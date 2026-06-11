@@ -29,9 +29,16 @@ import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import { ButtonSeg } from '../solicitacoes-dp/DpSolicitacaoTypeFields';
 import api from '@/lib/api';
+import {
+  constructionMaterialIdFromSinapiCode,
+  resolveConstructionMaterialsByNames,
+} from '@/lib/fetchAllConstructionMaterials';
+import { normalizeCostCentersResponse } from '@/lib/costCenters';
 import { getListTableRowClassName, listTableRowClasses, ListRowNavigableLabel, rowActionMenuButtonClass } from '@/components/ui/listTableUi';
 import { absoluteUploadUrl } from '@/lib/apiOrigin';
 import toast from 'react-hot-toast';
+import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
+import { CheckboxIndicator } from '@/components/ui/Checkbox';
 
 interface Material {
   id: string;
@@ -74,7 +81,7 @@ interface MaterialBalanceGroup {
 
 interface MovementFormData {
   costCenterId: string;
-  type: 'IN' | 'OUT';
+  type: '' | 'IN' | 'OUT';
   ocNumber: string;
   movementSplit: '' | 'TOTAL' | 'PARCIAL';
   notes: string;
@@ -123,6 +130,7 @@ interface PurchaseOrderOption {
   } | null;
   materialRequest?: {
     costCenter?: {
+      id?: string | null;
       code?: string | null;
       name?: string | null;
     } | null;
@@ -138,6 +146,7 @@ interface PurchaseOrderDetailItem {
   unit?: string;
   material?: {
     name?: string | null;
+    sinapiCode?: string | null;
   };
 }
 
@@ -147,6 +156,8 @@ interface PurchaseOrderDetail {
   materialRequest?: {
     costCenter?: {
       id: string;
+      code?: string | null;
+      name?: string | null;
     } | null;
   } | null;
 }
@@ -169,16 +180,41 @@ const normalizeMaterialName = (value: string) =>
     .trim()
     .toLowerCase();
 
-const orderTotalValue = (order: PurchaseOrderOption) => {
-  if (order.amountToPay != null && order.amountToPay !== '') {
-    const amount = Number(order.amountToPay);
-    if (Number.isFinite(amount)) return amount;
-  }
+const EMPTY_STOCK_MOVEMENTS: StockMovement[] = [];
 
-  const itemsTotal = (order.items || []).reduce((sum, item) => sum + Number(item.totalPrice || 0), 0);
-  const freight = Number(order.freightAmount || 0);
-  return Math.round((itemsTotal + freight) * 100) / 100;
-};
+function getAlreadyMovedQuantityForOcMaterial(
+  movements: StockMovement[],
+  ocNumber: string,
+  type: 'IN' | 'OUT',
+  materialId: string
+): number {
+  if (!materialId || !ocNumber.trim()) return 0;
+  const ocLower = ocNumber.trim().toLowerCase();
+  return movements.reduce((sum, mov) => {
+    if (mov.type !== type || mov.material?.id !== materialId) return sum;
+    const notes = mov.notes || '';
+    const ocMatch = notes.match(/Nº OC:\s*([^\n|]+)/i);
+    if (!ocMatch?.[1] || ocMatch[1].trim().toLowerCase() !== ocLower) return sum;
+    return sum + (Number(mov.quantity) || 0);
+  }, 0);
+}
+
+function ocMovementItemsEqual(a: OcMovementItemState[], b: OcMovementItemState[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((item, i) => {
+    const next = b[i];
+    return (
+      item.key === next.key &&
+      item.materialId === next.materialId &&
+      item.unresolvedMaterialId === next.unresolvedMaterialId &&
+      item.materialName === next.materialName &&
+      item.unit === next.unit &&
+      item.originalQuantity === next.originalQuantity &&
+      item.quantity === next.quantity &&
+      item.checked === next.checked
+    );
+  });
+}
 
 const extractFirstUrl = (text: string) => {
   const match = text.match(/https?:\/\/[^\s]+|\/uploads\/[^\s]+/i);
@@ -246,7 +282,6 @@ export default function EstoquePage() {
   const BALANCE_ITEMS_PER_PAGE = 12;
   const HISTORY_ITEMS_PER_PAGE = 12;
   const [ocMovementItems, setOcMovementItems] = useState<OcMovementItemState[]>([]);
-  const [isOcDropdownOpen, setIsOcDropdownOpen] = useState(false);
   const [invoiceFile, setInvoiceFile] = useState<UploadedInvoice | null>(null);
   const [isUploadingInvoice, setIsUploadingInvoice] = useState(false);
   const [withdrawalSheetFile, setWithdrawalSheetFile] = useState<UploadedInvoice | null>(null);
@@ -257,7 +292,7 @@ export default function EstoquePage() {
 
   const [formData, setFormData] = useState<MovementFormData>({
     costCenterId: '',
-    type: 'IN' as 'IN' | 'OUT',
+    type: '',
     ocNumber: '',
     movementSplit: '',
     notes: ''
@@ -302,20 +337,13 @@ export default function EstoquePage() {
   });
 
   const { data: costCentersData, isLoading: loadingCostCenters } = useQuery({
-    queryKey: ['cost-centers'],
+    queryKey: ['cost-centers', 'stock-page'],
     queryFn: async () => {
-      const res = await api.get('/cost-centers');
+      const res = await api.get('/cost-centers', {
+        params: { page: 1, limit: 2000, isActive: 'true' }
+      });
       return res.data;
     }
-  });
-
-  const { data: materialsData } = useQuery({
-    queryKey: ['construction-materials-for-stock-movement'],
-    queryFn: async () => {
-      const res = await api.get('/construction-materials', { params: { limit: 1000 } });
-      return res.data;
-    },
-    enabled: isMovementModalOpen
   });
 
   const { data: balanceData, isLoading: loadingBalance } = useQuery({
@@ -388,7 +416,7 @@ export default function EstoquePage() {
   const resetMovementForm = () => {
     setFormData({
       costCenterId: '',
-      type: 'IN',
+      type: '',
       ocNumber: '',
       movementSplit: '',
       notes: ''
@@ -397,7 +425,6 @@ export default function EstoquePage() {
     setWithdrawalSheetFile(null);
     setPaymentSlips([]);
     setOcMovementItems([]);
-    setIsOcDropdownOpen(false);
   };
 
   const closeMovementModal = () => {
@@ -413,11 +440,13 @@ export default function EstoquePage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['stock-balance'] });
       queryClient.invalidateQueries({ queryKey: ['stock-movements'] });
+      queryClient.invalidateQueries({ queryKey: ['stock-movements-oc-options'] });
+      queryClient.invalidateQueries({ queryKey: ['stock-movements-oc-tags'] });
       queryClient.invalidateQueries({ queryKey: ['stock-shortfalls-pending-count'] });
       queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
       setFormData({
         costCenterId: '',
-        type: 'IN',
+        type: '',
         ocNumber: '',
         movementSplit: '',
         notes: ''
@@ -453,14 +482,12 @@ export default function EstoquePage() {
       );
     });
 
-    if (
-      !trimmedOcNumber ||
-      !formData.type ||
-      !formData.costCenterId ||
-      !formData.movementSplit ||
-      selectedItems.length === 0
-    ) {
+    if (!trimmedOcNumber || !formData.type || !formData.movementSplit || selectedItems.length === 0) {
       toast.error('Preencha todos os campos obrigatórios');
+      return;
+    }
+    if (!formData.costCenterId) {
+      toast.error('Selecione o contrato');
       return;
     }
     if (totalMovementAlreadyDoneForSameType) {
@@ -535,6 +562,22 @@ export default function EstoquePage() {
         return;
       }
 
+      if (formData.movementSplit === 'PARCIAL' && formData.type) {
+        const alreadyMoved = getAlreadyMovedQuantityForOcMaterial(
+          movementsForOc,
+          trimmedOcNumber,
+          formData.type,
+          item.materialId
+        );
+        const remaining = Math.max(0, item.originalQuantity - alreadyMoved);
+        if (parsedQuantity > remaining) {
+          toast.error(
+            `Quantidade maior que o restante da OC (${remaining} ${item.unit}) para ${item.materialName}`
+          );
+          return;
+        }
+      }
+
       payloads.push({
         materialId: item.materialId,
         costCenterId: formData.costCenterId,
@@ -547,11 +590,11 @@ export default function EstoquePage() {
     createMovementMutation.mutate(payloads);
   };
 
-  const costCenters = Array.isArray(costCentersData?.data) 
-    ? costCentersData.data 
-    : Array.isArray(costCentersData) 
-    ? costCentersData 
-    : [];
+  const costCenters = normalizeCostCentersResponse(costCentersData) as Array<{
+    id: string;
+    code: string;
+    name: string;
+  }>;
   const balances: StockBalance[] = balanceData?.data || [];
   const groupedBalances = useMemo(() => {
     const byMaterial = new Map<string, GroupedStockBalance>();
@@ -601,7 +644,7 @@ export default function EstoquePage() {
       a.material.name.localeCompare(b.material.name, 'pt-BR', { sensitivity: 'base' })
     );
   }, [balances]);
-  const movements: StockMovement[] = movementsData?.data || [];
+  const movements: StockMovement[] = movementsData?.data ?? EMPTY_STOCK_MOVEMENTS;
 
   const clearBalanceFilters = () => {
     setFiltersCostCenterId('');
@@ -619,7 +662,7 @@ export default function EstoquePage() {
     setHistoryCurrentPage(1);
   };
 
-  const movementsForOc: StockMovement[] = movementOcData?.data || [];
+  const movementsForOc: StockMovement[] = movementOcData?.data ?? EMPTY_STOCK_MOVEMENTS;
   const purchaseOrders: PurchaseOrderOption[] = purchaseOrdersData?.data || [];
   const balanceByMaterialAndCostCenter = useMemo(() => {
     const map = new Map<string, number>();
@@ -700,15 +743,35 @@ export default function EstoquePage() {
   }, [isMovementModalOpen]);
 
   const selectedOrderDetail: PurchaseOrderDetail | null = selectedPurchaseOrderData?.data || null;
+
+  const unresolvedOcMaterialNames = useMemo(() => {
+    if (!selectedOrderDetail?.items?.length) return [];
+    const names: string[] = [];
+    for (const item of selectedOrderDetail.items) {
+      if (constructionMaterialIdFromSinapiCode(item.material?.sinapiCode)) continue;
+      const name = item.material?.name?.trim();
+      if (name) names.push(name);
+    }
+    return Array.from(new Set(names));
+  }, [selectedOrderDetail]);
+
+  const unresolvedOcMaterialNamesKey = unresolvedOcMaterialNames.slice().sort().join('\0');
+
+  const { data: resolvedMaterialsByName = [] } = useQuery({
+    queryKey: ['construction-materials-resolve-by-names', unresolvedOcMaterialNamesKey],
+    queryFn: () => resolveConstructionMaterialsByNames(unresolvedOcMaterialNames),
+    enabled: isMovementModalOpen && unresolvedOcMaterialNames.length > 0,
+    staleTime: 60_000,
+  });
+
   const constructionMaterialIdByName = useMemo(() => {
     const map = new Map<string, string>();
-    const list = materialsData?.data;
-    if (!Array.isArray(list)) return map;
-    list.forEach((material) => {
+    for (const material of resolvedMaterialsByName) {
       map.set(normalizeMaterialName(material.name), material.id);
-    });
+    }
     return map;
-  }, [materialsData?.data]);
+  }, [resolvedMaterialsByName]);
+
   const availableOcOptions = useMemo(() => {
     const ocWithTotalOut = new Set<string>();
 
@@ -731,26 +794,75 @@ export default function EstoquePage() {
       .filter((order) => !ocWithTotalOut.has(order.orderNumber))
       .sort((a, b) => a.orderNumber.localeCompare(b.orderNumber, 'pt-BR'));
   }, [movementsForOc, purchaseOrders]);
-  const filteredOcOptions = useMemo(() => {
-    const term = formData.ocNumber.trim().toLowerCase();
-    if (!term) return availableOcOptions;
-    return availableOcOptions.filter((order) => {
-      const costCenterLabel = order.materialRequest?.costCenter
-        ? `${order.materialRequest.costCenter.code || ''} ${order.materialRequest.costCenter.name || ''}`.trim()
-        : '';
-      const supplierLabel = order.supplier?.name || '';
-      const haystack = `${order.orderNumber} ${costCenterLabel} ${supplierLabel}`.toLowerCase();
-      return haystack.includes(term);
+  const contractDropdownOptions = useMemo(() => {
+    const byId = new Map<string, { value: string; label: string }>();
+    for (const order of availableOcOptions) {
+      const cc = order.materialRequest?.costCenter;
+      if (!cc?.id) continue;
+      if (!byId.has(cc.id)) {
+        const fromCatalog = costCenters.find((item) => item.id === cc.id);
+        byId.set(cc.id, {
+          value: cc.id,
+          label: fromCatalog?.name || cc.name || cc.code || cc.id,
+        });
+      }
+    }
+    return Array.from(byId.values()).sort((a, b) => a.label.localeCompare(b.label, 'pt-BR'));
+  }, [availableOcOptions, costCenters]);
+
+  const ocOptionsForSelectedContract = useMemo(() => {
+    if (!formData.costCenterId) return [];
+    return availableOcOptions.filter(
+      (order) => order.materialRequest?.costCenter?.id === formData.costCenterId
+    );
+  }, [availableOcOptions, formData.costCenterId]);
+
+  const ocDropdownOptions = useMemo(
+    () =>
+      ocOptionsForSelectedContract.map((order) => ({
+        value: order.orderNumber,
+        label: order.orderNumber,
+      })),
+    [ocOptionsForSelectedContract]
+  );
+
+  const handleContractChange = (costCenterId: string) => {
+    setFormData((prev) => {
+      const ocStillValid = availableOcOptions.some(
+        (order) =>
+          order.orderNumber === prev.ocNumber &&
+          order.materialRequest?.costCenter?.id === costCenterId
+      );
+      return {
+        ...prev,
+        costCenterId,
+        ocNumber: ocStillValid ? prev.ocNumber : '',
+      };
     });
-  }, [availableOcOptions, formData.ocNumber]);
+    if (
+      formData.ocNumber &&
+      !availableOcOptions.some(
+        (order) =>
+          order.orderNumber === formData.ocNumber &&
+          order.materialRequest?.costCenter?.id === costCenterId
+      )
+    ) {
+      setOcMovementItems([]);
+    }
+  };
+
+  const handleOcNumberChange = (ocNumber: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      ocNumber,
+    }));
+  };
 
   const selectedOrderDetailId = selectedOrderDetail?.id ?? null;
   const movementSplit = formData.movementSplit;
-  const ocCostCenterIdFromOrder =
-    selectedOrderDetail?.materialRequest?.costCenter?.id ?? null;
 
   useEffect(() => {
-    if (!selectedOrderDetailId || !movementSplit) {
+    if (!selectedOrderDetailId || !movementSplit || !formData.type || !formData.ocNumber.trim()) {
       setOcMovementItems((prev) => (prev.length === 0 ? prev : []));
       return;
     }
@@ -761,39 +873,63 @@ export default function EstoquePage() {
       return;
     }
 
-    const nextItems = detail.items.map((item, index) => {
-      const originalQuantity = Number(item.quantity || 0);
-      const materialName = item.material?.name || `Material ${index + 1}`;
-      const resolvedMaterialId =
-        constructionMaterialIdByName.get(normalizeMaterialName(materialName)) || '';
-      return {
-        key: `${item.materialId}-${index}`,
-        materialId: resolvedMaterialId,
-        unresolvedMaterialId: !resolvedMaterialId,
-        materialName,
-        unit: item.unit || '-',
-        originalQuantity,
-        quantity: String(originalQuantity),
-        checked: movementSplit === 'TOTAL',
-      };
-    });
+    const ocNumber = formData.ocNumber.trim();
+    const movementType = formData.type;
 
-    setOcMovementItems(nextItems);
+    setOcMovementItems((prev) => {
+      const nextItems = detail.items.map((item, index) => {
+        const key = `${item.materialId}-${index}`;
+        const prevRow = prev.find((row) => row.key === key);
+        const originalQuantity = Number(item.quantity || 0);
+        const materialName = item.material?.name || `Material ${index + 1}`;
+        const resolvedMaterialId =
+          constructionMaterialIdFromSinapiCode(item.material?.sinapiCode) ||
+          constructionMaterialIdByName.get(normalizeMaterialName(materialName)) ||
+          '';
+        const alreadyMoved = resolvedMaterialId
+          ? getAlreadyMovedQuantityForOcMaterial(
+              movementsForOc,
+              ocNumber,
+              movementType,
+              resolvedMaterialId
+            )
+          : 0;
+        const remaining = Math.max(0, originalQuantity - alreadyMoved);
+        const defaultQuantity = String(remaining > 0 ? remaining : originalQuantity);
+        const preservePartialEdits =
+          movementSplit === 'PARCIAL' &&
+          prevRow &&
+          prev.length === detail.items.length;
+
+        return {
+          key,
+          materialId: resolvedMaterialId,
+          unresolvedMaterialId: !resolvedMaterialId,
+          materialName,
+          unit: item.unit || '-',
+          originalQuantity,
+          quantity: preservePartialEdits && prevRow.checked ? prevRow.quantity : defaultQuantity,
+          checked:
+            movementSplit === 'TOTAL'
+              ? remaining > 0
+              : preservePartialEdits
+                ? prevRow.checked
+                : false,
+        };
+      });
+
+      return ocMovementItemsEqual(prev, nextItems) ? prev : nextItems;
+    });
   }, [
     selectedOrderDetailId,
     movementSplit,
-    materialsData?.data,
-    selectedPurchaseOrderData?.data,
+    formData.type,
+    formData.ocNumber,
     constructionMaterialIdByName,
+    selectedPurchaseOrderData?.data,
+    movementsForOc,
   ]);
 
-  useEffect(() => {
-    if (!ocCostCenterIdFromOrder) return;
-    setFormData((prev) => {
-      if (prev.costCenterId) return prev;
-      return { ...prev, costCenterId: ocCostCenterIdFromOrder };
-    });
-  }, [ocCostCenterIdFromOrder]);
   const exportRows = balances.map((b) => ({
     material: b.material.name,
     categoria: b.material.category || '-',
@@ -1784,92 +1920,56 @@ export default function EstoquePage() {
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    Número da OC
+                    Contrato
                   </label>
-                  <div className="relative">
-                    <input
-                      type="text"
-                      required
-                      value={formData.ocNumber}
-                      onFocus={() => setIsOcDropdownOpen(true)}
-                      onBlur={() => setTimeout(() => setIsOcDropdownOpen(false), 150)}
-                      onChange={(e) => {
-                        setFormData({ ...formData, ocNumber: e.target.value });
-                        setIsOcDropdownOpen(true);
-                      }}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                      disabled={loadingPurchaseOrders}
-                      placeholder={loadingPurchaseOrders ? 'Carregando OCs...' : 'Digite para pesquisar OC'}
-                    />
-                    {isOcDropdownOpen && !loadingPurchaseOrders && filteredOcOptions.length > 0 && (
-                      <div className="absolute z-[1100] mt-1 max-h-64 w-full min-w-[280px] overflow-y-auto rounded-lg border border-gray-700 bg-gray-900 shadow-xl">
-                        {filteredOcOptions.map((order) => {
-                          const costCenterLabel = order.materialRequest?.costCenter
-                            ? `${order.materialRequest.costCenter.code || ''} ${order.materialRequest.costCenter.name || ''}`.trim()
-                            : 'Sem CC';
-                          const supplierLabel = order.supplier?.name || 'Sem fornecedor';
-                          const totalLabel = orderTotalValue(order).toLocaleString('pt-BR', {
-                            style: 'currency',
-                            currency: 'BRL'
-                          });
-                          const detailsLabel = `${order.orderNumber} | ${costCenterLabel} | ${supplierLabel} | ${totalLabel}`;
-
-                          return (
-                            <button
-                              key={order.id}
-                              type="button"
-                              onMouseDown={(e) => {
-                                e.preventDefault();
-                                setFormData((prev) => ({ ...prev, ocNumber: order.orderNumber }));
-                                setIsOcDropdownOpen(false);
-                              }}
-                              className="w-full text-left px-3 py-2 text-sm text-gray-100 hover:bg-gray-800 border-b border-gray-800 last:border-b-0"
-                              title={detailsLabel}
-                            >
-                              {detailsLabel}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                  {!loadingPurchaseOrders && availableOcOptions.length === 0 && (
+                  <SingleSelectSearchDropdown
+                    value={formData.costCenterId}
+                    onChange={handleContractChange}
+                    options={contractDropdownOptions}
+                    disabled={loadingPurchaseOrders || loadingCostCenters}
+                    allowEmpty={false}
+                    placeholder={
+                      loadingPurchaseOrders || loadingCostCenters
+                        ? 'Carregando contratos...'
+                        : 'Selecionar contrato...'
+                    }
+                    emptyOptionsMessage="Nenhum contrato com OC disponível para movimentação."
+                    noFocusRing
+                  />
+                  {!loadingPurchaseOrders && contractDropdownOptions.length === 0 && (
                     <p className="mt-1 text-xs text-yellow-600 dark:text-yellow-500">
-                      Nenhuma OC disponível. Todas já tiveram saída total ou não há OCs cadastradas.
+                      Nenhum contrato com OC disponível. Todas já tiveram saída total ou não há OCs
+                      cadastradas.
                     </p>
                   )}
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                              Contrato
+                    Número da OC
                   </label>
-                  <select
-                    value={formData.costCenterId}
-                    onChange={(e) => setFormData({ ...formData, costCenterId: e.target.value })}
-                    disabled={loadingCostCenters}
-                    required
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 disabled:opacity-50"
-                  >
-                    <option value="">Selecione um contrato</option>
-                    {loadingCostCenters && <option disabled>Carregando contratos...</option>}
-                    {!loadingCostCenters && costCenters.length === 0 && (
-                      <option disabled>Nenhum contrato cadastrado</option>
+                  <SingleSelectSearchDropdown
+                    value={formData.ocNumber}
+                    onChange={handleOcNumberChange}
+                    options={ocDropdownOptions}
+                    disabled={loadingPurchaseOrders || !formData.costCenterId}
+                    allowEmpty={false}
+                    placeholder={
+                      !formData.costCenterId
+                        ? 'Selecione um contrato'
+                        : loadingPurchaseOrders
+                          ? 'Carregando OCs...'
+                          : 'Selecionar OC...'
+                    }
+                    emptyOptionsMessage="Nenhuma OC disponível para este contrato."
+                    noFocusRing
+                  />
+                  {formData.costCenterId &&
+                    !loadingPurchaseOrders &&
+                    ocOptionsForSelectedContract.length === 0 && (
+                      <p className="mt-1 text-xs text-yellow-600 dark:text-yellow-500">
+                        Nenhuma OC disponível para este contrato.
+                      </p>
                     )}
-                    {costCenters.map((cc: { id: string; code: string; name: string }) => (
-                      <option key={cc.id} value={cc.id}>
-                        {cc.name}
-                      </option>
-                    ))}
-                  </select>
-                  {!loadingCostCenters && costCenters.length === 0 && (
-                    <p className="mt-1 text-xs text-yellow-600 dark:text-yellow-500">
-                      ⚠️ Não há contratos cadastrados.{' '}
-                      <Link href="/ponto/centros-de-custo" className="underline hover:text-yellow-700">
-                        Cadastre aqui
-                      </Link>
-                      .
-                    </p>
-                  )}
                 </div>
               </div>
               <div>
@@ -1928,47 +2028,85 @@ export default function EstoquePage() {
                 ) : ocMovementItems.length === 0 ? (
                   <p className="text-sm text-gray-500">Selecione o tipo da movimentação (Total ou Parcial).</p>
                 ) : (
-                  <div className="border border-gray-300 dark:border-gray-600 rounded-lg divide-y divide-gray-200 dark:divide-gray-700">
-                    {ocMovementItems.map((item) => (
-                      <div key={item.key} className="p-3 grid grid-cols-1 md:grid-cols-12 gap-3 items-center">
-                        <label className="md:col-span-6 flex items-center gap-3 text-sm text-gray-800 dark:text-gray-200">
-                          <input
-                            type="checkbox"
-                            checked={item.checked}
-                            disabled={formData.movementSplit === 'TOTAL'}
-                            onChange={(e) =>
-                              setOcMovementItems((prev) =>
-                                prev.map((row) =>
-                                  row.key === item.key ? { ...row, checked: e.target.checked } : row
+                  <div className="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-600 divide-y divide-gray-200 dark:divide-gray-700">
+                    {ocMovementItems.map((item) => {
+                      const itemDisabled = formData.movementSplit === 'TOTAL';
+                      const alreadyMoved =
+                        item.materialId && formData.type
+                          ? getAlreadyMovedQuantityForOcMaterial(
+                              movementsForOc,
+                              formData.ocNumber.trim(),
+                              formData.type,
+                              item.materialId
+                            )
+                          : 0;
+                      const remaining = Math.max(0, item.originalQuantity - alreadyMoved);
+                      const itemFullyMoved = remaining <= 0;
+                      const checkboxDisabled = itemDisabled || itemFullyMoved || item.unresolvedMaterialId;
+                      return (
+                        <div
+                          key={item.key}
+                          className="grid grid-cols-1 items-center gap-3 bg-white p-3.5 transition-colors hover:bg-gray-50 dark:bg-gray-800/40 dark:hover:bg-gray-900/50 md:grid-cols-12"
+                        >
+                          <label
+                            className={`group flex items-start gap-3 md:col-span-6 ${
+                              checkboxDisabled ? 'cursor-default opacity-70' : 'cursor-pointer'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={item.checked}
+                              disabled={checkboxDisabled}
+                              onChange={(e) =>
+                                setOcMovementItems((prev) =>
+                                  prev.map((row) =>
+                                    row.key === item.key ? { ...row, checked: e.target.checked } : row
+                                  )
                                 )
-                              )
-                            }
-                            className="rounded border-gray-300 dark:border-gray-600"
-                          />
-                          <span>{item.materialName}</span>
-                          {item.unresolvedMaterialId && (
-                            <span className="text-xs text-red-500 dark:text-red-400">(não encontrado no estoque)</span>
-                          )}
-                        </label>
-                        <div className="md:col-span-4">
-                          <input
-                            type="text"
-                            inputMode="decimal"
-                            value={item.quantity}
-                            disabled={formData.movementSplit === 'TOTAL' || !item.checked}
-                            onChange={(e) =>
-                              setOcMovementItems((prev) =>
-                                prev.map((row) =>
-                                  row.key === item.key ? { ...row, quantity: e.target.value } : row
+                              }
+                              className="sr-only"
+                            />
+                            <CheckboxIndicator checked={item.checked} className="mt-0.5" />
+                            <span className="min-w-0 flex flex-col gap-1 pt-0.5">
+                              <span className="text-sm font-medium leading-snug text-gray-800 transition-colors group-hover:text-gray-900 dark:text-gray-100 dark:group-hover:text-white">
+                                {item.materialName}
+                              </span>
+                              {item.unresolvedMaterialId && (
+                                <span className="text-xs text-red-500 dark:text-red-400">
+                                  Não encontrado no estoque
+                                </span>
+                              )}
+                              {!item.unresolvedMaterialId && formData.movementSplit === 'PARCIAL' && (
+                                <span className="text-xs text-gray-500 dark:text-gray-400">
+                                  {itemFullyMoved
+                                    ? 'Quantidade desta OC já movimentada'
+                                    : `Restante na OC: ${remaining} ${item.unit} (de ${item.originalQuantity})`}
+                                </span>
+                              )}
+                            </span>
+                          </label>
+                          <div className="md:col-span-4">
+                            <input
+                              type="text"
+                              inputMode="decimal"
+                              value={item.quantity}
+                              disabled={checkboxDisabled || !item.checked}
+                              onChange={(e) =>
+                                setOcMovementItems((prev) =>
+                                  prev.map((row) =>
+                                    row.key === item.key ? { ...row, quantity: e.target.value } : row
+                                  )
                                 )
-                              )
-                            }
-                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 disabled:opacity-60"
-                          />
+                              }
+                              className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 transition-colors focus:border-red-500 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:focus:border-red-400"
+                            />
+                          </div>
+                          <div className="md:col-span-2 text-sm font-medium text-gray-500 dark:text-gray-400">
+                            {item.unit}
+                          </div>
                         </div>
-                        <div className="md:col-span-2 text-sm text-gray-600 dark:text-gray-400">{item.unit}</div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>

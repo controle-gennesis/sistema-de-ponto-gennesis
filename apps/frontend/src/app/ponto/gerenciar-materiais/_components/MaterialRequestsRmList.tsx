@@ -27,7 +27,6 @@ import {
   rmSolicitante,
   rmTitulo
 } from '../_lib/display';
-
 const LIST_ITEMS_PER_PAGE = 12;
 const RM_ACTION_MENU_WIDTH_PX = 224;
 

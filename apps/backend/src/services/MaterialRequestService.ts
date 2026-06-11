@@ -82,6 +82,42 @@ export class MaterialRequestService {
       orderBy: { name: 'asc' }
     });
 
+    return this.mapConstructionMaterialsToRmDropdown(constructionMaterials);
+  }
+
+  /** Busca paginada para dropdown da RM (sem carregar o catálogo inteiro). */
+  async searchConstructionMaterialsForRmDropdown(
+    search: string,
+    limit = 50
+  ): Promise<RmDropdownMaterial[]> {
+    const term = search.trim();
+    if (term.length < 2) return [];
+
+    const constructionMaterials = await prisma.constructionMaterial.findMany({
+      where: {
+        isActive: true,
+        OR: [
+          { name: { contains: term, mode: 'insensitive' } },
+          { description: { contains: term, mode: 'insensitive' } },
+          { code: { contains: term, mode: 'insensitive' } }
+        ]
+      },
+      orderBy: { name: 'asc' },
+      take: Math.min(Math.max(limit, 1), 100)
+    });
+
+    return this.mapConstructionMaterialsToRmDropdown(constructionMaterials);
+  }
+
+  private async mapConstructionMaterialsToRmDropdown(
+    constructionMaterials: Array<{
+      id: string;
+      name: string;
+      description: string | null;
+      unit: string;
+      isActive: boolean;
+    }>
+  ): Promise<RmDropdownMaterial[]> {
     if (constructionMaterials.length === 0) {
       return [];
     }

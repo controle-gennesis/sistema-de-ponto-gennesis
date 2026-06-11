@@ -8,7 +8,6 @@ import {
   extractOcNumberFromMovementNotes,
   type StockPaymentSlipParsed
 } from '../utils/stockMovementNotes';
-
 export type BoletoInstallmentPaymentStatus = 'PENDING_BOLETO' | 'AWAITING_PAYMENT' | 'PAID';
 
 export type BoletoInstallmentStored = {
@@ -426,26 +425,29 @@ export class PurchaseOrderService {
     } as const;
 
     try {
-      return await prisma.purchaseOrder.create({
+      const created = await prisma.purchaseOrder.create({
         data: { ...createDataBase, status: 'PENDING_COMPRAS' as any },
         include: purchaseOrderIncludeDetail
       });
+      return created;
     } catch (error: any) {
       const msg = typeof error?.message === 'string' ? error.message : '';
       const isPrismaValidation = error?.name === 'PrismaClientValidationError' && msg;
       // Compatibilidade temporária: Prisma Client antigo sem enum / campo.
       if (isPrismaValidation && msg.includes('PENDING_COMPRAS')) {
-        return await prisma.purchaseOrder.create({
+        const created = await prisma.purchaseOrder.create({
           data: { ...createDataBase, status: 'PENDING' as any },
           include: purchaseOrderIncludeDetail
         });
+        return created;
       }
       if (isPrismaValidation && msg.includes('quoteMapId') && createDataBase.quoteMapId) {
         const { quoteMapId: _omit, ...withoutQuote } = createDataBase as typeof createDataBase & { quoteMapId?: string | null };
-        return await prisma.purchaseOrder.create({
+        const created = await prisma.purchaseOrder.create({
           data: { ...withoutQuote, status: 'PENDING_COMPRAS' as any },
           include: purchaseOrderIncludeDetail
         });
+        return created;
       }
       throw error;
     }
@@ -1034,7 +1036,8 @@ export class PurchaseOrderService {
       });
     });
 
-    return await this.getById(id);
+    const refreshed = await this.getById(id);
+    return refreshed;
   }
 
   /**
@@ -1220,7 +1223,13 @@ export class PurchaseOrderService {
   ) {
     const order = await prisma.purchaseOrder.findUnique({
       where: { id },
-      select: { id: true, status: true, paymentType: true, paymentBoletoPhaseReleased: true }
+      select: {
+        id: true,
+        status: true,
+        paymentType: true,
+        paymentBoletoPhaseReleased: true,
+        createdBy: true,
+      },
     });
     if (!order) {
       throw new Error('Ordem de compra não encontrada');

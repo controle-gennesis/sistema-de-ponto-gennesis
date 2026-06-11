@@ -70,6 +70,8 @@ import { useFdNotificationCounts } from '@/hooks/useFdNotificationCounts';
 import { useApprovalNotificationCounts } from '@/hooks/useApprovalNotificationCounts';
 import { NotificationCountBadge } from '@/components/ui/NotificationCountBadge';
 import {
+  isHomeRoute,
+  isRailFooterRoute,
   readSelectedModuleId,
   readSidebarCollapsed,
   SIDEBAR_TRANSITION_CLASS,
@@ -80,30 +82,17 @@ import {
 const pk = pathToModuleKey;
 import { useTheme } from '@/context/ThemeContext';
 
-/** Atalhos do rodapé do rail — fora das categorias do menu lateral */
-const RAIL_FOOTER_ROUTES = ['/ponto/conversas', '/ponto/kanban', '/ponto/drive'] as const;
-
-function isRailFooterRoute(pathname: string | null): boolean {
-  if (pathname == null) return false;
-  return RAIL_FOOTER_ROUTES.some(
-    (base) => pathname === base || pathname.startsWith(`${base}/`)
-  );
-}
-
-function isHomeRoute(pathname: string | null): boolean {
-  return pathname === '/ponto/home';
-}
-
 interface SidebarProps {
   userRole: 'EMPLOYEE';
   userName: string;
   onLogout: () => void;
   onMenuToggle?: (collapsed: boolean) => void;
+  onOpenChangePassword?: () => void;
 }
 
-export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarProps) {
+export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChangePassword }: SidebarProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const [isCollapsed, setIsCollapsedState] = useState(() => readSidebarCollapsed());
+  const [isCollapsed, setIsCollapsedState] = useState(false);
   const [sidebarHydrated, setSidebarHydrated] = useState(false);
 
   const setCollapsed = useCallback(
@@ -113,11 +102,8 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
     },
     [onMenuToggle]
   );
-  const [selectedModuleId, setSelectedModuleId] = useState<string>(
-    () => readSelectedModuleId() ?? 'main'
-  );
+  const [selectedModuleId, setSelectedModuleId] = useState('main');
   const [searchTerm, setSearchTerm] = useState('');
-  const tier2Visible = !isCollapsed || isOpen;
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const pathname = usePathname();
   /** true quando o usuário clicou num módulo no rail sem mudar de rota */
@@ -823,18 +809,9 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
 
   const onRailFooterRoute = isRailFooterRoute(pathname);
   const onHomeRoute = isHomeRoute(pathname);
-
-  // Ao mudar de rota, prioriza o módulo da URL (evita flash em "Principal" após remount do layout)
-  if (pathname !== prevPathnameRef.current) {
-    prevPathnameRef.current = pathname;
-    userPickedModuleRef.current = false;
-    if (onHomeRoute || onRailFooterRoute) {
-      if (!isCollapsed) setCollapsed(true);
-      if (isOpen) setIsOpen(false);
-    } else if (activeModuleId && activeModuleId !== selectedModuleId) {
-      setSelectedModuleId(activeModuleId);
-    }
-  }
+  const routeForcesCollapsed = onHomeRoute || onRailFooterRoute;
+  const effectiveCollapsed = sidebarHydrated ? isCollapsed : routeForcesCollapsed;
+  const tier2Visible = !effectiveCollapsed || isOpen;
 
   const displayedModuleId = userPickedModuleRef.current
     ? selectedModuleId
@@ -857,14 +834,23 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
     setCollapsed(true);
   };
 
-  // Selecionar módulo conforme rota ativa; na home e nos atalhos do rodapé recolhe o painel
+  // Ao mudar de rota: recolhe em home/atalhos do rodapé ou sincroniza módulo ativo
   React.useEffect(() => {
+    if (pathname === prevPathnameRef.current) return;
+    prevPathnameRef.current = pathname;
+    userPickedModuleRef.current = false;
+
     if (onHomeRoute || onRailFooterRoute) {
       setCollapsed(true);
       setIsOpen(false);
-      userPickedModuleRef.current = false;
       return;
     }
+
+    if (activeModuleId && activeModuleId !== selectedModuleId) {
+      setSelectedModuleId(activeModuleId);
+      return;
+    }
+
     const activeCategory = menuItems.find((category) =>
       category.items.some((item) => item.permission && isActive(item.href))
     );
@@ -892,11 +878,17 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
   };
 
   useLayoutEffect(() => {
-    const collapsed = readSidebarCollapsed();
+    const savedModule = readSelectedModuleId();
+    if (savedModule) setSelectedModuleId(savedModule);
+
+    let collapsed = readSidebarCollapsed();
+    if (isHomeRoute(pathname) || isRailFooterRoute(pathname)) {
+      collapsed = true;
+    }
     setIsCollapsedState(collapsed);
     onMenuToggle?.(collapsed);
     setSidebarHydrated(true);
-  }, [onMenuToggle]);
+  }, [onMenuToggle, pathname]);
 
   // Salvar estado no localStorage sempre que mudar (após hidratação)
   React.useEffect(() => {
@@ -947,7 +939,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
           </div>
 
           <nav className="relative z-30 flex-1 overflow-x-visible overflow-y-auto px-2 pb-4 pt-3 space-y-3">
-            {menuItems.map((category) => {
+            {sidebarHydrated && !isLoading ? menuItems.map((category) => {
               const CategoryIcon = category.icon;
               const isRailActive = category.id === railModuleActiveId;
               const visibleItems = category.items.filter((item) => item.permission);
@@ -998,7 +990,13 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                   </button>
                 </div>
               );
-            })}
+            }) : (
+              Array.from({ length: 6 }, (_, i) => (
+                <div key={`rail-skeleton-${i}`} className="flex justify-center">
+                  <div className="h-10 w-10 animate-pulse rounded-xl bg-gray-100 dark:bg-gray-800" />
+                </div>
+              ))
+            )}
           </nav>
 
           {/* Rodapé: atalhos, divisor e perfil */}
@@ -1140,8 +1138,8 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                               type="button"
                               role="menuitem"
                               onClick={() => {
-                                window.dispatchEvent(new CustomEvent('openChangePasswordModal'));
                                 setProfileAvatarMenu(false);
+                                onOpenChangePassword?.();
                               }}
                               className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
                             >
@@ -1213,7 +1211,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
 
           {/* Lista de páginas */}
           <nav className="flex-1 overflow-y-auto overflow-x-hidden p-4 pt-4 space-y-3">
-            {searchTerm.trim() ? (
+            {sidebarHydrated && !isLoading ? searchTerm.trim() ? (
               menuItems.map((category) => {
                 const filteredItems = category.items.filter(
                   (item) =>
@@ -1285,7 +1283,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle }: SidebarP
                     </Link>
                   );
                 })
-            )}
+            ) : null}
           </nav>
 
         </div>

@@ -12,6 +12,15 @@ export function extractOcNumberFromMovementNotes(notes: string | null | undefine
   return m?.[1]?.trim() || null;
 }
 
+export function parseMovementReceiptTypeFromNotes(
+  notes: string | null | undefined
+): 'TOTAL' | 'PARCIAL' | null {
+  if (!notes) return null;
+  const raw = notes.match(/Tipo:\s*(TOTAL|PARCIAL)/i)?.[1]?.toUpperCase() ?? '';
+  if (raw === 'TOTAL' || raw === 'PARCIAL') return raw;
+  return null;
+}
+
 export function movementNotesMatchOc(notes: string | null | undefined, orderNumber: string): boolean {
   if (!notes || !orderNumber) return false;
   const needle = `Nº OC: ${orderNumber}`;

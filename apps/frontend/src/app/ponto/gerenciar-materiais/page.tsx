@@ -370,6 +370,8 @@ export default function GerenciarMateriaisPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['material-requests-manage'] });
       queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
+      queryClient.invalidateQueries({ queryKey: ['material-deliveries'] });
+      queryClient.invalidateQueries({ queryKey: ['material-deliveries-summary'] });
       setShowCreateOCModal(false);
       setSelectedRequest(null);
       resetOcForm();

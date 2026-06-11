@@ -353,7 +353,6 @@ export class MaterialDeliveryController {
           where: {
             ...baseWhere,
             receivedByEngineering: false,
-            currentStatus: MaterialDeliveryCurrentStatus.ENTREGUE,
           },
         }),
         prisma.materialDelivery.count({

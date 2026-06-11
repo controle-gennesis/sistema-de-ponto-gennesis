@@ -1,9 +1,16 @@
 'use client';
 
 import React, { useCallback, useLayoutEffect, useState } from 'react';
-import { readSidebarCollapsed, SIDEBAR_TRANSITION_CLASS } from '@/lib/sidebarStorage';
+import { usePathname } from 'next/navigation';
+import { useQueryClient } from '@tanstack/react-query';
+import {
+  readSidebarCollapsed,
+  shouldForceSidebarCollapsed,
+  SIDEBAR_TRANSITION_CLASS,
+} from '@/lib/sidebarStorage';
 import { Sidebar } from './Sidebar';
 import { ChatWidget } from '../chat/ChatWidget';
+import { ChangePasswordModal } from '@/components/ui/ChangePasswordModal';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useLogout } from '@/hooks/useLogout';
 import { useNativeWebRTCCall } from '@/hooks/useNativeWebRTCCall';
@@ -19,23 +26,37 @@ interface MainLayoutProps {
   onLogout?: () => void;
 }
 
+function resolveInitialSidebarCollapsed(pathname: string | null): boolean {
+  if (shouldForceSidebarCollapsed(pathname)) return true;
+  return readSidebarCollapsed();
+}
+
 export function MainLayout({ children, userRole, userName, onLogout }: MainLayoutProps) {
+  const pathname = usePathname();
+  const queryClient = useQueryClient();
   const defaultLogout = useLogout();
   const handleLogout = onLogout ?? defaultLogout;
-  const [isCollapsed, setIsCollapsed] = useState(() => readSidebarCollapsed());
+  const [isCollapsed, setIsCollapsed] = useState(() => resolveInitialSidebarCollapsed(pathname));
   const [layoutSynced, setLayoutSynced] = useState(false);
+  const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
   const { user } = usePermissions();
   const nativeCall = useNativeWebRTCCall({ userId: user?.id });
   useChatSounds({ userId: user?.id, callPhase: nativeCall.phase });
 
   useLayoutEffect(() => {
-    setIsCollapsed(readSidebarCollapsed());
+    setIsCollapsed(resolveInitialSidebarCollapsed(pathname));
     setLayoutSynced(true);
-  }, []);
+  }, [pathname]);
 
   const handleMenuToggle = useCallback((collapsed: boolean) => {
     setIsCollapsed((prev) => (prev === collapsed ? prev : collapsed));
   }, []);
+
+  const handleOpenChangePassword = useCallback(() => {
+    setIsChangePasswordOpen(true);
+  }, []);
+
+  const isFullBleedRoute = pathname != null && (pathname === '/ponto/conversas' || pathname.startsWith('/ponto/conversas/'));
 
   return (
     <NativeCallProvider value={nativeCall}>
@@ -46,6 +67,7 @@ export function MainLayout({ children, userRole, userName, onLogout }: MainLayou
         userName={userName} 
         onLogout={handleLogout}
         onMenuToggle={handleMenuToggle}
+        onOpenChangePassword={handleOpenChangePassword}
       />
       
       {/* Main Content — mesma duração/easing do painel tier 2 da sidebar */}
@@ -54,7 +76,7 @@ export function MainLayout({ children, userRole, userName, onLogout }: MainLayou
           layoutSynced ? `transition-[margin-left] ${SIDEBAR_TRANSITION_CLASS}` : ''
         } ${isCollapsed ? 'lg:ml-20' : 'lg:ml-[23rem]'}`}
       >
-        <main className="p-4 lg:p-8">
+        <main className={isFullBleedRoute ? 'p-0' : 'p-4 lg:p-8'}>
           {children}
         </main>
       </div>
@@ -66,6 +88,15 @@ export function MainLayout({ children, userRole, userName, onLogout }: MainLayou
           call={nativeCall}
           localAvatarUrl={user?.profilePhotoUrl ?? null}
           localDisplayName={user?.name ?? null}
+        />
+
+        <ChangePasswordModal
+          isOpen={isChangePasswordOpen}
+          onClose={() => setIsChangePasswordOpen(false)}
+          onSuccess={() => {
+            setIsChangePasswordOpen(false);
+            queryClient.invalidateQueries({ queryKey: ['user'] });
+          }}
         />
       </div>
     </NativeCallProvider>

@@ -69,6 +69,11 @@ router.get('/', (req, res, next) =>
   constructionMaterialController.getAllMaterials(req, res, next)
 );
 
+// Resolver IDs por nomes (estoque / OC)
+router.post('/resolve-by-names', (req, res, next) =>
+  constructionMaterialController.resolveByNames(req, res, next)
+);
+
 // Obter material por ID
 router.get('/:id', (req, res, next) => 
   constructionMaterialController.getMaterialById(req, res, next)

@@ -8,6 +8,24 @@ export const SIDEBAR_WIDTH_COLLAPSED = '5rem';
 
 export const SIDEBAR_TRANSITION_CLASS = 'duration-500 ease-in-out';
 
+/** Atalhos do rodapé do rail — recolhem o painel tier 2 automaticamente */
+export const RAIL_FOOTER_ROUTES = ['/ponto/conversas', '/ponto/kanban', '/ponto/drive'] as const;
+
+export function isRailFooterRoute(pathname: string | null): boolean {
+  if (pathname == null) return false;
+  return RAIL_FOOTER_ROUTES.some(
+    (base) => pathname === base || pathname.startsWith(`${base}/`)
+  );
+}
+
+export function isHomeRoute(pathname: string | null): boolean {
+  return pathname === '/ponto/home';
+}
+
+export function shouldForceSidebarCollapsed(pathname: string | null): boolean {
+  return isHomeRoute(pathname) || isRailFooterRoute(pathname);
+}
+
 export function readSidebarCollapsed(): boolean {
   if (typeof window === 'undefined') return false;
   try {

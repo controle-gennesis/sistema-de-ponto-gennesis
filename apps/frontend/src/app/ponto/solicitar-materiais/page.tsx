@@ -32,12 +32,13 @@ import { getListTableRowClassName, ListRowNavigableLabel, rowActionMenuButtonCla
 import { useCostCenters } from '@/hooks/useCostCenters';
 import { useServiceOrdersByCostCenter } from '@/hooks/useServiceOrdersByCostCenter';
 import { ServiceOrderSearchSelect } from '@/components/suprimentos/ServiceOrderSearchSelect';
+import { AsyncSearchSelectDropdown } from '@/components/ui/AsyncSearchSelectDropdown';
+import { getRmMaterialLabel, searchRmMaterials, type RmMaterialListItem } from '@/lib/searchRmMaterials';
 import {
   purchaseOrderPhaseLabel,
   ocStatusTextClass,
   OC_STATUS_LABELS_PT
 } from '@/components/oc/ocStatusLabels';
-
 /** Rótulo da OC sem prefixo "OC -" para caber melhor na coluna Fase atual. */
 function purchaseOrderPhaseShortLabel(status: string): string {
   const full = purchaseOrderPhaseLabel(status);
@@ -266,12 +267,6 @@ const emptyNewFormData = () => ({
   items: [{ materialId: '', quantity: 1, unit: '', observation: '', attachmentUrl: '', attachmentName: '' }]
 });
 
-const rmMaterialInputClass =
-  'w-full min-w-0 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm';
-
-const rmMaterialInputClassSm =
-  'w-full min-w-0 px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100';
-
 type NewMaterialRequestFormData = ReturnType<typeof emptyNewFormData>;
 
 function validateNewMaterialRequestForm(formData: NewMaterialRequestFormData): string | null {
@@ -368,16 +363,6 @@ function RmQuantityInput({
     </div>
   );
 }
-
-type RmMaterialOption = {
-  id: string;
-  code?: string;
-  description?: string;
-  name?: string;
-  unit?: string;
-};
-
-const EMPTY_MATERIAL_LIST: RmMaterialOption[] = [];
 
 type RmCostCenterOption = {
   id?: string;
@@ -528,132 +513,6 @@ function RmCostCenterAutocomplete({
   );
 }
 
-function RmMaterialAutocomplete({
-  searchValue,
-  isOpen,
-  onOpen,
-  onClose,
-  onSearchChange,
-  onSelect,
-  materials,
-  loading,
-  loadError,
-  getMaterialLabel,
-  inputClassName,
-  placeholder = 'Digite para buscar material...'
-}: {
-  searchValue: string;
-  isOpen: boolean;
-  onOpen: () => void;
-  onClose: () => void;
-  onSearchChange: (value: string) => void;
-  onSelect: (material: RmMaterialOption) => void;
-  materials: RmMaterialOption[];
-  loading: boolean;
-  loadError: boolean;
-  getMaterialLabel: (material?: RmMaterialOption | null) => string;
-  inputClassName: string;
-  placeholder?: string;
-}) {
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [menuStyle, setMenuStyle] = useState<{ top: number; left: number; width: number } | null>(null);
-
-  const syncMenuPosition = useCallback(() => {
-    const el = inputRef.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    setMenuStyle({ top: rect.bottom + 4, left: rect.left, width: rect.width });
-  }, []);
-
-  useLayoutEffect(() => {
-    if (!isOpen) {
-      setMenuStyle(null);
-      return;
-    }
-    syncMenuPosition();
-    const onReposition = () => syncMenuPosition();
-    window.addEventListener('resize', onReposition);
-    window.addEventListener('scroll', onReposition, true);
-    return () => {
-      window.removeEventListener('resize', onReposition);
-      window.removeEventListener('scroll', onReposition, true);
-    };
-  }, [isOpen, syncMenuPosition, searchValue]);
-
-  const filteredMaterials = useMemo(() => {
-    const q = searchValue.trim().toLowerCase();
-    return materials
-      .filter((material) => {
-        if (!q) return true;
-        return getMaterialLabel(material).toLowerCase().includes(q);
-      })
-      .slice(0, 50);
-  }, [materials, searchValue, getMaterialLabel]);
-
-  const dropdown =
-    isOpen &&
-    menuStyle &&
-    typeof document !== 'undefined' &&
-    createPortal(
-      <div
-        role="listbox"
-        className="max-h-56 overflow-auto rounded-lg border border-gray-300 bg-white shadow-lg dark:border-gray-600 dark:bg-gray-800"
-        style={{
-          position: 'fixed',
-          top: menuStyle.top,
-          left: menuStyle.left,
-          width: menuStyle.width,
-          zIndex: 1200
-        }}
-      >
-        {loading ? (
-          <p className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">Carregando materiais…</p>
-        ) : loadError ? (
-          <p className="px-3 py-2 text-sm text-red-600 dark:text-red-400">Erro ao carregar materiais.</p>
-        ) : filteredMaterials.length === 0 ? (
-          <p className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">
-            {materials.length === 0
-              ? 'Nenhum material ativo em Materiais e Serviços.'
-              : 'Nenhum material encontrado para esta busca.'}
-          </p>
-        ) : (
-          filteredMaterials.map((material) => (
-            <button
-              key={material.id}
-              type="button"
-              role="option"
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => onSelect(material)}
-              className="w-full px-3 py-2 text-left text-sm text-gray-900 whitespace-normal break-words hover:bg-gray-100 dark:text-gray-100 dark:hover:bg-gray-700"
-            >
-              {getMaterialLabel(material)}
-            </button>
-          ))
-        )}
-      </div>,
-      document.body
-    );
-
-  return (
-    <>
-      <input
-        ref={inputRef}
-        type="text"
-        value={searchValue}
-        onFocus={onOpen}
-        onClick={onOpen}
-        onBlur={() => setTimeout(onClose, 120)}
-        onChange={(e) => onSearchChange(e.target.value)}
-        placeholder={placeholder}
-        className={inputClassName}
-        title={searchValue || undefined}
-        autoComplete="off"
-      />
-      {dropdown}
-    </>
-  );
-}
-
 const RM_ATTACHMENT_ACCEPT = '.pdf,.png,.jpg,.jpeg,.webp,.doc,.docx,.xls,.xlsx';
 
 function RmAttachmentField({
@@ -781,10 +640,8 @@ function SolicitarMateriaisPage() {
     null
   );
   const [uploadingDemandSheetAttachment, setUploadingDemandSheetAttachment] = useState<'new' | 'edit' | null>(null);
-  const [newItemMaterialSearch, setNewItemMaterialSearch] = useState<string[]>(['']);
-  const [editItemMaterialSearch, setEditItemMaterialSearch] = useState<string[]>(['']);
-  const [activeNewMaterialDropdownIndex, setActiveNewMaterialDropdownIndex] = useState<number | null>(null);
-  const [activeEditMaterialDropdownIndex, setActiveEditMaterialDropdownIndex] = useState<number | null>(null);
+  const [newItemMaterialLabels, setNewItemMaterialLabels] = useState<string[]>(['']);
+  const [editItemMaterialLabels, setEditItemMaterialLabels] = useState<string[]>(['']);
   const [newCostCenterSearch, setNewCostCenterSearch] = useState('');
   const [editCostCenterSearch, setEditCostCenterSearch] = useState('');
   const [isNewCostCenterDropdownOpen, setIsNewCostCenterDropdownOpen] = useState(false);
@@ -891,26 +748,6 @@ function SolicitarMateriaisPage() {
     setEditFormData((prev) => ({ ...prev, serviceOrderId: '', serviceOrder: '' }));
   };
 
-  // Materiais e Serviços ativos (espelhados para a RM)
-  const {
-    data: materialsData,
-    isLoading: loadingMaterials,
-    isError: materialsLoadError,
-    refetch: refetchMaterials
-  } = useQuery({
-    queryKey: ['materials-rm-dropdown'],
-    queryFn: async () => {
-      const res = await api.get('/material-requests/materials');
-      return res.data;
-    }
-  });
-
-  useEffect(() => {
-    if (isNewRequestModalOpen || correctionEditId) {
-      void refetchMaterials();
-    }
-  }, [isNewRequestModalOpen, correctionEditId, refetchMaterials]);
-
   // Buscar requisições do usuário
   const { data: requestsData, isLoading: loadingRequests, isError: hasRequestsError, error: requestsError } = useQuery({
     queryKey: ['material-requests'],
@@ -1007,8 +844,7 @@ function SolicitarMateriaisPage() {
   const closeNewRequestModal = () => {
     setIsNewRequestModalOpen(false);
     setFormData(emptyNewFormData());
-    setNewItemMaterialSearch(['']);
-    setActiveNewMaterialDropdownIndex(null);
+    setNewItemMaterialLabels(['']);
     setNewCostCenterSearch('');
     setIsNewCostCenterDropdownOpen(false);
     setUploadingAttachment(null);
@@ -1050,13 +886,6 @@ function SolicitarMateriaisPage() {
     () => requestsData?.data?.requests ?? requestsData?.data ?? EMPTY_REQUEST_LIST,
     [requestsData]
   );
-  const materials = useMemo(
-    () => (materialsData?.data ?? EMPTY_MATERIAL_LIST) as RmMaterialOption[],
-    [materialsData]
-  );
-
-  const getMaterialLabel = (material?: RmMaterialOption | null) =>
-    material?.name?.trim() || material?.code?.trim() || material?.description?.trim() || 'Material sem nome';
 
   const obraOptionsFromRequests = useMemo(() => {
     const set = new Set<string>();
@@ -1186,7 +1015,7 @@ function SolicitarMateriaisPage() {
           ? itemsFromApi.map(
               (it: {
                 materialId?: string;
-                material?: { id?: string; unit?: string };
+                material?: { id?: string; unit?: string; name?: string; description?: string };
                 quantity?: unknown;
                 unit?: string;
                 notes?: string | null;
@@ -1203,6 +1032,14 @@ function SolicitarMateriaisPage() {
             )
           : [{ materialId: '', quantity: 1, unit: '', observation: '', attachmentUrl: '', attachmentName: '' }]
     });
+    setEditItemMaterialLabels(
+      itemsFromApi.length > 0
+        ? itemsFromApi.map(
+            (it: { material?: { name?: string; description?: string } }) =>
+              it.material?.name?.trim() || it.material?.description?.trim() || ''
+          )
+        : ['']
+    );
   }, [correctionEditId, correctionRmDetail, requests]);
 
   useEffect(() => {
@@ -1253,38 +1090,6 @@ function SolicitarMateriaisPage() {
     setEditCostCenterSearch((prev) => (prev === label ? prev : label));
   }, [correctionEditId, editFormData.costCenterId, costCenters]);
 
-  useEffect(() => {
-    setNewItemMaterialSearch((prev) => {
-      const next = formData.items.map((item, index) => {
-        if (item.materialId) {
-          const selected = materials.find((m) => m.id === item.materialId);
-          return selected ? getMaterialLabel(selected) : prev[index] || '';
-        }
-        return prev[index] || '';
-      });
-      if (prev.length === next.length && prev.every((value, index) => value === next[index])) {
-        return prev;
-      }
-      return next;
-    });
-  }, [formData.items, materials]);
-
-  useEffect(() => {
-    setEditItemMaterialSearch((prev) => {
-      const next = editFormData.items.map((item, index) => {
-        if (item.materialId) {
-          const selected = materials.find((m) => m.id === item.materialId);
-          return selected ? getMaterialLabel(selected) : prev[index] || '';
-        }
-        return prev[index] || '';
-      });
-      if (prev.length === next.length && prev.every((value, index) => value === next[index])) {
-        return prev;
-      }
-      return next;
-    });
-  }, [editFormData.items, materials]);
-
   const user = userData?.data || {
     name: 'Usuário',
     role: 'EMPLOYEE'
@@ -1308,7 +1113,7 @@ function SolicitarMateriaisPage() {
         { materialId: '', quantity: 1, unit: '', observation: '', attachmentUrl: '', attachmentName: '' }
       ]
     });
-    setNewItemMaterialSearch((prev) => [...prev, '']);
+    setNewItemMaterialLabels((prev) => [...prev, '']);
   };
 
   const handleRemoveItem = (index: number) => {
@@ -1316,39 +1121,28 @@ function SolicitarMateriaisPage() {
       ...formData,
       items: formData.items.filter((_, i) => i !== index)
     });
-    setNewItemMaterialSearch((prev) => prev.filter((_, i) => i !== index));
+    setNewItemMaterialLabels((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const handleItemChange = (index: number, field: string, value: any) => {
+  const handleItemChange = (index: number, field: string, value: unknown) => {
     const newItems = [...formData.items];
     newItems[index] = { ...newItems[index], [field]: value };
-    if (field === 'materialId') {
-      if (value) {
-        const material = (materialsData?.data || []).find((m: any) => m.id === value);
-        newItems[index].unit = material?.unit || '';
-      } else {
-        newItems[index].unit = '';
-      }
-    }
     setFormData({ ...formData, items: newItems });
   };
 
-  const handleNewItemMaterialSearchChange = (index: number, value: string) => {
-    setNewItemMaterialSearch((prev) => {
+  const handleNewItemMaterialSelect = (index: number, material: RmMaterialListItem) => {
+    const newItems = [...formData.items];
+    newItems[index] = {
+      ...newItems[index],
+      materialId: material.id,
+      unit: material.unit || '',
+    };
+    setFormData({ ...formData, items: newItems });
+    setNewItemMaterialLabels((prev) => {
       const next = [...prev];
-      next[index] = value;
+      next[index] = getRmMaterialLabel(material);
       return next;
     });
-
-    const normalized = value.trim().toLowerCase();
-    const exactMatch = materials.find((material) => getMaterialLabel(material).trim().toLowerCase() === normalized);
-
-    if (!normalized || !exactMatch) {
-      handleItemChange(index, 'materialId', '');
-      return;
-    }
-
-    handleItemChange(index, 'materialId', exactMatch.id);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -1388,7 +1182,7 @@ function SolicitarMateriaisPage() {
         { materialId: '', quantity: 1, unit: '', observation: '', attachmentUrl: '', attachmentName: '' }
       ]
     }));
-    setEditItemMaterialSearch((prev) => [...prev, '']);
+    setEditItemMaterialLabels((prev) => [...prev, '']);
   };
 
   const handleItemAttachmentFile = async (form: 'new' | 'edit', index: number, file: File | null) => {
@@ -1498,39 +1292,32 @@ function SolicitarMateriaisPage() {
       ...prev,
       items: prev.items.filter((_, i) => i !== index)
     }));
-    setEditItemMaterialSearch((prev) => prev.filter((_, i) => i !== index));
+    setEditItemMaterialLabels((prev) => prev.filter((_, i) => i !== index));
   };
 
   const handleEditItemChange = (index: number, field: string, value: unknown) => {
     setEditFormData((prev) => {
       const newItems = [...prev.items];
       newItems[index] = { ...newItems[index], [field]: value };
-      if (field === 'materialId' && typeof value === 'string' && value) {
-        const material = (materialsData?.data || []).find((m: { id: string }) => m.id === value);
-        newItems[index].unit = material?.unit || '';
-      } else if (field === 'materialId' && value === '') {
-        newItems[index].unit = '';
-      }
       return { ...prev, items: newItems };
     });
   };
 
-  const handleEditItemMaterialSearchChange = (index: number, value: string) => {
-    setEditItemMaterialSearch((prev) => {
+  const handleEditItemMaterialSelect = (index: number, material: RmMaterialListItem) => {
+    setEditFormData((prev) => {
+      const newItems = [...prev.items];
+      newItems[index] = {
+        ...newItems[index],
+        materialId: material.id,
+        unit: material.unit || '',
+      };
+      return { ...prev, items: newItems };
+    });
+    setEditItemMaterialLabels((prev) => {
       const next = [...prev];
-      next[index] = value;
+      next[index] = getRmMaterialLabel(material);
       return next;
     });
-
-    const normalized = value.trim().toLowerCase();
-    const exactMatch = materials.find((material) => getMaterialLabel(material).trim().toLowerCase() === normalized);
-
-    if (!normalized || !exactMatch) {
-      handleEditItemChange(index, 'materialId', '');
-      return;
-    }
-
-    handleEditItemChange(index, 'materialId', exactMatch.id);
   };
 
   const submitCorrectionEdit = (submitForApproval: boolean) => {
@@ -2151,24 +1938,16 @@ function SolicitarMateriaisPage() {
                                 Material *
                               </label>
                               <div>
-                                <RmMaterialAutocomplete
-                                  searchValue={newItemMaterialSearch[index] || ''}
-                                  isOpen={activeNewMaterialDropdownIndex === index}
-                                  onOpen={() => setActiveNewMaterialDropdownIndex(index)}
-                                  onClose={() =>
-                                    setActiveNewMaterialDropdownIndex((prev) => (prev === index ? null : prev))
-                                  }
-                                  onSearchChange={(value) => handleNewItemMaterialSearchChange(index, value)}
-                                  onSelect={(material) => {
-                                    handleItemChange(index, 'materialId', material.id);
-                                    handleNewItemMaterialSearchChange(index, getMaterialLabel(material));
-                                    setActiveNewMaterialDropdownIndex(null);
-                                  }}
-                                  materials={materials}
-                                  loading={loadingMaterials}
-                                  loadError={materialsLoadError}
-                                  getMaterialLabel={getMaterialLabel}
-                                  inputClassName={rmMaterialInputClass}
+                                <AsyncSearchSelectDropdown<RmMaterialListItem>
+                                  value={item.materialId}
+                                  selectedLabel={newItemMaterialLabels[index]}
+                                  onChange={(material) => handleNewItemMaterialSelect(index, material)}
+                                  searchFn={searchRmMaterials}
+                                  getOptionId={(m) => m.id}
+                                  getOptionLabel={getRmMaterialLabel}
+                                  placeholder="Digite para buscar material..."
+                                  noFocusRing
+                                  queryKeyPrefix="rm-materials-search"
                                 />
                                 <input type="hidden" required value={item.materialId} readOnly />
                               </div>
@@ -2649,24 +2428,16 @@ function SolicitarMateriaisPage() {
                         <div className="space-y-2">
                           <div>
                             <label className="block text-xs text-gray-500 mb-0.5">Material *</label>
-                            <RmMaterialAutocomplete
-                              searchValue={editItemMaterialSearch[index] || ''}
-                              isOpen={activeEditMaterialDropdownIndex === index}
-                              onOpen={() => setActiveEditMaterialDropdownIndex(index)}
-                              onClose={() =>
-                                setActiveEditMaterialDropdownIndex((prev) => (prev === index ? null : prev))
-                              }
-                              onSearchChange={(value) => handleEditItemMaterialSearchChange(index, value)}
-                              onSelect={(material) => {
-                                handleEditItemChange(index, 'materialId', material.id);
-                                handleEditItemMaterialSearchChange(index, getMaterialLabel(material));
-                                setActiveEditMaterialDropdownIndex(null);
-                              }}
-                              materials={materials}
-                              loading={loadingMaterials}
-                              loadError={materialsLoadError}
-                              getMaterialLabel={getMaterialLabel}
-                              inputClassName={rmMaterialInputClassSm}
+                            <AsyncSearchSelectDropdown<RmMaterialListItem>
+                              value={item.materialId}
+                              selectedLabel={editItemMaterialLabels[index]}
+                              onChange={(material) => handleEditItemMaterialSelect(index, material)}
+                              searchFn={searchRmMaterials}
+                              getOptionId={(m) => m.id}
+                              getOptionLabel={getRmMaterialLabel}
+                              placeholder="Digite para buscar material..."
+                              noFocusRing
+                              queryKeyPrefix="rm-materials-search"
                             />
                           </div>
                           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">

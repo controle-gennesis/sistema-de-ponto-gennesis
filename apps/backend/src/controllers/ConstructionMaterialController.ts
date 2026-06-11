@@ -320,6 +320,40 @@ export class ConstructionMaterialController {
     }
   }
 
+  /** Resolve IDs de Materiais e Serviços a partir de nomes (ex.: itens de OC no estoque). */
+  async resolveByNames(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const raw = req.body?.names;
+      if (!Array.isArray(raw) || raw.length === 0) {
+        res.json({ success: true, data: [] });
+        return;
+      }
+
+      const names = [...new Set(raw.map((n) => String(n).trim()).filter(Boolean))].slice(0, 50);
+      if (names.length === 0) {
+        res.json({ success: true, data: [] });
+        return;
+      }
+
+      const materials = await prisma.constructionMaterial.findMany({
+        where: {
+          isActive: true,
+          OR: names.map((name) => ({
+            name: { equals: name, mode: 'insensitive' },
+          })),
+        },
+        select: { id: true, name: true },
+      });
+
+      res.json({
+        success: true,
+        data: materials.map((m) => ({ id: m.id, name: m.name })),
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
   async getMaterialById(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;

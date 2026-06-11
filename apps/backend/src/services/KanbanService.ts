@@ -8,6 +8,7 @@ import {
   resolveKanbanBoardKeyParam,
   userIsAdministrator,
 } from '../lib/kanbanAccess';
+import { userHasKanbanValuesPermission } from '../lib/kanbanValuesAccess';
 import {
   DEFAULT_KANBAN_LABEL_PRESETS,
   resolveKanbanLabelPresets,
@@ -1496,7 +1497,7 @@ export class KanbanService {
   }
 
   async getCardCost(userId: string, cardId: string) {
-    if (!(await userIsAdministrator(userId))) {
+    if (!(await userHasKanbanValuesPermission(userId))) {
       throw new Error(KANBAN_FORBIDDEN);
     }
 

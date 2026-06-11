@@ -23,6 +23,11 @@ import {
   ChevronDown
 } from 'lucide-react';
 import api from '@/lib/api';
+import {
+  incomingChatBubbleClass,
+  ownChatAttachmentLinkClass,
+  ownChatBubbleClass,
+} from '@/components/conversas/chatBubbleTheme';
 
 const DEPARTMENTS = [
   { value: 'Projetos', label: 'Projetos' },
@@ -1099,8 +1104,8 @@ export function ChatWidget() {
                                     <div
                                       className={`rounded-lg px-3 py-2 ${
                                         isOwn
-                                          ? 'bg-red-600 dark:bg-red-500 text-white'
-                                          : 'bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 border border-gray-200 dark:border-gray-700'
+                                          ? ownChatBubbleClass
+                                          : incomingChatBubbleClass
                                       }`}
                                     >
                                       <div className="text-sm whitespace-pre-wrap break-words">
@@ -1116,7 +1121,7 @@ export function ChatWidget() {
                                               rel="noopener noreferrer"
                                               className={`flex items-center space-x-2 p-2 rounded text-sm ${
                                                 isOwn
-                                                  ? 'bg-white/20 dark:bg-white/10 hover:bg-white/30 dark:hover:bg-white/20 text-white'
+                                                  ? ownChatAttachmentLinkClass
                                                   : 'bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300'
                                               }`}
                                             >

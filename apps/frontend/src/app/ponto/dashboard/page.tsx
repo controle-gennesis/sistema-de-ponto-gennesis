@@ -66,18 +66,6 @@ export default function DashboardPage() {
     }
   }, [isFirstLogin, userData]);
 
-  // Listener para abrir modal de alterar senha via sidebar
-  useEffect(() => {
-    const handleOpenChangePasswordModal = () => {
-      setIsChangePasswordOpen(true);
-    };
-
-    window.addEventListener('openChangePasswordModal', handleOpenChangePasswordModal);
-    return () => {
-      window.removeEventListener('openChangePasswordModal', handleOpenChangePasswordModal);
-    };
-  }, []);
-
   if (loadingUser || !userData) {
     return (
       <Loading 

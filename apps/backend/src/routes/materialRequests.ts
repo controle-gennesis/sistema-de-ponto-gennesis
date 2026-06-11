@@ -55,10 +55,18 @@ router.use(authenticate);
 
 // Endpoint auxiliar para listar materiais da RM (deve vir antes de /:id)
 // Somente Materiais e Serviços (cadastro em /ponto/materiais-construcao); cada um tem espelho em EngineeringMaterial (sinapiCode CM-*)
-router.get('/materials', async (_req: AuthRequest, res: Response, next: NextFunction) => {
+router.get('/materials', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const data = await materialRequestService.listConstructionMaterialsForRmDropdown();
-    res.json({ success: true, data });
+    const search = String(req.query.search ?? '').trim();
+    const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '50'), 10) || 50, 1), 100);
+
+    if (search.length >= 2) {
+      const data = await materialRequestService.searchConstructionMaterialsForRmDropdown(search, limit);
+      res.json({ success: true, data });
+      return;
+    }
+
+    res.json({ success: true, data: [] });
   } catch (error) {
     next(error);
   }

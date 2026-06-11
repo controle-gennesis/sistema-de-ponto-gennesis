@@ -1,32 +1,27 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import {
   CheckCircle2,
   Clock,
-  Edit,
   Filter,
   PackageCheck,
   Plus,
-  RotateCcw,
   Search,
-  Trash2,
   Truck,
   X,
   AlertTriangle,
+  CalendarPlus,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import { Modal } from '@/components/ui/Modal';
-import { RowActionMenuCell } from '@/components/ui/RowActionMenu';
-import { listTableRowClasses } from '@/components/ui/listTableUi';
+import { getListTableRowClassName, ListRowNavigableLabel } from '@/components/ui/listTableUi';
 import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
-import { useRowActionMenu } from '@/hooks/useRowActionMenu';
 import api from '@/lib/api';
 import toast from 'react-hot-toast';
 import {
@@ -40,11 +35,11 @@ import {
   DELIVERY_TYPE_OPTIONS,
   PAYMENT_STATUS_OPTIONS,
   POLO_OPTIONS,
-  STOCK_SHORTFALL_TYPE_OPTIONS,
-  FINAL_STATUS_OPTIONS,
   formatCurrency,
   formatDate,
+  isDeliveryDateOverdue,
   normalizeDeliveryType,
+  shortfallTypeLabel,
   statusBadge,
   type CurrentStatusValue,
   type DeliveryTypeValue,
@@ -119,12 +114,60 @@ const EMPTY_FORM: FormState = {
   observations: '',
 };
 
+const ITEMS_PER_PAGE = 12;
+
+type ViewFilter = 'all' | 'awaiting' | 'received' | 'overdue';
+
+function getListHeaderConfig(viewFilter: ViewFilter) {
+  switch (viewFilter) {
+    case 'awaiting':
+      return {
+        Icon: PackageCheck,
+        iconBg: 'bg-amber-100 dark:bg-amber-900/30',
+        iconColor: 'text-amber-600 dark:text-amber-400',
+        title: 'Entregas Pendentes',
+        subtitle: 'Exibindo entregas com recebimento de engenharia pendente',
+      };
+    case 'received':
+      return {
+        Icon: CheckCircle2,
+        iconBg: 'bg-green-100 dark:bg-green-900/30',
+        iconColor: 'text-green-600 dark:text-green-400',
+        title: 'Entregas Recebidas',
+        subtitle: 'Exibindo entregas já confirmadas pela engenharia',
+      };
+    case 'overdue':
+      return {
+        Icon: AlertTriangle,
+        iconBg: 'bg-red-100 dark:bg-red-900/30',
+        iconColor: 'text-red-600 dark:text-red-400',
+        title: 'Entregas Atrasadas',
+        subtitle: 'Exibindo entregas com previsão vencida',
+      };
+    default:
+      return {
+        Icon: Truck,
+        iconBg: 'bg-blue-100 dark:bg-blue-900/30',
+        iconColor: 'text-blue-600 dark:text-blue-400',
+        title: 'Entregas em Andamento',
+        subtitle: 'Listagem completa de entregas de material',
+      };
+  }
+}
+
 const NO_FOCUS =
   'outline-none focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0';
 
 const fieldClassName = `w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm ${NO_FOCUS}`;
 
 const currencyFieldClassName = `${fieldClassName} text-right tabular-nums`;
+
+type ContractForDelivery = {
+  id: string;
+  name: string;
+  costCenterId?: string;
+  costCenter?: { id: string; code?: string; name?: string } | null;
+};
 
 const searchInputClassName = `h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm font-medium text-gray-900 placeholder:text-gray-400 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 ${NO_FOCUS}`;
 
@@ -174,6 +217,19 @@ const tdCenterClass = `${tdBase} text-center`;
 const tdTruncateCenterClass = `${tdCenterClass} truncate`;
 const tdPillClass = `${tdCenterClass}`;
 
+const ENGINEERING_RECEIPT_STATUS = {
+  received: {
+    label: 'Recebido',
+    className:
+      'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-200',
+  },
+  pending: {
+    label: 'Pendente',
+    className:
+      'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200',
+  },
+} as const;
+
 function StatusPill({
   value,
   options,
@@ -189,6 +245,42 @@ function StatusPill({
   );
 }
 
+function DetailSection({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="space-y-3">
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+        {title}
+      </h3>
+      <dl className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2">{children}</dl>
+    </section>
+  );
+}
+
+function DetailField({
+  label,
+  children,
+  className = '',
+}: {
+  label: string;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={className}>
+      <dt className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+        {label}
+      </dt>
+      <dd className="mt-1 text-sm text-gray-900 dark:text-gray-100">{children}</dd>
+    </div>
+  );
+}
+
 export default function ControleEntregasPageClient() {
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -197,16 +289,26 @@ export default function ControleEntregasPageClient() {
   const [poloFilter, setPoloFilter] = useState('');
   const [currentStatusFilter, setCurrentStatusFilter] = useState('');
   const [paymentStatusFilter, setPaymentStatusFilter] = useState('');
-  const [viewFilter, setViewFilter] = useState<'all' | 'awaiting' | 'overdue'>('all');
+  const [viewFilter, setViewFilter] = useState<ViewFilter>('all');
+  const [listCurrentPage, setListCurrentPage] = useState(1);
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<MaterialDeliveryRow | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [detailRowId, setDetailRowId] = useState<string | null>(null);
+  const [expectedDeliveryEditId, setExpectedDeliveryEditId] = useState<string | null>(null);
+  const [expectedDeliveryDraft, setExpectedDeliveryDraft] = useState('');
+  const [deliveryTypeEditId, setDeliveryTypeEditId] = useState<string | null>(null);
+  const [deliveryTypeDraft, setDeliveryTypeDraft] = useState<DeliveryTypeValue | ''>('');
 
-  const hasActiveFilters =
-    Boolean(poloFilter || currentStatusFilter || paymentStatusFilter || search.trim()) ||
-    viewFilter !== 'all';
+  const closeDetailModal = () => {
+    setDetailRowId(null);
+    setExpectedDeliveryEditId(null);
+    setExpectedDeliveryDraft('');
+    setDeliveryTypeEditId(null);
+    setDeliveryTypeDraft('');
+  };
 
   const { data: userData, isLoading: loadingUser } = useQuery({
     queryKey: ['user'],
@@ -241,6 +343,7 @@ export default function ControleEntregasPageClient() {
           currentStatus: currentStatusFilter || undefined,
           paymentStatus: paymentStatusFilter || undefined,
           awaitingEngineering: viewFilter === 'awaiting' ? 'true' : undefined,
+          receivedByEngineering: viewFilter === 'received' ? 'true' : undefined,
           limit: 300,
         },
       });
@@ -257,15 +360,6 @@ export default function ControleEntregasPageClient() {
     enabled: showForm,
   });
 
-  const { data: purchaseOrdersRes } = useQuery({
-    queryKey: ['purchase-orders-for-deliveries'],
-    queryFn: async () => {
-      const res = await api.get('/purchase-orders', { params: { limit: 200 } });
-      return res.data;
-    },
-    enabled: showForm,
-  });
-
   const { data: contractsRes } = useQuery({
     queryKey: ['contracts-for-deliveries'],
     queryFn: async () => {
@@ -276,10 +370,15 @@ export default function ControleEntregasPageClient() {
   });
 
   const items: MaterialDeliveryRow[] = listRes?.data ?? [];
+  const detailRow = useMemo(
+    () => (detailRowId ? items.find((row) => row.id === detailRowId) ?? null : null),
+    [items, detailRowId]
+  );
   const summary = summaryRes?.data ?? { total: 0, awaitingEngineering: 0, delivered: 0, overdue: 0 };
+  const listHeader = useMemo(() => getListHeaderConfig(viewFilter), [viewFilter]);
+  const ListHeaderIcon = listHeader.Icon;
   const suppliers = suppliersRes?.data ?? [];
-  const purchaseOrders = purchaseOrdersRes?.data ?? [];
-  const contracts = contractsRes?.data ?? [];
+  const contracts = (contractsRes?.data ?? []) as ContractForDelivery[];
 
   const contractOptions = useMemo(
     () => contracts.map((c: { id: string; name: string }) => ({ value: c.id, label: c.name })),
@@ -289,15 +388,6 @@ export default function ControleEntregasPageClient() {
   const supplierOptions = useMemo(
     () => suppliers.map((s: { id: string; name: string }) => ({ value: s.id, label: s.name })),
     [suppliers]
-  );
-
-  const purchaseOrderOptions = useMemo(
-    () =>
-      purchaseOrders.map((po: { id: string; orderNumber: string }) => ({
-        value: po.id,
-        label: po.orderNumber,
-      })),
-    [purchaseOrders]
   );
 
   const currentStatusOptions = useMemo(
@@ -310,11 +400,6 @@ export default function ControleEntregasPageClient() {
     []
   );
 
-  const deliveryTypeOptions = useMemo(
-    () => DELIVERY_TYPE_OPTIONS.map((o) => ({ value: o.value, label: o.label })),
-    []
-  );
-
   const poloSelectOptions = useMemo(
     () => POLO_OPTIONS.map((o) => ({ value: o.value, label: o.label })),
     []
@@ -322,22 +407,34 @@ export default function ControleEntregasPageClient() {
 
   const filteredItems = useMemo(() => {
     if (viewFilter !== 'overdue') return items;
-    const now = new Date();
     return items.filter((row) => {
       if (row.receivedByEngineering) return false;
       if (row.currentStatus === 'CANCELADO' || row.finalStatus === 'CANCELADO') return false;
-      if (!row.expectedDelivery) return false;
-      return new Date(row.expectedDelivery) < now && row.currentStatus !== 'ENTREGUE';
+      if (row.currentStatus === 'ENTREGUE') return false;
+      return isDeliveryDateOverdue(row.expectedDelivery);
     });
   }, [items, viewFilter]);
 
-  const {
-    rowActionMenu,
-    rowForActionMenu,
-    toggleRowActionMenu,
-    closeRowActionMenu,
-    isRowMenuOpen,
-  } = useRowActionMenu<MaterialDeliveryRow>(filteredItems);
+  const totalRows = filteredItems.length;
+  const totalPages = Math.max(1, Math.ceil(totalRows / ITEMS_PER_PAGE));
+  const startIndex = (listCurrentPage - 1) * ITEMS_PER_PAGE;
+  const endIndex = startIndex + ITEMS_PER_PAGE;
+  const paginatedItems = useMemo(
+    () => filteredItems.slice(startIndex, endIndex),
+    [filteredItems, startIndex, endIndex]
+  );
+  const startItem = totalRows === 0 ? 0 : startIndex + 1;
+  const endItem = Math.min(endIndex, totalRows);
+
+  useEffect(() => {
+    setListCurrentPage(1);
+  }, [search, poloFilter, currentStatusFilter, paymentStatusFilter, viewFilter]);
+
+  useEffect(() => {
+    if (listCurrentPage > totalPages) {
+      setListCurrentPage(totalPages);
+    }
+  }, [listCurrentPage, totalPages]);
 
   const saveMutation = useMutation({
     mutationFn: async () => {
@@ -345,15 +442,20 @@ export default function ControleEntregasPageClient() {
         (s: { id: string; name: string }) => s.id === form.supplierId
       );
       const payload = {
-        ...form,
+        polo: form.polo,
+        movementId: form.movementId,
+        movementNumber: form.movementNumber,
         contractId: form.contractId || null,
+        currentStatus: form.currentStatus,
+        paymentStatus: form.paymentStatus,
         supplierId: form.supplierId || null,
         supplierName: selectedSupplier?.name ?? null,
         purchaseOrderId: form.purchaseOrderId || null,
         orderValue: parseCurrencyInputBr(form.orderValue),
         totalPaid: parseCurrencyInputBr(form.totalPaid),
-        expectedDelivery: form.expectedDelivery || null,
-        deliveryType: form.deliveryType || null,
+        rmNumber: form.rmNumber,
+        observations: form.observations,
+        // Previsão e tipo de entrega são editados inline na listagem, não pelo modal.
       };
       if (editing) {
         const res = await api.patch(`/material-deliveries/${editing.id}`, payload);
@@ -394,9 +496,9 @@ export default function ControleEntregasPageClient() {
     },
   });
 
-  const deleteMutation = useMutation({
-    mutationFn: async (id: string) => {
-      const res = await api.delete(`/material-deliveries/${id}`);
+  const updateExpectedDeliveryMutation = useMutation({
+    mutationFn: async ({ id, expectedDelivery }: { id: string; expectedDelivery: string }) => {
+      const res = await api.patch(`/material-deliveries/${id}`, { expectedDelivery });
       return res.data;
     },
     onSuccess: () => {
@@ -404,8 +506,47 @@ export default function ControleEntregasPageClient() {
       queryClient.invalidateQueries({ queryKey: ['material-deliveries-summary'] });
       queryClient.invalidateQueries({ queryKey: ['material-deliveries-summary-recebimento'] });
       queryClient.invalidateQueries({ queryKey: ['material-deliveries-recebimento-pending-count'] });
+      toast.success('Previsão de entrega salva');
+      setExpectedDeliveryEditId(null);
+      setExpectedDeliveryDraft('');
+    },
+    onError: (err: any) => {
+      toast.error(err?.response?.data?.message || 'Erro ao salvar previsão de entrega');
+    },
+  });
+
+  const updateDeliveryTypeMutation = useMutation({
+    mutationFn: async ({ id, deliveryType }: { id: string; deliveryType: DeliveryTypeValue }) => {
+      const res = await api.patch(`/material-deliveries/${id}`, { deliveryType });
+      return res.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['material-deliveries'] });
+      queryClient.invalidateQueries({ queryKey: ['material-deliveries-summary'] });
+      queryClient.invalidateQueries({ queryKey: ['material-deliveries-summary-recebimento'] });
+      queryClient.invalidateQueries({ queryKey: ['material-deliveries-recebimento-pending-count'] });
+      toast.success('Tipo de entrega salvo');
+      setDeliveryTypeEditId(null);
+      setDeliveryTypeDraft('');
+    },
+    onError: (err: any) => {
+      toast.error(err?.response?.data?.message || 'Erro ao salvar tipo de entrega');
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await api.delete(`/material-deliveries/${id}`);
+      return res.data;
+    },
+    onSuccess: (_data, deletedId) => {
+      queryClient.invalidateQueries({ queryKey: ['material-deliveries'] });
+      queryClient.invalidateQueries({ queryKey: ['material-deliveries-summary'] });
+      queryClient.invalidateQueries({ queryKey: ['material-deliveries-summary-recebimento'] });
+      queryClient.invalidateQueries({ queryKey: ['material-deliveries-recebimento-pending-count'] });
       toast.success('Entrega excluída');
       setDeleteId(null);
+      if (detailRowId === deletedId) closeDetailModal();
     },
     onError: (err: any) => {
       toast.error(err?.response?.data?.message || 'Erro ao excluir');
@@ -426,22 +567,6 @@ export default function ControleEntregasPageClient() {
 
   const handleSupplierChange = (supplierId: string) => {
     setForm((prev) => ({ ...prev, supplierId }));
-  };
-
-  const handlePurchaseOrderChange = (purchaseOrderId: string) => {
-    const po = purchaseOrders.find(
-      (p: { id: string; orderNumber: string; amountToPay?: unknown; supplier?: { id: string; name: string } }) =>
-        p.id === purchaseOrderId
-    );
-    setForm((prev) => ({
-      ...prev,
-      purchaseOrderId,
-      orderValue:
-        po?.amountToPay != null
-          ? formatCurrencyInputBrFromNumber(po.amountToPay)
-          : prev.orderValue,
-      supplierId: po?.supplier?.id ?? prev.supplierId,
-    }));
   };
 
   useEffect(() => {
@@ -523,7 +648,7 @@ export default function ControleEntregasPageClient() {
                   </div>
                   <div className="ml-3 sm:ml-4 min-w-0 flex-1">
                     <p className="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400">
-                      Aguardando engenharia
+                      Pendentes
                     </p>
                     <p className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100 mt-1">
                       {summary.awaitingEngineering}
@@ -538,8 +663,8 @@ export default function ControleEntregasPageClient() {
                 className="p-4 sm:p-6"
                 role="button"
                 tabIndex={0}
-                onClick={() => setViewFilter('all')}
-                onKeyDown={(e) => e.key === 'Enter' && setViewFilter('all')}
+                onClick={() => setViewFilter('received')}
+                onKeyDown={(e) => e.key === 'Enter' && setViewFilter('received')}
               >
                 <div className="flex items-center">
                   <div className="p-2 sm:p-3 bg-green-100 dark:bg-green-900/30 rounded-lg flex-shrink-0">
@@ -586,49 +711,17 @@ export default function ControleEntregasPageClient() {
             <CardHeader className="border-b-0 pb-1">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                 <div className="flex items-center space-x-3">
-                  <div className="p-2 sm:p-3 bg-red-100 dark:bg-red-900/30 rounded-lg">
-                    <Truck className="w-5 h-5 sm:w-6 sm:h-6 text-red-600 dark:text-red-400" />
+                  <div className={`p-2 sm:p-3 rounded-lg ${listHeader.iconBg}`}>
+                    <ListHeaderIcon className={`w-5 h-5 sm:w-6 sm:h-6 ${listHeader.iconColor}`} />
                   </div>
                   <div>
                     <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                      Entregas Registradas
+                      {listHeader.title}
                     </h3>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">
-                      {viewFilter === 'awaiting'
-                        ? 'Exibindo entregas aguardando confirmação da engenharia'
-                        : viewFilter === 'overdue'
-                          ? 'Exibindo entregas com previsão vencida'
-                          : 'Listagem completa de entregas de material'}
-                    </p>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">{listHeader.subtitle}</p>
                   </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-2 sm:justify-end">
-                  {hasActiveFilters && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setPoloFilter('');
-                        setCurrentStatusFilter('');
-                        setPaymentStatusFilter('');
-                        setSearch('');
-                        setViewFilter('all');
-                      }}
-                      className="flex items-center justify-center w-8 h-8 text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors"
-                      title="Limpar filtros"
-                    >
-                      <RotateCcw className="w-5 h-5" />
-                    </button>
-                  )}
-                  {viewFilter !== 'all' && (
-                    <button
-                      type="button"
-                      onClick={() => setViewFilter('all')}
-                      className="inline-flex h-10 items-center gap-1 rounded-lg border border-gray-300 bg-white px-3 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                      Limpar visão
-                    </button>
-                  )}
                   <div className="relative min-w-[240px] flex-1 sm:w-[280px] sm:flex-none">
                     <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
                     <input
@@ -679,14 +772,18 @@ export default function ControleEntregasPageClient() {
                   <Clock className="w-12 h-12 text-gray-400 dark:text-gray-500 mx-auto mb-4" />
                   <p className="text-gray-600 dark:text-gray-400">Nenhuma entrega encontrada</p>
                   <p className="text-sm text-gray-500 dark:text-gray-500 mt-2">
-                    Ajuste os filtros ou registre a primeira entrega
+                    Ajuste os filtros ou clique em Nova entrega para cadastrar manualmente
                   </p>
                 </div>
               ) : (
                 <>
                   <div className="mb-2 flex flex-col gap-1 text-sm text-gray-600 dark:text-gray-400 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
                     <span>
-                      Mostrando {filteredItems.length} entrega{filteredItems.length !== 1 ? 's' : ''}
+                      Mostrando {startItem} a {endItem} de {totalRows} entrega
+                      {totalRows !== 1 ? 's' : ''}
+                    </span>
+                    <span>
+                      Página {listCurrentPage} de {totalPages}
                     </span>
                   </div>
                   <div className="overflow-x-auto">
@@ -694,210 +791,345 @@ export default function ControleEntregasPageClient() {
                       <thead className="border-b border-gray-200 dark:border-gray-700">
                         <tr>
                           <th className={thLeftClass}>ID</th>
-                          <th className={thCenterClass}>Ordem de compra</th>
                           <th className={thCenterClass}>N° RM</th>
                           <th className={thCenterClass}>ID Mov</th>
                           <th className={thCenterClass}>Nº Mov</th>
                           <th className={thCenterClass}>Contrato</th>
-                          <th className={thCenterClass}>Fornecedor</th>
-                          <th className={thCenterClass}>Valor OC</th>
-                          <th className={thCenterClass}>Status atual</th>
-                          <th className={thCenterClass}>Pagamento</th>
-                          <th className={thCenterClass}>Status final</th>
-                          <th className={thCenterClass}>Previsão entrega</th>
-                          <th className={thCenterClass}>Tipo entrega</th>
-                          <th className={thCenterClass}>Valor total pago</th>
-                          <th className={thCenterClass}>Furo estoque</th>
-                          <th className={thCenterClass}>Recebido eng.</th>
-                          <th className={thCenterClass}>Observações</th>
-                          <th className={thCenterClass}>Ação</th>
+                          <th className={thCenterClass}>Recebimento engenharia</th>
+                          <th className={thCenterClass}>Previsão</th>
                         </tr>
                       </thead>
                       <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                        {filteredItems.map((row) => {
+                        {paginatedItems.map((row) => {
                           const isOverdue =
                             !row.receivedByEngineering &&
-                            row.expectedDelivery &&
-                            new Date(row.expectedDelivery) < new Date() &&
                             row.currentStatus !== 'ENTREGUE' &&
-                            row.currentStatus !== 'CANCELADO';
+                            row.currentStatus !== 'CANCELADO' &&
+                            isDeliveryDateOverdue(row.expectedDelivery);
 
                           return (
                             <tr
                               key={row.id}
-                              className={`${listTableRowClasses.tr} ${
-                                isOverdue ? 'bg-red-50/60 dark:bg-red-950/20' : ''
-                              }`}
+                              role="button"
+                              tabIndex={0}
+                              onClick={() => setDetailRowId(row.id)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                  e.preventDefault();
+                                  setDetailRowId(row.id);
+                                }
+                              }}
+                              className={getListTableRowClassName(
+                                true,
+                                isOverdue ? 'bg-red-50/60 dark:bg-red-950/20' : undefined
+                              )}
                             >
                               <td className={`${tdLeftClass} whitespace-nowrap`}>
-                                <span className="text-sm text-gray-900 dark:text-gray-100 font-medium">{row.deliveryNumber}</span>
-                              </td>
-                              <td className={`${tdCenterClass} whitespace-nowrap`}>
-                                {row.purchaseOrder?.orderNumber || '—'}
+                                <ListRowNavigableLabel className="font-medium">
+                                  {row.deliveryNumber}
+                                </ListRowNavigableLabel>
                               </td>
                               <td className={`${tdCenterClass} whitespace-nowrap`}>{row.rmNumber || '—'}</td>
                               <td className={`${tdCenterClass} whitespace-nowrap`}>{row.movementId || '—'}</td>
                               <td className={`${tdCenterClass} whitespace-nowrap`}>{row.movementNumber || '—'}</td>
                               <td className={tdCenterClass} title={`${contractLabel(row)} · ${row.polo}`}>
                                 <span className="inline-flex flex-col items-center gap-0.5">
-                                  <span className="max-w-[140px] truncate">{contractLabel(row)}</span>
+                                  <span className="max-w-[160px] truncate">{contractLabel(row)}</span>
                                   <span className="text-xs text-gray-500 dark:text-gray-400">{row.polo}</span>
                                 </span>
                               </td>
-                              <td className={tdTruncateCenterClass} title={row.supplier?.name ?? row.supplierName ?? ''}>
-                                {row.supplier?.name || row.supplierName || '—'}
-                              </td>
-                              <td className={`${tdCenterClass} whitespace-nowrap tabular-nums`}>
-                                {formatCurrency(row.orderValue)}
-                              </td>
                               <td className={tdPillClass}>
-                                <div className="flex justify-center">
-                                  <StatusPill value={row.currentStatus} options={CURRENT_STATUS_OPTIONS} />
-                                </div>
-                              </td>
-                              <td className={tdPillClass}>
-                                <div className="flex justify-center">
-                                  <StatusPill value={row.paymentStatus} options={PAYMENT_STATUS_OPTIONS} />
-                                </div>
-                              </td>
-                              <td className={tdPillClass}>
-                                <div className="flex justify-center">
-                                  <StatusPill value={row.finalStatus} options={FINAL_STATUS_OPTIONS} />
-                                </div>
+                                {(() => {
+                                  const receipt = row.receivedByEngineering
+                                    ? ENGINEERING_RECEIPT_STATUS.received
+                                    : ENGINEERING_RECEIPT_STATUS.pending;
+                                  return (
+                                    <div className="flex justify-center">
+                                      <span
+                                        className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium whitespace-nowrap ${receipt.className}`}
+                                      >
+                                        {receipt.label}
+                                      </span>
+                                    </div>
+                                  );
+                                })()}
                               </td>
                               <td className={`${tdCenterClass} whitespace-nowrap`}>
-                                {formatDate(row.expectedDelivery)}
-                                {isOverdue && (
-                                  <span className="ml-1 text-xs font-medium text-red-600 dark:text-red-400">
-                                    atrasada
-                                  </span>
-                                )}
-                              </td>
-                              <td className={tdTruncateCenterClass} title={deliveryTypeLabel(row.deliveryType)}>
-                                {deliveryTypeLabel(row.deliveryType)}
-                              </td>
-                              <td className={`${tdCenterClass} whitespace-nowrap tabular-nums`}>
-                                {formatCurrency(row.totalPaid)}
-                              </td>
-                              <td className={tdPillClass}>
-                                {row.stockShortfallType ? (
-                                  <div className="flex justify-center">
-                                    <StatusPill
-                                      value={row.stockShortfallType}
-                                      options={STOCK_SHORTFALL_TYPE_OPTIONS}
-                                    />
-                                  </div>
-                                ) : (
-                                  <span className="text-xs text-gray-500">—</span>
-                                )}
-                              </td>
-                              <td className={tdCenterClass}>
-                                {row.receivedByEngineering ? (
-                                  <span className="inline-flex flex-col items-center gap-0.5">
-                                    <span>{row.receivedByUser?.name ?? '—'}</span>
-                                    {row.receivedAt ? (
-                                      <span className="text-xs text-gray-500 dark:text-gray-400">
-                                        {formatDate(row.receivedAt)}
+                                {row.expectedDelivery ? (
+                                  <span>
+                                    {formatDate(row.expectedDelivery)}
+                                    {isOverdue && (
+                                      <span className="ml-1 text-xs font-medium text-red-600 dark:text-red-400">
+                                        atrasada
                                       </span>
-                                    ) : null}
+                                    )}
                                   </span>
                                 ) : (
-                                  <span className="text-xs font-medium text-amber-600 dark:text-amber-400">
-                                    Pendente
-                                  </span>
+                                  <span className="text-xs text-gray-500 dark:text-gray-400">—</span>
                                 )}
                               </td>
-                              <td className={tdTruncateCenterClass} title={row.observations ?? ''}>
-                                {row.observations || '—'}
-                              </td>
-                              <RowActionMenuCell
-                                align="center"
-                                isOpen={isRowMenuOpen(row.id)}
-                                onToggle={(e) =>
-                                  toggleRowActionMenu(row.id, e.currentTarget as HTMLButtonElement)
-                                }
-                              />
                             </tr>
                           );
                         })}
                       </tbody>
                     </table>
                   </div>
-
-                  {rowActionMenu &&
-                    rowForActionMenu &&
-                    typeof document !== 'undefined' &&
-                    createPortal(
-                      <>
-                        <div
-                          className="fixed inset-0 z-[1050]"
-                          aria-hidden
-                          onClick={closeRowActionMenu}
-                        />
-                        <div
-                          role="menu"
-                          className="fixed z-[1051] w-56 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800"
-                          style={{ top: rowActionMenu.top, left: rowActionMenu.left }}
-                        >
-                          {[
-                            !rowForActionMenu.receivedByEngineering &&
-                            rowForActionMenu.currentStatus !== 'CANCELADO'
-                              ? {
-                                  key: 'receive',
-                                  label: 'Receber',
-                                  icon: (
-                                    <CheckCircle2 className="h-4 w-4 shrink-0 text-green-600 dark:text-green-400" />
-                                  ),
-                                  disabled: receiveMutation.isPending,
-                                  onClick: () => receiveMutation.mutate(rowForActionMenu.id),
-                                }
-                              : null,
-                            {
-                              key: 'edit',
-                              label: 'Editar',
-                              icon: (
-                                <Edit className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
-                              ),
-                              onClick: () => openEdit(rowForActionMenu),
-                            },
-                            {
-                              key: 'delete',
-                              label: 'Excluir',
-                              icon: (
-                                <Trash2 className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
-                              ),
-                              onClick: () => setDeleteId(rowForActionMenu.id),
-                            },
-                          ]
-                            .filter(Boolean)
-                            .map((item, index) => (
-                              <button
-                                key={item!.key}
-                                type="button"
-                                role="menuitem"
-                                disabled={'disabled' in item! ? item!.disabled : false}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  closeRowActionMenu();
-                                  item!.onClick();
-                                }}
-                                className={`flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-gray-300 dark:hover:bg-gray-700 ${
-                                  index > 0 ? 'border-t border-gray-200 dark:border-gray-700' : ''
-                                }`}
-                              >
-                                {item!.icon}
-                                <span>{item!.label}</span>
-                              </button>
-                            ))}
-                        </div>
-                      </>,
-                      document.body
-                    )}
+                  {totalPages > 1 && (
+                    <div className="mt-4 flex items-center justify-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setListCurrentPage((prev) => Math.max(prev - 1, 1))}
+                        disabled={listCurrentPage === 1}
+                        className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
+                      >
+                        Anterior
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setListCurrentPage((prev) => Math.min(prev + 1, totalPages))}
+                        disabled={listCurrentPage === totalPages}
+                        className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
+                      >
+                        Próxima
+                      </button>
+                    </div>
+                  )}
                 </>
               )}
             </CardContent>
           </Card>
         </div>
+
+        <Modal
+          isOpen={Boolean(detailRow)}
+          onClose={closeDetailModal}
+          title={detailRow ? `Entrega ${detailRow.deliveryNumber}` : 'Detalhes da entrega'}
+          size="lg"
+        >
+          {detailRow ? (
+            <div className="space-y-6">
+              <DetailSection title="Identificação">
+                <DetailField label="N° RM">{detailRow.rmNumber || '—'}</DetailField>
+                <DetailField label="ID Mov">{detailRow.movementId || '—'}</DetailField>
+                <DetailField label="Nº Mov">{detailRow.movementNumber || '—'}</DetailField>
+                <DetailField label="Contrato">{contractLabel(detailRow)}</DetailField>
+                <DetailField label="Polo">{detailRow.polo}</DetailField>
+                <DetailField label="Fornecedor" className="sm:col-span-2">
+                  {detailRow.supplier?.name || detailRow.supplierName || '—'}
+                </DetailField>
+                <DetailField label="Status atual">
+                  <StatusPill value={detailRow.currentStatus} options={CURRENT_STATUS_OPTIONS} />
+                </DetailField>
+                <DetailField label="Pagamento">
+                  {statusBadge(detailRow.paymentStatus, PAYMENT_STATUS_OPTIONS).label}
+                </DetailField>
+                <DetailField label="Valor OC">
+                  <span className="tabular-nums">{formatCurrency(detailRow.orderValue)}</span>
+                </DetailField>
+                <DetailField label="Valor total pago">
+                  <span className="tabular-nums">{formatCurrency(detailRow.totalPaid)}</span>
+                </DetailField>
+              </DetailSection>
+
+              <DetailSection title="Entrega">
+                <DetailField label="Previsão de entrega">
+                  {expectedDeliveryEditId === detailRow.id ? (
+                    <div className="space-y-2">
+                      <input
+                        type="date"
+                        value={expectedDeliveryDraft}
+                        onChange={(e) => setExpectedDeliveryDraft(e.target.value)}
+                        className={fieldClassName}
+                      />
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          disabled={
+                            !expectedDeliveryDraft || updateExpectedDeliveryMutation.isPending
+                          }
+                          onClick={() =>
+                            updateExpectedDeliveryMutation.mutate({
+                              id: detailRow.id,
+                              expectedDelivery: expectedDeliveryDraft,
+                            })
+                          }
+                          className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          Salvar
+                        </button>
+                        <button
+                          type="button"
+                          disabled={updateExpectedDeliveryMutation.isPending}
+                          onClick={() => {
+                            setExpectedDeliveryEditId(null);
+                            setExpectedDeliveryDraft('');
+                          }}
+                          className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800"
+                        >
+                          Cancelar
+                        </button>
+                      </div>
+                    </div>
+                  ) : detailRow.expectedDelivery ? (
+                    <span className="inline-flex flex-wrap items-center gap-2">
+                      <span>
+                        {formatDate(detailRow.expectedDelivery)}
+                        {isDeliveryDateOverdue(detailRow.expectedDelivery) &&
+                          !detailRow.receivedByEngineering &&
+                          detailRow.currentStatus !== 'ENTREGUE' &&
+                          detailRow.currentStatus !== 'CANCELADO' && (
+                            <span className="ml-1 text-xs font-medium text-red-600 dark:text-red-400">
+                              atrasada
+                            </span>
+                          )}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setExpectedDeliveryEditId(detailRow.id);
+                          setExpectedDeliveryDraft(toInputDate(detailRow.expectedDelivery));
+                        }}
+                        className="text-xs font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400"
+                      >
+                        Alterar
+                      </button>
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setExpectedDeliveryEditId(detailRow.id);
+                        setExpectedDeliveryDraft('');
+                      }}
+                      className="inline-flex items-center gap-1 rounded-lg border border-dashed border-gray-300 px-2.5 py-1 text-xs font-medium text-gray-700 hover:border-blue-400 hover:bg-blue-50 hover:text-blue-700 dark:border-gray-600 dark:text-gray-200 dark:hover:border-blue-500 dark:hover:bg-blue-950/30"
+                    >
+                      <CalendarPlus className="h-3.5 w-3.5" />
+                      Adicionar previsão
+                    </button>
+                  )}
+                </DetailField>
+                <DetailField label="Tipo de entrega">
+                  {deliveryTypeEditId === detailRow.id ? (
+                    <div className="space-y-2">
+                      <select
+                        value={deliveryTypeDraft}
+                        onChange={(e) =>
+                          setDeliveryTypeDraft(e.target.value as DeliveryTypeValue | '')
+                        }
+                        className={fieldClassName}
+                      >
+                        <option value="">Selecionar...</option>
+                        {DELIVERY_TYPE_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          disabled={!deliveryTypeDraft || updateDeliveryTypeMutation.isPending}
+                          onClick={() =>
+                            updateDeliveryTypeMutation.mutate({
+                              id: detailRow.id,
+                              deliveryType: deliveryTypeDraft as DeliveryTypeValue,
+                            })
+                          }
+                          className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          Salvar
+                        </button>
+                        <button
+                          type="button"
+                          disabled={updateDeliveryTypeMutation.isPending}
+                          onClick={() => {
+                            setDeliveryTypeEditId(null);
+                            setDeliveryTypeDraft('');
+                          }}
+                          className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800"
+                        >
+                          Cancelar
+                        </button>
+                      </div>
+                    </div>
+                  ) : normalizeDeliveryType(detailRow.deliveryType) ? (
+                    <span className="inline-flex flex-wrap items-center gap-2">
+                      <span>{deliveryTypeLabel(detailRow.deliveryType)}</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDeliveryTypeEditId(detailRow.id);
+                          setDeliveryTypeDraft(normalizeDeliveryType(detailRow.deliveryType));
+                        }}
+                        className="text-xs font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400"
+                      >
+                        Alterar
+                      </button>
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDeliveryTypeEditId(detailRow.id);
+                        setDeliveryTypeDraft('');
+                      }}
+                      className="inline-flex items-center gap-1 rounded-lg border border-dashed border-gray-300 px-2.5 py-1 text-xs font-medium text-gray-700 hover:border-blue-400 hover:bg-blue-50 hover:text-blue-700 dark:border-gray-600 dark:text-gray-200 dark:hover:border-blue-500 dark:hover:bg-blue-950/30"
+                    >
+                      <Truck className="h-3.5 w-3.5" />
+                      Adicionar tipo
+                    </button>
+                  )}
+                </DetailField>
+                <DetailField label="Recebimento engenharia">
+                  {(() => {
+                    const receipt = detailRow.receivedByEngineering
+                      ? ENGINEERING_RECEIPT_STATUS.received
+                      : ENGINEERING_RECEIPT_STATUS.pending;
+                    return (
+                      <span className="inline-flex flex-col gap-1">
+                        <span
+                          className={`inline-flex w-fit items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${receipt.className}`}
+                        >
+                          {receipt.label}
+                        </span>
+                        {detailRow.receivedByEngineering && detailRow.receivedByUser?.name ? (
+                          <span className="text-xs text-gray-500 dark:text-gray-400">
+                            por {detailRow.receivedByUser.name}
+                            {detailRow.receivedAt ? ` · ${formatDate(detailRow.receivedAt)}` : ''}
+                          </span>
+                        ) : null}
+                      </span>
+                    );
+                  })()}
+                </DetailField>
+                <DetailField label="Furo estoque">
+                  {detailRow.stockShortfallType
+                    ? shortfallTypeLabel(detailRow.stockShortfallType)
+                    : '—'}
+                </DetailField>
+              </DetailSection>
+
+              <section className="space-y-2">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                  Observações
+                </h3>
+                <p className="text-sm text-gray-900 dark:text-gray-100 whitespace-pre-wrap">
+                  {detailRow.observations || '—'}
+                </p>
+              </section>
+
+              <div className="flex justify-end border-t border-gray-200 pt-4 dark:border-gray-700">
+                <button
+                  type="button"
+                  onClick={closeDetailModal}
+                  className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                >
+                  Fechar
+                </button>
+              </div>
+            </div>
+          ) : null}
+        </Modal>
 
         <Modal
           isOpen={isFiltersOpen}
@@ -1005,6 +1237,14 @@ export default function ControleEntregasPageClient() {
                 />
               </div>
               <div>
+                <label className="block text-sm font-medium mb-1">N° RM</label>
+                <input
+                  value={form.rmNumber}
+                  onChange={(e) => setForm((f) => ({ ...f, rmNumber: e.target.value }))}
+                  className={fieldClassName}
+                />
+              </div>
+              <div>
                 <label className="block text-sm font-medium mb-1">ID Mov</label>
                 <input
                   value={form.movementId}
@@ -1013,7 +1253,7 @@ export default function ControleEntregasPageClient() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">Nº Mov.</label>
+                <label className="block text-sm font-medium mb-1">Nº Mov</label>
                 <input
                   value={form.movementNumber}
                   onChange={(e) => setForm((f) => ({ ...f, movementNumber: e.target.value }))}
@@ -1043,17 +1283,6 @@ export default function ControleEntregasPageClient() {
                   options={paymentStatusOptions}
                   allowEmpty={false}
                   placeholder="Selecionar pagamento..."
-                  noFocusRing
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">Ordem de Compra</label>
-                <SingleSelectSearchDropdown
-                  value={form.purchaseOrderId}
-                  onChange={handlePurchaseOrderChange}
-                  options={purchaseOrderOptions}
-                  placeholder="Nenhuma"
-                  emptyOptionLabel="Nenhuma"
                   noFocusRing
                 />
               </div>
@@ -1094,36 +1323,6 @@ export default function ControleEntregasPageClient() {
                   }
                   placeholder="R$ 0,00"
                   className={currencyFieldClassName}
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">Previsão de entrega</label>
-                <input
-                  type="date"
-                  value={form.expectedDelivery}
-                  onChange={(e) => setForm((f) => ({ ...f, expectedDelivery: e.target.value }))}
-                  className={fieldClassName}
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">N° da RM</label>
-                <input
-                  value={form.rmNumber}
-                  onChange={(e) => setForm((f) => ({ ...f, rmNumber: e.target.value }))}
-                  className={fieldClassName}
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">Tipo entrega</label>
-                <SingleSelectSearchDropdown
-                  value={form.deliveryType}
-                  onChange={(deliveryType) =>
-                    setForm((f) => ({ ...f, deliveryType: deliveryType as DeliveryTypeValue | '' }))
-                  }
-                  options={deliveryTypeOptions}
-                  allowEmpty={false}
-                  placeholder="Selecionar tipo..."
-                  noFocusRing
                 />
               </div>
               <div className="sm:col-span-2">

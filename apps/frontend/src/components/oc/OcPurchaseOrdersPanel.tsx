@@ -45,6 +45,7 @@ import {
   OcPurchaseOrderFormFields,
   buildOcFormValuesFromOrder,
   getOcSupplierLabel,
+  type OcFormOrderSource,
   type OcPurchaseOrderFormValues,
   type OcSupplierOption
 } from '@/components/oc/OcPurchaseOrderFormFields';
@@ -378,6 +379,29 @@ function parseOcMovementInfoFromNotes(notes?: string | null): { ocNumber: string
   };
 }
 
+function normalizeOcNumberKey(orderNumber: string): string {
+  return orderNumber.trim().toLowerCase();
+}
+
+/** Prefer TOTAL sobre PARCIAL (mesmo tipo IN/OUT); desempate pela data mais recente. */
+function pickRepresentativeOcMovement(movs: StockMovementForOcTag[]): StockMovementForOcTag | null {
+  if (!movs.length) return null;
+
+  const sorted = [...movs].sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  );
+  const latest = sorted[0];
+
+  const pickBestForType = (type: 'IN' | 'OUT') => {
+    const typed = sorted.filter((m) => m.type === type);
+    if (!typed.length) return null;
+    const totalMov = typed.find((m) => parseOcMovementInfoFromNotes(m.notes)?.split === 'TOTAL');
+    return totalMov ?? typed[0];
+  };
+
+  return pickBestForType(latest.type) ?? latest;
+}
+
 function buildOcTagFromMovement(mov: StockMovementForOcTag): OcMovementTag {
   const split = parseOcMovementInfoFromNotes(mov.notes)?.split || 'TOTAL';
   if (mov.type === 'IN') {
@@ -532,6 +556,125 @@ function parseStockMovementAttachmentsFromNotes(notes?: string | null): StockMov
   }
 
   return bundle;
+}
+
+function OcDetailField({
+  label,
+  children,
+  className = ''
+}: {
+  label: string;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={className}>
+      <dt className="text-xs font-medium text-gray-500 dark:text-gray-400">{label}</dt>
+      <dd className="mt-0.5 text-sm text-gray-900 dark:text-gray-100 break-words">{children}</dd>
+    </div>
+  );
+}
+
+function OcDetailSection({
+  title,
+  description,
+  children,
+  className = ''
+}: {
+  title: string;
+  description?: string;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <section
+      className={`rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50/40 dark:bg-gray-900/25 p-4 space-y-3 ${className}`}
+    >
+      <div>
+        <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">{title}</h3>
+        {description ? (
+          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400 leading-relaxed">{description}</p>
+        ) : null}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function OcDetailDocRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col gap-1.5 py-2.5 border-b border-gray-200/80 dark:border-gray-700/80 last:border-0 last:pb-0 first:pt-0 sm:flex-row sm:items-start sm:gap-4">
+      <span className="text-xs font-medium text-gray-500 dark:text-gray-400 shrink-0 sm:w-48">{label}</span>
+      <div className="min-w-0 flex-1 text-sm text-gray-800 dark:text-gray-200">{children}</div>
+    </div>
+  );
+}
+
+function materialLineLabel(
+  m?:
+    | PurchaseOrder['items'][number]['material']
+    | {
+        name?: string | null;
+        description?: string | null;
+        sinapiCode?: string | null;
+      }
+) {
+  if (!m) return '—';
+  const d = m.description?.trim();
+  const n = m.name?.trim();
+  if (d) return d;
+  if (n) return n;
+  if (m.sinapiCode) return m.sinapiCode;
+  return '—';
+}
+
+function formatCurrency(v: number) {
+  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
+}
+
+function totalOrder(items: { totalPrice: number }[]) {
+  return items.reduce((s, i) => s + Number(i.totalPrice), 0);
+}
+
+function OcOrderMaterialsTable({ order }: { order: PurchaseOrder }) {
+  return (
+    <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-600">
+      <table className="w-full text-xs sm:text-sm">
+        <thead className="bg-gray-50 dark:bg-gray-700/50">
+          <tr className="text-left">
+            <th className="p-2.5 font-medium text-gray-700 dark:text-gray-300">Material</th>
+            <th className="p-2.5 font-medium text-gray-700 dark:text-gray-300 text-right whitespace-nowrap">Qtd</th>
+            <th className="p-2.5 font-medium text-gray-700 dark:text-gray-300 text-center whitespace-nowrap">Un.</th>
+            <th className="p-2.5 font-medium text-gray-700 dark:text-gray-300 text-right whitespace-nowrap">Unitário</th>
+            <th className="p-2.5 font-medium text-gray-700 dark:text-gray-300 text-right whitespace-nowrap">Total</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-200 dark:divide-gray-600">
+          {order.items?.map((line, idx) => (
+            <tr key={idx} className="text-gray-600 dark:text-gray-400">
+              <td className="p-2.5 align-top max-w-[220px] sm:max-w-none">{materialLineLabel(line.material)}</td>
+              <td className="p-2.5 text-right whitespace-nowrap align-top">{Number(line.quantity)}</td>
+              <td className="p-2.5 text-center whitespace-nowrap align-top">{line.unit || '—'}</td>
+              <td className="p-2.5 text-right whitespace-nowrap align-top">{formatCurrency(Number(line.unitPrice))}</td>
+              <td className="p-2.5 text-right whitespace-nowrap align-top font-medium text-gray-900 dark:text-gray-100">
+                {formatCurrency(Number(line.totalPrice))}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+        <tfoot className="bg-gray-50 dark:bg-gray-700/30 border-t border-gray-200 dark:border-gray-600">
+          <tr>
+            <td colSpan={4} className="p-2.5 text-right font-medium text-gray-700 dark:text-gray-300">
+              Total dos itens
+            </td>
+            <td className="p-2.5 text-right font-semibold text-gray-900 dark:text-gray-100 whitespace-nowrap">
+              {formatCurrency(totalOrder(order.items))}
+            </td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  );
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -1323,23 +1466,32 @@ export function OcPurchaseOrdersPanel({
   const stockMovementsForOcTag: StockMovementForOcTag[] = stockMovementsData?.data || [];
 
   const latestOcMovementByOrderNumber = useMemo(() => {
-    const latestByOc = new Map<string, StockMovementForOcTag>();
+    const grouped = new Map<string, StockMovementForOcTag[]>();
 
     stockMovementsForOcTag.forEach((mov) => {
       const parsed = parseOcMovementInfoFromNotes(mov.notes);
       if (!parsed?.ocNumber) return;
 
-      const current = latestByOc.get(parsed.ocNumber);
-      if (!current || new Date(mov.createdAt).getTime() > new Date(current.createdAt).getTime()) {
-        latestByOc.set(parsed.ocNumber, mov);
-      }
+      const key = normalizeOcNumberKey(parsed.ocNumber);
+      const list = grouped.get(key) || [];
+      list.push(mov);
+      grouped.set(key, list);
+    });
+
+    const latestByOc = new Map<string, StockMovementForOcTag>();
+    grouped.forEach((movs, key) => {
+      const picked = pickRepresentativeOcMovement(movs);
+      if (picked) latestByOc.set(key, picked);
     });
 
     return latestByOc;
   }, [stockMovementsForOcTag]);
 
   const selectedOrderLatestStockMovement = useMemo(
-    () => (selectedOrder ? latestOcMovementByOrderNumber.get(selectedOrder.orderNumber) || null : null),
+    () =>
+      selectedOrder
+        ? latestOcMovementByOrderNumber.get(normalizeOcNumberKey(selectedOrder.orderNumber)) || null
+        : null,
     [selectedOrder, latestOcMovementByOrderNumber]
   );
 
@@ -1579,16 +1731,12 @@ export function OcPurchaseOrdersPanel({
   };
 
   const formatDate = (d?: string) => (d ? new Date(d).toLocaleDateString('pt-BR') : '-');
-  const formatCurrency = (v: number) =>
-    new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
   /** Ex.: R$100,00 (sem espaço após R$), conforme detalhes da OC */
   const formatBrlCompact = (v: number) =>
     `R$${new Intl.NumberFormat('pt-BR', {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2
     }).format(v)}`;
-  const totalOrder = (items: { totalPrice: number }[]) =>
-    items.reduce((s, i) => s + Number(i.totalPrice), 0);
 
   const handleExportFinalizedCsv = async () => {
     setExportingFinalizedCsv(true);
@@ -1616,24 +1764,6 @@ export function OcPurchaseOrdersPanel({
     } finally {
       setExportingFinalizedCsv(false);
     }
-  };
-
-  const materialLineLabel = (
-    m?:
-      | PurchaseOrder['items'][number]['material']
-      | {
-          name?: string | null;
-          description?: string | null;
-          sinapiCode?: string | null;
-        }
-  ) => {
-    if (!m) return '—';
-    const d = m.description?.trim();
-    const n = m.name?.trim();
-    if (d) return d;
-    if (n) return n;
-    if (m.sinapiCode) return m.sinapiCode;
-    return '—';
   };
 
   const openOrderDetail = async (o: PurchaseOrder) => {
@@ -1714,8 +1844,13 @@ export function OcPurchaseOrdersPanel({
     }
   };
 
-  const resolveOcFreightAmountStr = (order: PurchaseOrder) => {
-    const itemsSub = totalOrder(order.items);
+  const resolveOcFreightAmountStr = (order: OcFormOrderSource) => {
+    const itemsSub = (order.items || []).reduce((sum, item) => {
+      const qty = Number(item.quantity);
+      const unitPrice = Number(item.unitPrice);
+      const lineTotal = Number.isFinite(qty) && Number.isFinite(unitPrice) ? qty * unitPrice : 0;
+      return sum + lineTotal;
+    }, 0);
     const freightStored =
       order.freightAmount != null && order.freightAmount !== ''
         ? Number(order.freightAmount)
@@ -2105,7 +2240,9 @@ export function OcPurchaseOrdersPanel({
                   </thead>
                   <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
                     {displayedOrders.map((o: PurchaseOrder) => {
-                      const latestMovement = latestOcMovementByOrderNumber.get(o.orderNumber);
+                      const latestMovement = latestOcMovementByOrderNumber.get(
+                        normalizeOcNumberKey(o.orderNumber)
+                      );
                       const ocMovementTag = latestMovement ? buildOcTagFromMovement(latestMovement) : null;
                       const ocAttachmentTags = parseOcAttachmentTagsFromNotes(latestMovement?.notes);
                       return (
@@ -2824,18 +2961,35 @@ export function OcPurchaseOrdersPanel({
         <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/50" onClick={() => setSelectedOrder(null)} />
           <div
-            className={`relative bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full mx-4 max-h-[90vh] overflow-y-auto p-6 ${
-              selectedOrder.status === 'IN_REVIEW' ? 'max-w-2xl' : 'max-w-3xl'
+            className={`relative flex flex-col bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full mx-4 max-h-[min(92vh,880px)] ${
+              selectedOrder.status === 'IN_REVIEW' ? 'max-w-2xl' : 'max-w-4xl'
             }`}
+            role="dialog"
+            aria-modal="true"
           >
-            <div className="flex justify-between items-start gap-2 mb-4">
-              <div>
-                <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+            <div className="flex shrink-0 items-start justify-between gap-3 border-b border-gray-200 px-5 py-4 dark:border-gray-700">
+              <div className="min-w-0">
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 truncate">
                   {selectedOrder.status === 'IN_REVIEW' ? 'Ordem de Compra' : selectedOrder.orderNumber}
                 </h2>
                 {selectedOrder.status === 'IN_REVIEW' ? (
                   <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">{selectedOrder.orderNumber}</p>
-                ) : null}
+                ) : (
+                  <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                    <span
+                      className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[selectedOrder.status] || ''}`}
+                    >
+                      {purchaseOrderPhaseLabel(selectedOrder.status)}
+                    </span>
+                    {selectedOrderLatestStockMovement ? (
+                      <span className="text-xs text-gray-500 dark:text-gray-400">
+                        Estoque:{' '}
+                        {selectedOrderLatestStockMovement.type === 'IN' ? 'Entrada' : 'Saída'}{' '}
+                        {new Date(selectedOrderLatestStockMovement.createdAt).toLocaleDateString('pt-BR')}
+                      </span>
+                    ) : null}
+                  </div>
+                )}
               </div>
               <div className="flex items-center gap-1 shrink-0">
                 <button
@@ -2847,11 +3001,17 @@ export function OcPurchaseOrdersPanel({
                   <Download className="w-4 h-4" />
                   {pdfExportingId === selectedOrder.id ? 'Gerando…' : 'Baixar'}
                 </button>
-                <button type="button" onClick={() => setSelectedOrder(null)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg text-gray-500 dark:text-gray-400">
+                <button
+                  type="button"
+                  onClick={() => setSelectedOrder(null)}
+                  className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg text-gray-500 dark:text-gray-400"
+                  aria-label="Fechar"
+                >
                   <X className="w-5 h-5" />
                 </button>
               </div>
             </div>
+            <div className="flex-1 overflow-y-auto px-5 py-4">
             {selectedOrder.status === 'IN_REVIEW' ? (
               <>
                 <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
@@ -2892,74 +3052,49 @@ export function OcPurchaseOrdersPanel({
                 />
               </>
             ) : (
-            <div className="space-y-3 text-sm">
-              <p>
-                <span className="font-medium text-gray-700 dark:text-gray-300">Fornecedor:</span>{' '}
-                <span className="text-gray-600 dark:text-gray-400">{selectedOrder.supplier?.name}</span>
-              </p>
-              <p>
-                <span className="font-medium text-gray-700 dark:text-gray-300">SC:</span>{' '}
-                <span className="text-gray-600 dark:text-gray-400">{selectedOrder.materialRequest?.requestNumber || '-'}</span>
-              </p>
-              <p>
-                <span className="font-medium text-gray-700 dark:text-gray-300">Centro de custo:</span>{' '}
-                <span className="text-gray-600 dark:text-gray-400">
-                  {(() => {
-                    const cc = selectedOrder.materialRequest?.costCenter;
-                    if (!cc) return '—';
-                    const parts = [cc.code, cc.name]
-                      .map((x) => (x != null ? String(x).trim() : ''))
-                      .filter((s) => s.length > 0);
-                    return parts.length ? parts.join(' — ') : '—';
-                  })()}
-                </span>
-              </p>
-              <p>
-                <span className="font-medium text-gray-700 dark:text-gray-300">Ordem de serviço:</span>{' '}
-                <span className="text-gray-600 dark:text-gray-400">{selectedOrder.materialRequest?.serviceOrder?.trim() || '—'}</span>
-              </p>
-              <div>
-                <span className="font-medium text-gray-700 dark:text-gray-300">Descrição da solicitação:</span>
-                <p className="mt-1 text-gray-600 dark:text-gray-400 whitespace-pre-wrap rounded-md border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-900/40 px-3 py-2 min-h-[2.5rem]">
-                  {selectedOrder.materialRequest?.description?.trim() || '—'}
-                </p>
-              </div>
-              <p>
-                <span className="font-medium text-gray-700 dark:text-gray-300">Data:</span>{' '}
-                <span className="text-gray-600 dark:text-gray-400">{formatDate(selectedOrder.orderDate)}</span>
-              </p>
-              <p>
-                <span className="font-medium text-gray-700 dark:text-gray-300">Status:</span>{' '}
-                <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${STATUS_COLORS[selectedOrder.status] || ''}`}>
-                  {purchaseOrderPhaseLabel(selectedOrder.status)}
-                </span>
-              </p>
-              {selectedOrder.status === 'IN_REVIEW' && parseLastOcCorrectionReason(selectedOrder.notes) && (
-                <div className="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50/80 dark:bg-amber-900/20 px-3 py-2">
-                  <p className="text-xs font-semibold text-amber-800 dark:text-amber-300 uppercase tracking-wide mb-1">
-                    Motivo da correção
-                  </p>
-                  <p className="text-sm text-amber-900 dark:text-amber-100 whitespace-pre-wrap">
-                    {parseLastOcCorrectionReason(selectedOrder.notes)}
-                  </p>
-                </div>
-              )}
-              {selectedOrder.paymentType && (
-                <p>
-                  <span className="font-medium text-gray-700 dark:text-gray-300">Tipo de pagamento:</span>{' '}
-                  <span className="text-gray-600 dark:text-gray-400">
-                    {OC_PAYMENT_TYPE_LABELS[selectedOrder.paymentType] || selectedOrder.paymentType}
-                  </span>
-                </p>
-              )}
-              {selectedOrder.paymentCondition && (
-                <p>
-                  <span className="font-medium text-gray-700 dark:text-gray-300">Condição:</span>{' '}
-                  <span className="text-gray-600 dark:text-gray-400">
-                    {paymentConditionLabelMap[selectedOrder.paymentCondition] || selectedOrder.paymentCondition}
-                  </span>
-                </p>
-              )}
+            <div className="space-y-5 text-sm">
+              <OcDetailSection title="Resumo">
+                <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3">
+                  <OcDetailField label="Fornecedor">{selectedOrder.supplier?.name || '—'}</OcDetailField>
+                  <OcDetailField label="SC">{selectedOrder.materialRequest?.requestNumber || '—'}</OcDetailField>
+                  <OcDetailField label="Centro de custo">
+                    {(() => {
+                      const cc = selectedOrder.materialRequest?.costCenter;
+                      if (!cc) return '—';
+                      const parts = [cc.code, cc.name]
+                        .map((x) => (x != null ? String(x).trim() : ''))
+                        .filter((s) => s.length > 0);
+                      return parts.length ? parts.join(' — ') : '—';
+                    })()}
+                  </OcDetailField>
+                  <OcDetailField label="Ordem de serviço">
+                    {selectedOrder.materialRequest?.serviceOrder?.trim() || '—'}
+                  </OcDetailField>
+                  <OcDetailField label="Data">{formatDate(selectedOrder.orderDate)}</OcDetailField>
+                  {selectedOrder.paymentType ? (
+                    <OcDetailField label="Tipo de pagamento">
+                      {OC_PAYMENT_TYPE_LABELS[selectedOrder.paymentType] || selectedOrder.paymentType}
+                    </OcDetailField>
+                  ) : null}
+                  {selectedOrder.paymentCondition ? (
+                    <OcDetailField label="Condição">
+                      {paymentConditionLabelMap[selectedOrder.paymentCondition] ||
+                        selectedOrder.paymentCondition}
+                    </OcDetailField>
+                  ) : null}
+                </dl>
+                {selectedOrder.materialRequest?.description?.trim() ? (
+                  <div className="pt-1">
+                    <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
+                      Descrição da solicitação
+                    </p>
+                    <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap rounded-lg border border-gray-200/80 dark:border-gray-600/80 bg-white/60 dark:bg-gray-950/30 px-3 py-2">
+                      {selectedOrder.materialRequest.description.trim()}
+                    </p>
+                  </div>
+                ) : null}
+              </OcDetailSection>
+
               {[
                 'APPROVED',
                 'PENDING_PROOF_VALIDATION',
@@ -2970,28 +3105,32 @@ export function OcPurchaseOrdersPanel({
                 'PARTIALLY_RECEIVED',
                 'RECEIVED'
               ].includes(selectedOrder.status) && (
-                <div className="rounded-lg border border-slate-200 dark:border-slate-600 bg-slate-50/80 dark:bg-slate-900/40 px-3 py-2 space-y-1.5">
-                  <p className="text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wide">
-                    Registro financeiro
-                  </p>
-                  <p className="text-sm text-gray-700 dark:text-gray-300">
-                    <span className="font-medium">Valor Itens:</span>{' '}
-                    {formatBrlCompact(totalOrder(selectedOrder.items))}
-                  </p>
-                  <p className="text-sm text-gray-700 dark:text-gray-300">
-                    <span className="font-medium">Valor Frete:</span>{' '}
-                    {formatBrlCompact(orderFreightValue(selectedOrder))}
-                  </p>
-                  <p className="text-sm text-gray-700 dark:text-gray-300">
-                    <span className="font-medium">Total a Pagar:</span>{' '}
-                    {formatBrlCompact(orderGrandTotal(selectedOrder))}
-                  </p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">
-                    Boletos, comprovantes (incluindo por parcela) e notas fiscais anexadas ficam listados em
-                    Documentos abaixo e permanecem vinculados a esta OC.
-                  </p>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white/70 dark:bg-gray-950/30 px-4 py-3">
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Valor itens</p>
+                    <p className="mt-1 text-base font-semibold text-gray-900 dark:text-gray-100 tabular-nums">
+                      {formatBrlCompact(totalOrder(selectedOrder.items))}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white/70 dark:bg-gray-950/30 px-4 py-3">
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Frete</p>
+                    <p className="mt-1 text-base font-semibold text-gray-900 dark:text-gray-100 tabular-nums">
+                      {formatBrlCompact(orderFreightValue(selectedOrder))}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-emerald-200/80 dark:border-emerald-900/50 bg-emerald-50/50 dark:bg-emerald-950/20 px-4 py-3">
+                    <p className="text-xs text-emerald-800/80 dark:text-emerald-300/80">Total a pagar</p>
+                    <p className="mt-1 text-base font-semibold text-emerald-900 dark:text-emerald-100 tabular-nums">
+                      {formatBrlCompact(orderGrandTotal(selectedOrder))}
+                    </p>
+                  </div>
                 </div>
               )}
+
+              <OcDetailSection title="Materiais">
+                <OcOrderMaterialsTable order={selectedOrder} />
+              </OcDetailSection>
+
               {[
                 'APPROVED',
                 'PENDING_PROOF_VALIDATION',
@@ -3001,37 +3140,36 @@ export function OcPurchaseOrdersPanel({
                 'FINALIZED',
                 'PARTIALLY_RECEIVED',
                 'RECEIVED'
-              ].includes(selectedOrder.status) ? (
-                <div>
-                  <span className="font-medium text-gray-700 dark:text-gray-300">Dados de pagamento</span>
-                  <p className="mt-1 text-gray-600 dark:text-gray-400 whitespace-pre-wrap rounded-md border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-900/40 px-3 py-2 min-h-[2.5rem]">
-                    {selectedOrder.paymentDetails?.trim() || '—'}
+              ].includes(selectedOrder.status) && selectedOrder.paymentDetails?.trim() ? (
+                <OcDetailSection title="Dados de pagamento">
+                  <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
+                    {selectedOrder.paymentDetails.trim()}
                   </p>
-                </div>
+                </OcDetailSection>
               ) : (
                 <>
                   {selectedOrder.paymentDetails?.trim() && (
-                    <p className="text-gray-600 dark:text-gray-400 whitespace-pre-wrap">
-                      <span className="font-medium text-gray-700 dark:text-gray-300">Dados de pagamento:</span>{' '}
-                      {selectedOrder.paymentDetails}
-                    </p>
+                    <OcDetailSection title="Dados de pagamento">
+                      <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
+                        {selectedOrder.paymentDetails}
+                      </p>
+                    </OcDetailSection>
                   )}
-                  {selectedOrder.paymentType === 'AVISTA' && (selectedOrder.pixKeyType || selectedOrder.pixKey) && (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      {selectedOrder.pixKeyType && (
-                        <p className="text-gray-600 dark:text-gray-400">
-                          <span className="font-medium text-gray-700 dark:text-gray-300">Tipo de Chave Pix:</span>{' '}
-                          {selectedOrder.pixKeyType}
-                        </p>
-                      )}
-                      {selectedOrder.pixKey && (
-                        <p className="text-gray-600 dark:text-gray-400 break-all">
-                          <span className="font-medium text-gray-700 dark:text-gray-300">Chave Pix:</span>{' '}
-                          {selectedOrder.pixKey}
-                        </p>
-                      )}
-                    </div>
-                  )}
+                  {selectedOrder.paymentType === 'AVISTA' &&
+                    (selectedOrder.pixKeyType || selectedOrder.pixKey) && (
+                      <OcDetailSection title="PIX">
+                        <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          {selectedOrder.pixKeyType ? (
+                            <OcDetailField label="Tipo de chave">{selectedOrder.pixKeyType}</OcDetailField>
+                          ) : null}
+                          {selectedOrder.pixKey ? (
+                            <OcDetailField label="Chave" className="sm:col-span-2">
+                              <span className="break-all font-mono text-xs">{selectedOrder.pixKey}</span>
+                            </OcDetailField>
+                          ) : null}
+                        </dl>
+                      </OcDetailSection>
+                    )}
                 </>
               )}
               {selectedOrder.status === 'PENDING_PROOF_VALIDATION' && (
@@ -3297,49 +3435,136 @@ export function OcPurchaseOrdersPanel({
                     )}
                   </div>
                 )}
-              <div className="rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50/80 dark:bg-gray-900/40 px-3 py-2 space-y-2">
-                <p className="text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide">
-                  Documentos (fases anteriores)
-                </p>
-                <p className="text-sm">
-                  <span className="font-medium text-gray-700 dark:text-gray-300">NF anexada na criação da OC:</span>{' '}
-                  {selectedOrder.boletoAttachmentUrl ? (
-                    <OcAttachmentActions
-                      url={selectedOrder.boletoAttachmentUrl}
-                      fileName={selectedOrder.boletoAttachmentName || 'NF criação OC'}
-                    />
+              <OcDetailSection
+                title="Documentos"
+                description="Anexos das fases anteriores e da movimentação de estoque vinculada a esta OC."
+              >
+                <div>
+                  <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">Fases anteriores</p>
+                  <OcDetailDocRow label="NF na criação da OC">
+                    {selectedOrder.boletoAttachmentUrl ? (
+                      <OcAttachmentActions
+                        url={selectedOrder.boletoAttachmentUrl}
+                        fileName={selectedOrder.boletoAttachmentName || 'NF criação OC'}
+                      />
+                    ) : (
+                      <span className="text-gray-500 dark:text-gray-400">Não anexada</span>
+                    )}
+                  </OcDetailDocRow>
+                  <OcDetailDocRow label="Boleto (Anexar Boleto)">
+                    {(selectedOrder.paymentParcelCount ?? 1) > 1 ? (
+                      <BoletoParcelasList
+                        order={selectedOrder}
+                        showComprovante
+                        editable={canEditBoletoParcels && !boletoParcelsEditorInAttachBox}
+                        hint="Histórico por parcela: valor, vencimento, boleto e comprovante (quando houver)."
+                        onSaved={handleBoletoParcelsSaved}
+                      />
+                    ) : selectedOrder.paymentBoletoUrl ? (
+                      <OcAttachmentActions
+                        url={selectedOrder.paymentBoletoUrl}
+                        fileName={selectedOrder.paymentBoletoName || 'Boleto pagamento'}
+                        icon={Banknote}
+                      />
+                    ) : (
+                      <span className="text-gray-500 dark:text-gray-400">Não anexado</span>
+                    )}
+                  </OcDetailDocRow>
+                  {shouldShowOrderLevelPaymentProofInDocuments(selectedOrder) ? (
+                    <OcDetailDocRow label="Comprovante (Pagamento)">
+                      <OcAttachmentActions
+                        url={selectedOrder.paymentProofUrl || ''}
+                        fileName={selectedOrder.paymentProofName || 'Comprovante pagamento'}
+                        icon={Receipt}
+                      />
+                    </OcDetailDocRow>
+                  ) : null}
+                  {parseOcNfAttachments(selectedOrder.nfAttachments).length > 0 ? (
+                    <OcDetailDocRow label="Notas fiscais (pós-validação)">
+                      <ul className="space-y-1">
+                        {parseOcNfAttachments(selectedOrder.nfAttachments).map((nf, idx) => (
+                          <li key={`${nf.url}-${idx}`} className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                            <OcAttachmentActions url={nf.url} fileName={nf.name || `NF ${idx + 1}`} />
+                            {nf.uploadedAt ? (
+                              <span className="text-xs text-gray-500 dark:text-gray-400">
+                                ({new Date(nf.uploadedAt).toLocaleString('pt-BR')})
+                              </span>
+                            ) : null}
+                          </li>
+                        ))}
+                      </ul>
+                    </OcDetailDocRow>
+                  ) : null}
+                </div>
+                <div className="pt-2 border-t border-gray-200/80 dark:border-gray-700/80">
+                  <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">Movimentação de estoque</p>
+                  {selectedOrderLatestStockMovement ? (
+                    <>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+                        Última movimentação:{' '}
+                        <span className="font-medium text-gray-700 dark:text-gray-300">
+                          {selectedOrderLatestStockMovement.type === 'IN' ? 'Entrada' : 'Saída'}
+                        </span>{' '}
+                        em {new Date(selectedOrderLatestStockMovement.createdAt).toLocaleString('pt-BR')}
+                      </p>
+                      <OcDetailDocRow label="Nota fiscal">
+                        {selectedOrderStockAttachments.nf ? (
+                          <OcAttachmentActions
+                            url={selectedOrderStockAttachments.nf.url}
+                            fileName={selectedOrderStockAttachments.nf.name || 'NF estoque'}
+                          />
+                        ) : (
+                          <span className="text-gray-500 dark:text-gray-400">Não anexada</span>
+                        )}
+                      </OcDetailDocRow>
+                      <OcDetailDocRow label="Ficha de retirada">
+                        {selectedOrderStockAttachments.withdrawalSheet ? (
+                          <OcAttachmentActions
+                            url={selectedOrderStockAttachments.withdrawalSheet.url}
+                            fileName={
+                              selectedOrderStockAttachments.withdrawalSheet.name || 'Ficha de retirada'
+                            }
+                          />
+                        ) : (
+                          <span className="text-gray-500 dark:text-gray-400">Não anexada</span>
+                        )}
+                      </OcDetailDocRow>
+                      <OcDetailDocRow label="Boletos">
+                        {selectedOrderStockAttachments.paymentSlips.length === 0 ? (
+                          <span className="text-gray-500 dark:text-gray-400">Não anexados</span>
+                        ) : (
+                          <div className="space-y-1">
+                            {selectedOrderStockAttachments.paymentSlips.map((slip, idx) => (
+                              <div key={`${slip.url}-${idx}`}>
+                                <OcAttachmentActions
+                                  url={slip.url}
+                                  fileName={slip.name || `Boleto estoque ${idx + 1}`}
+                                  icon={Banknote}
+                                />
+                                {(slip.amount || slip.dueDate) && (
+                                  <span className="text-xs text-gray-500 dark:text-gray-400">
+                                    {' '}
+                                    — {slip.amount || 'Valor não informado'}
+                                    {slip.dueDate ? ` | Vencimento: ${slip.dueDate}` : ''}
+                                  </span>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </OcDetailDocRow>
+                    </>
                   ) : (
-                    <span className="text-gray-500 dark:text-gray-400">Não anexada</span>
-                  )}
-                </p>
-                <div className="text-sm space-y-2">
-                  <span className="font-medium text-gray-700 dark:text-gray-300">
-                    Boleto (anexo na fase &quot;Anexar Boleto&quot;):
-                  </span>
-                  {(selectedOrder.paymentParcelCount ?? 1) > 1 ? (
-                    <BoletoParcelasList
-                      className="mt-1"
-                      order={selectedOrder}
-                      showComprovante
-                      editable={canEditBoletoParcels && !boletoParcelsEditorInAttachBox}
-                      hint="Histórico por parcela: valor, vencimento, boleto e comprovante (quando houver)."
-                      onSaved={handleBoletoParcelsSaved}
-                    />
-                  ) : selectedOrder.paymentBoletoUrl ? (
-                    <OcAttachmentActions
-                      url={selectedOrder.paymentBoletoUrl}
-                      fileName={selectedOrder.paymentBoletoName || 'Boleto pagamento'}
-                      icon={Banknote}
-                    />
-                  ) : (
-                    <span className="text-gray-500 dark:text-gray-400">Não anexado</span>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                      Nenhuma movimentação de estoque vinculada a esta OC.
+                    </p>
                   )}
                 </div>
                 {selectedOrder.status === 'APPROVED' &&
                   selectedOrder.paymentType === 'BOLETO' &&
                   selectedOrder.paymentBoletoPhaseReleased &&
                   hasAnyPaymentBoletoAttachment(selectedOrder) && (
-                    <div className="pt-2 flex justify-end">
+                    <div className="pt-2 flex justify-end border-t border-gray-200/80 dark:border-gray-700/80">
                       <button
                         type="button"
                         disabled={reopenPaymentBoletoMutation.isPending}
@@ -3361,113 +3586,8 @@ export function OcPurchaseOrdersPanel({
                       </button>
                     </div>
                   )}
-                {shouldShowOrderLevelPaymentProofInDocuments(selectedOrder) ? (
-                  <p className="text-sm flex flex-wrap items-center gap-x-2 gap-y-1">
-                    <span className="font-medium text-gray-700 dark:text-gray-300">
-                      Comprovante de pagamento (fase Pagamento):
-                    </span>
-                    <OcAttachmentActions
-                      url={selectedOrder.paymentProofUrl || ''}
-                      fileName={selectedOrder.paymentProofName || 'Comprovante pagamento'}
-                      icon={Receipt}
-                    />
-                  </p>
-                ) : null}
-                {parseOcNfAttachments(selectedOrder.nfAttachments).length > 0 && (
-                  <div className="text-sm space-y-1.5 pt-2 border-t border-gray-200 dark:border-gray-600 mt-2">
-                    <span className="font-medium text-gray-700 dark:text-gray-300">
-                      Notas fiscais (após validação do comprovante):
-                    </span>
-                    <ul className="list-none space-y-1 pl-0">
-                      {parseOcNfAttachments(selectedOrder.nfAttachments).map((nf, idx) => (
-                        <li key={`${nf.url}-${idx}`} className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                          <OcAttachmentActions url={nf.url} fileName={nf.name || `NF ${idx + 1}`} />
-                          {nf.uploadedAt ? (
-                            <span className="text-xs text-gray-500 dark:text-gray-400">
-                              ({new Date(nf.uploadedAt).toLocaleString('pt-BR')})
-                            </span>
-                          ) : null}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-              </div>
-              <div className="rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50/80 dark:bg-gray-900/40 px-3 py-2 space-y-2">
-                <p className="text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide">
-                  Documentos da movimentação de estoque
-                </p>
-                {selectedOrderLatestStockMovement ? (
-                  <>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">
-                      Última movimentação:{' '}
-                      <span className="font-medium text-gray-700 dark:text-gray-300">
-                        {selectedOrderLatestStockMovement.type === 'IN' ? 'Entrada' : 'Saída'}
-                      </span>{' '}
-                      em {new Date(selectedOrderLatestStockMovement.createdAt).toLocaleString('pt-BR')}
-                    </p>
-                    <div className="text-sm space-y-2">
-                      <p>
-                        <span className="font-medium text-gray-700 dark:text-gray-300">Nota fiscal:</span>{' '}
-                        {selectedOrderStockAttachments.nf ? (
-                          <OcAttachmentActions
-                            url={selectedOrderStockAttachments.nf.url}
-                            fileName={selectedOrderStockAttachments.nf.name || 'NF estoque'}
-                          />
-                        ) : (
-                          <span className="text-gray-500 dark:text-gray-400">Não anexada</span>
-                        )}
-                      </p>
-                      <p>
-                        <span className="font-medium text-gray-700 dark:text-gray-300">Ficha de retirada:</span>{' '}
-                        {selectedOrderStockAttachments.withdrawalSheet ? (
-                          <OcAttachmentActions
-                            url={selectedOrderStockAttachments.withdrawalSheet.url}
-                            fileName={
-                              selectedOrderStockAttachments.withdrawalSheet.name || 'Ficha de retirada'
-                            }
-                          />
-                        ) : (
-                          <span className="text-gray-500 dark:text-gray-400">Não anexada</span>
-                        )}
-                      </p>
-                      <div>
-                        <span className="font-medium text-gray-700 dark:text-gray-300">Boletos:</span>
-                        {selectedOrderStockAttachments.paymentSlips.length === 0 ? (
-                          <span className="ml-1 text-gray-500 dark:text-gray-400">Não anexados</span>
-                        ) : (
-                          <div className="mt-1 space-y-1">
-                            {selectedOrderStockAttachments.paymentSlips.map((slip, idx) => (
-                              <div key={`${slip.url}-${idx}`} className="text-xs sm:text-sm">
-                                <OcAttachmentActions
-                                  url={slip.url}
-                                  fileName={slip.name || `Boleto estoque ${idx + 1}`}
-                                  icon={Banknote}
-                                />
-                                {(slip.amount || slip.dueDate) && (
-                                  <span className="text-gray-600 dark:text-gray-400">
-                                    {' '}
-                                    — {slip.amount || 'Valor não informado'}
-                                    {slip.dueDate ? ` | Vencimento: ${slip.dueDate}` : ''}
-                                  </span>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </>
-                ) : (
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
-                    Nenhuma movimentação de estoque vinculada a esta OC.
-                  </p>
-                )}
-              </div>
-              <div className="rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50/80 dark:bg-gray-900/40 px-3 py-2 space-y-3">
-                <p className="text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide">
-                  Recebimento no estoque
-                </p>
+              </OcDetailSection>
+              <OcDetailSection title="Recebimento no estoque">
                 {selectedOrder.stockReceipt?.hasReceipts ? (
                   <>
                     <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-600">
@@ -3551,7 +3671,7 @@ export function OcPurchaseOrdersPanel({
                     Nenhum recebimento registrado no estoque para esta OC.
                   </p>
                 )}
-              </div>
+              </OcDetailSection>
               {selectedOrderInFinancialLaunchPhase && (
                 <div className="rounded-lg border border-amber-200 dark:border-amber-900/50 bg-amber-50/50 dark:bg-amber-950/25 px-3 py-3 space-y-3">
                   <p className="text-xs font-semibold text-amber-900 dark:text-amber-200 uppercase tracking-wide">
@@ -3961,54 +4081,14 @@ export function OcPurchaseOrdersPanel({
                 </div>
               )}
               {stripOcCorrectionBlocksFromNotes(selectedOrder.notes) && (
-                <p className="text-gray-600 dark:text-gray-400 whitespace-pre-wrap">
-                  <span className="font-medium text-gray-700 dark:text-gray-300">Observações:</span>{' '}
-                  {stripOcCorrectionBlocksFromNotes(selectedOrder.notes)}
-                </p>
+                <OcDetailSection title="Observações">
+                  <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
+                    {stripOcCorrectionBlocksFromNotes(selectedOrder.notes)}
+                  </p>
+                </OcDetailSection>
               )}
 
-              <div className="pt-2">
-                <p className="font-medium text-gray-700 dark:text-gray-300 mb-2">Materiais (OC)</p>
-                <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-600">
-                  <table className="w-full text-xs sm:text-sm">
-                    <thead className="bg-gray-50 dark:bg-gray-700/50">
-                      <tr className="text-left">
-                        <th className="p-2 font-medium text-gray-700 dark:text-gray-300">Material</th>
-                        <th className="p-2 font-medium text-gray-700 dark:text-gray-300 text-right whitespace-nowrap">Qtd</th>
-                        <th className="p-2 font-medium text-gray-700 dark:text-gray-300 text-center whitespace-nowrap">Un.</th>
-                        <th className="p-2 font-medium text-gray-700 dark:text-gray-300 text-right whitespace-nowrap">Unitário</th>
-                        <th className="p-2 font-medium text-gray-700 dark:text-gray-300 text-right whitespace-nowrap">Total</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-200 dark:divide-gray-600">
-                      {selectedOrder.items?.map((line, idx) => (
-                        <tr key={idx} className="text-gray-600 dark:text-gray-400">
-                          <td className="p-2 align-top max-w-[200px] sm:max-w-none">{materialLineLabel(line.material)}</td>
-                          <td className="p-2 text-right whitespace-nowrap align-top">{Number(line.quantity)}</td>
-                          <td className="p-2 text-center whitespace-nowrap align-top">{line.unit || '—'}</td>
-                          <td className="p-2 text-right whitespace-nowrap align-top">{formatCurrency(Number(line.unitPrice))}</td>
-                          <td className="p-2 text-right whitespace-nowrap align-top font-medium text-gray-900 dark:text-gray-100">
-                            {formatCurrency(Number(line.totalPrice))}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                    <tfoot className="bg-gray-50 dark:bg-gray-700/30 border-t border-gray-200 dark:border-gray-600">
-                      <tr>
-                        <td colSpan={4} className="p-2 text-right font-medium text-gray-700 dark:text-gray-300">
-                          Total dos itens
-                        </td>
-                        <td className="p-2 text-right font-semibold text-gray-900 dark:text-gray-100 whitespace-nowrap">
-                          {formatCurrency(totalOrder(selectedOrder.items))}
-                        </td>
-                      </tr>
-                    </tfoot>
-                  </table>
-                </div>
-              </div>
-
-              <div className="pt-2">
-                <p className="font-medium text-gray-700 dark:text-gray-300 mb-2">Mapa de cotação vinculado</p>
+              <OcDetailSection title="Mapa de cotação">
                 {(() => {
                   const quoteMap = selectedOrder.quoteMap || null;
                   if (!quoteMap) {
@@ -4063,10 +4143,12 @@ export function OcPurchaseOrdersPanel({
                     </div>
                   );
                 })()}
-              </div>
+              </OcDetailSection>
             </div>
             )}
-            <div className="mt-4 flex flex-wrap gap-2">
+            </div>
+            <div className="shrink-0 border-t border-gray-200 dark:border-gray-700 px-5 py-3 bg-gray-50/80 dark:bg-gray-900/40 rounded-b-xl">
+            <div className="flex flex-wrap gap-2">
               {selectedOrder.quoteMap && (
                 <button
                   type="button"
@@ -4144,10 +4226,11 @@ export function OcPurchaseOrdersPanel({
             <button
               type="button"
               onClick={() => setSelectedOrder(null)}
-              className="mt-4 w-full px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+              className="mt-3 w-full px-4 py-2 text-sm text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
             >
               Fechar
             </button>
+            </div>
           </div>
         </div>
       )}

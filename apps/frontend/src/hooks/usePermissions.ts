@@ -212,6 +212,12 @@ export function usePermissions() {
     !!permissionData?.isAdmin ||
     can(pk('/ponto/controle/aprovar-combustivel'));
 
+  /** Custos/valores nos cards do Kanban (permissão Controle ou admin). */
+  const canViewKanbanValues =
+    isAdministrator ||
+    !!permissionData?.isAdmin ||
+    can(pk('/ponto/controle/ver-valores-kanban'));
+
 
   /** Lista de orçamentos: módulo Contratos + permissão checklist «Orçamento» em pelo menos um contrato. */
   const canAccessOrcamentoRoutePage =
@@ -304,6 +310,7 @@ export function usePermissions() {
     canApproveOcDiretoria,
     canApproveOcGestor,
     canApproveFuel,
+    canViewKanbanValues,
     canAccessContract,
     contractModuleFlags,
     canAccessOrcamentoRoutePage,

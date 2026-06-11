@@ -6,7 +6,6 @@ import { useRouter } from 'next/navigation';
 import { Cake, Search, Calendar, Users, Mail, Filter, ChevronDown, ChevronUp } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
-import { ChangePasswordModal } from '@/components/ui/ChangePasswordModal';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import api from '@/lib/api';
@@ -56,7 +55,6 @@ export default function AniversariantesPage() {
   const selectedYear = new Date().getFullYear(); // Sempre o ano atual
   const [searchTerm, setSearchTerm] = useState<string>('');
   const showAllBirthdays = true; // Sempre true para mostrar todos os aniversários do mês
-  const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
   const [isFiltersMinimized, setIsFiltersMinimized] = useState(true);
 
   const handleLogout = () => {
@@ -64,19 +62,6 @@ export default function AniversariantesPage() {
     sessionStorage.removeItem('token');
     router.push('/auth/login');
   };
-
-  // Listener para abrir modal de alterar senha via sidebar
-  useEffect(() => {
-    const handleOpenChangePasswordModal = () => {
-      setIsChangePasswordOpen(true);
-    };
-
-    window.addEventListener('openChangePasswordModal', handleOpenChangePasswordModal);
-    
-    return () => {
-      window.removeEventListener('openChangePasswordModal', handleOpenChangePasswordModal);
-    };
-  }, []);
 
   // Query para buscar aniversariantes
   const { data: birthdayData, isLoading: loadingBirthdays, error } = useQuery({
@@ -499,12 +484,6 @@ export default function AniversariantesPage() {
         </Card>
       </div>
 
-        {/* Modal de alterar senha */}
-        <ChangePasswordModal
-          isOpen={isChangePasswordOpen}
-          onClose={() => setIsChangePasswordOpen(false)}
-          onSuccess={() => setIsChangePasswordOpen(false)}
-        />
       </MainLayout>
     </ProtectedRoute>
   );

@@ -2,6 +2,7 @@ import { Response, NextFunction } from 'express';
 import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { ChatService } from '../services/ChatService';
+import { readFuelStoredPhoto } from '../lib/fuelPhotoStorage';
 import {
   gennecyChatAssistant,
   getGennecyBotUserId,
@@ -722,21 +723,13 @@ export class ChatController {
       if (!userId) throw createError('Usuário não autenticado', 401);
 
       const rawUrl = String(req.query.url || '').trim();
-      if (!rawUrl) throw createError('URL do anexo é obrigatória', 400);
+      const rawFileKey = String(req.query.fileKey || '').trim();
+      if (!rawUrl && !rawFileKey) throw createError('URL do anexo é obrigatória', 400);
 
-      const targetUrl = rawUrl.startsWith('/')
-        ? `${req.protocol}://${req.get('host')}${rawUrl}`
-        : rawUrl;
-
-      const upstream = await fetch(targetUrl);
-      if (!upstream.ok) {
-        throw createError(`Não foi possível baixar o anexo (${upstream.status})`, 400);
-      }
-
-      const contentType = upstream.headers.get('content-type') || 'application/octet-stream';
       const fallbackNameFromUrl = (() => {
+        if (!rawUrl) return 'anexo';
         try {
-          const parsed = new URL(targetUrl);
+          const parsed = new URL(rawUrl.startsWith('/') ? `http://local${rawUrl}` : rawUrl);
           const last = parsed.pathname.split('/').filter(Boolean).pop();
           return last || 'anexo';
         } catch {
@@ -747,10 +740,19 @@ export class ChatController {
         String(req.query.fileName || fallbackNameFromUrl)
       );
 
-      const data = Buffer.from(await upstream.arrayBuffer());
-      res.setHeader('Content-Type', contentType);
+      const stored = await readFuelStoredPhoto({
+        fileUrl: rawUrl || undefined,
+        fileKey: rawFileKey || undefined,
+        fileName,
+      });
+
+      if (!stored) {
+        throw createError('Não foi possível baixar o anexo', 404);
+      }
+
+      res.setHeader('Content-Type', stored.contentType);
       res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
-      res.status(200).send(data);
+      res.status(200).send(stored.buffer);
     } catch (error: any) {
       next(error);
     }

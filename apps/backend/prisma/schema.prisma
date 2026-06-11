@@ -1387,6 +1387,8 @@ model MaterialRequest {
   demandSheetAttachmentUrl  String? // URL do anexo da FD
   demandSheetAttachmentName String? // Nome original do anexo da FD
   status          MaterialRequestStatus   @default(PENDING) // Status da requisição
+  /// Último tipo de entrada de estoque vinculada a OC desta RM (Total ou Parcial).
+  lastStockReceiptType MaterialDeliveryReceiptType?
   priority        MaterialRequestPriority @default(MEDIUM) // Prioridade
   requestedAt     DateTime                @default(now()) // Data da requisição
   approvedBy      String? // ID do aprovador (compras)
@@ -2006,6 +2008,7 @@ model StockMovement {
   userId       String // Usuário que realizou a movimentação
   user         User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt    DateTime             @default(now())
+  materialDelivery MaterialDelivery?
 
   @@index([materialId])
   @@index([costCenterId])
@@ -2546,10 +2549,17 @@ model KanbanCardAttachment {
 }
 
 /// Controle de entregas de material (substitui planilha de recebimento)
+enum MaterialDeliveryReceiptType {
+  TOTAL
+  PARCIAL
+}
+
 model MaterialDelivery {
   id                  String                          @id @default(cuid())
   deliveryNumber      String                          @unique
   polo                MaterialDeliveryPolo
+  stockMovementId     String?                         @unique
+  receiptType         MaterialDeliveryReceiptType?
   movementId          String?
   movementNumber      String?
   contractId          String?
@@ -2579,8 +2589,11 @@ model MaterialDelivery {
   contractRecord Contract?     @relation(fields: [contractId], references: [id], onDelete: SetNull)
   creator       User           @relation("MaterialDeliveryCreator", fields: [createdBy], references: [id], onDelete: Restrict)
   receivedByUser User?         @relation("MaterialDeliveryReceiver", fields: [receivedByUserId], references: [id], onDelete: SetNull)
+  stockMovement StockMovement?  @relation(fields: [stockMovementId], references: [id], onDelete: SetNull)
 
   @@index([polo])
+  @@index([stockMovementId])
+  @@index([receiptType])
   @@index([currentStatus])
   @@index([paymentStatus])
   @@index([finalStatus])

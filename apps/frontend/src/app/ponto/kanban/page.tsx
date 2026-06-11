@@ -1452,6 +1452,7 @@ function KanbanPage() {
 
   const {
     isAdministrator,
+    canViewKanbanValues,
     isLoading: loadingPerms,
     user: meUser,
   } = usePermissions();
@@ -2345,7 +2346,7 @@ function KanbanPage() {
                 }
               : null
           }
-          isAdministrator={isAdministrator}
+          canViewKanbanValues={canViewKanbanValues}
           onClose={() => setCardModal(null)}
           onBoardRefresh={refreshBoard}
           onBoardCardPatch={patchBoardCard}

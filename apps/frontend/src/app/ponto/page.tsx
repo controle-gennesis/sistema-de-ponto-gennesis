@@ -60,19 +60,6 @@ export default function PontoPage() {
     }
   }, [isFirstLogin, userData]);
 
-  // Listener para abrir modal de alterar senha via sidebar
-  useEffect(() => {
-    const handleOpenChangePasswordModal = () => {
-      setIsChangePasswordOpen(true);
-    };
-
-    window.addEventListener('openChangePasswordModal', handleOpenChangePasswordModal);
-    
-    return () => {
-      window.removeEventListener('openChangePasswordModal', handleOpenChangePasswordModal);
-    };
-  }, []);
-
   // Detectar dispositivo móvel
   useEffect(() => {
     const checkIsMobile = () => {

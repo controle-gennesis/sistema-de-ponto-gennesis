@@ -7,6 +7,8 @@ import {
   ArrowDownCircle,
   ArrowLeftRight,
   ArrowUpCircle,
+  ChevronDown,
+  ChevronUp,
   Filter,
   History,
   MoreVertical,
@@ -20,6 +22,9 @@ import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import api from '@/lib/api';
 import { getListTableRowClassName, ListRowNavigableLabel, rowActionMenuButtonClass } from '@/components/ui/listTableUi';
+import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
+import { ConstructionMaterialSearchDropdown } from '@/components/suprimentos/ConstructionMaterialSearchDropdown';
+import type { ConstructionMaterialListItem } from '@/lib/fetchAllConstructionMaterials';
 import toast from 'react-hot-toast';
 
 interface Material {
@@ -31,7 +36,7 @@ interface Material {
 interface MovementFormData {
   materialId: string;
   costCenterId: string;
-  type: 'IN' | 'OUT';
+  type: 'IN' | 'OUT' | '';
   quantity: string;
   notes: string;
 }
@@ -95,10 +100,83 @@ function MovementSegButton({
   );
 }
 
+const quantityInputClass =
+  'min-w-0 flex-1 bg-transparent px-3 text-sm text-gray-900 tabular-nums outline-none dark:text-gray-100 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [-moz-appearance:textfield]';
+
+function parseAdjustmentQuantity(value: string): number {
+  const parsed = parseFloat(value.replace(',', '.').trim());
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function formatAdjustmentQuantity(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return '';
+  return Number.isInteger(value) ? String(value) : String(value).replace('.', ',');
+}
+
+function AdjustmentQuantityInput({
+  value,
+  onChange,
+  unit,
+  required = false,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  unit: string;
+  required?: boolean;
+}) {
+  const stepBtnClass =
+    'flex flex-1 items-center justify-center text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-600 dark:hover:text-gray-200';
+
+  const bump = (delta: number) => {
+    const current = parseAdjustmentQuantity(value);
+    const base = current > 0 ? current : 0;
+    const next = Math.max(0, base + delta);
+    onChange(formatAdjustmentQuantity(next));
+  };
+
+  return (
+    <div className="flex h-10 overflow-hidden rounded-lg border border-gray-300 bg-white dark:border-gray-600 dark:bg-gray-800">
+      <input
+        type="text"
+        required={required}
+        inputMode="decimal"
+        autoComplete="off"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="Ex.: 10,5"
+        className={quantityInputClass}
+      />
+      <span className="flex shrink-0 items-center border-l border-gray-300 px-2.5 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:border-gray-600 dark:text-gray-400">
+        {unit?.trim() || '—'}
+      </span>
+      <div className="flex w-8 shrink-0 flex-col border-l border-gray-300 dark:border-gray-600">
+        <button
+          type="button"
+          tabIndex={-1}
+          aria-label="Aumentar quantidade"
+          onClick={() => bump(1)}
+          className={`${stepBtnClass} border-b border-gray-300 dark:border-gray-600`}
+        >
+          <ChevronUp className="h-3.5 w-3.5" strokeWidth={2.5} />
+        </button>
+        <button
+          type="button"
+          tabIndex={-1}
+          aria-label="Diminuir quantidade"
+          onClick={() => bump(-1)}
+          className={stepBtnClass}
+        >
+          <ChevronDown className="h-3.5 w-3.5" strokeWidth={2.5} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 const emptyForm = (): MovementFormData => ({
   materialId: '',
   costCenterId: '',
-  type: 'IN',
+  type: '',
   quantity: '',
   notes: ''
 });
@@ -109,6 +187,7 @@ export default function AjusteEstoquePage() {
   const [isAdjustmentModalOpen, setIsAdjustmentModalOpen] = useState(false);
 
   const [formData, setFormData] = useState<MovementFormData>(emptyForm());
+  const [selectedMaterial, setSelectedMaterial] = useState<ConstructionMaterialListItem | null>(null);
   const [historySearch, setHistorySearch] = useState('');
   const [filtersCostCenterId, setFiltersCostCenterId] = useState('');
   const [filtersMonth, setFiltersMonth] = useState('');
@@ -132,20 +211,14 @@ export default function AjusteEstoquePage() {
     }
   });
 
-  const { data: materialsData } = useQuery({
-    queryKey: ['construction-materials'],
-    queryFn: async () => {
-      const res = await api.get('/construction-materials', { params: { limit: 1000 } });
-      return res.data;
-    }
-  });
-
   const { data: costCentersData, isLoading: loadingCostCenters } = useQuery({
-    queryKey: ['cost-centers'],
+    queryKey: ['cost-centers', 'adjustment-page'],
     queryFn: async () => {
-      const res = await api.get('/cost-centers');
+      const res = await api.get('/cost-centers', {
+        params: { page: 1, limit: 2000, isActive: 'true' },
+      });
       return res.data;
-    }
+    },
   });
 
   const { data: movementsData, isLoading: loadingMovements } = useQuery({
@@ -159,6 +232,7 @@ export default function AjusteEstoquePage() {
   const closeAdjustmentModal = () => {
     setIsAdjustmentModalOpen(false);
     setFormData(emptyForm());
+    setSelectedMaterial(null);
   };
 
   const createMovementMutation = useMutation({
@@ -183,7 +257,12 @@ export default function AjusteEstoquePage() {
     e.preventDefault();
     const parsedQuantity = parseFloat(formData.quantity.replace(',', '.'));
 
-    if (!formData.materialId || Number.isNaN(parsedQuantity) || parsedQuantity <= 0) {
+    if (
+      !formData.type ||
+      !formData.materialId ||
+      Number.isNaN(parsedQuantity) ||
+      parsedQuantity <= 0
+    ) {
       toast.error('Preencha todos os campos obrigatórios');
       return;
     }
@@ -197,13 +276,21 @@ export default function AjusteEstoquePage() {
     });
   };
 
-  const materials = materialsData?.data || [];
   const costCenters = Array.isArray(costCentersData?.data)
     ? costCentersData.data
     : Array.isArray(costCentersData)
       ? costCentersData
       : [];
-  const selectedMaterial = materials.find((m: Material) => m.id === formData.materialId);
+
+  const costCenterOptions = useMemo(
+    () =>
+      costCenters.map((cc: { id: string; name: string }) => ({
+        value: cc.id,
+        label: cc.name,
+      })),
+    [costCenters]
+  );
+
   const selectedUnit = selectedMaterial?.unit || '—';
   const movements: StockMovement[] = movementsData?.data || [];
 
@@ -638,70 +725,54 @@ export default function AjusteEstoquePage() {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                       Material *
                     </label>
-                    <select
-                      required
+                    <ConstructionMaterialSearchDropdown
                       value={formData.materialId}
-                      onChange={(e) => setFormData({ ...formData, materialId: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                    >
-                      <option value="">Selecione um material</option>
-                      {materials.map((m: Material) => (
-                        <option key={m.id} value={m.id}>
-                          {m.name}
-                        </option>
-                      ))}
-                    </select>
+                      selectedLabel={selectedMaterial?.name}
+                      onChange={(materialId, material) => {
+                        setFormData((prev) => ({ ...prev, materialId }));
+                        setSelectedMaterial(material);
+                      }}
+                      placeholder="Digite para buscar material..."
+                      noFocusRing
+                    />
                   </div>
 
-                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-2">
+                    <div className="min-w-0">
+                      <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
                         Quantidade *
                       </label>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <input
-                          type="text"
-                          required
-                          inputMode="decimal"
-                          value={formData.quantity}
-                          onChange={(e) => setFormData({ ...formData, quantity: e.target.value })}
-                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                          placeholder="Ex.: 10,5"
-                        />
-                        <input
-                          type="text"
-                          value={selectedUnit}
-                          readOnly
-                          disabled
-                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 cursor-not-allowed"
-                          aria-label="Unidade de Medida"
-                        />
-                      </div>
+                      <AdjustmentQuantityInput
+                        required
+                        value={formData.quantity}
+                        onChange={(quantity) => setFormData((prev) => ({ ...prev, quantity }))}
+                        unit={selectedUnit}
+                      />
                     </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    <div className="min-w-0">
+                      <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
                         Centro de Custo
                       </label>
-                      <select
+                      <SingleSelectSearchDropdown
                         value={formData.costCenterId}
-                        onChange={(e) => setFormData({ ...formData, costCenterId: e.target.value })}
+                        onChange={(costCenterId) =>
+                          setFormData((prev) => ({ ...prev, costCenterId }))
+                        }
+                        options={costCenterOptions}
                         disabled={loadingCostCenters}
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 disabled:opacity-50"
-                      >
-                        <option value="">Não especificado</option>
-                        {loadingCostCenters && <option disabled>Carregando centros de custo...</option>}
-                        {!loadingCostCenters && costCenters.length === 0 && (
-                          <option disabled>Nenhum centro de custo cadastrado</option>
-                        )}
-                        {costCenters.map((cc: { id: string; name: string }) => (
-                          <option key={cc.id} value={cc.id}>
-                            {cc.name}
-                          </option>
-                        ))}
-                      </select>
+                        allowEmpty
+                        emptyOptionLabel="Não especificado"
+                        placeholder={
+                          loadingCostCenters
+                            ? 'Carregando centros de custo...'
+                            : 'Selecionar centro de custo...'
+                        }
+                        emptyOptionsMessage="Nenhum centro de custo cadastrado."
+                        noFocusRing
+                      />
                     </div>
                   </div>
 

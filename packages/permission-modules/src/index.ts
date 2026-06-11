@@ -203,6 +203,12 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
     href: '/ponto/controle/aprovar-oc-diretoria',
     category: 'Controle',
   },
+  {
+    key: pathToModuleKey('/ponto/controle/ver-valores-kanban'),
+    name: 'Ver valores do Kanban',
+    href: '/ponto/controle/ver-valores-kanban',
+    category: 'Controle',
+  },
 ] as const;
 
 const keySet = new Set(PERMISSION_MODULES.map((m) => m.key));

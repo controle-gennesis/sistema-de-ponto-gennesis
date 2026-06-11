@@ -28,7 +28,7 @@ export default function RootLayout({
         <Favicon />
         <Providers>
           {children}
-          <div id="dropdown-portal-root" aria-hidden="true" />
+          <div id="dropdown-portal-root" />
         </Providers>
         <ToasterWrapper />
       </body>

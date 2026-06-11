@@ -6,7 +6,6 @@ import { useRouter } from 'next/navigation';
 import { Clock, Calendar, Filter, Download, Search, Building2, User, CreditCard, ChevronDown, ChevronUp, ListPlus, RotateCcw } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
-import { ChangePasswordModal } from '@/components/ui/ChangePasswordModal';
 import { Loading } from '@/components/ui/Loading';
 import { DEPARTMENTS_LIST, CLIENTS_LIST, POLOS_LIST } from '@/constants/payrollFilters';
 import { useCostCenters } from '@/hooks/useCostCenters';
@@ -77,7 +76,6 @@ export default function BankHoursPage() {
   });
 
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
-  const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
   const [isFiltersMinimized, setIsFiltersMinimized] = useState(true); // Minimizados por padrão
 
   const handleLogout = () => {
@@ -148,19 +146,6 @@ export default function BankHoursPage() {
       status: ''
     }));
   };
-
-  // Listener para abrir modal de alterar senha via sidebar
-  useEffect(() => {
-    const handleOpenChangePasswordModal = () => {
-      setIsChangePasswordOpen(true);
-    };
-
-    window.addEventListener('openChangePasswordModal', handleOpenChangePasswordModal);
-    
-    return () => {
-      window.removeEventListener('openChangePasswordModal', handleOpenChangePasswordModal);
-    };
-  }, []);
 
   const { data: bankHoursData, isLoading: loadingBankHours, error: bankHoursError } = useQuery({
     queryKey: ['bank-hours', filters],
@@ -756,16 +741,6 @@ export default function BankHoursPage() {
         </Card>
       </div>
 
-      {/* Modal de alterar senha */}
-      <ChangePasswordModal
-        isOpen={isChangePasswordOpen}
-        onClose={() => setIsChangePasswordOpen(false)}
-        onSuccess={() => {
-          setIsChangePasswordOpen(false);
-          // Invalidar query para recarregar dados do usuário
-          queryClient.invalidateQueries({ queryKey: ['user'] });
-        }}
-      />
     </MainLayout>
   );
 }
