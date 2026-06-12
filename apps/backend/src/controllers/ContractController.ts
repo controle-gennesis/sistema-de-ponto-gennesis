@@ -12,9 +12,53 @@ import { getTotvsRmRelatorioFinService } from '../services/TotvsRmRelatorioFinSe
 import { totvsRmContractLookupCodes } from '../lib/totvsRmContractCostCenterCode';
 import { fetchControleGeralFinancialSummary } from '../services/ControleGeralFinancialService';
 import { fetchBaseGastosSummary } from '../services/BaseGastosSheetsService';
+import {
+  normalizeCentroCustoName,
+  resolveGastosPoloForContract
+} from '../lib/gastosOperacionaisPolo';
 
 /** Igual ao filtro da tela do contrato: não somar pleitos gerados para histórico. */
 const PLEITO_HISTORICO_MARKER = '__PLEITO_HISTORICO__';
+
+type GastosOperacionaisDetailRow = {
+  contract: string;
+  month: number;
+  year: number;
+  total: number;
+  polo?: string | null;
+};
+
+function normalizeGastosCcLookupKey(value: string): string {
+  return normalizeCentroCustoName(value);
+}
+
+async function enrichGastosPoloFromCostCenters(
+  detailRows: GastosOperacionaisDetailRow[]
+): Promise<GastosOperacionaisDetailRow[]> {
+  const costCenters = await prisma.costCenter.findMany({
+    where: { isActive: true },
+    select: { name: true, code: true, polo: true }
+  });
+
+  const poloByName = new Map<string, string>();
+  const poloByCode = new Map<string, string>();
+  for (const cc of costCenters) {
+    const polo = cc.polo?.trim();
+    if (!polo) continue;
+    poloByName.set(normalizeGastosCcLookupKey(cc.name), polo);
+    poloByCode.set(normalizeGastosCcLookupKey(cc.code), polo);
+  }
+
+  return detailRows.map((row) => {
+    const key = normalizeGastosCcLookupKey(row.contract);
+    const costCenterPolo = poloByName.get(key) || poloByCode.get(key) || null;
+    const polo = resolveGastosPoloForContract(row.contract, {
+      costCenterPolo,
+      totvsPolo: row.polo
+    });
+    return { ...row, polo };
+  });
+}
 
 /** Igual ao frontend: só pleitos com status de orçamento Aprovado ou Faturado entram em "Valor orçado". */
 function isBudgetStatusInValorOrcadoSum(budgetStatus: string | null | undefined): boolean {
@@ -496,7 +540,8 @@ export class ContractController {
   }
 
   /**
-   * Gastos operacionais por contrato (aba QUERY BASE DE GASTOS da planilha).
+   * Gastos operacionais por centro de custo (TOTVS RM — RELATORIOFIN).
+   * Lista todos os CC presentes no relatório, sem depender de contratos cadastrados.
    */
   async getGastosOperacionais(req: AuthRequest, res: Response, next: NextFunction) {
     try {
@@ -506,37 +551,52 @@ export class ContractController {
         throw createError('Sem permissão para acessar contratos', 403);
       }
 
-      const { year, refresh } = req.query;
-      const yearParam = year != null && String(year).trim() !== '' ? Number(year) : null;
-      const filterYear = yearParam != null && Number.isFinite(yearParam) ? yearParam : undefined;
-      const forceRefresh = refresh === '1' || refresh === 'true';
-
-      const summary = await fetchBaseGastosSummary(filterYear, forceRefresh);
-      const rows = summary.byQueryContract.map((item) => ({
-        rowKey: item.contract,
-        contract: item.contract,
-        mesesApuracao: item.mesesApuracao,
-        anoMin: item.anoMin,
-        anoMax: item.anoMax,
-        totalAcumulado: item.totalAcumulado
-      }));
-
-      res.json({
-        success: true,
-        data: {
-          rows,
-          byQueryContract: summary.byQueryContract,
-          byCostCenter: summary.byCostCenter,
-          availableYears: summary.availableYears,
-          fetchedAt: summary.fetchedAt
-        }
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Erro ao carregar QUERY BASE DE GASTOS.';
-      if (message.includes('QUERY BASE DE GASTOS') || message.includes('planilha')) {
-        res.status(503).json({ success: false, message });
+      const svc = getTotvsRmRelatorioFinService();
+      if (!svc.isConfigured()) {
+        res.json({
+          success: true,
+          data: {
+            configured: false,
+            detailRows: [] as GastosOperacionaisDetailRow[],
+            fetchedAt: new Date().toISOString(),
+            message:
+              'Integração TOTVS RM não configurada. Defina TOTVS_RM_BASE_URL e TOTVS_RM_USER + TOTVS_RM_PASSWORD (Basic) ou TOTVS_RM_BEARER_TOKEN.'
+          }
+        });
         return;
       }
+
+      try {
+        const result = await svc.listGastosOperacionaisDetailRows();
+        const detailRows = await enrichGastosPoloFromCostCenters(result.detailRows);
+        res.json({
+          success: true,
+          data: {
+            configured: true,
+            detailRows,
+            fetchedAt: new Date().toISOString(),
+            costCenterCount: result.costCenterCount,
+            totalRowCount: result.totalRowCount,
+            ccColumn: result.ccColumn,
+            valueColumn: result.valueColumn,
+            dateColumn: result.dateColumn,
+            poloColumn: result.poloColumn
+          }
+        });
+      } catch (err) {
+        const message = svc.formatAxiosError(err);
+        console.warn(`[TOTVS RM GASTOS OPERACIONAIS]: ${message}`);
+        res.json({
+          success: false,
+          message,
+          data: {
+            configured: true,
+            detailRows: [] as GastosOperacionaisDetailRow[],
+            fetchedAt: new Date().toISOString()
+          }
+        });
+      }
+    } catch (error) {
       next(error);
     }
   }

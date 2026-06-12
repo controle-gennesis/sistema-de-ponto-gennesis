@@ -20,10 +20,12 @@ export type QueryGastosDetailRow = {
   year: number;
   contract: string;
   total: number;
+  polo?: string | null;
 };
 
 export type GastosOperacionaisFilters = {
   localities: GastosOperacionaisLocality[];
+  polos: string[];
   months: number[];
   years: number[];
   contracts: string[];
@@ -31,6 +33,7 @@ export type GastosOperacionaisFilters = {
 
 export const EMPTY_GASTOS_OPERACIONAIS_FILTERS: GastosOperacionaisFilters = {
   localities: [],
+  polos: [],
   months: [],
   years: [],
   contracts: []
@@ -92,6 +95,40 @@ export function buildGastosDetailRowsFromSheetRows(rows: string[][]): QueryGasto
   return parsed;
 }
 
+function resolveDetailRowPolo(row: QueryGastosDetailRow): string {
+  return (row.polo ?? '').trim() || '—';
+}
+
+function buildPoloByContractMap(detailRows: QueryGastosDetailRow[]): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const row of detailRows) {
+    if (!map.has(row.contract)) {
+      map.set(row.contract, resolveDetailRowPolo(row));
+    }
+  }
+  return map;
+}
+
+export function getGastosPoloFilterOptions(
+  detailRows: QueryGastosDetailRow[],
+  filters?: Pick<GastosOperacionaisFilters, 'polos'>
+) {
+  const poloByContract = buildPoloByContractMap(detailRows);
+  const polos = Array.from(new Set(poloByContract.values())).sort((a, b) =>
+    a.localeCompare(b, 'pt-BR')
+  );
+  const years = Array.from(new Set(detailRows.map((row) => row.year))).sort((a, b) => b - a);
+  const allContracts = Array.from(new Set(detailRows.map((row) => row.contract)));
+  const contracts = sortContractNamesByCustomOrder(
+    allContracts.filter((contract) => {
+      if (!filters?.polos?.length) return true;
+      return filters.polos.includes(poloByContract.get(contract) ?? '—');
+    })
+  );
+
+  return { polos, years, contracts };
+}
+
 export function getGastosFilterOptions(
   detailRows: QueryGastosDetailRow[],
   filters?: Pick<GastosOperacionaisFilters, 'localities'>,
@@ -111,6 +148,21 @@ export function getGastosFilterOptions(
   );
 
   return { years, contracts };
+}
+
+export function filterGastosDetailRowsByPolo(
+  detailRows: QueryGastosDetailRow[],
+  filters: GastosOperacionaisFilters
+): QueryGastosDetailRow[] {
+  return detailRows.filter((row) => {
+    if (filters.polos.length && !filters.polos.includes(resolveDetailRowPolo(row))) {
+      return false;
+    }
+    if (filters.months.length && !filters.months.includes(row.month)) return false;
+    if (filters.years.length && !filters.years.includes(row.year)) return false;
+    if (filters.contracts.length && !filters.contracts.includes(row.contract)) return false;
+    return true;
+  });
 }
 
 export function filterGastosDetailRows(
@@ -139,18 +191,22 @@ export function filterGastosDetailRows(
 export function aggregateGastosDetailRows(detailRows: QueryGastosDetailRow[]): GastosOperacionaisRow[] {
   const aggregates = new Map<
     string,
-    { totalAcumulado: number; months: Set<string>; years: Set<number> }
+    { totalAcumulado: number; months: Set<string>; years: Set<number>; polo: string | null }
   >();
 
   for (const row of detailRows) {
     const current = aggregates.get(row.contract) ?? {
       totalAcumulado: 0,
       months: new Set<string>(),
-      years: new Set<number>()
+      years: new Set<number>(),
+      polo: row.polo?.trim() || null
     };
     current.totalAcumulado += row.total;
     current.months.add(`${row.year}-${row.month}`);
     current.years.add(row.year);
+    if (!current.polo && row.polo?.trim()) {
+      current.polo = row.polo.trim();
+    }
     aggregates.set(row.contract, current);
   }
 
@@ -163,7 +219,8 @@ export function aggregateGastosDetailRows(detailRows: QueryGastosDetailRow[]): G
         mesesApuracao: data.months.size,
         anoMin: years[0] ?? 0,
         anoMax: years[years.length - 1] ?? 0,
-        totalAcumulado: data.totalAcumulado
+        totalAcumulado: data.totalAcumulado,
+        polo: data.polo
       };
     })
     .filter((row) => row.totalAcumulado !== 0);
@@ -223,6 +280,33 @@ export function groupGastosRowsByLocality(
   }
 
   return groups;
+}
+
+export type GastosPoloGroup = {
+  poloKey: string;
+  poloLabel: string;
+  rows: GastosOperacionaisRow[];
+  subtotal: number;
+};
+
+export function groupGastosRowsByPolo(rows: GastosOperacionaisRow[]): GastosPoloGroup[] {
+  const buckets = new Map<string, GastosOperacionaisRow[]>();
+
+  for (const row of rows) {
+    const key = (row.polo ?? '').trim() || '—';
+    const current = buckets.get(key) ?? [];
+    current.push(row);
+    buckets.set(key, current);
+  }
+
+  return Array.from(buckets.entries())
+    .map(([poloKey, groupRows]) => ({
+      poloKey,
+      poloLabel: poloKey === '—' ? 'Sem polo' : poloKey,
+      rows: sortContractsByCustomOrder(groupRows),
+      subtotal: Math.abs(groupRows.reduce((sum, row) => sum + row.totalAcumulado, 0))
+    }))
+    .sort((a, b) => a.poloLabel.localeCompare(b.poloLabel, 'pt-BR'));
 }
 
 export function buildGastosRowsFromApiPayload(payload?: GastosApiPayload): GastosOperacionaisRow[] {

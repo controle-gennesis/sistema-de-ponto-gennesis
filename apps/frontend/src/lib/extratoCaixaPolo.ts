@@ -158,7 +158,10 @@ function buildNomeToPoloMap(): Record<string, string> {
     ['TJGO MANUTENCAO LOTE 01', 'GO'],
     ['TJGO MANUTENCAO LOTE 06', 'GO'],
     ['SEMASDH - GO', 'GO'],
-    ['CAPITANIA FLUVIAL - GO', 'GO']
+    ['CAPITANIA FLUVIAL - GO', 'GO'],
+    ['SEFAZ PB - LOTE 1', 'PB'],
+    ['SEFAZ PB - LOTE 2', 'PB'],
+    ['SME REFORMA ESCOLAS MACAIBA', 'RN']
   ];
 
   const map: Record<string, string> = {};
@@ -171,6 +174,28 @@ function buildNomeToPoloMap(): Record<string, string> {
 export function poloLabelFromKey(key: string): string {
   if (key === SEM_POLO_KEY) return 'Sem polo';
   return key;
+}
+
+export function resolveGastosPoloFromContractName(
+  contract: string,
+  apiPolo?: string | null
+): string | null {
+  const fromName = resolveExtratoPolo({ ccusto: contract });
+  if (fromName.key !== SEM_POLO_KEY) return fromName.label;
+
+  const raw = (apiPolo ?? '').trim();
+  if (!raw) return null;
+  const u = raw
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toUpperCase();
+  if (u === 'DF' || u.includes('BRASILIA') || u.includes('DISTRITO FEDERAL')) return 'DF';
+  if (u === 'GO' || u.includes('GOIAS')) return 'GO';
+  if (u === 'CENTRAL') return 'CENTRAL';
+  if (['PB', 'PE', 'RS', 'RN'].includes(u)) return u;
+  if (u.length > 12 || u.includes('LTDA') || u.includes('EMPREEND')) return null;
+  return u.length <= 8 ? u : null;
 }
 
 export function resolveExtratoPolo(item: ExtratoCaixaItem): { key: string; label: string } {

@@ -27,8 +27,11 @@ import {
   aggregateGastosDetailRows,
   EMPTY_GASTOS_OPERACIONAIS_FILTERS,
   filterGastosDetailRows,
+  filterGastosDetailRowsByPolo,
   getGastosFilterOptions,
+  getGastosPoloFilterOptions,
   groupGastosRowsByLocality,
+  groupGastosRowsByPolo,
   type GastosOperacionaisFilters,
   type QueryGastosDetailRow
 } from './buildQueryGastosRows';
@@ -74,6 +77,7 @@ export type GastosOperacionaisRow = {
   anoMin: number;
   anoMax: number;
   totalAcumulado: number;
+  polo?: string | null;
   faturamentoAcumulado?: number;
   liquidoAcumulado?: number;
   recebidoAcumulado?: number;
@@ -109,6 +113,8 @@ type ControleGeralGastosOperacionaisPanelProps = {
   enableRowExclusion?: boolean;
   /** Oculta a coluna de localidade na tabela. */
   hideLocalityColumn?: boolean;
+  /** Exibe polo vindo da API (somente leitura) em vez de localidade editável. */
+  readOnlyPoloColumn?: boolean;
   panelTitle?: string;
   panelDescription?: string;
   totalColumnLabel?: string;
@@ -119,6 +125,12 @@ type ControleGeralGastosOperacionaisPanelProps = {
   /** Permite abrir a página de detalhes do contrato cadastrado. */
   showContractDetails?: boolean;
   contractsForDetailLookup?: readonly ContractDetailLookupSource[];
+  /** Oculta "Atualizado em" e botão "Atualizar planilha" no cabeçalho. */
+  hideDataRefreshControls?: boolean;
+  /** Filtros em linha (padrão histórico OS / contratos), sem caixa cinza. */
+  inlineFilters?: boolean;
+  /** @deprecated Exportação no cabeçalho usa estilo outline quando inlineFilters está ativo. */
+  primaryExportButton?: boolean;
 };
 
 function formatCurrency(value: number) {
@@ -207,19 +219,27 @@ function summarizeGastosPanelRows(rows: readonly GastosOperacionaisRow[]): Gasto
 
 /** Evita quebra do sinal negativo em valores monetários longos (ex.: -R$ 1.554.904,49). */
 const amountCurrencyCellClassName =
-  'px-3 py-3 text-right tabular-nums whitespace-nowrap min-w-[9.25rem] font-medium';
+  'px-3 py-3 text-center tabular-nums whitespace-nowrap min-w-[9.25rem] font-medium';
 const amountCurrencyTotalCellClassName =
-  'px-3 py-2.5 text-right tabular-nums whitespace-nowrap min-w-[9.25rem] font-semibold';
+  'px-3 py-2.5 text-center tabular-nums whitespace-nowrap min-w-[9.25rem] font-semibold';
 const amountGrandTotalCellClassName =
-  'px-3 py-3 text-right tabular-nums whitespace-nowrap min-w-[9.25rem] font-semibold';
+  'px-3 py-3 text-center tabular-nums whitespace-nowrap min-w-[9.25rem] font-semibold';
 const amountPercentCellClassName =
-  'px-3 py-3 text-right tabular-nums whitespace-nowrap min-w-[4.75rem] font-medium';
+  'px-3 py-3 text-center tabular-nums whitespace-nowrap min-w-[4.75rem] font-medium';
 const amountPercentTotalCellClassName =
-  'px-3 py-2.5 text-right tabular-nums whitespace-nowrap min-w-[4.75rem] font-semibold';
+  'px-3 py-2.5 text-center tabular-nums whitespace-nowrap min-w-[4.75rem] font-semibold';
 const amountCurrencyThClassName =
-  'px-3 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 whitespace-nowrap min-w-[9.25rem]';
+  'px-3 py-3 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 whitespace-nowrap min-w-[9.25rem]';
 const amountPercentThClassName =
-  'px-3 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 whitespace-nowrap min-w-[4.75rem]';
+  'px-3 py-3 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 whitespace-nowrap min-w-[4.75rem]';
+const dataCenterThClassName =
+  'px-3 py-3 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 whitespace-nowrap';
+const dataCenterCellClassName =
+  'px-3 py-3 text-center tabular-nums text-gray-600 dark:text-gray-300 whitespace-nowrap';
+const contractThClassName =
+  'px-3 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400';
+const contractCellClassName =
+  'px-3 py-3 text-left font-medium text-gray-900 dark:text-gray-100';
 
 function FinancialTotalsTableRow({
   title,
@@ -359,13 +379,17 @@ export function ControleGeralGastosOperacionaisPanel({
   showPdfExport = false,
   enableRowExclusion = false,
   hideLocalityColumn = false,
+  readOnlyPoloColumn = false,
   panelTitle = 'Gastos operacionais por contrato',
   panelDescription = 'QUERY BASE DE GASTOS — mês, ano, contrato e total (somatório por contrato)',
   totalColumnLabel = 'Total',
   showFaturamentoColumn = false,
   dataRefreshNonce = 0,
   showContractDetails = false,
-  contractsForDetailLookup = []
+  contractsForDetailLookup = [],
+  hideDataRefreshControls = false,
+  inlineFilters = false,
+  primaryExportButton = false
 }: ControleGeralGastosOperacionaisPanelProps) {
   const nfsMetricColumnCount = showFaturamentoColumn ? 3 : 0;
   const lucroLiquidoColumnCount = showFaturamentoColumn ? 1 : 0;
@@ -392,6 +416,7 @@ export function ControleGeralGastosOperacionaisPanel({
   );
   const [selectedRowKeys, setSelectedRowKeys] = useState<Set<string>>(() => new Set());
   const [hiddenContractsListMinimized, setHiddenContractsListMinimized] = useState(false);
+  const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
 
   const emissaoFilterMonths = useMemo(
     () => [...filters.months].sort((a, b) => a - b),
@@ -449,13 +474,22 @@ export function ControleGeralGastosOperacionaisPanel({
 
   const filterOptions = useMemo(
     () =>
-      getGastosFilterOptions(
-        detailRows,
-        { localities: filters.localities },
-        localityOverrides,
-        visibleLocalities
-      ),
-    [detailRows, filters.localities, localityOverrides, visibleLocalities]
+      readOnlyPoloColumn
+        ? getGastosPoloFilterOptions(detailRows, { polos: filters.polos })
+        : getGastosFilterOptions(
+            detailRows,
+            { localities: filters.localities },
+            localityOverrides,
+            visibleLocalities
+          ),
+    [
+      detailRows,
+      filters.localities,
+      filters.polos,
+      localityOverrides,
+      readOnlyPoloColumn,
+      visibleLocalities
+    ]
   );
 
   const localityFilterOptions = useMemo(
@@ -465,6 +499,15 @@ export function ControleGeralGastosOperacionaisPanel({
         label: locality.label
       })),
     [visibleLocalityItems]
+  );
+
+  const poloFilterOptions = useMemo(
+    () =>
+      ('polos' in filterOptions ? filterOptions.polos : []).map((polo) => ({
+        value: polo,
+        label: polo === '—' ? 'Sem polo' : polo
+      })),
+    [filterOptions]
   );
 
   const monthFilterOptions = useMemo(
@@ -496,20 +539,17 @@ export function ControleGeralGastosOperacionaisPanel({
   );
 
   const hasActiveFilters =
-    filters.localities.length > 0 ||
+    (readOnlyPoloColumn ? filters.polos.length > 0 : filters.localities.length > 0) ||
     filters.months.length > 0 ||
     filters.years.length > 0 ||
     filters.contracts.length > 0;
 
   const displayRows = useMemo(() => {
-    const filtered = filterGastosDetailRows(
-      detailRows,
-      filters,
-      localityOverrides,
-      visibleLocalities
-    );
+    const filtered = readOnlyPoloColumn
+      ? filterGastosDetailRowsByPolo(detailRows, filters)
+      : filterGastosDetailRows(detailRows, filters, localityOverrides, visibleLocalities);
     return aggregateGastosDetailRows(filtered);
-  }, [detailRows, filters, localityOverrides, visibleLocalities]);
+  }, [detailRows, filters, localityOverrides, readOnlyPoloColumn, visibleLocalities]);
 
   const visibleRows = useMemo(() => {
     if (!enableRowExclusion) return displayRows;
@@ -565,11 +605,17 @@ export function ControleGeralGastosOperacionaisPanel({
     return Array.from(labels.values());
   }, [displayRows, excludedContracts, enableRowExclusion]);
 
-  const localityGroups = useMemo(
-    () =>
-      groupGastosRowsByLocality(visibleRowsWithFaturamento, localityOverrides, visibleLocalities),
-    [visibleRowsWithFaturamento, localityOverrides, visibleLocalities]
-  );
+  const localityGroups = useMemo(() => {
+    if (readOnlyPoloColumn) {
+      return groupGastosRowsByPolo(visibleRowsWithFaturamento).map((group) => ({
+        localityKey: group.poloKey,
+        localityLabel: group.poloLabel,
+        rows: group.rows,
+        subtotal: group.subtotal
+      }));
+    }
+    return groupGastosRowsByLocality(visibleRowsWithFaturamento, localityOverrides, visibleLocalities);
+  }, [visibleRowsWithFaturamento, localityOverrides, readOnlyPoloColumn, visibleLocalities]);
 
   const grandSummary = useMemo(
     () => summarizeGastosPanelRows(visibleRowsWithFaturamento),
@@ -665,6 +711,24 @@ export function ControleGeralGastosOperacionaisPanel({
     }));
   };
 
+  const handlePolosChange = (selected: string[]) => {
+    const polos = selected;
+    const poloByContract = new Map<string, string>();
+    for (const row of detailRows) {
+      if (!poloByContract.has(row.contract)) {
+        poloByContract.set(row.contract, (row.polo ?? '').trim() || '—');
+      }
+    }
+    setFilters((prev) => ({
+      ...prev,
+      polos,
+      contracts:
+        polos.length > 0
+          ? prev.contracts.filter((contract) => polos.includes(poloByContract.get(contract) ?? '—'))
+          : prev.contracts
+    }));
+  };
+
   const handleContractLocalityChange = (contract: string, value: string) => {
     const locality = (value || 'OUTROS') as EffectiveContractLocality;
     setLocalityOverrides((prev) => {
@@ -687,6 +751,82 @@ export function ControleGeralGastosOperacionaisPanel({
       years: selected.map((value) => Number(value)).filter((value) => Number.isFinite(value))
     }));
   };
+
+  const gastosFiltersFields = (
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <div>
+        <span className={filterLabelClassName}>Contrato</span>
+        <MultiSelectSearchDropdown
+          options={contractFilterOptions}
+          selected={filters.contracts}
+          onChange={(contracts) => setFilters((prev) => ({ ...prev, contracts }))}
+          placeholder="Todos os contratos"
+          searchPlaceholder="Pesquisar contrato..."
+          emptyOptionsMessage="Nenhum contrato disponível."
+          emptySearchMessage="Nenhum contrato encontrado."
+          listMaxHeight={FILTER_DROPDOWN_LIST_MAX_HEIGHT}
+          menuOverlapContent
+          noFocusRing
+        />
+      </div>
+
+      <div>
+        <span className={filterLabelClassName}>
+          {readOnlyPoloColumn ? 'Polo' : 'Localidade'}
+        </span>
+        <MultiSelectSearchDropdown
+          options={readOnlyPoloColumn ? poloFilterOptions : localityFilterOptions}
+          selected={readOnlyPoloColumn ? filters.polos : filters.localities}
+          onChange={readOnlyPoloColumn ? handlePolosChange : handleLocalitiesChange}
+          placeholder={readOnlyPoloColumn ? 'Todos os polos' : 'Todas as localidades'}
+          searchPlaceholder={
+            readOnlyPoloColumn ? 'Pesquisar polo...' : 'Pesquisar localidade...'
+          }
+          emptyOptionsMessage={
+            readOnlyPoloColumn ? 'Nenhum polo disponível.' : 'Nenhuma localidade disponível.'
+          }
+          emptySearchMessage={
+            readOnlyPoloColumn ? 'Nenhum polo encontrado.' : 'Nenhuma localidade encontrada.'
+          }
+          listMaxHeight={FILTER_DROPDOWN_LIST_MAX_HEIGHT}
+          menuOverlapContent
+          noFocusRing
+        />
+      </div>
+
+      <div>
+        <span className={filterLabelClassName}>Mês</span>
+        <MultiSelectSearchDropdown
+          options={monthFilterOptions}
+          selected={filters.months.map(String)}
+          onChange={handleMonthsChange}
+          placeholder="Todos os meses"
+          searchPlaceholder="Pesquisar mês..."
+          emptyOptionsMessage="Nenhum mês disponível."
+          emptySearchMessage="Nenhum mês encontrado."
+          listMaxHeight={FILTER_DROPDOWN_LIST_MAX_HEIGHT}
+          menuOverlapContent
+          noFocusRing
+        />
+      </div>
+
+      <div>
+        <span className={filterLabelClassName}>Ano</span>
+        <MultiSelectSearchDropdown
+          options={yearFilterOptions}
+          selected={filters.years.map(String)}
+          onChange={handleYearsChange}
+          placeholder="Todos os anos"
+          searchPlaceholder="Pesquisar ano..."
+          emptyOptionsMessage="Nenhum ano disponível."
+          emptySearchMessage="Nenhum ano encontrado."
+          listMaxHeight={FILTER_DROPDOWN_LIST_MAX_HEIGHT}
+          menuOverlapContent
+          noFocusRing
+        />
+      </div>
+    </div>
+  );
 
   const buildMesesLabel = useCallback(
     (row: GastosOperacionaisRow) => {
@@ -714,7 +854,11 @@ export function ControleGeralGastosOperacionaisPanel({
   const buildPdfFilterLines = useCallback((): string[] => {
     const lines: string[] = [];
 
-    if (filters.localities.length) {
+    if (readOnlyPoloColumn) {
+      if (filters.polos.length) {
+        lines.push(`Polos: ${filters.polos.join(', ')}`);
+      }
+    } else if (filters.localities.length) {
       lines.push(
         `Localidades: ${filters.localities
           .map((key) => getLocalityLabel(key))
@@ -745,7 +889,7 @@ export function ControleGeralGastosOperacionaisPanel({
     }
 
     return lines;
-  }, [filters, hasActiveFilters, totalGastos, excludedContractLabels]);
+  }, [filters, hasActiveFilters, totalGastos, excludedContractLabels, readOnlyPoloColumn]);
 
   const handleExportPdf = useCallback(async () => {
     if (visibleRows.length === 0) {
@@ -845,7 +989,7 @@ export function ControleGeralGastosOperacionaisPanel({
   return (
     <Card>
       <CardHeader className="border-b-0 pb-1">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-start gap-3">
             <div className="rounded-lg bg-amber-100 p-2 sm:p-3 dark:bg-amber-900/30">
               <Wallet className="h-5 w-5 text-amber-600 dark:text-amber-400 sm:h-6 sm:w-6" />
@@ -859,21 +1003,53 @@ export function ControleGeralGastosOperacionaisPanel({
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-2 sm:flex-col sm:items-end">
-            {fetchedAt ? (
-              <p className="text-xs text-gray-500 dark:text-gray-400">
-                Atualizado em{' '}
-                {new Date(fetchedAt).toLocaleString('pt-BR', {
-                  day: '2-digit',
-                  month: '2-digit',
-                  year: 'numeric',
-                  hour: '2-digit',
-                  minute: '2-digit'
-                })}
-              </p>
-            ) : null}
-            <div className="flex flex-wrap items-center justify-end gap-2">
-              {showPdfExport || showFaturamentoColumn ? (
+          {(inlineFilters && (showPdfExport || showFaturamentoColumn)) ? (
+            <div className="flex flex-shrink-0 flex-wrap items-center gap-2 sm:justify-end">
+              <button
+                type="button"
+                onClick={() => setIsFiltersModalOpen(true)}
+                className={`relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition-colors ${
+                  hasActiveFilters
+                    ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40'
+                    : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
+                }`}
+                aria-label="Abrir filtro"
+                title={hasActiveFilters ? 'Filtro (ativo)' : 'Filtro'}
+              >
+                <Filter className="h-4 w-4" />
+                {hasActiveFilters ? (
+                  <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
+                ) : null}
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleExportPdf()}
+                disabled={isPanelLoading || exportingPdf || visibleRows.length === 0}
+                className="flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-800 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
+              >
+                {exportingPdf ? (
+                  <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
+                ) : (
+                  <Download className="h-4 w-4 shrink-0" aria-hidden />
+                )}
+                <span>{exportingPdf ? 'Gerando PDF…' : 'Exportar'}</span>
+              </button>
+            </div>
+          ) : (showPdfExport || showFaturamentoColumn) && !hideDataRefreshControls ? (
+            <div className="flex flex-col items-end gap-2">
+              {fetchedAt ? (
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  Atualizado em{' '}
+                  {new Date(fetchedAt).toLocaleString('pt-BR', {
+                    day: '2-digit',
+                    month: '2-digit',
+                    year: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                  })}
+                </p>
+              ) : null}
+              <div className="flex flex-wrap items-center justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => void handleExportPdf()}
@@ -887,23 +1063,37 @@ export function ControleGeralGastosOperacionaisPanel({
                   )}
                   {exportingPdf ? 'Gerando PDF…' : 'Exportar PDF'}
                 </button>
-              ) : null}
-              {onRetry ? (
-                <button
-                  type="button"
-                  onClick={onRetry}
-                  disabled={isPanelLoading || fetchingFaturamento}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
-                >
-                  <RefreshCw
-                    className={`h-3.5 w-3.5 ${isPanelLoading || fetchingFaturamento ? 'animate-spin' : ''}`}
-                    aria-hidden
-                  />
-                  Atualizar planilha
-                </button>
-              ) : null}
+                {onRetry ? (
+                  <button
+                    type="button"
+                    onClick={onRetry}
+                    disabled={isPanelLoading || fetchingFaturamento}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                  >
+                    <RefreshCw
+                      className={`h-3.5 w-3.5 ${isPanelLoading || fetchingFaturamento ? 'animate-spin' : ''}`}
+                      aria-hidden
+                    />
+                    Atualizar planilha
+                  </button>
+                ) : null}
+              </div>
             </div>
-          </div>
+          ) : (showPdfExport || showFaturamentoColumn) && primaryExportButton ? (
+            <button
+              type="button"
+              onClick={() => void handleExportPdf()}
+              disabled={isPanelLoading || exportingPdf || visibleRows.length === 0}
+              className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {exportingPdf ? (
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+              ) : (
+                <Download className="h-4 w-4" aria-hidden />
+              )}
+              {exportingPdf ? 'Gerando PDF…' : 'Exportar PDF'}
+            </button>
+          ) : null}
         </div>
       </CardHeader>
 
@@ -932,10 +1122,11 @@ export function ControleGeralGastosOperacionaisPanel({
           </div>
         ) : detailRows.length === 0 ? (
           <div className="py-10 text-center text-sm text-gray-500 dark:text-gray-400">
-            Nenhum gasto operacional encontrado na aba QUERY BASE DE GASTOS.
+            Nenhum gasto operacional encontrado.
           </div>
         ) : (
           <>
+            {!inlineFilters ? (
             <div className="mb-4 rounded-lg border border-gray-200 bg-gray-50/80 p-4 dark:border-gray-700 dark:bg-gray-800/40">
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -954,72 +1145,9 @@ export function ControleGeralGastosOperacionaisPanel({
                 ) : null}
               </div>
 
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                <div>
-                  <span className={filterLabelClassName}>Contrato</span>
-                  <MultiSelectSearchDropdown
-                    options={contractFilterOptions}
-                    selected={filters.contracts}
-                    onChange={(contracts) => setFilters((prev) => ({ ...prev, contracts }))}
-                    placeholder="Todos os contratos"
-                    searchPlaceholder="Pesquisar contrato..."
-                    emptyOptionsMessage="Nenhum contrato disponível."
-                    emptySearchMessage="Nenhum contrato encontrado."
-                    listMaxHeight={FILTER_DROPDOWN_LIST_MAX_HEIGHT}
-                    menuOverlapContent
-                    noFocusRing
-                  />
-                </div>
-
-                <div>
-                  <span className={filterLabelClassName}>Localidade</span>
-                  <MultiSelectSearchDropdown
-                    options={localityFilterOptions}
-                    selected={filters.localities}
-                    onChange={handleLocalitiesChange}
-                    placeholder="Todas as localidades"
-                    searchPlaceholder="Pesquisar localidade..."
-                    emptyOptionsMessage="Nenhuma localidade disponível."
-                    emptySearchMessage="Nenhuma localidade encontrada."
-                    listMaxHeight={FILTER_DROPDOWN_LIST_MAX_HEIGHT}
-                    menuOverlapContent
-                    noFocusRing
-                  />
-                </div>
-
-                <div>
-                  <span className={filterLabelClassName}>Mês</span>
-                  <MultiSelectSearchDropdown
-                    options={monthFilterOptions}
-                    selected={filters.months.map(String)}
-                    onChange={handleMonthsChange}
-                    placeholder="Todos os meses"
-                    searchPlaceholder="Pesquisar mês..."
-                    emptyOptionsMessage="Nenhum mês disponível."
-                    emptySearchMessage="Nenhum mês encontrado."
-                    listMaxHeight={FILTER_DROPDOWN_LIST_MAX_HEIGHT}
-                    menuOverlapContent
-                    noFocusRing
-                  />
-                </div>
-
-                <div>
-                  <span className={filterLabelClassName}>Ano</span>
-                  <MultiSelectSearchDropdown
-                    options={yearFilterOptions}
-                    selected={filters.years.map(String)}
-                    onChange={handleYearsChange}
-                    placeholder="Todos os anos"
-                    searchPlaceholder="Pesquisar ano..."
-                    emptyOptionsMessage="Nenhum ano disponível."
-                    emptySearchMessage="Nenhum ano encontrado."
-                    listMaxHeight={FILTER_DROPDOWN_LIST_MAX_HEIGHT}
-                    menuOverlapContent
-                    noFocusRing
-                  />
-                </div>
-              </div>
+              {gastosFiltersFields}
             </div>
+            ) : null}
 
             {displayRows.length === 0 ? (
               <div className="py-10 text-center text-sm text-gray-500 dark:text-gray-400">
@@ -1144,18 +1272,12 @@ export function ControleGeralGastosOperacionaisPanel({
                             />
                           </th>
                         ) : null}
-                        <th className="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 whitespace-nowrap">
-                          Mês de apuração
-                        </th>
-                        <th className="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 whitespace-nowrap">
-                          Ano de apuração
-                        </th>
-                        <th className="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                          Contrato
-                        </th>
+                        <th className={contractThClassName}>Contrato</th>
+                        <th className={dataCenterThClassName}>Mês de apuração</th>
+                        <th className={dataCenterThClassName}>Ano de apuração</th>
                         {!hideLocalityColumn ? (
-                          <th className="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 whitespace-nowrap">
-                            Localidade
+                          <th className={dataCenterThClassName}>
+                            {readOnlyPoloColumn ? 'Polo' : 'Localidade'}
                           </th>
                         ) : null}
                         {showFaturamentoColumn ? (
@@ -1211,18 +1333,7 @@ export function ControleGeralGastosOperacionaisPanel({
                                   />
                                 </td>
                               ) : null}
-                              <td className="px-3 py-3 tabular-nums text-gray-600 dark:text-gray-300 whitespace-nowrap">
-                                {filters.months.length === 1
-                                  ? MONTH_OPTIONS.find((m) => m.value === filters.months[0])?.label ??
-                                    filters.months[0]
-                                  : `${row.mesesApuracao} ${row.mesesApuracao === 1 ? 'mês' : 'meses'}`}
-                              </td>
-                              <td className="px-3 py-3 tabular-nums text-gray-600 dark:text-gray-300 whitespace-nowrap">
-                                {filters.years.length === 1
-                                  ? String(filters.years[0])
-                                  : formatAnoApuracao(row.anoMin, row.anoMax)}
-                              </td>
-                              <td className="px-3 py-3 pl-6 font-medium text-gray-900 dark:text-gray-100">
+                              <td className={contractCellClassName}>
                                 {(() => {
                                   const detailPath = resolveContractDetailPath(row.contract);
                                   if (!detailPath) return row.contract;
@@ -1239,25 +1350,40 @@ export function ControleGeralGastosOperacionaisPanel({
                                   );
                                 })()}
                               </td>
+                              <td className={dataCenterCellClassName}>
+                                {filters.months.length === 1
+                                  ? MONTH_OPTIONS.find((m) => m.value === filters.months[0])?.label ??
+                                    filters.months[0]
+                                  : `${row.mesesApuracao} ${row.mesesApuracao === 1 ? 'mês' : 'meses'}`}
+                              </td>
+                              <td className={dataCenterCellClassName}>
+                                {filters.years.length === 1
+                                  ? String(filters.years[0])
+                                  : formatAnoApuracao(row.anoMin, row.anoMax)}
+                              </td>
                               {!hideLocalityColumn ? (
-                                <td className="px-3 py-3">
-                                  <select
-                                    aria-label={`Localidade de ${row.contract}`}
-                                    value={getEffectiveContractLocality(row.contract, localityOverrides)}
-                                    onChange={(e) =>
-                                      handleContractLocalityChange(row.contract, e.target.value)
-                                    }
-                                    className={localitySelectClassName}
-                                  >
-                                    {!visibleLocalities?.length ? (
-                                      <option value="OUTROS">Outros</option>
-                                    ) : null}
-                                    {visibleLocalityItems.map((locality) => (
-                                      <option key={locality.key} value={locality.key}>
-                                        {locality.label}
-                                      </option>
-                                    ))}
-                                  </select>
+                                <td className={`${dataCenterCellClassName} text-gray-700 dark:text-gray-300`}>
+                                  {readOnlyPoloColumn ? (
+                                    row.polo?.trim() || '—'
+                                  ) : (
+                                    <select
+                                      aria-label={`Localidade de ${row.contract}`}
+                                      value={getEffectiveContractLocality(row.contract, localityOverrides)}
+                                      onChange={(e) =>
+                                        handleContractLocalityChange(row.contract, e.target.value)
+                                      }
+                                      className={`${localitySelectClassName} mx-auto`}
+                                    >
+                                      {!visibleLocalities?.length ? (
+                                        <option value="OUTROS">Outros</option>
+                                      ) : null}
+                                      {visibleLocalityItems.map((locality) => (
+                                        <option key={locality.key} value={locality.key}>
+                                          {locality.label}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  )}
                                 </td>
                               ) : null}
                               {showFaturamentoColumn ? (
@@ -1335,7 +1461,11 @@ export function ControleGeralGastosOperacionaisPanel({
                       })}
                       {localityGroups.length > 0 ? (
                         <FinancialTotalsTableRow
-                          title="Total geral — todas as localidades"
+                          title={
+                            readOnlyPoloColumn
+                              ? 'Total geral — todos os polos'
+                              : 'Total geral — todas as localidades'
+                          }
                           contractCount={visibleRowsWithFaturamento.length}
                           summary={grandSummary}
                           showNfsMetrics={showFaturamentoColumn}
@@ -1351,6 +1481,46 @@ export function ControleGeralGastosOperacionaisPanel({
           </>
         )}
       </CardContent>
+
+      {inlineFilters && isFiltersModalOpen ? (
+        <div className="fixed inset-0 z-[1000] flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/40"
+            onClick={() => setIsFiltersModalOpen(false)}
+          />
+          <div className="relative mx-4 w-full max-w-3xl rounded-xl bg-white shadow-2xl dark:bg-gray-800">
+            <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4 dark:border-gray-700">
+              <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">Filtro</h3>
+              <button
+                type="button"
+                onClick={() => setIsFiltersModalOpen(false)}
+                className="rounded-md p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+                aria-label="Fechar filtros"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="max-h-[70vh] overflow-y-auto px-5 py-4">{gastosFiltersFields}</div>
+            <div className="flex items-center justify-between border-t border-gray-200 px-5 py-4 dark:border-gray-700">
+              <button
+                type="button"
+                onClick={clearFilters}
+                className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+              >
+                <RotateCcw className="h-4 w-4" />
+                Limpar filtros
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsFiltersModalOpen(false)}
+                className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-gray-800 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-gray-200"
+              >
+                Fechar
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </Card>
   );
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { MainLayout } from '@/components/layout/MainLayout';
@@ -8,11 +8,23 @@ import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import api from '@/lib/api';
 import { ControleGeralGastosOperacionaisPanel } from '../controle-geral/ControleGeralGastosOperacionaisPanel';
-import { buildGastosDetailRowsFromSheetRows } from '../controle-geral/buildQueryGastosRows';
+import type { QueryGastosDetailRow } from '../controle-geral/buildQueryGastosRows';
+import { normalizeGastosOperacionaisContractName } from '../controle-geral/gastosOperacionaisContractOrder';
+import { resolveGastosPoloFromContractName } from '@/lib/extratoCaixaPolo';
+
+type GastosOperacionaisApi = {
+  success: boolean;
+  message?: string;
+  data: {
+    configured: boolean;
+    detailRows?: QueryGastosDetailRow[];
+    fetchedAt?: string;
+    message?: string;
+  };
+};
 
 export default function GastosOperacionaisPage() {
   const router = useRouter();
-  const [gastosRefreshNonce, setGastosRefreshNonce] = useState(0);
 
   const handleLogout = () => {
     localStorage.removeItem('token');
@@ -33,26 +45,37 @@ export default function GastosOperacionaisPage() {
     isLoading: loadingGastos,
     isError: gastosError,
     error: gastosErrorObj,
-    isFetching: fetchingGastos
+    isFetching: fetchingGastos,
+    refetch: refetchGastos
   } = useQuery({
-    queryKey: ['gastos-operacionais-module-v1', gastosRefreshNonce],
+    queryKey: ['gastos-operacionais-module-totvs-v4-polo-sigla'],
     queryFn: async () => {
-      const refreshParams = gastosRefreshNonce > 0 ? { refresh: 1 } : {};
-
-      const sheetRes = await api.get<{
-        success: boolean;
-        data?: { rows?: string[][]; fetchedAt?: string };
-      }>('/controle-nfs/sheet-data', {
-        params: { sheetName: 'QUERY BASE DE GASTOS', ...refreshParams },
-        timeout: 120_000
+      const res = await api.get<GastosOperacionaisApi>('/contracts/gastos-operacionais', {
+        timeout: 180_000
       });
+      const payload = res.data;
 
-      const detailRows = buildGastosDetailRowsFromSheetRows(sheetRes.data?.data?.rows ?? []);
+      if (payload?.data?.configured === false) {
+        throw new Error(
+          payload.data.message ??
+            'Integração TOTVS RM não configurada. Defina TOTVS_RM_* no servidor.'
+        );
+      }
+
+      if (payload?.success === false) {
+        throw new Error(payload.message ?? 'Não foi possível carregar os gastos no TOTVS RM.');
+      }
+
+      const detailRows = (payload.data?.detailRows ?? []).map((row) => {
+        const contract = normalizeGastosOperacionaisContractName(row.contract);
+        const polo = resolveGastosPoloFromContractName(contract, row.polo);
+        return { ...row, contract, polo };
+      });
 
       return {
         gastosOperacionais: {
           detailRows,
-          fetchedAt: sheetRes.data?.data?.fetchedAt ?? new Date().toISOString()
+          fetchedAt: payload.data?.fetchedAt ?? new Date().toISOString()
         }
       };
     },
@@ -61,7 +84,6 @@ export default function GastosOperacionaisPage() {
   });
 
   const gastosDetailRows = gastosData?.gastosOperacionais?.detailRows ?? [];
-  const gastosFetchedAt = gastosData?.gastosOperacionais?.fetchedAt;
   const gastosErrorMessage = (() => {
     const err = gastosErrorObj as {
       response?: { data?: { message?: string } };
@@ -70,7 +92,7 @@ export default function GastosOperacionaisPage() {
     return (
       err?.response?.data?.message ??
       err?.message ??
-      'Não foi possível carregar os gastos da planilha.'
+      'Não foi possível carregar os gastos no TOTVS RM.'
     );
   })();
 
@@ -95,17 +117,22 @@ export default function GastosOperacionaisPage() {
               Gastos Operacionais
             </h1>
             <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400 max-w-2xl mx-auto">
-              Gastos operacionais por contrato — QUERY BASE DE GASTOS
+              Gastos operacionais por Centro de Custo
             </p>
           </div>
 
           <ControleGeralGastosOperacionaisPanel
             detailRows={gastosDetailRows}
             isLoading={loadingGastos || fetchingGastos}
-            fetchedAt={gastosFetchedAt}
             isError={gastosError}
             errorMessage={gastosErrorMessage}
-            onRetry={() => setGastosRefreshNonce((n) => n + 1)}
+            onRetry={() => {
+              void refetchGastos();
+            }}
+            hideDataRefreshControls
+            inlineFilters
+            panelDescription="Gastos operacionais por centro de custo, consolidados por mês e ano a partir do TOTVS RM."
+            readOnlyPoloColumn
             showPdfExport
           />
         </div>

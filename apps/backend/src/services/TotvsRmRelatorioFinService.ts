@@ -204,6 +204,72 @@ function scoreCcColumn(key: string): number {
   return s;
 }
 
+/** Preferência por colunas de nome/descrição do CC (ex.: CENTRO DE CUSTO = GCCUSTO.NOME). */
+function scoreCcNameColumn(key: string): number {
+  const u = normHeaderKey(key);
+  const compact = u.replace(/\s/g, '');
+  if (u === 'CENTRO DE CUSTO' || compact === 'CENTRODECUSTO') return 32;
+  if (u.includes('NOME') && (u.includes('CCUSTO') || u.includes('CENTRO') || u.includes('CUSTO'))) {
+    return 28;
+  }
+  if (u.includes('CENTRO') && u.includes('CUSTO') && !u.includes('COD') && !u.includes('CODIGO')) {
+    return 26;
+  }
+  if (ccColumnIsLikelyNumericCodeHeader(key)) return 0;
+  if (u.includes('CCUSTO') && (u.includes('COD') || u.includes('CODIGO'))) return 0;
+  return 0;
+}
+
+function looksLikeHierarchicalCcCode(value: string): boolean {
+  const t = value.trim();
+  if (!t) return false;
+  if (/^\d{1,4}(\.\d{2,})+$/.test(t)) return true;
+  if (/^\d{1,2}$/.test(t)) return true;
+  return false;
+}
+
+function pickCcNameColumn(
+  rows: Record<string, unknown>[],
+  excludeKeys?: Set<string>
+): string | null {
+  const envOverride =
+    process.env.TOTVS_RM_CC_NAME_COLUMN?.trim() ||
+    process.env.TOTVS_RM_GASTOS_CC_NAME_COLUMN?.trim() ||
+    undefined;
+  return pickColumn(rows, scoreCcNameColumn, envOverride, excludeKeys);
+}
+
+function resolveCcDisplayLabelFromRow(
+  row: Record<string, unknown>,
+  nameCol: string | null,
+  codeCol: string | null
+): string {
+  const preferredCols = [nameCol, codeCol].filter(Boolean) as string[];
+  const seen = new Set<string>();
+
+  for (const col of preferredCols) {
+    if (seen.has(col)) continue;
+    seen.add(col);
+    const value = String(row[col] ?? '').trim();
+    if (value && !looksLikeHierarchicalCcCode(value)) return value;
+  }
+
+  for (const [key, raw] of Object.entries(row)) {
+    const header = normHeaderKey(key);
+    if (!header.includes('CENTRO') || !header.includes('CUSTO')) continue;
+    if (header.includes('COD') || header.includes('CODIGO')) continue;
+    const value = String(raw ?? '').trim();
+    if (value && !looksLikeHierarchicalCcCode(value)) return value;
+  }
+
+  for (const col of preferredCols) {
+    const value = String(row[col] ?? '').trim();
+    if (value) return value;
+  }
+
+  return '';
+}
+
 function scoreValueColumn(key: string): number {
   const u = normHeaderKey(key);
   const compact = u.replace(/\s/g, '');
@@ -219,6 +285,17 @@ function scoreValueColumn(key: string): number {
   if (u.includes('TOTAL')) s += 4;
   if (u.includes('VL')) s += 3;
   return s;
+}
+
+function scorePoloColumn(key: string): number {
+  const u = normHeaderKey(key);
+  const compact = u.replace(/\s/g, '');
+  if (u === 'POLO' || compact === 'POLO') return 40;
+  if (u.includes('POLO') && !u.includes('EMPRESA')) return 35;
+  if (u === 'UF' || compact === 'UF') return 32;
+  if (u.includes('FILIAL') && (u.includes('COD') || u.includes('SIGLA'))) return 28;
+  if (u.includes('ESTADO') && u.includes('SIGLA')) return 24;
+  return 0;
 }
 
 function scoreNaturezaColumn(key: string): number {
@@ -1053,6 +1130,186 @@ export class TotvsRmRelatorioFinService {
     }
     if (ax?.message) return ax.message;
     return String(err);
+  }
+
+  /**
+   * Gastos operacionais: todos os centros de custo do RELATORIOFIN (ou solicitações),
+   * agrupados por CC + mês/ano — sem depender de contratos cadastrados.
+   */
+  async listGastosOperacionaisDetailRows(): Promise<{
+    detailRows: Array<{ contract: string; month: number; year: number; total: number; polo: string | null }>;
+    ccColumn: string | null;
+    valueColumn: string | null;
+    dateColumn: string | null;
+    poloColumn: string | null;
+    totalRowCount: number;
+    costCenterCount: number;
+  }> {
+    const rows = await this.getRelatorioRowsCached();
+    if (!rows.length) {
+      return {
+        detailRows: [],
+        ccColumn: null,
+        valueColumn: null,
+        dateColumn: null,
+        poloColumn: null,
+        totalRowCount: 0,
+        costCenterCount: 0
+      };
+    }
+
+    const solicitationRows = await this.resolveSolicitationRows(rows);
+
+    const solCcNameCol = pickCcNameColumn(solicitationRows);
+    const solCcCodeCol = pickColumn(
+      solicitationRows,
+      scoreCcColumn,
+      process.env.TOTVS_RM_CC_CODE_COLUMN ||
+        process.env.TOTVS_RM_SOLICITACOES_CC_COLUMN ||
+        process.env.TOTVS_RM_CC_COLUMN,
+      solCcNameCol ? new Set([solCcNameCol]) : undefined
+    );
+    const solCcCol = solCcNameCol ?? solCcCodeCol;
+
+    const solCcExclude = new Set(
+      [solCcNameCol, solCcCodeCol].filter(Boolean) as string[]
+    );
+    const solValCol = pickColumn(
+      solicitationRows,
+      scoreValueColumn,
+      process.env.TOTVS_RM_SOLICITACOES_VALUE_COLUMN || process.env.TOTVS_RM_VALUE_COLUMN,
+      solCcExclude.size ? solCcExclude : undefined
+    );
+    const solNatCol = pickNaturezaColumn(
+      solicitationRows,
+      new Set([...solCcExclude, solValCol].filter(Boolean) as string[])
+    );
+
+    const solUseStatus = ['1', 'true', 'yes'].includes(
+      String(process.env.TOTVS_RM_SOLICITACOES_USE_STATUS_FILTER || '').trim().toLowerCase()
+    );
+    const solStatusAllowed = solUseStatus ? parseStatusIncludeNormSet() : null;
+    const solExcludeForStatus = new Set(
+      [...solCcExclude, solValCol, solNatCol].filter(Boolean) as string[]
+    );
+    const solStatusCol =
+      solStatusAllowed && solStatusAllowed.size > 0
+        ? pickColumn(
+            solicitationRows,
+            scoreStatusColumn,
+            process.env.TOTVS_RM_SOLICITACOES_STATUS_COLUMN || process.env.TOTVS_RM_STATUS_COLUMN,
+            solExcludeForStatus
+          )
+        : null;
+
+    const solDateExcludeKeys = new Set<string>(
+      [...solCcExclude, solValCol, solNatCol, solStatusCol].filter(Boolean) as string[]
+    );
+    const solDateEnv =
+      process.env.TOTVS_RM_SOLICITACOES_DATE_COLUMN || process.env.TOTVS_RM_DATE_COLUMN;
+    let solDateCol = pickColumn(
+      solicitationRows,
+      scorePaymentDateColumn,
+      solDateEnv,
+      solDateExcludeKeys
+    );
+    if (!solDateCol && !solDateEnv?.trim()) {
+      solDateCol = pickColumn(solicitationRows, scoreDateColumn, undefined, solDateExcludeKeys);
+    }
+
+    const solPoloExclude = new Set(
+      [...solCcExclude, solValCol, solNatCol, solStatusCol, solDateCol].filter(Boolean) as string[]
+    );
+    const solPoloCol = pickColumn(
+      solicitationRows,
+      scorePoloColumn,
+      process.env.TOTVS_RM_POLO_COLUMN,
+      solPoloExclude
+    );
+
+    if (!solCcCol || !solValCol) {
+      throw new Error(
+        'RELATORIOFIN: não foi possível detectar colunas de centro de custo e valor. Defina TOTVS_RM_CC_NAME_COLUMN (ou CENTRO DE CUSTO) e TOTVS_RM_VALUE_COLUMN.'
+      );
+    }
+
+    const byCcYm = new Map<string, Map<string, number>>();
+    const poloByCc = new Map<string, string>();
+    const costCenters = new Set<string>();
+
+    for (const row of solicitationRows) {
+      if (
+        solStatusCol &&
+        solStatusAllowed &&
+        solStatusAllowed.size > 0 &&
+        !solStatusAllowed.has(norm(String(row[solStatusCol] ?? '')))
+      ) {
+        continue;
+      }
+
+      const nkRaw = solNatCol ? String(row[solNatCol] ?? '').trim() : '';
+      const natLabel = nkRaw === '' ? '—' : nkRaw;
+      if (isNaturezaExcludedFromContractPaidTotal(natLabel)) continue;
+
+      const cc = resolveCcDisplayLabelFromRow(row, solCcNameCol, solCcCodeCol);
+      if (!cc) continue;
+
+      if (solPoloCol && !poloByCc.has(cc)) {
+        const poloRaw = String(row[solPoloCol] ?? '').trim();
+        if (poloRaw) poloByCc.set(cc, poloRaw);
+      }
+
+      const parsed = solDateCol ? parseTotvsRowDate(row[solDateCol]) : null;
+      if (!parsed || Number.isNaN(parsed.getTime())) continue;
+
+      const year = parsed.getFullYear();
+      const month = parsed.getMonth() + 1;
+      if (year < 1900 || year > 2100 || month < 1 || month > 12) continue;
+
+      const v = parseMoneyBr(row[solValCol]);
+      if (v === 0) continue;
+
+      costCenters.add(cc);
+      const ym = `${year}-${pad2(month)}`;
+      const ccBucket = byCcYm.get(cc) ?? new Map<string, number>();
+      ccBucket.set(ym, (ccBucket.get(ym) ?? 0) + v);
+      byCcYm.set(cc, ccBucket);
+    }
+
+    const detailRows: Array<{
+      contract: string;
+      month: number;
+      year: number;
+      total: number;
+      polo: string | null;
+    }> = [];
+    for (const [contract, ymMap] of byCcYm) {
+      const polo = poloByCc.get(contract) ?? null;
+      for (const [ym, total] of ymMap) {
+        const [yearStr, monthStr] = ym.split('-');
+        const year = Number(yearStr);
+        const month = Number(monthStr);
+        if (!Number.isFinite(year) || !Number.isFinite(month) || total === 0) continue;
+        detailRows.push({ contract, month, year, total, polo });
+      }
+    }
+
+    detailRows.sort((a, b) => {
+      const byContract = a.contract.localeCompare(b.contract, 'pt-BR');
+      if (byContract !== 0) return byContract;
+      if (a.year !== b.year) return a.year - b.year;
+      return a.month - b.month;
+    });
+
+    return {
+      detailRows,
+      ccColumn: solCcNameCol ?? solCcCodeCol,
+      valueColumn: solValCol,
+      dateColumn: solDateCol,
+      poloColumn: solPoloCol,
+      totalRowCount: solicitationRows.length,
+      costCenterCount: costCenters.size
+    };
   }
 }
 
