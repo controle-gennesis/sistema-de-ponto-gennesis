@@ -1,0 +1,1356 @@
+'use client';
+
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
+import { useQuery } from '@tanstack/react-query';
+import api from '@/lib/api';
+import {
+  AlertCircle,
+  ChevronDown,
+  ChevronUp,
+  Download,
+  ExternalLink,
+  EyeOff,
+  Filter,
+  Loader2,
+  RefreshCw,
+  RotateCcw,
+  Wallet,
+  X
+} from 'lucide-react';
+import { toast } from 'react-hot-toast';
+import { exportGastosOperacionaisPdf } from '@/lib/exportGastosOperacionaisPdf';
+import { exportControleGeralContratosPdf } from '@/lib/exportControleGeralContratosPdf';
+import { Card, CardContent, CardHeader } from '@/components/ui/Card';
+import { MultiSelectSearchDropdown } from '@/components/ui/MultiSelectSearchDropdown';
+import {
+  aggregateGastosDetailRows,
+  EMPTY_GASTOS_OPERACIONAIS_FILTERS,
+  filterGastosDetailRows,
+  getGastosFilterOptions,
+  groupGastosRowsByLocality,
+  type GastosOperacionaisFilters,
+  type QueryGastosDetailRow
+} from './buildQueryGastosRows';
+import {
+  getLocalityLabel,
+  resolveVisibleLocalityItems,
+  type GastosOperacionaisLocality
+} from './gastosOperacionaisContractOrder';
+import {
+  applyContractLocalityOverride,
+  contractMatchesLocalitiesWithOverrides,
+  getEffectiveContractLocality,
+  loadGastosLocalityOverridesWithCatalogSeed,
+  saveGastosLocalityOverrides,
+  type EffectiveContractLocality,
+  type GastosOperacionaisLocalityOverrideMap
+} from './gastosOperacionaisLocalityOverrides';
+import {
+  addControleGeralExcludedContracts,
+  clearControleGeralExcludedContracts,
+  isContractExcludedFromControleGeralView,
+  loadControleGeralExcludedContracts,
+  removeControleGeralExcludedContract
+} from './controleGeralExcludedContracts';
+import {
+  buildFaturamentoByContractLookup,
+  resolveContractFaturamento,
+  resolveContractLiquido,
+  resolveContractRecebido,
+  type FaturamentoByGastosContractEntry
+} from './buildFaturamentoByContractLookup';
+import {
+  buildGastosContractDetailLookup,
+  resolveGastosContractDetailPath,
+  type ContractDetailLookupSource
+} from './buildGastosContractDetailLookup';
+import { normalizeContractOrderKey } from './gastosOperacionaisContractOrder';
+
+export type GastosOperacionaisRow = {
+  rowKey: string;
+  contract: string;
+  mesesApuracao: number;
+  anoMin: number;
+  anoMax: number;
+  totalAcumulado: number;
+  faturamentoAcumulado?: number;
+  liquidoAcumulado?: number;
+  recebidoAcumulado?: number;
+};
+
+const MONTH_OPTIONS = [
+  { value: 1, label: 'Janeiro' },
+  { value: 2, label: 'Fevereiro' },
+  { value: 3, label: 'Março' },
+  { value: 4, label: 'Abril' },
+  { value: 5, label: 'Maio' },
+  { value: 6, label: 'Junho' },
+  { value: 7, label: 'Julho' },
+  { value: 8, label: 'Agosto' },
+  { value: 9, label: 'Setembro' },
+  { value: 10, label: 'Outubro' },
+  { value: 11, label: 'Novembro' },
+  { value: 12, label: 'Dezembro' }
+];
+
+type ControleGeralGastosOperacionaisPanelProps = {
+  detailRows: QueryGastosDetailRow[];
+  isLoading: boolean;
+  fetchedAt?: string;
+  isError?: boolean;
+  errorMessage?: string;
+  onRetry?: () => void;
+  /** Quando definido, oculta contratos e grupos das demais localidades. */
+  visibleLocalities?: readonly GastosOperacionaisLocality[];
+  /** Exibe botão de exportação em PDF (módulo Gastos Operacionais). */
+  showPdfExport?: boolean;
+  /** Permite ocultar linhas da visualização (somente Controle Geral de Contratos). */
+  enableRowExclusion?: boolean;
+  /** Oculta a coluna de localidade na tabela. */
+  hideLocalityColumn?: boolean;
+  panelTitle?: string;
+  panelDescription?: string;
+  totalColumnLabel?: string;
+  /** Exibe faturamento bruto (NF's) por contrato — somente Controle Geral de Contratos. */
+  showFaturamentoColumn?: boolean;
+  /** Incrementa para forçar atualização dos dados da planilha e das NF's. */
+  dataRefreshNonce?: number;
+  /** Permite abrir a página de detalhes do contrato cadastrado. */
+  showContractDetails?: boolean;
+  contractsForDetailLookup?: readonly ContractDetailLookupSource[];
+};
+
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat('pt-BR', {
+    style: 'currency',
+    currency: 'BRL',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(value);
+}
+
+function calcGastoFaturamentoPercent(gastos: number, faturamento: number): number | null {
+  if (!Number.isFinite(faturamento) || faturamento <= 0) return null;
+  return (Math.abs(gastos) / faturamento) * 100;
+}
+
+function formatGastoFaturamentoPercent(gastos: number, faturamento: number): string {
+  const percent = calcGastoFaturamentoPercent(gastos, faturamento);
+  if (percent == null) return '—';
+  return `${new Intl.NumberFormat('pt-BR', {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1
+  }).format(percent)}%`;
+}
+
+function gastoFaturamentoPercentClassName(gastos: number, faturamento: number): string {
+  const percent = calcGastoFaturamentoPercent(gastos, faturamento);
+  if (percent == null) return 'text-gray-500 dark:text-gray-400';
+  if (percent >= 70) return 'text-red-600 dark:text-red-400';
+  return 'text-green-600 dark:text-green-400';
+}
+
+function calcGastoRecebidoPercent(gastos: number, recebido: number): number | null {
+  if (!Number.isFinite(recebido) || recebido <= 0) return null;
+  return (Math.abs(gastos) / recebido) * 100;
+}
+
+function formatGastoRecebidoPercent(gastos: number, recebido: number): string {
+  const percent = calcGastoRecebidoPercent(gastos, recebido);
+  if (percent == null) return '—';
+  return `${new Intl.NumberFormat('pt-BR', {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1
+  }).format(percent)}%`;
+}
+
+function gastoRecebidoPercentClassName(gastos: number, recebido: number): string {
+  const percent = calcGastoRecebidoPercent(gastos, recebido);
+  if (percent == null) return 'text-gray-500 dark:text-gray-400';
+  if (percent >= 85) return 'text-red-600 dark:text-red-400';
+  return 'text-green-600 dark:text-green-400';
+}
+
+function calcLucroLiquido(recebido: number, gastos: number): number {
+  return recebido - Math.abs(gastos);
+}
+
+function lucroLiquidoClassName(value: number): string {
+  if (value > 0) return 'text-green-600 dark:text-green-400';
+  if (value < 0) return 'text-red-600 dark:text-red-400';
+  return 'text-gray-600 dark:text-gray-300';
+}
+
+type GastosPanelFinancialSummary = {
+  faturamento: number;
+  liquido: number;
+  recebido: number;
+  gastos: number;
+  lucroLiquido: number;
+};
+
+function summarizeGastosPanelRows(rows: readonly GastosOperacionaisRow[]): GastosPanelFinancialSummary {
+  const faturamento = rows.reduce((sum, row) => sum + (row.faturamentoAcumulado ?? 0), 0);
+  const liquido = rows.reduce((sum, row) => sum + (row.liquidoAcumulado ?? 0), 0);
+  const recebido = rows.reduce((sum, row) => sum + (row.recebidoAcumulado ?? 0), 0);
+  const gastos = Math.abs(rows.reduce((sum, row) => sum + row.totalAcumulado, 0));
+
+  return {
+    faturamento,
+    liquido,
+    recebido,
+    gastos,
+    lucroLiquido: calcLucroLiquido(recebido, gastos)
+  };
+}
+
+/** Evita quebra do sinal negativo em valores monetários longos (ex.: -R$ 1.554.904,49). */
+const amountCurrencyCellClassName =
+  'px-3 py-3 text-right tabular-nums whitespace-nowrap min-w-[9.25rem] font-medium';
+const amountCurrencyTotalCellClassName =
+  'px-3 py-2.5 text-right tabular-nums whitespace-nowrap min-w-[9.25rem] font-semibold';
+const amountGrandTotalCellClassName =
+  'px-3 py-3 text-right tabular-nums whitespace-nowrap min-w-[9.25rem] font-semibold';
+const amountPercentCellClassName =
+  'px-3 py-3 text-right tabular-nums whitespace-nowrap min-w-[4.75rem] font-medium';
+const amountPercentTotalCellClassName =
+  'px-3 py-2.5 text-right tabular-nums whitespace-nowrap min-w-[4.75rem] font-semibold';
+const amountCurrencyThClassName =
+  'px-3 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 whitespace-nowrap min-w-[9.25rem]';
+const amountPercentThClassName =
+  'px-3 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 whitespace-nowrap min-w-[4.75rem]';
+
+function FinancialTotalsTableRow({
+  title,
+  contractCount,
+  summary,
+  showNfsMetrics,
+  tableLabelColSpan,
+  variant = 'locality'
+}: {
+  title: string;
+  contractCount: number;
+  summary: GastosPanelFinancialSummary;
+  showNfsMetrics: boolean;
+  tableLabelColSpan: number;
+  variant?: 'locality' | 'grand';
+}) {
+  const isGrand = variant === 'grand';
+  const rowClassName = isGrand
+    ? 'border-t-2 border-amber-300 bg-amber-50/80 font-semibold dark:border-amber-700 dark:bg-amber-950/30'
+    : 'border-t border-gray-200 bg-gray-50/90 font-semibold dark:border-gray-600 dark:bg-gray-800/70';
+  const labelClassName = isGrand
+    ? 'px-3 py-3 text-amber-900 dark:text-amber-200'
+    : 'px-3 py-2.5 text-gray-700 dark:text-gray-300';
+  const currencyCellClassName = isGrand ? amountGrandTotalCellClassName : amountCurrencyTotalCellClassName;
+  const percentCellClassName = amountPercentTotalCellClassName;
+
+  return (
+    <tr className={rowClassName}>
+      <td colSpan={tableLabelColSpan} className={labelClassName}>
+        {title}
+        <span className="ml-2 text-xs font-normal text-gray-500 dark:text-gray-400">
+          ({contractCount} {contractCount === 1 ? 'contrato' : 'contratos'})
+        </span>
+      </td>
+      {showNfsMetrics ? (
+        <td className={`${currencyCellClassName} text-green-600 dark:text-green-400`}>
+          {formatCurrency(summary.faturamento)}
+        </td>
+      ) : null}
+      {showNfsMetrics ? (
+        <td className={`${currencyCellClassName} text-blue-600 dark:text-blue-400`}>
+          {formatCurrency(summary.liquido)}
+        </td>
+      ) : null}
+      {showNfsMetrics ? (
+        <td className={`${currencyCellClassName} text-sky-600 dark:text-sky-400`}>
+          {formatCurrency(summary.recebido)}
+        </td>
+      ) : null}
+      <td className={`${currencyCellClassName} text-red-600 dark:text-red-400`}>
+        {formatCurrency(summary.gastos)}
+      </td>
+      {showNfsMetrics ? (
+        <td className={`${currencyCellClassName} ${lucroLiquidoClassName(summary.lucroLiquido)}`}>
+          {formatCurrency(summary.lucroLiquido)}
+        </td>
+      ) : null}
+      {showNfsMetrics ? (
+        <td
+          className={`${percentCellClassName} ${gastoFaturamentoPercentClassName(
+            summary.gastos,
+            summary.faturamento
+          )}`}
+        >
+          {formatGastoFaturamentoPercent(summary.gastos, summary.faturamento)}
+        </td>
+      ) : null}
+      {showNfsMetrics ? (
+        <td
+          className={`${percentCellClassName} ${gastoRecebidoPercentClassName(
+            summary.gastos,
+            summary.recebido
+          )}`}
+        >
+          {formatGastoRecebidoPercent(summary.gastos, summary.recebido)}
+        </td>
+      ) : null}
+    </tr>
+  );
+}
+
+function formatAnoApuracao(anoMin: number, anoMax: number) {
+  if (!anoMin && !anoMax) return '—';
+  if (anoMin === anoMax) return String(anoMin);
+  return `${anoMin}–${anoMax}`;
+}
+
+const filterLabelClassName =
+  'mb-1 block text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400';
+
+const localitySelectClassName =
+  'w-full min-w-[10rem] rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100';
+
+const FILTER_DROPDOWN_LIST_MAX_HEIGHT = 520;
+
+const rowCheckboxClassName =
+  'h-4 w-4 rounded border-gray-300 text-amber-600 focus:ring-amber-500 dark:border-gray-600 dark:bg-gray-800 dark:focus:ring-amber-400';
+
+function RowSelectCheckbox({
+  checked,
+  indeterminate = false,
+  onChange,
+  ariaLabel
+}: {
+  checked: boolean;
+  indeterminate?: boolean;
+  onChange: () => void;
+  ariaLabel: string;
+}) {
+  const ref = React.useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (ref.current) ref.current.indeterminate = indeterminate;
+  }, [indeterminate]);
+
+  return (
+    <input
+      ref={ref}
+      type="checkbox"
+      checked={checked}
+      onChange={onChange}
+      onClick={(e) => e.stopPropagation()}
+      aria-label={ariaLabel}
+      className={rowCheckboxClassName}
+    />
+  );
+}
+
+export function ControleGeralGastosOperacionaisPanel({
+  detailRows,
+  isLoading,
+  fetchedAt,
+  isError = false,
+  errorMessage,
+  onRetry,
+  visibleLocalities,
+  showPdfExport = false,
+  enableRowExclusion = false,
+  hideLocalityColumn = false,
+  panelTitle = 'Gastos operacionais por contrato',
+  panelDescription = 'QUERY BASE DE GASTOS — mês, ano, contrato e total (somatório por contrato)',
+  totalColumnLabel = 'Total',
+  showFaturamentoColumn = false,
+  dataRefreshNonce = 0,
+  showContractDetails = false,
+  contractsForDetailLookup = []
+}: ControleGeralGastosOperacionaisPanelProps) {
+  const nfsMetricColumnCount = showFaturamentoColumn ? 3 : 0;
+  const lucroLiquidoColumnCount = showFaturamentoColumn ? 1 : 0;
+  const gastoRatioColumnCount = showFaturamentoColumn ? 2 : 0;
+  const tableColumnCount =
+    4 +
+    nfsMetricColumnCount +
+    lucroLiquidoColumnCount +
+    gastoRatioColumnCount +
+    (hideLocalityColumn ? 0 : 1) +
+    (enableRowExclusion ? 1 : 0);
+  const tableAmountColumnCount =
+    1 + nfsMetricColumnCount + lucroLiquidoColumnCount + gastoRatioColumnCount;
+  const tableLabelColSpan = tableColumnCount - tableAmountColumnCount;
+  const [filters, setFilters] = useState<GastosOperacionaisFilters>(
+    EMPTY_GASTOS_OPERACIONAIS_FILTERS
+  );
+  const [exportingPdf, setExportingPdf] = useState(false);
+  const [localityOverrides, setLocalityOverrides] = useState<GastosOperacionaisLocalityOverrideMap>(
+    () => loadGastosLocalityOverridesWithCatalogSeed()
+  );
+  const [excludedContracts, setExcludedContracts] = useState<Set<string>>(() =>
+    enableRowExclusion ? loadControleGeralExcludedContracts() : new Set()
+  );
+  const [selectedRowKeys, setSelectedRowKeys] = useState<Set<string>>(() => new Set());
+  const [hiddenContractsListMinimized, setHiddenContractsListMinimized] = useState(false);
+
+  const emissaoFilterMonths = useMemo(
+    () => [...filters.months].sort((a, b) => a - b),
+    [filters.months]
+  );
+  const emissaoFilterYears = useMemo(
+    () => [...filters.years].sort((a, b) => a - b),
+    [filters.years]
+  );
+
+  const {
+    data: faturamentoByContract = [],
+    isFetching: fetchingFaturamento,
+    isLoading: loadingFaturamento
+  } = useQuery({
+    enabled: showFaturamentoColumn,
+    queryKey: [
+      'controle-geral-faturamento-by-contract-v18-recebido-filter',
+      emissaoFilterMonths,
+      emissaoFilterYears,
+      dataRefreshNonce
+    ],
+    queryFn: async () => {
+      const params: Record<string, string | number> = {};
+      if (dataRefreshNonce > 0) params.refresh = 1;
+      if (emissaoFilterMonths.length > 0) {
+        params.months = emissaoFilterMonths.join(',');
+      }
+      if (emissaoFilterYears.length > 0) {
+        params.years = emissaoFilterYears.join(',');
+      }
+
+      const res = await api.get<{
+        success: boolean;
+        data?: { entries?: FaturamentoByGastosContractEntry[] };
+      }>('/controle-nfs/summary/faturamento-by-gastos-contract', {
+        params,
+        timeout: 120_000
+      });
+
+      return res.data?.data?.entries ?? [];
+    },
+    staleTime: 5 * 60 * 1000,
+    retry: 1,
+    placeholderData: (previousData) => previousData
+  });
+
+  const isPanelLoading =
+    isLoading || (showFaturamentoColumn && loadingFaturamento && faturamentoByContract.length === 0);
+
+  const visibleLocalityItems = useMemo(
+    () => resolveVisibleLocalityItems(visibleLocalities),
+    [visibleLocalities]
+  );
+
+  const filterOptions = useMemo(
+    () =>
+      getGastosFilterOptions(
+        detailRows,
+        { localities: filters.localities },
+        localityOverrides,
+        visibleLocalities
+      ),
+    [detailRows, filters.localities, localityOverrides, visibleLocalities]
+  );
+
+  const localityFilterOptions = useMemo(
+    () =>
+      visibleLocalityItems.map((locality) => ({
+        value: locality.key,
+        label: locality.label
+      })),
+    [visibleLocalityItems]
+  );
+
+  const monthFilterOptions = useMemo(
+    () =>
+      MONTH_OPTIONS.map((month) => ({
+        value: String(month.value),
+        label: month.label
+      })),
+    []
+  );
+
+  const yearFilterOptions = useMemo(
+    () =>
+      filterOptions.years.map((year) => ({
+        value: String(year),
+        label: String(year)
+      })),
+    [filterOptions.years]
+  );
+
+  const contractFilterOptions = useMemo(
+    () =>
+      filterOptions.contracts.map((contract) => ({
+        value: contract,
+        label: contract,
+        searchText: contract
+      })),
+    [filterOptions.contracts]
+  );
+
+  const hasActiveFilters =
+    filters.localities.length > 0 ||
+    filters.months.length > 0 ||
+    filters.years.length > 0 ||
+    filters.contracts.length > 0;
+
+  const displayRows = useMemo(() => {
+    const filtered = filterGastosDetailRows(
+      detailRows,
+      filters,
+      localityOverrides,
+      visibleLocalities
+    );
+    return aggregateGastosDetailRows(filtered);
+  }, [detailRows, filters, localityOverrides, visibleLocalities]);
+
+  const visibleRows = useMemo(() => {
+    if (!enableRowExclusion) return displayRows;
+    return displayRows.filter(
+      (row) => !isContractExcludedFromControleGeralView(row.contract, excludedContracts)
+    );
+  }, [displayRows, excludedContracts, enableRowExclusion]);
+
+  const faturamentoLookup = useMemo(
+    () => buildFaturamentoByContractLookup(faturamentoByContract),
+    [faturamentoByContract]
+  );
+
+  const contractDetailLookup = useMemo(
+    () => buildGastosContractDetailLookup(contractsForDetailLookup),
+    [contractsForDetailLookup]
+  );
+
+  const resolveContractDetailPath = useCallback(
+    (contract: string) => {
+      if (!showContractDetails) return null;
+      return resolveGastosContractDetailPath(contract, contractDetailLookup, contractsForDetailLookup);
+    },
+    [showContractDetails, contractDetailLookup, contractsForDetailLookup]
+  );
+
+  const visibleRowsWithFaturamento = useMemo(
+    () =>
+      visibleRows.map((row) => ({
+        ...row,
+        faturamentoAcumulado: showFaturamentoColumn
+          ? resolveContractFaturamento(row.contract, faturamentoLookup)
+          : undefined,
+        liquidoAcumulado: showFaturamentoColumn
+          ? resolveContractLiquido(row.contract, faturamentoLookup)
+          : undefined,
+        recebidoAcumulado: showFaturamentoColumn
+          ? resolveContractRecebido(row.contract, faturamentoLookup)
+          : undefined
+      })),
+    [visibleRows, faturamentoLookup, showFaturamentoColumn]
+  );
+
+  const excludedContractLabels = useMemo(() => {
+    if (!enableRowExclusion) return [];
+    const labels = new Map<string, string>();
+    for (const row of displayRows) {
+      const key = normalizeContractOrderKey(row.contract);
+      if (excludedContracts.has(key)) {
+        labels.set(key, row.contract);
+      }
+    }
+    return Array.from(labels.values());
+  }, [displayRows, excludedContracts, enableRowExclusion]);
+
+  const localityGroups = useMemo(
+    () =>
+      groupGastosRowsByLocality(visibleRowsWithFaturamento, localityOverrides, visibleLocalities),
+    [visibleRowsWithFaturamento, localityOverrides, visibleLocalities]
+  );
+
+  const grandSummary = useMemo(
+    () => summarizeGastosPanelRows(visibleRowsWithFaturamento),
+    [visibleRowsWithFaturamento]
+  );
+
+  const totalGastos = grandSummary.gastos;
+
+  const selectedRows = useMemo(
+    () => visibleRowsWithFaturamento.filter((row) => selectedRowKeys.has(row.rowKey)),
+    [visibleRowsWithFaturamento, selectedRowKeys]
+  );
+
+  const allVisibleSelected =
+    visibleRowsWithFaturamento.length > 0 &&
+    visibleRowsWithFaturamento.every((row) => selectedRowKeys.has(row.rowKey));
+  const someVisibleSelected = visibleRowsWithFaturamento.some((row) =>
+    selectedRowKeys.has(row.rowKey)
+  );
+
+  useEffect(() => {
+    setSelectedRowKeys((prev) => {
+      const visibleKeys = new Set(visibleRowsWithFaturamento.map((row) => row.rowKey));
+      const next = new Set(Array.from(prev).filter((key) => visibleKeys.has(key)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [visibleRowsWithFaturamento]);
+
+  const clearFilters = () => {
+    setFilters(EMPTY_GASTOS_OPERACIONAIS_FILTERS);
+  };
+
+  const toggleRowSelection = (rowKey: string) => {
+    setSelectedRowKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(rowKey)) next.delete(rowKey);
+      else next.add(rowKey);
+      return next;
+    });
+  };
+
+  const toggleSelectAllVisible = () => {
+    setSelectedRowKeys((prev) => {
+      const next = new Set(prev);
+      if (allVisibleSelected) {
+        for (const row of visibleRowsWithFaturamento) next.delete(row.rowKey);
+      } else {
+        for (const row of visibleRowsWithFaturamento) next.add(row.rowKey);
+      }
+      return next;
+    });
+  };
+
+  const clearRowSelection = () => {
+    setSelectedRowKeys(new Set());
+  };
+
+  const handleExcludeSelected = () => {
+    if (!selectedRows.length) return;
+
+    const contracts = selectedRows.map((row) => row.contract);
+    setExcludedContracts((prev) => addControleGeralExcludedContracts(contracts, prev));
+    setSelectedRowKeys(new Set());
+
+    toast.success(
+      contracts.length === 1
+        ? `"${contracts[0]}" ocultado da visualização.`
+        : `${contracts.length} contratos ocultados da visualização.`
+    );
+  };
+
+  const handleRestoreExcluded = (contract: string) => {
+    setExcludedContracts((prev) => removeControleGeralExcludedContract(contract, prev));
+    toast.success(`"${contract}" restaurado na visualização.`);
+  };
+
+  const handleRestoreAllExcluded = () => {
+    setExcludedContracts(clearControleGeralExcludedContracts());
+    toast.success('Contratos ocultos restaurados.');
+  };
+
+  const handleLocalitiesChange = (selected: string[]) => {
+    const localities = selected as GastosOperacionaisLocality[];
+    setFilters((prev) => ({
+      ...prev,
+      localities,
+      contracts:
+        localities.length > 0
+          ? prev.contracts.filter((contract) =>
+              contractMatchesLocalitiesWithOverrides(contract, localities, localityOverrides)
+            )
+          : prev.contracts
+    }));
+  };
+
+  const handleContractLocalityChange = (contract: string, value: string) => {
+    const locality = (value || 'OUTROS') as EffectiveContractLocality;
+    setLocalityOverrides((prev) => {
+      const next = applyContractLocalityOverride(contract, locality, prev);
+      saveGastosLocalityOverrides(next);
+      return next;
+    });
+  };
+
+  const handleMonthsChange = (selected: string[]) => {
+    setFilters((prev) => ({
+      ...prev,
+      months: selected.map((value) => Number(value)).filter((value) => Number.isFinite(value))
+    }));
+  };
+
+  const handleYearsChange = (selected: string[]) => {
+    setFilters((prev) => ({
+      ...prev,
+      years: selected.map((value) => Number(value)).filter((value) => Number.isFinite(value))
+    }));
+  };
+
+  const buildMesesLabel = useCallback(
+    (row: GastosOperacionaisRow) => {
+      if (filters.months.length === 1) {
+        return (
+          MONTH_OPTIONS.find((month) => month.value === filters.months[0])?.label ??
+          String(filters.months[0])
+        );
+      }
+      return `${row.mesesApuracao} ${row.mesesApuracao === 1 ? 'mês' : 'meses'}`;
+    },
+    [filters.months]
+  );
+
+  const buildAnoLabel = useCallback(
+    (row: GastosOperacionaisRow) => {
+      if (filters.years.length === 1) {
+        return String(filters.years[0]);
+      }
+      return formatAnoApuracao(row.anoMin, row.anoMax);
+    },
+    [filters.years]
+  );
+
+  const buildPdfFilterLines = useCallback((): string[] => {
+    const lines: string[] = [];
+
+    if (filters.localities.length) {
+      lines.push(
+        `Localidades: ${filters.localities
+          .map((key) => getLocalityLabel(key))
+          .join(', ')}`
+      );
+    }
+    if (filters.months.length) {
+      lines.push(
+        `Meses: ${filters.months
+          .map(
+            (month) =>
+              MONTH_OPTIONS.find((option) => option.value === month)?.label ?? String(month)
+          )
+          .join(', ')}`
+      );
+    }
+    if (filters.years.length) {
+      lines.push(`Anos: ${filters.years.join(', ')}`);
+    }
+    if (filters.contracts.length) {
+      lines.push(`Contratos: ${filters.contracts.join(', ')}`);
+    }
+    if (excludedContractLabels.length) {
+      lines.push(`Ocultos da visualização: ${excludedContractLabels.join(', ')}`);
+    }
+    if (hasActiveFilters) {
+      lines.push(`Total filtrado: ${formatCurrency(totalGastos)}`);
+    }
+
+    return lines;
+  }, [filters, hasActiveFilters, totalGastos, excludedContractLabels]);
+
+  const handleExportPdf = useCallback(async () => {
+    if (visibleRows.length === 0) {
+      toast.error('Nenhum dado para exportar com os filtros atuais.');
+      return;
+    }
+
+    setExportingPdf(true);
+    try {
+      const sheetUpdatedAt = fetchedAt
+        ? new Date(fetchedAt).toLocaleString('pt-BR', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+          })
+        : undefined;
+
+      if (showFaturamentoColumn) {
+        const buildPdfSummary = (rows: readonly GastosOperacionaisRow[]) => {
+          const summary = summarizeGastosPanelRows(rows);
+          return {
+            ...summary,
+            gastoFatPercent: formatGastoFaturamentoPercent(summary.gastos, summary.faturamento),
+            gastoRecPercent: formatGastoRecebidoPercent(summary.gastos, summary.recebido)
+          };
+        };
+
+        await exportControleGeralContratosPdf({
+          filterLines: buildPdfFilterLines(),
+          contractCount: visibleRowsWithFaturamento.length,
+          sheetUpdatedAt,
+          groups: localityGroups.map((group) => ({
+            localityLabel: group.localityLabel,
+            contractCount: group.rows.length,
+            summary: buildPdfSummary(group.rows),
+            rows: group.rows.map((row) => {
+              const gastos = Math.abs(row.totalAcumulado);
+              const faturamento = row.faturamentoAcumulado ?? 0;
+              const recebido = row.recebidoAcumulado ?? 0;
+              return {
+                contract: row.contract,
+                mesesLabel: buildMesesLabel(row),
+                anoLabel: buildAnoLabel(row),
+                faturamento,
+                liquido: row.liquidoAcumulado ?? 0,
+                recebido,
+                gastos,
+                lucroLiquido: calcLucroLiquido(recebido, row.totalAcumulado),
+                gastoFatPercent: formatGastoFaturamentoPercent(row.totalAcumulado, faturamento),
+                gastoRecPercent: formatGastoRecebidoPercent(row.totalAcumulado, recebido)
+              };
+            })
+          })),
+          grandSummary: buildPdfSummary(visibleRowsWithFaturamento)
+        });
+      } else {
+        await exportGastosOperacionaisPdf({
+          filterLines: buildPdfFilterLines(),
+          totalGastos,
+          contractCount: visibleRows.length,
+          localityCount: localityGroups.length,
+          groups: localityGroups.map((group) => ({
+            localityLabel: group.localityLabel,
+            contractCount: group.rows.length,
+            subtotal: group.subtotal,
+            rows: group.rows.map((row) => ({
+              contract: row.contract,
+              mesesLabel: buildMesesLabel(row),
+              anoLabel: buildAnoLabel(row),
+              total: row.totalAcumulado
+            }))
+          })),
+          sheetUpdatedAt
+        });
+      }
+
+      toast.success('PDF exportado com sucesso.');
+    } catch {
+      toast.error('Erro ao gerar o PDF. Tente novamente.');
+    } finally {
+      setExportingPdf(false);
+    }
+  }, [
+    buildAnoLabel,
+    buildMesesLabel,
+    buildPdfFilterLines,
+    fetchedAt,
+    localityGroups,
+    showFaturamentoColumn,
+    totalGastos,
+    visibleRows.length,
+    visibleRowsWithFaturamento
+  ]);
+
+  return (
+    <Card>
+      <CardHeader className="border-b-0 pb-1">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex items-start gap-3">
+            <div className="rounded-lg bg-amber-100 p-2 sm:p-3 dark:bg-amber-900/30">
+              <Wallet className="h-5 w-5 text-amber-600 dark:text-amber-400 sm:h-6 sm:w-6" />
+            </div>
+            <div>
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                {panelTitle}
+              </h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400">
+                {panelDescription}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 sm:flex-col sm:items-end">
+            {fetchedAt ? (
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                Atualizado em{' '}
+                {new Date(fetchedAt).toLocaleString('pt-BR', {
+                  day: '2-digit',
+                  month: '2-digit',
+                  year: 'numeric',
+                  hour: '2-digit',
+                  minute: '2-digit'
+                })}
+              </p>
+            ) : null}
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              {showPdfExport || showFaturamentoColumn ? (
+                <button
+                  type="button"
+                  onClick={() => void handleExportPdf()}
+                  disabled={isPanelLoading || exportingPdf || visibleRows.length === 0}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                >
+                  {exportingPdf ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                  ) : (
+                    <Download className="h-3.5 w-3.5" aria-hidden />
+                  )}
+                  {exportingPdf ? 'Gerando PDF…' : 'Exportar PDF'}
+                </button>
+              ) : null}
+              {onRetry ? (
+                <button
+                  type="button"
+                  onClick={onRetry}
+                  disabled={isPanelLoading || fetchingFaturamento}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                >
+                  <RefreshCw
+                    className={`h-3.5 w-3.5 ${isPanelLoading || fetchingFaturamento ? 'animate-spin' : ''}`}
+                    aria-hidden
+                  />
+                  Atualizar planilha
+                </button>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      </CardHeader>
+
+      <CardContent>
+        {isPanelLoading ? (
+          <div className="flex items-center justify-center gap-2 py-12 text-gray-500 dark:text-gray-400">
+            <Loader2 className="h-5 w-5 animate-spin" aria-hidden />
+            <span>Carregando dados do controle...</span>
+          </div>
+        ) : isError ? (
+          <div className="flex flex-col items-center gap-3 py-10 text-center">
+            <AlertCircle className="h-10 w-10 text-red-500" aria-hidden />
+            <p className="max-w-md text-sm text-red-700 dark:text-red-300">
+              {errorMessage ?? 'Erro ao carregar dados da planilha.'}
+            </p>
+            {onRetry ? (
+              <button
+                type="button"
+                onClick={onRetry}
+                className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700"
+              >
+                <RefreshCw className="h-4 w-4" aria-hidden />
+                Tentar novamente
+              </button>
+            ) : null}
+          </div>
+        ) : detailRows.length === 0 ? (
+          <div className="py-10 text-center text-sm text-gray-500 dark:text-gray-400">
+            Nenhum gasto operacional encontrado na aba QUERY BASE DE GASTOS.
+          </div>
+        ) : (
+          <>
+            <div className="mb-4 rounded-lg border border-gray-200 bg-gray-50/80 p-4 dark:border-gray-700 dark:bg-gray-800/40">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300">
+                  <Filter className="h-4 w-4" aria-hidden />
+                  Filtros
+                </div>
+                {hasActiveFilters ? (
+                  <button
+                    type="button"
+                    onClick={clearFilters}
+                    className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-200 dark:text-gray-400 dark:hover:bg-gray-700"
+                  >
+                    <X className="h-3.5 w-3.5" aria-hidden />
+                    Limpar filtros
+                  </button>
+                ) : null}
+              </div>
+
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <div>
+                  <span className={filterLabelClassName}>Contrato</span>
+                  <MultiSelectSearchDropdown
+                    options={contractFilterOptions}
+                    selected={filters.contracts}
+                    onChange={(contracts) => setFilters((prev) => ({ ...prev, contracts }))}
+                    placeholder="Todos os contratos"
+                    searchPlaceholder="Pesquisar contrato..."
+                    emptyOptionsMessage="Nenhum contrato disponível."
+                    emptySearchMessage="Nenhum contrato encontrado."
+                    listMaxHeight={FILTER_DROPDOWN_LIST_MAX_HEIGHT}
+                    menuOverlapContent
+                    noFocusRing
+                  />
+                </div>
+
+                <div>
+                  <span className={filterLabelClassName}>Localidade</span>
+                  <MultiSelectSearchDropdown
+                    options={localityFilterOptions}
+                    selected={filters.localities}
+                    onChange={handleLocalitiesChange}
+                    placeholder="Todas as localidades"
+                    searchPlaceholder="Pesquisar localidade..."
+                    emptyOptionsMessage="Nenhuma localidade disponível."
+                    emptySearchMessage="Nenhuma localidade encontrada."
+                    listMaxHeight={FILTER_DROPDOWN_LIST_MAX_HEIGHT}
+                    menuOverlapContent
+                    noFocusRing
+                  />
+                </div>
+
+                <div>
+                  <span className={filterLabelClassName}>Mês</span>
+                  <MultiSelectSearchDropdown
+                    options={monthFilterOptions}
+                    selected={filters.months.map(String)}
+                    onChange={handleMonthsChange}
+                    placeholder="Todos os meses"
+                    searchPlaceholder="Pesquisar mês..."
+                    emptyOptionsMessage="Nenhum mês disponível."
+                    emptySearchMessage="Nenhum mês encontrado."
+                    listMaxHeight={FILTER_DROPDOWN_LIST_MAX_HEIGHT}
+                    menuOverlapContent
+                    noFocusRing
+                  />
+                </div>
+
+                <div>
+                  <span className={filterLabelClassName}>Ano</span>
+                  <MultiSelectSearchDropdown
+                    options={yearFilterOptions}
+                    selected={filters.years.map(String)}
+                    onChange={handleYearsChange}
+                    placeholder="Todos os anos"
+                    searchPlaceholder="Pesquisar ano..."
+                    emptyOptionsMessage="Nenhum ano disponível."
+                    emptySearchMessage="Nenhum ano encontrado."
+                    listMaxHeight={FILTER_DROPDOWN_LIST_MAX_HEIGHT}
+                    menuOverlapContent
+                    noFocusRing
+                  />
+                </div>
+              </div>
+            </div>
+
+            {displayRows.length === 0 ? (
+              <div className="py-10 text-center text-sm text-gray-500 dark:text-gray-400">
+                Nenhum gasto encontrado para os filtros selecionados.
+              </div>
+            ) : enableRowExclusion && visibleRows.length === 0 ? (
+              <div className="py-10 text-center text-sm text-gray-500 dark:text-gray-400">
+                <p>Todos os contratos visíveis foram ocultados.</p>
+                <button
+                  type="button"
+                  onClick={handleRestoreAllExcluded}
+                  className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" aria-hidden />
+                  Restaurar todos
+                </button>
+              </div>
+            ) : (
+              <>
+                {enableRowExclusion && excludedContractLabels.length > 0 ? (
+                  <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50/80 px-4 py-3 dark:border-amber-900/40 dark:bg-amber-950/20">
+                    <div
+                      className={`flex flex-wrap items-center justify-between gap-2 ${
+                        hiddenContractsListMinimized ? '' : 'mb-2'
+                      }`}
+                    >
+                      <p className="text-xs font-medium uppercase tracking-wide text-amber-800 dark:text-amber-300">
+                        {excludedContractLabels.length}{' '}
+                        {excludedContractLabels.length === 1 ? 'contrato oculto' : 'contratos ocultos'}
+                      </p>
+                      <div className="flex flex-wrap items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => setHiddenContractsListMinimized((prev) => !prev)}
+                          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-amber-800 hover:bg-amber-100 dark:text-amber-300 dark:hover:bg-amber-900/40"
+                          aria-expanded={!hiddenContractsListMinimized}
+                        >
+                          {hiddenContractsListMinimized ? (
+                            <>
+                              <ChevronDown className="h-3.5 w-3.5" aria-hidden />
+                              Expandir
+                            </>
+                          ) : (
+                            <>
+                              <ChevronUp className="h-3.5 w-3.5" aria-hidden />
+                              Minimizar
+                            </>
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleRestoreAllExcluded}
+                          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-amber-800 hover:bg-amber-100 dark:text-amber-300 dark:hover:bg-amber-900/40"
+                        >
+                          <RotateCcw className="h-3.5 w-3.5" aria-hidden />
+                          Restaurar todos
+                        </button>
+                      </div>
+                    </div>
+                    {!hiddenContractsListMinimized ? (
+                      <div className="flex flex-wrap gap-2">
+                        {excludedContractLabels.map((contract) => (
+                          <button
+                            key={contract}
+                            type="button"
+                            onClick={() => handleRestoreExcluded(contract)}
+                            className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-white px-2.5 py-1 text-xs text-amber-900 hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200 dark:hover:bg-amber-900/50"
+                            title="Restaurar na visualização"
+                          >
+                            {contract}
+                            <RotateCcw className="h-3 w-3 shrink-0" aria-hidden />
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {enableRowExclusion && selectedRows.length > 0 ? (
+                  <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-blue-200 bg-blue-50/80 px-4 py-3 dark:border-blue-900/40 dark:bg-blue-950/20">
+                    <p className="text-sm text-blue-900 dark:text-blue-200">
+                      {selectedRows.length}{' '}
+                      {selectedRows.length === 1 ? 'contrato selecionado' : 'contratos selecionados'}
+                    </p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={clearRowSelection}
+                        className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-blue-800 hover:bg-blue-100 dark:text-blue-300 dark:hover:bg-blue-900/40"
+                      >
+                        <X className="h-3.5 w-3.5" aria-hidden />
+                        Desmarcar todos
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleExcludeSelected}
+                        className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600"
+                      >
+                        <EyeOff className="h-3.5 w-3.5" aria-hidden />
+                        Excluir da visualização
+                      </button>
+                    </div>
+                  </div>
+                ) : enableRowExclusion ? (
+                  <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">
+                    Marque os contratos com o checkbox e use &quot;Excluir da visualização&quot; para
+                    ocultá-los.
+                  </p>
+                ) : null}
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="border-b border-gray-200 dark:border-gray-700">
+                      <tr>
+                        {enableRowExclusion ? (
+                          <th className="w-10 px-3 py-3 text-center">
+                            <RowSelectCheckbox
+                              checked={allVisibleSelected}
+                              indeterminate={someVisibleSelected && !allVisibleSelected}
+                              onChange={toggleSelectAllVisible}
+                              ariaLabel="Selecionar todos os contratos visíveis"
+                            />
+                          </th>
+                        ) : null}
+                        <th className="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 whitespace-nowrap">
+                          Mês de apuração
+                        </th>
+                        <th className="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 whitespace-nowrap">
+                          Ano de apuração
+                        </th>
+                        <th className="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                          Contrato
+                        </th>
+                        {!hideLocalityColumn ? (
+                          <th className="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 whitespace-nowrap">
+                            Localidade
+                          </th>
+                        ) : null}
+                        {showFaturamentoColumn ? (
+                          <th className={amountCurrencyThClassName}>Faturamento</th>
+                        ) : null}
+                        {showFaturamentoColumn ? (
+                          <th className={amountCurrencyThClassName}>Líquido</th>
+                        ) : null}
+                        {showFaturamentoColumn ? (
+                          <th className={amountCurrencyThClassName}>Recebido</th>
+                        ) : null}
+                        <th className={amountCurrencyThClassName}>{totalColumnLabel}</th>
+                        {showFaturamentoColumn ? (
+                          <th className={amountCurrencyThClassName}>Lucro líquido</th>
+                        ) : null}
+                        {showFaturamentoColumn ? (
+                          <th className={amountPercentThClassName}>GASTO / FAT (%)</th>
+                        ) : null}
+                        {showFaturamentoColumn ? (
+                          <th className={amountPercentThClassName}>GASTO / REC (%)</th>
+                        ) : null}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
+                      {localityGroups.map((group) => {
+                        const groupSummary = summarizeGastosPanelRows(group.rows);
+
+                        return (
+                        <React.Fragment key={group.localityKey}>
+                          <tr className="bg-amber-50 dark:bg-amber-950/30">
+                            <td
+                              colSpan={tableColumnCount}
+                              className="px-3 py-2.5 text-xs font-bold uppercase tracking-wider text-amber-800 dark:text-amber-300"
+                            >
+                              {group.localityLabel}
+                            </td>
+                          </tr>
+                          {group.rows.map((row) => (
+                            <tr
+                              key={row.rowKey}
+                              className={`transition-colors hover:bg-gray-50 dark:hover:bg-gray-700/50 ${
+                                enableRowExclusion && selectedRowKeys.has(row.rowKey)
+                                  ? 'bg-blue-50/70 dark:bg-blue-950/20'
+                                  : ''
+                              }`}
+                            >
+                              {enableRowExclusion ? (
+                                <td className="px-3 py-3 text-center">
+                                  <RowSelectCheckbox
+                                    checked={selectedRowKeys.has(row.rowKey)}
+                                    onChange={() => toggleRowSelection(row.rowKey)}
+                                    ariaLabel={`Selecionar ${row.contract}`}
+                                  />
+                                </td>
+                              ) : null}
+                              <td className="px-3 py-3 tabular-nums text-gray-600 dark:text-gray-300 whitespace-nowrap">
+                                {filters.months.length === 1
+                                  ? MONTH_OPTIONS.find((m) => m.value === filters.months[0])?.label ??
+                                    filters.months[0]
+                                  : `${row.mesesApuracao} ${row.mesesApuracao === 1 ? 'mês' : 'meses'}`}
+                              </td>
+                              <td className="px-3 py-3 tabular-nums text-gray-600 dark:text-gray-300 whitespace-nowrap">
+                                {filters.years.length === 1
+                                  ? String(filters.years[0])
+                                  : formatAnoApuracao(row.anoMin, row.anoMax)}
+                              </td>
+                              <td className="px-3 py-3 pl-6 font-medium text-gray-900 dark:text-gray-100">
+                                {(() => {
+                                  const detailPath = resolveContractDetailPath(row.contract);
+                                  if (!detailPath) return row.contract;
+
+                                  return (
+                                    <Link
+                                      href={detailPath}
+                                      onClick={(e) => e.stopPropagation()}
+                                      className="inline-flex items-center gap-1.5 text-blue-600 hover:text-blue-700 hover:underline dark:text-blue-400 dark:hover:text-blue-300"
+                                    >
+                                      <span>{row.contract}</span>
+                                      <ExternalLink className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden />
+                                    </Link>
+                                  );
+                                })()}
+                              </td>
+                              {!hideLocalityColumn ? (
+                                <td className="px-3 py-3">
+                                  <select
+                                    aria-label={`Localidade de ${row.contract}`}
+                                    value={getEffectiveContractLocality(row.contract, localityOverrides)}
+                                    onChange={(e) =>
+                                      handleContractLocalityChange(row.contract, e.target.value)
+                                    }
+                                    className={localitySelectClassName}
+                                  >
+                                    {!visibleLocalities?.length ? (
+                                      <option value="OUTROS">Outros</option>
+                                    ) : null}
+                                    {visibleLocalityItems.map((locality) => (
+                                      <option key={locality.key} value={locality.key}>
+                                        {locality.label}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </td>
+                              ) : null}
+                              {showFaturamentoColumn ? (
+                                <td className={`${amountCurrencyCellClassName} text-green-600 dark:text-green-400`}>
+                                  {formatCurrency(row.faturamentoAcumulado ?? 0)}
+                                </td>
+                              ) : null}
+                              {showFaturamentoColumn ? (
+                                <td className={`${amountCurrencyCellClassName} text-blue-600 dark:text-blue-400`}>
+                                  {formatCurrency(row.liquidoAcumulado ?? 0)}
+                                </td>
+                              ) : null}
+                              {showFaturamentoColumn ? (
+                                <td className={`${amountCurrencyCellClassName} text-sky-600 dark:text-sky-400`}>
+                                  {formatCurrency(row.recebidoAcumulado ?? 0)}
+                                </td>
+                              ) : null}
+                              <td className={`${amountCurrencyCellClassName} text-red-600 dark:text-red-400`}>
+                                {formatCurrency(Math.abs(row.totalAcumulado))}
+                              </td>
+                              {showFaturamentoColumn ? (
+                                <td
+                                  className={`${amountCurrencyCellClassName} ${lucroLiquidoClassName(
+                                    calcLucroLiquido(
+                                      row.recebidoAcumulado ?? 0,
+                                      row.totalAcumulado
+                                    )
+                                  )}`}
+                                >
+                                  {formatCurrency(
+                                    calcLucroLiquido(
+                                      row.recebidoAcumulado ?? 0,
+                                      row.totalAcumulado
+                                    )
+                                  )}
+                                </td>
+                              ) : null}
+                              {showFaturamentoColumn ? (
+                                <td
+                                  className={`${amountPercentCellClassName} ${gastoFaturamentoPercentClassName(
+                                    row.totalAcumulado,
+                                    row.faturamentoAcumulado ?? 0
+                                  )}`}
+                                >
+                                  {formatGastoFaturamentoPercent(
+                                    row.totalAcumulado,
+                                    row.faturamentoAcumulado ?? 0
+                                  )}
+                                </td>
+                              ) : null}
+                              {showFaturamentoColumn ? (
+                                <td
+                                  className={`${amountPercentCellClassName} ${gastoRecebidoPercentClassName(
+                                    row.totalAcumulado,
+                                    row.recebidoAcumulado ?? 0
+                                  )}`}
+                                >
+                                  {formatGastoRecebidoPercent(
+                                    row.totalAcumulado,
+                                    row.recebidoAcumulado ?? 0
+                                  )}
+                                </td>
+                              ) : null}
+                            </tr>
+                          ))}
+                          <FinancialTotalsTableRow
+                            title={`Total — ${group.localityLabel}`}
+                            contractCount={group.rows.length}
+                            summary={groupSummary}
+                            showNfsMetrics={showFaturamentoColumn}
+                            tableLabelColSpan={tableLabelColSpan}
+                          />
+                        </React.Fragment>
+                        );
+                      })}
+                      {localityGroups.length > 0 ? (
+                        <FinancialTotalsTableRow
+                          title="Total geral — todas as localidades"
+                          contractCount={visibleRowsWithFaturamento.length}
+                          summary={grandSummary}
+                          showNfsMetrics={showFaturamentoColumn}
+                          tableLabelColSpan={tableLabelColSpan}
+                          variant="grand"
+                        />
+                      ) : null}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}

@@ -49,6 +49,7 @@ import {
   pickResumoRowsForPdf,
   type ExtratoCaixaPdfAjusteRow
 } from '@/lib/exportExtratoCaixaPdf';
+import { exportDemonstrativoFinanceiroPdf } from '@/lib/exportDemonstrativoFinanceiroPdf';
 import {
   buildExtratoResumoPolo,
   comparePoloKeys,
@@ -2478,6 +2479,7 @@ export default function AnaliseExtratoPage() {
   }, [activeBalancoTab]);
   const [exportPdfModalOpen, setExportPdfModalOpen] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
+  const [exportingDemonstrativoPdf, setExportingDemonstrativoPdf] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const filtersInitializedRef = useRef(false);
 
@@ -3152,6 +3154,156 @@ export default function AnaliseExtratoPage() {
     filteredItems.length
   ]);
 
+  const buildPdfDesmarcadosLines = useCallback((): string[] => {
+    const lines: string[] = [];
+
+    for (const campo of filtrosDesmarcados) {
+      const qtd = campo.desmarcados.length;
+      const lista = campo.desmarcados.join(' · ');
+      lines.push(
+        `${campo.campo} (${qtd} excluído${qtd !== 1 ? 's' : ''}): ${lista}`
+      );
+    }
+
+    return lines;
+  }, [filtrosDesmarcados]);
+
+  const handleExportDemonstrativoPdf = useCallback(async () => {
+    setExportingDemonstrativoPdf(true);
+    try {
+      await exportDemonstrativoFinanceiroPdf({
+        subtitle: pageSubtitle,
+        stats: {
+          totalEntrada: extratoStats.totalEntrada,
+          totalSaida: extratoStats.totalSaida,
+          saldoLiquido: extratoStats.saldoLiquido,
+          qtdEntrada: extratoStats.qtdEntrada,
+          qtdSaida: extratoStats.qtdSaida
+        },
+        movimentacoesFiltradas: filteredItems.length,
+        filterLines: buildPdfDesmarcadosLines(),
+        roi: demonstrativoRoi,
+        roiLabel:
+          'ROI = ((Ganho Obtido − Investimento) ÷ Investimento) × 100 — recorte filtrado',
+        cards: [
+          {
+            title: 'Gastos com Pessoal',
+            qtd: demonstrativoGastosPessoal.qtd,
+            total: demonstrativoGastosPessoal.total,
+            kind: 'expense'
+          },
+          {
+            title: 'Receita Líquida',
+            qtd: demonstrativoReceitaLiquida.qtd,
+            total: demonstrativoReceitaLiquida.total,
+            kind: 'income'
+          },
+          {
+            title: 'Gastos com Assessoria Externa',
+            qtd: demonstrativoGastosAssessoriaExterna.qtd,
+            total: demonstrativoGastosAssessoriaExterna.total,
+            kind: 'expense'
+          },
+          {
+            title: 'Aporte de Capital dos Socios',
+            qtd: demonstrativoAporteCapitalSocios.qtd,
+            total: demonstrativoAporteCapitalSocios.total,
+            kind: 'income'
+          },
+          {
+            title: 'Gastos com Empreitas',
+            qtd: demonstrativoGastosEmpreitas.qtd,
+            total: demonstrativoGastosEmpreitas.total,
+            kind: 'expense'
+          },
+          {
+            title: 'Distribuição de Lucro',
+            qtd: demonstrativoDistribuicaoLucro.qtd,
+            total: demonstrativoDistribuicaoLucro.total,
+            kind: 'expense'
+          },
+          {
+            title: 'Gastos com Materiais',
+            qtd: demonstrativoGastosMateriais.qtd,
+            total: demonstrativoGastosMateriais.total,
+            kind: 'expense'
+          }
+        ],
+        categories: [
+          {
+            sectionTitle: 'Gastos com Pessoal — por natureza',
+            items: demonstrativoGastosPessoalItems
+          },
+          {
+            sectionTitle: 'Receita Líquida — por natureza',
+            items: demonstrativoReceitaLiquidaItems
+          },
+          {
+            sectionTitle: 'Gastos com Assessoria Externa — por natureza',
+            items: demonstrativoGastosAssessoriaExternaItems
+          },
+          {
+            sectionTitle: 'Aporte de Capital dos Socios — por natureza',
+            items: demonstrativoAporteCapitalSociosItems
+          },
+          {
+            sectionTitle: 'Gastos com Empreitas — por natureza',
+            items: demonstrativoGastosEmpreitasItems
+          },
+          {
+            sectionTitle: 'Distribuição de Lucro — por natureza',
+            items: demonstrativoDistribuicaoLucroItems
+          },
+          {
+            sectionTitle: 'Gastos com Materiais — por natureza',
+            items: demonstrativoGastosMateriaisItems
+          },
+          {
+            sectionTitle: 'Entradas — por natureza',
+            items: demonstrativoEntradasItems
+          }
+        ],
+        resumos: {
+          mensal: extratoResumoMensal,
+          polo: extratoResumoPolo,
+          centroCusto: extratoResumoCentroCusto
+        },
+        ajustesManuais: ajustesManuaisPdf
+      });
+
+      toast.success('PDF exportado com sucesso.');
+    } catch {
+      toast.error('Erro ao gerar o PDF. Tente novamente.');
+    } finally {
+      setExportingDemonstrativoPdf(false);
+    }
+  }, [
+    pageSubtitle,
+    buildPdfDesmarcadosLines,
+    extratoStats,
+    filteredItems.length,
+    demonstrativoRoi,
+    demonstrativoGastosPessoal,
+    demonstrativoReceitaLiquida,
+    demonstrativoGastosAssessoriaExterna,
+    demonstrativoAporteCapitalSocios,
+    demonstrativoGastosEmpreitas,
+    demonstrativoDistribuicaoLucro,
+    demonstrativoGastosMateriais,
+    demonstrativoGastosPessoalItems,
+    demonstrativoReceitaLiquidaItems,
+    demonstrativoGastosAssessoriaExternaItems,
+    demonstrativoAporteCapitalSociosItems,
+    demonstrativoGastosEmpreitasItems,
+    demonstrativoDistribuicaoLucroItems,
+    demonstrativoGastosMateriaisItems,
+    demonstrativoEntradasItems,
+    extratoResumoMensal,
+    extratoResumoPolo,
+    extratoResumoCentroCusto,
+    ajustesManuaisPdf
+  ]);
+
   const handleExportPdf = useCallback(
     async (mode: ExtratoPdfNatureMode) => {
       setExportingPdf(true);
@@ -3543,19 +3695,38 @@ export default function AnaliseExtratoPage() {
                       </span>
                       .
                     </p>
-                    <button
-                      type="button"
-                      onClick={() => setIsFiltersModalOpen(true)}
-                      disabled={isLoading || isFetching}
-                      className={`inline-flex h-10 shrink-0 items-center gap-2 rounded-lg border px-4 py-2 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
-                        hasActiveFilters
-                          ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40'
-                          : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
-                      }`}
-                    >
-                      <Filter className="h-4 w-4" aria-hidden />
-                      Filtros
-                    </button>
+                    <div className="flex shrink-0 flex-col gap-2 sm:flex-row sm:items-center">
+                      {showDashboards ? (
+                        <button
+                          type="button"
+                          onClick={() => void handleExportDemonstrativoPdf()}
+                          disabled={isLoading || isFetching || exportingDemonstrativoPdf}
+                          className="inline-flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-800 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
+                        >
+                          {exportingDemonstrativoPdf ? (
+                            <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
+                          ) : (
+                            <Download className="h-4 w-4 shrink-0" aria-hidden />
+                          )}
+                          <span>
+                            {exportingDemonstrativoPdf ? 'Gerando PDF…' : 'Exportar PDF'}
+                          </span>
+                        </button>
+                      ) : null}
+                      <button
+                        type="button"
+                        onClick={() => setIsFiltersModalOpen(true)}
+                        disabled={isLoading || isFetching}
+                        className={`inline-flex h-10 shrink-0 items-center gap-2 rounded-lg border px-4 py-2 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+                          hasActiveFilters
+                            ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40'
+                            : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
+                        }`}
+                      >
+                        <Filter className="h-4 w-4" aria-hidden />
+                        Filtros
+                      </button>
+                    </div>
                   </div>
                   {filtrosDesmarcados.length > 0 ? (
                     <ExtratoFiltrosDesmarcadosResumo
@@ -3943,7 +4114,7 @@ export default function AnaliseExtratoPage() {
                     </Card>
                   </div>
 
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 xl:grid-cols-3">
+                                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 xl:grid-cols-3">
                     <Card>
                       <CardContent className="p-4 sm:p-6">
                         <div className="flex items-center">

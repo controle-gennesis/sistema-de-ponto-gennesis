@@ -10,6 +10,8 @@ import {
 } from '../lib/contractAccess';
 import { getTotvsRmRelatorioFinService } from '../services/TotvsRmRelatorioFinService';
 import { totvsRmContractLookupCodes } from '../lib/totvsRmContractCostCenterCode';
+import { fetchControleGeralFinancialSummary } from '../services/ControleGeralFinancialService';
+import { fetchBaseGastosSummary } from '../services/BaseGastosSheetsService';
 
 /** Igual ao filtro da tela do contrato: não somar pleitos gerados para histórico. */
 const PLEITO_HISTORICO_MARKER = '__PLEITO_HISTORICO__';
@@ -437,11 +439,129 @@ export class ContractController {
         .filter((y) => Number.isFinite(y))
         .sort((a, b) => b - a);
 
+      const includeGastosOperacionais =
+        req.query.includeGastosOperacionais === '1' ||
+        req.query.includeGastosOperacionais === 'true';
+
+      let gastosOperacionais:
+        | {
+            rows: Array<{
+              rowKey: string;
+              label: string;
+              gastosAcumulado: number;
+              isLotRow: boolean;
+            }>;
+            fetchedAt: string;
+          }
+        | undefined;
+
+      if (includeGastosOperacionais) {
+        const forceRefresh =
+          req.query.refresh === '1' ||
+          req.query.refresh === 'true' ||
+          req.query.gastosRefresh === '1' ||
+          req.query.gastosRefresh === 'true';
+        const gastosSummary = await fetchBaseGastosSummary(undefined, forceRefresh);
+        gastosOperacionais = {
+          rows: gastosSummary.byQueryContract.map((item) => ({
+            rowKey: item.contract,
+            label: item.contract,
+            contract: item.contract,
+            mesesApuracao: item.mesesApuracao,
+            anoMin: item.anoMin,
+            anoMax: item.anoMax,
+            totalAcumulado: item.totalAcumulado,
+            gastosAcumulado: item.totalAcumulado,
+            isLotRow: false
+          })),
+          fetchedAt: gastosSummary.fetchedAt
+        };
+      }
+
       res.json({
         success: true,
         data: overview,
         filterYear: year ? filterYear : null,
-        availableYears
+        availableYears,
+        ...(gastosOperacionais ? { gastosOperacionais } : {})
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Erro ao carregar controle geral.';
+      if (message.includes('Base de Gastos') || message.includes('planilha')) {
+        res.status(503).json({ success: false, message });
+        return;
+      }
+      next(error);
+    }
+  }
+
+  /**
+   * Gastos operacionais por contrato (aba QUERY BASE DE GASTOS da planilha).
+   */
+  async getGastosOperacionais(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.user) throw createError('Não autenticado', 401);
+      const access = await getContractAccessForUser(req.user.id, req.user.isAdmin);
+      if (access.filter === 'none') {
+        throw createError('Sem permissão para acessar contratos', 403);
+      }
+
+      const { year, refresh } = req.query;
+      const yearParam = year != null && String(year).trim() !== '' ? Number(year) : null;
+      const filterYear = yearParam != null && Number.isFinite(yearParam) ? yearParam : undefined;
+      const forceRefresh = refresh === '1' || refresh === 'true';
+
+      const summary = await fetchBaseGastosSummary(filterYear, forceRefresh);
+      const rows = summary.byQueryContract.map((item) => ({
+        rowKey: item.contract,
+        contract: item.contract,
+        mesesApuracao: item.mesesApuracao,
+        anoMin: item.anoMin,
+        anoMax: item.anoMax,
+        totalAcumulado: item.totalAcumulado
+      }));
+
+      res.json({
+        success: true,
+        data: {
+          rows,
+          byQueryContract: summary.byQueryContract,
+          byCostCenter: summary.byCostCenter,
+          availableYears: summary.availableYears,
+          fetchedAt: summary.fetchedAt
+        }
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Erro ao carregar QUERY BASE DE GASTOS.';
+      if (message.includes('QUERY BASE DE GASTOS') || message.includes('planilha')) {
+        res.status(503).json({ success: false, message });
+        return;
+      }
+      next(error);
+    }
+  }
+
+  /**
+   * Resumo financeiro por contrato (planilha): gastos da Base de Gastos + faturamento do Controle de NF's.
+   */
+  async getSheetsFinancialSummary(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.user) throw createError('Não autenticado', 401);
+      const access = await getContractAccessForUser(req.user.id, req.user.isAdmin);
+      if (access.filter === 'none') {
+        throw createError('Sem permissão para acessar contratos', 403);
+      }
+
+      const { year, refresh } = req.query;
+      const yearParam = year != null && String(year).trim() !== '' ? Number(year) : null;
+      const filterYear = yearParam != null && Number.isFinite(yearParam) ? yearParam : undefined;
+      const forceRefresh = refresh === '1' || refresh === 'true';
+
+      const summary = await fetchControleGeralFinancialSummary(filterYear, forceRefresh);
+
+      res.json({
+        success: true,
+        data: summary
       });
     } catch (error) {
       next(error);

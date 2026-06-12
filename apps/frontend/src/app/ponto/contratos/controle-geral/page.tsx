@@ -4,13 +4,16 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { FileText, BarChart3, Search, ExternalLink, X, Filter, RotateCcw } from 'lucide-react';
+import { FileText, BarChart3, Search, ExternalLink, X } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import api from '@/lib/api';
 import { listTableRowClasses } from '@/components/ui/listTableUi';
+import { ControleGeralGastosOperacionaisPanel } from './ControleGeralGastosOperacionaisPanel';
+import { buildGastosDetailRowsFromSheetRows } from './buildQueryGastosRows';
+import { CONTROLE_GERAL_GASTOS_VISIBLE_LOCALITIES } from './gastosOperacionaisContractOrder';
 
 const ITEMS_PER_PAGE = 20;
 
@@ -56,10 +59,9 @@ function formatCurrency(value: number) {
 
 export default function ControleGeralContratosPage() {
   const router = useRouter();
-  const [selectedYear, setSelectedYear] = useState<number | ''>(() => new Date().getFullYear());
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
-  const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
+  const [dataRefreshNonce, setDataRefreshNonce] = useState(0);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
   const handleLogout = () => {
@@ -77,14 +79,59 @@ export default function ControleGeralContratosPage() {
   });
 
   const { data: overviewData, isLoading: loadingOverview } = useQuery({
-    queryKey: ['contracts-overview', selectedYear],
+    queryKey: ['contracts-overview'],
     queryFn: async () => {
-      const res = await api.get('/contracts/overview', {
-        params: selectedYear ? { year: selectedYear } : {}
-      });
+      const res = await api.get('/contracts/overview');
       return res.data;
     }
   });
+
+  const {
+    data: gastosData,
+    isLoading: loadingGastos,
+    isError: gastosError,
+    error: gastosErrorObj,
+    refetch: refetchGastos,
+    isFetching: fetchingGastos
+  } = useQuery({
+    queryKey: ['controle-geral-gastos-operacionais-v16-emissao-filter', dataRefreshNonce],
+    queryFn: async () => {
+      const refreshParams = dataRefreshNonce > 0 ? { refresh: 1 } : {};
+
+      const sheetRes = await api.get<{
+        success: boolean;
+        data?: { rows?: string[][]; fetchedAt?: string };
+      }>('/controle-nfs/sheet-data', {
+        params: { sheetName: 'QUERY BASE DE GASTOS', ...refreshParams },
+        timeout: 120_000
+      });
+
+      const detailRows = buildGastosDetailRowsFromSheetRows(sheetRes.data?.data?.rows ?? []);
+
+      return {
+        gastosOperacionais: {
+          detailRows,
+          fetchedAt: sheetRes.data?.data?.fetchedAt ?? new Date().toISOString()
+        }
+      };
+    },
+    staleTime: 5 * 60 * 1000,
+    retry: 1
+  });
+
+  const gastosDetailRows = gastosData?.gastosOperacionais?.detailRows ?? [];
+  const gastosFetchedAt = gastosData?.gastosOperacionais?.fetchedAt;
+  const gastosErrorMessage = (() => {
+    const err = gastosErrorObj as {
+      response?: { data?: { message?: string } };
+      message?: string;
+    } | null;
+    return (
+      err?.response?.data?.message ??
+      err?.message ??
+      'Não foi possível carregar os gastos da planilha.'
+    );
+  })();
 
   const rawList = (overviewData?.data ?? []) as ContractOverview[];
   const filterYear = overviewData?.filterYear ?? null;
@@ -103,7 +150,7 @@ export default function ControleGeralContratosPage() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, selectedYear]);
+  }, [searchTerm]);
 
   const totalFiltered = filteredContracts.length;
   const totalPages = Math.max(1, Math.ceil(totalFiltered / ITEMS_PER_PAGE));
@@ -138,15 +185,6 @@ export default function ControleGeralContratosPage() {
 
 
   const user = userData?.data || { name: 'Usuário', role: 'EMPLOYEE' };
-  const availableYears = ((overviewData?.availableYears as number[] | undefined) || []).filter((y) =>
-    Number.isFinite(y)
-  );
-  const hasActiveYearFilter = selectedYear !== '';
-
-  const clearYearFilters = () => {
-    setSelectedYear('');
-    setCurrentPage(1);
-  };
 
   // Ordem fixa solicitada para este módulo:
   // CONTRATO, CENTRO DE CUSTO, FATURAMENTO ACUMULADO, FATURAMENTO ANUAL, PRODUÇÃO, VALOR ORÇADO, PENDENTE FATURAMENTO.
@@ -173,6 +211,25 @@ export default function ControleGeralContratosPage() {
               Visão consolidada de todos os contratos
             </p>
           </div>
+
+          <ControleGeralGastosOperacionaisPanel
+            detailRows={gastosDetailRows}
+            isLoading={loadingGastos || fetchingGastos}
+            fetchedAt={gastosFetchedAt}
+            isError={gastosError}
+            errorMessage={gastosErrorMessage}
+            onRetry={() => setDataRefreshNonce((n) => n + 1)}
+            dataRefreshNonce={dataRefreshNonce}
+            visibleLocalities={CONTROLE_GERAL_GASTOS_VISIBLE_LOCALITIES}
+            enableRowExclusion
+            hideLocalityColumn
+            panelTitle="Controle de Contratos"
+            totalColumnLabel="Gastos"
+            showFaturamentoColumn
+            showPdfExport
+            showContractDetails
+            contractsForDetailLookup={rawList}
+          />
 
           {loadingOverview ? (
             <Card>
@@ -219,22 +276,6 @@ export default function ControleGeralContratosPage() {
                         </button>
                       ) : null}
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => setIsFiltersModalOpen(true)}
-                      className={`relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition-colors ${
-                        hasActiveYearFilter
-                          ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40'
-                          : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
-                      }`}
-                      aria-label="Abrir filtros"
-                      title={hasActiveYearFilter ? 'Filtros ativos' : 'Filtros'}
-                    >
-                      <Filter className="h-4 w-4" />
-                      {hasActiveYearFilter ? (
-                        <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
-                      ) : null}
-                    </button>
                   </div>
                 </div>
               </CardHeader>
@@ -424,66 +465,6 @@ export default function ControleGeralContratosPage() {
             </Card>
           )}
         </div>
-
-        {isFiltersModalOpen && (
-          <div className="fixed inset-0 z-[1000] flex items-center justify-center">
-            <div
-              className="absolute inset-0 bg-black/40"
-              aria-hidden
-              onClick={() => setIsFiltersModalOpen(false)}
-            />
-            <div className="relative mx-4 w-full max-w-md rounded-xl bg-white shadow-2xl dark:bg-gray-800">
-              <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4 dark:border-gray-700">
-                <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">Filtros</h3>
-                <button
-                  type="button"
-                  onClick={() => setIsFiltersModalOpen(false)}
-                  className="rounded-md p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
-                  aria-label="Fechar filtros"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-              <div className="px-5 py-4">
-                <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Ano
-                </label>
-                <select
-                  value={selectedYear}
-                  onChange={(e) => {
-                    setSelectedYear(e.target.value === '' ? '' : parseInt(e.target.value, 10));
-                    setCurrentPage(1);
-                  }}
-                  className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                >
-                  <option value="">Todos</option>
-                  {availableYears.map((y) => (
-                    <option key={y} value={y}>
-                      {y}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="flex items-center justify-between border-t border-gray-200 px-5 py-4 dark:border-gray-700">
-                <button
-                  type="button"
-                  onClick={clearYearFilters}
-                  className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
-                >
-                  <RotateCcw className="h-4 w-4" />
-                  Limpar filtros
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setIsFiltersModalOpen(false)}
-                  className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
-                >
-                  Aplicar
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
       </MainLayout>
     </ProtectedRoute>
   );

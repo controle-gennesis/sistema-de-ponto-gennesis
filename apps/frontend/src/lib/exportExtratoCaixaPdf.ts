@@ -35,6 +35,14 @@ export type ExtratoCaixaPdfAjusteRow = {
   valor: number;
 };
 
+export type ExtratoCaixaPdfStatCard = {
+  label: string;
+  value: string;
+  subtitle?: string;
+  accentColor?: [number, number, number];
+  valueColor?: [number, number, number];
+};
+
 export type ExportExtratoCaixaPdfInput = {
   title?: string;
   subtitle?: string;
@@ -45,6 +53,30 @@ export type ExportExtratoCaixaPdfInput = {
   /** Ajustes manuais do recorte (mesmos filtros do balanço), exibidos antes dos resumos. */
   ajustesManuais?: ExtratoCaixaPdfAjusteRow[];
   sections: ExtratoCaixaPdfSection[];
+  /** Cards de indicadores (demonstrativo), exibidos acima de Saídas/Entradas/Saldo. */
+  indicatorCards?: ExtratoCaixaPdfStatCard[];
+  /** Colunas do grid de indicadores. Padrão: 2 */
+  indicatorColumns?: number;
+  /** Nota exibida abaixo do grid de indicadores (ex.: fórmula do ROI). */
+  indicatorFootnote?: string;
+  /** Nome do arquivo sem extensão. Padrão: balanco-financeiro-resumos_YYYY-MM-DD */
+  fileName?: string;
+  /** Rótulo do terceiro card de totais. Padrão: Valor */
+  statsThirdCardLabel?: string;
+  /** Texto do rodapé após o nome da empresa. Padrão: Balanço Financeiro */
+  footerDocumentLabel?: string;
+  /** Exibe a caixa de filtros aplicados. Padrão: true */
+  includeFilterBox?: boolean;
+  /** Título da caixa de filtros. Padrão: Filtros aplicados */
+  filterBoxTitle?: string;
+  /** Texto quando filterLines estiver vazio. */
+  filterBoxEmptyMessage?: string;
+  /** Texto no cabeçalho (canto superior direito, linha inferior). */
+  headerConsolidadoNote?: string;
+  /** Exibe os cards de totais (Saídas / Entradas / Valor). Padrão: true */
+  includeStatsCards?: boolean;
+  /** Layout das colunas nas seções de resumo. Padrão: default */
+  resumoColumnLayout?: 'default' | 'saida-only';
 };
 
 const BRAND_RED: [number, number, number] = [185, 28, 28];
@@ -263,7 +295,7 @@ function drawPageHeader(
   logo: { dataUrl: string; wMm: number; hMm: number } | null,
   title: string,
   generatedAt: Date,
-  incluiAjustesManuais: boolean
+  consolidadoNote: string
 ): number {
   const headerH = 36;
   doc.setFillColor(...HEADER_PAGE_BG);
@@ -293,17 +325,77 @@ function drawPageHeader(
   });
   doc.setFontSize(8);
   doc.text(`Gerado em ${dateStr} às ${timeStr}`, pageWidth - margin, 15, { align: 'right' });
-  doc.text(
-    incluiAjustesManuais
-      ? 'Consolidado e ajustes manuais do recorte filtrado'
-      : 'Consolidado — movimentações detalhadas não incluídas',
-    pageWidth - margin,
-    22,
-    { align: 'right' }
-  );
+  doc.text(consolidadoNote, pageWidth - margin, 22, { align: 'right' });
 
   doc.setTextColor(...TEXT_BLACK);
   return headerH + 8;
+}
+
+function drawSingleStatCard(
+  doc: jsPDF,
+  x: number,
+  y: number,
+  cardW: number,
+  cardH: number,
+  card: ExtratoCaixaPdfStatCard
+): void {
+  const accent = card.accentColor ?? TEXT_RED;
+  const valueColor = card.valueColor ?? TEXT_BLACK;
+
+  doc.setDrawColor(...BORDER);
+  doc.setFillColor(255, 255, 255);
+  doc.roundedRect(x, y, cardW, cardH, 2.5, 2.5, 'FD');
+  doc.setFillColor(...accent);
+  doc.roundedRect(x, y + 2, 2.5, cardH - 4, 1, 1, 'F');
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
+  doc.setTextColor(...TEXT_MUTED);
+  doc.text(truncateText(doc, card.label, cardW - 10), x + 6, y + 7);
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.setTextColor(...valueColor);
+  doc.text(truncateText(doc, card.value, cardW - 10), x + 6, y + 15);
+
+  if (card.subtitle) {
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7);
+    doc.setTextColor(...TEXT_MUTED);
+    doc.text(truncateText(doc, card.subtitle, cardW - 10), x + 6, y + 20);
+  }
+}
+
+function drawStatCardsGrid(
+  doc: jsPDF,
+  y: number,
+  margin: number,
+  contentW: number,
+  cards: ExtratoCaixaPdfStatCard[],
+  columns = 3
+): number {
+  if (cards.length === 0) return y;
+
+  const gap = 4;
+  const cardW = (contentW - gap * (columns - 1)) / columns;
+  const cardH = 22;
+  const rowCount = Math.ceil(cards.length / columns);
+
+  for (let row = 0; row < rowCount; row++) {
+    y = ensureSpace(doc, y, cardH + 8, margin);
+
+    for (let col = 0; col < columns; col++) {
+      const index = row * columns + col;
+      if (index >= cards.length) break;
+      const x = margin + col * (cardW + gap);
+      drawSingleStatCard(doc, x, y, cardW, cardH, cards[index]);
+    }
+
+    y += cardH + gap;
+  }
+
+  doc.setTextColor(...TEXT_BLACK);
+  return y + 4;
 }
 
 function drawStatsCards(
@@ -312,61 +404,42 @@ function drawStatsCards(
   margin: number,
   contentW: number,
   stats: ExtratoCaixaPdfStats,
-  movimentacoesFiltradas: number
+  movimentacoesFiltradas: number,
+  statsThirdCardLabel = 'Valor'
 ): number {
-  y = ensureSpace(doc, y, 28, margin);
-  const gap = 4;
-  const cardW = (contentW - gap * 2) / 3;
-  const cardH = 22;
-  const labels = ['Saídas', 'Entradas', 'Valor'];
-  const values = [
-    formatCurrency(stats.totalSaida),
-    formatCurrency(stats.totalEntrada),
-    formatCurrency(stats.saldoLiquido)
-  ];
-  const subs = [
-    `${stats.qtdSaida} mov.`,
-    `${stats.qtdEntrada} mov.`,
-    `${movimentacoesFiltradas} no período filtrado`
-  ];
+  const saldoColor =
+    stats.saldoLiquido > 0 ? TEXT_GREEN : stats.saldoLiquido < 0 ? TEXT_RED : TEXT_BLACK;
 
-  for (let i = 0; i < 3; i++) {
-    const x = margin + i * (cardW + gap);
-    const accent =
-      i === 0 ? TEXT_RED : i === 1 ? TEXT_GREEN : stats.saldoLiquido >= 0 ? TEXT_GREEN : TEXT_RED;
-
-    doc.setDrawColor(...BORDER);
-    doc.setFillColor(255, 255, 255);
-    doc.roundedRect(x, y, cardW, cardH, 2.5, 2.5, 'FD');
-    doc.setFillColor(...accent);
-    doc.roundedRect(x, y + 2, 2.5, cardH - 4, 1, 1, 'F');
-
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(8);
-    doc.setTextColor(...TEXT_MUTED);
-    doc.text(labels[i], x + 6, y + 7);
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(11);
-    if (i === 0) {
-      doc.setTextColor(...TEXT_RED);
-    } else if (i === 1) {
-      doc.setTextColor(...TEXT_GREEN);
-    } else if (stats.saldoLiquido > 0) {
-      doc.setTextColor(...TEXT_GREEN);
-    } else if (stats.saldoLiquido < 0) {
-      doc.setTextColor(...TEXT_RED);
-    } else {
-      doc.setTextColor(...TEXT_BLACK);
-    }
-    doc.text(values[i], x + 6, y + 15);
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(7);
-    doc.setTextColor(...TEXT_MUTED);
-    doc.text(subs[i], x + 6, y + 20);
-  }
-
-  doc.setTextColor(...TEXT_BLACK);
-  return y + cardH + 8;
+  return drawStatCardsGrid(
+    doc,
+    y,
+    margin,
+    contentW,
+    [
+      {
+        label: 'Saídas',
+        value: formatCurrency(stats.totalSaida),
+        subtitle: `${stats.qtdSaida} mov.`,
+        accentColor: TEXT_RED,
+        valueColor: TEXT_RED
+      },
+      {
+        label: 'Entradas',
+        value: formatCurrency(stats.totalEntrada),
+        subtitle: `${stats.qtdEntrada} mov.`,
+        accentColor: TEXT_GREEN,
+        valueColor: TEXT_GREEN
+      },
+      {
+        label: statsThirdCardLabel,
+        value: formatCurrency(stats.saldoLiquido),
+        subtitle: `${movimentacoesFiltradas} no período filtrado`,
+        accentColor: saldoColor,
+        valueColor: saldoColor
+      }
+    ],
+    3
+  );
 }
 
 function drawFilterBox(
@@ -374,12 +447,11 @@ function drawFilterBox(
   y: number,
   margin: number,
   contentW: number,
-  filterLines: string[]
+  filterLines: string[],
+  title = 'Filtros aplicados',
+  emptyMessage = 'Nenhum filtro restritivo aplicado (todos os registros visíveis).'
 ): number {
-  const lines =
-    filterLines.length > 0
-      ? filterLines
-      : ['Nenhum filtro restritivo aplicado (todos os registros visíveis).'];
+  const lines = filterLines.length > 0 ? filterLines : [emptyMessage];
   doc.setFontSize(8);
   const wrapped: string[] = [];
   for (const line of lines) {
@@ -397,7 +469,7 @@ function drawFilterBox(
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9);
   doc.setTextColor(...TEXT_BLACK);
-  doc.text('Filtros aplicados', margin + 8, y + 7);
+  doc.text(title, margin + 8, y + 7);
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8);
@@ -417,7 +489,8 @@ function drawResumoSection(
   y: number,
   margin: number,
   contentW: number,
-  section: ExtratoCaixaPdfSection
+  section: ExtratoCaixaPdfSection,
+  columnLayout: 'default' | 'saida-only' = 'default'
 ): number {
   const rowH = 7;
   const headerH = 8;
@@ -433,17 +506,26 @@ function drawResumoSection(
   drawSectionTitleBar(doc, margin, y, contentW, titleH, section.title, section.footnote);
   y += titleH + 3;
 
-  const colLabel = contentW * 0.42;
-  const colVal = (contentW - colLabel) / 3;
-  const colX = [margin, margin + colLabel, margin + colLabel + colVal, margin + colLabel + colVal * 2];
+  const saidaOnly = columnLayout === 'saida-only';
+  const colLabel = saidaOnly ? contentW * 0.68 : contentW * 0.42;
+  const colVal = saidaOnly ? contentW - colLabel : (contentW - colLabel) / 3;
+  const colX = saidaOnly
+    ? [margin, margin + colLabel]
+    : [margin, margin + colLabel, margin + colLabel + colVal, margin + colLabel + colVal * 2];
 
   const drawTableHeader = () => {
-    drawTableHeaderRow(doc, margin, y, contentW, headerH, [
-      { label: section.rowLabelHeader, x: colX[0] + 3 },
-      { label: 'Saída', x: colX[1] + colVal - 3, align: 'right' },
-      { label: 'Entrada', x: colX[2] + colVal - 3, align: 'right' },
-      { label: 'Valor', x: colX[3] + colVal - 3, align: 'right' }
-    ]);
+    const columns = saidaOnly
+      ? [
+          { label: section.rowLabelHeader, x: colX[0] + 3 },
+          { label: 'Saída', x: colX[1] + colVal - 3, align: 'right' as const }
+        ]
+      : [
+          { label: section.rowLabelHeader, x: colX[0] + 3 },
+          { label: 'Saída', x: colX[1] + colVal - 3, align: 'right' as const },
+          { label: 'Entrada', x: colX[2] + colVal - 3, align: 'right' as const },
+          { label: 'Valor', x: colX[3] + colVal - 3, align: 'right' as const }
+        ];
+    drawTableHeaderRow(doc, margin, y, contentW, headerH, columns);
     y += headerH;
   };
 
@@ -484,12 +566,17 @@ function drawResumoSection(
     const label = truncateText(doc, row.label, colLabel - 6);
     doc.setTextColor(...TEXT_BLACK);
     doc.text(label, colX[0] + 3, y + 5);
-    setTextColorByValue(doc, row.totalSaida);
-    doc.text(formatCurrencyCell(row.totalSaida), colX[1] + colVal - 3, y + 5, { align: 'right' });
-    setTextColorByValue(doc, row.totalEntrada);
-    doc.text(formatCurrencyCell(row.totalEntrada), colX[2] + colVal - 3, y + 5, { align: 'right' });
-    setTextColorByValue(doc, row.totalValor);
-    doc.text(formatCurrencyCell(row.totalValor), colX[3] + colVal - 3, y + 5, { align: 'right' });
+    if (saidaOnly) {
+      doc.setTextColor(...TEXT_RED);
+      doc.text(formatCurrencyCell(row.totalSaida), colX[1] + colVal - 3, y + 5, { align: 'right' });
+    } else {
+      setTextColorByValue(doc, row.totalSaida);
+      doc.text(formatCurrencyCell(row.totalSaida), colX[1] + colVal - 3, y + 5, { align: 'right' });
+      setTextColorByValue(doc, row.totalEntrada);
+      doc.text(formatCurrencyCell(row.totalEntrada), colX[2] + colVal - 3, y + 5, { align: 'right' });
+      setTextColorByValue(doc, row.totalValor);
+      doc.text(formatCurrencyCell(row.totalValor), colX[3] + colVal - 3, y + 5, { align: 'right' });
+    }
     y += rowH;
   }
 
@@ -503,12 +590,17 @@ function drawResumoSection(
   doc.setFontSize(7);
   doc.setTextColor(...TEXT_BLACK);
   doc.text(totalLabel, colX[0] + 3, y + 5);
-  setTextColorByValue(doc, totais.totalSaida);
-  doc.text(formatCurrency(totais.totalSaida), colX[1] + colVal - 3, y + 5, { align: 'right' });
-  setTextColorByValue(doc, totais.totalEntrada);
-  doc.text(formatCurrency(totais.totalEntrada), colX[2] + colVal - 3, y + 5, { align: 'right' });
-  setTextColorByValue(doc, totais.totalValor);
-  doc.text(formatCurrency(totais.totalValor), colX[3] + colVal - 3, y + 5, { align: 'right' });
+  if (saidaOnly) {
+    doc.setTextColor(...TEXT_RED);
+    doc.text(formatCurrency(totais.totalSaida), colX[1] + colVal - 3, y + 5, { align: 'right' });
+  } else {
+    setTextColorByValue(doc, totais.totalSaida);
+    doc.text(formatCurrency(totais.totalSaida), colX[1] + colVal - 3, y + 5, { align: 'right' });
+    setTextColorByValue(doc, totais.totalEntrada);
+    doc.text(formatCurrency(totais.totalEntrada), colX[2] + colVal - 3, y + 5, { align: 'right' });
+    setTextColorByValue(doc, totais.totalValor);
+    doc.text(formatCurrency(totais.totalValor), colX[3] + colVal - 3, y + 5, { align: 'right' });
+  }
   y += rowH + 10;
 
   return y;
@@ -620,7 +712,7 @@ function drawAjustesManuaisSection(
   return y;
 }
 
-function drawFooter(doc: jsPDF, margin: number) {
+function drawFooter(doc: jsPDF, margin: number, documentLabel = 'Balanço Financeiro') {
   const pageCount = doc.getNumberOfPages();
   for (let p = 1; p <= pageCount; p++) {
     doc.setPage(p);
@@ -631,7 +723,7 @@ function drawFooter(doc: jsPDF, margin: number) {
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(7);
     doc.setTextColor(...TEXT_MUTED);
-    doc.text(`${COMPANY.name} — Balanço Financeiro`, margin, pageH - 8);
+    doc.text(`${COMPANY.name} — ${documentLabel}`, margin, pageH - 8);
     doc.text(`Página ${p} de ${pageCount}`, pageW - margin, pageH - 8, { align: 'right' });
   }
 }
@@ -645,6 +737,11 @@ export async function exportExtratoCaixaPdf(input: ExportExtratoCaixaPdfInput): 
   const generatedAt = input.generatedAt ?? new Date();
   const title = input.title ?? 'Balanço Financeiro';
   const ajustesRows = input.ajustesManuais ?? [];
+  const consolidadoNote =
+    input.headerConsolidadoNote ??
+    (ajustesRows.length > 0
+      ? 'Consolidado e ajustes manuais do recorte filtrado'
+      : 'Consolidado — movimentações detalhadas não incluídas');
 
   let y = drawPageHeader(
     doc,
@@ -653,8 +750,20 @@ export async function exportExtratoCaixaPdf(input: ExportExtratoCaixaPdfInput): 
     logo,
     title,
     generatedAt,
-    ajustesRows.length > 0
+    consolidadoNote
   );
+
+  if (input.includeFilterBox !== false) {
+    y = drawFilterBox(
+      doc,
+      y,
+      margin,
+      contentW,
+      input.filterLines,
+      input.filterBoxTitle,
+      input.filterBoxEmptyMessage
+    );
+  }
 
   if (input.subtitle) {
     doc.setFont('helvetica', 'normal');
@@ -664,17 +773,62 @@ export async function exportExtratoCaixaPdf(input: ExportExtratoCaixaPdfInput): 
     y += 6;
   }
 
-  y = drawFilterBox(doc, y, margin, contentW, input.filterLines);
-  y = drawStatsCards(doc, y, margin, contentW, input.stats, input.movimentacoesFiltradas);
-  y = drawAjustesManuaisSection(doc, y, margin, contentW, ajustesRows);
-
-  for (const section of input.sections) {
-    if (section.rows.length === 0) continue;
-    y = drawResumoSection(doc, y, margin, contentW, section);
+  if (input.indicatorCards && input.indicatorCards.length > 0) {
+    y = ensureSpace(doc, y, 14, margin);
+    drawSectionTitleBar(
+      doc,
+      margin,
+      y,
+      contentW,
+      10,
+      'Indicadores do demonstrativo financeiro'
+    );
+    y += 13;
+    y = drawStatCardsGrid(
+      doc,
+      y,
+      margin,
+      contentW,
+      input.indicatorCards,
+      input.indicatorColumns ?? 2
+    );
+    if (input.indicatorFootnote?.trim()) {
+      y = ensureSpace(doc, y, 8, margin);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7);
+      doc.setTextColor(...TEXT_MUTED);
+      const footnoteLines = doc.splitTextToSize(input.indicatorFootnote.trim(), contentW);
+      for (const line of footnoteLines) {
+        doc.text(line, margin, y);
+        y += 3.5;
+      }
+      doc.setTextColor(...TEXT_BLACK);
+      y += 4;
+    }
   }
 
-  drawFooter(doc, margin);
+  if (input.includeStatsCards !== false) {
+    y = drawStatsCards(
+      doc,
+      y,
+      margin,
+      contentW,
+      input.stats,
+      input.movimentacoesFiltradas,
+      input.statsThirdCardLabel
+    );
+  }
+  y = drawAjustesManuaisSection(doc, y, margin, contentW, ajustesRows);
+
+  const resumoColumnLayout = input.resumoColumnLayout ?? 'default';
+  for (const section of input.sections) {
+    if (section.rows.length === 0) continue;
+    y = drawResumoSection(doc, y, margin, contentW, section, resumoColumnLayout);
+  }
+
+  drawFooter(doc, margin, input.footerDocumentLabel);
 
   const datePart = generatedAt.toISOString().slice(0, 10);
-  doc.save(`balanco-financeiro-resumos_${datePart}.pdf`);
+  const defaultName = `balanco-financeiro-resumos_${datePart}`;
+  doc.save(`${input.fileName ?? defaultName}.pdf`);
 }

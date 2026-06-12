@@ -31,6 +31,7 @@ import {
   FileText,
   Search,
   LayoutDashboard,
+  Wallet,
   CalendarX2,
   MailPlus,
   Moon,
@@ -487,11 +488,30 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
             permission: isAdministrator || isDepartmentFinanceiro || can(pk('/ponto/financeiro/analise-extrato'))
           },
           {
+            name: "Controle de NF's",
+            href: '/ponto/financeiro/controle-nfs',
+            icon: FileSpreadsheet,
+            description: 'Controle de notas fiscais por contrato (planilha Relatório de Custos)',
+            permission:
+              isAdministrator ||
+              isDepartmentFinanceiro ||
+              can(pk('/ponto/financeiro/controle-nfs')) ||
+              can(pk('/ponto/financeiro/analise-extrato')) ||
+              can(pk('/ponto/financeiro/controle-financeiro'))
+          },
+          {
             name: 'Controle Geral de Contratos',
             href: '/ponto/contratos/controle-geral',
             icon: LayoutDashboard,
             description: 'Visão consolidada de todos os contratos',
             permission: isAdministrator || can(pk('/ponto/contratos/controle-geral'))
+          },
+          {
+            name: 'Gastos Operacionais',
+            href: '/ponto/contratos/gastos-operacionais',
+            icon: Wallet,
+            description: 'Gastos operacionais por contrato (QUERY BASE DE GASTOS)',
+            permission: isAdministrator || can(pk('/ponto/contratos/gastos-operacionais'))
           },
         ]
       },
@@ -795,7 +815,12 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
     if (href === '/ponto/contratos') {
       if (pathname === '/ponto/contratos') return true;
       // Rotas fixas sob /ponto/contratos (ex.: controle geral) — não marcam "Contratos", só o item próprio.
-      if (pathname.startsWith('/ponto/contratos/controle-geral')) return false;
+      if (
+        pathname.startsWith('/ponto/contratos/controle-geral') ||
+        pathname.startsWith('/ponto/contratos/gastos-operacionais')
+      ) {
+        return false;
+      }
       // Detalhe do contrato e subpáginas (orçamento, permissões, etc.)
       return /^\/ponto\/contratos\/[^/]+/.test(pathname);
     }

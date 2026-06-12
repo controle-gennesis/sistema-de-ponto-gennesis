@@ -71,12 +71,14 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
   // Financeiro
   { key: pathToModuleKey('/ponto/financeiro/controle-financeiro'), name: 'Controle Financeiro', href: '/ponto/financeiro/controle-financeiro', category: 'Financeiro' },
   { key: pathToModuleKey('/ponto/financeiro/analise-extrato'), name: 'Balanço Financeiro', href: '/ponto/financeiro/analise-extrato', category: 'Métricas' },
+  { key: pathToModuleKey('/ponto/financeiro/controle-nfs'), name: "Controle de NF's", href: '/ponto/financeiro/controle-nfs', category: 'Métricas' },
   { key: pathToModuleKey('/ponto/financeiro'), name: 'Pagamento da Folha', href: '/ponto/financeiro', category: 'Financeiro' },
   // Engenharia
   { key: pathToModuleKey('/ponto/orcamento'), name: 'Orçamento', href: '/ponto/orcamento', category: 'Engenharia' },
   { key: pathToModuleKey('/ponto/contratos'), name: 'Contratos', href: '/ponto/contratos', category: 'Engenharia' },
   { key: pathToModuleKey('/ponto/contratos/relatorios'), name: 'Relatórios Fotográficos', href: '/ponto/contratos/relatorios', category: 'Engenharia' },
   { key: pathToModuleKey('/ponto/contratos/controle-geral'), name: 'Controle Geral de Contratos', href: '/ponto/contratos/controle-geral', category: 'Métricas' },
+  { key: pathToModuleKey('/ponto/contratos/gastos-operacionais'), name: 'Gastos Operacionais', href: '/ponto/contratos/gastos-operacionais', category: 'Métricas' },
   { key: pathToModuleKey('/ponto/andamento-da-os'), name: 'Ordem de Serviço', href: '/ponto/andamento-da-os', category: 'Engenharia' },
   // Contratos e Licitações
   {

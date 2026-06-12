@@ -292,6 +292,7 @@ export function usePermissions() {
     userPosition,
     userDepartment,
     isAdministrator,
+    isElevatedUser,
     isDepartmentPessoal,
     isDepartmentProjetos,
     isDepartmentFinanceiro,
@@ -344,12 +345,12 @@ export function useRoutePermission(route: string) {
   const {
     permissions,
     isLoading,
+    isElevatedUser,
     isDepartmentPessoal,
     isDepartmentProjetos,
     isDepartmentFinanceiro,
     isDepartmentCompras,
     isDepartmentJuridico,
-    userPosition,
     can,
     dpApprovalContractIds,
     canApproveEspelhoNf,
@@ -362,7 +363,7 @@ export function useRoutePermission(route: string) {
     return { hasAccess: false, isLoading: true };
   }
 
-  const isAdministrator = userPosition === 'Administrador';
+  const isAdministrator = isElevatedUser;
 
   const routePermissions: Record<string, boolean> = {
     '/ponto': isAdministrator || isDepartmentPessoal || permissions.canRegisterTime,
@@ -414,6 +415,8 @@ export function useRoutePermission(route: string) {
     '/ponto/orcamento': canAccessOrcamentoRoutePage,
     '/ponto/contratos': isAdministrator || can(pk('/ponto/contratos')),
     '/ponto/contratos/controle-geral': isAdministrator || can(pk('/ponto/contratos/controle-geral')),
+    '/ponto/contratos/gastos-operacionais':
+      isAdministrator || can(pk('/ponto/contratos/gastos-operacionais')),
     '/ponto/pleitos-gerados': isAdministrator || can(pk('/ponto/pleitos-gerados')),
     '/ponto/aprovacao-fds': isAdministrator || can(pk('/ponto/aprovacao-fds')),
     '/ponto/recebimento-entregas': canAccessRecebimentoEntregasRoutePage,
@@ -457,6 +460,12 @@ export function useRoutePermission(route: string) {
       isAdministrator || isDepartmentJuridico || can(pk('/ponto/juridico')),
     '/ponto/financeiro/controle-financeiro':
       isAdministrator || isDepartmentFinanceiro || can(pk('/ponto/financeiro/controle-financeiro')),
+    '/ponto/financeiro/controle-nfs':
+      isAdministrator ||
+      isDepartmentFinanceiro ||
+      can(pk('/ponto/financeiro/controle-nfs')) ||
+      can(pk('/ponto/financeiro/analise-extrato')) ||
+      can(pk('/ponto/financeiro/controle-financeiro')),
   };
 
   return {
