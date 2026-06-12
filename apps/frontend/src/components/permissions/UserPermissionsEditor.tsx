@@ -197,7 +197,11 @@ function inferCategoryFromHref(href: string): string {
   ) {
     return 'Departamento Pessoal';
   }
-  if (h === '/ponto/financeiro/analise-extrato' || h === '/ponto/contratos/controle-geral') {
+  if (
+    h === '/ponto/financeiro/analise-extrato' ||
+    h === '/ponto/contratos/controle-geral' ||
+    h === '/ponto/contratos/gastos-operacionais'
+  ) {
     return 'Métricas';
   }
   if (h.startsWith('/ponto/financeiro')) return 'Financeiro';

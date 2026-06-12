@@ -1,0 +1,325 @@
+export const GASTOS_OPERACIONAIS_LOCALITIES = [
+  { key: 'CENTRAL', label: 'Central' },
+  { key: 'GOIAS', label: 'Goiás' },
+  { key: 'DISTRITO_FEDERAL', label: 'Distrito Federal' },
+  { key: 'SUL', label: 'Região Sul' },
+  { key: 'NORDESTE', label: 'Região Nordeste' }
+] as const;
+
+export type GastosOperacionaisLocality =
+  (typeof GASTOS_OPERACIONAIS_LOCALITIES)[number]['key'];
+
+/** Localidades exibidas no painel de gastos do Controle Geral de Contratos. */
+export const CONTROLE_GERAL_GASTOS_VISIBLE_LOCALITIES = [
+  'GOIAS',
+  'DISTRITO_FEDERAL'
+] as const satisfies readonly GastosOperacionaisLocality[];
+
+export function resolveVisibleLocalityItems(
+  visibleLocalities?: readonly GastosOperacionaisLocality[]
+) {
+  if (!visibleLocalities?.length) {
+    return [...GASTOS_OPERACIONAIS_LOCALITIES];
+  }
+
+  const allowed = new Set(visibleLocalities);
+  return GASTOS_OPERACIONAIS_LOCALITIES.filter((locality) => allowed.has(locality.key));
+}
+
+/** Contratos agrupados por localidade (conforme planilha de referência). */
+const CONTRACTS_BY_LOCALITY: Record<GastosOperacionaisLocality, readonly string[]> = {
+  CENTRAL: ['ADMINISTRACAO CENTRAL', 'ADM CENTRAL GENNESIS'],
+  GOIAS: [
+    'BBGO - MANUTENÇÃO',
+    'CAPITANIA FLUVIAL - GO',
+    'GO - ADM LOCAL',
+    'JUSTIÇA FEDERAL GOIAS',
+    'SEINFRA - APARECIDA',
+    'SEMASDH - GO',
+    'TJGO',
+    'TJ MANUTENÇÃO CALDAS NOVAS - CORRETIVA',
+    'TJ MANUTENÇÃO RIO VERDE - CORRETIVA',
+    'TJGO RETROFIT',
+    'TJGO RETROFIT PARCEIROS - LOTES 5',
+    'TJGO RETROFIT R5 - LOTE 4',
+    'TJGO RETROFIT R5 - LOTE 5',
+    'UFG'
+  ],
+  DISTRITO_FEDERAL: [
+    'CODEVASF',
+    'CRO 11',
+    'DF - ADM LOCAL',
+    'CONFEA - 508 NORTE',
+    'CONFEA - 516 NORTE',
+    'HFA - MÃO DE OBRA',
+    'HFA - SERVIÇOS EVENTUAIS',
+    'ITAMARATY - MÃO DE OBRA',
+    'ITAMARATY - SERVIÇOS EVENTUAIS',
+    'ICMBIO - DF',
+    'PGR',
+    'SARAH',
+    'SENAC - DF',
+    'SEDES',
+    'SEDES NORTE',
+    'SES - LOTE 10',
+    'SES - LOTE 12',
+    'SES - LOTE 14',
+    'SES - LOTE 17',
+    'STM - DF',
+    'FHE - DF',
+    'MINISTÉRIO DA CULTURA - DF',
+    'UNB',
+    'UNB - CAR',
+    'UNB - CMI',
+    'EMBRAPA BSB'
+  ],
+  SUL: [
+    'BANRISUL - LOTE 1',
+    'BANRISUL - LOTE 2',
+    'BANRISUL CENTRO',
+    'FUNDEPAR - LOTE 04 - CAMPO MOURÃO (DESATIVADO)',
+    'CORREIOS - 824',
+    'CORREIOS 18 - SOLEDADE',
+    'CORREIOS 12',
+    'INMETRO - RS',
+    'GRUPO HOSPITALAR DA CONCEIÇÃO',
+    'PMC/PR - LOTE 04',
+    'RS - ADM LOCAL',
+    'SERPRO - RS',
+    'SMAP - LOTE 01',
+    'TRE - RS',
+    'SMOBI PRAÇAS - LOTE 01',
+    'OBRA PATOS'
+  ],
+  NORDESTE: [
+    'ADM REGIONAL NATAL ECONTECX',
+    'ACESSIBILIDADE',
+    'CEHAB PE',
+    'INCRA - MÃO DE OBRA',
+    'INCRA - SERVIÇOS EVENTUAIS',
+    'PARQUE TRES RUAS - JOAO PESSOA',
+    'RECEITA FEDERAL - MÃO DE OBRA',
+    'RN - ADM LOCAL',
+    'SEFAZ PB - LOTE 01',
+    'SEFAZ PB - LOTE 02',
+    'SEFAZ PB - LOTE 03',
+    'SEFAZ PB - LOTE 04',
+    'SEFAZ PB - LOTE 05',
+    'SME REFORMA ESCOLAS MACAIBA',
+    'SME NATAL 062 - EMERGENCIAL',
+    'SEINFRA - PAVIMENTAÇÃO',
+    'SEINFRA NATAL TAPA BURACOS ZONA LESTE',
+    'SEINFRA NATAL TAPA BURACOS ZONA SUL',
+    'SEECT PB ITEM 4',
+    'SEMTAS NATAL - ZONA OESTE',
+    'SME - ZONA NORTE LOTE I - MANUTENÇÃO',
+    'SMS NATAL',
+    'SMS NATAL DISTRITO LESTE ITEM 1',
+    'SMS NATAL DISTRITO OESTE ITEM 2',
+    'SMS NATAL DISTRITO SUL ITEM 3',
+    'UFPE IMPERMEABILIZAÇÃO',
+    'UFPE PINTURA',
+    'UFRN - IMPERMEABILIZAÇÃO',
+    'UFRN - PINTURA',
+    'ALPB - MANUTENÇÃO PREDIAL'
+  ]
+};
+
+/** Contratos omitidos do painel de gastos operacionais. */
+export const GASTOS_OPERACIONAIS_EXCLUDED_CONTRACTS = [] as const;
+
+/** Normaliza nomes para casar variações da planilha (hífens, acentos, espaços). */
+export function normalizeContractOrderKey(name: string): string {
+  return name
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .replace(/\s*-\s*/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** Variações da planilha que devem ser exibidas sob um único nome canônico. */
+const GASTOS_OPERACIONAIS_CONTRACT_ALIASES: Readonly<Record<string, string>> = {
+  [normalizeContractOrderKey('TJGO MANUTENÇÃO LOTE 02')]: 'TJ MANUTENÇÃO RIO VERDE - CORRETIVA'
+};
+
+/** Unifica aliases da planilha no nome exibido no painel de gastos operacionais. */
+export function normalizeGastosOperacionaisContractName(contract: string): string {
+  const trimmed = contract.trim();
+  if (!trimmed) return trimmed;
+  return GASTOS_OPERACIONAIS_CONTRACT_ALIASES[normalizeContractOrderKey(trimmed)] ?? trimmed;
+}
+
+const excludedContractKeys = new Set(
+  GASTOS_OPERACIONAIS_EXCLUDED_CONTRACTS.map((name) => normalizeContractOrderKey(name))
+);
+
+export function isContractExcludedFromPresentation(contract: string): boolean {
+  return excludedContractKeys.has(normalizeContractOrderKey(contract));
+}
+
+const localityByContractKey = new Map<string, GastosOperacionaisLocality>();
+for (const [locality, contracts] of Object.entries(CONTRACTS_BY_LOCALITY) as Array<
+  [GastosOperacionaisLocality, readonly string[]]
+>) {
+  for (const contract of contracts) {
+    localityByContractKey.set(normalizeContractOrderKey(contract), locality);
+  }
+}
+
+/** Mapa inicial de localidades do catálogo (usado apenas na migração local). */
+export function buildCatalogLocalityOverrideMap(): Record<string, GastosOperacionaisLocality> {
+  const map: Record<string, GastosOperacionaisLocality> = {};
+  for (const [locality, contracts] of Object.entries(CONTRACTS_BY_LOCALITY) as Array<
+    [GastosOperacionaisLocality, readonly string[]]
+  >) {
+    for (const contract of contracts) {
+      map[normalizeContractOrderKey(contract)] = locality;
+    }
+  }
+  return map;
+}
+
+/** Ordem de exibição dos contratos no quadro de gastos operacionais. */
+export const GASTOS_OPERACIONAIS_CONTRACT_ORDER = [
+  'ADMINISTRACAO CENTRAL',
+  'ADM CENTRAL GENNESIS',
+  'ADM REGIONAL NATAL ECONTECX',
+  'BBGO - MANUTENÇÃO',
+  'CAPITANIA FLUVIAL - GO',
+  'GO - ADM LOCAL',
+  'JUSTIÇA FEDERAL GOIAS',
+  'SEINFRA - APARECIDA',
+  'SEMASDH - GO',
+  'TJGO',
+  'TJ MANUTENÇÃO CALDAS NOVAS - CORRETIVA',
+  'TJ MANUTENÇÃO RIO VERDE - CORRETIVA',
+  'TJGO RETROFIT',
+  'TJGO RETROFIT PARCEIROS - LOTES 5',
+  'TJGO RETROFIT R5 - LOTE 4',
+  'TJGO RETROFIT R5 - LOTE 5',
+  'UFG',
+  'CODEVASF',
+  'CRO 11',
+  'DF - ADM LOCAL',
+  'CONFEA - 508 NORTE',
+  'CONFEA - 516 NORTE',
+  'HFA - MÃO DE OBRA',
+  'HFA - SERVIÇOS EVENTUAIS',
+  'ITAMARATY - MÃO DE OBRA',
+  'ITAMARATY - SERVIÇOS EVENTUAIS',
+  'ICMBIO - DF',
+  'PGR',
+  'SARAH',
+  'SENAC - DF',
+  'SEDES',
+  'SEDES NORTE',
+  'SES - LOTE 10',
+  'SES - LOTE 12',
+  'SES - LOTE 14',
+  'SES - LOTE 17',
+  'STM - DF',
+  'FHE - DF',
+  'MINISTÉRIO DA CULTURA - DF',
+  'UNB',
+  'UNB - CAR',
+  'UNB - CMI',
+  'EMBRAPA BSB',
+  'BANRISUL - LOTE 1',
+  'BANRISUL - LOTE 2',
+  'BANRISUL CENTRO',
+  'FUNDEPAR - LOTE 04 - CAMPO MOURÃO (DESATIVADO)',
+  'CORREIOS - 824',
+  'CORREIOS 18 - SOLEDADE',
+  'CORREIOS 12',
+  'INMETRO - RS',
+  'GRUPO HOSPITALAR DA CONCEIÇÃO',
+  'PMC/PR - LOTE 04',
+  'RS - ADM LOCAL',
+  'SERPRO - RS',
+  'SMAP - LOTE 01',
+  'TRE - RS',
+  'SMOBI PRAÇAS - LOTE 01',
+  'OBRA PATOS',
+  'ACESSIBILIDADE',
+  'CEHAB PE',
+  'INCRA - MÃO DE OBRA',
+  'INCRA - SERVIÇOS EVENTUAIS',
+  'PARQUE TRES RUAS - JOAO PESSOA',
+  'RECEITA FEDERAL - MÃO DE OBRA',
+  'RN - ADM LOCAL',
+  'SEFAZ PB - LOTE 01',
+  'SEFAZ PB - LOTE 02',
+  'SEFAZ PB - LOTE 03',
+  'SEFAZ PB - LOTE 04',
+  'SEFAZ PB - LOTE 05',
+  'SME REFORMA ESCOLAS MACAIBA',
+  'SME NATAL 062 - EMERGENCIAL',
+  'SEINFRA - PAVIMENTAÇÃO',
+  'SEINFRA NATAL TAPA BURACOS ZONA LESTE',
+  'SEINFRA NATAL TAPA BURACOS ZONA SUL',
+  'SEECT PB ITEM 4',
+  'SEMTAS NATAL - ZONA OESTE',
+  'SME - ZONA NORTE LOTE I - MANUTENÇÃO',
+  'SMS NATAL',
+  'SMS NATAL DISTRITO LESTE ITEM 1',
+  'SMS NATAL DISTRITO OESTE ITEM 2',
+  'SMS NATAL DISTRITO SUL ITEM 3',
+  'UFPE IMPERMEABILIZAÇÃO',
+  'UFPE PINTURA',
+  'UFRN - IMPERMEABILIZAÇÃO',
+  'UFRN - PINTURA',
+  'ALPB - MANUTENÇÃO PREDIAL'
+] as const;
+
+const orderIndexByKey = new Map<string, number>(
+  GASTOS_OPERACIONAIS_CONTRACT_ORDER.map((name, index) => [normalizeContractOrderKey(name), index])
+);
+
+export function getContractOrderIndex(contract: string): number | undefined {
+  return orderIndexByKey.get(normalizeContractOrderKey(contract));
+}
+
+export function compareContractsByCustomOrder(a: string, b: string): number {
+  const indexA = getContractOrderIndex(a);
+  const indexB = getContractOrderIndex(b);
+
+  if (indexA != null && indexB != null) return indexA - indexB;
+  if (indexA != null) return -1;
+  if (indexB != null) return 1;
+  return a.localeCompare(b, 'pt-BR');
+}
+
+export function sortContractsByCustomOrder<T extends { contract: string }>(rows: T[]): T[] {
+  return [...rows].sort((a, b) => compareContractsByCustomOrder(a.contract, b.contract));
+}
+
+export function sortContractNamesByCustomOrder(names: string[]): string[] {
+  return [...names].sort(compareContractsByCustomOrder);
+}
+
+export function getContractLocality(contract: string): GastosOperacionaisLocality | undefined {
+  return localityByContractKey.get(normalizeContractOrderKey(contract));
+}
+
+export function contractMatchesLocality(
+  contract: string,
+  locality: GastosOperacionaisLocality | null
+): boolean {
+  if (!locality) return true;
+  return getContractLocality(contract) === locality;
+}
+
+export function contractMatchesLocalities(
+  contract: string,
+  localities: GastosOperacionaisLocality[]
+): boolean {
+  if (!localities.length) return true;
+  const contractLocality = getContractLocality(contract);
+  return contractLocality != null && localities.includes(contractLocality);
+}
+
+export function getLocalityLabel(locality: GastosOperacionaisLocality): string {
+  return GASTOS_OPERACIONAIS_LOCALITIES.find((item) => item.key === locality)?.label ?? locality;
+}

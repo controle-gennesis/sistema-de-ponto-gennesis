@@ -129,6 +129,13 @@ export type MultiSelectSearchDropdownProps = {
    * Em modais longos prefira menu flutuante (portal), sem menuInline.
    */
   menuInline?: boolean;
+  /** Altura máxima da área rolável de opções (padrão: 220px). */
+  listMaxHeight?: number;
+  /**
+   * Menu flutuante pode usar altura total solicitada e sobrepor o conteúdo da página,
+   * em vez de encolher para caber no espaço livre abaixo do campo na viewport.
+   */
+  menuOverlapContent?: boolean;
   /** Remove anéis/bordas de foco do campo, busca e checkboxes. */
   noFocusRing?: boolean;
 };
@@ -144,13 +151,45 @@ type FloatingPos = {
 
 const LIST_MAX = 220;
 
-function computeFloatingPos(trigger: HTMLElement): FloatingPos {
+function computeFloatingPos(
+  trigger: HTMLElement,
+  listMax: number,
+  overlapContent = false
+): FloatingPos {
   const rect = trigger.getBoundingClientRect();
   const gap = 6;
   const margin = 12;
   const width = Math.max(rect.width, 200);
   const chrome = 118;
-  const preferred = LIST_MAX + chrome;
+  const preferred = listMax + chrome;
+  const viewportMax = window.innerHeight - margin * 2;
+
+  if (overlapContent) {
+    const maxHeight = Math.min(preferred, viewportMax);
+    const panelBottomIfDown = rect.bottom + gap + maxHeight;
+    const fitsBelow = panelBottomIfDown <= window.innerHeight - margin;
+    const spaceAbove = rect.top - gap - margin;
+    const spaceBelow = window.innerHeight - rect.bottom - gap - margin;
+    const openUp = !fitsBelow && spaceAbove > spaceBelow;
+
+    if (openUp) {
+      return {
+        left: rect.left,
+        width,
+        bottom: window.innerHeight - rect.top + gap,
+        maxHeight,
+        openUp: true,
+      };
+    }
+
+    return {
+      left: rect.left,
+      width,
+      top: rect.bottom + gap,
+      maxHeight,
+      openUp: false,
+    };
+  }
 
   const spaceBelow = window.innerHeight - rect.bottom - gap - margin;
   const spaceAbove = rect.top - gap - margin;
@@ -302,8 +341,8 @@ function MenuPanel({
 
       <div
         ref={listRef}
-        className="min-h-[5rem] flex-1 basis-0 overflow-y-auto overflow-x-hidden px-1.5 py-1"
-        style={listMaxHeight > 0 ? { maxHeight: listMaxHeight } : undefined}
+        className="shrink-0 overflow-y-auto overflow-x-hidden px-1.5 py-1"
+        style={listMaxHeight > 0 ? { height: listMaxHeight, maxHeight: listMaxHeight } : undefined}
       >
         {options.length === 0 ? (
           <p className="py-4 text-center text-sm text-gray-500 dark:text-gray-400">{emptyOptionsMessage}</p>
@@ -343,8 +382,11 @@ export function MultiSelectSearchDropdown({
   closeOnSelect = false,
   closeOnOutsideClick = true,
   menuInline = false,
+  listMaxHeight: listMaxHeightProp,
+  menuOverlapContent = false,
   noFocusRing = false,
 }: MultiSelectSearchDropdownProps) {
+  const effectiveListMax = listMaxHeightProp ?? LIST_MAX;
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [floatingPos, setFloatingPos] = useState<FloatingPos | null>(null);
@@ -377,8 +419,10 @@ export function MultiSelectSearchDropdown({
 
   const syncFloatingPos = useCallback(() => {
     if (!triggerRef.current) return;
-    setFloatingPos(computeFloatingPos(triggerRef.current));
-  }, []);
+    setFloatingPos(
+      computeFloatingPos(triggerRef.current, effectiveListMax, menuOverlapContent)
+    );
+  }, [effectiveListMax, menuOverlapContent]);
 
   useEffect(() => setMounted(true), []);
 
@@ -451,10 +495,10 @@ export function MultiSelectSearchDropdown({
         : `${selected.length} selecionado(s)`;
 
   const listMaxHeight = menuInline
-    ? LIST_MAX
+    ? effectiveListMax
     : floatingPos
       ? Math.max(80, floatingPos.maxHeight - 118)
-      : LIST_MAX;
+      : effectiveListMax;
 
   const menuProps = {
     panelId,
@@ -487,7 +531,7 @@ export function MultiSelectSearchDropdown({
       <MenuPanel
         {...menuProps}
         className="mt-2 flex flex-col overflow-hidden rounded-lg border border-gray-300 bg-white shadow-md ring-1 ring-black/5 dark:border-gray-600 dark:bg-gray-800 dark:ring-white/10"
-        style={{ maxHeight: LIST_MAX + 118 }}
+        style={{ maxHeight: effectiveListMax + 118 }}
       />
     ) : null;
 
@@ -500,6 +544,7 @@ export function MultiSelectSearchDropdown({
           zIndex: 99999,
           left: floatingPos.left,
           width: floatingPos.width,
+          height: floatingPos.maxHeight,
           maxHeight: floatingPos.maxHeight,
           ...(floatingPos.openUp
             ? { bottom: floatingPos.bottom }
