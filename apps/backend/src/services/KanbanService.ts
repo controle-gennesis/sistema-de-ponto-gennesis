@@ -1254,10 +1254,6 @@ export class KanbanService {
   },
   ) {
     await this.assertColumnAccess(userId, data.columnId);
-    const maxPos = await prisma.kanbanCard.aggregate({
-      where: { columnId: data.columnId },
-      _max: { position: true },
-    });
 
     let assigneeName = data.assigneeName?.trim() || null;
     if (data.assigneeUserId) {
@@ -1280,29 +1276,36 @@ export class KanbanService {
     const validatedLabels =
       validateCardLabelsForBoard(data.labels ?? [], labelPresets) ?? [];
 
-    const card = await prisma.kanbanCard.create({
-      data: {
-        columnId: data.columnId,
-        title: data.title.trim(),
-        description: data.description?.trim() ?? '',
-        priority: priorityFromClient(data.priority ?? 'medium'),
-        startDate: parseDateInput(data.startDate) ?? null,
-        endDate: parseDateInput(data.endDate) ?? null,
-        labels: labelsToJson(validatedLabels) ?? [],
-        assigneeUserId: memberIds[0] ?? data.assigneeUserId ?? null,
-        assigneeName,
-        totalTasks: data.totalTasks ?? 0,
-        completedTasks: Math.min(data.completedTasks ?? 0, data.totalTasks ?? 0),
-        position: (maxPos._max.position ?? -1) + 1,
-        ...(memberIds.length > 0
-          ? {
-              members: {
-                create: memberIds.map((userId) => ({ userId })),
-              },
-            }
-          : {}),
-      },
-      include: cardInclude,
+    const card = await prisma.$transaction(async (tx) => {
+      await tx.kanbanCard.updateMany({
+        where: { columnId: data.columnId },
+        data: { position: { increment: 1 } },
+      });
+
+      return tx.kanbanCard.create({
+        data: {
+          columnId: data.columnId,
+          title: data.title.trim(),
+          description: data.description?.trim() ?? '',
+          priority: priorityFromClient(data.priority ?? 'medium'),
+          startDate: parseDateInput(data.startDate) ?? null,
+          endDate: parseDateInput(data.endDate) ?? null,
+          labels: labelsToJson(validatedLabels) ?? [],
+          assigneeUserId: memberIds[0] ?? data.assigneeUserId ?? null,
+          assigneeName,
+          totalTasks: data.totalTasks ?? 0,
+          completedTasks: Math.min(data.completedTasks ?? 0, data.totalTasks ?? 0),
+          position: 0,
+          ...(memberIds.length > 0
+            ? {
+                members: {
+                  create: memberIds.map((userId) => ({ userId })),
+                },
+              }
+            : {}),
+        },
+        include: cardInclude,
+      });
     });
 
     if (memberIds.length > 0) {
