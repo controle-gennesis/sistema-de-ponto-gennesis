@@ -117,7 +117,7 @@ export default function GastosOperacionaisPage() {
               Gastos Operacionais
             </h1>
             <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400 max-w-2xl mx-auto">
-              Gastos operacionais por Centro de Custo
+              Visualize e exporte os gastos de todos os centros de custo.
             </p>
           </div>
 
@@ -131,7 +131,8 @@ export default function GastosOperacionaisPage() {
             }}
             hideDataRefreshControls
             inlineFilters
-            panelDescription="Gastos operacionais por centro de custo, consolidados por mês e ano a partir do TOTVS RM."
+            panelTitle="Resumo por centro de custo"
+            panelDescription="Totais mensais e anuais integrados ao TOTVS RM."
             readOnlyPoloColumn
             showPdfExport
           />

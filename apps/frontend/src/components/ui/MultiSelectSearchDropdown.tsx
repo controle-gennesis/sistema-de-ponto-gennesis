@@ -572,7 +572,9 @@ export function MultiSelectSearchDropdown({
             return !v;
           });
         }}
-        className={`relative flex h-10 w-full items-center rounded-md border border-gray-300 bg-white pl-10 pr-11 text-left text-sm text-gray-900 outline-none disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 ${
+        className={`relative flex h-10 w-full items-center rounded-md border border-gray-300 bg-white pr-11 text-left text-sm text-gray-900 outline-none disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 ${
+          icon ? 'pl-10' : 'pl-3'
+        } ${
           noFocusRing
             ? 'focus:ring-0 focus:border-gray-300 dark:focus:border-gray-600'
             : 'focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent dark:focus:ring-red-400'
