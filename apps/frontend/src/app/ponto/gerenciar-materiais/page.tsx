@@ -24,10 +24,13 @@ import {
   OC_TYPE_BOLETO,
   parseCurrencyBR
 } from './_lib/ocAmounts';
+import { maskCurrencyInputBrOrEmpty, parseCurrencyInputBr } from '@/lib/maskCurrencyBr';
 import { FluxGlobalSearch } from './_components/FluxGlobalSearch';
 import { FluxTabsNav } from './_components/FluxTabsNav';
 import { MaterialRequestsRmList } from './_components/MaterialRequestsRmList';
 import { SearchableEntityAutocomplete } from '@/components/ui/SearchableEntityAutocomplete';
+import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
+import { OC_PIX_KEY_TYPE_OPTIONS } from '@/components/oc/OcPurchaseOrderFormFields';
 import {
   getFluxTabForPurchaseOrder,
   getMaterialRequestCancellationReason,
@@ -39,7 +42,7 @@ import {
 } from './_lib/search';
 
 const ocFieldCls =
-  'w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 disabled:cursor-not-allowed disabled:opacity-50';
+  'w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-0 focus:border-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:focus:border-red-500 disabled:cursor-not-allowed disabled:opacity-50';
 
 type OcSupplierOption = {
   id: string;
@@ -48,8 +51,6 @@ type OcSupplierOption = {
   tradeName?: string | null;
   isActive?: boolean;
 };
-
-const OC_PIX_KEY_TYPES = ['ALEATÓRIA', 'CELULAR', 'CNPJ', 'CPF', 'E-MAIL'] as const;
 
 function isOcAvistaPaymentIncomplete(
   paymentType: string,
@@ -69,14 +70,14 @@ function getOcSupplierLabel(supplier?: OcSupplierOption | null): string {
 }
 
 const ocPaymentSegmentCls = (active: boolean) =>
-  `w-full rounded-lg border px-3 py-2.5 text-center text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+  `w-full rounded-lg border px-3 py-2.5 text-center text-sm font-medium transition-colors focus:outline-none focus:ring-0 focus:border-red-500 dark:focus:border-red-500 ${
     active
-      ? 'border-blue-600 bg-blue-600 text-white shadow-sm dark:border-blue-500 dark:bg-blue-500'
+      ? 'border-red-600 bg-red-50 text-red-800 dark:border-red-500 dark:bg-red-950/40 dark:text-red-200'
       : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700/80'
   }`;
 
 const ocFieldCompactCls =
-  'w-full min-w-0 rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 disabled:cursor-not-allowed disabled:opacity-50';
+  'w-full min-w-0 rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-0 focus:border-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:focus:border-red-500 disabled:cursor-not-allowed disabled:opacity-50';
 
 export default function GerenciarMateriaisPage() {
   const router = useRouter();
@@ -139,9 +140,7 @@ export default function GerenciarMateriaisPage() {
       setOcQuantityStrByItemId(
         Object.fromEntries(selectedRequest.items.map((i) => [i.id, String(i.quantity)]))
       );
-      setOcUnitPriceStrByItemId(
-        Object.fromEntries(selectedRequest.items.map((i) => [i.id, '0']))
-      );
+      setOcUnitPriceStrByItemId({});
     }
   }, [showCreateOCModal, selectedRequest]);
 
@@ -175,7 +174,7 @@ export default function GerenciarMateriaisPage() {
   }, [selectedRequest, ocSelectedItemIds, ocQuantityStrByItemId, ocUnitPriceStrByItemId]);
 
   const ocFreteParsed =
-    ocFreteStr.trim() === '' ? 0 : parseCurrencyBR(ocFreteStr);
+    ocFreteStr.trim() === '' ? 0 : parseCurrencyInputBr(ocFreteStr);
   const ocFreteInvalid = ocFreteStr.trim() !== '' && ocFreteParsed === null;
   const ocAmountToPayComputed =
     ocFreteInvalid || ocFreteParsed === null
@@ -204,7 +203,7 @@ export default function GerenciarMateriaisPage() {
     setOcUnitPriceStrByItemId((prev) => {
       const next = { ...prev };
       for (const it of selectedRequest.items) {
-        if (next[it.id] === undefined) next[it.id] = '0';
+        if (next[it.id] === undefined) next[it.id] = '';
       }
       return next;
     });
@@ -980,7 +979,7 @@ export default function GerenciarMateriaisPage() {
                             Qtd. na OC
                           </th>
                           <th scope="col" className="px-2 py-2 text-left font-medium">
-                            Valor unit. (R$)
+                            Valor unit.
                           </th>
                         </tr>
                       </thead>
@@ -1043,17 +1042,17 @@ export default function GerenciarMateriaisPage() {
                                 <input
                                   id={`oc-price-${item.id}`}
                                   type="text"
-                                  inputMode="decimal"
-                                  placeholder="0,00"
+                                  inputMode="numeric"
+                                  placeholder="R$ 0,00"
                                   disabled={!isSelected}
                                   value={ocUnitPriceStrByItemId[item.id] ?? ''}
                                   onChange={(e) => {
                                     setOcUnitPriceStrByItemId((prev) => ({
                                       ...prev,
-                                      [item.id]: e.target.value
+                                      [item.id]: maskCurrencyInputBrOrEmpty(e.target.value)
                                     }));
                                   }}
-                                  className={`${ocFieldCompactCls} w-full`}
+                                  className={`${ocFieldCompactCls} w-full tabular-nums`}
                                 />
                               </td>
                             </tr>
@@ -1139,7 +1138,6 @@ export default function GerenciarMateriaisPage() {
                     paymentType="BOLETO"
                     value={ocPaymentCondition}
                     onChange={setOcPaymentCondition}
-                    className={ocFieldCls}
                   />
                 </div>
               ) : null}
@@ -1165,19 +1163,15 @@ export default function GerenciarMateriaisPage() {
                       <label htmlFor="ocPixKeyType" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                         Tipo de Chave Pix *
                       </label>
-                      <select
-                        id="ocPixKeyType"
+                      <SingleSelectSearchDropdown
                         value={ocPixKeyType}
-                        onChange={(e) => setOcPixKeyType(e.target.value)}
-                        className={ocFieldCls}
-                      >
-                        <option value="">Selecione...</option>
-                        {OC_PIX_KEY_TYPES.map((type) => (
-                          <option key={type} value={type}>
-                            {type}
-                          </option>
-                        ))}
-                      </select>
+                        onChange={setOcPixKeyType}
+                        options={OC_PIX_KEY_TYPE_OPTIONS}
+                        allowEmpty
+                        placeholder="Selecione..."
+                        searchPlaceholder="Pesquisar..."
+                        noFocusRing
+                      />
                     </div>
 
                     <div>
@@ -1213,16 +1207,16 @@ export default function GerenciarMateriaisPage() {
 
               <div>
                 <label htmlFor="ocFrete" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Frete (R$)
+                  Frete
                 </label>
                 <input
                   id="ocFrete"
                   type="text"
-                  inputMode="decimal"
-                  placeholder="0,00"
+                  inputMode="numeric"
+                  placeholder="R$ 0,00"
                   value={ocFreteStr}
-                  onChange={(e) => setOcFreteStr(e.target.value)}
-                  className={ocFieldCls}
+                  onChange={(e) => setOcFreteStr(maskCurrencyInputBrOrEmpty(e.target.value))}
+                  className={`${ocFieldCls} tabular-nums`}
                 />
                 {ocFreteInvalid && (
                   <p className="text-xs text-red-600 dark:text-red-400 mt-1">Informe um valor de frete válido ou deixe em branco.</p>
@@ -1231,7 +1225,7 @@ export default function GerenciarMateriaisPage() {
 
               <div>
                 <span className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Valor a ser pago (R$) *
+                  Valor total *
                 </span>
                 <div
                   className={`${ocFieldCls} bg-gray-50 font-semibold dark:bg-gray-900/50`}

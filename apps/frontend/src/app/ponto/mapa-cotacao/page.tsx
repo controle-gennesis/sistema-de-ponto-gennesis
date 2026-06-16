@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { FileSpreadsheet, FileText, Plus, Search, Truck, X } from 'lucide-react';
+import { FileSpreadsheet, FileText, Plus, Truck, X } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Loading } from '@/components/ui/Loading';
 import toast from 'react-hot-toast';
@@ -11,6 +11,10 @@ import api from '@/lib/api';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { PaymentConditionSelect } from '@/components/oc/PaymentConditionSelect';
+import { OC_PIX_KEY_TYPE_OPTIONS } from '@/components/oc/OcPurchaseOrderFormFields';
+import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
+import { MultiSelectSearchDropdown } from '@/components/ui/MultiSelectSearchDropdown';
+import { maskCurrencyInputBrOrEmpty, parseCurrencyInputBr } from '@/lib/maskCurrencyBr';
 import { materialItemLabel, materialItemSubtitle } from '../gerenciar-materiais/_lib/display';
 
 type MaterialRequestItem = {
@@ -104,6 +108,14 @@ function parseCurrencyBR(input: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+function parseMapUnitPrice(input: string): number | null {
+  const t = input.trim();
+  if (!t) return null;
+  const fromMask = parseCurrencyInputBr(t);
+  if (fromMask !== null) return fromMask;
+  return parseCurrencyBR(t);
+}
+
 function formatCurrencyBR(v: number): string {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
 }
@@ -117,7 +129,7 @@ function formatDateTimeBR(dateString: string) {
 }
 
 const mapFieldCls =
-  'w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm tabular-nums text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100';
+  'w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm tabular-nums text-gray-900 placeholder:text-gray-400 focus:outline-none dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100';
 
 const mapThCls =
   'px-3 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-4';
@@ -125,9 +137,9 @@ const mapThCls =
 const mapTdCls = 'px-3 py-3 text-sm sm:px-4 align-middle';
 
 const mapPaymentSegmentCls = (active: boolean) =>
-  `w-full rounded-lg border px-3 py-2.5 text-center text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+  `w-full rounded-lg border px-3 py-2.5 text-center text-sm font-medium transition-colors focus:outline-none ${
     active
-      ? 'border-blue-600 bg-blue-600 text-white shadow-sm dark:border-blue-500 dark:bg-blue-500'
+      ? 'border-red-600 bg-red-50 text-red-800 dark:border-red-500 dark:bg-red-950/40 dark:text-red-200'
       : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700/80'
   }`;
 
@@ -187,6 +199,8 @@ function emptyPaymentDraft() {
     paymentType: OC_TYPE_AVISTA,
     paymentCondition: paymentConditionDefault(OC_TYPE_AVISTA),
     paymentDetails: '',
+    pixKeyType: '',
+    pixKey: '',
     observations: '',
     amountToPayStr: ''
   };
@@ -206,7 +220,6 @@ export default function MapaCotacaoPage() {
   const queryClient = useQueryClient();
 
   const [selectedRequestId, setSelectedRequestId] = useState<string>('');
-  const [supplierSearch, setSupplierSearch] = useState('');
   const [selectedSupplierIds, setSelectedSupplierIds] = useState<Set<string>>(new Set());
   const [freightBySupplier, setFreightBySupplier] = useState<Record<string, string>>({});
   const [unitPriceBySupplierItem, setUnitPriceBySupplierItem] = useState<Record<string, string>>({});
@@ -225,6 +238,8 @@ export default function MapaCotacaoPage() {
         paymentType: string;
         paymentCondition: string;
         paymentDetails: string;
+        pixKeyType: string;
+        pixKey: string;
         observations: string;
         amountToPayStr: string;
       }
@@ -277,6 +292,20 @@ export default function MapaCotacaoPage() {
     [rawApprovedRequests, materialRequestIdsWithOc]
   );
 
+  const materialRequestOptions = useMemo(
+    () =>
+      approvedRequests.map((r) => {
+        const num = r.requestNumber || r.id.slice(0, 8);
+        const date = formatDateTimeBR(r.createdAt);
+        return {
+          value: r.id,
+          label: `${num} (${date})`,
+          searchText: `${num} ${date} ${r.id}`
+        };
+      }),
+    [approvedRequests]
+  );
+
   const { data: suppliersData, isLoading: loadingSuppliers } = useQuery({
     queryKey: ['suppliers-map'],
     queryFn: async () => {
@@ -290,15 +319,15 @@ export default function MapaCotacaoPage() {
     [suppliersData?.data]
   );
 
-  const filteredSuppliers = useMemo(() => {
-    const q = supplierSearch.trim().toLowerCase();
-    if (!q) return suppliers;
-    return suppliers.filter(
-      (s) =>
-        s.name.toLowerCase().includes(q) ||
-        (s.code && s.code.toLowerCase().includes(q))
-    );
-  }, [suppliers, supplierSearch]);
+  const supplierOptions = useMemo(
+    () =>
+      suppliers.map((s) => ({
+        value: s.id,
+        label: s.code ? `${s.name} · Cód. ${s.code}` : s.name,
+        searchText: `${s.name} ${s.code ?? ''}`
+      })),
+    [suppliers]
+  );
 
   const selectedRequest = approvedRequests.find((r) => r.id === selectedRequestId) || null;
 
@@ -332,7 +361,6 @@ export default function MapaCotacaoPage() {
     setFreightBySupplier({});
     setUnitPriceBySupplierItem({});
     setPaymentDraftBySupplier({});
-    setSupplierSearch('');
   }, [selectedRequestId]);
 
   useEffect(() => {
@@ -400,8 +428,8 @@ export default function MapaCotacaoPage() {
 
       for (const supplierId of Array.from(selectedSupplierIds)) {
         const key = `${supplierId}:${item.id}`;
-        const unitPrice = parseCurrencyBR(unitPriceBySupplierItem[key] ?? '');
-        const freight = parseCurrencyBR(freightBySupplier[supplierId] ?? '') ?? 0;
+        const unitPrice = parseMapUnitPrice(unitPriceBySupplierItem[key] ?? '');
+        const freight = parseMapUnitPrice(freightBySupplier[supplierId] ?? '') ?? 0;
 
         const itemTotal = unitPrice == null ? null : unitPrice * quantity;
         const score = unitPrice == null ? null : scoreItem({ unitPrice, quantity, freight });
@@ -482,12 +510,12 @@ export default function MapaCotacaoPage() {
   const computedSupplierTotals = useMemo(() => {
     const out: Record<string, { itemsTotal: number; freight: number; amountToPay: number }> = {};
     for (const supplierId of Array.from(selectedSupplierIds)) {
-      const freight = parseCurrencyBR(freightBySupplier[supplierId] ?? '') ?? 0;
+      const freight = parseMapUnitPrice(freightBySupplier[supplierId] ?? '') ?? 0;
       const items = wonItemsBySupplier[supplierId] ?? [];
       let itemsTotal = 0;
       for (const item of items) {
         const key = `${supplierId}:${item.id}`;
-        const unitPrice = parseCurrencyBR(unitPriceBySupplierItem[key] ?? '');
+        const unitPrice = parseMapUnitPrice(unitPriceBySupplierItem[key] ?? '');
         if (unitPrice == null) continue;
         const q = ocItemQtyByItemId[item.id] ?? Number(item.quantity);
         itemsTotal += unitPrice * q;
@@ -520,7 +548,7 @@ export default function MapaCotacaoPage() {
         const freightBySupplierPayload: Record<string, number> = {};
         for (const supplierId of selectedSupplierIdsArr) {
           const rawFrete = freightBySupplier[supplierId] ?? '';
-          const parsed = parseCurrencyBR(rawFrete);
+          const parsed = parseMapUnitPrice(rawFrete);
           // Campo vazio = sem frete (0), igual ao resumo exibido na tela
           const f = rawFrete.trim() === '' ? 0 : parsed;
           if (f == null || f < 0) {
@@ -542,7 +570,7 @@ export default function MapaCotacaoPage() {
         for (const supplierId of selectedSupplierIdsArr) {
           for (const item of selectedRequest.items) {
             const key = `${supplierId}:${item.id}`;
-            const u = parseCurrencyBR(unitPriceBySupplierItem[key] ?? '');
+            const u = parseMapUnitPrice(unitPriceBySupplierItem[key] ?? '');
             if (u == null || u < 0) continue; // se vazio, não conta para vitória
             unitPricesPayload.push({
               supplierId,
@@ -572,16 +600,21 @@ export default function MapaCotacaoPage() {
           paymentType: string;
           paymentCondition: string;
           paymentDetails?: string;
+          pixKeyType?: string;
+          pixKey?: string;
           observations?: string;
           amountToPay?: number;
         }> = [];
 
         for (const supplierId of Array.from(generateSupplierIds)) {
           const totals = computedSupplierTotals[supplierId];
+          const supplierName = suppliers.find((s) => s.id === supplierId)?.name ?? 'fornecedor';
           const fallbackDraft = {
             paymentType: OC_TYPE_AVISTA,
             paymentCondition: paymentConditionDefault(OC_TYPE_AVISTA),
             paymentDetails: '',
+            pixKeyType: '',
+            pixKey: '',
             observations: '',
             amountToPayStr: totals ? String(totals.amountToPay) : ''
           };
@@ -590,11 +623,25 @@ export default function MapaCotacaoPage() {
           const paymentType = draft.paymentType ?? OC_TYPE_AVISTA;
           const paymentCondition = draft.paymentCondition ?? paymentConditionDefault(paymentType);
 
+          if (paymentType === OC_TYPE_AVISTA) {
+            if (!draft.paymentDetails?.trim()) {
+              throw new Error(`Informe os dados do pagamento para "${supplierName}".`);
+            }
+            if (!draft.pixKeyType?.trim()) {
+              throw new Error(`Informe o tipo de chave PIX para "${supplierName}".`);
+            }
+            if (!draft.pixKey?.trim()) {
+              throw new Error(`Informe a chave PIX para "${supplierName}".`);
+            }
+          }
+
           paymentBySupplierPayload.push({
             supplierId,
             paymentType,
             paymentCondition,
             paymentDetails: draft.paymentDetails?.trim() || undefined,
+            pixKeyType: paymentType === OC_TYPE_AVISTA ? draft.pixKeyType?.trim() || undefined : undefined,
+            pixKey: paymentType === OC_TYPE_AVISTA ? draft.pixKey?.trim() || undefined : undefined,
             observations: draft.observations?.trim() || undefined,
             amountToPay: totals?.amountToPay
           });
@@ -656,8 +703,8 @@ export default function MapaCotacaoPage() {
           <Card>
             <CardHeader className="border-b-0 pb-1">
               <div className="flex items-center gap-3">
-                <div className="flex-shrink-0 rounded-lg bg-blue-100 p-2 sm:p-3 dark:bg-blue-900/30">
-                  <Truck className="h-5 w-5 text-blue-600 sm:h-6 sm:w-6 dark:text-blue-400" />
+                <div className="flex-shrink-0 rounded-lg bg-red-100 p-2 sm:p-3 dark:bg-red-950/40">
+                  <Truck className="h-5 w-5 text-red-600 sm:h-6 sm:w-6 dark:text-red-400" />
                 </div>
                 <div className="min-w-0">
                   <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
@@ -681,25 +728,21 @@ export default function MapaCotacaoPage() {
               ) : (
                 <>
                   <div>
-                    <label
-                      htmlFor="mapa-cotacao-rm-select"
-                      className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
-                    >
+                    <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                       Requisição de material *
                     </label>
-                    <select
-                      id="mapa-cotacao-rm-select"
+                    <SingleSelectSearchDropdown
                       value={selectedRequestId}
-                      onChange={(e) => setSelectedRequestId(e.target.value)}
-                      className="h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-                    >
-                      <option value="">Selecione uma requisição (RMs Aprovadas)</option>
-                      {approvedRequests.map((r) => (
-                        <option key={r.id} value={r.id}>
-                          {r.requestNumber || r.id.slice(0, 8)} ({formatDateTimeBR(r.createdAt)})
-                        </option>
-                      ))}
-                    </select>
+                      onChange={setSelectedRequestId}
+                      options={materialRequestOptions}
+                      allowEmpty={false}
+                      placeholder="Selecione uma requisição (RMs Aprovadas)"
+                      searchPlaceholder="Pesquisar..."
+                      emptyOptionsMessage="Nenhuma requisição disponível."
+                      emptySearchMessage="Nenhuma requisição encontrada."
+                      noFocusRing
+                      hideFocus
+                    />
                   </div>
 
                   {!selectedRequest ? (
@@ -714,88 +757,22 @@ export default function MapaCotacaoPage() {
                     </div>
                   ) : (
                     <div className="mt-4 min-w-0">
-                        <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                          <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                            Fornecedores (comparação)
-                            {selectedSupplierIds.size > 0 ? (
-                              <span className="font-normal text-gray-500 dark:text-gray-400">
-                                {' '}
-                                · {selectedSupplierIds.size} selecionado
-                                {selectedSupplierIds.size === 1 ? '' : 's'}
-                              </span>
-                            ) : null}
-                          </p>
-                          <div className="relative w-full sm:max-w-[16rem]">
-                            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
-                            <input
-                              type="text"
-                              inputMode="search"
-                              autoComplete="off"
-                              value={supplierSearch}
-                              onChange={(e) => setSupplierSearch(e.target.value)}
-                              placeholder="Buscar fornecedor..."
-                              className="h-9 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-                            />
-                            {supplierSearch ? (
-                              <button
-                                type="button"
-                                onClick={() => setSupplierSearch('')}
-                                aria-label="Limpar busca"
-                                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-300"
-                              >
-                                <X className="h-4 w-4" />
-                              </button>
-                            ) : null}
-                          </div>
-                        </div>
-                        <div className="max-h-[280px] overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-600">
-                          {suppliers.length === 0 ? (
-                            <p className="px-3 py-6 text-sm text-gray-500 dark:text-gray-400">
-                              Nenhum fornecedor cadastrado.
-                            </p>
-                          ) : filteredSuppliers.length === 0 ? (
-                            <p className="px-3 py-6 text-sm text-gray-500 dark:text-gray-400">
-                              Nenhum fornecedor corresponde à busca.
-                            </p>
-                          ) : (
-                            <ul className="divide-y divide-gray-200 dark:divide-gray-600">
-                              {filteredSuppliers.map((s) => {
-                                const isChecked = selectedSupplierIds.has(s.id);
-                                return (
-                                  <li
-                                    key={s.id}
-                                    className="transition-colors hover:bg-gray-50 dark:hover:bg-gray-700/50"
-                                  >
-                                    <label className="flex w-full cursor-pointer items-center gap-3 px-3 py-2.5 text-sm text-gray-700 dark:text-gray-300">
-                                      <MapStyledCheckbox
-                                        checked={isChecked}
-                                        onChange={(checked) => {
-                                          setSelectedSupplierIds((prev) => {
-                                            const next = new Set(prev);
-                                            if (checked) next.add(s.id);
-                                            else next.delete(s.id);
-                                            return next;
-                                          });
-                                        }}
-                                        ariaLabel={`Selecionar ${s.name}`}
-                                      />
-                                      <span className="min-w-0 flex-1 leading-tight">
-                                        <span className="block truncate font-medium text-gray-900 dark:text-gray-100">
-                                          {s.name}
-                                        </span>
-                                        {s.code ? (
-                                          <span className="block truncate text-xs text-gray-500 dark:text-gray-400">
-                                            Cód. {s.code}
-                                          </span>
-                                        ) : null}
-                                      </span>
-                                    </label>
-                                  </li>
-                                );
-                              })}
-                            </ul>
-                          )}
-                        </div>
+                      <MultiSelectSearchDropdown
+                        label={
+                          selectedSupplierIds.size > 0
+                            ? `Fornecedores · ${selectedSupplierIds.size} selecionado${selectedSupplierIds.size === 1 ? '' : 's'}`
+                            : 'Fornecedores'
+                        }
+                        options={supplierOptions}
+                        selected={Array.from(selectedSupplierIds)}
+                        onChange={(ids) => setSelectedSupplierIds(new Set(ids))}
+                        placeholder="Selecione fornecedores para comparar..."
+                        searchPlaceholder="Pesquisar..."
+                        emptyOptionsMessage="Nenhum fornecedor cadastrado."
+                        emptySearchMessage="Nenhum fornecedor encontrado."
+                        listMaxHeight={280}
+                        noFocusRing
+                      />
                     </div>
                   )}
                 </>
@@ -827,7 +804,6 @@ export default function MapaCotacaoPage() {
                         onClick={() => {
                           setSelectedRequestId('');
                           setQuoteMapId('');
-                          setSupplierSearch('');
                           setSelectedSupplierIds(new Set());
                           setGenerateSupplierIds(new Set());
                           setFreightBySupplier({});
@@ -865,7 +841,7 @@ export default function MapaCotacaoPage() {
                     <>
                       <div className="mb-4 rounded-lg border border-gray-200 bg-gray-50/60 p-4 dark:border-gray-600 dark:bg-gray-900/40">
                         <p className="mb-3 text-sm font-medium text-gray-800 dark:text-gray-200">
-                          Frete por fornecedor (R$)
+                          Frete por fornecedor
                         </p>
                         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
                           {Array.from(selectedSupplierIds).map((supplierId) => {
@@ -882,25 +858,16 @@ export default function MapaCotacaoPage() {
                                 <input
                                   id={`frete-${supplierId}`}
                                   type="text"
-                                  inputMode="decimal"
+                                  inputMode="numeric"
                                   value={freightBySupplier[supplierId] ?? ''}
                                   onChange={(e) => {
                                     setFreightBySupplier((prev) => ({
                                       ...prev,
-                                      [supplierId]: e.target.value
+                                      [supplierId]: maskCurrencyInputBrOrEmpty(e.target.value)
                                     }));
                                   }}
-                                  onBlur={() => {
-                                    const raw = freightBySupplier[supplierId] ?? '';
-                                    const formatted =
-                                      raw.trim() === '' ? '0,00' : formatCurrencyInputValue(raw);
-                                    setFreightBySupplier((prev) => ({
-                                      ...prev,
-                                      [supplierId]: formatted
-                                    }));
-                                  }}
-                                  placeholder="0,00"
-                                  className={mapFieldCls}
+                                  placeholder="R$ 0,00"
+                                  className={`${mapFieldCls} tabular-nums`}
                                 />
                               </div>
                             );
@@ -915,25 +882,25 @@ export default function MapaCotacaoPage() {
                               <tr>
                                 <th className={`${mapThCls} min-w-[11rem]`}>Material</th>
                                 <th className={`${mapThCls} whitespace-nowrap text-center`}>Qtd. SC</th>
-                                <th className={`${mapThCls} whitespace-nowrap`}>Qtd. na OC</th>
+                                <th className={`${mapThCls} whitespace-nowrap text-center`}>Qtd. na OC</th>
                                 {Array.from(selectedSupplierIds).map((supplierId) => {
                                   const sup = suppliers.find((x) => x.id === supplierId);
                                   return (
                                     <th
                                       key={supplierId}
-                                      className={`${mapThCls} min-w-[8.5rem] whitespace-nowrap`}
+                                      className={`${mapThCls} min-w-[8.5rem] whitespace-nowrap text-center`}
                                       title={sup?.name ?? supplierId}
                                     >
                                       <span className="block truncate normal-case tracking-normal text-gray-800 dark:text-gray-200">
                                         {sup ? sup.name : supplierId}
                                       </span>
                                       <span className="mt-0.5 block text-[10px] font-normal normal-case tracking-normal text-gray-500 dark:text-gray-400">
-                                        Valor unit. (R$)
+                                        Valor unit.
                                       </span>
                                     </th>
                                   );
                                 })}
-                                <th className={`${mapThCls} whitespace-nowrap`}>Vencedor</th>
+                                <th className={`${mapThCls} whitespace-nowrap text-center`}>Vencedor</th>
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
@@ -963,7 +930,7 @@ export default function MapaCotacaoPage() {
                                     <td className={`${mapTdCls} text-center tabular-nums font-medium text-gray-900 dark:text-gray-100`}>
                                       {maxQty} {unitLabel}
                                     </td>
-                                    <td className={mapTdCls}>
+                                    <td className={`${mapTdCls} text-center`}>
                                       <label htmlFor={`oc-qty-map-${item.id}`} className="sr-only">
                                         Quantidade na OC
                                       </label>
@@ -980,15 +947,15 @@ export default function MapaCotacaoPage() {
                                           const q = Math.min(Math.max(n, 0.0001), maxQty);
                                           setOcItemQtyByItemId((prev) => ({ ...prev, [item.id]: q }));
                                         }}
-                                        className={`${mapFieldCls} max-w-[6.5rem]`}
+                                        className={`${mapFieldCls} mx-auto block max-w-[6.5rem] text-center [appearance:textfield] [-moz-appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none`}
                                       />
                                     </td>
 
                                     {Array.from(selectedSupplierIds).map((supplierId) => {
                                       const key = `${supplierId}:${item.id}`;
                                       const unitPriceStr = unitPriceBySupplierItem[key] ?? '';
-                                      const unitPrice = parseCurrencyBR(unitPriceStr);
-                                      const freightParsed = parseCurrencyBR(freightBySupplier[supplierId] ?? '');
+                                      const unitPrice = parseMapUnitPrice(unitPriceStr);
+                                      const freightParsed = parseMapUnitPrice(freightBySupplier[supplierId] ?? '');
                                       const freight = freightParsed ?? 0;
                                       const itemTotal = unitPrice == null ? null : unitPrice * qty;
                                       const score = unitPrice == null ? null : itemTotal! + freight;
@@ -997,40 +964,32 @@ export default function MapaCotacaoPage() {
                                       return (
                                         <td
                                           key={supplierId}
-                                          className={`${mapTdCls} ${
+                                          className={`${mapTdCls} text-center ${
                                             isWinner
-                                              ? 'border-l-2 border-l-green-500 bg-green-50/30 dark:bg-green-950/10'
+                                              ? 'bg-green-50/30 dark:bg-green-950/10'
                                               : ''
                                           }`}
                                         >
                                           <input
                                             id={`unit-${key}`}
                                             type="text"
-                                            inputMode="decimal"
+                                            inputMode="numeric"
                                             aria-label={`Valor unitário ${suppliers.find((x) => x.id === supplierId)?.name ?? supplierId}`}
                                             value={unitPriceStr}
                                             onChange={(e) => {
                                               setUnitPriceBySupplierItem((prev) => ({
                                                 ...prev,
-                                                [key]: e.target.value
+                                                [key]: maskCurrencyInputBrOrEmpty(e.target.value)
                                               }));
                                             }}
-                                            onBlur={() => {
-                                              const raw = unitPriceBySupplierItem[key] ?? '';
-                                              const formatted = formatCurrencyInputValue(raw);
-                                              setUnitPriceBySupplierItem((prev) => ({
-                                                ...prev,
-                                                [key]: formatted
-                                              }));
-                                            }}
-                                            placeholder="0,00"
-                                            className={`${mapFieldCls} max-w-[8rem] ${
+                                            placeholder="R$ 0,00"
+                                            className={`${mapFieldCls} mx-auto block max-w-[8rem] tabular-nums text-center ${
                                               isWinner
                                                 ? 'border-green-500 dark:border-green-500'
                                                 : ''
                                             }`}
                                           />
-                                          <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                                          <p className="mt-1.5 text-center text-xs text-gray-500 dark:text-gray-400">
                                             Custo p/ vencer:{' '}
                                             <span className="font-medium tabular-nums text-gray-800 dark:text-gray-200">
                                               {score == null ? '—' : formatCurrencyBR(score)}
@@ -1040,9 +999,9 @@ export default function MapaCotacaoPage() {
                                       );
                                     })}
 
-                                    <td className={mapTdCls}>
+                                    <td className={`${mapTdCls} text-center`}>
                                       {winnerSupplier && winner ? (
-                                        <div className="flex flex-col items-start gap-1">
+                                        <div className="flex flex-col items-center gap-1">
                                           <span className="inline-flex max-w-full rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-800 dark:bg-green-900/35 dark:text-green-300">
                                             <span className="truncate">{winnerSupplier.name}</span>
                                           </span>
@@ -1161,7 +1120,7 @@ export default function MapaCotacaoPage() {
                                             const maxQty = Number(item.quantity);
                                             const qty = ocItemQtyByItemId[item.id] ?? maxQty;
                                             const priceKey = `${sid}:${item.id}`;
-                                            const unitParsed = parseCurrencyBR(
+                                            const unitParsed = parseMapUnitPrice(
                                               unitPriceBySupplierItem[priceKey] ?? ''
                                             );
                                             const sub = materialItemSubtitle(item);
@@ -1238,7 +1197,9 @@ export default function MapaCotacaoPage() {
                                                   [sid]: {
                                                     ...(prev[sid] ?? emptyPaymentDraft()),
                                                     paymentType: OC_TYPE_BOLETO,
-                                                    paymentCondition: paymentConditionDefault(OC_TYPE_BOLETO)
+                                                    paymentCondition: paymentConditionDefault(OC_TYPE_BOLETO),
+                                                    pixKeyType: '',
+                                                    pixKey: ''
                                                   }
                                                 }));
                                               }}
@@ -1274,7 +1235,7 @@ export default function MapaCotacaoPage() {
                                               }));
                                             }}
                                             disabled={payType === OC_TYPE_AVISTA}
-                                            className={mapFieldCls}
+                                            hideFocus
                                           />
                                         </div>
 
@@ -1320,7 +1281,7 @@ export default function MapaCotacaoPage() {
 
                                         <div>
                                           <label htmlFor={`pay-details-${sid}`} className={mapLabelCls}>
-                                            Dados do pagamento
+                                            Dados do pagamento{payType === OC_TYPE_AVISTA ? ' *' : ''}
                                           </label>
                                           <textarea
                                             id={`pay-details-${sid}`}
@@ -1335,10 +1296,63 @@ export default function MapaCotacaoPage() {
                                               }));
                                             }}
                                             rows={3}
-                                            placeholder="Conta, PIX, agência, favorecido, etc."
+                                            placeholder={
+                                              payType === OC_TYPE_AVISTA
+                                                ? 'Conta, agência, favorecido, etc.'
+                                                : 'Conta, PIX, agência, favorecido, etc.'
+                                            }
                                             className={`${mapFieldCls} min-h-[5rem] resize-y`}
                                           />
                                         </div>
+
+                                        {payType === OC_TYPE_AVISTA ? (
+                                          <div className="grid grid-cols-1 gap-4 sm:grid-cols-[minmax(10rem,1fr)_minmax(0,2.2fr)]">
+                                            <div>
+                                              <label htmlFor={`pix-type-${sid}`} className={mapLabelCls}>
+                                                Tipo de Chave Pix *
+                                              </label>
+                                              <SingleSelectSearchDropdown
+                                                value={paymentDraftBySupplier[sid]?.pixKeyType ?? ''}
+                                                onChange={(v) => {
+                                                  setPaymentDraftBySupplier((prev) => ({
+                                                    ...prev,
+                                                    [sid]: {
+                                                      ...(prev[sid] ?? emptyPaymentDraft()),
+                                                      pixKeyType: v
+                                                    }
+                                                  }));
+                                                }}
+                                                options={OC_PIX_KEY_TYPE_OPTIONS}
+                                                allowEmpty
+                                                placeholder="Selecione..."
+                                                searchPlaceholder="Pesquisar..."
+                                                noFocusRing
+                      hideFocus
+                                              />
+                                            </div>
+                                            <div>
+                                              <label htmlFor={`pix-key-${sid}`} className={mapLabelCls}>
+                                                Chave Pix *
+                                              </label>
+                                              <input
+                                                id={`pix-key-${sid}`}
+                                                type="text"
+                                                value={paymentDraftBySupplier[sid]?.pixKey ?? ''}
+                                                onChange={(e) => {
+                                                  setPaymentDraftBySupplier((prev) => ({
+                                                    ...prev,
+                                                    [sid]: {
+                                                      ...(prev[sid] ?? emptyPaymentDraft()),
+                                                      pixKey: e.target.value
+                                                    }
+                                                  }));
+                                                }}
+                                                placeholder="Informe a chave PIX"
+                                                className={mapFieldCls}
+                                              />
+                                            </div>
+                                          </div>
+                                        ) : null}
 
                                         <div>
                                           <label htmlFor={`obs-${sid}`} className={mapLabelCls}>

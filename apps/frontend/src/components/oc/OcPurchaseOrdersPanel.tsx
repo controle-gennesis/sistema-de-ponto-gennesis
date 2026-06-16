@@ -84,6 +84,7 @@ import {
 } from '@/lib/financialControlEntry';
 import { OcFluxTabsNav } from '@/components/oc/OcFluxTabsNav';
 import { computeOcTabCounts } from '@/components/oc/ocTabCounts';
+import { parseCurrencyInputBr } from '@/lib/maskCurrencyBr';
 
 export {
   orderNeedsPaymentBoleto,
@@ -1068,7 +1069,11 @@ export function OcPurchaseOrdersPanel({
   };
 
   const parseMoneyInput = (value: string): number | null => {
-    const cleaned = value.trim().replace(/[R$\s]/g, '').replace(/\./g, '').replace(',', '.');
+    const t = value.trim();
+    if (!t) return null;
+    const fromMask = parseCurrencyInputBr(t);
+    if (fromMask !== null) return fromMask;
+    const cleaned = t.replace(/[R$\s]/g, '').replace(/\./g, '').replace(',', '.');
     if (!cleaned) return null;
     const n = parseFloat(cleaned);
     return Number.isFinite(n) ? n : null;

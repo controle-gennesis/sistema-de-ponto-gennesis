@@ -388,6 +388,8 @@ export class QuoteMapService {
         paymentType: string;
         paymentCondition: string;
         paymentDetails?: string;
+        pixKeyType?: string;
+        pixKey?: string;
         observations?: string;
         amountToPay?: number;
         boletoAttachmentUrl?: string;
@@ -507,6 +509,8 @@ export class QuoteMapService {
           paymentType: pay.paymentType,
           paymentCondition: pay.paymentCondition,
           paymentDetails: pay.paymentDetails ?? null,
+          pixKeyType: pay.pixKeyType ?? null,
+          pixKey: pay.pixKey ?? null,
           boletoAttachmentUrl: pay.boletoAttachmentUrl,
           boletoAttachmentName: pay.boletoAttachmentName,
           freightAmount: Number(freight),

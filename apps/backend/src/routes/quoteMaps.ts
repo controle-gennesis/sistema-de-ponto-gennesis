@@ -70,6 +70,8 @@ router.post('/:id/generate', async (req: AuthRequest, res: Response, next: NextF
         paymentType: string;
         paymentCondition: string;
         paymentDetails?: string;
+        pixKeyType?: string;
+        pixKey?: string;
         observations?: string;
         amountToPay?: number;
         boletoAttachmentUrl?: string;

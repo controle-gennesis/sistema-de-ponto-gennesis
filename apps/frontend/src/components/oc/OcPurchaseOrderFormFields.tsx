@@ -3,9 +3,21 @@
 import React from 'react';
 import { PaymentConditionSelect } from '@/components/oc/PaymentConditionSelect';
 import { SearchableEntityAutocomplete } from '@/components/ui/SearchableEntityAutocomplete';
+import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
+import type { MultiSelectSearchOption } from '@/components/ui/MultiSelectSearchDropdown';
+import {
+  formatCurrencyInputBrFromNumber,
+  maskCurrencyInputBrOrEmpty
+} from '@/lib/maskCurrencyBr';
 import { formatCurrencyBR } from '@/app/ponto/gerenciar-materiais/_lib/ocAmounts';
 
 export const OC_PIX_KEY_TYPES = ['ALEATÓRIA', 'CELULAR', 'CNPJ', 'CPF', 'E-MAIL'] as const;
+
+export const OC_PIX_KEY_TYPE_OPTIONS: MultiSelectSearchOption[] = OC_PIX_KEY_TYPES.map((type) => ({
+  value: type,
+  label: type,
+  searchText: type
+}));
 
 const OC_PAYMENT_TYPE_LABELS: Record<string, string> = {
   AVISTA: 'À vista',
@@ -22,9 +34,9 @@ const ocFieldReadonlyCls =
   'w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-2.5 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-900/50 dark:text-gray-100';
 
 const ocPaymentSegmentCls = (active: boolean) =>
-  `w-full rounded-lg border px-3 py-2.5 text-center text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+  `w-full rounded-lg border px-3 py-2.5 text-center text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-red-500 ${
     active
-      ? 'border-blue-600 bg-blue-600 text-white shadow-sm dark:border-blue-500 dark:bg-blue-500'
+      ? 'border-red-600 bg-red-50 text-red-800 dark:border-red-500 dark:bg-red-950/40 dark:text-red-200'
       : 'border-gray-300 bg-white text-gray-700 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200'
   }`;
 
@@ -147,7 +159,7 @@ export function OcPurchaseOrderFormFields({
                     Qtd. na OC
                   </th>
                   <th scope="col" className="px-2 py-2 text-left font-medium">
-                    Valor unit. (R$)
+                    Valor unit.
                   </th>
                 </tr>
               </thead>
@@ -294,7 +306,6 @@ export function OcPurchaseOrderFormFields({
               paymentType="BOLETO"
               value={values.paymentCondition}
               onChange={(code) => onChange?.({ paymentCondition: code })}
-              className={ocFieldCls}
             />
           ) : (
             <div className={ocFieldReadonlyCls}>
@@ -330,18 +341,15 @@ export function OcPurchaseOrderFormFields({
                 Tipo de Chave Pix *
               </label>
               {isEdit ? (
-                <select
+                <SingleSelectSearchDropdown
                   value={values.pixKeyType}
-                  onChange={(e) => onChange?.({ pixKeyType: e.target.value })}
-                  className={ocFieldCls}
-                >
-                  <option value="">Selecione...</option>
-                  {OC_PIX_KEY_TYPES.map((type) => (
-                    <option key={type} value={type}>
-                      {type}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(v) => onChange?.({ pixKeyType: v })}
+                  options={OC_PIX_KEY_TYPE_OPTIONS}
+                  allowEmpty
+                  placeholder="Selecione..."
+                  searchPlaceholder="Pesquisar..."
+                  noFocusRing
+                />
               ) : (
                 <div className={ocFieldReadonlyCls}>{values.pixKeyType || '—'}</div>
               )}
@@ -386,15 +394,15 @@ export function OcPurchaseOrderFormFields({
       )}
 
       <div>
-        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Frete (R$)</label>
+        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Frete</label>
         {isEdit ? (
           <input
             type="text"
-            inputMode="decimal"
-            placeholder="0,00"
+            inputMode="numeric"
+            placeholder="R$ 0,00"
             value={values.freightAmount}
-            onChange={(e) => onChange?.({ freightAmount: e.target.value })}
-            className={ocFieldCls}
+            onChange={(e) => onChange?.({ freightAmount: maskCurrencyInputBrOrEmpty(e.target.value) })}
+            className={`${ocFieldCls} tabular-nums`}
           />
         ) : (
           <div className={ocFieldReadonlyCls}>
@@ -405,7 +413,7 @@ export function OcPurchaseOrderFormFields({
 
       <div>
         <span className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-          Valor a ser pago (R$) *
+          Valor total *
         </span>
         <div className={`${ocFieldCls} bg-gray-50 font-semibold dark:bg-gray-900/50`} aria-live="polite">
           R$ {formatCurrencyBR(total)}
@@ -489,11 +497,12 @@ export function buildOcFormValuesFromOrder(
       it.materialRequestItem?.quantity != null ? Number(it.materialRequestItem.quantity) : null
   }));
 
-  let freightStored = '0';
+  let freightStored = '';
   if (options?.parseFreight) {
     freightStored = options.parseFreight(order);
   } else if (order.freightAmount != null && order.freightAmount !== '') {
-    freightStored = String(Number(order.freightAmount));
+    const n = Number(order.freightAmount);
+    freightStored = Number.isFinite(n) && n > 0 ? formatCurrencyInputBrFromNumber(n) : '';
   }
 
   return {
