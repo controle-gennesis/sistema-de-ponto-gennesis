@@ -393,8 +393,11 @@
 
 /* Inverter ícone de calendário em inputs de data no dark mode */
 .dark .input[type="date"]::-webkit-calendar-picker-indicator,
-.dark input[type="date"]::-webkit-calendar-picker-indicator {
+.dark input[type="date"]::-webkit-calendar-picker-indicator,
+.dark .input[type="datetime-local"]::-webkit-calendar-picker-indicator,
+.dark input[type="datetime-local"]::-webkit-calendar-picker-indicator {
   filter: invert(1);
+  cursor: pointer;
 }
 
 /* Inverter ícone de relógio em inputs de time no dark mode */

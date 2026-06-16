@@ -6,6 +6,14 @@ import { Edit, MoreVertical, Trash2 } from 'lucide-react';
 import type { RowActionMenuState } from '@/hooks/useRowActionMenu';
 import { listTableRowClasses, rowActionMenuButtonClass } from '@/components/ui/listTableUi';
 
+export type RowActionMenuExtraItem = {
+  label: string;
+  onClick: () => void;
+  icon?: React.ReactNode;
+  disabled?: boolean;
+  disabledTitle?: string;
+};
+
 type RowActionMenuCellProps = {
   isOpen: boolean;
   onToggle: (e: React.MouseEvent<HTMLButtonElement>) => void;
@@ -61,6 +69,7 @@ type RowActionMenuPortalProps = {
   editDisabled?: boolean;
   deleteDisabled?: boolean;
   deleteDisabledTitle?: string;
+  extraItems?: RowActionMenuExtraItem[];
   zIndex?: { backdrop: number; menu: number };
 };
 
@@ -72,6 +81,7 @@ export function RowActionMenuPortal({
   editDisabled = false,
   deleteDisabled = false,
   deleteDisabledTitle,
+  extraItems = [],
   zIndex = { backdrop: 1050, menu: 1051 }
 }: RowActionMenuPortalProps) {
   if (!menu || typeof document === 'undefined') return null;
@@ -95,6 +105,7 @@ export function RowActionMenuPortal({
           disabled={editDisabled}
           onClick={(e) => {
             e.stopPropagation();
+            if (editDisabled) return;
             onClose();
             onEdit();
           }}
@@ -103,11 +114,36 @@ export function RowActionMenuPortal({
           <Edit className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
           <span>Editar</span>
         </button>
+        {extraItems.map((item) => (
+          <button
+            key={item.label}
+            type="button"
+            role="menuitem"
+            disabled={item.disabled}
+            title={item.disabled ? item.disabledTitle : item.label}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (item.disabled) return;
+              onClose();
+              item.onClick();
+            }}
+            className={`flex w-full items-center gap-2 border-t border-gray-200 px-3 py-2.5 text-left text-sm hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-700 ${
+              item.disabled
+                ? 'cursor-not-allowed text-gray-400 dark:text-gray-500'
+                : 'text-gray-700 dark:text-gray-300'
+            }`}
+          >
+            {item.icon}
+            <span>{item.label}</span>
+          </button>
+        ))}
         <button
           type="button"
           role="menuitem"
+          disabled={deleteDisabled}
           onClick={(e) => {
             e.stopPropagation();
+            if (deleteDisabled) return;
             onClose();
             onDelete();
           }}

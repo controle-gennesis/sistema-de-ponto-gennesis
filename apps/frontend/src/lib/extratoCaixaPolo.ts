@@ -176,11 +176,33 @@ export function poloLabelFromKey(key: string): string {
   return key;
 }
 
+export function resolveExtratoPoloFromCentroCusto(
+  ccusto?: string | null,
+  codFilial?: number | null
+): { key: string; label: string } {
+  const name = ccusto?.trim() || '';
+  if (name) {
+    const polo = NOME_CENTRO_CUSTO_TO_POLO[normalizeCentroCustoName(name)];
+    if (polo) {
+      return { key: polo, label: poloLabelFromKey(polo) };
+    }
+  }
+
+  if (codFilial != null) {
+    const polo = FILIAL_COD_TO_POLO[codFilial];
+    if (polo) {
+      return { key: polo, label: poloLabelFromKey(polo) };
+    }
+  }
+
+  return { key: SEM_POLO_KEY, label: poloLabelFromKey(SEM_POLO_KEY) };
+}
+
 export function resolveGastosPoloFromContractName(
   contract: string,
   apiPolo?: string | null
 ): string | null {
-  const fromName = resolveExtratoPolo({ ccusto: contract });
+  const fromName = resolveExtratoPoloFromCentroCusto(contract);
   if (fromName.key !== SEM_POLO_KEY) return fromName.label;
 
   const raw = (apiPolo ?? '').trim();
@@ -199,22 +221,7 @@ export function resolveGastosPoloFromContractName(
 }
 
 export function resolveExtratoPolo(item: ExtratoCaixaItem): { key: string; label: string } {
-  const name = item.ccusto?.trim() || '';
-  if (name) {
-    const polo = NOME_CENTRO_CUSTO_TO_POLO[normalizeCentroCustoName(name)];
-    if (polo) {
-      return { key: polo, label: poloLabelFromKey(polo) };
-    }
-  }
-
-  if (item.codFilial != null) {
-    const polo = FILIAL_COD_TO_POLO[item.codFilial];
-    if (polo) {
-      return { key: polo, label: poloLabelFromKey(polo) };
-    }
-  }
-
-  return { key: SEM_POLO_KEY, label: poloLabelFromKey(SEM_POLO_KEY) };
+  return resolveExtratoPoloFromCentroCusto(item.ccusto, item.codFilial);
 }
 
 export function sortExtratoResumoPoloRows<T extends { key: string; totalValor: number }>(

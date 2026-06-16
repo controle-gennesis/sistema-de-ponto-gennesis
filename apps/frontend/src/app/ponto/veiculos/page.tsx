@@ -1,0 +1,915 @@
+'use client';
+
+import React, { useEffect, useMemo, useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useRouter } from 'next/navigation';
+import { Car, Loader2, Plus, Search, X } from 'lucide-react';
+import { Card, CardContent, CardHeader } from '@/components/ui/Card';
+import {
+  CadastroListEmpty,
+  CadastroListLoading,
+  CadastroListSummary,
+  formatCadastroListId,
+  getCadastroListRange
+} from '@/components/ui/CadastroListSummary';
+import {
+  RowActionMenuCell,
+  RowActionMenuPortal,
+  cadastroListClasses,
+  listTableRowClasses
+} from '@/components/ui/RowActionMenu';
+import { useRowActionMenu } from '@/hooks/useRowActionMenu';
+import { MainLayout } from '@/components/layout/MainLayout';
+import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
+import { Loading } from '@/components/ui/Loading';
+import toast from 'react-hot-toast';
+import api from '@/lib/api';
+import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
+import type { MultiSelectSearchOption } from '@/components/ui/MultiSelectSearchDropdown';
+import { ButtonSeg } from '@/app/ponto/solicitacoes-dp/DpSolicitacaoTypeFields';
+import { POLO_OPTIONS } from '@/components/suprimentos/materialDeliveryLabels';
+import {
+  formatPlacaDisplay,
+  isValidBrazilianPlate,
+  maskBrazilianPlate
+} from '@/lib/brazilianVehiclePlate';
+
+type VehicleUsageType = 'FROTA' | 'PARTICULAR';
+
+type FipeOption = {
+  code: string;
+  name: string;
+};
+
+type EmployeeOption = {
+  id: string;
+  name: string;
+  costCenter: string | null;
+  polo: string | null;
+};
+
+interface Vehicle {
+  id: string;
+  code: string;
+  marcaVeic?: string | null;
+  modeloVeic: string;
+  placaVeic: string;
+  polo?: string | null;
+  contrato?: string | null;
+  responsavel?: string | null;
+  frotaPartic?: VehicleUsageType | null;
+  isActive: boolean;
+}
+
+type VehicleFormState = {
+  marcaCode: string;
+  marcaName: string;
+  modeloCode: string;
+  modeloName: string;
+  placaVeic: string;
+  polo: string;
+  contrato: string;
+  responsavel: string;
+  frotaPartic: '' | VehicleUsageType;
+  isActive: boolean;
+};
+
+const EMPTY_FORM: VehicleFormState = {
+  marcaCode: '',
+  marcaName: '',
+  modeloCode: '',
+  modeloName: '',
+  placaVeic: '',
+  polo: '',
+  contrato: '',
+  responsavel: '',
+  frotaPartic: '',
+  isActive: true
+};
+
+function normalizePoloValue(polo?: string | null): string {
+  if (!polo) return '';
+  const normalized = polo.trim().toUpperCase();
+  if (normalized === 'DF' || normalized.includes('BRAS')) return 'DF';
+  if (normalized === 'GO' || normalized.includes('GOI')) return 'GO';
+  return polo;
+}
+
+function mapEmployeePoloToForm(polo: string | null): string {
+  return normalizePoloValue(polo);
+}
+
+function formatFrotaPartic(value?: VehicleUsageType | null): string {
+  if (value === 'FROTA') return 'Frota';
+  if (value === 'PARTICULAR') return 'Particular';
+  return '—';
+}
+
+function formatVehicleModel(vehicle: Pick<Vehicle, 'marcaVeic' | 'modeloVeic'>): string {
+  const marca = vehicle.marcaVeic?.trim();
+  const modelo = extractBaseModelName(vehicle.modeloVeic || '');
+  if (marca && modelo) return `${marca} ${modelo}`;
+  return modelo || marca || '—';
+}
+
+function extractBaseModelName(fullName: string): string {
+  const trimmed = fullName.trim();
+  if (!trimmed) return '';
+  return trimmed.split(/\s+/)[0] || trimmed;
+}
+
+export default function VeiculosPage() {
+  const router = useRouter();
+  const queryClient = useQueryClient();
+  const [searchTerm, setSearchTerm] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage] = useState(20);
+  const [showForm, setShowForm] = useState(false);
+  const [editing, setEditing] = useState<Vehicle | null>(null);
+  const [formData, setFormData] = useState<VehicleFormState>(EMPTY_FORM);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
+
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    sessionStorage.removeItem('token');
+    router.push('/auth/login');
+  };
+
+  const { data: userData, isLoading: loadingUser } = useQuery({
+    queryKey: ['user'],
+    queryFn: async () => {
+      const res = await api.get('/auth/me');
+      return res.data;
+    }
+  });
+
+  const { data: listData, isLoading } = useQuery({
+    queryKey: ['vehicles', searchTerm, currentPage, itemsPerPage],
+    queryFn: async () => {
+      const res = await api.get('/vehicles', {
+        params: {
+          search: searchTerm || undefined,
+          page: currentPage,
+          limit: itemsPerPage
+        }
+      });
+      return res.data;
+    }
+  });
+
+  const { data: fipeBrands = [], isLoading: loadingBrands } = useQuery({
+    queryKey: ['vehicles-fipe-brands'],
+    queryFn: async () => {
+      const res = await api.get('/vehicles/fipe/brands', { params: { type: 'cars' } });
+      return (res.data?.data || []) as FipeOption[];
+    },
+    enabled: showForm,
+    staleTime: 24 * 60 * 60 * 1000
+  });
+
+  const { data: fipeModels = [], isLoading: loadingModels } = useQuery({
+    queryKey: ['vehicles-fipe-models', formData.marcaCode],
+    queryFn: async () => {
+      const res = await api.get(`/vehicles/fipe/brands/${formData.marcaCode}/models`, {
+        params: { type: 'cars' }
+      });
+      return (res.data?.data || []) as FipeOption[];
+    },
+    enabled: showForm && Boolean(formData.marcaCode),
+    staleTime: 24 * 60 * 60 * 1000
+  });
+
+  const { data: employeeOptions = [], isLoading: loadingEmployees } = useQuery<EmployeeOption[]>({
+    queryKey: ['vehicles-employee-options'],
+    queryFn: async () => {
+      const res = await api.get('/users', {
+        params: { page: 1, limit: 1000 }
+      });
+      const users = res.data?.data || [];
+      return users
+        .filter((user: any) => {
+          if (!user.employee?.id) return false;
+          if (user.employee.position === 'Administrador') return false;
+          const name = String(user.name || '').trim();
+          if (name.localeCompare('Administrador', 'pt-BR', { sensitivity: 'accent' }) === 0) {
+            return false;
+          }
+          return true;
+        })
+        .map((user: any) => ({
+          id: String(user.employee.id),
+          name: String(user.name || '').trim(),
+          costCenter: user.employee.costCenter ? String(user.employee.costCenter).trim() : null,
+          polo: user.employee.polo ? String(user.employee.polo).trim() : null
+        }))
+        .filter((employee: EmployeeOption) => employee.id && employee.name)
+        .sort((a: EmployeeOption, b: EmployeeOption) => a.name.localeCompare(b.name, 'pt-BR'));
+    },
+    enabled: showForm,
+    staleTime: 10 * 60 * 1000
+  });
+
+  const vehicles = (listData?.data || []) as Vehicle[];
+  const pagination = listData?.pagination || {
+    page: 1,
+    limit: itemsPerPage,
+    total: 0,
+    totalPages: 1
+  };
+
+  const employeeByName = useMemo(() => {
+    const map = new Map<string, EmployeeOption>();
+    for (const employee of employeeOptions) {
+      map.set(employee.name, employee);
+    }
+    return map;
+  }, [employeeOptions]);
+
+  const fipeBrandOptions = useMemo<MultiSelectSearchOption[]>(
+    () =>
+      fipeBrands.map((brand) => ({
+        value: brand.code,
+        label: brand.name,
+        searchText: brand.name
+      })),
+    [fipeBrands]
+  );
+
+  const fipeModelOptions = useMemo<MultiSelectSearchOption[]>(
+    () =>
+      fipeModels.map((model) => ({
+        value: model.code,
+        label: model.name,
+        searchText: model.name
+      })),
+    [fipeModels]
+  );
+
+  const employeeSelectOptions = useMemo<MultiSelectSearchOption[]>(
+    () =>
+      employeeOptions.map((employee) => ({
+        value: employee.name,
+        label: employee.name,
+        searchText: [employee.name, employee.costCenter, employee.polo]
+          .filter(Boolean)
+          .join(' ')
+      })),
+    [employeeOptions]
+  );
+
+  const frotaParticOptions = useMemo<MultiSelectSearchOption[]>(
+    () => [
+      { value: 'FROTA', label: 'Frota' },
+      { value: 'PARTICULAR', label: 'Particular' }
+    ],
+    []
+  );
+
+  const {
+    rowActionMenu,
+    rowForActionMenu,
+    toggleRowActionMenu,
+    closeRowActionMenu,
+    isRowMenuOpen,
+    setRowActionMenu
+  } = useRowActionMenu(vehicles);
+
+  const listRange = getCadastroListRange(
+    pagination.page,
+    pagination.limit,
+    pagination.total
+  );
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm]);
+
+  const modalOpen = showForm || deleteId != null;
+
+  useEffect(() => {
+    if (!modalOpen) return;
+    document.body.classList.add('modal-open');
+    return () => {
+      document.body.classList.remove('modal-open');
+    };
+  }, [modalOpen]);
+
+  useEffect(() => {
+    if (!editing || !fipeBrands.length || formData.marcaCode) return;
+    const marca = editing.marcaVeic?.trim();
+    if (!marca) return;
+    const brand = fipeBrands.find((item) => item.name === marca);
+    if (!brand) return;
+    setFormData((current) => ({
+      ...current,
+      marcaCode: brand.code,
+      marcaName: brand.name
+    }));
+  }, [editing, fipeBrands, formData.marcaCode]);
+
+  useEffect(() => {
+    if (!editing || !fipeModels.length || formData.modeloCode) return;
+    const modelo = editing.modeloVeic?.trim();
+    if (!modelo) return;
+    const baseModel = extractBaseModelName(modelo);
+    const model = fipeModels.find(
+      (item) => item.name === modelo || item.name === baseModel || item.code === baseModel
+    );
+    if (!model) return;
+    setFormData((current) => ({
+      ...current,
+      modeloCode: model.code,
+      modeloName: model.name
+    }));
+  }, [editing, fipeModels, formData.modeloCode]);
+
+  const resetForm = () => {
+    setFormData(EMPTY_FORM);
+    setEditing(null);
+  };
+
+  const createMutation = useMutation({
+    mutationFn: async (body: Record<string, unknown>) => {
+      const res = await api.post('/vehicles', body);
+      return res.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['vehicles'] });
+      setShowForm(false);
+      resetForm();
+      toast.success('Veículo cadastrado com sucesso!');
+    },
+    onError: (err: any) => toast.error(err.response?.data?.message || 'Erro ao cadastrar veículo')
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: async ({ id, data }: { id: string; data: Record<string, unknown> }) => {
+      const res = await api.patch(`/vehicles/${id}`, data);
+      return res.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['vehicles'] });
+      setShowForm(false);
+      resetForm();
+      toast.success('Veículo atualizado com sucesso!');
+    },
+    onError: (err: any) => toast.error(err.response?.data?.message || 'Erro ao atualizar veículo')
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await api.delete(`/vehicles/${id}`);
+      return res.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['vehicles'] });
+      setDeleteId(null);
+      setRowActionMenu(null);
+      toast.success('Veículo excluído com sucesso!');
+    },
+    onError: (err: any) => toast.error(err.response?.data?.message || 'Erro ao excluir veículo')
+  });
+
+  const openEdit = (vehicle: Vehicle) => {
+    setEditing(vehicle);
+    setFormData({
+      marcaCode: '',
+      marcaName: vehicle.marcaVeic || '',
+      modeloCode: '',
+      modeloName: extractBaseModelName(vehicle.modeloVeic),
+      placaVeic: formatPlacaDisplay(vehicle.placaVeic),
+      polo: normalizePoloValue(vehicle.polo),
+      contrato: vehicle.contrato || '',
+      responsavel: vehicle.responsavel || '',
+      frotaPartic: vehicle.frotaPartic || '',
+      isActive: vehicle.isActive
+    });
+    setShowForm(true);
+  };
+
+  const handleBrandChange = (brandCode: string) => {
+    const brand = fipeBrands.find((item) => item.code === brandCode);
+    setFormData((current) => ({
+      ...current,
+      marcaCode: brandCode,
+      marcaName: brand?.name || '',
+      modeloCode: '',
+      modeloName: ''
+    }));
+  };
+
+  const handleModelChange = (modelCode: string) => {
+    const model = fipeModels.find((item) => item.code === modelCode);
+    setFormData((current) => ({
+      ...current,
+      modeloCode: modelCode,
+      modeloName: model?.name || ''
+    }));
+  };
+
+  const handleResponsavelChange = (responsavel: string) => {
+    const employee = employeeByName.get(responsavel);
+    setFormData((current) => ({
+      ...current,
+      responsavel,
+      contrato: employee?.costCenter || '',
+      polo: employee?.polo ? mapEmployeePoloToForm(employee.polo) : current.polo
+    }));
+  };
+
+  const buildPayload = () => ({
+    marcaVeic: formData.marcaName.trim() || undefined,
+    modeloVeic: formData.modeloName.trim(),
+    placaVeic: formatPlacaDisplay(formData.placaVeic.trim()),
+    polo: formData.polo.trim() || undefined,
+    contrato: formData.contrato.trim() || undefined,
+    responsavel: formData.responsavel.trim() || undefined,
+    frota_partic: formData.frotaPartic || undefined,
+    isActive: formData.isActive
+  });
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!formData.marcaCode) {
+      toast.error('Selecione a marca do veículo');
+      return;
+    }
+    if (!formData.modeloCode) {
+      toast.error('Selecione o modelo do veículo');
+      return;
+    }
+    if (!formData.placaVeic.trim()) {
+      toast.error('Informe a placa');
+      return;
+    }
+    if (!isValidBrazilianPlate(formData.placaVeic)) {
+      toast.error('Placa inválida. Use ABC-1234 (antiga) ou ABC1D23 (Mercosul).');
+      return;
+    }
+
+    const payload = buildPayload();
+    if (editing) {
+      updateMutation.mutate({ id: editing.id, data: payload });
+    } else {
+      createMutation.mutate(payload);
+    }
+  };
+
+  const user = userData?.data || { name: 'Usuário', role: 'EMPLOYEE' };
+  const isListEmpty = !isLoading && vehicles.length === 0;
+  const isSaving = createMutation.isPending || updateMutation.isPending;
+
+  if (loadingUser) {
+    return <Loading message="Carregando..." fullScreen size="lg" />;
+  }
+
+  return (
+    <ProtectedRoute route="/ponto/veiculos">
+      <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
+        <div className="space-y-6">
+          <div className="text-center">
+            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">
+              Cadastro de Veículos
+            </h1>
+            <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400">
+              Gerencie os veículos da frota e particulares vinculados aos contratos
+            </p>
+          </div>
+
+          <Card className={cadastroListClasses.card}>
+            <CardHeader className={cadastroListClasses.cardHeader}>
+              <div className={cadastroListClasses.cardHeaderRow}>
+                <div className={cadastroListClasses.cardHeaderIconRow}>
+                  <div className="rounded-lg bg-red-100 p-2 sm:p-3 dark:bg-red-900/30">
+                    <Car className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6" />
+                  </div>
+                  <div className="min-w-0">
+                    <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 sm:text-xl">
+                      Veículos
+                    </h2>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                      {isLoading
+                        ? 'Carregando...'
+                        : pagination.total === 1
+                          ? '1 veículo cadastrado'
+                          : `${pagination.total} veículos cadastrados`}
+                    </p>
+                  </div>
+                </div>
+                <div className={cadastroListClasses.cardToolbar}>
+                  <div className="relative min-w-[240px] flex-1 sm:w-[280px] sm:flex-none">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                    <input
+                      type="text"
+                      placeholder="Buscar por modelo, placa, contrato..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                    />
+                    {searchTerm ? (
+                      <button
+                        type="button"
+                        onClick={() => setSearchTerm('')}
+                        aria-label="Limpar busca"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-300"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    ) : null}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditing(null);
+                      resetForm();
+                      setShowForm(true);
+                    }}
+                    className="flex h-10 items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+                  >
+                    <Plus className="h-4 w-4 shrink-0" />
+                    <span>Novo veículo</span>
+                  </button>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className={cadastroListClasses.cardContent}>
+              {isLoading ? (
+                <CadastroListLoading message="Carregando veículos..." />
+              ) : isListEmpty ? (
+                <CadastroListEmpty
+                  icon={Car}
+                  title="Nenhum veículo encontrado"
+                  hint={
+                    searchTerm.trim()
+                      ? 'Tente ajustar a busca'
+                      : 'Cadastre um novo veículo para começar'
+                  }
+                />
+              ) : (
+                <>
+                  <CadastroListSummary
+                    startItem={listRange.startItem}
+                    endItem={listRange.endItem}
+                    total={pagination.total}
+                    itemLabel="veículo"
+                    itemLabelPlural="veículos"
+                    currentPage={pagination.page}
+                    totalPages={pagination.totalPages}
+                  />
+                  <div className="overflow-x-auto">
+                    <table className={cadastroListClasses.table}>
+                      <thead className="border-b border-gray-200 dark:border-gray-700">
+                        <tr>
+                          <th className={cadastroListClasses.th}>ID</th>
+                          <th className={cadastroListClasses.th}>Modelo</th>
+                          <th className={cadastroListClasses.th}>Placa</th>
+                          <th className={cadastroListClasses.th}>Contrato</th>
+                          <th className={cadastroListClasses.th}>Responsável</th>
+                          <th className={cadastroListClasses.th}>Frota / Particular</th>
+                          <th className={cadastroListClasses.thRight}>Ação</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
+                        {vehicles.map((vehicle, index) => (
+                          <tr key={vehicle.id} className={listTableRowClasses.tr}>
+                            <td className={cadastroListClasses.tdMono}>
+                              {formatCadastroListId(
+                                vehicle.code,
+                                listRange.startItem + index
+                              )}
+                            </td>
+                            <td className={cadastroListClasses.td}>{formatVehicleModel(vehicle)}</td>
+                            <td className={cadastroListClasses.tdMono}>
+                              {formatPlacaDisplay(vehicle.placaVeic)}
+                            </td>
+                            <td className={cadastroListClasses.td}>{vehicle.contrato || '—'}</td>
+                            <td className={cadastroListClasses.td}>{vehicle.responsavel || '—'}</td>
+                            <td className={cadastroListClasses.td}>
+                              {formatFrotaPartic(vehicle.frotaPartic)}
+                            </td>
+                            <RowActionMenuCell
+                              isOpen={isRowMenuOpen(vehicle.id)}
+                              onToggle={(e) =>
+                                toggleRowActionMenu(vehicle.id, e.currentTarget as HTMLButtonElement)
+                              }
+                            />
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {pagination.totalPages > 1 && (
+                    <div className={cadastroListClasses.pagination}>
+                      <button
+                        type="button"
+                        onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                        disabled={currentPage === 1}
+                        className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-400 dark:hover:bg-gray-600"
+                      >
+                        Anterior
+                      </button>
+                      {Array.from({ length: Math.min(5, pagination.totalPages) }, (_, i) => {
+                        const pageNumber = i + 1;
+                        const isActive = pageNumber === currentPage;
+                        return (
+                          <button
+                            key={pageNumber}
+                            type="button"
+                            onClick={() => setCurrentPage(pageNumber)}
+                            className={`rounded-md px-3 py-2 text-sm font-medium ${
+                              isActive
+                                ? 'bg-red-600 text-white'
+                                : 'border border-gray-300 bg-white text-gray-500 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-400 dark:hover:bg-gray-600'
+                            }`}
+                          >
+                            {pageNumber}
+                          </button>
+                        );
+                      })}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setCurrentPage((p) => Math.min(pagination.totalPages, p + 1))
+                        }
+                        disabled={currentPage === pagination.totalPages}
+                        className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-400 dark:hover:bg-gray-600"
+                      >
+                        Próxima
+                      </button>
+                    </div>
+                  )}
+
+                  {rowActionMenu && rowForActionMenu && (
+                    <RowActionMenuPortal
+                      menu={rowActionMenu}
+                      onClose={closeRowActionMenu}
+                      onEdit={() => openEdit(rowForActionMenu as Vehicle)}
+                      onDelete={() => setDeleteId((rowForActionMenu as Vehicle).id)}
+                    />
+                  )}
+                </>
+              )}
+            </CardContent>
+          </Card>
+
+          {showForm && (
+            <div className="fixed inset-0 z-[1100] flex items-center justify-center p-4">
+              <div
+                className="absolute inset-0 bg-black/50"
+                aria-hidden
+                onClick={() => {
+                  setShowForm(false);
+                  resetForm();
+                }}
+              />
+              <div className="relative z-[1101] max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-lg bg-white p-6 shadow-xl dark:bg-gray-800">
+                <h3 className="mb-4 text-lg font-semibold text-gray-900 dark:text-gray-100">
+                  {editing ? 'Editar veículo' : 'Novo veículo'}
+                </h3>
+                <form onSubmit={handleSubmit} className="space-y-4">
+                  {editing ? (
+                    <div>
+                      <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                        ID
+                      </label>
+                      <input
+                        type="text"
+                        value={formatCadastroListId(editing.code)}
+                        readOnly
+                        className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-600 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-400"
+                      />
+                    </div>
+                  ) : null}
+
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Marca *
+                    </label>
+                    <SingleSelectSearchDropdown
+                      value={formData.marcaCode}
+                      onChange={handleBrandChange}
+                      options={fipeBrandOptions}
+                      disabled={loadingBrands}
+                      allowEmpty={false}
+                      placeholder={
+                        loadingBrands ? 'Carregando marcas...' : 'Selecionar marca...'
+                      }
+                      searchPlaceholder="Pesquisar marca..."
+                      emptyOptionsMessage="Nenhuma marca disponível."
+                      noFocusRing
+                    />
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Modelo *
+                    </label>
+                    <SingleSelectSearchDropdown
+                      value={formData.modeloCode}
+                      onChange={handleModelChange}
+                      options={fipeModelOptions}
+                      disabled={!formData.marcaCode || loadingModels}
+                      allowEmpty={false}
+                      placeholder={
+                        !formData.marcaCode
+                          ? 'Selecione a marca primeiro'
+                          : loadingModels
+                            ? 'Carregando modelos...'
+                            : 'Selecionar modelo...'
+                      }
+                      searchPlaceholder="Pesquisar modelo..."
+                      emptyOptionsMessage={
+                        !formData.marcaCode
+                          ? 'Selecione a marca primeiro.'
+                          : 'Nenhum modelo disponível.'
+                      }
+                      noFocusRing
+                    />
+                    {loadingModels ? (
+                      <p className="mt-1 flex items-center gap-1 text-xs text-gray-500">
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        Consultando tabela FIPE...
+                      </p>
+                    ) : null}
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Placa *
+                    </label>
+                    <input
+                      type="text"
+                      value={formData.placaVeic}
+                      onChange={(e) =>
+                        setFormData((f) => ({
+                          ...f,
+                          placaVeic: maskBrazilianPlate(e.target.value)
+                        }))
+                      }
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 uppercase placeholder:normal-case dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500"
+                      placeholder="Escreva a placa do veículo"
+                      maxLength={8}
+                      inputMode="text"
+                      autoComplete="off"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Polo
+                    </label>
+                    <div className="flex gap-2">
+                      {POLO_OPTIONS.map((option) => (
+                        <ButtonSeg
+                          key={option.value}
+                          active={formData.polo === option.value}
+                          onClick={() =>
+                            setFormData((current) => ({ ...current, polo: option.value }))
+                          }
+                          label={option.label}
+                        />
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Responsável
+                    </label>
+                    <SingleSelectSearchDropdown
+                      value={formData.responsavel}
+                      onChange={handleResponsavelChange}
+                      options={employeeSelectOptions}
+                      disabled={loadingEmployees}
+                      placeholder={
+                        loadingEmployees
+                          ? 'Carregando funcionários...'
+                          : 'Selecionar responsável...'
+                      }
+                      searchPlaceholder="Pesquisar..."
+                      emptyOptionsMessage="Nenhum funcionário disponível."
+                      noFocusRing
+                    />
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Frota / Particular
+                    </label>
+                    <SingleSelectSearchDropdown
+                      value={formData.frotaPartic}
+                      onChange={(frotaPartic) =>
+                        setFormData((current) => ({
+                          ...current,
+                          frotaPartic: frotaPartic as '' | VehicleUsageType
+                        }))
+                      }
+                      options={frotaParticOptions}
+                      placeholder="Selecionar..."
+                      searchPlaceholder="Pesquisar..."
+                      noFocusRing
+                    />
+                  </div>
+
+                  <label className="group flex cursor-pointer items-center space-x-3">
+                    <div className="relative">
+                      <input
+                        type="checkbox"
+                        checked={formData.isActive}
+                        onChange={(e) => setFormData((f) => ({ ...f, isActive: e.target.checked }))}
+                        className="sr-only"
+                      />
+                      <div
+                        className={`flex h-5 w-5 items-center justify-center rounded border-2 transition-all duration-200 ${
+                          formData.isActive
+                            ? 'border-red-600 bg-red-600 dark:border-red-500 dark:bg-red-500'
+                            : 'border-gray-300 bg-white group-hover:border-red-500 dark:border-gray-600 dark:bg-gray-800 dark:group-hover:border-red-400'
+                        }`}
+                      >
+                        {formData.isActive ? (
+                          <svg
+                            className="h-3 w-3 text-white"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                            aria-hidden
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={3}
+                              d="M5 13l4 4L19 7"
+                            />
+                          </svg>
+                        ) : null}
+                      </div>
+                    </div>
+                    <span className="text-sm font-medium text-gray-700 transition-colors group-hover:text-gray-900 dark:text-gray-300 dark:group-hover:text-gray-100">
+                      Ativo
+                    </span>
+                  </label>
+
+                  <div className="flex justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowForm(false);
+                        resetForm();
+                      }}
+                      className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isSaving}
+                      className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+                    >
+                      {isSaving ? 'Salvando...' : editing ? 'Salvar' : 'Cadastrar'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {deleteId && (
+            <div className="fixed inset-0 z-[1100] flex items-center justify-center p-4">
+              <div
+                className="absolute inset-0 bg-black/50"
+                aria-hidden
+                onClick={() => setDeleteId(null)}
+              />
+              <div className="relative z-[1101] w-full max-w-md rounded-lg bg-white p-6 shadow-xl dark:bg-gray-800">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                  Excluir veículo
+                </h3>
+                <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
+                  Tem certeza que deseja excluir este veículo? Esta ação não pode ser desfeita.
+                </p>
+                <div className="mt-6 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setDeleteId(null)}
+                    className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => deleteMutation.mutate(deleteId)}
+                    disabled={deleteMutation.isPending}
+                    className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+                  >
+                    {deleteMutation.isPending ? 'Excluindo...' : 'Excluir'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </MainLayout>
+    </ProtectedRoute>
+  );
+}

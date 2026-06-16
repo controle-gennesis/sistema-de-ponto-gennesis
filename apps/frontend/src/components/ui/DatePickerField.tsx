@@ -15,6 +15,7 @@ export type DatePickerFieldProps = {
   /** `field` = caixa com borda; `inline` = só texto + ícone (tabela) */
   appearance?: 'field' | 'inline';
   className?: string;
+  noFocusRing?: boolean;
   'aria-label'?: string;
 };
 
@@ -49,6 +50,7 @@ export function DatePickerField({
   size = 'form',
   appearance = 'field',
   className,
+  noFocusRing = false,
   'aria-label': ariaLabel
 }: DatePickerFieldProps) {
   const listboxId = useId();
@@ -133,13 +135,15 @@ export function DatePickerField({
     appearance === 'inline'
       ? clsx(
           'h-auto cursor-pointer border-0 bg-transparent px-1 py-1 text-xs shadow-none focus:outline-none focus:ring-0 sm:text-sm',
-          open && 'rounded-md ring-2 ring-red-500 dark:ring-red-400'
+          !noFocusRing && open && 'rounded-md ring-2 ring-red-500 dark:ring-red-400'
         )
       : clsx(
           'rounded-md border border-gray-300 bg-white text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100',
-          'focus:outline-none focus:ring-2 focus:ring-red-500 dark:focus:ring-red-400 focus:border-transparent',
+          noFocusRing
+            ? 'focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0'
+            : 'focus:outline-none focus:ring-2 focus:ring-red-500 dark:focus:ring-red-400 focus:border-transparent',
           size === 'form' ? 'h-10 rounded-lg px-3 text-sm' : 'h-9 px-2.5 text-xs sm:text-sm',
-          open && 'ring-2 ring-red-500 dark:ring-red-400 border-transparent'
+          !noFocusRing && open && 'ring-2 ring-red-500 dark:ring-red-400 border-transparent'
         ),
     className
   );

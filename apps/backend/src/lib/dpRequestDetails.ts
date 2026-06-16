@@ -10,14 +10,32 @@ export const dpAttachmentSchema = z.object({
 const str = z.string().min(1);
 const strOpt = z.string().optional();
 
+const admissaoCandidatoSchema = z.object({
+  nome: str,
+  funcao: str,
+  contato: str,
+});
+
 export const dpDetailsSchemas = {
-  ADMISSAO: z.object({
-    quantidadeNomeFuncaoContato: str,
-    funcaoNomeQuantidadeContato: str,
-    motivoContratacao: str,
-    setor: str,
-    observacao: strOpt,
-  }),
+  ADMISSAO: z
+    .object({
+      quantidade: z.coerce.number().int().min(1).max(30),
+      candidatos: z.array(admissaoCandidatoSchema).min(1).max(30),
+      quantidadeNomeFuncaoContato: strOpt,
+      funcaoNomeQuantidadeContato: strOpt,
+      motivoContratacao: str,
+      setor: str,
+      observacao: strOpt,
+    })
+    .superRefine((data, ctx) => {
+      if (data.candidatos.length !== data.quantidade) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['candidatos'],
+          message: 'A quantidade deve corresponder ao número de candidatos informados',
+        });
+      }
+    }),
   FERIAS: z.object({
     employeeId: str,
     dataInicial: str,

@@ -109,10 +109,19 @@ function buildPoloByContractMap(detailRows: QueryGastosDetailRow[]): Map<string,
   return map;
 }
 
+export type GastosOperacionaisFilterOptions = {
+  years: number[];
+  contracts: string[];
+};
+
+export type GastosOperacionaisPoloFilterOptions = GastosOperacionaisFilterOptions & {
+  polos: string[];
+};
+
 export function getGastosPoloFilterOptions(
   detailRows: QueryGastosDetailRow[],
   filters?: Pick<GastosOperacionaisFilters, 'polos'>
-) {
+): GastosOperacionaisPoloFilterOptions {
   const poloByContract = buildPoloByContractMap(detailRows);
   const polos = Array.from(new Set(poloByContract.values())).sort((a, b) =>
     a.localeCompare(b, 'pt-BR')
@@ -134,7 +143,7 @@ export function getGastosFilterOptions(
   filters?: Pick<GastosOperacionaisFilters, 'localities'>,
   localityOverrides: GastosOperacionaisLocalityOverrideMap = {},
   visibleLocalities?: readonly GastosOperacionaisLocality[]
-) {
+): GastosOperacionaisFilterOptions {
   const years = Array.from(new Set(detailRows.map((row) => row.year))).sort((a, b) => b - a);
   const allContracts = Array.from(new Set(detailRows.map((row) => row.contract)));
   const contracts = sortContractNamesByCustomOrder(

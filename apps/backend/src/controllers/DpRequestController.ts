@@ -5,9 +5,8 @@ import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { createError } from '../middleware/errorHandler';
 import {
-  assertCanAttachContractToDpRequest,
+  assertCanAttachCostCenterToDpRequest,
   assertManagerCanActOnDpContract,
-  getDpFormContractWhere,
   getManagerDpApprovalContractScope,
   userMayCreateSensitiveDpRequest,
 } from '../lib/dpApprovalAccess';
@@ -35,9 +34,9 @@ const createDpRequestSchema = z.object({
   /** Prazo desejado para retorno/acompanhamento pelo DP (independe das datas de período em férias, atestado etc.). */
   prazoInicio: z.string().min(1).optional(),
   prazoFim: z.string().min(1).optional(),
-  contractId: z.string().min(1),
+  costCenterId: z.string().min(1),
 
-  // Persistimos para histórico (mesmo que possamos derivar do contrato depois).
+  // Persistimos para histórico (mesmo que possamos derivar do centro de custo depois).
   company: z.string().min(1).optional(),
   polo: z.string().min(1).optional(),
 
@@ -45,10 +44,24 @@ const createDpRequestSchema = z.object({
 });
 
 const approveDpRequestSchema = z.object({
-  /** Vazio é permitido (aprovação/rejeição sem observação). */
+  /** Vazio é permitido (aprovação sem observação). */
   comment: z.string().optional().transform((s) => (typeof s === 'string' ? s.trim() : '')),
   isInternal: z.boolean().default(false), // Mantemos por compatibilidade futura.
 });
+
+const rejectDpRequestSchema = z
+  .object({
+    cancellationReason: z.string().optional(),
+    /** Compatibilidade: aceita `comment` legado como motivo. */
+    comment: z.string().optional(),
+  })
+  .transform((data) => ({
+    cancellationReason: (data.cancellationReason ?? data.comment ?? '').trim(),
+  }))
+  .refine((data) => data.cancellationReason.length > 0, {
+    message: 'Informe o motivo do cancelamento',
+    path: ['cancellationReason'],
+  });
 
 const DP_FEEDBACK_NEXT_STATUSES = [
   'IN_REVIEW_DP',
@@ -61,13 +74,24 @@ const DP_FEEDBACK_NEXT_STATUSES = [
   'CANCELLED',
 ] as const;
 
-const feedbackDpRequestSchema = z.object({
-  feedback: z.string().min(1),
-  nextStatus: z.enum(DP_FEEDBACK_NEXT_STATUSES),
-  /** Texto extra ao concluir (se vazio, usa `feedback` como comentário de conclusão). */
-  conclusionComment: z.string().optional(),
-  responsibleNote: z.string().optional(),
-});
+const feedbackDpRequestSchema = z
+  .object({
+    feedback: z.string().min(1),
+    nextStatus: z.enum(DP_FEEDBACK_NEXT_STATUSES),
+    /** Texto extra ao concluir (se vazio, usa `feedback` como comentário de conclusão). */
+    conclusionComment: z.string().optional(),
+    responsibleNote: z.string().optional(),
+    cancellationReason: z.string().optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (data.nextStatus === 'CANCELLED' && !(data.cancellationReason || '').trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Informe o motivo do cancelamento',
+        path: ['cancellationReason'],
+      });
+    }
+  });
 
 const requesterReturnSchema = z.object({
   comment: z.string().min(1, 'Informe o retorno para o DP'),
@@ -187,23 +211,38 @@ async function attachDpContractSummaries<T extends { contractId: string | null }
 }
 
 export class DpRequestController {
-  /** Lista enxuta de contratos para o formulário (inclui escopo de «aprovar DP» sem módulo Contratos). */
+  /** Todos os centros de custo ativos para o formulário de solicitação geral. */
   async getEligibleContracts(req: AuthRequest, res: Response) {
     try {
       if (!req.user) throw createError('Usuário não autenticado', 401);
-      const where = await getDpFormContractWhere(req.user.id, req.user.isAdmin);
-      const contracts = await prisma.contract.findMany({
-        where,
+
+      const costCenters = await prisma.costCenter.findMany({
+        where: { isActive: true },
         select: {
           id: true,
           name: true,
-          number: true,
-          costCenter: { select: { company: true, polo: true } },
+          code: true,
+          company: true,
+          polo: true,
+          contracts: {
+            select: { id: true, name: true, number: true },
+            orderBy: { name: 'asc' },
+            take: 1,
+          },
         },
         orderBy: { name: 'asc' },
-        take: 500,
+        take: 2000,
       });
-      return res.json({ success: true, data: contracts });
+
+      const data = costCenters.map((cc) => ({
+        id: cc.id,
+        name: cc.name.trim() || cc.code,
+        code: cc.code,
+        contractId: cc.contracts[0]?.id ?? null,
+        costCenter: { company: cc.company ?? null, polo: cc.polo ?? null },
+      }));
+
+      return res.json({ success: true, data });
     } catch (e: unknown) {
       const err = e as { statusCode?: number; message?: string };
       if (err?.statusCode && typeof err.statusCode === 'number') {
@@ -265,16 +304,35 @@ export class DpRequestController {
         return res.status(400).json({ error: msg });
       }
 
-      await assertCanAttachContractToDpRequest(req, validated.contractId);
+      await assertCanAttachCostCenterToDpRequest(req, validated.costCenterId);
+
+      const costCenter = await prisma.costCenter.findFirst({
+        where: { id: validated.costCenterId, isActive: true },
+        include: {
+          contracts: {
+            orderBy: { name: 'asc' },
+            take: 1,
+          },
+        },
+      });
+      if (!costCenter) throw createError('Centro de custo não encontrado', 404);
+
+      const contract = costCenter.contracts[0] ?? null;
 
       const isSensitiveType = (SENSITIVE_MANAGER_ONLY_DP_TYPES as readonly string[]).includes(
         validated.requestType
       );
       if (isSensitiveType) {
+        if (!contract) {
+          throw createError(
+            'Este tipo de solicitação exige um centro de custo com contrato vinculado no sistema.',
+            400
+          );
+        }
         const ok = await userMayCreateSensitiveDpRequest(
           actorUserId,
           req.user.isAdmin,
-          validated.contractId
+          contract.id
         );
         if (!ok) {
           throw createError(
@@ -284,15 +342,8 @@ export class DpRequestController {
         }
       }
 
-      const contract = await prisma.contract.findUnique({
-        where: { id: validated.contractId },
-        include: { costCenter: true },
-      });
-
-      if (!contract) throw createError('Contrato não encontrado', 404);
-
-      const company = validated.company ?? contract.costCenter.company ?? '';
-      const polo = validated.polo ?? contract.costCenter.polo ?? '';
+      const company = validated.company ?? costCenter.company ?? '';
+      const polo = validated.polo ?? costCenter.polo ?? '';
 
       const typeLabel: Record<string, string> = {
         ADMISSAO: 'Admissão',
@@ -330,7 +381,8 @@ export class DpRequestController {
             prazoInicio,
             prazoFim,
             details: parsedDetails as Prisma.InputJsonValue,
-            contractId: contract.id,
+            contractId: contract?.id ?? null,
+            costCenterId: costCenter.id,
             company: company || null,
             polo: polo || null,
             status: 'WAITING_MANAGER',
@@ -463,7 +515,12 @@ export class DpRequestController {
         throw createError('A solicitação não está aguardando aprovação do gestor', 400);
       }
 
-      await assertManagerCanActOnDpContract(req.user.id, req.user.isAdmin, dpRequest.contractId);
+      await assertManagerCanActOnDpContract(
+        req.user.id,
+        req.user.isAdmin,
+        dpRequest.contractId,
+        dpRequest.costCenterId
+      );
 
       const payload = approveDpRequestSchema.parse(req.body);
       const approverName = await getUserDisplayName(req.user.id);
@@ -517,10 +574,15 @@ export class DpRequestController {
         throw createError('A solicitação não está aguardando aprovação do gestor', 400);
       }
 
-      await assertManagerCanActOnDpContract(req.user.id, req.user.isAdmin, dpRequest.contractId);
+      await assertManagerCanActOnDpContract(
+        req.user.id,
+        req.user.isAdmin,
+        dpRequest.contractId,
+        dpRequest.costCenterId
+      );
 
-      const payload = approveDpRequestSchema.parse(req.body);
-      const rejectionReason = (payload.comment || 'Rejeitada pelo gestor').trim();
+      const payload = rejectDpRequestSchema.parse(req.body);
+      const rejectionReason = payload.cancellationReason;
       const rejecterName = await getUserDisplayName(req.user.id);
 
       const updated = await prisma.dpRequest.update({
@@ -531,7 +593,7 @@ export class DpRequestController {
           managerApprovedAt: null,
           managerApprovalComment: null,
           managerRejectionReason: rejectionReason,
-          managerRejectionComment: payload.comment || null,
+          managerRejectionComment: null,
           statusHistory: appendStatusTransition(
             {
               createdAt: dpRequest.createdAt,
@@ -552,6 +614,9 @@ export class DpRequestController {
 
       return res.json({ success: true, data: updated });
     } catch (e: unknown) {
+      if (e instanceof z.ZodError) {
+        return res.status(400).json({ error: 'Dados inválidos', details: e.issues });
+      }
       const err = e as { statusCode?: number; message?: string };
       if (err?.statusCode && typeof err.statusCode === 'number') {
         return res.status(err.statusCode).json({ error: err.message || 'Erro' });
@@ -587,10 +652,19 @@ export class DpRequestController {
       const next = payload.nextStatus;
       const responsible = (payload.responsibleNote || '').trim();
       const dpActorName = await getUserDisplayName(req.user.id);
+      const cancellationReason = (payload.cancellationReason || '').trim();
       const historyNote =
         next === 'CONCLUDED'
           ? (payload.conclusionComment || payload.feedback).trim()
-          : [payload.feedback.trim(), responsible ? `Responsável: ${responsible}` : ''].filter(Boolean).join('\n');
+          : next === 'CANCELLED'
+            ? [
+                `Motivo do cancelamento: ${cancellationReason}`,
+                payload.feedback.trim(),
+                responsible ? `Responsável: ${responsible}` : '',
+              ]
+                .filter(Boolean)
+                .join('\n')
+            : [payload.feedback.trim(), responsible ? `Responsável: ${responsible}` : ''].filter(Boolean).join('\n');
 
       const data: Prisma.DpRequestUpdateInput = {
         dpFeedback: payload.feedback.trim(),
@@ -620,6 +694,10 @@ export class DpRequestController {
         data.dpConclusionComment = (payload.conclusionComment || payload.feedback).trim();
       } else {
         data.dpConcludedAt = null;
+      }
+
+      if (next === 'CANCELLED') {
+        data.dpCancellationReason = cancellationReason;
       }
 
       const updated = await prisma.dpRequest.update({

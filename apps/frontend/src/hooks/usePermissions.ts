@@ -451,7 +451,12 @@ export function useRoutePermission(route: string) {
       isAdministrator || isDepartmentCompras || can(pk('/ponto/fds-aprovadas')),
     '/ponto/solicitacoes-combustivel':
       isAdministrator || isDepartmentCompras || can(pk('/ponto/solicitacoes-combustivel')),
+    '/ponto/solicitacoes-reserva-veiculos':
+      isAdministrator || isDepartmentCompras || can(pk('/ponto/solicitacoes-reserva-veiculos')),
     '/ponto/fornecedores': isAdministrator || isDepartmentCompras || can(pk('/ponto/fornecedores')),
+    '/ponto/veiculos': isAdministrator || isDepartmentCompras || can(pk('/ponto/veiculos')),
+    '/ponto/reserva-veiculos':
+      isAdministrator || isDepartmentCompras || can(pk('/ponto/reserva-veiculos')),
     '/ponto/condicoes-pagamento':
       isAdministrator || isDepartmentCompras || can(pk('/ponto/condicoes-pagamento')),
     '/ponto/natureza-orcamentaria':

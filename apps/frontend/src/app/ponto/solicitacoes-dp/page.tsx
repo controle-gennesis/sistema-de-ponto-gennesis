@@ -11,12 +11,25 @@ import { getListTableRowClassName, ListRowNavigableLabel, rowActionMenuButtonCla
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
+import { DatePickerField } from '@/components/ui/DatePickerField';
+import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
+import type { MultiSelectSearchOption } from '@/components/ui/MultiSelectSearchDropdown';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'react-hot-toast';
 import { ClipboardList, Eye, Filter, Loader2, Plus, RotateCcw, Search, X } from 'lucide-react';
 import { ButtonSeg, DpSolicitacaoTypeFields, type DpFormRequestType } from './DpSolicitacaoTypeFields';
 import { usePermissions } from '@/hooks/usePermissions';
 import { buildDpRequestTimeline } from '@/lib/dpRequestTimeline';
+import { DpRequestDetailsPreview } from '@/lib/dpRequestDetailsPreview';
+import { DP_SOLICITACOES_NO_FOCUS_CLS, formatIsoDateRangeToBr } from '@/lib/dpSolicitacoesUi';
+import {
+  DpRequestHistoryMetaCard,
+  DpRequestHistoryModalFooter,
+  DpRequestHistoryModalTabs,
+  DpRequestHistorySectionCard,
+  DpRequestHistoryTimeline,
+  type DpRequestHistoryMetaField,
+} from '@/lib/dpRequestHistoryModal';
 import { COMPANIES_LIST } from '@/constants/payrollFilters';
 
 type DpUrgency = 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
@@ -72,12 +85,6 @@ function getDpHistoryFeedbackText(r: DpRequest): string | null {
   if (fb) return fb;
   if (conc) return conc;
   return null;
-}
-
-function formatYmd(iso: string) {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '—';
-  return d.toISOString().slice(0, 10);
 }
 
 function formatDateTime(iso?: string | null) {
@@ -169,10 +176,8 @@ const STATUS_ROW_BADGE: Record<DpRequestStatus, string> = {
 
 const SENSITIVE_DP_REQUEST_TYPES = ['RESCISAO', 'ALTERACAO_FUNCAO_SALARIO'] as const;
 
-const selectFieldCls =
-  'w-full px-3 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 appearance-none focus:!outline-none focus:!ring-2 focus:!ring-red-500 dark:focus:!ring-red-400 focus-visible:!outline-none focus-visible:!ring-2 focus-visible:!ring-red-500 dark:focus-visible:!ring-red-400';
 const inputFieldCls =
-  'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:!outline-none focus:!ring-2 focus:!ring-red-500 dark:focus:!ring-red-400 focus-visible:!outline-none focus-visible:!ring-2 focus-visible:!ring-red-500 dark:focus-visible:!ring-red-400';
+  `border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${DP_SOLICITACOES_NO_FOCUS_CLS}`;
 
 /** Polos no formulário de solicitação DP (UF); alinha com o cadastro BRASÍLIA/GOIÁS → DF/GO. */
 const DP_POLO_OPTIONS = ['DF', 'GO'] as const;
@@ -200,11 +205,22 @@ export function SolicitacoesGeraisPage() {
   const { canCreateSensitiveDpRequestType, isLoading: loadingPerms } = usePermissions();
   const [activeTab, setActiveTab] = useState<'list' | 'new'>('list');
   const [historyRequest, setHistoryRequest] = useState<DpRequest | null>(null);
+  const [historyModalTab, setHistoryModalTab] = useState<'detalhes' | 'timeline'>('detalhes');
   const historyFeedbackText = React.useMemo(
     () => (historyRequest ? getDpHistoryFeedbackText(historyRequest) : null),
     [historyRequest]
   );
   const [returnComment, setReturnComment] = useState<Record<string, string>>({});
+
+  const openHistoryRequest = (r: DpRequest) => {
+    setHistoryModalTab('detalhes');
+    setHistoryRequest(r);
+  };
+
+  const closeHistoryRequest = () => {
+    setHistoryRequest(null);
+    setHistoryModalTab('detalhes');
+  };
   const router = useRouter();
 
   const { data: userData, isLoading: loadingUser } = useQuery({
@@ -222,14 +238,20 @@ export function SolicitacoesGeraisPage() {
   };
 
   const { data: contractsResp } = useQuery({
-    queryKey: ['solicitacoes-dp-contratos-elegiveis'],
+    queryKey: ['solicitacoes-dp-centros-custo'],
     queryFn: async () => {
       const res = await api.get('/solicitacoes-dp/contratos-elegiveis');
       return res.data?.data ?? [];
     },
   });
 
-  const contracts = contractsResp || [];
+  const costCenters = (contractsResp ?? []) as Array<{
+    id: string;
+    name: string;
+    code?: string;
+    contractId?: string | null;
+    costCenter?: { company?: string | null; polo?: string | null };
+  }>;
 
   const payrollMonthYear = React.useMemo(() => {
     const n = new Date();
@@ -253,7 +275,6 @@ export function SolicitacoesGeraisPage() {
   const payrollEmployees = payrollEmpResp ?? [];
 
   const [details, setDetails] = useState<Record<string, unknown>>({});
-  const [multiEmpSearch, setMultiEmpSearch] = useState('');
   const [atestadoFile, setAtestadoFile] = useState<File | null>(null);
   const [horaExtraFile, setHoraExtraFile] = useState<File | null>(null);
   const [atestadoFileName, setAtestadoFileName] = useState('');
@@ -270,7 +291,7 @@ export function SolicitacoesGeraisPage() {
     requestType: DpRequestType | '';
     prazoInicio: string;
     prazoFim: string;
-    contractId: string;
+    costCenterId: string;
     company: string;
     polo: string;
   }>({
@@ -278,7 +299,7 @@ export function SolicitacoesGeraisPage() {
     requestType: '',
     prazoInicio: '',
     prazoFim: '',
-    contractId: '',
+    costCenterId: '',
     company: '',
     polo: '',
   });
@@ -290,28 +311,32 @@ export function SolicitacoesGeraisPage() {
     setHoraExtraFile(null);
     setAtestadoFileName('');
     setHoraExtraFileName('');
-    setMultiEmpSearch('');
   };
+
+  const selectedCostCenterContractId = React.useMemo(() => {
+    if (!form.costCenterId) return '';
+    return costCenters.find((c) => c.id === form.costCenterId)?.contractId ?? '';
+  }, [form.costCenterId, costCenters]);
 
   const selectableRequestTypeEntries = React.useMemo(() => {
     return Object.entries(TYPE_LABELS).filter(([k]) => {
       if ((SENSITIVE_DP_REQUEST_TYPES as readonly string[]).includes(k)) {
-        return canCreateSensitiveDpRequestType(form.contractId);
+        return canCreateSensitiveDpRequestType(selectedCostCenterContractId);
       }
       return true;
     });
-  }, [form.contractId, canCreateSensitiveDpRequestType]);
+  }, [selectedCostCenterContractId, canCreateSensitiveDpRequestType]);
 
   React.useEffect(() => {
     if (loadingPerms) return;
     if (
       (form.requestType === 'RESCISAO' || form.requestType === 'ALTERACAO_FUNCAO_SALARIO') &&
-      !canCreateSensitiveDpRequestType(form.contractId)
+      !canCreateSensitiveDpRequestType(selectedCostCenterContractId)
     ) {
       setForm((p) => ({ ...p, requestType: '', prazoInicio: '', prazoFim: '' }));
       setDetails({});
     }
-  }, [form.contractId, form.requestType, canCreateSensitiveDpRequestType, loadingPerms]);
+  }, [selectedCostCenterContractId, form.requestType, canCreateSensitiveDpRequestType, loadingPerms]);
 
   useEffect(() => {
     if (form.requestType !== 'ADVERTENCIA_SUSPENSAO') return;
@@ -346,6 +371,105 @@ export function SolicitacoesGeraisPage() {
     return Array.from(map.entries()).sort((a, b) => a[1].localeCompare(b[1], 'pt-BR'));
   }, [myRequests]);
 
+  const requestTypeSelectOptions = React.useMemo<MultiSelectSearchOption[]>(
+    () =>
+      selectableRequestTypeEntries.map(([value, label]) => ({
+        value,
+        label,
+        searchText: label,
+      })),
+    [selectableRequestTypeEntries]
+  );
+
+  const costCenterSelectOptions = React.useMemo<MultiSelectSearchOption[]>(
+    () =>
+      costCenters.map((c) => ({
+        value: c.id,
+        label: c.name,
+        searchText: [c.name, c.code].filter(Boolean).join(' '),
+      })),
+    [costCenters]
+  );
+
+  const companySelectOptions = React.useMemo<MultiSelectSearchOption[]>(() => {
+    const items = COMPANIES_LIST.map((c) => ({ value: c, label: c, searchText: c }));
+    if (form.company && !COMPANIES_LIST.includes(form.company)) {
+      return [{ value: form.company, label: form.company, searchText: form.company }, ...items];
+    }
+    return items;
+  }, [form.company]);
+
+  const poloSelectOptions = React.useMemo<MultiSelectSearchOption[]>(
+    () => DP_POLO_OPTIONS.map((p) => ({ value: p, label: p })),
+    []
+  );
+
+  const myStatusFilterOptions = React.useMemo<MultiSelectSearchOption[]>(
+    () => [
+      { value: 'all', label: 'Todos' },
+      ...(Object.entries(STATUS_LABELS) as [DpRequestStatus, string][]).map(([value, label]) => ({
+        value,
+        label,
+        searchText: label,
+      })),
+    ],
+    []
+  );
+
+  const filterUrgencyOptions = React.useMemo<MultiSelectSearchOption[]>(
+    () => [
+      { value: 'all', label: 'Todas' },
+      ...(Object.keys(URGENCY_LABELS) as DpUrgency[]).map((value) => ({
+        value,
+        label: URGENCY_LABELS[value],
+        searchText: URGENCY_LABELS[value],
+      })),
+    ],
+    []
+  );
+
+  const filterRequestTypeOptions = React.useMemo<MultiSelectSearchOption[]>(
+    () => [
+      { value: 'all', label: 'Todos' },
+      ...(Object.keys(TYPE_LABELS) as DpRequestType[])
+        .slice()
+        .sort((a, b) => TYPE_LABELS[a].localeCompare(TYPE_LABELS[b], 'pt-BR'))
+        .map((value) => ({
+          value,
+          label: TYPE_LABELS[value],
+          searchText: TYPE_LABELS[value],
+        })),
+    ],
+    []
+  );
+
+  const filterContractSelectOptions = React.useMemo<MultiSelectSearchOption[]>(
+    () => [
+      { value: 'all', label: 'Todos' },
+      ...contractFilterOptions.map(([id, name]) => ({
+        value: id,
+        label: name,
+        searchText: name,
+      })),
+    ],
+    [contractFilterOptions]
+  );
+
+  const handleCostCenterChange = (id: string) => {
+    if (!id) {
+      setForm((p) => ({ ...p, costCenterId: '', company: '', polo: '' }));
+      return;
+    }
+    const cc = costCenters.find((x) => x.id === id);
+    const meta = cc?.costCenter;
+    setForm((p) => ({
+      ...p,
+      costCenterId: id,
+      company: meta?.company?.trim() ?? '',
+      polo: mapCostCenterPoloToFormPolo(meta?.polo),
+    }));
+  };
+
   const filteredMyRequests = myRequests.filter((r) => {
     if (filterUrgency !== 'all' && r.urgency !== filterUrgency) return false;
     if (filterRequestType !== 'all' && r.requestType !== filterRequestType) return false;
@@ -366,7 +490,7 @@ export function SolicitacoesGeraisPage() {
   const createMutation = useMutation({
     mutationFn: async () => {
       if (!form.requestType) throw new Error('Selecione o tipo de solicitação');
-      if (!form.contractId) throw new Error('Selecione o contrato');
+      if (!form.costCenterId) throw new Error('Selecione o centro de custo');
 
       if (!form.prazoInicio || !form.prazoFim) {
         throw new Error('Informe o prazo (início e fim) em que o DP deve dar retorno sobre a solicitação');
@@ -386,7 +510,7 @@ export function SolicitacoesGeraisPage() {
       const payload: Record<string, unknown> = {
         urgency: form.urgency,
         requestType: form.requestType,
-        contractId: form.contractId,
+        costCenterId: form.costCenterId,
         company: form.company || undefined,
         polo: form.polo || undefined,
         details: d,
@@ -425,6 +549,36 @@ export function SolicitacoesGeraisPage() {
   });
 
   const buildTimeline = (r: DpRequest) => buildDpRequestTimeline(r, STATUS_LABELS, formatDuration);
+
+  const buildHistoryMetaFields = (r: DpRequest): DpRequestHistoryMetaField[] => [
+    {
+      label: 'Nº da solicitação',
+      value: r.displayNumber != null ? String(r.displayNumber) : '—',
+    },
+    {
+      label: 'Tipo',
+      value: TYPE_LABELS[r.requestType] ?? r.requestType,
+    },
+    {
+      label: 'Status',
+      value: (
+        <span
+          className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${STATUS_ROW_BADGE[r.status]}`}
+        >
+          {STATUS_LABELS[r.status] ?? r.status}
+        </span>
+      ),
+    },
+    { label: 'Setor', value: r.sectorSolicitante || '—' },
+    { label: 'Contrato', value: r.contract?.name ?? '—' },
+    {
+      label: 'Prazo',
+      value: formatIsoDateRangeToBr(r.prazoInicio, r.prazoFim),
+    },
+    { label: 'Criada em', value: formatDateTime(r.createdAt) },
+    { label: 'Aprovada em', value: formatDateTime(r.managerApprovedAt) },
+    { label: 'Concluída em', value: formatDateTime(r.dpConcludedAt) },
+  ];
 
   if (loadingUser) {
     return (
@@ -467,7 +621,7 @@ export function SolicitacoesGeraisPage() {
                       value={mySearch}
                       onChange={(e) => setMySearch(e.target.value)}
                       placeholder="Buscar por ID..."
-                      className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-10 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                      className={`h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-10 text-sm font-medium text-gray-900 placeholder:text-gray-400 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 ${DP_SOLICITACOES_NO_FOCUS_CLS}`}
                     />
                     {mySearch ? (
                       <button
@@ -511,15 +665,16 @@ export function SolicitacoesGeraisPage() {
                   onClose={() => setActiveTab('list')}
                   title="Nova solicitação"
                   size="xl"
+                  contentOverflowVisible
+                  elevated
                 >
-                  <div className="max-h-[75vh] overflow-y-auto overflow-x-visible px-1 pt-1">
-                    <form
-                      className="grid grid-cols-1 gap-4 md:grid-cols-2"
-                      onSubmit={(e) => {
-                        e.preventDefault();
-                        void createMutation.mutate();
-                      }}
-                    >
+                  <form
+                    className="grid grid-cols-1 gap-4 md:grid-cols-2"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      void createMutation.mutate();
+                    }}
+                  >
                   <div className="md:col-span-2">
                     <label className="block text-sm font-medium mb-1 text-gray-800 dark:text-gray-200">
                       Urgência
@@ -540,27 +695,27 @@ export function SolicitacoesGeraisPage() {
 
                   <div className="md:col-span-2">
                     <label className="block text-sm font-medium mb-1">Tipo de solicitação *</label>
-                    <select
-                      className={selectFieldCls}
+                    <SingleSelectSearchDropdown
                       value={form.requestType}
-                      onChange={(e) => {
-                        const rt = (e.target.value === '' ? '' : e.target.value) as DpRequestType | '';
-                        setForm((p) => ({ ...p, requestType: rt, prazoInicio: '', prazoFim: '' }));
+                      onChange={(rt) => {
+                        setForm((p) => ({
+                          ...p,
+                          requestType: rt as DpRequestType | '',
+                          prazoInicio: '',
+                          prazoFim: '',
+                        }));
                         setDetails({});
                         setAtestadoFile(null);
                         setHoraExtraFile(null);
                         setAtestadoFileName('');
                         setHoraExtraFileName('');
-                        setMultiEmpSearch('');
                       }}
-                    >
-                      <option value="">Selecione o tipo...</option>
-                      {selectableRequestTypeEntries.map(([k, v]) => (
-                        <option key={k} value={k}>
-                          {v}
-                        </option>
-                      ))}
-                    </select>
+                      options={requestTypeSelectOptions}
+                      allowEmpty
+                      placeholder="Selecione o tipo..."
+                      searchPlaceholder="Pesquisar..."
+                      noFocusRing
+                    />
                   </div>
 
                   <DpSolicitacaoTypeFields
@@ -568,8 +723,6 @@ export function SolicitacoesGeraisPage() {
                     details={details}
                     patchDetails={patchDetails}
                     employees={payrollEmployees}
-                    multiEmpSearch={multiEmpSearch}
-                    setMultiEmpSearch={setMultiEmpSearch}
                     setEmployeeId={setSingleEmployeeId}
                     onAtestadoFile={(f) => {
                       setAtestadoFile(f);
@@ -600,89 +753,69 @@ export function SolicitacoesGeraisPage() {
                     </div>
                   )}
 
-                  <div>
-                    <label className="block text-sm font-medium mb-1">Início do prazo *</label>
-                    <Input
-                      type="date"
-                      className={inputFieldCls}
-                      value={form.prazoInicio}
-                      onChange={(e) => setForm((p) => ({ ...p, prazoInicio: e.target.value }))}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1">Fim do prazo *</label>
-                    <Input
-                      type="date"
-                      className={inputFieldCls}
-                      value={form.prazoFim}
-                      onChange={(e) => setForm((p) => ({ ...p, prazoFim: e.target.value }))}
-                    />
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:col-span-2">
+                    <div>
+                      <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                        Início do prazo *
+                      </label>
+                      <DatePickerField
+                        value={form.prazoInicio}
+                        onChange={(prazoInicio) => setForm((p) => ({ ...p, prazoInicio }))}
+                        placeholder="dd/mm/aaaa"
+                        noFocusRing
+                        aria-label="Início do prazo"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                        Fim do prazo *
+                      </label>
+                      <DatePickerField
+                        value={form.prazoFim}
+                        onChange={(prazoFim) => setForm((p) => ({ ...p, prazoFim }))}
+                        placeholder="dd/mm/aaaa"
+                        noFocusRing
+                        aria-label="Fim do prazo"
+                      />
+                    </div>
                   </div>
 
                   <div className="md:col-span-2 grid grid-cols-1 sm:grid-cols-3 gap-4">
                     <div className="min-w-0">
-                      <label className="block text-sm font-medium mb-1">Contrato *</label>
-                      <select
-                        className={selectFieldCls}
-                        value={form.contractId}
-                        onChange={(e) => {
-                          const id = e.target.value;
-                          if (!id) {
-                            setForm((p) => ({ ...p, contractId: '', company: '', polo: '' }));
-                            return;
-                          }
-                          const c = contracts.find((x: any) => x.id === id) as
-                            | { costCenter?: { company?: string | null; polo?: string | null } }
-                            | undefined;
-                          const cc = c?.costCenter;
-                          setForm((p) => ({
-                            ...p,
-                            contractId: id,
-                            company: cc?.company?.trim() ?? '',
-                            polo: mapCostCenterPoloToFormPolo(cc?.polo),
-                          }));
-                        }}
-                      >
-                        <option value="">Selecione...</option>
-                        {contracts.map((c: any) => (
-                          <option key={c.id} value={c.id}>
-                            {c.name}
-                          </option>
-                        ))}
-                      </select>
+                      <label className="block text-sm font-medium mb-1">Centro de custo *</label>
+                      <SingleSelectSearchDropdown
+                        value={form.costCenterId}
+                        onChange={handleCostCenterChange}
+                        options={costCenterSelectOptions}
+                        allowEmpty
+                        placeholder="Selecionar centro de custo..."
+                        searchPlaceholder="Pesquisar..."
+                        noFocusRing
+                      />
                     </div>
                     <div className="min-w-0">
                       <label className="block text-sm font-medium mb-1">Empresa</label>
-                      <select
-                        className={selectFieldCls}
+                      <SingleSelectSearchDropdown
                         value={form.company}
-                        onChange={(e) => setForm((p) => ({ ...p, company: e.target.value }))}
-                      >
-                        <option value="">Selecione...</option>
-                        {form.company && !COMPANIES_LIST.includes(form.company) ? (
-                          <option value={form.company}>{form.company}</option>
-                        ) : null}
-                        {COMPANIES_LIST.map((c) => (
-                          <option key={c} value={c}>
-                            {c}
-                          </option>
-                        ))}
-                      </select>
+                        onChange={(company) => setForm((p) => ({ ...p, company }))}
+                        options={companySelectOptions}
+                        allowEmpty
+                        placeholder="Selecione a empresa..."
+                        searchPlaceholder="Pesquisar..."
+                        noFocusRing
+                      />
                     </div>
                     <div className="min-w-0">
                       <label className="block text-sm font-medium mb-1">Polo</label>
-                      <select
-                        className={selectFieldCls}
+                      <SingleSelectSearchDropdown
                         value={isDpFormPolo(form.polo) ? form.polo : ''}
-                        onChange={(e) => setForm((p) => ({ ...p, polo: e.target.value }))}
-                      >
-                        <option value="">Selecione...</option>
-                        {DP_POLO_OPTIONS.map((p) => (
-                          <option key={p} value={p}>
-                            {p}
-                          </option>
-                        ))}
-                      </select>
+                        onChange={(polo) => setForm((p) => ({ ...p, polo }))}
+                        options={poloSelectOptions}
+                        allowEmpty
+                        placeholder="Selecione o polo..."
+                        searchPlaceholder="Pesquisar..."
+                        noFocusRing
+                      />
                     </div>
                   </div>
 
@@ -695,7 +828,6 @@ export function SolicitacoesGeraisPage() {
                         </Button>
                       </div>
                     </form>
-                  </div>
                 </Modal>
               ) : (
                 <div className="space-y-4">
@@ -766,22 +898,19 @@ export function SolicitacoesGeraisPage() {
                               <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                                 Urgência
                               </th>
-                              <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                              <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                                 Tipo
                               </th>
-                              <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                              <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                                 Contrato
                               </th>
-                              <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                                Prazo início
-                              </th>
-                              <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                                Prazo fim
+                              <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                                Prazo
                               </th>
                               <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                                 Setor
                               </th>
-                              <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                              <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                                 Solicitante
                               </th>
                               <th className="px-3 sm:px-6 py-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
@@ -793,7 +922,7 @@ export function SolicitacoesGeraisPage() {
                             {filteredMyRequests.map((r) => (
                                 <tr
                                   key={r.id}
-                                  onClick={() => setHistoryRequest(r)}
+                                  onClick={() => openHistoryRequest(r)}
                                   className={getListTableRowClassName(true)}
                                 >
                                   <td className="px-3 sm:px-6 py-3 align-middle text-sm font-medium tabular-nums text-gray-900 dark:text-gray-100">
@@ -815,22 +944,19 @@ export function SolicitacoesGeraisPage() {
                                       {URGENCY_LABELS[r.urgency]}
                                     </span>
                                   </td>
-                                  <td className="px-3 sm:px-6 py-3 align-middle text-sm text-gray-700 dark:text-gray-300">
+                                  <td className="px-3 sm:px-6 py-3 align-middle text-center text-sm text-gray-700 dark:text-gray-300">
                                     {TYPE_LABELS[r.requestType] ?? r.requestType}
                                   </td>
-                                  <td className="px-3 sm:px-6 py-3 align-middle text-sm text-gray-700 dark:text-gray-300 max-w-[280px]">
+                                  <td className="px-3 sm:px-6 py-3 align-middle text-center text-sm text-gray-700 dark:text-gray-300 max-w-[280px]">
                                     {r.contract?.name ?? '—'}
                                   </td>
-                                  <td className="px-3 sm:px-6 py-3 align-middle text-sm text-gray-700 dark:text-gray-300">
-                                    {formatYmd(r.prazoInicio)}
-                                  </td>
-                                  <td className="px-3 sm:px-6 py-3 align-middle text-sm text-gray-700 dark:text-gray-300">
-                                    {formatYmd(r.prazoFim)}
+                                  <td className="px-3 sm:px-6 py-3 align-middle text-center text-sm text-gray-700 dark:text-gray-300 whitespace-nowrap">
+                                    {formatIsoDateRangeToBr(r.prazoInicio, r.prazoFim)}
                                   </td>
                                   <td className="px-3 sm:px-6 py-3 align-middle text-center text-sm text-gray-700 dark:text-gray-300">
                                     {r.sectorSolicitante}
                                   </td>
-                                  <td className="px-3 sm:px-6 py-3 align-middle text-sm text-gray-700 dark:text-gray-300">
+                                  <td className="px-3 sm:px-6 py-3 align-middle text-center text-sm text-gray-700 dark:text-gray-300">
                                     {r.solicitanteNome}
                                   </td>
                                   <td className="px-3 sm:px-6 py-3 align-middle text-right" onClick={(e) => e.stopPropagation()}>
@@ -839,7 +965,7 @@ export function SolicitacoesGeraisPage() {
                                         <div className="flex justify-end">
                                           <button
                                             type="button"
-                                            onClick={() => setHistoryRequest(r)}
+                                            onClick={() => openHistoryRequest(r)}
                                             title="Ver histórico"
                                             aria-label="Ver histórico"
                                             className={rowActionMenuButtonClass(false)}
@@ -853,7 +979,7 @@ export function SolicitacoesGeraisPage() {
                                             setReturnComment((p) => ({ ...p, [r.id]: e.target.value }))
                                           }
                                           placeholder="Digite seu retorno para o DP..."
-                                          className="w-full px-3 py-2.5 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 min-h-[88px] focus:!outline-none focus:!ring-2 focus:!ring-red-500 dark:focus:!ring-red-400"
+                                          className={`w-full px-3 py-2.5 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 min-h-[88px] ${DP_SOLICITACOES_NO_FOCUS_CLS}`}
                                         />
                                         <Button
                                           size="sm"
@@ -867,7 +993,7 @@ export function SolicitacoesGeraisPage() {
                                       <div className="flex justify-end">
                                         <button
                                           type="button"
-                                          onClick={() => setHistoryRequest(r)}
+                                          onClick={() => openHistoryRequest(r)}
                                           title="Ver histórico"
                                           aria-label="Ver histórico"
                                           className={rowActionMenuButtonClass(false)}
@@ -912,74 +1038,55 @@ export function SolicitacoesGeraisPage() {
                       <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                         Status
                       </label>
-                      <select
+                      <SingleSelectSearchDropdown
                         value={myStatusFilter}
-                        onChange={(e) => setMyStatusFilter(e.target.value as 'all' | DpRequestStatus)}
-                        className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500/40 focus:border-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                      >
-                        <option value="all">Todos</option>
-                        <option value="WAITING_MANAGER">Aguardando aprovação</option>
-                        <option value="IN_REVIEW_DP">Em análise</option>
-                        <option value="IN_FINANCEIRO">No financeiro</option>
-                        <option value="WAITING_RETURN_ACCOUNTING">Pendência contábil</option>
-                        <option value="WAITING_RETURN">Sua pendência</option>
-                        <option value="WAITING_RETURN_ADM_TST">Pendência ADM/TST</option>
-                        <option value="WAITING_RETURN_ENGINEERING">Pendência engenharia</option>
-                        <option value="CONCLUDED">Concluída</option>
-                        <option value="CANCELLED">Cancelada</option>
-                      </select>
+                        onChange={(value) => setMyStatusFilter(value as 'all' | DpRequestStatus)}
+                        options={myStatusFilterOptions}
+                        allowEmpty={false}
+                        placeholder="Todos"
+                        searchPlaceholder="Pesquisar..."
+                        noFocusRing
+                      />
                     </div>
                     <div>
                       <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                         Urgência
                       </label>
-                      <select
+                      <SingleSelectSearchDropdown
                         value={filterUrgency}
-                        onChange={(e) => setFilterUrgency(e.target.value as 'all' | DpUrgency)}
-                        className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500/40 focus:border-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                      >
-                        <option value="all">Todas</option>
-                        {(Object.keys(URGENCY_LABELS) as DpUrgency[]).map((u) => (
-                          <option key={u} value={u}>
-                            {URGENCY_LABELS[u]}
-                          </option>
-                        ))}
-                      </select>
+                        onChange={(value) => setFilterUrgency(value as 'all' | DpUrgency)}
+                        options={filterUrgencyOptions}
+                        allowEmpty={false}
+                        placeholder="Todas"
+                        searchPlaceholder="Pesquisar..."
+                        noFocusRing
+                      />
                     </div>
                     <div>
                       <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Tipo</label>
-                      <select
+                      <SingleSelectSearchDropdown
                         value={filterRequestType}
-                        onChange={(e) => setFilterRequestType(e.target.value as 'all' | DpRequestType)}
-                        className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500/40 focus:border-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                      >
-                        <option value="all">Todos</option>
-                        {(Object.keys(TYPE_LABELS) as DpRequestType[])
-                          .slice()
-                          .sort((a, b) => TYPE_LABELS[a].localeCompare(TYPE_LABELS[b], 'pt-BR'))
-                          .map((t) => (
-                            <option key={t} value={t}>
-                              {TYPE_LABELS[t]}
-                            </option>
-                          ))}
-                      </select>
+                        onChange={(value) => setFilterRequestType(value as 'all' | DpRequestType)}
+                        options={filterRequestTypeOptions}
+                        allowEmpty={false}
+                        placeholder="Todos"
+                        searchPlaceholder="Pesquisar..."
+                        noFocusRing
+                      />
                     </div>
                     <div className="sm:col-span-2 lg:col-span-3">
                       <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                         Contrato
                       </label>
-                      <select
+                      <SingleSelectSearchDropdown
                         value={filterContractId}
-                        onChange={(e) => setFilterContractId(e.target.value as 'all' | string)}
-                        className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500/40 focus:border-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                      >
-                        <option value="all">Todos</option>
-                        {contractFilterOptions.map(([id, name]) => (
-                          <option key={id} value={id}>
-                            {name}
-                          </option>
-                        ))}
-                      </select>
+                        onChange={(value) => setFilterContractId(value as 'all' | string)}
+                        options={filterContractSelectOptions}
+                        allowEmpty={false}
+                        placeholder="Todos"
+                        searchPlaceholder="Pesquisar..."
+                        noFocusRing
+                      />
                       {contractFilterOptions.length === 0 && (
                         <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
                           Nenhum contrato na lista atual — altere o status ou aguarde novas solicitações.
@@ -1017,93 +1124,53 @@ export function SolicitacoesGeraisPage() {
 
         <Modal
           isOpen={!!historyRequest}
-          onClose={() => setHistoryRequest(null)}
+          onClose={closeHistoryRequest}
           title="Histórico da solicitação"
           size="lg"
         >
           {historyRequest && (
             <div className="space-y-5">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-                <div>
-                  <span className="font-semibold">Tipo:</span> {TYPE_LABELS[historyRequest.requestType] ?? historyRequest.requestType}
-                </div>
-                <div>
-                  <span className="font-semibold">Status atual:</span>{' '}
-                  {STATUS_LABELS[historyRequest.status] ?? historyRequest.status}
-                </div>
-                <div>
-                  <span className="font-semibold">Criada em:</span> {formatDateTime(historyRequest.createdAt)}
-                </div>
-                <div>
-                  <span className="font-semibold">Aprovada em:</span> {formatDateTime(historyRequest.managerApprovedAt)}
-                </div>
-                <div>
-                  <span className="font-semibold">Concluída em:</span> {formatDateTime(historyRequest.dpConcludedAt)}
-                </div>
-              </div>
+              <DpRequestHistoryModalTabs
+                activeTab={historyModalTab}
+                onTabChange={setHistoryModalTab}
+              />
 
-              <div className="space-y-2">
-                <h3 className="font-semibold text-gray-900 dark:text-gray-100">Timeline</h3>
-                <div className="space-y-2">
-                  {buildTimeline(historyRequest).map((step) => {
-                    const noteWithoutResponsible = (step.note || '')
-                      .split(/\r?\n/)
-                      .filter((line) => !/^\s*respons[aá]vel\s*:/i.test(line))
-                      .join('\n')
-                      .trim();
-                    return (
-                      <div
-                        key={step.key}
-                        className="rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-2 text-sm"
-                      >
-                        <div className="flex justify-between gap-3">
-                          <div className="min-w-0">
-                            <span className="font-medium">{step.title}</span>
-                            <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                              {step.from === step.to ? (
-                                formatDateTime(new Date(step.from as number).toISOString())
-                              ) : (
-                                <>
-                                  {formatDateTime(new Date(step.from as number).toISOString())}
-                                  {' → '}
-                                  {step.isOngoing
-                                    ? 'Em andamento'
-                                    : formatDateTime(new Date(step.to as number).toISOString())}
-                                </>
-                              )}
-                            </div>
-                            {step.actorName ? (
-                              <div className="text-xs text-gray-600 dark:text-gray-300 mt-1">
-                                <span className="font-medium text-gray-700 dark:text-gray-200">Responsável:</span>{' '}
-                                {step.actorName}
-                              </div>
-                            ) : null}
-                            {noteWithoutResponsible ? (
-                              <div className="text-xs text-gray-600 dark:text-gray-400 mt-1 whitespace-pre-wrap break-words">
-                                <span className="font-medium text-gray-700 dark:text-gray-300">Obs.:</span> {noteWithoutResponsible}
-                              </div>
-                            ) : null}
-                          </div>
-                          {step.from !== step.to && (
-                            <span className="text-gray-600 dark:text-gray-400 my-auto whitespace-nowrap shrink-0">
-                              {step.leadTime}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
+              {historyModalTab === 'detalhes' ? (
+                <div className="space-y-4">
+                  <DpRequestHistoryMetaCard fields={buildHistoryMetaFields(historyRequest)} />
 
-              {historyFeedbackText ? (
-                <div className="space-y-2 text-sm">
-                  <h3 className="font-semibold text-gray-900 dark:text-gray-100">Feedback</h3>
-                  <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-3 whitespace-pre-wrap break-words text-gray-700 dark:text-gray-300">
-                    {historyFeedbackText}
-                  </div>
+                  <DpRequestDetailsPreview
+                    requestType={historyRequest.requestType}
+                    details={historyRequest.details}
+                  />
+
+                  {historyFeedbackText ? (
+                    <DpRequestHistorySectionCard title="Feedback do DP">
+                      <p className="whitespace-pre-wrap break-words text-sm text-gray-700 dark:text-gray-300">
+                        {historyFeedbackText}
+                      </p>
+                    </DpRequestHistorySectionCard>
+                  ) : null}
+
+                  <DpRequestHistoryModalFooter>
+                    <Button type="button" variant="outline" onClick={closeHistoryRequest}>
+                      Fechar
+                    </Button>
+                  </DpRequestHistoryModalFooter>
                 </div>
-              ) : null}
+              ) : (
+                <div className="space-y-4">
+                  <DpRequestHistoryTimeline
+                    steps={buildTimeline(historyRequest)}
+                    formatDateTime={formatDateTime}
+                  />
+                  <DpRequestHistoryModalFooter>
+                    <Button type="button" variant="outline" onClick={closeHistoryRequest}>
+                      Fechar
+                    </Button>
+                  </DpRequestHistoryModalFooter>
+                </div>
+              )}
             </div>
           )}
         </Modal>

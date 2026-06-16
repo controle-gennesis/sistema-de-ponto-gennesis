@@ -63,7 +63,9 @@ import {
   ScrollText,
   Camera,
   Loader2,
-  Fuel
+  Fuel,
+  Car,
+  CalendarRange
 } from 'lucide-react';
 import { pathToModuleKey } from '@sistema-ponto/permission-modules';
 import { usePermissions } from '@/hooks/usePermissions';
@@ -158,6 +160,8 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
     isAdministrator || isDepartmentCompras || can(pk('/ponto/furo-estoque'));
   const canSeeFuelSupplies =
     isAdministrator || isDepartmentCompras || can(pk('/ponto/solicitacoes-combustivel'));
+  const canSeeVehicleReservationSupplies =
+    isAdministrator || isDepartmentCompras || can(pk('/ponto/solicitacoes-reserva-veiculos'));
 
   const { data: pendingFuroCount = 0 } = useQuery({
     queryKey: ['stock-shortfalls-pending-count'],
@@ -200,6 +204,19 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
     staleTime: 20_000,
   });
 
+  const { data: vehicleReservationSuppliesPendingCount = 0 } = useQuery({
+    queryKey: ['vehicle-reservation-supplies-pending-count'],
+    queryFn: async () => {
+      const res = await api.get('/vehicle-reservations/supplies-pending-count');
+      const n = Number(res.data?.data?.count ?? res.data?.count);
+      return Number.isFinite(n) && n > 0 ? n : 0;
+    },
+    enabled: canSeeVehicleReservationSupplies && !isLoading,
+    refetchInterval: 60_000,
+    refetchOnWindowFocus: true,
+    staleTime: 20_000,
+  });
+
   const { counts: fdNotificationCounts } = useFdNotificationCounts();
   const { counts: approvalCounts } = useApprovalNotificationCounts();
 
@@ -209,13 +226,19 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
     if (href === '/ponto/furo-estoque') return pendingFuroCount;
     if (href === '/ponto/recebimento-entregas') return recebimentoPendingCount;
     if (href === '/ponto/solicitacoes-combustivel') return fuelSuppliesPendingCount;
+    if (href === '/ponto/solicitacoes-reserva-veiculos') return vehicleReservationSuppliesPendingCount;
     return 0;
   };
 
   const moduleBadgeCountForId = (categoryId: string): number => {
     if (categoryId === 'main') return approvalCounts.total;
     if (categoryId === 'suprimentos') {
-      return fdNotificationCounts.pendingPurchase + pendingFuroCount + fuelSuppliesPendingCount;
+      return (
+        fdNotificationCounts.pendingPurchase +
+        pendingFuroCount +
+        fuelSuppliesPendingCount +
+        vehicleReservationSuppliesPendingCount
+      );
     }
     if (categoryId === 'engenharia') return recebimentoPendingCount;
     return 0;
@@ -352,6 +375,14 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
             icon: MailPlus,
             description: 'Minhas solicitações ao DP',
             permission: isAdministrator || can(pk('/ponto/solicitacoes-dp'))
+          },
+          {
+            name: 'Reserva de Veículos',
+            href: '/ponto/reserva-veiculos',
+            icon: Car,
+            description: 'Solicitar reserva de veículos da frota',
+            permission:
+              isAdministrator || isDepartmentCompras || can(pk('/ponto/reserva-veiculos'))
           },
         ]
       },
@@ -676,6 +707,16 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
             permission:
               isAdministrator || isDepartmentCompras || can(pk('/ponto/solicitacoes-combustivel'))
           },
+          {
+            name: 'Reservas de Veículos',
+            href: '/ponto/solicitacoes-reserva-veiculos',
+            icon: CalendarRange,
+            description: 'Aprovar ou rejeitar solicitações de uso da frota',
+            permission:
+              isAdministrator ||
+              isDepartmentCompras ||
+              can(pk('/ponto/solicitacoes-reserva-veiculos'))
+          },
         ]
       },
       {
@@ -703,6 +744,13 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
             icon: Building2,
             description: 'Cadastro de fornecedores',
             permission: isAdministrator || isDepartmentCompras || can(pk('/ponto/fornecedores'))
+          },
+          {
+            name: 'Veículos',
+            href: '/ponto/veiculos',
+            icon: Car,
+            description: 'Cadastro de veículos da frota',
+            permission: isAdministrator || isDepartmentCompras || can(pk('/ponto/veiculos'))
           },
           {
             name: 'Condições de Pagamento',

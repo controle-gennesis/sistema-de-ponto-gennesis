@@ -13,7 +13,6 @@ import { toast } from 'react-hot-toast';
 import { useRouter } from 'next/navigation';
 import {
   CheckCircle,
-  ClipboardList,
   Clock,
   FileText,
   Filter,
@@ -22,9 +21,21 @@ import {
   Users,
   X,
   XCircle,
+  type LucideIcon,
 } from 'lucide-react';
 import { getListTableRowClassName, ListRowNavigableLabel, rowActionMenuButtonClass } from '@/components/ui/listTableUi';
 import { buildDpRequestTimeline } from '@/lib/dpRequestTimeline';
+import { DpRequestDetailsPreview } from '@/lib/dpRequestDetailsPreview';
+import { DP_SOLICITACOES_NO_FOCUS_CLS, formatIsoDateRangeToBr } from '@/lib/dpSolicitacoesUi';
+import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
+import {
+  DpRequestHistoryMetaCard,
+  DpRequestHistoryModalFooter,
+  DpRequestHistoryModalTabs,
+  DpRequestHistorySectionCard,
+  DpRequestHistoryTimeline,
+  type DpRequestHistoryMetaField,
+} from '@/lib/dpRequestHistoryModal';
 
 type DpUrgency = 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
 type DpRequestStatus =
@@ -94,12 +105,6 @@ type DpRequest = {
   employee?: { costCenter?: string | null } | null;
 };
 
-function formatYmd(iso: string) {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '—';
-  return d.toISOString().slice(0, 10);
-}
-
 function formatDateTime(iso?: string | null) {
   if (!iso) return '—';
   const d = new Date(iso);
@@ -155,6 +160,12 @@ const DP_FEEDBACK_NEXT_OPTIONS: { value: DpDpFeedbackNextStatus; label: string }
   { value: 'CANCELLED', label: 'Cancelada' },
 ];
 
+const DP_FEEDBACK_SELECT_OPTIONS = DP_FEEDBACK_NEXT_OPTIONS.map((o) => ({
+  value: o.value,
+  label: o.label,
+  searchText: o.label,
+}));
+
 const CAN_DP_SEND_FEEDBACK: DpRequestStatus[] = [
   'IN_REVIEW_DP',
   'IN_FINANCEIRO',
@@ -193,9 +204,98 @@ const TYPE_LABELS: Record<DpRequestType, string> = {
 
 const LIST_TABLE_ACTION_ICON_CLASS = rowActionMenuButtonClass(false);
 
+type ManageCardFilter = 'all' | 'pending' | 'CONCLUDED' | 'CANCELLED';
+
+const MANAGE_CARD_LIST_CONFIG: Record<
+  ManageCardFilter,
+  {
+    title: string;
+    subtitle: string;
+    Icon: LucideIcon;
+    iconBg: string;
+    iconColor: string;
+  }
+> = {
+  all: {
+    title: 'Todas as Solicitações',
+    subtitle: 'Registre retornos e altere etapas no detalhe de cada solicitação.',
+    Icon: Users,
+    iconBg: 'bg-blue-100 dark:bg-blue-900/30',
+    iconColor: 'text-blue-600 dark:text-blue-400',
+  },
+  pending: {
+    title: 'Solicitações Pendentes',
+    subtitle: 'Solicitações em tramitação após a aprovação do gestor.',
+    Icon: Clock,
+    iconBg: 'bg-yellow-100 dark:bg-yellow-900/30',
+    iconColor: 'text-yellow-600 dark:text-yellow-400',
+  },
+  CONCLUDED: {
+    title: 'Solicitações Concluídas',
+    subtitle: 'Histórico de solicitações finalizadas pelo DP.',
+    Icon: CheckCircle,
+    iconBg: 'bg-green-100 dark:bg-green-900/30',
+    iconColor: 'text-green-600 dark:text-green-400',
+  },
+  CANCELLED: {
+    title: 'Solicitações Canceladas',
+    subtitle: 'Histórico de solicitações canceladas.',
+    Icon: XCircle,
+    iconBg: 'bg-red-100 dark:bg-red-900/30',
+    iconColor: 'text-red-600 dark:text-red-400',
+  },
+};
+
+const MANAGE_STAT_CARDS: {
+  filter: ManageCardFilter;
+  label: string;
+  iconBg: string;
+  iconColor: string;
+  Icon: LucideIcon;
+  countKey: keyof { total: number; pending: number; concluded: number; cancelled: number };
+}[] = [
+  {
+    filter: 'all',
+    label: 'Registros',
+    iconBg: 'bg-blue-100 dark:bg-blue-900/30',
+    iconColor: 'text-blue-600 dark:text-blue-400',
+    Icon: Users,
+    countKey: 'total',
+  },
+  {
+    filter: 'pending',
+    label: 'Pendentes',
+    iconBg: 'bg-yellow-100 dark:bg-yellow-900/30',
+    iconColor: 'text-yellow-600 dark:text-yellow-400',
+    Icon: Clock,
+    countKey: 'pending',
+  },
+  {
+    filter: 'CONCLUDED',
+    label: 'Concluídas',
+    iconBg: 'bg-green-100 dark:bg-green-900/30',
+    iconColor: 'text-green-600 dark:text-green-400',
+    Icon: CheckCircle,
+    countKey: 'concluded',
+  },
+  {
+    filter: 'CANCELLED',
+    label: 'Canceladas',
+    iconBg: 'bg-red-100 dark:bg-red-900/30',
+    iconColor: 'text-red-600 dark:text-red-400',
+    Icon: XCircle,
+    countKey: 'cancelled',
+  },
+];
+
+function manageStatCardClassName(): string {
+  return 'cursor-pointer transition-shadow hover:shadow-md';
+}
+
 export function GerenciarSolicitacoesGeraisPage() {
   const queryClient = useQueryClient();
 
+  const [cardFilter, setCardFilter] = useState<ManageCardFilter>('pending');
   const [activeStatus, setActiveStatus] = useState<'all' | Exclude<DpRequestStatus, 'WAITING_MANAGER'>>('all');
   const [filterUrgency, setFilterUrgency] = useState<'all' | DpUrgency>('all');
   const [filterRequestType, setFilterRequestType] = useState<'all' | DpRequestType>('all');
@@ -203,8 +303,20 @@ export function GerenciarSolicitacoesGeraisPage() {
   const [search, setSearch] = useState('');
   const [dpFeedback, setDpFeedback] = useState<Record<string, string>>({});
   const [dpNextStatus, setDpNextStatus] = useState<Record<string, DpDpFeedbackNextStatus>>({});
+  const [dpCancellationReason, setDpCancellationReason] = useState<Record<string, string>>({});
   const [historyRequest, setHistoryRequest] = useState<DpRequest | null>(null);
+  const [historyModalTab, setHistoryModalTab] = useState<'detalhes' | 'timeline'>('detalhes');
   const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
+
+  const openHistoryRequest = (r: DpRequest) => {
+    setHistoryModalTab('detalhes');
+    setHistoryRequest(r);
+  };
+
+  const closeHistoryRequest = () => {
+    setHistoryRequest(null);
+    setHistoryModalTab('detalhes');
+  };
 
   const router = useRouter();
   const { data: userData, isLoading: loadingUser } = useQuery({
@@ -221,10 +333,15 @@ export function GerenciarSolicitacoesGeraisPage() {
   };
 
   const { data: resp, isLoading: loadingList } = useQuery({
-    queryKey: ['dp-manage', activeStatus],
+    queryKey: ['dp-manage', cardFilter],
     queryFn: async () => {
-      const res = await api.get('/solicitacoes-dp/gerenciar', { params: { status: activeStatus } });
-      return res.data?.data ?? [];
+      const statusParam = cardFilter === 'pending' || cardFilter === 'all' ? 'all' : cardFilter;
+      const res = await api.get('/solicitacoes-dp/gerenciar', { params: { status: statusParam } });
+      let data = (res.data?.data ?? []) as DpRequest[];
+      if (cardFilter === 'pending') {
+        data = data.filter((r) => r.status !== 'CONCLUDED' && r.status !== 'CANCELLED');
+      }
+      return data;
     },
     enabled: !loadingUser,
   });
@@ -259,6 +376,7 @@ export function GerenciarSolicitacoesGeraisPage() {
   }, [requests]);
 
   const filteredRequests = requests.filter((r) => {
+    if (activeStatus !== 'all' && r.status !== activeStatus) return false;
     if (filterUrgency !== 'all' && r.urgency !== filterUrgency) return false;
     if (filterRequestType !== 'all' && r.requestType !== filterRequestType) return false;
     if (filterContractId !== 'all') {
@@ -296,23 +414,26 @@ export function GerenciarSolicitacoesGeraisPage() {
       feedback,
       nextStatus,
       responsibleNote,
+      cancellationReason,
     }: {
       id: string;
       feedback: string;
       nextStatus: DpDpFeedbackNextStatus;
       responsibleNote?: string;
+      cancellationReason?: string;
     }) => {
       const res = await api.put(`/solicitacoes-dp/${id}/dp-feedback`, {
         feedback,
         nextStatus,
         responsibleNote: responsibleNote?.trim() || undefined,
+        cancellationReason: cancellationReason?.trim() || undefined,
       });
       return res.data?.data as DpRequest;
     },
     onSuccess: async (_, vars) => {
       toast.success('Feedback registrado');
       cancelRowDraft(vars.id);
-      setHistoryRequest(null);
+      closeHistoryRequest();
       await queryClient.invalidateQueries({ queryKey: ['dp-manage'] });
     },
     onError: (err: any) => toast.error(err?.response?.data?.error || err?.message || 'Erro'),
@@ -329,22 +450,77 @@ export function GerenciarSolicitacoesGeraisPage() {
       delete n[id];
       return n;
     });
+    setDpCancellationReason((p) => {
+      const n = { ...p };
+      delete n[id];
+      return n;
+    });
   };
 
   const submitDpFeedback = (r: DpRequest) => {
     const feedback = (dpFeedback[r.id] || '').trim();
     if (!feedback) {
-      toast.error('Preencha o feedback');
+      toast.error('Preencha as observações');
       return;
     }
     const nextStatus = (dpNextStatus[r.id] ?? r.status) as DpDpFeedbackNextStatus;
+    const cancellationReason =
+      nextStatus === 'CANCELLED' ? (dpCancellationReason[r.id] || '').trim() : undefined;
+    if (nextStatus === 'CANCELLED' && !cancellationReason) {
+      toast.error('Informe o motivo do cancelamento');
+      return;
+    }
     feedbackMutation.mutate({
       id: r.id,
       feedback,
       nextStatus,
       responsibleNote: saverName || undefined,
+      cancellationReason,
     });
   };
+
+  const buildHistoryMetaFields = (r: DpRequest): DpRequestHistoryMetaField[] => [
+    {
+      label: 'Nº da solicitação',
+      value: r.displayNumber != null ? String(r.displayNumber) : '—',
+    },
+    {
+      label: 'Tipo',
+      value: TYPE_LABELS[r.requestType] ?? r.requestType,
+    },
+    {
+      label: 'Status',
+      value: (
+        <span
+          className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${STATUS_ROW_BADGE[r.status]}`}
+        >
+          {STATUS_LABELS[r.status]}
+        </span>
+      ),
+    },
+    { label: 'Solicitante', value: r.solicitanteNome },
+    { label: 'Contrato', value: r.contract?.name ?? '—' },
+    {
+      label: 'Prazo',
+      value: formatIsoDateRangeToBr(r.prazoInicio, r.prazoFim),
+    },
+    { label: 'Criada em', value: formatDateTime(r.createdAt) },
+    { label: 'Aprovada em', value: formatDateTime(r.managerApprovedAt) },
+    { label: 'Concluída em', value: formatDateTime(r.dpConcludedAt) },
+  ];
+
+  const selectCardFilter = (filter: ManageCardFilter) => {
+    setCardFilter(filter);
+    setActiveStatus('all');
+  };
+
+  const listHeader = MANAGE_CARD_LIST_CONFIG[cardFilter];
+  const ListHeaderIcon = listHeader.Icon;
+  const hasActiveModalFilter =
+    activeStatus !== 'all' ||
+    filterUrgency !== 'all' ||
+    filterRequestType !== 'all' ||
+    filterContractId !== 'all';
 
   if (loadingUser) {
     return <Loading message="Carregando..." fullScreen size="lg" />;
@@ -364,82 +540,57 @@ export function GerenciarSolicitacoesGeraisPage() {
           </div>
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-4">
-            <Card>
-              <CardContent className="p-4 sm:p-6">
-                <div className="flex items-center gap-3 sm:gap-4">
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-100 dark:bg-blue-900/30 sm:h-12 sm:w-12">
-                    <Users className="h-5 w-5 text-blue-600 dark:text-blue-400 sm:h-6 sm:w-6" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">Registros</p>
-                    <p className="text-xl font-bold tabular-nums text-gray-900 dark:text-gray-100 sm:text-2xl">
-                      {loadingStats ? '—' : manageStats.total}
-                    </p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-4 sm:p-6">
-                <div className="flex items-center gap-3 sm:gap-4">
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-yellow-100 dark:bg-yellow-900/30 sm:h-12 sm:w-12">
-                    <Clock className="h-5 w-5 text-yellow-600 dark:text-yellow-400 sm:h-6 sm:w-6" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">Pendentes</p>
-                    <p className="text-xl font-bold tabular-nums text-gray-900 dark:text-gray-100 sm:text-2xl">
-                      {loadingStats ? '—' : manageStats.pending}
-                    </p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-4 sm:p-6">
-                <div className="flex items-center gap-3 sm:gap-4">
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-green-100 dark:bg-green-900/30 sm:h-12 sm:w-12">
-                    <CheckCircle className="h-5 w-5 text-green-600 dark:text-green-400 sm:h-6 sm:w-6" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">Concluídas</p>
-                    <p className="text-xl font-bold tabular-nums text-gray-900 dark:text-gray-100 sm:text-2xl">
-                      {loadingStats ? '—' : manageStats.concluded}
-                    </p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-4 sm:p-6">
-                <div className="flex items-center gap-3 sm:gap-4">
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-red-100 dark:bg-red-900/30 sm:h-12 sm:w-12">
-                    <XCircle className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">Canceladas</p>
-                    <p className="text-xl font-bold tabular-nums text-gray-900 dark:text-gray-100 sm:text-2xl">
-                      {loadingStats ? '—' : manageStats.cancelled}
-                    </p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+            {MANAGE_STAT_CARDS.map((card) => {
+              const StatIcon = card.Icon;
+              const isActive = cardFilter === card.filter;
+              return (
+                <Card key={card.filter} className={manageStatCardClassName()}>
+                  <CardContent
+                    className="p-4 sm:p-6"
+                    role="button"
+                    tabIndex={0}
+                    aria-pressed={isActive}
+                    onClick={() => selectCardFilter(card.filter)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        selectCardFilter(card.filter);
+                      }
+                    }}
+                  >
+                    <div className="flex items-center gap-3 sm:gap-4">
+                      <div
+                        className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg sm:h-12 sm:w-12 ${card.iconBg}`}
+                      >
+                        <StatIcon className={`h-5 w-5 sm:h-6 sm:w-6 ${card.iconColor}`} />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">
+                          {card.label}
+                        </p>
+                        <p className="text-xl font-bold tabular-nums text-gray-900 dark:text-gray-100 sm:text-2xl">
+                          {loadingStats ? '—' : manageStats[card.countKey]}
+                        </p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
           </div>
 
           <Card className="w-full">
             <CardHeader className="border-b-0 pb-1">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                 <div className="flex items-center space-x-3">
-                  <div className="p-2 sm:p-3 bg-red-100 dark:bg-red-900/30 rounded-lg">
-                    <ClipboardList className="w-5 h-5 sm:w-6 sm:h-6 text-red-600 dark:text-red-400" />
+                  <div className={`rounded-lg p-2 sm:p-3 ${listHeader.iconBg}`}>
+                    <ListHeaderIcon className={`h-5 w-5 sm:h-6 sm:w-6 ${listHeader.iconColor}`} />
                   </div>
                   <div>
                     <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                      Solicitações em tramitação
+                      {listHeader.title}
                     </h3>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">
-                      Registre retornos e altere etapas no detalhe de cada solicitação.
-                    </p>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">{listHeader.subtitle}</p>
                   </div>
                 </div>
                 <div className="flex flex-shrink-0 flex-wrap items-center gap-2 sm:justify-end">
@@ -450,7 +601,7 @@ export function GerenciarSolicitacoesGeraisPage() {
                       value={search}
                       onChange={(e) => setSearch(e.target.value)}
                       placeholder="Buscar por ID..."
-                      className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-10 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                      className={`h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-10 text-sm font-medium text-gray-900 placeholder:text-gray-400 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 ${DP_SOLICITACOES_NO_FOCUS_CLS}`}
                     />
                     {search ? (
                       <button
@@ -467,11 +618,18 @@ export function GerenciarSolicitacoesGeraisPage() {
                   <button
                     type="button"
                     onClick={() => setIsFiltersModalOpen(true)}
-                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                    className={`relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition-colors ${
+                      hasActiveModalFilter
+                        ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40'
+                        : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
+                    }`}
                     aria-label="Abrir filtro"
-                    title="Filtro"
+                    title={hasActiveModalFilter ? 'Filtro (ativo)' : 'Filtro'}
                   >
                     <Filter className="h-4 w-4" />
+                    {hasActiveModalFilter ? (
+                      <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
+                    ) : null}
                   </button>
                 </div>
               </div>
@@ -501,19 +659,16 @@ export function GerenciarSolicitacoesGeraisPage() {
                           <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                             Urgência
                           </th>
-                          <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                          <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                             Tipo
                           </th>
-                          <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                          <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                             Contrato
                           </th>
-                          <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                            Prazo início
+                          <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                            Prazo
                           </th>
-                          <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                            Prazo fim
-                          </th>
-                          <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                          <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                             Solicitante
                           </th>
                           <th className="px-3 sm:px-6 py-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
@@ -526,7 +681,7 @@ export function GerenciarSolicitacoesGeraisPage() {
                           return (
                             <tr
                               key={r.id}
-                              onClick={() => setHistoryRequest(r)}
+                              onClick={() => openHistoryRequest(r)}
                               className={getListTableRowClassName(true)}
                             >
                               <td className="px-3 sm:px-6 py-3 align-middle text-sm font-medium tabular-nums text-gray-900 dark:text-gray-100">
@@ -548,26 +703,23 @@ export function GerenciarSolicitacoesGeraisPage() {
                                   {URGENCY_LABELS[r.urgency]}
                                 </span>
                               </td>
-                              <td className="px-3 sm:px-6 py-3 align-middle text-sm text-gray-700 dark:text-gray-300">
+                              <td className="px-3 sm:px-6 py-3 align-middle text-center text-sm text-gray-700 dark:text-gray-300">
                                 {TYPE_LABELS[r.requestType] ?? r.requestType}
                               </td>
-                              <td className="px-3 sm:px-6 py-3 align-middle text-sm text-gray-700 dark:text-gray-300 max-w-[220px]">
+                              <td className="px-3 sm:px-6 py-3 align-middle text-center text-sm text-gray-700 dark:text-gray-300 max-w-[220px]">
                                 {getContratoColunaLabel(r)}
                               </td>
-                              <td className="px-3 sm:px-6 py-3 align-middle text-sm text-gray-700 dark:text-gray-300">
-                                {formatYmd(r.prazoInicio)}
+                              <td className="px-3 sm:px-6 py-3 align-middle text-center text-sm text-gray-700 dark:text-gray-300 whitespace-nowrap">
+                                {formatIsoDateRangeToBr(r.prazoInicio, r.prazoFim)}
                               </td>
-                              <td className="px-3 sm:px-6 py-3 align-middle text-sm text-gray-700 dark:text-gray-300">
-                                {formatYmd(r.prazoFim)}
-                              </td>
-                              <td className="px-3 sm:px-6 py-3 align-middle text-sm font-medium text-gray-900 dark:text-gray-100">
+                              <td className="px-3 sm:px-6 py-3 align-middle text-center text-sm font-medium text-gray-900 dark:text-gray-100">
                                 {r.solicitanteNome}
                               </td>
                               <td className="px-3 sm:px-6 py-3 align-middle text-right" onClick={(e) => e.stopPropagation()}>
                                 <div className="flex justify-end">
                                   <button
                                     type="button"
-                                    onClick={() => setHistoryRequest(r)}
+                                    onClick={() => openHistoryRequest(r)}
                                     title="Ver detalhes e histórico"
                                     aria-label="Ver detalhes e histórico"
                                     className={LIST_TABLE_ACTION_ICON_CLASS}
@@ -581,9 +733,9 @@ export function GerenciarSolicitacoesGeraisPage() {
                         })}
                         {filteredRequests.length === 0 && (
                           <tr>
-                            <td colSpan={9} className="px-6 py-10 text-center">
-                              <ClipboardList
-                                className="mx-auto mb-3 h-10 w-10 text-gray-400 dark:text-gray-500"
+                            <td colSpan={8} className="px-6 py-10 text-center">
+                              <ListHeaderIcon
+                                className={`mx-auto mb-3 h-10 w-10 ${listHeader.iconColor} opacity-60`}
                                 aria-hidden
                                 strokeWidth={1.25}
                               />
@@ -631,7 +783,7 @@ export function GerenciarSolicitacoesGeraisPage() {
                           onChange={(e) =>
                             setActiveStatus(e.target.value as 'all' | Exclude<DpRequestStatus, 'WAITING_MANAGER'>)
                           }
-                          className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                          className={`w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 ${DP_SOLICITACOES_NO_FOCUS_CLS}`}
                         >
                           <option value="all">Todos</option>
                           <option value="IN_REVIEW_DP">Em análise</option>
@@ -651,7 +803,7 @@ export function GerenciarSolicitacoesGeraisPage() {
                         <select
                           value={filterUrgency}
                           onChange={(e) => setFilterUrgency(e.target.value as 'all' | DpUrgency)}
-                          className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                          className={`w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 ${DP_SOLICITACOES_NO_FOCUS_CLS}`}
                         >
                           <option value="all">Todas</option>
                           {(Object.keys(URGENCY_LABELS) as DpUrgency[]).map((u) => (
@@ -666,7 +818,7 @@ export function GerenciarSolicitacoesGeraisPage() {
                         <select
                           value={filterRequestType}
                           onChange={(e) => setFilterRequestType(e.target.value as 'all' | DpRequestType)}
-                          className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                          className={`w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 ${DP_SOLICITACOES_NO_FOCUS_CLS}`}
                         >
                           <option value="all">Todos</option>
                           {(Object.keys(TYPE_LABELS) as DpRequestType[])
@@ -686,7 +838,7 @@ export function GerenciarSolicitacoesGeraisPage() {
                         <select
                           value={filterContractId}
                           onChange={(e) => setFilterContractId(e.target.value as 'all' | string)}
-                          className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                          className={`w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 ${DP_SOLICITACOES_NO_FOCUS_CLS}`}
                         >
                           <option value="all">Todos</option>
                           {contractFilterOptions.map(([id, name]) => (
@@ -733,149 +885,112 @@ export function GerenciarSolicitacoesGeraisPage() {
 
         <Modal
           isOpen={!!historyRequest}
-          onClose={() => setHistoryRequest(null)}
+          onClose={closeHistoryRequest}
           title="Solicitação"
           size="lg"
         >
           {historyRequest && (
-            <div className="max-h-[min(85vh,720px)] space-y-4 overflow-y-auto pr-1">
-              <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
-                <div>
-                  <span className="font-semibold text-gray-900 dark:text-gray-100">Tipo:</span>{' '}
-                  {TYPE_LABELS[historyRequest.requestType] ?? historyRequest.requestType}
-                </div>
-                <div>
-                  <span className="font-semibold text-gray-900 dark:text-gray-100">Status atual:</span>{' '}
-                  {STATUS_LABELS[historyRequest.status]}
-                </div>
-                <div>
-                  <span className="font-semibold text-gray-900 dark:text-gray-100">Criada em:</span>{' '}
-                  {formatDateTime(historyRequest.createdAt)}
-                </div>
-                <div>
-                  <span className="font-semibold text-gray-900 dark:text-gray-100">Aprovada em:</span>{' '}
-                  {formatDateTime(historyRequest.managerApprovedAt)}
-                </div>
-                <div>
-                  <span className="font-semibold text-gray-900 dark:text-gray-100">Concluída em:</span>{' '}
-                  {formatDateTime(historyRequest.dpConcludedAt)}
-                </div>
-                <div className="sm:col-span-2">
-                  <span className="font-semibold text-gray-900 dark:text-gray-100">Contrato:</span>{' '}
-                  {historyRequest.contract?.name ?? '—'}
-                </div>
-                <div>
-                  <span className="font-semibold text-gray-900 dark:text-gray-100">Solicitante:</span>{' '}
-                  {historyRequest.solicitanteNome}
-                </div>
-                <div>
-                  <span className="font-semibold text-gray-900 dark:text-gray-100">Prazo:</span>{' '}
-                  {formatYmd(historyRequest.prazoInicio)} à {formatYmd(historyRequest.prazoFim)}
-                </div>
-              </div>
+            <div className="space-y-5">
+              <DpRequestHistoryModalTabs
+                activeTab={historyModalTab}
+                onTabChange={setHistoryModalTab}
+              />
 
-              <div className="space-y-2">
-                <h3 className="font-semibold text-gray-900 dark:text-gray-100">Timeline</h3>
-                <div className="space-y-2">
-                  {buildTimeline(historyRequest).map((step) => {
-                    const noteWithoutResponsible = (step.note || '')
-                      .split(/\r?\n/)
-                      .filter((line) => !/^\s*respons[aá]vel\s*:/i.test(line))
-                      .join('\n')
-                      .trim();
-                    return (
-                      <div key={step.key} className="rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-2 text-sm">
-                        <div className="flex justify-between gap-3">
-                          <div className="min-w-0">
-                            <span className="font-medium">{step.title}</span>
-                            <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                              {step.from === step.to ? (
-                                formatDateTime(new Date(step.from).toISOString())
-                              ) : (
-                                <>
-                                  {formatDateTime(new Date(step.from).toISOString())}
-                                  {' → '}
-                                  {step.isOngoing
-                                    ? 'Em andamento'
-                                    : formatDateTime(new Date(step.to).toISOString())}
-                                </>
-                              )}
-                            </div>
-                            {step.actorName ? (
-                              <div className="text-xs text-gray-600 dark:text-gray-300 mt-1">
-                                <span className="font-medium text-gray-700 dark:text-gray-200">Responsável:</span>{' '}
-                                {step.actorName}
-                              </div>
-                            ) : null}
-                            {noteWithoutResponsible ? (
-                              <div className="text-xs text-gray-600 dark:text-gray-400 mt-1 whitespace-pre-wrap break-words">
-                                <span className="font-medium text-gray-700 dark:text-gray-300">Obs.:</span> {noteWithoutResponsible}
-                              </div>
-                            ) : null}
-                          </div>
-                          {step.from !== step.to && (
-                            <span className="text-gray-600 dark:text-gray-400 my-auto whitespace-nowrap shrink-0">
-                              {step.leadTime}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
+              {historyModalTab === 'detalhes' ? (
+                <div className="space-y-4">
+                  <DpRequestHistoryMetaCard fields={buildHistoryMetaFields(historyRequest)} />
 
-              {CAN_DP_SEND_FEEDBACK.includes(historyRequest.status) ? (
-                <div className="space-y-3 border-t border-gray-200 pt-4 dark:border-gray-700">
-                  <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Feedback *</h3>
-                  <textarea
-                    value={dpFeedback[historyRequest.id] || ''}
-                    onChange={(e) => setDpFeedback((p) => ({ ...p, [historyRequest.id]: e.target.value }))}
-                    placeholder="Digite o feedback..."
-                    className="w-full min-h-[100px] rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                  <DpRequestDetailsPreview
+                    requestType={historyRequest.requestType}
+                    details={historyRequest.details}
                   />
-                  <div>
-                    <label className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300">
-                      Próxima etapa *
-                    </label>
-                    <select
-                      className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-                      value={dpNextStatus[historyRequest.id] ?? historyRequest.status}
-                      onChange={(e) =>
-                        setDpNextStatus((p) => ({
-                          ...p,
-                          [historyRequest.id]: e.target.value as DpDpFeedbackNextStatus,
-                        }))
-                      }
-                    >
-                      {DP_FEEDBACK_NEXT_OPTIONS.map((o) => (
-                        <option key={o.value} value={o.value}>
-                          {o.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <p className="text-[11px] text-gray-500 dark:text-gray-400">
-                    Data de registro: ao salvar, será {formatDateTime(new Date().toISOString())}
-                  </p>
-                  <div className="flex flex-wrap justify-end gap-2">
-                    <Button type="button" variant="outline" onClick={() => setHistoryRequest(null)}>
+
+                  {CAN_DP_SEND_FEEDBACK.includes(historyRequest.status) ? (
+                    <DpRequestHistorySectionCard title="Registrar feedback">
+                      <div className="space-y-3">
+                        <div>
+                          <label className="mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400">
+                            Observações *
+                          </label>
+                          <textarea
+                            value={dpFeedback[historyRequest.id] || ''}
+                            onChange={(e) =>
+                              setDpFeedback((p) => ({ ...p, [historyRequest.id]: e.target.value }))
+                            }
+                            placeholder="Digite as observações..."
+                            className={`w-full min-h-[100px] rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 ${DP_SOLICITACOES_NO_FOCUS_CLS}`}
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400">
+                            Feedback *
+                          </label>
+                          <SingleSelectSearchDropdown
+                            value={dpNextStatus[historyRequest.id] ?? historyRequest.status}
+                            onChange={(value) =>
+                              setDpNextStatus((p) => ({
+                                ...p,
+                                [historyRequest.id]: value as DpDpFeedbackNextStatus,
+                              }))
+                            }
+                            options={DP_FEEDBACK_SELECT_OPTIONS}
+                            allowEmpty={false}
+                            placeholder="Selecione o feedback..."
+                            searchPlaceholder="Pesquisar..."
+                            noFocusRing
+                          />
+                        </div>
+                        {(dpNextStatus[historyRequest.id] ?? historyRequest.status) === 'CANCELLED' ? (
+                          <div>
+                            <label className="mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400">
+                              Motivo do cancelamento *
+                            </label>
+                            <textarea
+                              value={dpCancellationReason[historyRequest.id] || ''}
+                              onChange={(e) =>
+                                setDpCancellationReason((p) => ({
+                                  ...p,
+                                  [historyRequest.id]: e.target.value,
+                                }))
+                              }
+                              placeholder="Informe o motivo do cancelamento..."
+                              className={`w-full min-h-[88px] rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 ${DP_SOLICITACOES_NO_FOCUS_CLS}`}
+                            />
+                          </div>
+                        ) : null}
+                        <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                          Data de registro: ao salvar, será {formatDateTime(new Date().toISOString())}
+                        </p>
+                      </div>
+                    </DpRequestHistorySectionCard>
+                  ) : null}
+
+                  <DpRequestHistoryModalFooter>
+                    <Button type="button" variant="outline" onClick={closeHistoryRequest}>
                       Fechar
                     </Button>
-                    <Button
-                      type="button"
-                      onClick={() => submitDpFeedback(historyRequest)}
-                      disabled={feedbackMutation.isPending}
-                    >
-                      {feedbackMutation.isPending ? 'Salvando...' : 'Salvar'}
-                    </Button>
-                  </div>
+                    {CAN_DP_SEND_FEEDBACK.includes(historyRequest.status) ? (
+                      <Button
+                        type="button"
+                        onClick={() => submitDpFeedback(historyRequest)}
+                        disabled={feedbackMutation.isPending}
+                      >
+                        {feedbackMutation.isPending ? 'Salvando...' : 'Salvar'}
+                      </Button>
+                    ) : null}
+                  </DpRequestHistoryModalFooter>
                 </div>
               ) : (
-                <div className="flex justify-end border-t border-gray-200 pt-4 dark:border-gray-700">
-                  <Button type="button" variant="outline" onClick={() => setHistoryRequest(null)}>
-                    Fechar
-                  </Button>
+                <div className="space-y-4">
+                  <DpRequestHistoryTimeline
+                    steps={buildTimeline(historyRequest)}
+                    formatDateTime={formatDateTime}
+                  />
+                  <DpRequestHistoryModalFooter>
+                    <Button type="button" variant="outline" onClick={closeHistoryRequest}>
+                      Fechar
+                    </Button>
+                  </DpRequestHistoryModalFooter>
                 </div>
               )}
             </div>

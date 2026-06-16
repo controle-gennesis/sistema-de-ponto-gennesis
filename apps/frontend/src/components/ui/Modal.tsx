@@ -183,14 +183,21 @@ export const Modal: React.FC<ModalProps> = ({
           {/* Content */}
           <div
             className={clsx(
-              'p-6 flex-1 min-h-0',
+              'flex-1 min-h-0',
               scrollContent
                 ? 'overflow-y-auto overscroll-contain [scrollbar-gutter:stable]'
                 : 'flex min-h-0 flex-col overflow-hidden',
               contentOverflowVisible && scrollContent && 'overflow-x-visible',
             )}
           >
-            {children}
+            <div
+              className={clsx(
+                'p-6',
+                !scrollContent && 'flex min-h-0 flex-1 flex-col overflow-hidden',
+              )}
+            >
+              {children}
+            </div>
           </div>
         </div>
       </div>

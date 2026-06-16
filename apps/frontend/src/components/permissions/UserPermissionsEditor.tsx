@@ -175,6 +175,7 @@ function inferCategoryFromHref(href: string): string {
       '/ponto/financeiro/gestao-solicitacoes',
       '/ponto/solicitacoes-dp',
       '/ponto/drive',
+      '/ponto/reserva-veiculos',
     ].some((p) => h === p)
   ) {
     return 'Principal';
@@ -229,6 +230,10 @@ function inferCategoryFromHref(href: string): string {
       '/ponto/estoque',
       '/ponto/furo-estoque',
       '/ponto/ajuste-estoque',
+      '/ponto/controle-entregas',
+      '/ponto/fds-aprovadas',
+      '/ponto/solicitacoes-combustivel',
+      '/ponto/solicitacoes-reserva-veiculos',
     ].some((p) => h === p)
   ) {
     return 'Suprimentos';
@@ -238,6 +243,7 @@ function inferCategoryFromHref(href: string): string {
       '/ponto/centros-custo',
       '/ponto/materiais-construcao',
       '/ponto/fornecedores',
+      '/ponto/veiculos',
       '/ponto/condicoes-pagamento',
       '/ponto/natureza-orcamentaria',
       '/ponto/prestadores-servico',

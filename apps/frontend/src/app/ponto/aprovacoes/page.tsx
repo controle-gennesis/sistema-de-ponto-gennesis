@@ -132,6 +132,8 @@ const DETAIL_KEY_LABELS: Record<string, string> = {
   dataFinal: 'Data final',
   quantidadeNomeFuncaoContato: 'Qtd. / nome / função / contato',
   funcaoNomeQuantidadeContato: 'Função / nome / qtd. / contato',
+  quantidade: 'Quantidade',
+  candidatos: 'Candidatos',
   motivoContratacao: 'Motivo da contratação',
   funcaoSalarioAntigo: 'Função/salário (anterior)',
   funcaoSalarioNovo: 'Função/salário (novo)',
@@ -187,6 +189,19 @@ function formatDetailEntryValue(
       })
       .filter(Boolean);
     return parts.join(', ');
+  }
+  if (key === 'candidatos' && Array.isArray(v)) {
+    return v
+      .map((item, index) => {
+        if (!item || typeof item !== 'object') return '';
+        const row = item as Record<string, unknown>;
+        const nome = String(row.nome ?? '—').trim() || '—';
+        const funcao = String(row.funcao ?? '—').trim() || '—';
+        const contato = String(row.contato ?? '—').trim() || '—';
+        return `${index + 1}. ${nome} — ${funcao} — ${contato}`;
+      })
+      .filter(Boolean)
+      .join('\n');
   }
   return formatDetailValue(v);
 }
@@ -285,6 +300,8 @@ export default function AprovacoesPage() {
   const [searchEspelho, setSearchEspelho] = useState('');
   const [isEspelhoFiltersOpen, setIsEspelhoFiltersOpen] = useState(false);
   const [managerComment, setManagerComment] = useState<Record<string, string>>({});
+  const [managerCancellationReason, setManagerCancellationReason] = useState<Record<string, string>>({});
+  const [managerRejectingId, setManagerRejectingId] = useState<string | null>(null);
   const [detailRequest, setDetailRequest] = useState<DpRequest | null>(null);
   const [espelhoPhase, setEspelhoPhase] = useState<EspelhoPhaseFilter>('PENDING_APPROVAL');
   const [attachmentPreview, setAttachmentPreview] = useState<{
@@ -579,19 +596,42 @@ export default function AprovacoesPage() {
   });
 
   const rejectMutation = useMutation({
-    mutationFn: async ({ id }: { id: string }) => {
-      const comment = managerComment[id] || '';
-      const res = await api.put(`/solicitacoes-dp/${id}/manager-reject`, { comment });
+    mutationFn: async ({ id, cancellationReason }: { id: string; cancellationReason: string }) => {
+      const res = await api.put(`/solicitacoes-dp/${id}/manager-reject`, { cancellationReason });
       return res.data?.data as DpRequest;
     },
     onSuccess: async (_, variables) => {
-      toast.success('Solicitação rejeitada');
+      toast.success('Solicitação cancelada');
+      setManagerRejectingId(null);
+      setManagerCancellationReason((p) => {
+        const n = { ...p };
+        delete n[variables.id];
+        return n;
+      });
       setDetailRequest((cur) => (cur?.id === variables.id ? null : cur));
       await queryClient.invalidateQueries({ queryKey: ['approvals', 'dp', 'WAITING_MANAGER'] });
       await queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
     },
     onError: (err: any) => toast.error(err?.response?.data?.error || err?.message || 'Erro'),
   });
+
+  const closeDetailModal = () => {
+    setDetailRequest(null);
+    setManagerRejectingId(null);
+  };
+
+  const handleManagerRejectClick = (id: string) => {
+    if (managerRejectingId !== id) {
+      setManagerRejectingId(id);
+      return;
+    }
+    const reason = (managerCancellationReason[id] || '').trim();
+    if (!reason) {
+      toast.error('Informe o motivo do cancelamento');
+      return;
+    }
+    rejectMutation.mutate({ id, cancellationReason: reason });
+  };
   const applyEspelhoDecision = async (
     mirrorId: string,
     status: EspelhoApprovalStatus,
@@ -1006,7 +1046,7 @@ export default function AprovacoesPage() {
 
           <Modal
             isOpen={!!detailRequest}
-            onClose={() => setDetailRequest(null)}
+            onClose={closeDetailModal}
             title={
               detailRequest
                 ? `Solicitação`
@@ -1080,22 +1120,44 @@ export default function AprovacoesPage() {
                       }
                       placeholder="Comentário (opcional)"
                     />
+                    {managerRejectingId === detailRequest.id ? (
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300">
+                          Motivo do cancelamento *
+                        </label>
+                        <textarea
+                          value={managerCancellationReason[detailRequest.id] || ''}
+                          onChange={(e) =>
+                            setManagerCancellationReason((p) => ({
+                              ...p,
+                              [detailRequest.id]: e.target.value,
+                            }))
+                          }
+                          placeholder="Informe o motivo do cancelamento..."
+                          className="w-full min-h-[88px] rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                        />
+                      </div>
+                    ) : null}
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <Button type="button" variant="outline" onClick={() => setDetailRequest(null)}>
+                      <Button type="button" variant="outline" onClick={closeDetailModal}>
                         Fechar
                       </Button>
                       <div className="flex flex-wrap items-center justify-end gap-2">
                         <Button
                           type="button"
                           variant="error"
-                          onClick={() => rejectMutation.mutate({ id: detailRequest.id })}
+                          onClick={() => handleManagerRejectClick(detailRequest.id)}
                           disabled={
                             approveMutation.isPending ||
                             rejectMutation.isPending ||
                             detailRequest.status !== 'WAITING_MANAGER'
                           }
                         >
-                          {rejectMutation.isPending ? 'Rejeitando…' : 'Rejeitar'}
+                          {rejectMutation.isPending
+                            ? 'Cancelando…'
+                            : managerRejectingId === detailRequest.id
+                              ? 'Confirmar cancelamento'
+                              : 'Cancelar'}
                         </Button>
                         <Button
                           type="button"

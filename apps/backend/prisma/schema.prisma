@@ -89,6 +89,10 @@ model User {
   fuelRefuelRequestsRequested             FuelRefuelRequest[] @relation("FuelRefuelRequester")
   fuelRefuelRequestsManagerApproved       FuelRefuelRequest[] @relation("FuelRefuelManager")
   fuelRefuelRequestsSuppliesApproved      FuelRefuelRequest[] @relation("FuelRefuelSupplies")
+  vehicleReservationsCreated              VehicleReservation[] @relation("VehicleReservationCreator")
+  vehicleReservationsSuppliesApproved     VehicleReservation[] @relation("VehicleReservationSuppliesApprover")
+  vehicleReservationsBaixaReported        VehicleReservation[] @relation("VehicleReservationBaixaReporter")
+  vehicleReservationsVistoriaReported     VehicleReservation[] @relation("VehicleReservationVistoriaReporter")
 
   @@map("users")
 }
@@ -651,9 +655,11 @@ model DpRequest {
   details Json?
 
   // Dados vinculados ao contrato/centro de custo (pode ser persistido para histórico mesmo que contrato mude).
-  contractId String?
-  company    String?
-  polo       String?
+  contractId   String?
+  costCenterId String?
+  costCenter   CostCenter? @relation(fields: [costCenterId], references: [id], onDelete: SetNull)
+  company      String?
+  polo         String?
 
   // Workflow
   status        DpRequestStatus @default(WAITING_MANAGER)
@@ -677,6 +683,8 @@ model DpRequest {
   requesterReturnedAt    DateTime?
   dpConclusionComment    String?
   dpConcludedAt          DateTime?
+  /// Motivo informado pelo DP ao cancelar a solicitação.
+  dpCancellationReason   String?
   dpHandledBy            String?
   // (MVP) sem relação explícita com User: mantemos só o userId em dpHandledBy.
 
@@ -686,6 +694,7 @@ model DpRequest {
 
   @@index([employeeId])
   @@index([status])
+  @@index([costCenterId])
   @@map("dp_requests")
 }
 
@@ -942,6 +951,7 @@ model CostCenter {
   projects               Project[]
   materialRequests       MaterialRequest[]
   contracts              Contract[]
+  dpRequests             DpRequest[]
   cacambas               cacambas[]
   contract_additives     contract_additives[]
   monthly_goals          monthly_goals[]
@@ -1594,6 +1604,93 @@ model Supplier {
   @@index([code])
   @@index([isActive])
   @@map("suppliers")
+}
+
+enum VehicleUsageType {
+  FROTA
+  PARTICULAR
+}
+
+/// Cadastro de veículos da frota
+model Vehicle {
+  id          String             @id @default(cuid())
+  code        String             @unique
+  marcaVeic   String?
+  modeloVeic  String
+  placaVeic   String             @unique
+  polo        String?
+  contrato    String?
+  responsavel String?
+  frotaPartic VehicleUsageType?
+  isActive    Boolean            @default(true)
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  reservations VehicleReservation[]
+
+  @@index([code])
+  @@index([placaVeic])
+  @@index([isActive])
+  @@map("vehicles")
+}
+
+enum VehicleReservationStatus {
+  PENDING_SUPPLIES
+  APPROVED
+  COMPLETED
+  INSPECTED
+  REJECTED
+  CANCELLED
+}
+
+/// Reservas de veículos da frota
+model VehicleReservation {
+  id                      String                   @id @default(cuid())
+  code                    String                   @unique
+  solicitante             String
+  motorista               String
+  vehicleId               String
+  atividade               String
+  localDestino            String
+  dataUsoInicio           DateTime                 @db.Date
+  dataUsoFim              DateTime                 @db.Date
+  /// Ex.: ["INTEGRAL","MATUTINO"]
+  periodoUso              Json                     @default("[]")
+  polo                    String?
+  contrato                String?
+  assinatura              String
+  status                  VehicleReservationStatus @default(PENDING_SUPPLIES)
+  suppliesApprovedById    String?
+  suppliesApprovedAt      DateTime?
+  suppliesApprovalComment String?
+  suppliesRejectionReason String?
+  devolucaoAt             DateTime?
+  baixaObservacao         String?
+  baixaFotoUrl            String?
+  baixaFotoKey            String?
+  baixaAssinatura         String?
+  baixaReportedAt         DateTime?
+  baixaReportedById       String?
+  vistoriaAt              DateTime?
+  vistoriaLaudoUrl        String?
+  vistoriaLaudoKey        String?
+  vistoriaLaudoFileName   String?
+  vistoriaReportedAt      DateTime?
+  vistoriaReportedById    String?
+  createdById             String?
+  createdAt               DateTime                 @default(now())
+  updatedAt               DateTime                 @updatedAt
+
+  vehicle            Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
+  createdBy          User?   @relation("VehicleReservationCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  suppliesApprovedBy User?   @relation("VehicleReservationSuppliesApprover", fields: [suppliesApprovedById], references: [id], onDelete: SetNull)
+  baixaReportedBy    User?   @relation("VehicleReservationBaixaReporter", fields: [baixaReportedById], references: [id], onDelete: SetNull)
+  vistoriaReportedBy User?   @relation("VehicleReservationVistoriaReporter", fields: [vistoriaReportedById], references: [id], onDelete: SetNull)
+
+  @@index([vehicleId])
+  @@index([dataUsoInicio])
+  @@index([createdById])
+  @@index([status])
+  @@map("vehicle_reservations")
 }
 
 /// Condições de pagamento para OC (valores gravados em PurchaseOrder.paymentCondition)

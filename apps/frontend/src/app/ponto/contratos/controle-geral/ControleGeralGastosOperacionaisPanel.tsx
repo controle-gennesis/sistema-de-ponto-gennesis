@@ -30,6 +30,7 @@ import {
   filterGastosDetailRowsByPolo,
   getGastosFilterOptions,
   getGastosPoloFilterOptions,
+  type GastosOperacionaisPoloFilterOptions,
   groupGastosRowsByLocality,
   groupGastosRowsByPolo,
   type GastosOperacionaisFilters,
@@ -503,11 +504,14 @@ export function ControleGeralGastosOperacionaisPanel({
 
   const poloFilterOptions = useMemo(
     () =>
-      ('polos' in filterOptions ? filterOptions.polos : []).map((polo) => ({
+      (readOnlyPoloColumn
+        ? (filterOptions as GastosOperacionaisPoloFilterOptions).polos
+        : []
+      ).map((polo) => ({
         value: polo,
         label: polo === '—' ? 'Sem polo' : polo
       })),
-    [filterOptions]
+    [filterOptions, readOnlyPoloColumn]
   );
 
   const monthFilterOptions = useMemo(

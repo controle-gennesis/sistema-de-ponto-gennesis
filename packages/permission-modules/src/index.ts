@@ -52,6 +52,7 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
   { key: pathToModuleKey('/ponto/conversas-whatsapp'), name: 'Central de Atendimentos', href: '/ponto/conversas-whatsapp', category: 'Principal' },
   { key: pathToModuleKey('/ponto/financeiro/gestao-solicitacoes'), name: 'Processos do Fluig', href: '/ponto/financeiro/gestao-solicitacoes', category: 'Principal' },
   { key: pathToModuleKey('/ponto/solicitacoes-dp'), name: 'Solicitações Gerais', href: '/ponto/solicitacoes-dp', category: 'Principal' },
+  { key: pathToModuleKey('/ponto/reserva-veiculos'), name: 'Reserva de Veículos', href: '/ponto/reserva-veiculos', category: 'Principal' },
   { key: pathToModuleKey('/ponto/drive'), name: 'Meu Drive', href: '/ponto/drive', category: 'Principal' },
   { key: pathToModuleKey('/ponto/kanban'), name: 'Tasks', href: '/ponto/kanban', category: 'Principal' },
   // Departamento Pessoal
@@ -120,10 +121,17 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
     href: '/ponto/solicitacoes-combustivel',
     category: 'Suprimentos',
   },
+  {
+    key: pathToModuleKey('/ponto/solicitacoes-reserva-veiculos'),
+    name: 'Reservas de Veículos',
+    href: '/ponto/solicitacoes-reserva-veiculos',
+    category: 'Suprimentos',
+  },
   // Cadastros
   { key: pathToModuleKey('/ponto/centros-custo'), name: 'Centros de Custo', href: '/ponto/centros-custo', category: 'Cadastros' },
   { key: pathToModuleKey('/ponto/materiais-construcao'), name: 'Materiais e Serviços', href: '/ponto/materiais-construcao', category: 'Cadastros' },
   { key: pathToModuleKey('/ponto/fornecedores'), name: 'Fornecedores', href: '/ponto/fornecedores', category: 'Cadastros' },
+  { key: pathToModuleKey('/ponto/veiculos'), name: 'Veículos', href: '/ponto/veiculos', category: 'Cadastros' },
   { key: pathToModuleKey('/ponto/condicoes-pagamento'), name: 'Condições de Pagamento', href: '/ponto/condicoes-pagamento', category: 'Cadastros' },
   { key: pathToModuleKey('/ponto/natureza-orcamentaria'), name: 'Natureza Orçamentária', href: '/ponto/natureza-orcamentaria', category: 'Cadastros' },
   {
