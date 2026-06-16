@@ -165,14 +165,17 @@ function computeFloatingPos(
   const viewportMax = window.innerHeight - margin * 2;
 
   if (overlapContent) {
-    const maxHeight = Math.min(preferred, viewportMax);
-    const panelBottomIfDown = rect.bottom + gap + maxHeight;
-    const fitsBelow = panelBottomIfDown <= window.innerHeight - margin;
+    const preferred = listMax + chrome;
+    const viewportMax = window.innerHeight - margin * 2;
     const spaceAbove = rect.top - gap - margin;
     const spaceBelow = window.innerHeight - rect.bottom - gap - margin;
+    const fitsBelow =
+      rect.bottom + gap + Math.min(preferred, viewportMax, spaceBelow) <=
+      window.innerHeight - margin;
     const openUp = !fitsBelow && spaceAbove > spaceBelow;
 
     if (openUp) {
+      const maxHeight = Math.max(160, Math.min(preferred, viewportMax, spaceAbove));
       return {
         left: rect.left,
         width,
@@ -182,6 +185,7 @@ function computeFloatingPos(
       };
     }
 
+    const maxHeight = Math.max(160, Math.min(preferred, viewportMax, spaceBelow));
     return {
       left: rect.left,
       width,
