@@ -150,6 +150,13 @@ type FloatingPos = {
 };
 
 const LIST_MAX = 220;
+const LIST_ROW_ESTIMATE_PX = 42;
+const PANEL_CHROME_PX = 118;
+
+function estimateListMaxHeight(optionCount: number, cap: number): number {
+  if (optionCount <= 0) return Math.min(cap, 80);
+  return Math.min(cap, Math.max(80, optionCount * LIST_ROW_ESTIMATE_PX + 8));
+}
 
 function computeFloatingPos(
   trigger: HTMLElement,
@@ -345,8 +352,8 @@ function MenuPanel({
 
       <div
         ref={listRef}
-        className="shrink-0 overflow-y-auto overflow-x-hidden px-1.5 py-1"
-        style={listMaxHeight > 0 ? { height: listMaxHeight, maxHeight: listMaxHeight } : undefined}
+        className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-1.5 py-1"
+        style={listMaxHeight > 0 ? { maxHeight: listMaxHeight } : undefined}
       >
         {options.length === 0 ? (
           <p className="py-4 text-center text-sm text-gray-500 dark:text-gray-400">{emptyOptionsMessage}</p>
@@ -421,12 +428,17 @@ export function MultiSelectSearchDropdown({
     allFilteredValues.length > 0 && allFilteredValues.every((v) => selectedSet.has(v));
   const someFilteredSelected = allFilteredValues.some((v) => selectedSet.has(v));
 
+  const estimatedListMax = useMemo(
+    () => estimateListMaxHeight(filtered.length, effectiveListMax),
+    [filtered.length, effectiveListMax]
+  );
+
   const syncFloatingPos = useCallback(() => {
     if (!triggerRef.current) return;
     setFloatingPos(
-      computeFloatingPos(triggerRef.current, effectiveListMax, menuOverlapContent)
+      computeFloatingPos(triggerRef.current, estimatedListMax, menuOverlapContent)
     );
-  }, [effectiveListMax, menuOverlapContent]);
+  }, [estimatedListMax, menuOverlapContent]);
 
   useEffect(() => setMounted(true), []);
 
@@ -447,7 +459,7 @@ export function MultiSelectSearchDropdown({
       window.removeEventListener('resize', syncFloatingPos);
       window.removeEventListener('scroll', onScroll, true);
     };
-  }, [open, menuInline, syncFloatingPos]);
+  }, [open, menuInline, syncFloatingPos, filtered.length, search]);
 
   useEffect(() => {
     if (disabled && open) {
@@ -499,10 +511,10 @@ export function MultiSelectSearchDropdown({
         : `${selected.length} selecionado(s)`;
 
   const listMaxHeight = menuInline
-    ? effectiveListMax
+    ? estimatedListMax
     : floatingPos
-      ? Math.max(80, floatingPos.maxHeight - 118)
-      : effectiveListMax;
+      ? Math.min(estimatedListMax, Math.max(80, floatingPos.maxHeight - PANEL_CHROME_PX))
+      : estimatedListMax;
 
   const menuProps = {
     panelId,
@@ -535,7 +547,7 @@ export function MultiSelectSearchDropdown({
       <MenuPanel
         {...menuProps}
         className="mt-2 flex flex-col overflow-hidden rounded-lg border border-gray-300 bg-white shadow-md ring-1 ring-black/5 dark:border-gray-600 dark:bg-gray-800 dark:ring-white/10"
-        style={{ maxHeight: effectiveListMax + 118 }}
+        style={{ maxHeight: estimatedListMax + PANEL_CHROME_PX }}
       />
     ) : null;
 
@@ -548,7 +560,6 @@ export function MultiSelectSearchDropdown({
           zIndex: 99999,
           left: floatingPos.left,
           width: floatingPos.width,
-          height: floatingPos.maxHeight,
           maxHeight: floatingPos.maxHeight,
           ...(floatingPos.openUp
             ? { bottom: floatingPos.bottom }
