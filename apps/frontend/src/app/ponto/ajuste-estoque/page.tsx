@@ -62,6 +62,8 @@ interface StockMovement {
   createdAt: string;
 }
 
+const ADJUSTMENT_MARKER = '[AJUSTE_ESTOQUE]';
+
 const HISTORY_TYPE_FILTER_OPTIONS = labeledToSelectOptions([
   { value: 'ALL', label: 'Todos' },
   { value: 'IN', label: 'Entrada' },
