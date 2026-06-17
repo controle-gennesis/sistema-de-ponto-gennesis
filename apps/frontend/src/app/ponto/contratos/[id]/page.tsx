@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Modal } from '@/components/ui/Modal';
+import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
@@ -59,6 +60,7 @@ import {
   type DivSeOptionRow
 } from '@/lib/formatOsSePasta';
 import { getOsEtiquetaAbertura, isOsConcluida, type BillingForOsCheck } from '@/lib/pleitoOsExport';
+import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 
 interface ContractBilling {
   id: string;
@@ -208,6 +210,51 @@ const MESES_FILTRO = [
   { value: 11, label: 'Novembro' },
   { value: 12, label: 'Dezembro' }
 ];
+
+const MESES_FILTRO_SELECT_OPTIONS = labeledToSelectOptions(
+  MESES_FILTRO.map((m) => ({ value: String(m.value), label: m.label }))
+);
+
+const FILTER_STATUS_ORCAMENTO_OPTIONS = labeledToSelectOptions([
+  { value: '', label: 'Todos' },
+  ...STATUS_ORCAMENTO_OPCOES.map((op) => ({ value: op, label: op })),
+  { value: '—', label: '— (vazio)' },
+]);
+
+const FILTER_STATUS_EXECUCAO_OPTIONS = labeledToSelectOptions([
+  { value: '', label: 'Todos' },
+  ...STATUS_EXECUCAO_OPCOES.map((op) => ({ value: op, label: op })),
+  { value: '—', label: '— (vazio)' },
+]);
+
+const FILTER_STATUS_FATURAMENTO_OPTIONS = labeledToSelectOptions([
+  { value: '', label: 'Todos' },
+  { value: '0', label: '0% (não faturado)' },
+  { value: '1-25', label: '1% a 25%' },
+  { value: '26-50', label: '26% a 50%' },
+  { value: '51-75', label: '51% a 75%' },
+  { value: '76-99', label: '76% a 99%' },
+  { value: '100', label: '100% ou mais' },
+  { value: 'sem-orcamento', label: 'Sem orçamento' },
+]);
+
+const HIST_MONTH_FILTER_OPTIONS = labeledToSelectOptions([
+  { value: 'all', label: 'Mês: Todos' },
+  ...MESES_FILTRO.filter((m) => m.value > 0).map((m) => ({
+    value: String(m.value),
+    label: m.label,
+  })),
+]);
+
+const HIST_ETIQUETA_FILTER_OPTIONS = labeledToSelectOptions([
+  { value: 'all', label: 'Etiqueta: Todas' },
+  { value: 'gerado-100', label: HISTORICO_ETIQUETA_GERADO_100 },
+]);
+
+const BILLING_STATUS_ROW_OPTIONS = labeledToSelectOptions([
+  { value: 'nao-pago', label: 'Não pago' },
+  { value: 'pago', label: 'Pago' },
+]);
 
 const CONTROLE_GERAL_META_AJUDA =
   'Meta ideal = saldo ÷ meses restantes até o fim da vigência. Aditivos em "Valor + Aditivos" recalculam da data do evento até o fim do contrato; ajuste do valor anual recalcula só entre o mês da data e dezembro do mesmo ano civil. Apenas meses cobertos pela vigência. Meta real recalcula como saldo ÷ meses restantes na vigência inteira: sem faturamento ainda, igual à meta ideal; depois do primeiro faturamento, usa (soma das metas ideais na vigência completa − faturamento já acumulado no contrato até o mês anterior) ÷ meses de vigência restantes.';
@@ -1270,6 +1317,23 @@ export default function ContractDetailPage() {
     return years.length > 0 ? years : [start];
   }, [contract]);
 
+  const headerYearSelectOptions = useMemo(
+    () =>
+      labeledToSelectOptions([
+        { value: '0', label: 'Todos' },
+        ...availableYears.map((year) => ({ value: String(year), label: String(year) })),
+      ]),
+    [availableYears]
+  );
+
+  const adjYearSelectOptions = useMemo(
+    () =>
+      labeledToSelectOptions(
+        availableYears.map((year) => ({ value: String(year), label: String(year) }))
+      ),
+    [availableYears]
+  );
+
   /** Valor de cada ano de vigência: (valor + aditivos) ÷ anos da vigência (aniversários a partir da data inicial até o fim). */
   const contractYearsCount = useMemo(
     () => (contract ? countContractYearsOfVigencia(contract.startDate, contract.endDate) : 0),
@@ -2315,6 +2379,16 @@ export default function ContractDetailPage() {
     });
     return Array.from(years).sort((a, b) => b - a);
   }, [generatedPleitos]);
+
+  const histYearFilterOptions = useMemo(
+    () =>
+      labeledToSelectOptions([
+        { value: 'all', label: 'Ano: Todos' },
+        ...historicoYears.map((y) => ({ value: String(y), label: String(y) })),
+      ]),
+    [historicoYears]
+  );
+
   const filteredHistoricoPleitos = useMemo(() => {
     const osQuery = histOsFilter.trim().toLowerCase();
     const pastaQuery = histPastaFilter.trim().toLowerCase();
@@ -2717,43 +2791,20 @@ export default function ContractDetailPage() {
                   </div>
                 ) : (
                   <div className="flex items-center gap-1.5">
-                    <div className="relative">
-                      <select
-                        aria-label="Mês"
-                        value={selectedMonth}
-                        onChange={(e) => setSelectedMonth(Number(e.target.value))}
-                        className="h-8 min-w-[9.5rem] max-w-[10.5rem] appearance-none rounded-md border border-gray-300 bg-white py-1 pl-2 pr-8 text-xs text-gray-900 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-                      >
-                        {MESES_FILTRO.map((m) => (
-                          <option key={m.value} value={m.value}>
-                            {m.label}
-                          </option>
-                        ))}
-                      </select>
-                      <ChevronDown
-                        className="pointer-events-none absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-500 dark:text-gray-400"
-                        aria-hidden
-                      />
-                    </div>
-                    <div className="relative">
-                      <select
-                        aria-label="Ano"
-                        value={selectedYear}
-                        onChange={(e) => setSelectedYear(Number(e.target.value))}
-                        className="h-8 min-w-[4.75rem] appearance-none rounded-md border border-gray-300 bg-white py-1 pl-2 pr-7 text-xs text-gray-900 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-                      >
-                        <option value={0}>Todos</option>
-                        {availableYears.map((year) => (
-                          <option key={year} value={year}>
-                            {year}
-                          </option>
-                        ))}
-                      </select>
-                      <ChevronDown
-                        className="pointer-events-none absolute right-1.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-500 dark:text-gray-400"
-                        aria-hidden
-                      />
-                    </div>
+                    <StringSingleSelectDropdown
+                      value={String(selectedMonth)}
+                      onChange={(v) => setSelectedMonth(Number(v))}
+                      options={MESES_FILTRO_SELECT_OPTIONS}
+                      allowEmpty={false}
+                      className="min-w-[9.5rem] max-w-[10.5rem]"
+                    />
+                    <StringSingleSelectDropdown
+                      value={String(selectedYear)}
+                      onChange={(v) => setSelectedYear(Number(v))}
+                      options={headerYearSelectOptions}
+                      allowEmpty={false}
+                      className="min-w-[4.75rem]"
+                    />
                   </div>
                 )}
               </div>
@@ -3517,48 +3568,30 @@ export default function ContractDetailPage() {
                   <div className="grid grid-cols-1 gap-3 border-t border-gray-100 pt-4 dark:border-gray-700/60 sm:grid-cols-3">
                     <div className="flex flex-col gap-1">
                       <label className="text-xs font-medium text-gray-500 dark:text-gray-400">Status Orçamento</label>
-                      <select
+                      <StringSingleSelectDropdown
                         value={filterStatusOrcamento}
-                        onChange={(e) => setFilterStatusOrcamento(e.target.value)}
-                        className="h-9 w-full rounded-lg border border-gray-300 bg-white px-2 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-                      >
-                        <option value="">Todos</option>
-                        {STATUS_ORCAMENTO_OPCOES.map((op) => (
-                          <option key={op} value={op}>{op}</option>
-                        ))}
-                        <option value="—">— (vazio)</option>
-                      </select>
+                        onChange={setFilterStatusOrcamento}
+                        options={FILTER_STATUS_ORCAMENTO_OPTIONS}
+                        allowEmpty={false}
+                      />
                     </div>
                     <div className="flex flex-col gap-1">
                       <label className="text-xs font-medium text-gray-500 dark:text-gray-400">Status Execução</label>
-                      <select
+                      <StringSingleSelectDropdown
                         value={filterStatusExecucao}
-                        onChange={(e) => setFilterStatusExecucao(e.target.value)}
-                        className="h-9 w-full rounded-lg border border-gray-300 bg-white px-2 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-                      >
-                        <option value="">Todos</option>
-                        {STATUS_EXECUCAO_OPCOES.map((op) => (
-                          <option key={op} value={op}>{op}</option>
-                        ))}
-                        <option value="—">— (vazio)</option>
-                      </select>
+                        onChange={setFilterStatusExecucao}
+                        options={FILTER_STATUS_EXECUCAO_OPTIONS}
+                        allowEmpty={false}
+                      />
                     </div>
                     <div className="flex flex-col gap-1">
                       <label className="text-xs font-medium text-gray-500 dark:text-gray-400">Status Faturamento (%)</label>
-                      <select
+                      <StringSingleSelectDropdown
                         value={filterStatusFaturamento}
-                        onChange={(e) => setFilterStatusFaturamento(e.target.value)}
-                        className="h-9 w-full rounded-lg border border-gray-300 bg-white px-2 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-                      >
-                        <option value="">Todos</option>
-                        <option value="0">0% (não faturado)</option>
-                        <option value="1-25">1% a 25%</option>
-                        <option value="26-50">26% a 50%</option>
-                        <option value="51-75">51% a 75%</option>
-                        <option value="76-99">76% a 99%</option>
-                        <option value="100">100% ou mais</option>
-                        <option value="sem-orcamento">Sem orçamento</option>
-                      </select>
+                        onChange={setFilterStatusFaturamento}
+                        options={FILTER_STATUS_FATURAMENTO_OPTIONS}
+                        allowEmpty={false}
+                      />
                     </div>
                   </div>
                 )}
@@ -4352,17 +4385,12 @@ export default function ContractDetailPage() {
                   )}
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Ano civil</label>
-                    <select
-                      value={adjFormYear}
-                      onChange={(e) => setAdjFormYear(Number(e.target.value))}
-                      className="w-full h-10 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm"
-                    >
-                      {availableYears.map((y) => (
-                        <option key={y} value={y}>
-                          {y}
-                        </option>
-                      ))}
-                    </select>
+                    <StringSingleSelectDropdown
+                      value={String(adjFormYear)}
+                      onChange={(v) => setAdjFormYear(Number(v))}
+                      options={adjYearSelectOptions}
+                      allowEmpty={false}
+                    />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
@@ -4942,26 +4970,18 @@ export default function ContractDetailPage() {
                   ) : (
                     <div className="space-y-4">
                       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
-                        <select
+                        <StringSingleSelectDropdown
                           value={histMonthFilter}
-                          onChange={(e) => setHistMonthFilter(e.target.value)}
-                          className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                        >
-                          <option value="all">Mês: Todos</option>
-                          {MESES_FILTRO.filter((m) => m.value > 0).map((m) => (
-                            <option key={m.value} value={String(m.value)}>{m.label}</option>
-                          ))}
-                        </select>
-                        <select
+                          onChange={setHistMonthFilter}
+                          options={HIST_MONTH_FILTER_OPTIONS}
+                          allowEmpty={false}
+                        />
+                        <StringSingleSelectDropdown
                           value={histYearFilter}
-                          onChange={(e) => setHistYearFilter(e.target.value)}
-                          className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                        >
-                          <option value="all">Ano: Todos</option>
-                          {historicoYears.map((y) => (
-                            <option key={y} value={String(y)}>{y}</option>
-                          ))}
-                        </select>
+                          onChange={setHistYearFilter}
+                          options={histYearFilterOptions}
+                          allowEmpty={false}
+                        />
                         <input
                           type="text"
                           value={histOsFilter}
@@ -4983,14 +5003,12 @@ export default function ContractDetailPage() {
                           placeholder="Descrição"
                           className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
                         />
-                        <select
+                        <StringSingleSelectDropdown
                           value={histEtiquetaFilter}
-                          onChange={(e) => setHistEtiquetaFilter(e.target.value)}
-                          className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                        >
-                          <option value="all">Etiqueta: Todas</option>
-                          <option value="gerado-100">{HISTORICO_ETIQUETA_GERADO_100}</option>
-                        </select>
+                          onChange={setHistEtiquetaFilter}
+                          options={HIST_ETIQUETA_FILTER_OPTIONS}
+                          allowEmpty={false}
+                        />
                       </div>
                       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                         <div className="flex flex-col sm:flex-row sm:items-center gap-2">
@@ -5078,23 +5096,21 @@ export default function ContractDetailPage() {
                                   />
                                 </td>
                                 <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100" onClick={(e) => e.stopPropagation()}>
-                                  <select
+                                  <StringSingleSelectDropdown
                                     value={rowDraft.billingStatus}
-                                    disabled={isSavingHistoricoPleitos}
-                                    onChange={(e) =>
+                                    onChange={(v) =>
                                       setHistoricoDrafts((prev) => ({
                                         ...prev,
                                         [p.id]: {
                                           ...rowDraft,
-                                          billingStatus: e.target.value === 'pago' ? 'pago' : 'nao-pago'
-                                        }
+                                          billingStatus: v === 'pago' ? 'pago' : 'nao-pago',
+                                        },
                                       }))
                                     }
-                                    className="w-full bg-transparent border border-gray-200 dark:border-gray-700 rounded px-2 py-1 text-sm text-gray-900 dark:text-gray-100 disabled:opacity-60"
-                                  >
-                                    <option value="nao-pago">Não pago</option>
-                                    <option value="pago">Pago</option>
-                                  </select>
+                                    options={BILLING_STATUS_ROW_OPTIONS}
+                                    disabled={isSavingHistoricoPleitos}
+                                    allowEmpty={false}
+                                  />
                                 </td>
                                 <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                                   <input

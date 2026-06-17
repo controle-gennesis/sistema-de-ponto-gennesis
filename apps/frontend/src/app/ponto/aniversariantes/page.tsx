@@ -9,6 +9,8 @@ import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import api from '@/lib/api';
+import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 
 interface BirthdayEmployee {
   id: string;
@@ -38,6 +40,16 @@ interface BirthdayResponse {
   month: number;
   year: number;
 }
+
+const MONTH_NAMES = [
+  'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+  'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro',
+];
+
+const MONTH_FILTER_OPTIONS = labeledToSelectOptions([
+  { value: 'all', label: 'Todos' },
+  ...MONTH_NAMES.map((month, index) => ({ value: String(index + 1), label: month })),
+]);
 
 export default function AniversariantesPage() {
   const router = useRouter();
@@ -103,10 +115,7 @@ export default function AniversariantesPage() {
     year: selectedYear
   };
 
-  const months = [
-    'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
-    'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
-  ];
+  const months = MONTH_NAMES;
 
 
   const getAgeText = (age: number) => {
@@ -245,7 +254,7 @@ export default function AniversariantesPage() {
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
                         placeholder="Digite o nome do funcionário ou o setor..."
-                        className="w-full pl-10 pr-4 py-3 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
+                        className="w-full pl-10 pr-4 py-3 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
                       />
                     </div>
                   </div>
@@ -254,21 +263,15 @@ export default function AniversariantesPage() {
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                       Mês
                     </label>
-                    <select
-                      value={selectedMonth}
-                      onChange={(e) => {
-                        const value = e.target.value;
+                    <StringSingleSelectDropdown
+                      value={String(selectedMonth)}
+                      onChange={(value) => {
                         setSelectedMonth(value === 'all' ? 'all' : parseInt(value));
                       }}
-                      className="w-full px-3 pr-8 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none text-gray-900 dark:text-gray-100 text-sm"
-                    >
-                      <option value="all">Todos</option>
-                      {months.map((month, index) => (
-                        <option key={index} value={index + 1}>
-                          {month}
-                        </option>
-                      ))}
-                    </select>
+                      options={MONTH_FILTER_OPTIONS}
+                      allowEmpty={false}
+                      className="w-full"
+                    />
                   </div>
                 </div>
               </div>

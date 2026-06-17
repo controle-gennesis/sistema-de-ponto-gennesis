@@ -6,6 +6,14 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Trash2, Users, Search, AlertTriangle, X, Clock, Calendar, User, Download, Edit, Save, Camera, FileCheck, Eye, EyeOff, Plus, ChevronDown, ChevronUp, CheckCircle, RotateCcw, Upload, FileSpreadsheet, Loader2, MoreVertical, DoorOpen, DoorClosed, Utensils, UtensilsCrossed, XCircle, UserX, Shield, Filter, KeyRound } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
+import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import {
+  filterOptionsWithAll,
+  EMPLOYEE_POLO_OPTIONS,
+  EMPLOYEE_CATEGORIA_FINANCEIRA_OPTIONS,
+  EMPLOYEE_STATUS_FILTER_OPTIONS,
+  labeledToSelectOptions,
+} from '@/lib/selectOptionBuilders';
 import { getListTableRowClassName, ListRowNavigableLabel, rowActionMenuButtonClass } from '@/components/ui/listTableUi';
 import { TOMADORES_LIST } from '@/constants/tomadores';
 import { 
@@ -32,6 +40,35 @@ import { SalaryAdjustment, CreateAdjustmentData, UpdateAdjustmentData, SalaryDis
 import toast from 'react-hot-toast';
 
 const EMPLOYEE_ACTION_MENU_WIDTH_PX = 224; // w-56
+
+const MONTH_SELECT_OPTIONS = labeledToSelectOptions([
+  { value: '1', label: 'Janeiro' },
+  { value: '2', label: 'Fevereiro' },
+  { value: '3', label: 'Março' },
+  { value: '4', label: 'Abril' },
+  { value: '5', label: 'Maio' },
+  { value: '6', label: 'Junho' },
+  { value: '7', label: 'Julho' },
+  { value: '8', label: 'Agosto' },
+  { value: '9', label: 'Setembro' },
+  { value: '10', label: 'Outubro' },
+  { value: '11', label: 'Novembro' },
+  { value: '12', label: 'Dezembro' },
+]);
+
+const RECORD_TYPE_EDIT_SELECT_OPTIONS = labeledToSelectOptions([
+  { value: 'ENTRY', label: 'Entrada' },
+  { value: 'LUNCH_START', label: 'Almoço' },
+  { value: 'LUNCH_END', label: 'Retorno' },
+  { value: 'EXIT', label: 'Saída' },
+]);
+
+const RECORD_TYPE_MANUAL_SELECT_OPTIONS = labeledToSelectOptions([
+  { value: 'ENTRY', label: 'Entrada' },
+  { value: 'LUNCH_START', label: 'Início do Almoço' },
+  { value: 'LUNCH_END', label: 'Retorno do Almoço' },
+  { value: 'EXIT', label: 'Saída' },
+]);
 
 const pk = pathToModuleKey;
 
@@ -1055,6 +1092,55 @@ export function EmployeeList({
   const modalities: string[] = ['Todos', ...MODALITIES_LIST];
   const pagination = employeesData?.pagination || { total: 0, totalPages: 0 };
 
+  const departmentFilterSelectOptions = useMemo(
+    () => filterOptionsWithAll(['Todos', ...DEPARTMENTS_LIST], 'Todos'),
+    []
+  );
+  const positionFilterSelectOptions = useMemo(
+    () => filterOptionsWithAll(['Todos', ...CARGOS_LIST], 'Todos'),
+    []
+  );
+  const companyFilterSelectOptions = useMemo(
+    () => filterOptionsWithAll(['Todos', ...COMPANIES_LIST], 'Todas'),
+    []
+  );
+  const poloFilterSelectOptions = useMemo(
+    () => [
+      { value: 'all', label: 'Todos', searchText: 'Todos' },
+      ...EMPLOYEE_POLO_OPTIONS,
+    ],
+    []
+  );
+  const costCenterFilterSelectOptions = useMemo(
+    () => filterOptionsWithAll(['Todos', ...costCentersList], 'Todos'),
+    [costCentersList]
+  );
+  const clientFilterSelectOptions = useMemo(
+    () => filterOptionsWithAll(['Todos', ...CLIENTS_LIST], 'Todos'),
+    []
+  );
+  const categoriaFinanceiraFilterSelectOptions = useMemo(
+    () => [
+      { value: 'all', label: 'Todas', searchText: 'Todas' },
+      ...EMPLOYEE_CATEGORIA_FINANCEIRA_OPTIONS,
+    ],
+    []
+  );
+  const modalityFilterSelectOptions = useMemo(
+    () => filterOptionsWithAll(['Todos', ...MODALITIES_LIST], 'Todas'),
+    []
+  );
+  const yearFilterSelectOptions = useMemo(
+    () =>
+      labeledToSelectOptions(
+        Array.from({ length: 5 }, (_, i) => {
+          const year = new Date().getFullYear() - 2 + i;
+          return { value: String(year), label: String(year) };
+        })
+      ),
+    []
+  );
+
   // Filtrar apenas funcionários (não RH/Admin) e por todos os filtros
   const filteredEmployees = useMemo(() => {
     if (!employees || employees.length === 0) {
@@ -1316,7 +1402,7 @@ export function EmployeeList({
                         setCurrentPage(1);
                       }}
                       placeholder="Digite nome, CPF, matrícula, setor, empresa ou qualquer informação..."
-                      className="w-full pl-10 pr-4 py-3 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
+                      className="w-full pl-10 pr-4 py-3 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
                     />
                   </div>
                 </div>
@@ -1337,79 +1423,60 @@ export function EmployeeList({
                         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                           Setor
                         </label>
-                        <select
+                        <StringSingleSelectDropdown
                           value={departmentFilter}
-                          onChange={(e) => setDepartmentFilter(e.target.value)}
-                          className="w-full px-3 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
-                        >
-                          <option value="all">Todos</option>
-                          {departments.filter(d => d !== 'Todos').map((dept) => (
-                            <option key={dept} value={dept}>{dept}</option>
-                          ))}
-                        </select>
+                          onChange={setDepartmentFilter}
+                          options={departmentFilterSelectOptions}
+                          allowEmpty={false}
+                        />
                       </div>
 
                       <div>
                         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                           Cargo
                         </label>
-                        <select
+                        <StringSingleSelectDropdown
                           value={positionFilter}
-                          onChange={(e) => setPositionFilter(e.target.value)}
-                          className="w-full px-3 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
-                        >
-                          <option value="all">Todos</option>
-                          {positions.filter(p => p !== 'Todos').map((pos) => (
-                            <option key={pos} value={pos}>{pos}</option>
-                          ))}
-                        </select>
+                          onChange={setPositionFilter}
+                          options={positionFilterSelectOptions}
+                          allowEmpty={false}
+                        />
                       </div>
 
                       <div>
                         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                           Empresa
                         </label>
-                        <select
+                        <StringSingleSelectDropdown
                           value={companyFilter}
-                          onChange={(e) => setCompanyFilter(e.target.value)}
-                          className="w-full px-3 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
-                        >
-                          <option value="all">Todas</option>
-                          {companies.filter(c => c !== 'Todos').map((c) => (
-                            <option key={c} value={c}>{c}</option>
-                          ))}
-                        </select>
+                          onChange={setCompanyFilter}
+                          options={companyFilterSelectOptions}
+                          allowEmpty={false}
+                        />
                       </div>
 
                       <div>
                         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                           Polo
                         </label>
-                        <select
+                        <StringSingleSelectDropdown
                           value={poloFilter}
-                          onChange={(e) => setPoloFilter(e.target.value)}
-                          className="w-full px-3 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
-                        >
-                          <option value="all">Todos</option>
-                          {polos.filter(p => p !== 'Todos').map((p) => (
-                            <option key={p} value={p}>{p}</option>
-                          ))}
-                        </select>
+                          onChange={setPoloFilter}
+                          options={poloFilterSelectOptions}
+                          allowEmpty={false}
+                        />
                       </div>
 
                       <div>
                         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                           Status
                         </label>
-                        <select
+                        <StringSingleSelectDropdown
                           value={statusFilter}
-                          onChange={(e) => setStatusFilter(e.target.value as 'active' | 'inactive' | 'all')}
-                          className="w-full px-3 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none text-gray-900 dark:text-gray-100"
-                        >
-                          <option value="active">Ativos</option>
-                          <option value="inactive">Inativos</option>
-                          <option value="all">Todos</option>
-                        </select>
+                          onChange={(v) => setStatusFilter(v as 'active' | 'inactive' | 'all')}
+                          options={EMPLOYEE_STATUS_FILTER_OPTIONS}
+                          allowEmpty={false}
+                        />
                       </div>
                     </div>
                   </div>
@@ -1422,64 +1489,48 @@ export function EmployeeList({
                         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                           Centro de Custo
                         </label>
-                        <select
+                        <StringSingleSelectDropdown
                           value={costCenterFilter}
-                          onChange={(e) => setCostCenterFilter(e.target.value)}
-                          className="w-full px-3 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
-                        >
-                          <option value="all">Todos</option>
-                          {costCenters.filter(cc => cc !== 'Todos').map((center) => (
-                            <option key={center} value={center}>{center}</option>
-                          ))}
-                        </select>
+                          onChange={setCostCenterFilter}
+                          options={costCenterFilterSelectOptions}
+                          allowEmpty={false}
+                        />
                       </div>
 
                       <div>
                         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                           Tomador
                         </label>
-                        <select
+                        <StringSingleSelectDropdown
                           value={clientFilter}
-                          onChange={(e) => setClientFilter(e.target.value)}
-                          className="w-full px-3 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
-                        >
-                          <option value="all">Todos</option>
-                          {clients.filter(c => c !== 'Todos').map((tomador) => (
-                            <option key={tomador} value={tomador}>{tomador}</option>
-                          ))}
-                        </select>
+                          onChange={setClientFilter}
+                          options={clientFilterSelectOptions}
+                          allowEmpty={false}
+                        />
                       </div>
 
                       <div>
                         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                           Categoria Financeira
                         </label>
-                        <select
+                        <StringSingleSelectDropdown
                           value={categoriaFinanceiraFilter}
-                          onChange={(e) => setCategoriaFinanceiraFilter(e.target.value)}
-                          className="w-full px-3 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
-                        >
-                          <option value="all">Todas</option>
-                          {categoriasFinanceiras.filter(c => c !== 'Todos').map((c) => (
-                            <option key={c} value={c}>{c}</option>
-                          ))}
-                        </select>
+                          onChange={setCategoriaFinanceiraFilter}
+                          options={categoriaFinanceiraFilterSelectOptions}
+                          allowEmpty={false}
+                        />
                       </div>
 
                       <div>
                         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                           Modalidade
                         </label>
-                        <select
+                        <StringSingleSelectDropdown
                           value={modalityFilter}
-                          onChange={(e) => setModalityFilter(e.target.value)}
-                          className="w-full px-3 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
-                        >
-                          <option value="all">Todas</option>
-                          {modalities.filter(m => m !== 'Todos').map((m) => (
-                            <option key={m} value={m}>{m}</option>
-                          ))}
-                        </select>
+                          onChange={setModalityFilter}
+                          options={modalityFilterSelectOptions}
+                          allowEmpty={false}
+                        />
                       </div>
                     </div>
                   </div>
@@ -1595,7 +1646,7 @@ export function EmployeeList({
                     placeholder="Buscar funcionários por nome, email ou CPF..."
                     value={searchTerm}
                     onChange={(e) => handleSearch(e.target.value)}
-                    className="w-full pl-10 pr-4 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
+                    className="w-full pl-10 pr-4 py-2.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
                   />
                 </div>
               </div>
@@ -1604,58 +1655,46 @@ export function EmployeeList({
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div className="flex items-center space-x-2">
                   <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Setor:</label>
-                  <select
+                  <StringSingleSelectDropdown
                     value={departmentFilter}
-                    onChange={(e) => setDepartmentFilter(e.target.value)}
-                    className="w-full px-3 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
-                  >
-                    <option value="all">Todos</option>
-                    {departments.filter(d => d !== 'Todos').map((dept) => (
-                      <option key={dept} value={dept}>{dept}</option>
-                    ))}
-                  </select>
+                    onChange={setDepartmentFilter}
+                    options={departmentFilterSelectOptions}
+                    allowEmpty={false}
+                    className="flex-1"
+                  />
                 </div>
                 
                 <div className="flex items-center space-x-2">
                   <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Cargo:</label>
-                  <select
+                  <StringSingleSelectDropdown
                     value={positionFilter}
-                    onChange={(e) => setPositionFilter(e.target.value)}
-                    className="w-full px-3 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
-                  >
-                    <option value="all">Todos</option>
-                    {positions.filter(p => p !== 'Todos').map((pos) => (
-                      <option key={pos} value={pos}>{pos}</option>
-                    ))}
-                  </select>
+                    onChange={setPositionFilter}
+                    options={positionFilterSelectOptions}
+                    allowEmpty={false}
+                    className="flex-1"
+                  />
                 </div>
                 
                 <div className="flex items-center space-x-2">
                   <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Centro de Custo:</label>
-                  <select
+                  <StringSingleSelectDropdown
                     value={costCenterFilter}
-                    onChange={(e) => setCostCenterFilter(e.target.value)}
-                    className="w-full px-3 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
-                  >
-                    <option value="all">Todos</option>
-                    {costCenters.filter(cc => cc !== 'Todos').map((center) => (
-                      <option key={center} value={center}>{center}</option>
-                    ))}
-                  </select>
+                    onChange={setCostCenterFilter}
+                    options={costCenterFilterSelectOptions}
+                    allowEmpty={false}
+                    className="flex-1"
+                  />
                 </div>
                 
                 <div className="flex items-center space-x-2">
                   <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Tomador:</label>
-                  <select
+                  <StringSingleSelectDropdown
                     value={clientFilter}
-                    onChange={(e) => setClientFilter(e.target.value)}
-                    className="w-full px-3 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
-                  >
-                    <option value="all">Todos</option>
-                    {clients.filter(c => c !== 'Todos').map((tomador) => (
-                      <option key={tomador} value={tomador}>{tomador}</option>
-                    ))}
-                  </select>
+                    onChange={setClientFilter}
+                    options={clientFilterSelectOptions}
+                    allowEmpty={false}
+                    className="flex-1"
+                  />
                 </div>
               </div>
             </div>
@@ -1914,7 +1953,7 @@ export function EmployeeList({
                 <button
                   onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
                   disabled={currentPage === 1}
-                  className="px-3 py-2 text-sm font-medium text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="px-3 py-2 text-sm font-medium text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Anterior
                 </button>
@@ -1931,7 +1970,7 @@ export function EmployeeList({
                       className={`px-3 py-2 text-sm font-medium rounded-md ${
                         isActive
                           ? 'bg-blue-600 text-white'
-                          : 'text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
+                          : 'text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
                       }`}
                     >
                       {pageNumber}
@@ -1942,7 +1981,7 @@ export function EmployeeList({
                 <button
                   onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
                   disabled={currentPage === totalPages}
-                  className="px-3 py-2 text-sm font-medium text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="px-3 py-2 text-sm font-medium text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Próxima
                 </button>
@@ -1971,67 +2010,84 @@ export function EmployeeList({
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                     <div>
                       <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Status</label>
-                      <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as 'active' | 'inactive' | 'all')} className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100">
-                        <option value="active">Ativos</option>
-                        <option value="inactive">Inativos</option>
-                        <option value="all">Todos</option>
-                      </select>
+                      <StringSingleSelectDropdown
+                        value={statusFilter}
+                        onChange={(v) => setStatusFilter(v as 'active' | 'inactive' | 'all')}
+                        options={EMPLOYEE_STATUS_FILTER_OPTIONS}
+                        allowEmpty={false}
+                      />
                     </div>
                     <div>
                       <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Setor</label>
-                      <select value={departmentFilter} onChange={(e) => setDepartmentFilter(e.target.value)} className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100">
-                        <option value="all">Todos</option>
-                        {departments.filter((d) => d !== 'Todos').map((dept) => (<option key={dept} value={dept}>{dept}</option>))}
-                      </select>
+                      <StringSingleSelectDropdown
+                        value={departmentFilter}
+                        onChange={setDepartmentFilter}
+                        options={departmentFilterSelectOptions}
+                        allowEmpty={false}
+                      />
                     </div>
                     <div>
                       <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Cargo</label>
-                      <select value={positionFilter} onChange={(e) => setPositionFilter(e.target.value)} className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100">
-                        <option value="all">Todos</option>
-                        {positions.filter((p) => p !== 'Todos').map((pos) => (<option key={pos} value={pos}>{pos}</option>))}
-                      </select>
+                      <StringSingleSelectDropdown
+                        value={positionFilter}
+                        onChange={setPositionFilter}
+                        options={positionFilterSelectOptions}
+                        allowEmpty={false}
+                      />
                     </div>
                     <div>
                       <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Empresa</label>
-                      <select value={companyFilter} onChange={(e) => setCompanyFilter(e.target.value)} className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100">
-                        <option value="all">Todas</option>
-                        {companies.filter((c) => c !== 'Todos').map((c) => (<option key={c} value={c}>{c}</option>))}
-                      </select>
+                      <StringSingleSelectDropdown
+                        value={companyFilter}
+                        onChange={setCompanyFilter}
+                        options={companyFilterSelectOptions}
+                        allowEmpty={false}
+                      />
                     </div>
                     <div>
                       <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Centro de Custo</label>
-                      <select value={costCenterFilter} onChange={(e) => setCostCenterFilter(e.target.value)} className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100">
-                        <option value="all">Todos</option>
-                        {costCenters.filter((cc) => cc !== 'Todos').map((center) => (<option key={center} value={center}>{center}</option>))}
-                      </select>
+                      <StringSingleSelectDropdown
+                        value={costCenterFilter}
+                        onChange={setCostCenterFilter}
+                        options={costCenterFilterSelectOptions}
+                        allowEmpty={false}
+                      />
                     </div>
                     <div>
                       <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Tomador</label>
-                      <select value={clientFilter} onChange={(e) => setClientFilter(e.target.value)} className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100">
-                        <option value="all">Todos</option>
-                        {clients.filter((c) => c !== 'Todos').map((tomador) => (<option key={tomador} value={tomador}>{tomador}</option>))}
-                      </select>
+                      <StringSingleSelectDropdown
+                        value={clientFilter}
+                        onChange={setClientFilter}
+                        options={clientFilterSelectOptions}
+                        allowEmpty={false}
+                      />
                     </div>
                     <div>
                       <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Polo</label>
-                      <select value={poloFilter} onChange={(e) => setPoloFilter(e.target.value)} className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100">
-                        <option value="all">Todos</option>
-                        {polos.filter((p) => p !== 'Todos').map((p) => (<option key={p} value={p}>{p}</option>))}
-                      </select>
+                      <StringSingleSelectDropdown
+                        value={poloFilter}
+                        onChange={setPoloFilter}
+                        options={poloFilterSelectOptions}
+                        allowEmpty={false}
+                      />
                     </div>
                     <div>
                       <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Categoria Financeira</label>
-                      <select value={categoriaFinanceiraFilter} onChange={(e) => setCategoriaFinanceiraFilter(e.target.value)} className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100">
-                        <option value="all">Todas</option>
-                        {categoriasFinanceiras.filter((c) => c !== 'Todos').map((c) => (<option key={c} value={c}>{c}</option>))}
-                      </select>
+                      <StringSingleSelectDropdown
+                        value={categoriaFinanceiraFilter}
+                        onChange={setCategoriaFinanceiraFilter}
+                        options={categoriaFinanceiraFilterSelectOptions}
+                        allowEmpty={false}
+                      />
                     </div>
                     <div>
                       <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Modalidade</label>
-                      <select value={modalityFilter} onChange={(e) => setModalityFilter(e.target.value)} className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100">
-                        <option value="all">Todas</option>
-                        {modalities.filter((m) => m !== 'Todos').map((m) => (<option key={m} value={m}>{m}</option>))}
-                      </select>
+                      <StringSingleSelectDropdown
+                        value={modalityFilter}
+                        onChange={setModalityFilter}
+                        options={modalityFilterSelectOptions}
+                        allowEmpty={false}
+                      />
                     </div>
                   </div>
                 </div>
@@ -2280,7 +2336,7 @@ export function EmployeeList({
                             setEditVisibleSections(['personal']);
                             setShowEditForm(true);
                           }}
-                          className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600"
+                          className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-600"
                         >
                           Editar
                         </button>
@@ -2325,7 +2381,7 @@ export function EmployeeList({
                             setEditVisibleSections(['professional']);
                             setShowEditForm(true);
                           }}
-                          className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600"
+                          className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-600"
                         >
                           Editar
                         </button>
@@ -2400,7 +2456,7 @@ export function EmployeeList({
                             setEditVisibleSections(['bank']);
                             setShowEditForm(true);
                           }}
-                          className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600"
+                          className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-600"
                         >
                           Editar
                         </button>
@@ -2469,7 +2525,7 @@ export function EmployeeList({
                           setEditVisibleSections(['remuneration']);
                           setShowEditForm(true);
                         }}
-                        className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600"
+                        className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-600"
                       >
                         Editar
                       </button>
@@ -2652,55 +2708,23 @@ export function EmployeeList({
                       <div className="flex items-end gap-4 flex-1">
                         <div className="flex flex-col">
                           <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Mês</label>
-                          <select
-                            value={selectedMonth}
-                            onChange={(e) => setSelectedMonth(Number(e.target.value))}
-                            className="px-4 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 appearance-none cursor-pointer transition-all text-sm font-medium min-w-[150px] shadow-sm"
-                            style={{
-                              backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E")`,
-                              backgroundPosition: 'right 0.75rem center',
-                              backgroundRepeat: 'no-repeat',
-                              backgroundSize: '1.25em 1.25em',
-                              paddingRight: '2.5rem'
-                            }}
-                          >
-                            <option value={1}>Janeiro</option>
-                            <option value={2}>Fevereiro</option>
-                            <option value={3}>Março</option>
-                            <option value={4}>Abril</option>
-                            <option value={5}>Maio</option>
-                            <option value={6}>Junho</option>
-                            <option value={7}>Julho</option>
-                            <option value={8}>Agosto</option>
-                            <option value={9}>Setembro</option>
-                            <option value={10}>Outubro</option>
-                            <option value={11}>Novembro</option>
-                            <option value={12}>Dezembro</option>
-                          </select>
+                          <StringSingleSelectDropdown
+                            value={String(selectedMonth)}
+                            onChange={(v) => setSelectedMonth(Number(v))}
+                            options={MONTH_SELECT_OPTIONS}
+                            allowEmpty={false}
+                            className="min-w-[150px]"
+                          />
                         </div>
                         <div className="flex flex-col">
                           <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Ano</label>
-                          <select
-                            value={selectedYear}
-                            onChange={(e) => setSelectedYear(Number(e.target.value))}
-                            className="px-4 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 appearance-none cursor-pointer transition-all text-sm font-medium min-w-[110px] shadow-sm"
-                            style={{
-                              backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E")`,
-                              backgroundPosition: 'right 0.75rem center',
-                              backgroundRepeat: 'no-repeat',
-                              backgroundSize: '1.25em 1.25em',
-                              paddingRight: '2.5rem'
-                            }}
-                          >
-                            {Array.from({ length: 5 }, (_, i) => {
-                              const year = new Date().getFullYear() - 2 + i;
-                              return (
-                                <option key={year} value={year}>
-                                  {year}
-                                </option>
-                              );
-                            })}
-                          </select>
+                          <StringSingleSelectDropdown
+                            value={String(selectedYear)}
+                            onChange={(v) => setSelectedYear(Number(v))}
+                            options={yearFilterSelectOptions}
+                            allowEmpty={false}
+                            className="min-w-[110px]"
+                          />
                         </div>
                       </div>
 
@@ -2987,16 +3011,12 @@ export function EmployeeList({
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                     Tipo de Registro
                   </label>
-                  <select
+                  <StringSingleSelectDropdown
                     value={editForm.type}
-                    onChange={(e) => setEditForm({ ...editForm, type: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
-                  >
-                    <option value="ENTRY">Entrada</option>
-                    <option value="LUNCH_START">Almoço</option>
-                    <option value="LUNCH_END">Retorno</option>
-                    <option value="EXIT">Saída</option>
-                  </select>
+                    onChange={(type) => setEditForm({ ...editForm, type })}
+                    options={RECORD_TYPE_EDIT_SELECT_OPTIONS}
+                    allowEmpty={false}
+                  />
                 </div>
 
                 <div>
@@ -3007,7 +3027,7 @@ export function EmployeeList({
                     type="datetime-local"
                     value={editForm.timestamp}
                     onChange={(e) => setEditForm({ ...editForm, timestamp: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
                   />
                 </div>
 
@@ -3019,7 +3039,7 @@ export function EmployeeList({
                     value={editForm.observation}
                     onChange={(e) => setEditForm({ ...editForm, observation: e.target.value })}
                     rows={3}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
                     placeholder="Observação do funcionário..."
                   />
                 </div>
@@ -3032,7 +3052,7 @@ export function EmployeeList({
                     value={editForm.reason}
                     onChange={(e) => setEditForm({ ...editForm, reason: e.target.value })}
                     rows={3}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
                     placeholder="Motivo da alteração..."
                   />
                 </div>
@@ -3048,7 +3068,7 @@ export function EmployeeList({
                   </button>
                   <button
                     onClick={handleCancelEdit}
-                    className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 bg-white dark:bg-gray-700"
+                    className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 bg-white dark:bg-gray-800"
                   >
                     Cancelar
                   </button>
@@ -3100,10 +3120,9 @@ export function EmployeeList({
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Tipo de Ponto
                 </label>
-                <select
+                <StringSingleSelectDropdown
                   value={manualPointData.type}
-                  onChange={(e) => {
-                    const type = e.target.value;
+                  onChange={(type) => {
                     // Definir horário padrão baseado no tipo
                     let defaultTime = '08:00';
                     if (type === 'ENTRY') {
@@ -3117,13 +3136,9 @@ export function EmployeeList({
                     }
                     setManualPointData({ ...manualPointData, type, time: defaultTime });
                   }}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
-                >
-                  <option value="ENTRY">Entrada</option>
-                  <option value="LUNCH_START">Início do Almoço</option>
-                  <option value="LUNCH_END">Retorno do Almoço</option>
-                  <option value="EXIT">Saída</option>
-                </select>
+                  options={RECORD_TYPE_MANUAL_SELECT_OPTIONS}
+                  allowEmpty={false}
+                />
               </div>
 
               <div>
@@ -3134,7 +3149,7 @@ export function EmployeeList({
                   type="date"
                   value={manualPointData.date}
                   onChange={(e) => setManualPointData({ ...manualPointData, date: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
                 />
               </div>
 
@@ -3146,7 +3161,7 @@ export function EmployeeList({
                   type="time"
                   value={manualPointData.time}
                   onChange={(e) => setManualPointData({ ...manualPointData, time: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
                 />
               </div>
 
@@ -3158,7 +3173,7 @@ export function EmployeeList({
                   value={manualPointData.observation}
                   onChange={(e) => setManualPointData({ ...manualPointData, observation: e.target.value })}
                   rows={3}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
                   placeholder="Observação sobre o ponto criado..."
                 />
               </div>
@@ -3166,7 +3181,7 @@ export function EmployeeList({
               <div className="flex space-x-3 pt-4">
                 <button
                   onClick={() => setShowManualPointModal(false)}
-                  className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 bg-white dark:bg-gray-700"
+                  className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 bg-white dark:bg-gray-800"
                 >
                   Cancelar
                 </button>
@@ -3359,7 +3374,7 @@ export function EmployeeList({
                         setSelectedFile(null);
                         setParsedRecords([]);
                       }}
-                      className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 bg-white dark:bg-gray-700"
+                      className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 bg-white dark:bg-gray-800"
                     >
                       Cancelar
                     </button>
@@ -3473,7 +3488,7 @@ export function EmployeeList({
                     type={showNewPassword ? 'text' : 'password'}
                     value={passwordForm.newPassword}
                     onChange={(e) => setPasswordForm((prev) => ({ ...prev, newPassword: e.target.value }))}
-                    className="w-full px-3 py-2.5 pr-10 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+                    className="w-full px-3 py-2.5 pr-10 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
                     placeholder="Digite a nova senha"
                   />
                   <button
@@ -3493,7 +3508,7 @@ export function EmployeeList({
                     type={showConfirmPassword ? 'text' : 'password'}
                     value={passwordForm.confirmPassword}
                     onChange={(e) => setPasswordForm((prev) => ({ ...prev, confirmPassword: e.target.value }))}
-                    className="w-full px-3 py-2.5 pr-10 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+                    className="w-full px-3 py-2.5 pr-10 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
                     placeholder="Repita a nova senha"
                   />
                   <button

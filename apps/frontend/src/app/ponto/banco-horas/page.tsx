@@ -13,6 +13,14 @@ import { CARGOS_LIST } from '@/constants/cargos';
 import * as XLSX from 'xlsx';
 import api from '@/lib/api';
 import { listTableRowClasses } from '@/components/ui/listTableUi';
+import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
+
+const BANK_HOURS_STATUS_OPTIONS = labeledToSelectOptions([
+  { value: 'positive', label: 'Positivo' },
+  { value: 'negative', label: 'Negativo' },
+  { value: 'zero', label: 'Neutro' },
+]);
 
 interface BankHoursData {
   employeeId: string;
@@ -88,28 +96,28 @@ export default function BankHoursPage() {
     setFilters(prev => ({ ...prev, search: e.target.value }));
   };
 
-  const handleDepartmentChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setFilters(prev => ({ ...prev, department: e.target.value }));
+  const handleDepartmentChange = (value: string) => {
+    setFilters(prev => ({ ...prev, department: value }));
   };
 
-  const handlePositionChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setFilters(prev => ({ ...prev, position: e.target.value }));
+  const handlePositionChange = (value: string) => {
+    setFilters(prev => ({ ...prev, position: value }));
   };
 
-  const handleCostCenterChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setFilters(prev => ({ ...prev, costCenter: e.target.value }));
+  const handleCostCenterChange = (value: string) => {
+    setFilters(prev => ({ ...prev, costCenter: value }));
   };
 
-  const handleClientChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setFilters(prev => ({ ...prev, client: e.target.value }));
+  const handleClientChange = (value: string) => {
+    setFilters(prev => ({ ...prev, client: value }));
   };
 
-  const handlePoloChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setFilters(prev => ({ ...prev, polo: e.target.value }));
+  const handlePoloChange = (value: string) => {
+    setFilters(prev => ({ ...prev, polo: value }));
   };
 
-  const handleStatusChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setFilters(prev => ({ ...prev, status: e.target.value }));
+  const handleStatusChange = (value: string) => {
+    setFilters(prev => ({ ...prev, status: value }));
   };
 
   const handleStartDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -366,7 +374,7 @@ export default function BankHoursPage() {
                     value={filters.search}
                     onChange={handleSearchChange}
                     placeholder="Digite nome, CPF, matrícula, setor, empresa ou qualquer informação..."
-                    className="w-full pl-10 pr-4 py-3 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
+                    className="w-full pl-10 pr-4 py-3 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
                   />
                 </div>
               </div>
@@ -383,7 +391,7 @@ export default function BankHoursPage() {
                       type="date"
                       value={filters.startDate}
                       onChange={handleStartDateChange}
-                      className="w-full pl-10 pr-4 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100"
+                      className="w-full pl-10 pr-4 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100"
                     />
                   </div>
                 </div>
@@ -398,7 +406,7 @@ export default function BankHoursPage() {
                       type="date"
                       value={filters.endDate}
                       onChange={handleEndDateChange}
-                      className="w-full pl-10 pr-4 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100"
+                      className="w-full pl-10 pr-4 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100"
                     />
                   </div>
                 </div>
@@ -422,18 +430,12 @@ export default function BankHoursPage() {
                         </label>
                         <div className="relative">
                           <Building2 className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4" />
-                          <select
-                            value={filters.department}
+                          <StringSingleSelectDropdown
+                            value={filters.department ?? ''}
                             onChange={handleDepartmentChange}
-                            className="w-full pl-10 pr-4 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none text-gray-900 dark:text-gray-100"
-                          >
-                            <option value="">Todos os setores</option>
-                            {(DEPARTMENTS_LIST || []).map(dept => (
-                              <option key={dept} value={dept}>
-                                {dept}
-                              </option>
-                            ))}
-                          </select>
+                            options={DEPARTMENTS_LIST || []}
+                            emptyOptionLabel="Todos os setores"
+                          />
                         </div>
                       </div>
 
@@ -441,21 +443,12 @@ export default function BankHoursPage() {
                         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                           Cargo
                         </label>
-                        <div className="relative">
-                          <Building2 className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4" />
-                          <select
-                            value={filters.position}
-                            onChange={handlePositionChange}
-                            className="w-full pl-10 pr-4 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none text-gray-900 dark:text-gray-100"
-                          >
-                            <option value="">Todos os cargos</option>
-                            {(CARGOS_LIST || []).map(cargo => (
-                              <option key={cargo} value={cargo}>
-                                {cargo}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
+                        <StringSingleSelectDropdown
+                          value={filters.position ?? ''}
+                          onChange={handlePositionChange}
+                          options={CARGOS_LIST || []}
+                          emptyOptionLabel="Todos os cargos"
+                        />
                       </div>
 
                       <div>
@@ -463,17 +456,14 @@ export default function BankHoursPage() {
                           Status do Banco
                         </label>
                         <div className="relative">
-                          <Building2 className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4" />
-                          <select
-                            value={filters.status}
+                          <Building2 className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4 z-10 pointer-events-none" />
+                          <StringSingleSelectDropdown
+                            value={filters.status ?? ''}
                             onChange={handleStatusChange}
-                            className="w-full pl-10 pr-4 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none text-gray-900 dark:text-gray-100"
-                          >
-                            <option value="">Todos os status</option>
-                            <option value="positive">Positivo</option>
-                            <option value="negative">Negativo</option>
-                            <option value="zero">Neutro</option>
-                          </select>
+                            options={BANK_HOURS_STATUS_OPTIONS}
+                            emptyOptionLabel="Todos os status"
+                            className="[&>button]:pl-10"
+                          />
                         </div>
                       </div>
                     </div>
@@ -488,19 +478,14 @@ export default function BankHoursPage() {
                           Centro de Custo
                         </label>
                         <div className="relative">
-                          <Building2 className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4" />
-                          <select
-                            value={filters.costCenter}
+                          <Building2 className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4 z-10 pointer-events-none" />
+                          <StringSingleSelectDropdown
+                            value={filters.costCenter ?? ''}
                             onChange={handleCostCenterChange}
-                            className="w-full pl-10 pr-4 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none text-gray-900 dark:text-gray-100"
-                          >
-                            <option value="">Todos os centros de custo</option>
-                            {costCentersList.map(center => (
-                              <option key={center} value={center}>
-                                {center}
-                              </option>
-                            ))}
-                          </select>
+                            options={costCentersList}
+                            emptyOptionLabel="Todos os centros de custo"
+                            className="[&>button]:pl-10"
+                          />
                         </div>
                       </div>
 
@@ -510,18 +495,12 @@ export default function BankHoursPage() {
                         </label>
                         <div className="relative">
                           <Building2 className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4" />
-                          <select
-                            value={filters.client}
+                          <StringSingleSelectDropdown
+                            value={filters.client ?? ''}
                             onChange={handleClientChange}
-                            className="w-full pl-10 pr-4 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none text-gray-900 dark:text-gray-100"
-                          >
-                            <option value="">Todos os tomadores</option>
-                            {(CLIENTS_LIST || []).map(client => (
-                              <option key={client} value={client}>
-                                {client}
-                              </option>
-                            ))}
-                          </select>
+                            options={CLIENTS_LIST || []}
+                            emptyOptionLabel="Todos os tomadores"
+                          />
                         </div>
                       </div>
 
@@ -531,18 +510,12 @@ export default function BankHoursPage() {
                         </label>
                         <div className="relative">
                           <Building2 className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4" />
-                          <select
-                            value={filters.polo}
+                          <StringSingleSelectDropdown
+                            value={filters.polo ?? ''}
                             onChange={handlePoloChange}
-                            className="w-full pl-10 pr-4 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none text-gray-900 dark:text-gray-100"
-                          >
-                            <option value="">Todos os polos</option>
-                            {(POLOS_LIST || []).map(polo => (
-                              <option key={polo} value={polo}>
-                                {polo}
-                              </option>
-                            ))}
-                          </select>
+                            options={POLOS_LIST || []}
+                            emptyOptionLabel="Todos os polos"
+                          />
                         </div>
                       </div>
                     </div>

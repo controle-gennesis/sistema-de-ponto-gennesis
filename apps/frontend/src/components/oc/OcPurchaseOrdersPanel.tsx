@@ -85,6 +85,13 @@ import {
 import { OcFluxTabsNav } from '@/components/oc/OcFluxTabsNav';
 import { computeOcTabCounts } from '@/components/oc/ocTabCounts';
 import { parseCurrencyInputBr } from '@/lib/maskCurrencyBr';
+import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
+
+const OC_APPROVAL_LIST_PHASE_OPTIONS = labeledToSelectOptions([
+  { value: 'pending', label: 'Pendentes de aprovação' },
+  { value: 'approved_by_me', label: 'Aprovadas por mim' },
+]);
 
 export {
   orderNeedsPaymentBoleto,
@@ -1023,30 +1030,6 @@ export function OcPurchaseOrdersPanel({
 
   const [editOcForm, setEditOcForm] = useState<OcPurchaseOrderFormValues | null>(null);
   const [editSupplierSearch, setEditSupplierSearch] = useState('');
-  const [editSupplierSearchDebounced, setEditSupplierSearchDebounced] = useState('');
-  const [editSupplierDropdownOpen, setEditSupplierDropdownOpen] = useState(false);
-
-  useEffect(() => {
-    const timer = setTimeout(() => setEditSupplierSearchDebounced(editSupplierSearch), 300);
-    return () => clearTimeout(timer);
-  }, [editSupplierSearch]);
-
-  const { data: editSuppliersData, isLoading: editSuppliersLoading, isError: editSuppliersError } = useQuery({
-    queryKey: ['suppliers-oc-edit', editSupplierSearchDebounced],
-    queryFn: async () => {
-      const res = await api.get('/suppliers', {
-        params: {
-          search: editSupplierSearchDebounced.trim() || undefined,
-          isActive: true,
-          limit: 50,
-          page: 1
-        }
-      });
-      return res.data;
-    },
-    enabled: showEditOcModal
-  });
-  const editSuppliers: OcSupplierOption[] = editSuppliersData?.data || [];
 
   const handleExportPdf = async (id: string) => {
     setPdfExportingId(id);
@@ -1697,6 +1680,31 @@ export function OcPurchaseOrdersPanel({
     });
   }, [costCentersResponse]);
 
+  const supplierFilterSelectOptions = useMemo(
+    () => [
+      { value: '', label: 'Todos', searchText: 'Todos' },
+      ...(suppliersForFilter as Array<{ id: string; name: string }>).map((s) => ({
+        value: s.id,
+        label: s.name,
+        searchText: s.name,
+      })),
+    ],
+    [suppliersForFilter]
+  );
+
+  const costCenterFilterSelectOptions = useMemo(
+    () => [
+      { value: '', label: 'Todos', searchText: 'Todos' },
+      ...costCentersForFilter
+        .filter((cc): cc is typeof cc & { id: string } => Boolean(cc.id))
+        .map((cc) => {
+          const label = [cc.code, cc.name].filter(Boolean).join(' — ') || cc.id;
+          return { value: cc.id, label, searchText: label };
+        }),
+    ],
+    [costCentersForFilter]
+  );
+
   const finalizedOrders: PurchaseOrder[] = finalizedListResponse?.data ?? [];
   const finalizedPagination = finalizedListResponse?.pagination as
     | { page: number; limit: number; total: number; totalPages: number }
@@ -1884,7 +1892,6 @@ export function OcPurchaseOrdersPanel({
     setEditSupplierSearch(
       getOcSupplierLabel(order.supplier as OcSupplierOption) || order.supplier?.name || ''
     );
-    setEditSupplierDropdownOpen(false);
     setShowEditOcModal(true);
   };
 
@@ -2904,31 +2911,13 @@ export function OcPurchaseOrdersPanel({
                   return { ...prev, items: nextItems };
                 })
               }
-              supplierAutocomplete={{
-                supplierSearch: editSupplierSearch,
-                supplierDropdownOpen: editSupplierDropdownOpen,
-                onSupplierSearchChange: (value) => {
-                  setEditSupplierSearch(value);
-                  const normalized = value.trim().toLowerCase();
-                  const exactMatch = editSuppliers.find(
-                    (supplier) => getOcSupplierLabel(supplier).trim().toLowerCase() === normalized
-                  );
-                  if (!normalized || !exactMatch) {
-                    setEditOcForm((prev) => (prev ? { ...prev, supplierId: '' } : prev));
-                    return;
-                  }
-                  setEditOcForm((prev) => (prev ? { ...prev, supplierId: exactMatch.id } : prev));
-                },
-                onSupplierDropdownOpen: () => setEditSupplierDropdownOpen(true),
-                onSupplierDropdownClose: () => setEditSupplierDropdownOpen(false),
-                onSupplierSelect: (supplier) => {
+              supplierField={{
+                supplierId: editOcForm.supplierId,
+                supplierLabel: editSupplierSearch,
+                onSupplierChange: (supplier) => {
                   setEditOcForm((prev) => (prev ? { ...prev, supplierId: supplier.id } : prev));
                   setEditSupplierSearch(getOcSupplierLabel(supplier));
-                  setEditSupplierDropdownOpen(false);
                 },
-                suppliers: editSuppliers,
-                suppliersLoading: editSuppliersLoading,
-                suppliersError: editSuppliersError
               }}
             />
 
@@ -3042,17 +3031,12 @@ export function OcPurchaseOrdersPanel({
                       : undefined
                   }
                   correctionReason={parseLastOcCorrectionReason(selectedOrder.notes)}
-                  supplierAutocomplete={{
-                    supplierSearch:
+                  supplierField={{
+                    supplierId: selectedOrder.supplierId ?? '',
+                    supplierLabel:
                       getOcSupplierLabel(selectedOrder.supplier as OcSupplierOption) ||
                       selectedOrder.supplier?.name ||
                       '—',
-                    supplierDropdownOpen: false,
-                    onSupplierSearchChange: () => undefined,
-                    onSupplierDropdownOpen: () => undefined,
-                    onSupplierDropdownClose: () => undefined,
-                    onSupplierSelect: () => undefined,
-                    suppliers: []
                   }}
                 />
               </>
@@ -4293,16 +4277,12 @@ export function OcPurchaseOrdersPanel({
                 <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                   Exibir
                 </label>
-                <select
+                <StringSingleSelectDropdown
                   value={approvalListPhase}
-                  onChange={(e) =>
-                    setApprovalListPhase(e.target.value as OcApprovalListPhase)
-                  }
-                  className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                >
-                  <option value="pending">Pendentes de aprovação</option>
-                  <option value="approved_by_me">Aprovadas por mim</option>
-                </select>
+                  onChange={(v) => setApprovalListPhase(v as OcApprovalListPhase)}
+                  options={OC_APPROVAL_LIST_PHASE_OPTIONS}
+                  allowEmpty={false}
+                />
               </div>
               {approvalListPhase === 'approved_by_me' ? (
                 <p className="text-xs text-gray-500 dark:text-gray-400">
@@ -4366,7 +4346,7 @@ export function OcPurchaseOrdersPanel({
                     onChange={(e) =>
                       setFinalizedFilters((f) => ({ ...f, orderDateFrom: e.target.value }))
                     }
-                    className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                    className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
                   />
                 </div>
                 <div>
@@ -4379,48 +4359,34 @@ export function OcPurchaseOrdersPanel({
                     onChange={(e) =>
                       setFinalizedFilters((f) => ({ ...f, orderDateTo: e.target.value }))
                     }
-                    className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                    className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
                   />
                 </div>
                 <div>
                   <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                     Fornecedor
                   </label>
-                  <select
+                  <StringSingleSelectDropdown
                     value={finalizedFilters.supplierId}
-                    onChange={(e) =>
-                      setFinalizedFilters((f) => ({ ...f, supplierId: e.target.value }))
+                    onChange={(supplierId) =>
+                      setFinalizedFilters((f) => ({ ...f, supplierId }))
                     }
-                    className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                  >
-                    <option value="">Todos</option>
-                    {(suppliersForFilter as Array<{ id: string; name: string }>).map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.name}
-                      </option>
-                    ))}
-                  </select>
+                    options={supplierFilterSelectOptions}
+                    allowEmpty={false}
+                  />
                 </div>
                 <div>
                   <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                     Centro de custo
                   </label>
-                  <select
+                  <StringSingleSelectDropdown
                     value={finalizedFilters.costCenterId}
-                    onChange={(e) =>
-                      setFinalizedFilters((f) => ({ ...f, costCenterId: e.target.value }))
+                    onChange={(costCenterId) =>
+                      setFinalizedFilters((f) => ({ ...f, costCenterId }))
                     }
-                    className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                  >
-                    <option value="">Todos</option>
-                    {costCentersForFilter
-                      .filter((cc): cc is typeof cc & { id: string } => Boolean(cc.id))
-                      .map((cc) => (
-                        <option key={cc.id} value={cc.id}>
-                          {[cc.code, cc.name].filter(Boolean).join(' — ') || cc.id}
-                        </option>
-                      ))}
-                  </select>
+                    options={costCenterFilterSelectOptions}
+                    allowEmpty={false}
+                  />
                 </div>
               </div>
               <p className="mt-4 text-xs text-gray-500 dark:text-gray-400">

@@ -22,6 +22,8 @@ import { Loading } from '@/components/ui/Loading';
 import { Modal } from '@/components/ui/Modal';
 import { getListTableRowClassName, ListRowNavigableLabel } from '@/components/ui/listTableUi';
 import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
+import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import api from '@/lib/api';
 import toast from 'react-hot-toast';
 import {
@@ -1011,20 +1013,15 @@ export default function ControleEntregasPageClient() {
                 <DetailField label="Tipo de entrega">
                   {deliveryTypeEditId === detailRow.id ? (
                     <div className="space-y-2">
-                      <select
+                      <StringSingleSelectDropdown
                         value={deliveryTypeDraft}
-                        onChange={(e) =>
-                          setDeliveryTypeDraft(e.target.value as DeliveryTypeValue | '')
+                        onChange={(value) =>
+                          setDeliveryTypeDraft(value as DeliveryTypeValue | '')
                         }
+                        options={labeledToSelectOptions(DELIVERY_TYPE_OPTIONS)}
+                        placeholder="Selecionar..."
                         className={fieldClassName}
-                      >
-                        <option value="">Selecionar...</option>
-                        {DELIVERY_TYPE_OPTIONS.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
+                      />
                       <div className="flex gap-2">
                         <button
                           type="button"

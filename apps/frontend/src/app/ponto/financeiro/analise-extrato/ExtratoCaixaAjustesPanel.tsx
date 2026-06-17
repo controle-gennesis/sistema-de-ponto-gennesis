@@ -14,7 +14,9 @@ import {
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Modal } from '@/components/ui/Modal';
+import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import api from '@/lib/api';
+import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import {
   EMPTY_AJUSTE_FORM,
   type ExtratoCaixaAjuste,
@@ -57,7 +59,7 @@ function formatDateBr(iso: string): string {
 }
 
 const INPUT_CLASS =
-  'w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 dark:focus:ring-red-400';
+  'w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:focus:ring-red-400';
 
 const LABEL_CLASS = 'mb-2 block text-xs font-medium text-gray-500 dark:text-gray-400';
 
@@ -245,6 +247,56 @@ export function ExtratoCaixaAjustesPanel({
   };
 
   const listsReady = sourceItems.length > 0 || ccOptions.length > 0;
+
+  const ccSelectOptions = useMemo(
+    () => [
+      {
+        value: '',
+        label: listsReady ? 'Selecione o centro de custo' : 'Carregue o balanço para listar opções',
+        searchText: '',
+      },
+      ...ccOptions,
+    ],
+    [ccOptions, listsReady]
+  );
+
+  const natureSelectOptions = useMemo(
+    () => [
+      {
+        value: '',
+        label: listsReady
+          ? 'Selecione a natureza financeira'
+          : 'Carregue o balanço para listar opções',
+        searchText: '',
+      },
+      ...natureOptions,
+    ],
+    [natureOptions, listsReady]
+  );
+
+  const filialSelectOptions = useMemo(
+    () =>
+      labeledToSelectOptions([
+        { value: '', label: 'Sem filial' },
+        ...Object.entries(FILIAL_UF_POR_CODIGO).map(([code, uf]) => ({
+          value: code,
+          label: `FILIAL ${code} - ${uf}`,
+        })),
+      ]),
+    []
+  );
+
+  const fornecedorSelectOptions = useMemo(
+    () => [
+      {
+        value: '',
+        label: listsReady ? 'Selecione o fornecedor' : 'Carregue o balanço para listar opções',
+        searchText: '',
+      },
+      ...fornecedorOptions,
+    ],
+    [fornecedorOptions, listsReady]
+  );
 
   if (!enabled) return null;
 
@@ -521,60 +573,40 @@ export function ExtratoCaixaAjustesPanel({
             <label htmlFor="ajuste-cc" className={LABEL_CLASS}>
               Centro de custo
             </label>
-            <select
-              id="ajuste-cc"
+            <StringSingleSelectDropdown
               value={form.codCCusto}
-              onChange={(e) => {
-                const cc = resolveCcFromSelect(e.target.value, sourceItems);
+              onChange={(v) => {
+                const cc = resolveCcFromSelect(v, sourceItems);
                 setForm((f) => ({
                   ...f,
-                  codCCusto: e.target.value,
-                  ccusto: cc.ccusto
+                  codCCusto: v,
+                  ccusto: cc.ccusto,
                 }));
               }}
-              className={INPUT_CLASS}
+              options={ccSelectOptions}
               disabled={!listsReady}
-            >
-              <option value="">
-                {listsReady ? 'Selecione o centro de custo' : 'Carregue o balanço para listar opções'}
-              </option>
-              {ccOptions.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
+              allowEmpty={false}
+            />
           </div>
 
           <div>
             <label htmlFor="ajuste-natureza" className={LABEL_CLASS}>
               Natureza financeira
             </label>
-            <select
-              id="ajuste-natureza"
+            <StringSingleSelectDropdown
               value={form.codNatFinanceira}
-              onChange={(e) => {
-                const nat = resolveNatureFromSelect(e.target.value, sourceItems);
+              onChange={(v) => {
+                const nat = resolveNatureFromSelect(v, sourceItems);
                 setForm((f) => ({
                   ...f,
-                  codNatFinanceira: e.target.value,
-                  natureza: nat.natureza
+                  codNatFinanceira: v,
+                  natureza: nat.natureza,
                 }));
               }}
-              className={INPUT_CLASS}
+              options={natureSelectOptions}
               disabled={!listsReady}
-            >
-              <option value="">
-                {listsReady
-                  ? 'Selecione a natureza financeira'
-                  : 'Carregue o balanço para listar opções'}
-              </option>
-              {natureOptions.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
+              allowEmpty={false}
+            />
           </div>
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -582,40 +614,24 @@ export function ExtratoCaixaAjustesPanel({
               <label htmlFor="ajuste-filial" className={LABEL_CLASS}>
                 Filial
               </label>
-              <select
-                id="ajuste-filial"
+              <StringSingleSelectDropdown
                 value={form.codFilial}
-                onChange={(e) => setForm((f) => ({ ...f, codFilial: e.target.value }))}
-                className={INPUT_CLASS}
-              >
-                <option value="">Sem filial</option>
-                {Object.entries(FILIAL_UF_POR_CODIGO).map(([code, uf]) => (
-                  <option key={code} value={code}>
-                    FILIAL {code} - {uf}
-                  </option>
-                ))}
-              </select>
+                onChange={(v) => setForm((f) => ({ ...f, codFilial: v }))}
+                options={filialSelectOptions}
+                allowEmpty={false}
+              />
             </div>
             <div>
               <label htmlFor="ajuste-fornecedor" className={LABEL_CLASS}>
                 Fornecedor
               </label>
-              <select
-                id="ajuste-fornecedor"
+              <StringSingleSelectDropdown
                 value={form.fornecedor}
-                onChange={(e) => setForm((f) => ({ ...f, fornecedor: e.target.value }))}
-                className={INPUT_CLASS}
+                onChange={(v) => setForm((f) => ({ ...f, fornecedor: resolveFornecedorFromSelect(v) }))}
+                options={fornecedorSelectOptions}
                 disabled={!listsReady}
-              >
-                <option value="">
-                  {listsReady ? 'Selecione o fornecedor' : 'Carregue o balanço para listar opções'}
-                </option>
-                {fornecedorOptions.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
+                allowEmpty={false}
+              />
             </div>
           </div>
 

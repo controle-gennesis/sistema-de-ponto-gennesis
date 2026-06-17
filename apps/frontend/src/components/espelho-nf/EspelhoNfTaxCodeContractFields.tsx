@@ -1,6 +1,13 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
+import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
+
+const ISS_COLLECTION_TYPE_OPTIONS = labeledToSelectOptions([
+  { value: 'RETIDO', label: 'Retido' },
+  { value: 'RECOLHIDO', label: 'Recolhido' },
+]);
 
 export type FederalTaxRates = {
   cofins: string;
@@ -922,16 +929,15 @@ export function EspelhoNfTaxCodeContractFields({
                   {label} — tipo
                 </label>
                 {taxKey === 'iss' ? (
-                  <select
+                  <StringSingleSelectDropdown
                     value={taxCodeForm.iss.collectionType}
-                    onChange={(e) =>
-                      handleTaxRuleFieldChange('iss', e.target.value as 'RETIDO' | 'RECOLHIDO')
+                    onChange={(value) =>
+                      handleTaxRuleFieldChange('iss', value as 'RETIDO' | 'RECOLHIDO')
                     }
+                    options={ISS_COLLECTION_TYPE_OPTIONS}
+                    allowEmpty={false}
                     className={inputClass}
-                  >
-                    <option value="RETIDO">Retido</option>
-                    <option value="RECOLHIDO">Recolhido</option>
-                  </select>
+                  />
                 ) : (
                   <input
                     type="text"

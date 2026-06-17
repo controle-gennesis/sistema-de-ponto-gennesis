@@ -29,7 +29,9 @@ import { Modal } from '@/components/ui/Modal';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { FinancialControlEntryModal } from '@/components/financeiro/FinancialControlEntryModal';
+import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import api from '@/lib/api';
+import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 
 type FinancialControlStatus =
   | 'PROCESSO_COMPLETO'
@@ -378,6 +380,29 @@ export default function ControleFinanceiroPage() {
     entries.forEach((e) => setYears.add(e.paymentYear));
     return Array.from(setYears).sort((a, b) => b - a);
   }, [entries, currentYear]);
+
+  const yearFilterOptions = useMemo(
+    () => labeledToSelectOptions(availableYears.map((year) => ({ value: String(year), label: String(year) }))),
+    [availableYears]
+  );
+
+  const monthFilterOptions = useMemo(
+    () =>
+      labeledToSelectOptions([
+        { value: '0', label: 'Todos os meses' },
+        ...MONTHS_PT.map((label, idx) => ({ value: String(idx + 1), label })),
+      ]),
+    []
+  );
+
+  const statusFilterOptions = useMemo(
+    () =>
+      labeledToSelectOptions([
+        { value: '', label: 'Todos' },
+        ...STATUS_OPTIONS.map((opt) => ({ value: opt.value, label: opt.label })),
+      ]),
+    []
+  );
 
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
@@ -736,55 +761,38 @@ export default function ControleFinanceiroPage() {
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                   Ano
                 </label>
-                <select
-                  value={filters.year}
-                  onChange={(e) => setFilters({ ...filters, year: parseInt(e.target.value, 10) })}
-                  className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                >
-                  {availableYears.map((year) => (
-                    <option key={year} value={year}>
-                      {year}
-                    </option>
-                  ))}
-                </select>
+                <StringSingleSelectDropdown
+                  value={String(filters.year)}
+                  onChange={(v) => setFilters({ ...filters, year: parseInt(v, 10) })}
+                  options={yearFilterOptions}
+                  allowEmpty={false}
+                />
               </div>
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                   Mês
                 </label>
-                <select
-                  value={filters.month}
-                  onChange={(e) => setFilters({ ...filters, month: parseInt(e.target.value, 10) })}
-                  className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                >
-                  <option value={0}>Todos os meses</option>
-                  {MONTHS_PT.map((label, idx) => (
-                    <option key={idx} value={idx + 1}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
+                <StringSingleSelectDropdown
+                  value={String(filters.month)}
+                  onChange={(v) => setFilters({ ...filters, month: parseInt(v, 10) })}
+                  options={monthFilterOptions}
+                  allowEmpty={false}
+                />
               </div>
 
               <div className="sm:col-span-2">
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                   Status
                 </label>
-                <select
+                <StringSingleSelectDropdown
                   value={filters.status}
-                  onChange={(e) =>
-                    setFilters({ ...filters, status: e.target.value as '' | FinancialControlStatus })
+                  onChange={(v) =>
+                    setFilters({ ...filters, status: v as '' | FinancialControlStatus })
                   }
-                  className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                >
-                  <option value="">Todos</option>
-                  {STATUS_OPTIONS.map((opt) => (
-                    <option key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </option>
-                  ))}
-                </select>
+                  options={statusFilterOptions}
+                  allowEmpty={false}
+                />
               </div>
 
               <div className="sm:col-span-2">

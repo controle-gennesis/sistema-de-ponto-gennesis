@@ -4,6 +4,19 @@ import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Calendar, ChevronLeft, ChevronRight } from 'lucide-react';
 import { clsx } from 'clsx';
+import {
+  DATE_PICKER_FOOTER_ACTION_CLS,
+  DATE_PICKER_FOOTER_CLEAR_CLS,
+  DATE_PICKER_FOOTER_CLS,
+  DATE_PICKER_NAV_BTN_CLS,
+  DATE_PICKER_POPOVER_CLS,
+  DATE_PICKER_WEEKDAY_ROW_CLS,
+  DATE_PICKER_WEEKDAYS,
+  datePickerCalendarIconCls,
+  datePickerDayButtonCls,
+  datePickerTriggerCls,
+  datePickerTriggerTextCls,
+} from '@/components/ui/datePickerDropdownUi';
 
 export type DatePickerFieldProps = {
   value: string;
@@ -40,12 +53,12 @@ function formatDisplayBr(ymd: string): string {
   return d.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
 }
 
-const WEEKDAYS = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
+const WEEKDAYS = [...DATE_PICKER_WEEKDAYS];
 
 export function DatePickerField({
   value,
   onChange,
-  placeholder = 'Selecione a data',
+  placeholder = 'dd/mm/aaaa',
   disabled = false,
   size = 'form',
   appearance = 'field',
@@ -129,24 +142,7 @@ export function DatePickerField({
     setOpen(false);
   };
 
-  const triggerCls = clsx(
-    'group flex w-full min-w-0 items-center justify-between gap-2 text-left transition-[border-color,box-shadow,background-color]',
-    'disabled:cursor-not-allowed disabled:opacity-60',
-    appearance === 'inline'
-      ? clsx(
-          'h-auto cursor-pointer border-0 bg-transparent px-1 py-1 text-xs shadow-none focus:outline-none focus:ring-0 sm:text-sm',
-          !noFocusRing && open && 'rounded-md ring-2 ring-red-500 dark:ring-red-400'
-        )
-      : clsx(
-          'rounded-md border border-gray-300 bg-white text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100',
-          noFocusRing
-            ? 'focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0'
-            : 'focus:outline-none focus:ring-2 focus:ring-red-500 dark:focus:ring-red-400 focus:border-transparent',
-          size === 'form' ? 'h-10 rounded-lg px-3 text-sm' : 'h-9 px-2.5 text-xs sm:text-sm',
-          !noFocusRing && open && 'ring-2 ring-red-500 dark:ring-red-400 border-transparent'
-        ),
-    className
-  );
+  const triggerAppearance = appearance === 'inline' ? 'inline' : size === 'table' ? 'table' : 'field';
 
   const popover = open ? (
     <div
@@ -154,30 +150,30 @@ export function DatePickerField({
       id={listboxId}
       role="dialog"
       aria-label="Calendário"
-      className="fixed z-[9999] rounded-xl border border-gray-200 bg-white p-3 shadow-xl dark:border-gray-600 dark:bg-gray-800"
+      className={DATE_PICKER_POPOVER_CLS}
       style={{ top: coords.top, left: coords.left, width: coords.width }}
     >
-      <div className="flex items-center justify-between mb-3">
+      <div className="mb-3 flex items-center justify-between">
         <button
           type="button"
           onClick={() => setViewDate(new Date(year, month - 1, 1))}
-          className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-100"
+          className={DATE_PICKER_NAV_BTN_CLS}
           aria-label="Mês anterior"
         >
           <ChevronLeft className="h-4 w-4" />
         </button>
-        <span className="text-sm font-semibold text-gray-900 dark:text-gray-100 capitalize">{monthLabel}</span>
+        <span className="text-sm font-semibold capitalize text-gray-900 dark:text-gray-100">{monthLabel}</span>
         <button
           type="button"
           onClick={() => setViewDate(new Date(year, month + 1, 1))}
-          className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-100"
+          className={DATE_PICKER_NAV_BTN_CLS}
           aria-label="Próximo mês"
         >
           <ChevronRight className="h-4 w-4" />
         </button>
       </div>
 
-      <div className="grid grid-cols-7 gap-0.5 text-center text-[10px] font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-1">
+      <div className={DATE_PICKER_WEEKDAY_ROW_CLS}>
         {WEEKDAYS.map((d) => (
           <span key={d} className="py-1">
             {d}
@@ -196,16 +192,7 @@ export function DatePickerField({
               key={day}
               type="button"
               onClick={() => pickDay(day)}
-              className={clsx(
-                'h-9 rounded-lg text-sm transition-colors flex items-center justify-center',
-                selected && 'bg-red-600 text-white font-semibold dark:bg-red-500',
-                !selected &&
-                  isToday &&
-                  'font-semibold text-red-600 ring-1 ring-inset ring-red-500/40 dark:text-red-400 dark:ring-red-400/50',
-                !selected &&
-                  !isToday &&
-                  'text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700/80'
-              )}
+              className={datePickerDayButtonCls(selected, isToday)}
             >
               {day}
             </button>
@@ -213,14 +200,14 @@ export function DatePickerField({
         })}
       </div>
 
-      <div className="mt-3 flex items-center justify-between gap-2 border-t border-gray-200 pt-3 dark:border-gray-600">
+      <div className={DATE_PICKER_FOOTER_CLS}>
         <button
           type="button"
           onClick={() => {
             onChange('');
             setOpen(false);
           }}
-          className="text-xs font-medium text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100"
+          className={DATE_PICKER_FOOTER_CLEAR_CLS}
         >
           Limpar
         </button>
@@ -231,7 +218,7 @@ export function DatePickerField({
             setViewDate(new Date());
             setOpen(false);
           }}
-          className="text-xs font-semibold text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+          className={DATE_PICKER_FOOTER_ACTION_CLS}
         >
           Hoje
         </button>
@@ -249,30 +236,18 @@ export function DatePickerField({
         aria-expanded={open}
         aria-haspopup="dialog"
         aria-controls={open ? listboxId : undefined}
-        className={triggerCls}
+        className={datePickerTriggerCls(open, triggerAppearance, noFocusRing, className)}
+        data-form-field-trigger="true"
         onClick={() => {
           if (disabled) return;
           if (!open) updatePosition();
           setOpen((v) => !v);
         }}
       >
-        <span
-          className={clsx(
-            'min-w-0 truncate tabular-nums',
-            value ? 'text-gray-900 dark:text-gray-100' : 'text-gray-400 dark:text-gray-500'
-          )}
-        >
+        <span className={clsx('min-w-0 truncate tabular-nums', datePickerTriggerTextCls(Boolean(value)))}>
           {value ? formatDisplayBr(value) : placeholder}
         </span>
-        <Calendar
-          className={clsx(
-            'h-4 w-4 shrink-0',
-            appearance === 'inline'
-              ? 'text-gray-400 dark:text-gray-500'
-              : 'text-gray-400 transition-colors group-hover:text-red-600 dark:text-gray-300 dark:group-hover:text-red-400'
-          )}
-          aria-hidden
-        />
+        <Calendar className={datePickerCalendarIconCls(triggerAppearance)} aria-hidden />
       </button>
       {typeof document !== 'undefined' && popover ? createPortal(popover, document.body) : null}
     </>

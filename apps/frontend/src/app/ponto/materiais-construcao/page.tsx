@@ -32,6 +32,14 @@ import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import api from '@/lib/api';
 import toast from 'react-hot-toast';
+import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
+
+const MATERIAL_ACTIVE_FILTER_OPTIONS = labeledToSelectOptions([
+  { value: 'all', label: 'Todos' },
+  { value: 'true', label: 'Ativos' },
+  { value: 'false', label: 'Inativos' },
+]);
 import * as XLSX from 'xlsx';
 import { ButtonSeg } from '../solicitacoes-dp/DpSolicitacaoTypeFields';
 
@@ -976,15 +984,12 @@ export default function MateriaisConstrucaoPage() {
                 <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                   Status
                 </label>
-                <select
+                <StringSingleSelectDropdown
                   value={materialActiveFilter}
-                  onChange={(e) => setMaterialActiveFilter(e.target.value)}
-                  className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                >
-                  <option value="all">Todos</option>
-                  <option value="true">Ativos</option>
-                  <option value="false">Inativos</option>
-                </select>
+                  onChange={setMaterialActiveFilter}
+                  options={MATERIAL_ACTIVE_FILTER_OPTIONS}
+                  allowEmpty={false}
+                />
               </div>
               <div className="flex items-center justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
                 <button
@@ -1215,7 +1220,7 @@ export default function MateriaisConstrucaoPage() {
                       <button
                         onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
                         disabled={currentPage === 1}
-                        className="px-3 py-2 text-sm font-medium text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        className="px-3 py-2 text-sm font-medium text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                       >
                         Anterior
                       </button>
@@ -1242,7 +1247,7 @@ export default function MateriaisConstrucaoPage() {
                             className={`px-3 py-2 text-sm font-medium rounded-md ${
                               isActive
                                 ? 'bg-red-600 text-white'
-                                : 'text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
+                                : 'text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
                             } transition-colors`}
                           >
                             {pageNumber}
@@ -1253,7 +1258,7 @@ export default function MateriaisConstrucaoPage() {
                       <button
                         onClick={() => setCurrentPage(prev => Math.min(prev + 1, pagination.totalPages))}
                         disabled={currentPage === pagination.totalPages}
-                        className="px-3 py-2 text-sm font-medium text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        className="px-3 py-2 text-sm font-medium text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                       >
                         Próxima
                       </button>
@@ -1662,6 +1667,26 @@ function MaterialFormModal({
 }) {
   const [useCustomUnit, setUseCustomUnit] = useState(false);
 
+  const unitSelectOptions = useMemo(
+    () =>
+      labeledToSelectOptions([
+        ...unitOptions.map((unit) => ({ value: unit, label: unit })),
+        { value: UNIT_OTHER_VALUE, label: 'Outra (informar manualmente)' },
+      ]),
+    [unitOptions]
+  );
+
+  const budgetNatureSelectOptions = useMemo(
+    () =>
+      labeledToSelectOptions(
+        budgetNatureOptions.map((bn) => ({
+          value: bn.id,
+          label: formatBudgetNatureLabel(bn),
+        }))
+      ),
+    [budgetNatureOptions]
+  );
+
   useEffect(() => {
     if (!isOpen) return;
     const unit = formData.unit.trim();
@@ -1752,11 +1777,9 @@ function MaterialFormModal({
               <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                 Unidade de Medida *
               </label>
-              <select
-                required={!useCustomUnit}
+              <StringSingleSelectDropdown
                 value={useCustomUnit ? UNIT_OTHER_VALUE : formData.unit}
-                onChange={(e) => {
-                  const value = e.target.value;
+                onChange={(value) => {
                   if (value === UNIT_OTHER_VALUE) {
                     setUseCustomUnit(true);
                     setFormData({ ...formData, unit: '' });
@@ -1765,16 +1788,11 @@ function MaterialFormModal({
                   setUseCustomUnit(false);
                   setFormData({ ...formData, unit: value });
                 }}
+                options={unitSelectOptions}
+                placeholder="Selecione a unidade"
+                emptyOptionLabel="Selecione a unidade"
                 className={selectFieldClass}
-              >
-                <option value="">Selecione a unidade</option>
-                {unitOptions.map((unit) => (
-                  <option key={unit} value={unit}>
-                    {unit}
-                  </option>
-                ))}
-                <option value={UNIT_OTHER_VALUE}>Outra (informar manualmente)</option>
-              </select>
+              />
               {useCustomUnit ? (
                 <input
                   type="text"
@@ -1791,20 +1809,16 @@ function MaterialFormModal({
               <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                 Natureza Orçamentária
               </label>
-              <select
+              <StringSingleSelectDropdown
                 value={formData.budgetNatureId}
-                onChange={(e) =>
-                  setFormData({ ...formData, budgetNatureId: e.target.value })
+                onChange={(budgetNatureId) =>
+                  setFormData({ ...formData, budgetNatureId })
                 }
+                options={budgetNatureSelectOptions}
+                placeholder="Selecione (opcional)"
+                emptyOptionLabel="Selecione (opcional)"
                 className={selectFieldClass}
-              >
-                <option value="">Selecione (opcional)</option>
-                {budgetNatureOptions.map((bn) => (
-                  <option key={bn.id} value={bn.id}>
-                    {formatBudgetNatureLabel(bn)}
-                  </option>
-                ))}
-              </select>
+              />
             </div>
 
             <div className="flex items-center">

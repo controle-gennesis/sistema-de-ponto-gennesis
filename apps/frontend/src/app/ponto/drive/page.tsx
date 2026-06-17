@@ -40,6 +40,13 @@ import { MainLayout } from '@/components/layout/MainLayout';
 import { Loading } from '@/components/ui/Loading';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Modal } from '@/components/ui/Modal';
+import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
+
+const SHARE_PERMISSION_OPTIONS = labeledToSelectOptions([
+  { value: 'READ', label: 'Leitura (ver e baixar)' },
+  { value: 'READ_WRITE', label: 'Edição (enviar e criar subpastas)' },
+]);
 
 // ── Tipos ─────────────────────────────────────────────────────────────────────
 
@@ -921,7 +928,7 @@ function DrivePageContent() {
                       setNewFolderName('');
                       setShowNewFolder(true);
                     }}
-                    className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 rounded-md hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors"
+                    className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 rounded-md hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors"
                   >
                     <FolderPlus className="h-4 w-4" />
                     Nova pasta
@@ -984,7 +991,7 @@ function DrivePageContent() {
                     setShowNewFolder(false);
                   }
                 }}
-                className="w-full px-3 py-2 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:focus:ring-red-400"
+                className="w-full px-3 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:focus:ring-red-400"
               />
             </div>
             <div className="flex justify-end gap-2 pt-2">
@@ -1029,7 +1036,7 @@ function DrivePageContent() {
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && renameName.trim()) submitRename();
                 }}
-                className="w-full px-3 py-2 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500 dark:focus:ring-red-400"
+                className="w-full px-3 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500 dark:focus:ring-red-400"
               />
             </div>
             <div className="flex justify-end gap-2 pt-2">
@@ -1155,7 +1162,7 @@ function DrivePageContent() {
                               e.stopPropagation();
                               setShowShareUserDropdown((v) => !v);
                             }}
-                            className="w-full min-h-[3rem] h-12 pl-12 pr-12 text-left rounded-lg border-2 border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-base text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500 dark:focus:ring-red-400 focus:border-transparent relative"
+                            className="w-full min-h-[3rem] h-12 pl-12 pr-12 text-left rounded-lg border-2 border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-base text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500 dark:focus:ring-red-400 focus:border-transparent relative"
                           >
                             <ListPlus className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 w-5 h-5 pointer-events-none" />
                             <span className="block pr-1 truncate">
@@ -1268,21 +1275,19 @@ function DrivePageContent() {
                           <label className="sr-only" htmlFor={`share-perm-${row.id}`}>
                             Permissão de {row.user.name}
                           </label>
-                          <select
-                            id={`share-perm-${row.id}`}
+                          <StringSingleSelectDropdown
                             value={row.permission}
-                            onChange={(e) =>
+                            onChange={(perm) =>
                               updateShareMut.mutate({
                                 uid: row.userId,
-                                perm: e.target.value as 'READ' | 'READ_WRITE',
+                                perm: perm as 'READ' | 'READ_WRITE',
                               })
                             }
+                            options={SHARE_PERMISSION_OPTIONS}
                             disabled={updateShareMut.isPending}
-                            className="w-full sm:w-auto min-w-0 text-sm border border-gray-300 dark:border-gray-600 rounded-md px-2 py-2 bg-white dark:text-gray-100 dark:bg-gray-700"
-                          >
-                            <option value="READ">Leitura (ver e baixar)</option>
-                            <option value="READ_WRITE">Edição (enviar e criar subpastas)</option>
-                          </select>
+                            allowEmpty={false}
+                            className="w-full sm:w-auto min-w-0"
+                          />
                           <button
                             type="button"
                             onClick={() => {

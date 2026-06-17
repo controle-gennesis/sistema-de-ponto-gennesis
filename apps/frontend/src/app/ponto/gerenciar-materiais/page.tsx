@@ -28,7 +28,8 @@ import { maskCurrencyInputBrOrEmpty, parseCurrencyInputBr } from '@/lib/maskCurr
 import { FluxGlobalSearch } from './_components/FluxGlobalSearch';
 import { FluxTabsNav } from './_components/FluxTabsNav';
 import { MaterialRequestsRmList } from './_components/MaterialRequestsRmList';
-import { SearchableEntityAutocomplete } from '@/components/ui/SearchableEntityAutocomplete';
+import { AsyncSearchSelectDropdown } from '@/components/ui/AsyncSearchSelectDropdown';
+import { searchOcSuppliers } from '@/components/oc/searchOcSuppliers';
 import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
 import { OC_PIX_KEY_TYPE_OPTIONS } from '@/components/oc/OcPurchaseOrderFormFields';
 import {
@@ -42,7 +43,7 @@ import {
 } from './_lib/search';
 
 const ocFieldCls =
-  'w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-0 focus:border-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:focus:border-red-500 disabled:cursor-not-allowed disabled:opacity-50';
+  'w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-0 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 disabled:cursor-not-allowed disabled:opacity-50';
 
 type OcSupplierOption = {
   id: string;
@@ -70,14 +71,14 @@ function getOcSupplierLabel(supplier?: OcSupplierOption | null): string {
 }
 
 const ocPaymentSegmentCls = (active: boolean) =>
-  `w-full rounded-lg border px-3 py-2.5 text-center text-sm font-medium transition-colors focus:outline-none focus:ring-0 focus:border-red-500 dark:focus:border-red-500 ${
+  `w-full rounded-lg border px-3 py-2.5 text-center text-sm font-medium transition-colors focus:outline-none focus:ring-0 ${
     active
       ? 'border-red-600 bg-red-50 text-red-800 dark:border-red-500 dark:bg-red-950/40 dark:text-red-200'
       : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700/80'
   }`;
 
 const ocFieldCompactCls =
-  'w-full min-w-0 rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-0 focus:border-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:focus:border-red-500 disabled:cursor-not-allowed disabled:opacity-50';
+  'w-full min-w-0 rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-0 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 disabled:cursor-not-allowed disabled:opacity-50';
 
 export default function GerenciarMateriaisPage() {
   const router = useRouter();
@@ -91,8 +92,6 @@ export default function GerenciarMateriaisPage() {
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [ocSupplierId, setOcSupplierId] = useState('');
   const [ocSupplierSearch, setOcSupplierSearch] = useState('');
-  const [ocSupplierSearchDebounced, setOcSupplierSearchDebounced] = useState('');
-  const [ocSupplierDropdownOpen, setOcSupplierDropdownOpen] = useState(false);
   const [ocPaymentType, setOcPaymentType] = useState<string>(OC_TYPE_AVISTA);
   const [ocPaymentCondition, setOcPaymentCondition] = useState<string>('AVISTA');
   const [ocPaymentDetails, setOcPaymentDetails] = useState('');
@@ -119,8 +118,6 @@ export default function GerenciarMateriaisPage() {
   const resetOcForm = () => {
     setOcSupplierId('');
     setOcSupplierSearch('');
-    setOcSupplierSearchDebounced('');
-    setOcSupplierDropdownOpen(false);
     setOcPaymentType(OC_TYPE_AVISTA);
     setOcPaymentCondition('AVISTA');
     setOcPaymentDetails('');
@@ -143,13 +140,6 @@ export default function GerenciarMateriaisPage() {
       setOcUnitPriceStrByItemId({});
     }
   }, [showCreateOCModal, selectedRequest]);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      setOcSupplierSearchDebounced(ocSupplierSearch);
-    }, 300);
-    return () => window.clearTimeout(timer);
-  }, [ocSupplierSearch]);
 
   const ocSelectedItems =
     selectedRequest?.items.filter((i) => ocSelectedItemIds.has(i.id)) ?? [];
@@ -267,38 +257,6 @@ export default function GerenciarMateriaisPage() {
     }
   });
 
-  const { data: suppliersData, isLoading: loadingSuppliers, isError: suppliersLoadError } = useQuery({
-    queryKey: ['suppliers-oc-search', ocSupplierSearchDebounced],
-    queryFn: async () => {
-      const res = await api.get('/suppliers', {
-        params: {
-          search: ocSupplierSearchDebounced.trim() || undefined,
-          isActive: true,
-          limit: 50,
-          page: 1
-        }
-      });
-      return res.data;
-    },
-    enabled: showCreateOCModal
-  });
-
-  const ocSuppliers: OcSupplierOption[] = suppliersData?.data || [];
-
-  const handleOcSupplierSearchChange = (value: string) => {
-    setOcSupplierSearch(value);
-    const normalized = value.trim().toLowerCase();
-    const exactMatch = ocSuppliers.find(
-      (supplier) => getOcSupplierLabel(supplier).trim().toLowerCase() === normalized
-    );
-
-    if (!normalized || !exactMatch) {
-      setOcSupplierId('');
-      return;
-    }
-
-    setOcSupplierId(exactMatch.id);
-  };
 
   // Criar Ordem de Compra
   const createOCMutation = useMutation({
@@ -1072,28 +1030,19 @@ export default function GerenciarMateriaisPage() {
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                   Fornecedor *
                 </label>
-                <SearchableEntityAutocomplete
-                  searchValue={ocSupplierSearch}
-                  isOpen={ocSupplierDropdownOpen}
-                  onOpen={() => setOcSupplierDropdownOpen(true)}
-                  onClose={() => setOcSupplierDropdownOpen(false)}
-                  onSearchChange={handleOcSupplierSearchChange}
-                  onSelect={(supplier) => {
+                <AsyncSearchSelectDropdown
+                  value={ocSupplierId}
+                  selectedLabel={ocSupplierSearch}
+                  onChange={(supplier) => {
                     setOcSupplierId(supplier.id);
                     setOcSupplierSearch(getOcSupplierLabel(supplier));
-                    setOcSupplierDropdownOpen(false);
                   }}
-                  items={ocSuppliers}
-                  getItemKey={(supplier) => supplier.id}
-                  getItemLabel={getOcSupplierLabel}
-                  loading={loadingSuppliers}
-                  loadError={suppliersLoadError}
-                  inputClassName={ocFieldCls}
+                  searchFn={searchOcSuppliers}
+                  getOptionId={(supplier) => supplier.id}
+                  getOptionLabel={getOcSupplierLabel}
+                  queryKeyPrefix="suppliers-oc-modal"
                   placeholder="Digite para buscar fornecedor..."
-                  emptyListMessage="Nenhum fornecedor ativo cadastrado."
-                  notFoundMessage="Nenhum fornecedor encontrado para esta busca."
-                  loadingMessage="Carregando fornecedores…"
-                  errorMessage="Erro ao carregar fornecedores."
+                  searchPlaceholder="Pesquisar fornecedor..."
                 />
                 <input type="hidden" value={ocSupplierId} readOnly />
               </div>

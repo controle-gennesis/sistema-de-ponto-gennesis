@@ -1,7 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo, useRef, useCallback, useLayoutEffect, Suspense } from 'react';
-import { createPortal } from 'react-dom';
+import React, { useState, useEffect, useMemo, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
@@ -33,7 +32,9 @@ import { useCostCenters } from '@/hooks/useCostCenters';
 import { useServiceOrdersByCostCenter } from '@/hooks/useServiceOrdersByCostCenter';
 import { ServiceOrderSearchSelect } from '@/components/suprimentos/ServiceOrderSearchSelect';
 import { AsyncSearchSelectDropdown } from '@/components/ui/AsyncSearchSelectDropdown';
+import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
 import { getRmMaterialLabel, searchRmMaterials, type RmMaterialListItem } from '@/lib/searchRmMaterials';
+import { FORM_FIELD_INPUT_CLS, FORM_FIELD_TEXTAREA_CLS } from '@/lib/formFieldUi';
 import {
   purchaseOrderPhaseLabel,
   ocStatusTextClass,
@@ -189,6 +190,13 @@ const OC_FASE_FILTER_ORDER = [
   'CANCELLED'
 ] as const;
 
+const RM_PRIORITY_OPTIONS = [
+  { value: 'LOW', label: 'Baixa' },
+  { value: 'MEDIUM', label: 'Média' },
+  { value: 'HIGH', label: 'Alta' },
+  { value: 'URGENT', label: 'Urgente' },
+];
+
 /** Filtro "Fase atual": `rm:STATUS` = fase da SC; `oc:STATUS` = alguma OC com esse status. */
 function requestMatchesFaseAtualFilter(
   request: { status?: string; purchaseOrders?: RmListPurchaseOrder[] },
@@ -314,7 +322,7 @@ function RmQuantityInput({
   const shellClass =
     size === 'sm'
       ? 'flex overflow-hidden rounded border border-gray-300 bg-white dark:border-gray-600 dark:bg-gray-800'
-      : 'flex overflow-hidden rounded-lg border border-gray-300 bg-white dark:border-gray-600 dark:bg-gray-700';
+      : 'flex overflow-hidden rounded-lg border border-gray-300 bg-white dark:border-gray-600 dark:bg-gray-800';
   const stepBtnClass =
     'flex flex-1 items-center justify-center text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-600 dark:hover:text-gray-200';
   const unitClass =
@@ -380,139 +388,6 @@ function getCostCenterLabel(costCenter?: RmCostCenterOption | null) {
   return String(costCenter.name ?? costCenter.label ?? '').trim();
 }
 
-function costCenterMatchesSearch(costCenter: RmCostCenterOption, query: string) {
-  const q = query.trim().toLowerCase();
-  if (!q) return true;
-  const haystack = [
-    costCenter.name,
-    costCenter.label,
-    costCenter.code,
-    costCenter.description
-  ]
-    .map((part) => String(part ?? '').trim().toLowerCase())
-    .filter(Boolean)
-    .join(' ');
-  return haystack.includes(q);
-}
-
-function RmCostCenterAutocomplete({
-  searchValue,
-  isOpen,
-  onOpen,
-  onClose,
-  onSearchChange,
-  onSelect,
-  costCenters,
-  loading,
-  getCostCenterLabel: getLabel,
-  inputClassName,
-  placeholder = 'Digite para buscar centro de custo...'
-}: {
-  searchValue: string;
-  isOpen: boolean;
-  onOpen: () => void;
-  onClose: () => void;
-  onSearchChange: (value: string) => void;
-  onSelect: (costCenter: RmCostCenterOption & { id: string }) => void;
-  costCenters: RmCostCenterOption[];
-  loading: boolean;
-  getCostCenterLabel: (costCenter?: RmCostCenterOption | null) => string;
-  inputClassName: string;
-  placeholder?: string;
-}) {
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [menuStyle, setMenuStyle] = useState<{ top: number; left: number; width: number } | null>(null);
-
-  const syncMenuPosition = useCallback(() => {
-    const el = inputRef.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    setMenuStyle({ top: rect.bottom + 4, left: rect.left, width: rect.width });
-  }, []);
-
-  useLayoutEffect(() => {
-    if (!isOpen) {
-      setMenuStyle(null);
-      return;
-    }
-    syncMenuPosition();
-    const onReposition = () => syncMenuPosition();
-    window.addEventListener('resize', onReposition);
-    window.addEventListener('scroll', onReposition, true);
-    return () => {
-      window.removeEventListener('resize', onReposition);
-      window.removeEventListener('scroll', onReposition, true);
-    };
-  }, [isOpen, syncMenuPosition, searchValue]);
-
-  const filteredCostCenters = useMemo(() => {
-    return costCenters
-      .filter((costCenter): costCenter is RmCostCenterOption & { id: string } => Boolean(costCenter.id))
-      .filter((costCenter) => costCenterMatchesSearch(costCenter, searchValue))
-      .slice(0, 50);
-  }, [costCenters, searchValue]);
-
-  const dropdown =
-    isOpen &&
-    menuStyle &&
-    typeof document !== 'undefined' &&
-    createPortal(
-      <div
-        role="listbox"
-        className="max-h-56 overflow-auto rounded-lg border border-gray-300 bg-white shadow-lg dark:border-gray-600 dark:bg-gray-800"
-        style={{
-          position: 'fixed',
-          top: menuStyle.top,
-          left: menuStyle.left,
-          width: menuStyle.width,
-          zIndex: 1200
-        }}
-      >
-        {loading ? (
-          <p className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">Carregando centros de custo…</p>
-        ) : filteredCostCenters.length === 0 ? (
-          <p className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">
-            {costCenters.length === 0
-              ? 'Nenhum centro de custo disponível.'
-              : 'Nenhum centro de custo encontrado para esta busca.'}
-          </p>
-        ) : (
-          filteredCostCenters.map((costCenter) => (
-            <button
-              key={costCenter.id}
-              type="button"
-              role="option"
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => onSelect(costCenter)}
-              className="w-full px-3 py-2 text-left text-sm text-gray-900 hover:bg-gray-100 dark:text-gray-100 dark:hover:bg-gray-700"
-            >
-              {getLabel(costCenter)}
-            </button>
-          ))
-        )}
-      </div>,
-      document.body
-    );
-
-  return (
-    <>
-      <input
-        ref={inputRef}
-        type="text"
-        value={searchValue}
-        onFocus={onOpen}
-        onClick={onOpen}
-        onBlur={() => setTimeout(onClose, 120)}
-        onChange={(e) => onSearchChange(e.target.value)}
-        placeholder={placeholder}
-        className={inputClassName}
-        autoComplete="off"
-      />
-      {dropdown}
-    </>
-  );
-}
-
 const RM_ATTACHMENT_ACCEPT = '.pdf,.png,.jpg,.jpeg,.webp,.doc,.docx,.xls,.xlsx';
 
 function RmAttachmentField({
@@ -537,10 +412,10 @@ function RmAttachmentField({
   const isSm = size === 'sm';
   const shellClass = isSm
     ? 'rounded border border-gray-300 bg-white dark:border-gray-600 dark:bg-gray-800'
-    : 'rounded-lg border border-gray-300 bg-white dark:border-gray-600 dark:bg-gray-700';
+    : 'rounded-lg border border-gray-300 bg-white dark:border-gray-600 dark:bg-gray-800';
   const chooseBtnClass = isSm
     ? 'inline-flex w-full items-center justify-center gap-1.5 px-2 py-1.5 text-xs rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50'
-    : 'inline-flex w-full items-center justify-center gap-1.5 px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-200 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50';
+    : 'inline-flex w-full items-center justify-center gap-1.5 px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50';
 
   if (!fileUrl) {
     return (
@@ -642,10 +517,6 @@ function SolicitarMateriaisPage() {
   const [uploadingDemandSheetAttachment, setUploadingDemandSheetAttachment] = useState<'new' | 'edit' | null>(null);
   const [newItemMaterialLabels, setNewItemMaterialLabels] = useState<string[]>(['']);
   const [editItemMaterialLabels, setEditItemMaterialLabels] = useState<string[]>(['']);
-  const [newCostCenterSearch, setNewCostCenterSearch] = useState('');
-  const [editCostCenterSearch, setEditCostCenterSearch] = useState('');
-  const [isNewCostCenterDropdownOpen, setIsNewCostCenterDropdownOpen] = useState(false);
-  const [isEditCostCenterDropdownOpen, setIsEditCostCenterDropdownOpen] = useState(false);
 
   const [rmListSearch, setRmListSearch] = useState('');
   /** '' | `rm:PENDING` | `oc:APPROVED` … — fase da SC ou de alguma OC */
@@ -694,42 +565,6 @@ function SolicitarMateriaisPage() {
       serviceOrderId: '',
       serviceOrder: ''
     }));
-  };
-
-  const handleNewCostCenterSearchChange = (value: string) => {
-    setNewCostCenterSearch(value);
-    const normalized = value.trim().toLowerCase();
-    const exactMatch = costCenters.find(
-      (cc): cc is RmCostCenterOption & { id: string } =>
-        Boolean(cc.id) && getCostCenterLabel(cc).trim().toLowerCase() === normalized
-    );
-
-    setFormData((prev) => {
-      if (!normalized || !exactMatch) {
-        if (!prev.costCenterId && !prev.serviceOrderId && !prev.serviceOrder) return prev;
-        return { ...prev, costCenterId: '', serviceOrderId: '', serviceOrder: '' };
-      }
-      if (prev.costCenterId === exactMatch.id) return prev;
-      return { ...prev, costCenterId: exactMatch.id, serviceOrderId: '', serviceOrder: '' };
-    });
-  };
-
-  const handleEditCostCenterSearchChange = (value: string) => {
-    setEditCostCenterSearch(value);
-    const normalized = value.trim().toLowerCase();
-    const exactMatch = costCenters.find(
-      (cc): cc is RmCostCenterOption & { id: string } =>
-        Boolean(cc.id) && getCostCenterLabel(cc).trim().toLowerCase() === normalized
-    );
-
-    setEditFormData((prev) => {
-      if (!normalized || !exactMatch) {
-        if (!prev.costCenterId && !prev.serviceOrderId && !prev.serviceOrder) return prev;
-        return { ...prev, costCenterId: '', serviceOrderId: '', serviceOrder: '' };
-      }
-      if (prev.costCenterId === exactMatch.id) return prev;
-      return { ...prev, costCenterId: exactMatch.id, serviceOrderId: '', serviceOrder: '' };
-    });
   };
 
   const handleNewServiceOrderSelect = (serviceOrderId: string, serviceOrder: string) => {
@@ -845,8 +680,6 @@ function SolicitarMateriaisPage() {
     setIsNewRequestModalOpen(false);
     setFormData(emptyNewFormData());
     setNewItemMaterialLabels(['']);
-    setNewCostCenterSearch('');
-    setIsNewCostCenterDropdownOpen(false);
     setUploadingAttachment(null);
     setUploadingDemandSheetAttachment(null);
   };
@@ -895,6 +728,45 @@ function SolicitarMateriaisPage() {
     }
     return Array.from(set).sort((a, b) => a.localeCompare(b, 'pt-BR', { sensitivity: 'base' }));
   }, [requests]);
+
+  const costCenterSelectOptions = useMemo(
+    () =>
+      costCenters
+        .filter((cc): cc is RmCostCenterOption & { id: string } => Boolean(cc.id))
+        .map((cc) => ({
+          value: cc.id,
+          label: getCostCenterLabel(cc),
+          searchText: [cc.name, cc.label, cc.code, cc.description]
+            .map((part) => String(part ?? '').trim())
+            .filter(Boolean)
+            .join(' '),
+        })),
+    [costCenters]
+  );
+
+  const rmListFaseOptions = useMemo(() => {
+    const options: { value: string; label: string; searchText?: string }[] = [{ value: '', label: 'Todas' }];
+    for (const st of RM_FASE_FILTER_ORDER) {
+      const label = rmStatusLabelPt(st);
+      options.push({ value: `rm:${st}`, label, searchText: `SC ${label}` });
+    }
+    for (const st of OC_FASE_FILTER_ORDER) {
+      if (!(st in OC_STATUS_LABELS_PT)) continue;
+      const label = purchaseOrderPhaseShortLabel(st);
+      options.push({ value: `oc:${st}`, label, searchText: `OC ${label}` });
+    }
+    return options;
+  }, []);
+
+  const rmListObraOptions = useMemo(
+    () => [{ value: '', label: 'Todas' }, ...obraOptionsFromRequests.map((obra) => ({ value: obra, label: obra }))],
+    [obraOptionsFromRequests]
+  );
+
+  const rmListCostCenterOptions = useMemo(
+    () => [{ value: '', label: 'Todos' }, ...costCenterSelectOptions],
+    [costCenterSelectOptions]
+  );
 
   const filteredRequests = useMemo(() => {
     let list = Array.isArray(requests) ? [...requests] : [];
@@ -1070,25 +942,6 @@ function SolicitarMateriaisPage() {
     return () => window.removeEventListener('keydown', onKey);
   }, [detailViewId]);
 
-  useEffect(() => {
-    if (!formData.costCenterId) return;
-    const selected = costCenters.find((cc) => cc.id === formData.costCenterId);
-    if (!selected) return;
-    const label = getCostCenterLabel(selected);
-    setNewCostCenterSearch((prev) => (prev === label ? prev : label));
-  }, [formData.costCenterId, costCenters]);
-
-  useEffect(() => {
-    if (!correctionEditId) {
-      setEditCostCenterSearch((prev) => (prev === '' ? prev : ''));
-      return;
-    }
-    if (!editFormData.costCenterId) return;
-    const selected = costCenters.find((cc) => cc.id === editFormData.costCenterId);
-    if (!selected) return;
-    const label = getCostCenterLabel(selected);
-    setEditCostCenterSearch((prev) => (prev === label ? prev : label));
-  }, [correctionEditId, editFormData.costCenterId, costCenters]);
 
   const user = userData?.data || {
     name: 'Usuário',
@@ -1634,66 +1487,47 @@ function SolicitarMateriaisPage() {
                       <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                         Fase atual
                       </label>
-                      <select
+                      <SingleSelectSearchDropdown
                         value={rmListFaseAtual}
-                        onChange={(e) => setRmListFaseAtual(e.target.value)}
-                        className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                      >
-                        <option value="">Todas</option>
-                        <optgroup label="SC (solicitação)">
-                          {RM_FASE_FILTER_ORDER.map((st) => (
-                            <option key={`rm:${st}`} value={`rm:${st}`}>
-                              {rmStatusLabelPt(st)}
-                            </option>
-                          ))}
-                        </optgroup>
-                        <optgroup label="OC (ordem de compra)">
-                          {OC_FASE_FILTER_ORDER.filter((k) => k in OC_STATUS_LABELS_PT).map((st) => (
-                            <option key={`oc:${st}`} value={`oc:${st}`}>
-                              {purchaseOrderPhaseShortLabel(st)}
-                            </option>
-                          ))}
-                        </optgroup>
-                      </select>
+                        onChange={setRmListFaseAtual}
+                        options={rmListFaseOptions}
+                        allowEmpty={false}
+                        placeholder="Todas"
+                        searchPlaceholder="Pesquisar fase..."
+                        emptyOptionLabel="Todas"
+                      />
                     </div>
                     <div>
                       <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Obra</label>
-                      <select
+                      <SingleSelectSearchDropdown
                         value={rmListObra}
-                        onChange={(e) => setRmListObra(e.target.value)}
-                        className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                      >
-                        <option value="">Todas</option>
-                        {obraOptionsFromRequests.map((obra) => (
-                          <option key={obra} value={obra}>
-                            {obra}
-                          </option>
-                        ))}
-                      </select>
+                        onChange={setRmListObra}
+                        options={rmListObraOptions}
+                        allowEmpty={false}
+                        placeholder="Todas"
+                        searchPlaceholder="Pesquisar obra..."
+                        emptyOptionLabel="Todas"
+                      />
                     </div>
                     <div>
                       <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                         Centro de custo
                       </label>
                       {loadingCostCenters ? (
-                        <div className="w-full rounded-md border border-gray-300 bg-gray-50 px-3 py-2.5 text-sm text-gray-500 dark:border-gray-600 dark:bg-gray-800">
+                        <div className="w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-2.5 text-sm text-gray-500 dark:border-gray-600 dark:bg-gray-800">
                           Carregando...
                         </div>
                       ) : (
-                        <select
+                        <SingleSelectSearchDropdown
                           value={rmListCostCenterId}
-                          onChange={(e) => setRmListCostCenterId(e.target.value)}
-                          className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                        >
-                          <option value="">Todos</option>
-                          {costCenters
-                            .filter((cc): cc is typeof cc & { id: string } => Boolean(cc.id))
-                            .map((cc) => (
-                              <option key={cc.id} value={cc.id}>
-                                {cc.name}
-                              </option>
-                            ))}
-                        </select>
+                          onChange={setRmListCostCenterId}
+                          options={rmListCostCenterOptions}
+                          allowEmpty={false}
+                          placeholder="Todos"
+                          searchPlaceholder="Pesquisar centro de custo..."
+                          emptyOptionLabel="Todos"
+                          emptyOptionsMessage="Nenhum centro de custo disponível."
+                        />
                       )}
                     </div>
                     <div>
@@ -1704,7 +1538,7 @@ function SolicitarMateriaisPage() {
                         type="date"
                         value={rmListDateFrom}
                         onChange={(e) => setRmListDateFrom(e.target.value)}
-                        className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                        className={FORM_FIELD_INPUT_CLS}
                       />
                     </div>
                     <div>
@@ -1715,7 +1549,7 @@ function SolicitarMateriaisPage() {
                         type="date"
                         value={rmListDateTo}
                         onChange={(e) => setRmListDateTo(e.target.value)}
-                        className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                        className={FORM_FIELD_INPUT_CLS}
                       />
                     </div>
                     <p className="text-xs text-gray-500 dark:text-gray-400 sm:col-span-2">
@@ -1776,30 +1610,25 @@ function SolicitarMateriaisPage() {
                       Centro de Custo *
                     </label>
                     {loadingCostCenters ? (
-                      <input
-                        type="text"
+                      <SingleSelectSearchDropdown
+                        value=""
+                        onChange={() => undefined}
+                        options={[]}
                         disabled
-                        readOnly
-                        value="Carregando centros de custo..."
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-500 dark:text-gray-400 focus:outline-none disabled:cursor-not-allowed disabled:opacity-100"
+                        placeholder="Carregando centros de custo..."
+                        allowEmpty={false}
                       />
                     ) : (
                       <>
-                        <RmCostCenterAutocomplete
-                          searchValue={newCostCenterSearch}
-                          isOpen={isNewCostCenterDropdownOpen}
-                          onOpen={() => setIsNewCostCenterDropdownOpen(true)}
-                          onClose={() => setIsNewCostCenterDropdownOpen(false)}
-                          onSearchChange={handleNewCostCenterSearchChange}
-                          onSelect={(costCenter) => {
-                            handleNewCostCenterChange(costCenter.id);
-                            setNewCostCenterSearch(getCostCenterLabel(costCenter));
-                            setIsNewCostCenterDropdownOpen(false);
-                          }}
-                          costCenters={costCenters}
-                          loading={loadingCostCenters}
-                          getCostCenterLabel={getCostCenterLabel}
-                          inputClassName="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        <SingleSelectSearchDropdown
+                          value={formData.costCenterId}
+                          onChange={handleNewCostCenterChange}
+                          options={costCenterSelectOptions}
+                          allowEmpty={false}
+                          placeholder="Digite para buscar centro de custo..."
+                          searchPlaceholder="Pesquisar centro de custo..."
+                          emptyOptionsMessage="Nenhum centro de custo disponível."
+                          emptySearchMessage="Nenhum centro de custo encontrado para esta busca."
                         />
                         <input type="hidden" required value={formData.costCenterId} readOnly />
                       </>
@@ -1837,7 +1666,7 @@ function SolicitarMateriaisPage() {
                       required
                       value={formData.obra}
                       onChange={(e) => setFormData({ ...formData, obra: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      className={FORM_FIELD_INPUT_CLS}
                       placeholder="Identificação da obra"
                     />
                   </div>
@@ -1850,7 +1679,7 @@ function SolicitarMateriaisPage() {
                       value={formData.description}
                       onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                       rows={3}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+                      className={FORM_FIELD_TEXTAREA_CLS}
                       placeholder="Descreva a necessidade dos materiais..."
                     />
                   </div>
@@ -1866,7 +1695,7 @@ function SolicitarMateriaisPage() {
                           required
                           value={formData.demandSheet}
                           onChange={(e) => setFormData({ ...formData, demandSheet: e.target.value })}
-                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+                          className={FORM_FIELD_TEXTAREA_CLS}
                           placeholder="Número ou referência da FD"
                         />
                       </div>
@@ -1889,17 +1718,14 @@ function SolicitarMateriaisPage() {
                       <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                         Prioridade *
                       </label>
-                      <select
-                        required
+                      <SingleSelectSearchDropdown
                         value={formData.priority}
-                        onChange={(e) => setFormData({ ...formData, priority: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
-                      >
-                        <option value="LOW">Baixa</option>
-                        <option value="MEDIUM">Média</option>
-                        <option value="HIGH">Alta</option>
-                        <option value="URGENT">Urgente</option>
-                      </select>
+                        onChange={(priority) => setFormData({ ...formData, priority })}
+                        options={RM_PRIORITY_OPTIONS}
+                        allowEmpty={false}
+                        placeholder="Selecionar prioridade..."
+                        searchPlaceholder="Pesquisar prioridade..."
+                      />
                     </div>
                   </div>
 
@@ -1972,7 +1798,7 @@ function SolicitarMateriaisPage() {
                                 type="text"
                                 value={item.observation}
                                 onChange={(e) => handleItemChange(index, 'observation', e.target.value)}
-                                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm"
+                                className={FORM_FIELD_INPUT_CLS}
                               />
                             </div>
                             </div>
@@ -2280,21 +2106,15 @@ function SolicitarMateriaisPage() {
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                     Centro de Custo *
                   </label>
-                  <RmCostCenterAutocomplete
-                    searchValue={editCostCenterSearch}
-                    isOpen={isEditCostCenterDropdownOpen}
-                    onOpen={() => setIsEditCostCenterDropdownOpen(true)}
-                    onClose={() => setIsEditCostCenterDropdownOpen(false)}
-                    onSearchChange={handleEditCostCenterSearchChange}
-                    onSelect={(costCenter) => {
-                      handleEditCostCenterChange(costCenter.id);
-                      setEditCostCenterSearch(getCostCenterLabel(costCenter));
-                      setIsEditCostCenterDropdownOpen(false);
-                    }}
-                    costCenters={costCenters}
-                    loading={loadingCostCenters}
-                    getCostCenterLabel={getCostCenterLabel}
-                    inputClassName="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm"
+                  <SingleSelectSearchDropdown
+                    value={editFormData.costCenterId}
+                    onChange={handleEditCostCenterChange}
+                    options={costCenterSelectOptions}
+                    allowEmpty={false}
+                    placeholder="Digite para buscar centro de custo..."
+                    searchPlaceholder="Pesquisar centro de custo..."
+                    emptyOptionsMessage="Nenhum centro de custo disponível."
+                    emptySearchMessage="Nenhum centro de custo encontrado para esta busca."
                   />
                   <input type="hidden" value={editFormData.costCenterId} readOnly />
                 </div>
@@ -2333,7 +2153,7 @@ function SolicitarMateriaisPage() {
                     type="text"
                     value={editFormData.obra}
                     onChange={(e) => setEditFormData({ ...editFormData, obra: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm"
+                    className={FORM_FIELD_INPUT_CLS}
                     placeholder="Identificação da obra (opcional)"
                   />
                 </div>
@@ -2346,7 +2166,7 @@ function SolicitarMateriaisPage() {
                     value={editFormData.description}
                     onChange={(e) => setEditFormData({ ...editFormData, description: e.target.value })}
                     rows={3}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm"
+                    className={FORM_FIELD_INPUT_CLS}
                   />
                 </div>
 
@@ -2354,16 +2174,14 @@ function SolicitarMateriaisPage() {
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                     Prioridade
                   </label>
-                  <select
+                  <SingleSelectSearchDropdown
                     value={editFormData.priority}
-                    onChange={(e) => setEditFormData({ ...editFormData, priority: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm"
-                  >
-                    <option value="LOW">Baixa</option>
-                    <option value="MEDIUM">Média</option>
-                    <option value="HIGH">Alta</option>
-                    <option value="URGENT">Urgente</option>
-                  </select>
+                    onChange={(priority) => setEditFormData({ ...editFormData, priority })}
+                    options={RM_PRIORITY_OPTIONS}
+                    allowEmpty={false}
+                    placeholder="Selecionar prioridade..."
+                    searchPlaceholder="Pesquisar prioridade..."
+                  />
                 </div>
 
                 <div>
@@ -2374,7 +2192,7 @@ function SolicitarMateriaisPage() {
                     type="text"
                     value={editFormData.demandSheet}
                     onChange={(e) => setEditFormData({ ...editFormData, demandSheet: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm"
+                    className={FORM_FIELD_INPUT_CLS}
                     placeholder="Número ou referência da FD (opcional)"
                   />
                 </div>

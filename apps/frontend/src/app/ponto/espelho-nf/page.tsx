@@ -27,6 +27,8 @@ import { Modal } from '@/components/ui/Modal';
 import api from '@/lib/api';
 import { getListTableRowClassName, ListRowNavigableLabel, rowActionMenuButtonClass } from '@/components/ui/listTableUi';
 import toast from 'react-hot-toast';
+import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import {
   buildEspelhoDetailRows,
   computeEspelhoBasesCalculoInssIss,
@@ -302,6 +304,27 @@ type TaxCode = {
   federalRatesByContext?: FederalTaxRatesByContext | null;
   federalTaxContextEnabled?: FederalTaxContextEnabled | null;
 };
+
+const ESPELHO_ISSQN_OPTIONS = labeledToSelectOptions([
+  { value: '07.02 - Obra', label: '07.02 - Obra' },
+  { value: '07.05 - Manutenção', label: '07.05 - Manutenção' },
+]);
+
+const ESPELHO_SAVED_MONTH_FILTER_OPTIONS = labeledToSelectOptions([
+  { value: '', label: 'Todos' },
+  { value: '1', label: 'Janeiro' },
+  { value: '2', label: 'Fevereiro' },
+  { value: '3', label: 'Março' },
+  { value: '4', label: 'Abril' },
+  { value: '5', label: 'Maio' },
+  { value: '6', label: 'Junho' },
+  { value: '7', label: 'Julho' },
+  { value: '8', label: 'Agosto' },
+  { value: '9', label: 'Setembro' },
+  { value: '10', label: 'Outubro' },
+  { value: '11', label: 'Novembro' },
+  { value: '12', label: 'Dezembro' },
+]);
 
 const INITIAL_DRAFT: MirrorDraft = {
   measurementRef: '',
@@ -816,6 +839,41 @@ export default function EspelhoNfPage() {
         })
       ),
     [serviceTakers]
+  );
+
+  const espelhoSavedCostCenterFilterOptions = useMemo(
+    () => [
+      { value: '', label: 'Todos', searchText: 'Todos' },
+      ...costCentersForEspelho
+        .filter((cc): cc is typeof cc & { id: string } => Boolean(cc.id))
+        .map((cc) => {
+          const label = [cc.code, cc.name].filter(Boolean).join(' — ') || cc.name || '—';
+          return { value: cc.id, label, searchText: label };
+        }),
+    ],
+    [costCentersForEspelho]
+  );
+
+  const espelhoSavedTakerFilterOptions = useMemo(
+    () => [
+      { value: '', label: 'Todos', searchText: 'Todos' },
+      ...sortedEspelhoTakers.map((t) => {
+        const label = t.corporateName || t.name;
+        return { value: t.id, label, searchText: label };
+      }),
+    ],
+    [sortedEspelhoTakers]
+  );
+
+  const espelhoSavedYearFilterOptions = useMemo(
+    () => [
+      { value: '', label: 'Todos', searchText: 'Todos' },
+      ...espelhoSavedYearOptions.map((yr) => ({
+        value: String(yr),
+        label: String(yr),
+      })),
+    ],
+    [espelhoSavedYearOptions]
   );
 
   const filteredPrestadorPickerList = useMemo(() => {
@@ -2298,16 +2356,13 @@ export default function EspelhoNfPage() {
                       >
                         Lista de Serviços - ISSQN
                       </label>
-                      <select
-                        id="espelho-draft-issqn"
+                      <StringSingleSelectDropdown
                         value={draft.serviceIssqn}
-                        onChange={(e) => setDraft((prev) => ({ ...prev, serviceIssqn: e.target.value }))}
-                        className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 focus:outline-none focus:ring-0"
-                      >
-                        <option value="">Selecione...</option>
-                        <option value="07.02 - Obra">07.02 - Obra</option>
-                        <option value="07.05 - Manutenção">07.05 - Manutenção</option>
-                      </select>
+                        onChange={(serviceIssqn) => setDraft((prev) => ({ ...prev, serviceIssqn }))}
+                        options={ESPELHO_ISSQN_OPTIONS}
+                        placeholder="Selecione..."
+                        emptyOptionLabel="Selecione..."
+                      />
                     </div>
                   </div>
                   </>
@@ -3216,72 +3271,35 @@ export default function EspelhoNfPage() {
                           <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                             Centro de custo
                           </label>
-                          <select
+                          <StringSingleSelectDropdown
                             value={espelhoSavedFilterCostCenter}
-                            onChange={(e) => setEspelhoSavedFilterCostCenter(e.target.value)}
+                            onChange={setEspelhoSavedFilterCostCenter}
+                            options={espelhoSavedCostCenterFilterOptions}
                             disabled={loadingCostCenters}
-                            className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                          >
-                            <option value="">Todos</option>
-                            {costCentersForEspelho
-                              .filter((cc): cc is typeof cc & { id: string } => Boolean(cc.id))
-                              .map((cc) => (
-                                <option key={cc.id} value={cc.id}>
-                                  {[cc.code, cc.name].filter(Boolean).join(' — ') || cc.name || '—'}
-                                </option>
-                              ))}
-                          </select>
+                            allowEmpty={false}
+                          />
                         </div>
                         <div>
                           <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                             Tomador
                           </label>
-                          <select
+                          <StringSingleSelectDropdown
                             value={espelhoSavedFilterTaker}
-                            onChange={(e) => setEspelhoSavedFilterTaker(e.target.value)}
-                            className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                          >
-                            <option value="">Todos</option>
-                            {[...serviceTakers]
-                              .sort((a, b) =>
-                                (a.corporateName || a.name).localeCompare(b.corporateName || b.name, 'pt-BR')
-                              )
-                              .map((t) => (
-                                <option key={t.id} value={t.id}>
-                                  {t.corporateName || t.name}
-                                </option>
-                              ))}
-                          </select>
+                            onChange={setEspelhoSavedFilterTaker}
+                            options={espelhoSavedTakerFilterOptions}
+                            allowEmpty={false}
+                          />
                         </div>
                         <div>
                           <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                             Mês
                           </label>
-                          <select
+                          <StringSingleSelectDropdown
                             value={espelhoSavedFilterMonth}
-                            onChange={(e) => setEspelhoSavedFilterMonth(e.target.value)}
-                            className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                          >
-                            <option value="">Todos</option>
-                            {[
-                              [1, 'Janeiro'],
-                              [2, 'Fevereiro'],
-                              [3, 'Março'],
-                              [4, 'Abril'],
-                              [5, 'Maio'],
-                              [6, 'Junho'],
-                              [7, 'Julho'],
-                              [8, 'Agosto'],
-                              [9, 'Setembro'],
-                              [10, 'Outubro'],
-                              [11, 'Novembro'],
-                              [12, 'Dezembro']
-                            ].map(([num, label]) => (
-                              <option key={num} value={String(num)}>
-                                {label}
-                              </option>
-                            ))}
-                          </select>
+                            onChange={setEspelhoSavedFilterMonth}
+                            options={ESPELHO_SAVED_MONTH_FILTER_OPTIONS}
+                            allowEmpty={false}
+                          />
                         </div>
                         <div>
                           <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -3290,7 +3308,7 @@ export default function EspelhoNfPage() {
                           <select
                             value={espelhoSavedFilterYear}
                             onChange={(e) => setEspelhoSavedFilterYear(e.target.value)}
-                            className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                            className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
                           >
                             <option value="">Todos</option>
                             {espelhoSavedYearOptions.map((yr) => (

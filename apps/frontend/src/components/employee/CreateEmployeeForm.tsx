@@ -1,9 +1,18 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { UserPlus, X, Save, AlertCircle, CheckCircle, Eye, EyeOff, ChevronRight, ChevronLeft, User, Briefcase, DollarSign, CreditCard, Clock, Loader2 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
+import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import {
+  EMPLOYEE_CATEGORIA_FINANCEIRA_OPTIONS,
+  EMPLOYEE_MODALITY_OPTIONS,
+  EMPLOYEE_POLO_OPTIONS,
+  PERCENT_0_100_STEP5_OPTIONS,
+  selectTriggerErrorCls,
+  stringsToSelectOptions,
+} from '@/lib/selectOptionBuilders';
 import { TOMADORES_LIST } from '@/constants/tomadores';
 import { CARGOS_AVAILABLE } from '@/constants/cargos';
 import { useCostCenters } from '@/hooks/useCostCenters';
@@ -224,6 +233,15 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
   // Estado para controlar a etapa atual do formulário
   const [currentStep, setCurrentStep] = useState(1);
 
+  const companyOptions = useMemo(() => stringsToSelectOptions(companies), [companies]);
+  const sectorOptions = useMemo(() => stringsToSelectOptions(sectors), [sectors]);
+  const positionOptions = useMemo(() => stringsToSelectOptions(positions), [positions]);
+  const costCenterOptions = useMemo(() => stringsToSelectOptions(costCenters), [costCenters]);
+  const tomadorOptions = useMemo(() => stringsToSelectOptions(TOMADORES_LIST), []);
+  const bankOptions = useMemo(() => stringsToSelectOptions(banks), [banks]);
+  const accountTypeOptions = useMemo(() => stringsToSelectOptions(accountTypes), [accountTypes]);
+  const pixKeyTypeOptions = useMemo(() => stringsToSelectOptions(pixKeyTypes), [pixKeyTypes]);
+
   // Etapas do formulário
   const steps = [
     { id: 1, title: 'Dados Pessoais', icon: User },
@@ -233,102 +251,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
     { id: 5, title: 'Horário de Trabalho', icon: Clock }
   ];
 
-  const [tomadorSearch, setTomadorSearch] = useState('');
-  const [showTomadorDropdown, setShowTomadorDropdown] = useState(false);
-
-  // Estados para busca de outros campos
-  const [costCenterSearch, setCostCenterSearch] = useState('');
-  const [showCostCenterDropdown, setShowCostCenterDropdown] = useState(false);
-
-  const [positionSearch, setPositionSearch] = useState('');
-  const [showPositionDropdown, setShowPositionDropdown] = useState(false);
-
-  const [sectorSearch, setSectorSearch] = useState('');
-  const [showSectorDropdown, setShowSectorDropdown] = useState(false);
-
-  // Estados para busca de campos restantes
-  const [companySearch, setCompanySearch] = useState('');
-  const [showCompanyDropdown, setShowCompanyDropdown] = useState(false);
-
-  const [bankSearch, setBankSearch] = useState('');
-  const [showBankDropdown, setShowBankDropdown] = useState(false);
-
   const queryClient = useQueryClient();
-
-  // Filtrar tomadores baseado na busca
-  const filteredTomadores = TOMADORES_LIST.filter(tomador =>
-    tomador.toLowerCase().includes(tomadorSearch.toLowerCase())
-  );
-
-  // Filtrar centros de custo baseado na busca
-  const filteredCostCenters = costCenters.filter(costCenter =>
-    costCenter.toLowerCase().includes(costCenterSearch.toLowerCase())
-  );
-
-  // Filtrar cargos baseado na busca
-  const filteredPositions = positions.filter(position =>
-    position.toLowerCase().includes(positionSearch.toLowerCase())
-  );
-
-  // Filtrar setores baseado na busca
-  const filteredSectors = sectors.filter(sector =>
-    sector.toLowerCase().includes(sectorSearch.toLowerCase())
-  );
-
-  // Filtrar empresas baseado na busca
-  const filteredCompanies = companies.filter(company =>
-    company.toLowerCase().includes(companySearch.toLowerCase())
-  );
-
-  // Filtrar bancos baseado na busca
-  const filteredBanks = banks.filter(bank =>
-    bank.toLowerCase().includes(bankSearch.toLowerCase())
-  );
-
-
-  // Função para selecionar tomador
-  const selectTomador = (tomador: string) => {
-    setFormData(prev => ({ ...prev, client: tomador }));
-    setTomadorSearch(tomador);
-    setShowTomadorDropdown(false);
-  };
-
-  // Função para selecionar centro de custo
-  const selectCostCenter = (costCenter: string) => {
-    setFormData(prev => ({ ...prev, costCenter }));
-    setCostCenterSearch(costCenter);
-    setShowCostCenterDropdown(false);
-  };
-
-  // Função para selecionar cargo
-  const selectPosition = (position: string) => {
-    setFormData(prev => ({ ...prev, position }));
-    setPositionSearch(position);
-    setShowPositionDropdown(false);
-  };
-
-  // Função para selecionar setor
-  const selectSector = (sector: string) => {
-    setFormData(prev => ({ ...prev, sector }));
-    setSectorSearch(sector);
-    setShowSectorDropdown(false);
-  };
-
-  // Função para selecionar empresa
-  const selectCompany = (company: string) => {
-    setFormData(prev => ({ ...prev, company }));
-    setCompanySearch(company);
-    setShowCompanyDropdown(false);
-  };
-
-  // Função para selecionar banco
-  const selectBank = (bank: string) => {
-    setFormData(prev => ({ ...prev, bank }));
-    setBankSearch(bank);
-    setShowBankDropdown(false);
-  };
-
-  // Função para validar CPF
   const isValidCPF = (cpf: string): boolean => {
     if (cpf.length !== 11) return false;
 
@@ -589,7 +512,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
       // Validação dos Dados Bancários
       if (!formData.bank.trim()) {
         newErrors.bank = 'Banco é obrigatório';
-      } else if (bankSearch.trim() && !banks.includes(bankSearch)) {
+      } else if (!banks.includes(formData.bank)) {
         newErrors.bank = 'Selecione um banco válido da lista';
       }
       
@@ -685,17 +608,16 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
 
     // Matrícula é gerada automaticamente, não precisa validar
 
-    // Validação do setor - verifica se está vazio ou se o texto digitado não corresponde a nenhum setor
     if (!formData.sector.trim()) {
       newErrors.sector = 'Setor é obrigatório';
-    } else if (sectorSearch.trim() && !sectors.includes(sectorSearch)) {
+    } else if (!sectors.includes(formData.sector)) {
       newErrors.sector = 'Selecione um setor válido da lista';
     }
 
     // Validação do cargo - verifica se está vazio ou se o texto digitado não corresponde a nenhum cargo
     if (!formData.position.trim()) {
       newErrors.position = 'Cargo é obrigatório';
-    } else if (positionSearch.trim() && !positions.includes(positionSearch)) {
+    } else if (!positions.includes(formData.position)) {
       newErrors.position = 'Selecione um cargo válido da lista';
     }
 
@@ -758,31 +680,30 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
       }
     }
 
-    // Validação do centro de custo - verifica se está vazio ou se o texto digitado não corresponde a nenhum centro
     if (!formData.costCenter.trim()) {
       newErrors.costCenter = 'Centro de custo é obrigatório';
-    } else if (costCenterSearch.trim() && !costCentersList.includes(costCenterSearch)) {
+    } else if (!costCentersList.includes(formData.costCenter)) {
       newErrors.costCenter = 'Selecione um centro de custo válido da lista';
     }
 
     // Validação do tomador - verifica se está vazio ou se o texto digitado não corresponde a nenhum tomador
     if (!formData.client.trim()) {
       newErrors.client = 'Tomador é obrigatório';
-    } else if (tomadorSearch.trim() && !TOMADORES_LIST.includes(tomadorSearch)) {
+    } else if (!TOMADORES_LIST.includes(formData.client)) {
       newErrors.client = 'Selecione um tomador válido da lista';
     }
 
     // Validação da empresa - verifica se está vazio ou se o texto digitado não corresponde a nenhuma empresa
     if (!formData.company.trim()) {
       newErrors.company = 'Empresa é obrigatória';
-    } else if (companySearch.trim() && !companies.includes(companySearch)) {
+    } else if (!companies.includes(formData.company)) {
       newErrors.company = 'Selecione uma empresa válida da lista';
     }
 
     // Validação do banco - verifica se está vazio ou se o texto digitado não corresponde a nenhum banco
     if (!formData.bank.trim()) {
       newErrors.bank = 'Banco é obrigatório';
-    } else if (bankSearch.trim() && !banks.includes(bankSearch)) {
+    } else if (!banks.includes(formData.bank)) {
       newErrors.bank = 'Selecione um banco válido da lista';
     }
 
@@ -1127,7 +1048,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                             ? 'bg-blue-600 dark:bg-blue-500 border-blue-600 dark:border-blue-500 text-white shadow-sm'
                             : isCompleted
                             ? 'bg-green-500 dark:bg-green-600 border-green-500 dark:border-green-600 text-white'
-                            : 'bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-400 dark:text-gray-500'
+                            : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-400 dark:text-gray-500'
                         }`}
                       >
                         {isCompleted ? (
@@ -1179,7 +1100,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                   type="text"
                   value={formData.name}
                   onChange={(e) => handleInputChange('name', e.target.value)}
-                  className={`w-full px-3 py-2.5 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
+                  className={`w-full px-3 py-2.5 bg-white dark:bg-gray-800 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
                     errors.name ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'
                   }`}
                   placeholder="Nome completo do funcionário"
@@ -1198,10 +1119,10 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                     onChange={(e) => handleEmailChange(e.target.value)}
                     className={`w-full px-3 py-2.5 border rounded-md focus:outline-none focus:ring-2 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
                       errors.email 
-                        ? 'border-red-500 dark:border-red-400 bg-white dark:bg-gray-700 focus:ring-red-500' 
+                        ? 'border-red-500 dark:border-red-400 bg-white dark:bg-gray-800 focus:ring-red-500' 
                         : !isCheckingEmail && formData.email && isValidEmail(formData.email.trim()) && !errors.email
                         ? 'border-green-500 dark:border-green-400 bg-green-50 dark:bg-green-900/20 focus:ring-green-500'
-                        : 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 focus:ring-blue-500'
+                        : 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 focus:ring-blue-500'
                     }`}
                     placeholder="email@empresa.com"
                   />
@@ -1232,10 +1153,10 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                     onChange={(e) => handleCPFChange(e.target.value)}
                     className={`w-full px-3 py-2.5 border rounded-md focus:outline-none focus:ring-2 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
                       errors.cpf 
-                        ? 'border-red-500 dark:border-red-400 bg-white dark:bg-gray-700 focus:ring-red-500' 
+                        ? 'border-red-500 dark:border-red-400 bg-white dark:bg-gray-800 focus:ring-red-500' 
                         : !isCheckingCpf && formData.cpf.replace(/\D/g, '').length === 11 && isValidCPF(formData.cpf.replace(/\D/g, '')) && !errors.cpf
                         ? 'border-green-500 dark:border-green-400 bg-green-50 dark:bg-green-900/20 focus:ring-green-500'
-                        : 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 focus:ring-blue-500'
+                        : 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 focus:ring-blue-500'
                     }`}
                     placeholder="000.000.000-00"
                     maxLength={14}
@@ -1288,7 +1209,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                   }}
                   placeholder="dd/mm/aaaa"
                   maxLength={10}
-                  className={`w-full px-3 py-2.5 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
+                  className={`w-full px-3 py-2.5 bg-white dark:bg-gray-800 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
                     errors.birthDate ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'
                   }`}
                 />
@@ -1304,7 +1225,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                     type={showPassword ? 'text' : 'password'}
                     value={formData.password}
                     onChange={(e) => handleInputChange('password', e.target.value)}
-                    className={`w-full px-3 py-2.5 pr-10 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
+                    className={`w-full px-3 py-2.5 pr-10 bg-white dark:bg-gray-800 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
                       errors.password ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'
                     }`}
                     placeholder="Mínimo 6 caracteres"
@@ -1338,7 +1259,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                         setErrors(prev => ({ ...prev, confirmPassword: '' }));
                       }
                     }}
-                    className={`w-full px-3 py-2.5 pr-10 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
+                    className={`w-full px-3 py-2.5 pr-10 bg-white dark:bg-gray-800 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
                       errors.confirmPassword ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'
                     }`}
                     placeholder="Confirme a senha"
@@ -1376,47 +1297,14 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                   Empresa *
                   </label>
 
-                {/* Campo de busca com dropdown */}
-                <div className="relative">
-                  <input
-                    type="text"
-                    value={companySearch}
-                    onChange={(e) => {
-                      setCompanySearch(e.target.value);
-                      setShowCompanyDropdown(true);
-                      if (e.target.value === '') {
-                        setFormData(prev => ({ ...prev, company: '' }));
-                      }
-                    }}
-                    onFocus={() => setShowCompanyDropdown(true)}
-                    onBlur={() => setTimeout(() => setShowCompanyDropdown(false), 200)}
-                    placeholder="Digite para buscar a empresa..."
-                    className={`w-full px-3 py-2.5 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
-                      errors.company ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'
-                    }`}
-                  />
-                  
-                  {/* Dropdown com resultados */}
-                  {showCompanyDropdown && (
-                    <div className="absolute z-10 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md shadow-lg max-h-60 overflow-y-auto">
-                      {filteredCompanies.length > 0 ? (
-                        filteredCompanies.map((company) => (
-                          <div
-                            key={company}
-                            onClick={() => selectCompany(company)}
-                            className="px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer text-sm text-gray-900 dark:text-gray-100"
-                          >
-                            {company}
-                          </div>
-                        ))
-                      ) : (
-                        <div className="px-3 py-2 text-gray-500 dark:text-gray-400 text-sm">
-                          Nenhuma empresa encontrada
-                        </div>
-                      )}
-                </div>
-                  )}
-              </div>
+                <StringSingleSelectDropdown
+                  value={formData.company}
+                  onChange={(company) => handleInputChange('company', company)}
+                  options={companyOptions}
+                  placeholder="Digite para buscar a empresa..."
+                  searchPlaceholder="Pesquisar empresa..."
+                  className={selectTriggerErrorCls(Boolean(errors.company))}
+                />
 
                 {errors.company && (
                   <p className="text-red-500 dark:text-red-400 text-xs mt-1">{errors.company}</p>
@@ -1428,17 +1316,14 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Polo *
                 </label>
-                <select
+                <StringSingleSelectDropdown
                   value={formData.polo}
-                  onChange={(e) => handleInputChange('polo', e.target.value)}
-                  className={`w-full px-3 py-2.5 pr-8 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none text-gray-900 dark:text-gray-100 ${
-                    errors.polo ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'
-                  }`}
-                >
-                  <option value="">Selecione o polo</option>
-                  <option value="BRASÍLIA">BRASÍLIA</option>
-                  <option value="GOIÁS">GOIÁS</option>
-                </select>
+                  onChange={(polo) => handleInputChange('polo', polo)}
+                  options={EMPLOYEE_POLO_OPTIONS}
+                  placeholder="Selecione o polo"
+                  searchPlaceholder="Pesquisar polo..."
+                  className={selectTriggerErrorCls(Boolean(errors.polo))}
+                />
                 {errors.polo && (
                   <p className="text-red-500 dark:text-red-400 text-xs mt-1 flex items-center">
                     <AlertCircle className="w-3 h-3 mr-1" />
@@ -1453,45 +1338,14 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                   Setor *
                 </label>
 
-                {/* Campo de busca com dropdown */}
-                <div className="relative">
-                  <input
-                    type="text"
-                    value={sectorSearch}
-                    onChange={(e) => {
-                      setSectorSearch(e.target.value);
-                      setShowSectorDropdown(true);
-                      if (e.target.value === '') {
-                        setFormData(prev => ({ ...prev, sector: '' }));
-                      }
-                    }}
-                    onFocus={() => setShowSectorDropdown(true)}
-                    onBlur={() => setTimeout(() => setShowSectorDropdown(false), 200)}
-                    placeholder="Digite para buscar o setor..."
-                    className="w-full px-3 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
-                  />
-
-                  {/* Dropdown com resultados */}
-                  {showSectorDropdown && (
-                    <div className="absolute z-10 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md shadow-lg max-h-60 overflow-y-auto">
-                      {filteredSectors.length > 0 ? (
-                        filteredSectors.map((sector) => (
-                          <div
-                            key={sector}
-                            onClick={() => selectSector(sector)}
-                            className="px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer text-sm text-gray-900 dark:text-gray-100"
-                          >
-                            {sector}
-                          </div>
-                        ))
-                      ) : (
-                        <div className="px-3 py-2 text-gray-500 dark:text-gray-400 text-sm">
-                          Nenhum setor encontrado
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
+                <StringSingleSelectDropdown
+                  value={formData.sector}
+                  onChange={(sector) => handleInputChange('sector', sector)}
+                  options={sectorOptions}
+                  placeholder="Digite para buscar o setor..."
+                  searchPlaceholder="Pesquisar setor..."
+                  className={selectTriggerErrorCls(Boolean(errors.sector))}
+                />
 
                 {errors.sector && (
                   <p className="text-red-500 dark:text-red-400 text-xs mt-1">{errors.sector}</p>
@@ -1503,45 +1357,14 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                   Cargo *
                 </label>
 
-                {/* Campo de busca com dropdown */}
-                <div className="relative">
-                  <input
-                    type="text"
-                    value={positionSearch}
-                    onChange={(e) => {
-                      setPositionSearch(e.target.value);
-                      setShowPositionDropdown(true);
-                      if (e.target.value === '') {
-                        setFormData(prev => ({ ...prev, position: '' }));
-                      }
-                    }}
-                    onFocus={() => setShowPositionDropdown(true)}
-                    onBlur={() => setTimeout(() => setShowPositionDropdown(false), 200)}
-                    placeholder="Digite para buscar o cargo..."
-                    className="w-full px-3 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
-                  />
-
-                  {/* Dropdown com resultados */}
-                  {showPositionDropdown && (
-                    <div className="absolute z-10 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md shadow-lg max-h-60 overflow-y-auto">
-                      {filteredPositions.length > 0 ? (
-                        filteredPositions.map((position) => (
-                          <div
-                            key={position}
-                            onClick={() => selectPosition(position)}
-                            className="px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer text-sm text-gray-900 dark:text-gray-100"
-                          >
-                            {position}
-                          </div>
-                        ))
-                      ) : (
-                        <div className="px-3 py-2 text-gray-500 dark:text-gray-400 text-sm">
-                          Nenhum cargo encontrado
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
+                <StringSingleSelectDropdown
+                  value={formData.position}
+                  onChange={(position) => handleInputChange('position', position)}
+                  options={positionOptions}
+                  placeholder="Digite para buscar o cargo..."
+                  searchPlaceholder="Pesquisar cargo..."
+                  className={selectTriggerErrorCls(Boolean(errors.position))}
+                />
 
                 {errors.position && (
                   <p className="text-red-500 dark:text-red-400 text-xs mt-1">{errors.position}</p>
@@ -1554,45 +1377,14 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                   Centro de Custo *
                 </label>
 
-                {/* Campo de busca com dropdown */}
-                <div className="relative">
-                  <input
-                    type="text"
-                    value={costCenterSearch}
-                    onChange={(e) => {
-                      setCostCenterSearch(e.target.value);
-                      setShowCostCenterDropdown(true);
-                      if (e.target.value === '') {
-                        setFormData(prev => ({ ...prev, costCenter: '' }));
-                      }
-                    }}
-                    onFocus={() => setShowCostCenterDropdown(true)}
-                    onBlur={() => setTimeout(() => setShowCostCenterDropdown(false), 200)}
-                    placeholder="Digite para buscar o centro de custo..."
-                    className="w-full px-3 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
-                  />
-
-                  {/* Dropdown com resultados */}
-                  {showCostCenterDropdown && (
-                    <div className="absolute z-10 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md shadow-lg max-h-60 overflow-y-auto">
-                      {filteredCostCenters.length > 0 ? (
-                        filteredCostCenters.map((costCenter) => (
-                          <div
-                            key={costCenter}
-                            onClick={() => selectCostCenter(costCenter)}
-                            className="px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer text-sm text-gray-900 dark:text-gray-100"
-                          >
-                            {costCenter}
-                          </div>
-                        ))
-                      ) : (
-                        <div className="px-3 py-2 text-gray-500 dark:text-gray-400 text-sm">
-                          Nenhum centro de custo encontrado
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
+                <StringSingleSelectDropdown
+                  value={formData.costCenter}
+                  onChange={(costCenter) => handleInputChange('costCenter', costCenter)}
+                  options={costCenterOptions}
+                  placeholder="Digite para buscar o centro de custo..."
+                  searchPlaceholder="Pesquisar centro de custo..."
+                  className={selectTriggerErrorCls(Boolean(errors.costCenter))}
+                />
 
                 {errors.costCenter && (
                   <p className="text-red-500 dark:text-red-400 text-xs mt-1">{errors.costCenter}</p>
@@ -1604,49 +1396,14 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                   Tomador *
                 </label>
 
-                {/* Campo de busca com dropdown */}
-                <div className="relative">
-                  <input
-                    type="text"
-                    value={tomadorSearch}
-                    onChange={(e) => {
-                      setTomadorSearch(e.target.value);
-                      setShowTomadorDropdown(true);
-                      // Se o campo estiver vazio, limpar a seleção
-                      if (e.target.value === '') {
-                        setFormData(prev => ({ ...prev, client: '' }));
-                      }
-                    }}
-                    onFocus={() => setShowTomadorDropdown(true)}
-                    onBlur={() => {
-                      // Delay para permitir clique no dropdown
-                      setTimeout(() => setShowTomadorDropdown(false), 200);
-                    }}
-                    placeholder="Digite para buscar o tomador..."
-                    className="w-full px-3 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
-                  />
-
-                  {/* Dropdown com resultados */}
-                  {showTomadorDropdown && (
-                    <div className="absolute z-10 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md shadow-lg max-h-60 overflow-y-auto">
-                      {filteredTomadores.length > 0 ? (
-                        filteredTomadores.map((tomador) => (
-                          <div
-                            key={tomador}
-                            onClick={() => selectTomador(tomador)}
-                            className="px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer text-sm text-gray-900 dark:text-gray-100"
-                          >
-                            {tomador}
-                          </div>
-                        ))
-                      ) : (
-                        <div className="px-3 py-2 text-gray-500 dark:text-gray-400 text-sm">
-                          Nenhum tomador encontrado
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
+                <StringSingleSelectDropdown
+                  value={formData.client}
+                  onChange={(client) => handleInputChange('client', client)}
+                  options={tomadorOptions}
+                  placeholder="Digite para buscar o tomador..."
+                  searchPlaceholder="Pesquisar tomador..."
+                  className={selectTriggerErrorCls(Boolean(errors.client))}
+                />
 
                 {errors.client && (
                   <p className="text-red-500 dark:text-red-400 text-xs mt-1">{errors.client}</p>
@@ -1658,18 +1415,14 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Modalidade *
                 </label>
-                <select
+                <StringSingleSelectDropdown
                   value={formData.modality}
-                  onChange={(e) => handleInputChange('modality', e.target.value)}
-                  className={`w-full px-3 py-2.5 pr-8 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none text-gray-900 dark:text-gray-100 ${
-                    errors.modality ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'
-                  }`}
-                >
-                  <option value="">Selecione a modalidade</option>
-                  <option value="CLT">CLT</option>
-                  <option value="MEI">MEI</option>
-                  <option value="ESTAGIARIO">ESTAGIÁRIO</option>
-                </select>
+                  onChange={(modality) => handleInputChange('modality', modality)}
+                  options={EMPLOYEE_MODALITY_OPTIONS}
+                  placeholder="Selecione a modalidade"
+                  searchPlaceholder="Pesquisar modalidade..."
+                  className={selectTriggerErrorCls(Boolean(errors.modality))}
+                />
                 {errors.modality && (
                   <p className="text-red-500 dark:text-red-400 text-xs mt-1 flex items-center">
                     <AlertCircle className="w-3 h-3 mr-1" />
@@ -1682,17 +1435,14 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Categoria Financeira *
                 </label>
-                <select
+                <StringSingleSelectDropdown
                   value={formData.categoriaFinanceira}
-                  onChange={(e) => handleInputChange('categoriaFinanceira', e.target.value)}
-                  className={`w-full px-3 py-2.5 pr-8 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none text-gray-900 dark:text-gray-100 ${
-                    errors.categoriaFinanceira ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'
-                  }`}
-                >
-                  <option value="">Selecione a categoria</option>
-                  <option value="CUSTO">CUSTO</option>
-                  <option value="DESPESA">DESPESA</option>
-                </select>
+                  onChange={(categoriaFinanceira) => handleInputChange('categoriaFinanceira', categoriaFinanceira)}
+                  options={EMPLOYEE_CATEGORIA_FINANCEIRA_OPTIONS}
+                  placeholder="Selecione a categoria"
+                  searchPlaceholder="Pesquisar categoria..."
+                  className={selectTriggerErrorCls(Boolean(errors.categoriaFinanceira))}
+                />
                 {errors.categoriaFinanceira && (
                   <p className="text-red-500 dark:text-red-400 text-xs mt-1 flex items-center">
                     <AlertCircle className="w-3 h-3 mr-1" />
@@ -1710,7 +1460,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                   type="date"
                   value={formData.hireDate}
                   onChange={(e) => handleInputChange('hireDate', e.target.value)}
-                  className={`w-full px-3 py-2.5 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
+                  className={`w-full px-3 py-2.5 bg-white dark:bg-gray-800 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
                     errors.hireDate ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'
                   }`}
                 />
@@ -1725,7 +1475,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                   id="isRemote"
                   checked={formData.isRemote}
                   onChange={(e) => handleInputChange('isRemote', e.target.checked)}
-                  className="h-4 w-4 text-blue-600 dark:text-blue-500 focus:ring-blue-500 border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700"
+                  className="h-4 w-4 text-blue-600 dark:text-blue-500 focus:ring-blue-500 border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800"
                 />
                 <label htmlFor="isRemote" className="text-sm font-medium text-gray-700 dark:text-gray-300">
                   Trabalho Remoto
@@ -1752,7 +1502,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                     value={formData.salary}
                     onChange={(e) => setFormData(prev => ({ ...prev, salary: maskCurrencyInput(e.target.value) }))}
                     inputMode="numeric"
-                    className={`w-full px-3 py-2.5 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
+                    className={`w-full px-3 py-2.5 bg-white dark:bg-gray-800 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
                       errors.salary ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'
                     }`}
                     placeholder="R$ 0,00"
@@ -1774,7 +1524,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                     value={formData.familySalary}
                     onChange={(e) => setFormData(prev => ({ ...prev, familySalary: maskCurrencyInput(e.target.value) }))}
                     inputMode="numeric"
-                    className={`w-full px-3 py-2.5 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
+                    className={`w-full px-3 py-2.5 bg-white dark:bg-gray-800 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
                       errors.familySalary ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'
                     }`}
                     placeholder="R$ 0,00"
@@ -1796,7 +1546,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                     value={formData.dailyFoodVoucher}
                     onChange={(e) => setFormData(prev => ({ ...prev, dailyFoodVoucher: maskCurrencyInput(e.target.value) }))}
                     inputMode="numeric"
-                    className={`w-full px-3 py-2.5 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
+                    className={`w-full px-3 py-2.5 bg-white dark:bg-gray-800 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
                       errors.dailyFoodVoucher ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'
                     }`}
                     placeholder="R$ 0,00"
@@ -1818,7 +1568,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                     value={formData.dailyTransportVoucher}
                     onChange={(e) => setFormData(prev => ({ ...prev, dailyTransportVoucher: maskCurrencyInput(e.target.value) }))}
                     inputMode="numeric"
-                    className={`w-full px-3 py-2.5 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
+                    className={`w-full px-3 py-2.5 bg-white dark:bg-gray-800 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
                       errors.dailyTransportVoucher ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'
                     }`}
                     placeholder="R$ 0,00"
@@ -1840,7 +1590,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                   value={formData.fixedAdjustments}
                   onChange={(e) => setFormData(prev => ({ ...prev, fixedAdjustments: maskCurrencyInput(e.target.value) }))}
                   inputMode="numeric"
-                  className={`w-full px-3 py-2.5 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
+                  className={`w-full px-3 py-2.5 bg-white dark:bg-gray-800 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
                     errors.fixedAdjustments ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'
                   }`}
                   placeholder="R$ 0,00"
@@ -1857,36 +1607,14 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                     Periculosidade
                   </label>
-                  <select
+                  <StringSingleSelectDropdown
                     value={formData.dangerPay}
-                    onChange={(e) => handleInputChange('dangerPay', e.target.value)}
-                    className={`w-full px-3 py-2.5 pr-8 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none text-gray-900 dark:text-gray-100 ${
-                      errors.dangerPay ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'
-                    }`}
-                  >
-                    <option value="">Selecione a porcentagem</option>
-                    <option value="0">0%</option>
-                    <option value="5">5%</option>
-                    <option value="10">10%</option>
-                    <option value="15">15%</option>
-                    <option value="20">20%</option>
-                    <option value="25">25%</option>
-                    <option value="30">30%</option>
-                    <option value="35">35%</option>
-                    <option value="40">40%</option>
-                    <option value="45">45%</option>
-                    <option value="50">50%</option>
-                    <option value="55">55%</option>
-                    <option value="60">60%</option>
-                    <option value="65">65%</option>
-                    <option value="70">70%</option>
-                    <option value="75">75%</option>
-                    <option value="80">80%</option>
-                    <option value="85">85%</option>
-                    <option value="90">90%</option>
-                    <option value="95">95%</option>
-                    <option value="100">100%</option>
-                  </select>
+                    onChange={(dangerPay) => handleInputChange('dangerPay', dangerPay)}
+                    options={PERCENT_0_100_STEP5_OPTIONS}
+                    placeholder="Selecione a porcentagem"
+                    searchPlaceholder="Pesquisar porcentagem..."
+                    className={selectTriggerErrorCls(Boolean(errors.dangerPay))}
+                  />
                   {errors.dangerPay && (
                     <p className="text-red-500 dark:text-red-400 text-xs mt-1 flex items-center">
                       <AlertCircle className="w-3 h-3 mr-1" />
@@ -1899,36 +1627,14 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                     Insalubridade
                   </label>
-                  <select
+                  <StringSingleSelectDropdown
                     value={formData.unhealthyPay}
-                    onChange={(e) => handleInputChange('unhealthyPay', e.target.value)}
-                    className={`w-full px-3 py-2.5 pr-8 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none text-gray-900 dark:text-gray-100 ${
-                      errors.unhealthyPay ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'
-                    }`}
-                  >
-                    <option value="">Selecione a porcentagem</option>
-                    <option value="0">0%</option>
-                    <option value="5">5%</option>
-                    <option value="10">10%</option>
-                    <option value="15">15%</option>
-                    <option value="20">20%</option>
-                    <option value="25">25%</option>
-                    <option value="30">30%</option>
-                    <option value="35">35%</option>
-                    <option value="40">40%</option>
-                    <option value="45">45%</option>
-                    <option value="50">50%</option>
-                    <option value="55">55%</option>
-                    <option value="60">60%</option>
-                    <option value="65">65%</option>
-                    <option value="70">70%</option>
-                    <option value="75">75%</option>
-                    <option value="80">80%</option>
-                    <option value="85">85%</option>
-                    <option value="90">90%</option>
-                    <option value="95">95%</option>
-                    <option value="100">100%</option>
-                  </select>
+                    onChange={(unhealthyPay) => handleInputChange('unhealthyPay', unhealthyPay)}
+                    options={PERCENT_0_100_STEP5_OPTIONS}
+                    placeholder="Selecione a porcentagem"
+                    searchPlaceholder="Pesquisar porcentagem..."
+                    className={selectTriggerErrorCls(Boolean(errors.unhealthyPay))}
+                  />
                   {errors.unhealthyPay && (
                     <p className="text-red-500 dark:text-red-400 text-xs mt-1 flex items-center">
                       <AlertCircle className="w-3 h-3 mr-1" />
@@ -1953,45 +1659,14 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                   Banco *
                 </label>
 
-                {/* Campo de busca com dropdown */}
-                <div className="relative">
-                  <input
-                    type="text"
-                    value={bankSearch}
-                    onChange={(e) => {
-                      setBankSearch(e.target.value);
-                      setShowBankDropdown(true);
-                      if (e.target.value === '') {
-                        setFormData(prev => ({ ...prev, bank: '' }));
-                      }
-                    }}
-                    onFocus={() => setShowBankDropdown(true)}
-                    onBlur={() => setTimeout(() => setShowBankDropdown(false), 200)}
-                    placeholder="Digite para buscar o banco..."
-                    className="w-full px-3 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
-                  />
-
-                  {/* Dropdown com resultados */}
-                  {showBankDropdown && (
-                    <div className="absolute z-10 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md shadow-lg max-h-60 overflow-y-auto">
-                      {filteredBanks.length > 0 ? (
-                        filteredBanks.map((bank) => (
-                          <div
-                            key={bank}
-                            onClick={() => selectBank(bank)}
-                            className="px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer text-sm text-gray-900 dark:text-gray-100"
-                          >
-                            {bank}
-                          </div>
-                        ))
-                      ) : (
-                        <div className="px-3 py-2 text-gray-500 dark:text-gray-400 text-sm">
-                          Nenhum banco encontrado
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
+                <StringSingleSelectDropdown
+                  value={formData.bank}
+                  onChange={(bank) => handleInputChange('bank', bank)}
+                  options={bankOptions}
+                  placeholder="Digite para buscar o banco..."
+                  searchPlaceholder="Pesquisar banco..."
+                  className={selectTriggerErrorCls(Boolean(errors.bank))}
+                />
 
                 {errors.bank && (
                   <p className="text-red-500 dark:text-red-400 text-xs mt-1">{errors.bank}</p>
@@ -2002,20 +1677,14 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Tipo de Conta *
                 </label>
-                <select
+                <StringSingleSelectDropdown
                   value={formData.accountType}
-                  onChange={(e) => handleInputChange('accountType', e.target.value)}
-                  className={`w-full px-3 py-2.5 pr-8 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none text-gray-900 dark:text-gray-100 ${
-                    errors.accountType ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'
-                  }`}
-                >
-                  <option value="">Selecione o tipo</option>
-                  {accountTypes.map((type) => (
-                    <option key={type} value={type}>
-                      {type}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(accountType) => handleInputChange('accountType', accountType)}
+                  options={accountTypeOptions}
+                  placeholder="Selecione o tipo"
+                  searchPlaceholder="Pesquisar tipo..."
+                  className={selectTriggerErrorCls(Boolean(errors.accountType))}
+                />
                 {errors.accountType && <p className="text-red-500 dark:text-red-400 text-xs mt-1">{errors.accountType}</p>}
               </div>
 
@@ -2028,7 +1697,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                     type="text"
                     value={formData.agency}
                     onChange={(e) => handleInputChange('agency', e.target.value)}
-                    className={`w-full px-3 py-2.5 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
+                    className={`w-full px-3 py-2.5 bg-white dark:bg-gray-800 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
                       errors.agency ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'
                     }`}
                     placeholder="1234"
@@ -2052,7 +1721,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                             handleInputChange('operation', '');
                           }
                         }}
-                        className="h-4 w-4 text-blue-600 dark:text-blue-500 focus:ring-blue-500 border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700"
+                        className="h-4 w-4 text-blue-600 dark:text-blue-500 focus:ring-blue-500 border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800"
                       />
                       <label htmlFor="hasOperation" className="text-xs text-gray-500 dark:text-gray-400 cursor-pointer">
                         Tem operação?
@@ -2064,7 +1733,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                       type="text"
                       value={formData.operation}
                       onChange={(e) => handleInputChange('operation', e.target.value)}
-                      className={`w-full px-3 py-2.5 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
+                      className={`w-full px-3 py-2.5 bg-white dark:bg-gray-800 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
                         errors.operation ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'
                       }`}
                       placeholder="01"
@@ -2085,7 +1754,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                     type="text"
                     value={formData.account}
                     onChange={(e) => handleInputChange('account', e.target.value)}
-                    className={`w-full px-3 py-2.5 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
+                    className={`w-full px-3 py-2.5 bg-white dark:bg-gray-800 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
                       errors.account ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'
                     }`}
                     placeholder="12345"
@@ -2101,7 +1770,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                     type="text"
                     value={formData.digit}
                     onChange={(e) => handleInputChange('digit', e.target.value)}
-                    className={`w-full px-3 py-2.5 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
+                    className={`w-full px-3 py-2.5 bg-white dark:bg-gray-800 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
                       errors.digit ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'
                     }`}
                     placeholder="6"
@@ -2123,20 +1792,14 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Tipo de Chave *
                 </label>
-                <select
+                <StringSingleSelectDropdown
                   value={formData.pixKeyType}
-                  onChange={(e) => handleInputChange('pixKeyType', e.target.value)}
-                  className={`w-full px-3 py-2.5 pr-8 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none text-gray-900 dark:text-gray-100 ${
-                    errors.pixKeyType ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'
-                  }`}
-                >
-                  <option value="">Selecione o tipo</option>
-                  {pixKeyTypes.map((type) => (
-                    <option key={type} value={type}>
-                      {type}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(pixKeyType) => handleInputChange('pixKeyType', pixKeyType)}
+                  options={pixKeyTypeOptions}
+                  placeholder="Selecione o tipo"
+                  searchPlaceholder="Pesquisar tipo..."
+                  className={selectTriggerErrorCls(Boolean(errors.pixKeyType))}
+                />
                 {errors.pixKeyType && <p className="text-red-500 dark:text-red-400 text-xs mt-1">{errors.pixKeyType}</p>}
               </div>
 
@@ -2148,7 +1811,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                   type="text"
                   value={formData.pixKey}
                   onChange={(e) => handleInputChange('pixKey', e.target.value)}
-                  className={`w-full px-3 py-2.5 bg-white dark:bg-gray-700 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
+                  className={`w-full px-3 py-2.5 bg-white dark:bg-gray-800 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${
                     errors.pixKey ? 'border-red-500 dark:border-red-400' : 'border-gray-300 dark:border-gray-600'
                   }`}
                   placeholder="Digite a chave PIX"
@@ -2176,7 +1839,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                   type="time"
                   value={formData.workStartTime}
                   onChange={(e) => handleInputChange('workStartTime', e.target.value)}
-                  className="w-full px-3 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100"
+                  className="w-full px-3 py-2.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100"
                 />
               </div>
 
@@ -2188,7 +1851,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                   type="time"
                   value={formData.workEndTime}
                   onChange={(e) => handleInputChange('workEndTime', e.target.value)}
-                  className="w-full px-3 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100"
+                  className="w-full px-3 py-2.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100"
                 />
               </div>
 
@@ -2200,7 +1863,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                   type="time"
                   value={formData.lunchStartTime}
                   onChange={(e) => handleInputChange('lunchStartTime', e.target.value)}
-                  className="w-full px-3 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100"
+                  className="w-full px-3 py-2.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100"
                 />
               </div>
 
@@ -2212,7 +1875,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                   type="time"
                   value={formData.lunchEndTime}
                   onChange={(e) => handleInputChange('lunchEndTime', e.target.value)}
-                  className="w-full px-3 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100"
+                  className="w-full px-3 py-2.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100"
                 />
               </div>
             </div>
@@ -2225,7 +1888,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                 type="number"
                 value={formData.toleranceMinutes}
                 onChange={(e) => handleInputChange('toleranceMinutes', e.target.value)}
-                className="w-full px-3 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 text-gray-900 dark:text-gray-100"
+                className="w-full px-3 py-2.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 text-gray-900 dark:text-gray-100"
                 min="0"
                 max="60"
               />
@@ -2277,7 +1940,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
             <button
                   type="button"
                   onClick={prevStep}
-                  className="px-4 py-2 text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-500 transition-colors flex items-center space-x-2"
+                  className="px-4 py-2 text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-500 transition-colors flex items-center space-x-2"
                 >
                   <ChevronLeft className="w-4 h-4" />
                   <span>Anterior</span>

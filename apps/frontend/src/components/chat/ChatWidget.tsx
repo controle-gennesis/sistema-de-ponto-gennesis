@@ -28,6 +28,8 @@ import {
   ownChatAttachmentLinkClass,
   ownChatBubbleClass,
 } from '@/components/conversas/chatBubbleTheme';
+import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 
 const DEPARTMENTS = [
   { value: 'Projetos', label: 'Projetos' },
@@ -39,6 +41,8 @@ const DEPARTMENTS = [
   { value: 'Administrativo', label: 'Administrativo' },
   { value: 'Financeiro', label: 'Financeiro' },
 ];
+
+const departmentSelectOptions = labeledToSelectOptions(DEPARTMENTS);
 
 /** `false` = esconde só o botão flutuante na tela; modal e lógica continuam no código. Para voltar a exibir, use `true`. */
 const SHOW_CHAT_FLOAT_BUTTON = false;
@@ -913,18 +917,13 @@ export function ChatWidget() {
                         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                           Setor <span className="text-red-500">*</span>
                         </label>
-                        <select
+                        <StringSingleSelectDropdown
                           value={selectedDepartment}
-                          onChange={(e) => setSelectedDepartment(e.target.value)}
-                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-red-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
-                        >
-                          <option value="">Selecione um setor...</option>
-                          {DEPARTMENTS.map(dept => (
-                            <option key={dept.value} value={dept.value}>
-                              {dept.label}
-                            </option>
-                          ))}
-                        </select>
+                          onChange={setSelectedDepartment}
+                          options={departmentSelectOptions}
+                          placeholder="Selecione um setor..."
+                          className="w-full"
+                        />
                       </div>
 
                       <div>
@@ -935,7 +934,7 @@ export function ChatWidget() {
                           value={initialMessage}
                           onChange={(e) => setInitialMessage(e.target.value)}
                           rows={6}
-                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-red-500 resize-none text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-400 bg-white dark:bg-gray-700"
+                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-red-500 resize-none text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-400 bg-white dark:bg-gray-800"
                           placeholder="Digite o assunto da conversa..."
                         />
                       </div>
@@ -1240,7 +1239,7 @@ export function ChatWidget() {
                             }}
                             placeholder="Digite sua mensagem..."
                             rows={1}
-                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500 resize-none max-h-24 overflow-y-auto text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-400"
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500 resize-none max-h-24 overflow-y-auto text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-400"
                             style={{ minHeight: '40px', maxHeight: '96px', lineHeight: '1.4' }}
                           />
                         </div>

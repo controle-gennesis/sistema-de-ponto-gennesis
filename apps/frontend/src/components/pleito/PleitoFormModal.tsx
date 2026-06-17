@@ -1,10 +1,12 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '@/lib/api';
+import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import {
   MESES,
   STATUS_ORCAMENTO_OPCOES,
@@ -23,6 +25,24 @@ import {
   executionStatusPillClass,
   pleitoStatusSelectBase
 } from '@/lib/pleitoStatusStyles';
+
+const CREATION_MONTH_SELECT_OPTIONS = labeledToSelectOptions([
+  { value: '', label: 'Selecione' },
+  ...MESES.map((m) => ({ value: m.value, label: m.label })),
+]);
+const BUDGET_STATUS_SELECT_OPTIONS = labeledToSelectOptions([
+  { value: '', label: 'Selecione' },
+  ...STATUS_ORCAMENTO_OPCOES.map((op) => ({ value: op, label: op })),
+  { value: OUTRO_STATUS, label: 'Outro (cadastrar novo)' },
+]);
+const EXECUTION_STATUS_SELECT_OPTIONS = labeledToSelectOptions([
+  { value: '', label: 'Selecione' },
+  ...STATUS_EXECUCAO_OPCOES.map((op) => ({ value: op, label: op })),
+]);
+const RVI_RVF_SELECT_OPTIONS = labeledToSelectOptions([
+  { value: '', label: 'Selecione' },
+  ...RVI_RVF_OPCOES.map((op) => ({ value: op, label: op })),
+]);
 
 function Input({
   label,
@@ -129,16 +149,12 @@ export function PleitoFormModal({ contractId, contractDisplay, pleitoToEdit, onC
             <div className="flex gap-2 items-end">
               <div className="flex-1">
                 <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Mês de criação</label>
-                <select
+                <StringSingleSelectDropdown
                   value={form.creationMonth || ''}
-                  onChange={(e) => setForm({ ...form, creationMonth: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm"
-                >
-                  <option value="">Selecione</option>
-                  {MESES.map((m) => (
-                    <option key={m.value} value={m.value}>{m.label}</option>
-                  ))}
-                </select>
+                  onChange={(v) => setForm({ ...form, creationMonth: v })}
+                  options={CREATION_MONTH_SELECT_OPTIONS}
+                  allowEmpty={false}
+                />
               </div>
               <div className="w-24">
                 <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Ano</label>
@@ -157,25 +173,19 @@ export function PleitoFormModal({ contractId, contractDisplay, pleitoToEdit, onC
             <Input label="Data término" name="endDate" form={form} setForm={setForm} type="date" />
             <div>
               <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Status orçamento</label>
-              <select
+              <StringSingleSelectDropdown
                 value={form.budgetStatus || ''}
-                onChange={(e) => setForm({ ...form, budgetStatus: e.target.value })}
+                onChange={(v) => setForm({ ...form, budgetStatus: v })}
+                options={BUDGET_STATUS_SELECT_OPTIONS}
+                allowEmpty={false}
                 className={
                   form.budgetStatus && form.budgetStatus !== ''
-                    ? `${pleitoStatusSelectBase} ${
-                        form.budgetStatus === OUTRO_STATUS
-                          ? budgetStatusPillClass(form.budgetStatusCustom || null)
-                          : budgetStatusPillClass(form.budgetStatus)
-                      }`
-                    : 'w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm'
+                    ? form.budgetStatus === OUTRO_STATUS
+                      ? budgetStatusPillClass(form.budgetStatusCustom || null)
+                      : budgetStatusPillClass(form.budgetStatus)
+                    : ''
                 }
-              >
-                <option value="">Selecione</option>
-                {STATUS_ORCAMENTO_OPCOES.map((op) => (
-                  <option key={op} value={op}>{op}</option>
-                ))}
-                <option value={OUTRO_STATUS}>Outro (cadastrar novo)</option>
-              </select>
+              />
               {form.budgetStatus === OUTRO_STATUS && (
                 <input
                   type="text"
@@ -215,20 +225,17 @@ export function PleitoFormModal({ contractId, contractDisplay, pleitoToEdit, onC
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Status execução</label>
-              <select
+              <StringSingleSelectDropdown
                 value={form.executionStatus || ''}
-                onChange={(e) => setForm({ ...form, executionStatus: e.target.value })}
+                onChange={(v) => setForm({ ...form, executionStatus: v })}
+                options={EXECUTION_STATUS_SELECT_OPTIONS}
+                allowEmpty={false}
                 className={
                   form.executionStatus && form.executionStatus !== ''
-                    ? `${pleitoStatusSelectBase} ${executionStatusPillClass(form.executionStatus)}`
-                    : 'w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm'
+                    ? executionStatusPillClass(form.executionStatus)
+                    : ''
                 }
-              >
-                <option value="">Selecione</option>
-                {STATUS_EXECUCAO_OPCOES.map((op) => (
-                  <option key={op} value={op}>{op}</option>
-                ))}
-              </select>
+              />
             </div>
             <p className="text-xs text-gray-500 dark:text-gray-400 col-span-full">
               Acumulado faturado, Status faturamento (%) e Pendente faturamento são calculados automaticamente conforme o faturamento cadastrado para esta OS.
@@ -256,29 +263,21 @@ export function PleitoFormModal({ contractId, contractDisplay, pleitoToEdit, onC
             ))}
             <div>
               <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">RVI</label>
-              <select
+              <StringSingleSelectDropdown
                 value={form.pv || ''}
-                onChange={(e) => setForm({ ...form, pv: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm"
-              >
-                <option value="">Selecione</option>
-                {RVI_RVF_OPCOES.map((op) => (
-                  <option key={op} value={op}>{op}</option>
-                ))}
-              </select>
+                onChange={(v) => setForm({ ...form, pv: v })}
+                options={RVI_RVF_SELECT_OPTIONS}
+                allowEmpty={false}
+              />
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">RVF</label>
-              <select
+              <StringSingleSelectDropdown
                 value={form.ipi || ''}
-                onChange={(e) => setForm({ ...form, ipi: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm"
-              >
-                <option value="">Selecione</option>
-                {RVI_RVF_OPCOES.map((op) => (
-                  <option key={op} value={op}>{op}</option>
-                ))}
-              </select>
+                onChange={(v) => setForm({ ...form, ipi: v })}
+                options={RVI_RVF_SELECT_OPTIONS}
+                allowEmpty={false}
+              />
             </div>
             <Input label="Feedback Relatorios" name="reportsBilling" form={form} setForm={setForm} />
             <Input label="Engenheiro" name="engineer" form={form} setForm={setForm} />

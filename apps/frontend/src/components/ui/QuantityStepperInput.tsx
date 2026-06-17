@@ -45,7 +45,7 @@ export function QuantityStepperInput({
   const shellClass =
     size === 'sm'
       ? 'flex overflow-hidden rounded border border-gray-300 bg-white dark:border-gray-600 dark:bg-gray-800'
-      : 'flex overflow-hidden rounded-lg border border-gray-300 bg-white dark:border-gray-600 dark:bg-gray-700';
+      : 'flex overflow-hidden rounded-lg border border-gray-300 bg-white dark:border-gray-600 dark:bg-gray-800';
   const stepBtnClass =
     'flex flex-1 items-center justify-center text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-600 dark:hover:text-gray-200';
   const unitClass =
@@ -61,7 +61,7 @@ export function QuantityStepperInput({
   const canDecrease = allowEmpty ? normalized > 0 : normalized > min;
 
   return (
-    <div className={shellClass}>
+    <div className={shellClass} data-form-field-shell="true">
       <input
         type="number"
         required={required}

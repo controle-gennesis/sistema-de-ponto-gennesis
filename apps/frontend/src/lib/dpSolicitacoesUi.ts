@@ -1,6 +1,5 @@
-/** Sem anel de foco nos formulários/listas de Solicitações Gerais. */
-export const DP_SOLICITACOES_NO_FOCUS_CLS =
-  'focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0';
+/** @deprecated Use FORM_FIELD_NO_FOCUS_CLS de `@/lib/formFieldUi`. */
+export { FORM_FIELD_NO_FOCUS_CLS as DP_SOLICITACOES_NO_FOCUS_CLS } from '@/lib/formFieldUi';
 
 /** Data ISO → DD/MM/AAAA (ex.: 24/10/2002). */
 export function formatIsoDateToBr(iso?: string | null): string {

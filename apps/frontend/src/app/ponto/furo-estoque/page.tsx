@@ -11,6 +11,25 @@ import { Loading } from '@/components/ui/Loading';
 import api from '@/lib/api';
 import { getListTableRowClassName, ListRowNavigableLabel, rowActionMenuButtonClass } from '@/components/ui/listTableUi';
 import toast from 'react-hot-toast';
+import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
+
+const FURO_STATUS_FILTER_OPTIONS = labeledToSelectOptions([
+  { value: 'ABERTO', label: 'Aberto' },
+  { value: 'RESOLVIDO', label: 'Resolvido' },
+  { value: 'ALL', label: 'Todos' },
+]);
+
+const FURO_MONTH_FILTER_OPTIONS = labeledToSelectOptions([
+  { value: '', label: 'Todos' },
+  ...Array.from({ length: 12 }, (_, i) => {
+    const month = i + 1;
+    return {
+      value: String(month),
+      label: new Date(0, i).toLocaleString('pt-BR', { month: 'long' }),
+    };
+  }),
+]);
 
 const CATEGORIES = [
   'ACABAMENTO',
@@ -166,6 +185,35 @@ export default function FuroEstoquePage() {
     : Array.isArray(costCentersData)
       ? costCentersData
       : [];
+
+  const costCenterFilterOptions = useMemo(
+    () => [
+      { value: '', label: 'Todos', searchText: 'Todos' },
+      ...costCenters.map((cc: { id: string; name: string }) => ({
+        value: cc.id,
+        label: cc.name,
+        searchText: cc.name,
+      })),
+    ],
+    [costCenters]
+  );
+
+  const categoryFilterOptions = useMemo(
+    () => [
+      { value: '', label: 'Todas', searchText: 'Todas' },
+      ...CATEGORIES.map((cat) => ({ value: cat, label: cat, searchText: cat })),
+    ],
+    []
+  );
+
+  const yearFilterOptions = useMemo(
+    () =>
+      Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - i).map((year) => ({
+        value: String(year),
+        label: String(year),
+      })),
+    []
+  );
   const rows: ShortfallRow[] = shortfallsRes?.data || [];
 
   const totalRows = rows.length;
@@ -447,82 +495,56 @@ export default function FuroEstoquePage() {
                         <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                           Centro de Custo
                         </label>
-                        <select
+                        <StringSingleSelectDropdown
                           value={filtersCostCenterId}
-                          onChange={(e) => setFiltersCostCenterId(e.target.value)}
-                          className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                        >
-                          <option value="">Todos</option>
-                          {costCenters.map((cc: { id: string; code: string; name: string }) => (
-                            <option key={cc.id} value={cc.id}>
-                              {cc.name}
-                            </option>
-                          ))}
-                        </select>
+                          onChange={setFiltersCostCenterId}
+                          options={costCenterFilterOptions}
+                          allowEmpty={false}
+                        />
                       </div>
                       <div>
                         <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                           Categoria
                         </label>
-                        <select
+                        <StringSingleSelectDropdown
                           value={filtersCategory}
-                          onChange={(e) => setFiltersCategory(e.target.value)}
-                          className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                        >
-                          <option value="">Todas</option>
-                          {CATEGORIES.map((cat) => (
-                            <option key={cat} value={cat}>
-                              {cat}
-                            </option>
-                          ))}
-                        </select>
+                          onChange={setFiltersCategory}
+                          options={categoryFilterOptions}
+                          allowEmpty={false}
+                        />
                       </div>
                       <div>
                         <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                           Mês
                         </label>
-                        <select
+                        <StringSingleSelectDropdown
                           value={filtersMonth}
-                          onChange={(e) => setFiltersMonth(e.target.value)}
-                          className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                        >
-                          <option value="">Todos</option>
-                          {Array.from({ length: 12 }, (_, i) => (
-                            <option key={i + 1} value={i + 1}>
-                              {new Date(0, i).toLocaleString('pt-BR', { month: 'long' })}
-                            </option>
-                          ))}
-                        </select>
+                          onChange={setFiltersMonth}
+                          options={FURO_MONTH_FILTER_OPTIONS}
+                          allowEmpty={false}
+                        />
                       </div>
                       <div>
                         <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                           Ano
                         </label>
-                        <select
+                        <StringSingleSelectDropdown
                           value={filtersYear}
-                          onChange={(e) => setFiltersYear(e.target.value)}
-                          className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                        >
-                          {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - i).map((year) => (
-                            <option key={year} value={year}>
-                              {year}
-                            </option>
-                          ))}
-                        </select>
+                          onChange={setFiltersYear}
+                          options={yearFilterOptions}
+                          allowEmpty={false}
+                        />
                       </div>
                       <div className="sm:col-span-2">
                         <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                           Situação
                         </label>
-                        <select
+                        <StringSingleSelectDropdown
                           value={statusFilter}
-                          onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
-                          className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                        >
-                          <option value="ABERTO">Aberto</option>
-                          <option value="RESOLVIDO">Resolvido</option>
-                          <option value="ALL">Todos</option>
-                        </select>
+                          onChange={(v) => setStatusFilter(v as typeof statusFilter)}
+                          options={FURO_STATUS_FILTER_OPTIONS}
+                          allowEmpty={false}
+                        />
                       </div>
                     </div>
                   </div>

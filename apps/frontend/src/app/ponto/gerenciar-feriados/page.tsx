@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { MainLayout } from '@/components/layout/MainLayout';
@@ -11,6 +11,8 @@ import { Loading } from '@/components/ui/Loading';
 import { Modal } from '@/components/ui/Modal';
 import api from '@/lib/api';
 import { listTableRowClasses } from '@/components/ui/listTableUi';
+import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import { toast } from 'react-hot-toast';
 import { 
   Calendar, 
@@ -47,6 +49,28 @@ interface Holiday {
   updatedAt: string;
 }
 
+const HOLIDAY_TYPE_OPTIONS = labeledToSelectOptions([
+  { value: 'NATIONAL', label: 'Nacional' },
+  { value: 'STATE', label: 'Estadual' },
+  { value: 'MUNICIPAL', label: 'Municipal' },
+  { value: 'OPTIONAL', label: 'Ponto Facultativo' },
+  { value: 'COMPANY', label: 'Empresa' },
+]);
+
+const HOLIDAY_TYPE_FILTER_OPTIONS = labeledToSelectOptions([
+  { value: '', label: 'Todos os tipos' },
+  { value: 'NATIONAL', label: 'Nacional' },
+  { value: 'STATE', label: 'Estadual' },
+  { value: 'MUNICIPAL', label: 'Municipal' },
+  { value: 'OPTIONAL', label: 'Ponto Facultativo' },
+  { value: 'COMPANY', label: 'Empresa' },
+]);
+
+const HOLIDAY_STATE_OPTIONS = labeledToSelectOptions([
+  { value: 'DF', label: 'Distrito Federal (DF) - Brasília' },
+  { value: 'GO', label: 'Goiás (GO)' },
+]);
+
 export default function GerenciarFeriadosPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -54,6 +78,27 @@ export default function GerenciarFeriadosPage() {
   const [selectedMonth, setSelectedMonth] = useState<number | undefined>(undefined);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState<string>('');
+  const yearFilterOptions = useMemo(
+    () =>
+      Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - 1 + i).map((year) => ({
+        value: String(year),
+        label: String(year),
+      })),
+    []
+  );
+  const monthFilterOptions = useMemo(
+    () => [
+      { value: '', label: 'Todos os meses', searchText: 'Todos os meses' },
+      ...Array.from({ length: 12 }, (_, i) => {
+        const month = i + 1;
+        return {
+          value: String(month),
+          label: new Date(2000, month - 1).toLocaleDateString('pt-BR', { month: 'long' }),
+        };
+      }),
+    ],
+    []
+  );
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [editingHoliday, setEditingHoliday] = useState<Holiday | null>(null);
@@ -373,7 +418,7 @@ export default function GerenciarFeriadosPage() {
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
                       placeholder="Digite o nome do feriado..."
-                      className="w-full pl-10 pr-4 py-3 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
+                      className="w-full pl-10 pr-4 py-3 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
                     />
                   </div>
                 </div>
@@ -395,17 +440,12 @@ export default function GerenciarFeriadosPage() {
                           </label>
                           <div className="relative">
                             <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4" />
-                            <select
-                              value={selectedYear}
-                              onChange={(e) => setSelectedYear(parseInt(e.target.value))}
-                              className="w-full pl-10 pr-4 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none text-gray-900 dark:text-gray-100"
-                            >
-                              {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - 1 + i).map((year) => (
-                                <option key={year} value={year}>
-                                  {year}
-                                </option>
-                              ))}
-                            </select>
+                            <StringSingleSelectDropdown
+                              value={String(selectedYear)}
+                              onChange={(v) => setSelectedYear(parseInt(v))}
+                              options={yearFilterOptions}
+                              allowEmpty={false}
+                            />
                           </div>
                         </div>
 
@@ -415,18 +455,12 @@ export default function GerenciarFeriadosPage() {
                           </label>
                           <div className="relative">
                             <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4" />
-                            <select
-                              value={selectedMonth || ''}
-                              onChange={(e) => setSelectedMonth(e.target.value ? parseInt(e.target.value) : undefined)}
-                              className="w-full pl-10 pr-4 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none text-gray-900 dark:text-gray-100"
-                            >
-                              <option value="">Todos os meses</option>
-                              {Array.from({ length: 12 }, (_, i) => i + 1).map((month) => (
-                                <option key={month} value={month}>
-                                  {new Date(2000, month - 1).toLocaleDateString('pt-BR', { month: 'long' })}
-                                </option>
-                              ))}
-                            </select>
+                            <StringSingleSelectDropdown
+                              value={selectedMonth != null ? String(selectedMonth) : ''}
+                              onChange={(v) => setSelectedMonth(v ? parseInt(v) : undefined)}
+                              options={monthFilterOptions}
+                              allowEmpty={false}
+                            />
                           </div>
                         </div>
 
@@ -436,18 +470,12 @@ export default function GerenciarFeriadosPage() {
                           </label>
                           <div className="relative">
                             <Flag className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4" />
-                            <select
+                            <StringSingleSelectDropdown
                               value={filterType}
-                              onChange={(e) => setFilterType(e.target.value)}
-                              className="w-full pl-10 pr-4 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none text-gray-900 dark:text-gray-100"
-                            >
-                              <option value="">Todos os tipos</option>
-                              <option value="NATIONAL">Nacional</option>
-                              <option value="STATE">Estadual</option>
-                              <option value="MUNICIPAL">Municipal</option>
-                              <option value="OPTIONAL">Ponto Facultativo</option>
-                              <option value="COMPANY">Empresa</option>
-                            </select>
+                              onChange={setFilterType}
+                              options={HOLIDAY_TYPE_FILTER_OPTIONS}
+                              allowEmpty={false}
+                            />
                           </div>
                         </div>
                       </div>
@@ -477,7 +505,7 @@ export default function GerenciarFeriadosPage() {
                   <button
                     onClick={() => generateRecurringMutation.mutate(selectedYear)}
                     disabled={generateRecurringMutation.isPending}
-                    className="flex items-center space-x-2 px-3 sm:px-4 py-2 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors text-sm sm:text-base"
+                    className="flex items-center space-x-2 px-3 sm:px-4 py-2 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors text-sm sm:text-base"
                     title="Gerar feriados recorrentes"
                   >
                     <RefreshCw className={`w-4 h-4 ${generateRecurringMutation.isPending ? 'animate-spin' : ''}`} />
@@ -486,7 +514,7 @@ export default function GerenciarFeriadosPage() {
                 )}
                 <button
                   onClick={() => setIsImportModalOpen(true)}
-                  className="flex items-center space-x-2 px-3 sm:px-4 py-2 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors text-sm sm:text-base"
+                  className="flex items-center space-x-2 px-3 sm:px-4 py-2 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors text-sm sm:text-base"
                   title="Importar feriados nacionais"
                 >
                   <Upload className="w-4 h-4" />
@@ -665,27 +693,19 @@ export default function GerenciarFeriadosPage() {
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                 Tipo *
               </label>
-              <select
+              <StringSingleSelectDropdown
                 value={formData.type}
-                onChange={(e) => {
-                  const newType = e.target.value as Holiday['type'];
-                  // Limpar estado se não for feriado estadual
+                onChange={(newType) => {
                   const currentState: string = formData.state || '';
-                  setFormData({ 
-                    ...formData, 
-                    type: newType,
-                    state: newType === 'STATE' ? currentState : undefined
+                  setFormData({
+                    ...formData,
+                    type: newType as Holiday['type'],
+                    state: newType === 'STATE' ? currentState : undefined,
                   });
                 }}
-                className="w-full"
-                required
-              >
-                <option value="NATIONAL">Nacional</option>
-                <option value="STATE">Estadual</option>
-                <option value="MUNICIPAL">Municipal</option>
-                <option value="OPTIONAL">Ponto Facultativo</option>
-                <option value="COMPANY">Empresa</option>
-              </select>
+                options={HOLIDAY_TYPE_OPTIONS}
+                allowEmpty={false}
+              />
             </div>
 
             {formData.type === 'STATE' && (
@@ -693,19 +713,15 @@ export default function GerenciarFeriadosPage() {
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Estado *
                 </label>
-                <select
+                <StringSingleSelectDropdown
                   value={formData.state || ''}
-                  onChange={(e) => {
-                    const newState: string = e.target.value;
+                  onChange={(newState) => {
                     setFormData({ ...formData, state: newState || undefined });
                   }}
-                  className="w-full"
-                  required
-                >
-                  <option value="">Selecione um estado</option>
-                  <option value="DF">Distrito Federal (DF) - Brasília</option>
-                  <option value="GO">Goiás (GO)</option>
-                </select>
+                  options={HOLIDAY_STATE_OPTIONS}
+                  placeholder="Selecione um estado"
+                  emptyOptionLabel="Selecione um estado"
+                />
               </div>
             )}
 

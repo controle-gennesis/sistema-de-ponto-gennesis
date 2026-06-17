@@ -17,6 +17,7 @@ import {
   inputGradeCls,
   selectGradeHeaderMemorialCls
 } from './orcamentoGradeCellClasses';
+import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 
 /** Painel de medições (C, L, H, N, %, A, V) — aba Memorial de cálculo (layout em tabela, padrão das demais abas). */
 type Props = {
@@ -278,19 +279,14 @@ export function OrcamentoMedicaoPainel({
           <span className="sr-only">
             Coluna {col === 'pct' ? '%' : col}, rótulo {valorAtual}
           </span>
-          <select
+          <StringSingleSelectDropdown
             className={selectGradeHeaderMemorialCls}
             value={valorAtual}
             disabled={!updateRotuloColunaMedicao}
-            onChange={e => updateRotuloColunaMedicao?.(col, e.target.value)}
-            aria-label={`Lista suspensa: rótulo da coluna de ${ariaDim}`}
-          >
-            {lista.map(o => (
-              <option key={o} value={o}>
-                {o}
-              </option>
-            ))}
-          </select>
+            onChange={(value) => updateRotuloColunaMedicao?.(col, value)}
+            options={lista}
+            allowEmpty={false}
+          />
         </label>
       </Tag>
     );

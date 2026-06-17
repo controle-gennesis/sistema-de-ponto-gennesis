@@ -2,7 +2,17 @@
 
 import React, { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronDown, ChevronUp, Check, Search, X } from 'lucide-react';
+import { Check, Search, X } from 'lucide-react';
+import {
+  SINGLE_SELECT_LIST_MAX,
+  SINGLE_SELECT_PANEL_CLS,
+  SINGLE_SELECT_SEARCH_INPUT_CLS,
+  SINGLE_SELECT_TRIGGER_BASE_CLS,
+  SingleSelectTriggerChevron,
+  singleSelectOptionClassName,
+  singleSelectTriggerBorderClass,
+  singleSelectTriggerTextClass,
+} from '@/components/ui/singleSelectDropdownUi';
 import type { MultiSelectSearchOption } from './MultiSelectSearchDropdown';
 
 export type SingleSelectSearchDropdownProps = {
@@ -31,7 +41,7 @@ type FloatingPos = {
   openUp: boolean;
 };
 
-const LIST_MAX = 220;
+const LIST_MAX = SINGLE_SELECT_LIST_MAX;
 
 function getPortalRoot(): HTMLElement | null {
   if (typeof document === 'undefined') return null;
@@ -198,30 +208,9 @@ export function SingleSelectSearchDropdown({
       ? Math.max(80, floatingPos.maxHeight - 72)
       : LIST_MAX;
 
-  const neutralFocusCls =
-    'focus:outline-none focus:ring-0 focus:border-gray-300 dark:focus:border-gray-600';
+  const optionClassName = singleSelectOptionClassName;
 
-  const searchFocusCls = hideFocus
-    ? neutralFocusCls
-    : noFocusRing
-      ? 'focus:ring-0 focus:border-red-500 dark:focus:border-red-500'
-      : 'focus:outline-none focus:ring-2 focus:ring-red-500/70 focus:border-transparent dark:focus:ring-red-400/70';
-
-  const triggerFocusCls = hideFocus
-    ? neutralFocusCls
-    : noFocusRing
-      ? 'focus:ring-0 focus:border-red-500 dark:focus:border-red-500'
-      : 'focus:outline-none focus:ring-2 focus:ring-red-500/70 focus:border-transparent dark:focus:ring-red-400/70';
-
-  const optionClassName = (active: boolean) =>
-    `flex w-full min-h-[2.75rem] items-center justify-between gap-2 rounded-md px-3 py-2.5 text-left text-sm transition-colors ${
-      active
-        ? 'bg-gray-100 font-medium text-gray-900 dark:bg-gray-700/90 dark:text-white'
-        : 'text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-700/50'
-    }`;
-
-  const panelClassName =
-    'flex flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-2xl dark:border-gray-600 dark:bg-gray-800';
+  const panelClassName = SINGLE_SELECT_PANEL_CLS;
 
   const menuContent = (
     <div
@@ -244,7 +233,7 @@ export function SingleSelectSearchDropdown({
             placeholder={searchPlaceholder}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className={`block h-9 w-full rounded-md border border-gray-200 bg-gray-50 py-2 pl-9 text-sm text-gray-900 placeholder:text-gray-400 outline-none dark:border-gray-600 dark:bg-gray-900/40 dark:text-gray-100 dark:placeholder:text-gray-500 ${searchFocusCls} ${search ? 'pr-9' : 'pr-3'}`}
+            className={`${SINGLE_SELECT_SEARCH_INPUT_CLS} ${search ? 'pr-9' : 'pr-3'}`}
           />
           {search ? (
             <button
@@ -350,16 +339,13 @@ export function SingleSelectSearchDropdown({
             return !v;
           });
         }}
-        className={`relative flex h-10 w-full items-center rounded-lg border bg-white px-3 pr-10 text-left text-sm outline-none transition-colors disabled:cursor-not-allowed disabled:opacity-60 dark:bg-gray-800 dark:text-gray-100 ${
-          open && !hideFocus
-            ? 'border-red-500 dark:border-red-400'
-            : 'border-gray-300 dark:border-gray-600'
-        } ${triggerFocusCls} ${!selectedLabel ? 'text-gray-500 dark:text-gray-400' : 'text-gray-900 dark:text-gray-100'}`}
+        className={`${SINGLE_SELECT_TRIGGER_BASE_CLS} ${singleSelectTriggerBorderClass(open, hideFocus)} ${singleSelectTriggerTextClass(Boolean(selectedLabel))}`}
+        data-form-field-trigger="true"
+        aria-expanded={open}
+        aria-haspopup="listbox"
       >
         <span className="block truncate">{triggerLabel}</span>
-        <span className="pointer-events-none absolute right-3 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center text-red-600 dark:text-red-400">
-          {open ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-        </span>
+        <SingleSelectTriggerChevron open={open} />
       </button>
 
       {inlineMenu}

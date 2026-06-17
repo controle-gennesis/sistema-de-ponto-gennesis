@@ -1,16 +1,25 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Loader2, SquareKanban } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { Modal } from '@/components/ui/Modal';
+import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import {
   createKanbanCard,
   fetchKanbanBoard,
   fetchKanbanBoards,
   type Priority,
 } from '@/lib/kanban';
+import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
+
+const PRIORITY_SELECT_OPTIONS = labeledToSelectOptions([
+  { value: 'low', label: 'Baixa' },
+  { value: 'medium', label: 'Média' },
+  { value: 'high', label: 'Alta' },
+  { value: 'critical', label: 'Crítica' },
+]);
 
 export type ChatMessageForTask = {
   id: string;
@@ -183,6 +192,25 @@ export function CreateTaskFromChatModal({
 
   const boardBlocked = board?.canWrite === false;
 
+  const boardSelectOptions = useMemo(
+    () =>
+      labeledToSelectOptions(
+        (boards ?? []).map((b) => ({
+          value: b.departmentKey,
+          label: `${b.department}${b.isOwnDepartment ? ' (seu setor)' : ''}`,
+        }))
+      ),
+    [boards]
+  );
+
+  const columnSelectOptions = useMemo(
+    () =>
+      labeledToSelectOptions(
+        (board?.columns ?? []).map((col) => ({ value: col.id, label: col.title }))
+      ),
+    [board?.columns]
+  );
+
   return (
     <Modal
       isOpen={isOpen}
@@ -206,18 +234,12 @@ export function CreateTaskFromChatModal({
             <label className="mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400">
               Quadro (setor)
             </label>
-            <select
+            <StringSingleSelectDropdown
               value={effectiveDeptKey ?? ''}
-              onChange={(e) => setDepartmentKey(e.target.value || undefined)}
-              className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
-            >
-              {boards.map((b) => (
-                <option key={b.departmentKey} value={b.departmentKey}>
-                  {b.department}
-                  {b.isOwnDepartment ? ' (seu setor)' : ''}
-                </option>
-              ))}
-            </select>
+              onChange={(v) => setDepartmentKey(v || undefined)}
+              options={boardSelectOptions}
+              allowEmpty={false}
+            />
           </div>
         )}
 
@@ -244,18 +266,13 @@ export function CreateTaskFromChatModal({
               <label className="mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400">
                 Coluna
               </label>
-              <select
+              <StringSingleSelectDropdown
                 value={columnId}
-                onChange={(e) => setColumnId(e.target.value)}
+                onChange={setColumnId}
+                options={columnSelectOptions}
                 disabled={boardBlocked}
-                className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
-              >
-                {board.columns.map((col) => (
-                  <option key={col.id} value={col.id}>
-                    {col.title}
-                  </option>
-                ))}
-              </select>
+                allowEmpty={false}
+              />
             </div>
 
             <div>
@@ -276,17 +293,13 @@ export function CreateTaskFromChatModal({
               <label className="mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400">
                 Prioridade
               </label>
-              <select
+              <StringSingleSelectDropdown
                 value={priority}
-                onChange={(e) => setPriority(e.target.value as Priority)}
+                onChange={(v) => setPriority(v as Priority)}
+                options={PRIORITY_SELECT_OPTIONS}
                 disabled={boardBlocked}
-                className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
-              >
-                <option value="low">Baixa</option>
-                <option value="medium">Média</option>
-                <option value="high">Alta</option>
-                <option value="critical">Crítica</option>
-              </select>
+                allowEmpty={false}
+              />
             </div>
 
             <div>

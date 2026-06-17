@@ -21,6 +21,13 @@ import {
   formatParcelSummary,
   normalizeParcelDueDaysClient
 } from '@/components/oc/PaymentConditionSelect';
+import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
+
+const PAYMENT_TYPE_OPTIONS = labeledToSelectOptions([
+  { value: 'AVISTA', label: 'À vista' },
+  { value: 'BOLETO', label: 'Boleto' },
+]);
 
 export default function CondicoesPagamentoPage() {
   const router = useRouter();
@@ -430,12 +437,12 @@ export default function CondicoesPagamentoPage() {
                 {!editing && (
                   <>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Tipo de pagamento</label>
-                    <select
+                    <StringSingleSelectDropdown
                       value={formPaymentType}
-                      onChange={(e) => {
-                        const t = e.target.value as 'AVISTA' | 'BOLETO';
-                        setFormPaymentType(t);
-                        if (t === 'AVISTA') {
+                      onChange={(t) => {
+                        const paymentType = t as 'AVISTA' | 'BOLETO';
+                        setFormPaymentType(paymentType);
+                        if (paymentType === 'AVISTA') {
                           setFormParcelCount(1);
                           setFormParcelDayStrs(['0']);
                         } else {
@@ -443,11 +450,10 @@ export default function CondicoesPagamentoPage() {
                           setFormParcelDayStrs(['30']);
                         }
                       }}
-                      className="w-full mb-4 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800"
-                    >
-                      <option value="AVISTA">À vista</option>
-                      <option value="BOLETO">Boleto</option>
-                    </select>
+                      options={PAYMENT_TYPE_OPTIONS}
+                      allowEmpty={false}
+                      className="w-full mb-4"
+                    />
                   </>
                 )}
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Nome</label>

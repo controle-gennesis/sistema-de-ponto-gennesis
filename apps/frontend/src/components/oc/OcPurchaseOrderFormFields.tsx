@@ -2,8 +2,9 @@
 
 import React from 'react';
 import { PaymentConditionSelect } from '@/components/oc/PaymentConditionSelect';
-import { SearchableEntityAutocomplete } from '@/components/ui/SearchableEntityAutocomplete';
+import { AsyncSearchSelectDropdown } from '@/components/ui/AsyncSearchSelectDropdown';
 import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
+import { searchOcSuppliers } from '@/components/oc/searchOcSuppliers';
 import type { MultiSelectSearchOption } from '@/components/ui/MultiSelectSearchDropdown';
 import {
   formatCurrencyInputBrFromNumber,
@@ -25,16 +26,16 @@ const OC_PAYMENT_TYPE_LABELS: Record<string, string> = {
 };
 
 export const ocFieldCls =
-  'w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 disabled:cursor-not-allowed disabled:opacity-50';
+  'w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-0 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 disabled:cursor-not-allowed disabled:opacity-50';
 
 const ocFieldCompactCls =
-  'w-full min-w-0 rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 disabled:cursor-not-allowed disabled:opacity-50';
+  'w-full min-w-0 rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-0 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 disabled:cursor-not-allowed disabled:opacity-50';
 
 const ocFieldReadonlyCls =
   'w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-2.5 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-900/50 dark:text-gray-100';
 
 const ocPaymentSegmentCls = (active: boolean) =>
-  `w-full rounded-lg border px-3 py-2.5 text-center text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-red-500 ${
+  `w-full rounded-lg border px-3 py-2.5 text-center text-sm font-medium transition-colors focus:outline-none focus:ring-0 ${
     active
       ? 'border-red-600 bg-red-50 text-red-800 dark:border-red-500 dark:bg-red-950/40 dark:text-red-200'
       : 'border-gray-300 bg-white text-gray-700 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200'
@@ -74,16 +75,10 @@ export type OcPurchaseOrderFormValues = {
   items: OcFormLineItem[];
 };
 
-type SupplierAutocompleteProps = {
-  supplierSearch: string;
-  supplierDropdownOpen: boolean;
-  onSupplierSearchChange: (value: string) => void;
-  onSupplierDropdownOpen: () => void;
-  onSupplierDropdownClose: () => void;
-  onSupplierSelect: (supplier: OcSupplierOption) => void;
-  suppliers: OcSupplierOption[];
-  suppliersLoading?: boolean;
-  suppliersError?: boolean;
+type SupplierFieldProps = {
+  supplierId: string;
+  supplierLabel: string;
+  onSupplierChange?: (supplier: OcSupplierOption) => void;
 };
 
 type OcPurchaseOrderFormFieldsProps = {
@@ -93,7 +88,7 @@ type OcPurchaseOrderFormFieldsProps = {
   correctionReason?: string | null;
   onChange?: (patch: Partial<OcPurchaseOrderFormValues>) => void;
   onItemChange?: (index: number, patch: Partial<OcFormLineItem>) => void;
-  supplierAutocomplete?: SupplierAutocompleteProps;
+  supplierField?: SupplierFieldProps;
   parseMoneyInput?: (value: string) => number | null;
 };
 
@@ -113,7 +108,7 @@ export function OcPurchaseOrderFormFields({
   correctionReason,
   onChange,
   onItemChange,
-  supplierAutocomplete,
+  supplierField,
   parseMoneyInput
 }: OcPurchaseOrderFormFieldsProps) {
   const isEdit = mode === 'edit';
@@ -222,31 +217,21 @@ export function OcPurchaseOrderFormFields({
         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
           Fornecedor {isEdit ? '*' : ''}
         </label>
-        {isEdit && supplierAutocomplete ? (
-          <SearchableEntityAutocomplete
-            searchValue={supplierAutocomplete.supplierSearch}
-            isOpen={supplierAutocomplete.supplierDropdownOpen}
-            onOpen={supplierAutocomplete.onSupplierDropdownOpen}
-            onClose={supplierAutocomplete.onSupplierDropdownClose}
-            onSearchChange={supplierAutocomplete.onSupplierSearchChange}
-            onSelect={supplierAutocomplete.onSupplierSelect}
-            items={supplierAutocomplete.suppliers}
-            getItemKey={(supplier) => supplier.id}
-            getItemLabel={getOcSupplierLabel}
-            loading={supplierAutocomplete.suppliersLoading}
-            loadError={supplierAutocomplete.suppliersError}
-            inputClassName={ocFieldCls}
+        {isEdit && supplierField?.onSupplierChange ? (
+          <AsyncSearchSelectDropdown
+            value={supplierField.supplierId}
+            selectedLabel={supplierField.supplierLabel}
+            onChange={supplierField.onSupplierChange}
+            searchFn={searchOcSuppliers}
+            getOptionId={(supplier) => supplier.id}
+            getOptionLabel={getOcSupplierLabel}
+            queryKeyPrefix="oc-supplier-field"
             placeholder="Digite para buscar fornecedor..."
-            emptyListMessage="Nenhum fornecedor ativo cadastrado."
-            notFoundMessage="Nenhum fornecedor encontrado para esta busca."
-            loadingMessage="Carregando fornecedores…"
-            errorMessage="Erro ao carregar fornecedores."
+            searchPlaceholder="Pesquisar fornecedor..."
           />
         ) : (
           <div className={ocFieldReadonlyCls}>
-            {supplierAutocomplete
-              ? supplierAutocomplete.supplierSearch || '—'
-              : '—'}
+            {supplierField ? supplierField.supplierLabel || '—' : '—'}
           </div>
         )}
       </div>

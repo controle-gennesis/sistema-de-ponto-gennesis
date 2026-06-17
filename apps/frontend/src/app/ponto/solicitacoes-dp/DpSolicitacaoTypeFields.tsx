@@ -28,7 +28,7 @@ export type DpFormRequestType =
 type PayrollEmp = { id: string; name: string };
 
 const fieldBox =
-  `w-full px-3 py-2.5 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 text-sm appearance-none ${DP_SOLICITACOES_NO_FOCUS_CLS}`;
+  `w-full px-3 py-2.5 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 text-sm appearance-none ${DP_SOLICITACOES_NO_FOCUS_CLS}`;
 const labelCls = 'block text-sm font-medium mb-1 text-gray-800 dark:text-gray-200';
 const taCls = `${fieldBox} min-h-[100px] resize-y`;
 const inputFieldCls = `border-gray-300 dark:border-gray-600 ${DP_SOLICITACOES_NO_FOCUS_CLS}`;
@@ -68,7 +68,7 @@ function DpFileAttachmentField({
         onChange={(e) => onFileSelect(e.target.files?.[0] ?? null)}
       />
       {fileName ? (
-        <div className="flex overflow-hidden rounded-lg border border-gray-300 bg-white dark:border-gray-600 dark:bg-gray-700">
+        <div className="flex overflow-hidden rounded-lg border border-gray-300 bg-white dark:border-gray-600 dark:bg-gray-800">
           <div className="flex min-w-0 flex-1 items-center gap-2 px-3 py-2.5">
             <Paperclip className="h-4 w-4 shrink-0 text-gray-500 dark:text-gray-400" />
             <span
@@ -97,6 +97,7 @@ function DpFileAttachmentField({
       ) : (
         <button
           type="button"
+          data-form-field-shell="true"
           onClick={() => inputRef.current?.click()}
           className="flex w-full flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-gray-300 bg-gray-50/60 px-4 py-6 text-center transition-colors hover:border-red-400 hover:bg-red-50/40 dark:border-gray-600 dark:bg-gray-800/40 dark:hover:border-red-500/50 dark:hover:bg-red-950/20"
         >

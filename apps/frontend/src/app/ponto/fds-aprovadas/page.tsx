@@ -20,10 +20,24 @@ import {
   type DemandSheetPurchaseStatus,
   type FichaDemandaApprovalRecord,
 } from '@/lib/fichaDemandaApproval';
+import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 
 const ITEMS_PER_PAGE = 20;
 
 type PurchaseStatusFilter = 'ALL' | 'NONE' | DemandSheetPurchaseStatus;
+
+const PURCHASE_STATUS_FILTER_OPTIONS = labeledToSelectOptions([
+  { value: 'ALL', label: 'Todos' },
+  { value: 'NONE', label: 'Sem status' },
+  { value: 'WAREHOUSE_DF', label: 'Almoxarifado DF' },
+  { value: 'WAREHOUSE_GO', label: 'Almoxarifado GO' },
+  { value: 'FULLY_FULFILLED_BY_STOCK', label: 'Atendida totalmente pelo estoque' },
+  { value: 'PARTIALLY_FULFILLED_BY_STOCK', label: 'Atendida parcialmente pelo estoque' },
+  { value: 'PURCHASE_REQUEST', label: 'Solicitação de compra' },
+  { value: 'SUPPLIES', label: 'Suprimentos' },
+  { value: 'FINISHED', label: 'Finalizado' },
+]);
 
 export default function FdsAprovadasPage() {
   const router = useRouter();
@@ -326,23 +340,13 @@ export default function FdsAprovadasPage() {
               <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                 Status de compras
               </label>
-              <select
+              <StringSingleSelectDropdown
                 value={purchaseStatusFilter}
-                onChange={(e) => setPurchaseStatusFilter(e.target.value as PurchaseStatusFilter)}
-                className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-              >
-                <option value="ALL">Todos</option>
-                <option value="NONE">Sem status</option>
-                <option value="WAREHOUSE_DF">Almoxarifado DF</option>
-                <option value="WAREHOUSE_GO">Almoxarifado GO</option>
-                <option value="FULLY_FULFILLED_BY_STOCK">Atendida totalmente pelo estoque</option>
-                <option value="PARTIALLY_FULFILLED_BY_STOCK">
-                  Atendida parcialmente pelo estoque
-                </option>
-                <option value="PURCHASE_REQUEST">Solicitação de compra</option>
-                <option value="SUPPLIES">Suprimentos</option>
-                <option value="FINISHED">Finalizado</option>
-              </select>
+                onChange={(value) => setPurchaseStatusFilter(value as PurchaseStatusFilter)}
+                options={PURCHASE_STATUS_FILTER_OPTIONS}
+                allowEmpty={false}
+                className="w-full"
+              />
             </div>
 
             <div className="flex items-center justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">

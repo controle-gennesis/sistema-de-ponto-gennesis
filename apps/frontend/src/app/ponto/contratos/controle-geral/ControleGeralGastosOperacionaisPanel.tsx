@@ -23,6 +23,8 @@ import { exportGastosOperacionaisPdf } from '@/lib/exportGastosOperacionaisPdf';
 import { exportControleGeralContratosPdf } from '@/lib/exportControleGeralContratosPdf';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MultiSelectSearchDropdown } from '@/components/ui/MultiSelectSearchDropdown';
+import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import {
   aggregateGastosDetailRows,
   EMPTY_GASTOS_OPERACIONAIS_FILTERS,
@@ -500,6 +502,14 @@ export function ControleGeralGastosOperacionaisPanel({
         label: locality.label
       })),
     [visibleLocalityItems]
+  );
+
+  const localityTableSelectOptions = useMemo(
+    () =>
+      !visibleLocalities?.length
+        ? labeledToSelectOptions([{ value: 'OUTROS', label: 'Outros' }])
+        : labeledToSelectOptions(localityFilterOptions),
+    [visibleLocalities, localityFilterOptions]
   );
 
   const poloFilterOptions = useMemo(
@@ -1370,23 +1380,15 @@ export function ControleGeralGastosOperacionaisPanel({
                                   {readOnlyPoloColumn ? (
                                     row.polo?.trim() || '—'
                                   ) : (
-                                    <select
-                                      aria-label={`Localidade de ${row.contract}`}
+                                    <StringSingleSelectDropdown
                                       value={getEffectiveContractLocality(row.contract, localityOverrides)}
-                                      onChange={(e) =>
-                                        handleContractLocalityChange(row.contract, e.target.value)
+                                      onChange={(value) =>
+                                        handleContractLocalityChange(row.contract, value)
                                       }
+                                      options={localityTableSelectOptions}
+                                      allowEmpty={false}
                                       className={`${localitySelectClassName} mx-auto`}
-                                    >
-                                      {!visibleLocalities?.length ? (
-                                        <option value="OUTROS">Outros</option>
-                                      ) : null}
-                                      {visibleLocalityItems.map((locality) => (
-                                        <option key={locality.key} value={locality.key}>
-                                          {locality.label}
-                                        </option>
-                                      ))}
-                                    </select>
+                                    />
                                   )}
                                 </td>
                               ) : null}

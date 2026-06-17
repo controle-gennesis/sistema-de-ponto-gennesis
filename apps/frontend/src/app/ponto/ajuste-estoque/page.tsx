@@ -23,6 +23,8 @@ import { Loading } from '@/components/ui/Loading';
 import api from '@/lib/api';
 import { getListTableRowClassName, ListRowNavigableLabel, rowActionMenuButtonClass } from '@/components/ui/listTableUi';
 import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
+import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import { ConstructionMaterialSearchDropdown } from '@/components/suprimentos/ConstructionMaterialSearchDropdown';
 import type { ConstructionMaterialListItem } from '@/lib/fetchAllConstructionMaterials';
 import toast from 'react-hot-toast';
@@ -60,7 +62,22 @@ interface StockMovement {
   createdAt: string;
 }
 
-const ADJUSTMENT_MARKER = '[AJUSTE_ESTOQUE]';
+const HISTORY_TYPE_FILTER_OPTIONS = labeledToSelectOptions([
+  { value: 'ALL', label: 'Todos' },
+  { value: 'IN', label: 'Entrada' },
+  { value: 'OUT', label: 'Saída' },
+]);
+
+const HISTORY_MONTH_FILTER_OPTIONS = labeledToSelectOptions([
+  { value: '', label: 'Todos' },
+  ...Array.from({ length: 12 }, (_, i) => {
+    const month = i + 1;
+    return {
+      value: String(month),
+      label: new Date(0, i).toLocaleString('pt-BR', { month: 'long' }),
+    };
+  }),
+]);
 const HISTORY_ITEMS_PER_PAGE = 12;
 
 const cleanAdjustmentNotes = (notes?: string | null) =>
@@ -289,6 +306,23 @@ export default function AjusteEstoquePage() {
         label: cc.name,
       })),
     [costCenters]
+  );
+
+  const costCenterFilterOptions = useMemo(
+    () => [
+      { value: '', label: 'Todos', searchText: 'Todos' },
+      ...costCenterOptions,
+    ],
+    [costCenterOptions]
+  );
+
+  const historyYearFilterOptions = useMemo(
+    () =>
+      Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - i).map((year) => ({
+        value: String(year),
+        label: String(year),
+      })),
+    []
   );
 
   const selectedUnit = selectedMaterial?.unit || '—';
@@ -591,65 +625,45 @@ export default function AjusteEstoquePage() {
                           <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                             Centro de Custo
                           </label>
-                          <select
+                          <StringSingleSelectDropdown
                             value={filtersCostCenterId}
-                            onChange={(e) => setFiltersCostCenterId(e.target.value)}
-                            className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                          >
-                            <option value="">Todos</option>
-                            {costCenters.map((cc: { id: string; name: string }) => (
-                              <option key={cc.id} value={cc.id}>
-                                {cc.name}
-                              </option>
-                            ))}
-                          </select>
+                            onChange={setFiltersCostCenterId}
+                            options={costCenterFilterOptions}
+                            allowEmpty={false}
+                          />
                         </div>
                         <div>
                           <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                             Movimento
                           </label>
-                          <select
+                          <StringSingleSelectDropdown
                             value={typeFilter}
-                            onChange={(e) => setTypeFilter(e.target.value as typeof typeFilter)}
-                            className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                          >
-                            <option value="ALL">Todos</option>
-                            <option value="IN">Entrada</option>
-                            <option value="OUT">Saída</option>
-                          </select>
+                            onChange={(v) => setTypeFilter(v as typeof typeFilter)}
+                            options={HISTORY_TYPE_FILTER_OPTIONS}
+                            allowEmpty={false}
+                          />
                         </div>
                         <div>
                           <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                             Mês
                           </label>
-                          <select
+                          <StringSingleSelectDropdown
                             value={filtersMonth}
-                            onChange={(e) => setFiltersMonth(e.target.value)}
-                            className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                          >
-                            <option value="">Todos</option>
-                            {Array.from({ length: 12 }, (_, i) => (
-                              <option key={i + 1} value={i + 1}>
-                                {new Date(0, i).toLocaleString('pt-BR', { month: 'long' })}
-                              </option>
-                            ))}
-                          </select>
+                            onChange={setFiltersMonth}
+                            options={HISTORY_MONTH_FILTER_OPTIONS}
+                            allowEmpty={false}
+                          />
                         </div>
                         <div>
                           <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                             Ano
                           </label>
-                          <select
+                          <StringSingleSelectDropdown
                             value={filtersYear}
-                            onChange={(e) => setFiltersYear(e.target.value)}
-                            className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                          >
-                            {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - i).map((year) => (
-                              <option key={year} value={year}>
-                                {year}
-                              </option>
-                            ))}
-                          </select>
+                            onChange={setFiltersYear}
+                            options={historyYearFilterOptions}
+                            allowEmpty={false}
+                          />
                         </div>
                       </div>
                     </div>

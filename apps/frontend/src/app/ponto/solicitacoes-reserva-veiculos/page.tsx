@@ -28,6 +28,8 @@ import {
   defaultReturnDatetimeLocalValue,
   type VehicleReservationStatus
 } from '@/lib/vehicleReservationLabels';
+import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import {
   getListTableRowClassName,
   ListRowNavigableLabel,
@@ -80,6 +82,17 @@ const ITEMS_PER_PAGE = 20;
 type SuppliesCardFilter = 'all' | 'pending' | 'CONCLUDED' | 'CANCELLED';
 
 type DetailStatusFilter = 'ALL' | 'SUPPLIES_QUEUE' | VehicleReservationStatus;
+
+const DETAIL_STATUS_FILTER_OPTIONS = labeledToSelectOptions([
+  { value: 'ALL', label: 'Todos do card selecionado' },
+  { value: 'SUPPLIES_QUEUE', label: 'Aguardando e Aguardando vistoria' },
+  { value: 'PENDING_SUPPLIES', label: 'Aguardando' },
+  { value: 'APPROVED', label: 'Em uso' },
+  { value: 'COMPLETED', label: 'Aguardando vistoria' },
+  { value: 'INSPECTED', label: 'Vistoriadas' },
+  { value: 'REJECTED', label: 'Rejeitadas' },
+  { value: 'CANCELLED', label: 'Canceladas' },
+]);
 
 const DEFAULT_CARD_FILTER: SuppliesCardFilter = 'pending';
 
@@ -996,20 +1009,13 @@ export default function SolicitacoesReservaVeiculosPage() {
               <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                 Status
               </label>
-              <select
+              <StringSingleSelectDropdown
                 value={detailStatusFilter}
-                onChange={(e) => setDetailStatusFilter(e.target.value as DetailStatusFilter)}
-                className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-              >
-                <option value="ALL">Todos do card selecionado</option>
-                <option value="SUPPLIES_QUEUE">Aguardando e Aguardando vistoria</option>
-                <option value="PENDING_SUPPLIES">Aguardando</option>
-                <option value="APPROVED">Em uso</option>
-                <option value="COMPLETED">Aguardando vistoria</option>
-                <option value="INSPECTED">Vistoriadas</option>
-                <option value="REJECTED">Rejeitadas</option>
-                <option value="CANCELLED">Canceladas</option>
-              </select>
+                onChange={(value) => setDetailStatusFilter(value as DetailStatusFilter)}
+                options={DETAIL_STATUS_FILTER_OPTIONS}
+                allowEmpty={false}
+                className="w-full"
+              />
             </div>
             <div className="flex items-center justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
               <Button type="button" variant="outline" onClick={() => setIsFiltersOpen(false)}>

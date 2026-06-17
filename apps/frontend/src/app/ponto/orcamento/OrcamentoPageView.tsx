@@ -9946,7 +9946,7 @@ export function OrcamentoPageView({
                     <button
                       type="button"
                       onClick={(e) => { e.stopPropagation(); setShowServicosDropdown(v => !v); }}
-                      className="w-full h-10 pl-10 pr-11 text-left rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500 dark:focus:ring-red-400 focus:border-transparent relative"
+                      className="w-full h-10 pl-10 pr-11 text-left rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500 dark:focus:ring-red-400 focus:border-transparent relative"
                     >
                       <ListPlus className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4 pointer-events-none" />
                       <span className="block pr-6 truncate">
@@ -12211,7 +12211,7 @@ export function OrcamentoPageView({
                               ? 'bg-red-600 dark:bg-red-500 border-red-600 dark:border-red-500 text-white shadow-sm'
                               : isCompleted
                               ? 'bg-green-500 dark:bg-green-600 border-green-500 dark:border-green-600 text-white'
-                              : 'bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-400 dark:text-gray-500'
+                              : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-400 dark:text-gray-500'
                           }`}
                         >
                           {isCompleted ? <CheckCircle className="w-4 h-4" /> : <Icon className="w-4 h-4" />}

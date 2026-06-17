@@ -2,7 +2,15 @@
 
 import React, { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronDown, ChevronUp, X } from 'lucide-react';
+import { Search, X } from 'lucide-react';
+import {
+  SINGLE_SELECT_PANEL_CLS,
+  SINGLE_SELECT_SEARCH_INPUT_CLS,
+  SINGLE_SELECT_TRIGGER_BASE_CLS,
+  SingleSelectTriggerChevron,
+  singleSelectTriggerBorderClass,
+  singleSelectTriggerTextClass,
+} from '@/components/ui/singleSelectDropdownUi';
 
 export type MultiSelectSearchOption = {
   value: string;
@@ -136,8 +144,12 @@ export type MultiSelectSearchDropdownProps = {
    * em vez de encolher para caber no espaço livre abaixo do campo na viewport.
    */
   menuOverlapContent?: boolean;
-  /** Remove anéis/bordas de foco do campo, busca e checkboxes. */
+  /** Remove anéis/bordas de foco do campo, busca e checkboxes. Sem borda vermelha ao abrir. */
   noFocusRing?: boolean;
+  hideFocus?: boolean;
+  /** Controle externo de abertura (ex.: só um campo aberto por vez em modais de filtro). */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 };
 
 type FloatingPos = {
@@ -288,21 +300,23 @@ function MenuPanel({
       style={style}
       className={
         className ??
-        'flex flex-col rounded-lg border border-gray-300 bg-white shadow-xl ring-1 ring-black/5 dark:border-gray-600 dark:bg-gray-800 dark:ring-white/10'
+        `flex flex-col overflow-hidden ${SINGLE_SELECT_PANEL_CLS}`
       }
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
-      <div className="shrink-0 border-b border-gray-200 px-3 py-3 dark:border-gray-600">
+      <div className="shrink-0 border-b border-gray-100 px-3 py-2.5 dark:border-gray-700">
         <div className="relative">
+          <Search
+            className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500"
+            aria-hidden
+          />
           <input
             type="text"
             placeholder={searchPlaceholder}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className={`block h-10 w-full rounded-lg border border-gray-300 bg-gray-50 py-2 text-sm text-gray-900 placeholder:text-gray-400 outline-none dark:border-gray-600 dark:bg-gray-900/50 dark:text-gray-100 dark:placeholder:text-gray-500 ${
-              noFocusRing ? 'focus:ring-0 focus:border-gray-300 dark:focus:border-gray-600' : 'focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent dark:focus:ring-red-400'
-            } ${search ? 'pl-3 pr-9' : 'px-3'}`}
+            className={`${SINGLE_SELECT_SEARCH_INPUT_CLS} ${search ? 'pr-9' : 'pr-3'}`}
           />
           {search ? (
             <button
@@ -321,7 +335,7 @@ function MenuPanel({
       </div>
 
       {options.length > 0 ? (
-        <div className="shrink-0 border-b border-gray-200 px-1.5 py-1 dark:border-gray-600">
+        <div className="shrink-0 border-b border-gray-100 px-1.5 py-1 dark:border-gray-700">
           <DropdownCheckbox
             id={`${panelId}-all`}
             noFocusRing={noFocusRing}
@@ -396,9 +410,22 @@ export function MultiSelectSearchDropdown({
   listMaxHeight: listMaxHeightProp,
   menuOverlapContent = false,
   noFocusRing = false,
+  hideFocus = false,
+  open: openControlled,
+  onOpenChange,
 }: MultiSelectSearchDropdownProps) {
   const effectiveListMax = listMaxHeightProp ?? LIST_MAX;
-  const [open, setOpen] = useState(false);
+  const [openInternal, setOpenInternal] = useState(false);
+  const open = openControlled ?? openInternal;
+
+  const setOpen = useCallback(
+    (next: boolean | ((prev: boolean) => boolean)) => {
+      const resolved = typeof next === 'function' ? next(open) : next;
+      if (openControlled === undefined) setOpenInternal(resolved);
+      onOpenChange?.(resolved);
+    },
+    [open, openControlled, onOpenChange]
+  );
   const [search, setSearch] = useState('');
   const [floatingPos, setFloatingPos] = useState<FloatingPos | null>(null);
   const [mounted, setMounted] = useState(false);
@@ -542,11 +569,14 @@ export function MultiSelectSearchDropdown({
     noFocusRing,
   };
 
+  const suppressOpenBorder = hideFocus || noFocusRing;
+  const hasSelection = selected.length > 0;
+
   const inlineMenu =
     open && menuInline ? (
       <MenuPanel
         {...menuProps}
-        className="mt-2 flex flex-col overflow-hidden rounded-lg border border-gray-300 bg-white shadow-md ring-1 ring-black/5 dark:border-gray-600 dark:bg-gray-800 dark:ring-white/10"
+        className={`mt-2 flex flex-col overflow-hidden ${SINGLE_SELECT_PANEL_CLS}`}
         style={{ maxHeight: estimatedListMax + PANEL_CHROME_PX }}
       />
     ) : null;
@@ -565,7 +595,7 @@ export function MultiSelectSearchDropdown({
             ? { bottom: floatingPos.bottom }
             : { top: floatingPos.top }),
         }}
-        className="flex flex-col overflow-hidden rounded-lg border border-gray-300 bg-white shadow-xl ring-1 ring-black/5 dark:border-gray-600 dark:bg-gray-800 dark:ring-white/10"
+        className={`flex flex-col overflow-hidden ${SINGLE_SELECT_PANEL_CLS}`}
       />
     ) : null;
 
@@ -587,23 +617,18 @@ export function MultiSelectSearchDropdown({
             return !v;
           });
         }}
-        className={`relative flex h-10 w-full items-center rounded-md border border-gray-300 bg-white pr-11 text-left text-sm text-gray-900 outline-none disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 ${
-          icon ? 'pl-10' : 'pl-3'
-        } ${
-          noFocusRing
-            ? 'focus:ring-0 focus:border-gray-300 dark:focus:border-gray-600'
-            : 'focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent dark:focus:ring-red-400'
-        }`}
+        className={`${SINGLE_SELECT_TRIGGER_BASE_CLS} ${icon ? 'pl-10' : ''} ${singleSelectTriggerBorderClass(open, suppressOpenBorder)} ${singleSelectTriggerTextClass(hasSelection)}`}
+        data-form-field-trigger="true"
+        aria-expanded={open}
+        aria-haspopup="listbox"
       >
         {icon ? (
           <span className="pointer-events-none absolute left-3 top-1/2 flex -translate-y-1/2 text-gray-400 dark:text-gray-500">
             {icon}
           </span>
         ) : null}
-        <span className="block truncate pr-6">{triggerLabel}</span>
-        <span className="pointer-events-none absolute right-3 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center text-gray-400 dark:text-gray-500">
-          {open ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-        </span>
+        <span className="block truncate">{triggerLabel}</span>
+        <SingleSelectTriggerChevron open={open} />
       </button>
 
       {inlineMenu}

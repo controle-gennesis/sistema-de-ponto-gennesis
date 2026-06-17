@@ -28,6 +28,8 @@ import { buildDpRequestTimeline } from '@/lib/dpRequestTimeline';
 import { DpRequestDetailsPreview } from '@/lib/dpRequestDetailsPreview';
 import { DP_SOLICITACOES_NO_FOCUS_CLS, formatIsoDateRangeToBr } from '@/lib/dpSolicitacoesUi';
 import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
+import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import {
   DpRequestHistoryMetaCard,
   DpRequestHistoryModalFooter,
@@ -202,6 +204,34 @@ const TYPE_LABELS: Record<DpRequestType, string> = {
   RETIFICACAO_ALOCACAO: 'Retificação de alocação',
 };
 
+const DP_STATUS_FILTER_OPTIONS = labeledToSelectOptions([
+  { value: 'all', label: 'Todos' },
+  { value: 'IN_REVIEW_DP', label: 'Em análise' },
+  { value: 'IN_FINANCEIRO', label: 'No financeiro' },
+  { value: 'WAITING_RETURN_ACCOUNTING', label: 'Pendência contábil' },
+  { value: 'WAITING_RETURN', label: 'Pendência colaborador' },
+  { value: 'WAITING_RETURN_ADM_TST', label: 'Pendência ADM/TST' },
+  { value: 'WAITING_RETURN_ENGINEERING', label: 'Pendência engenharia' },
+  { value: 'CONCLUDED', label: 'Concluída' },
+  { value: 'CANCELLED', label: 'Cancelada' },
+]);
+
+const DP_URGENCY_FILTER_OPTIONS = labeledToSelectOptions([
+  { value: 'all', label: 'Todas' },
+  ...(Object.keys(URGENCY_LABELS) as DpUrgency[]).map((u) => ({
+    value: u,
+    label: URGENCY_LABELS[u],
+  })),
+]);
+
+const DP_TYPE_FILTER_OPTIONS = labeledToSelectOptions([
+  { value: 'all', label: 'Todos' },
+  ...(Object.keys(TYPE_LABELS) as DpRequestType[])
+    .slice()
+    .sort((a, b) => TYPE_LABELS[a].localeCompare(TYPE_LABELS[b], 'pt-BR'))
+    .map((t) => ({ value: t, label: TYPE_LABELS[t] })),
+]);
+
 const LIST_TABLE_ACTION_ICON_CLASS = rowActionMenuButtonClass(false);
 
 type ManageCardFilter = 'all' | 'pending' | 'CONCLUDED' | 'CANCELLED';
@@ -374,6 +404,18 @@ export function GerenciarSolicitacoesGeraisPage() {
     }
     return Array.from(map.entries()).sort((a, b) => a[1].localeCompare(b[1], 'pt-BR'));
   }, [requests]);
+
+  const contractFilterSelectOptions = useMemo(
+    () => [
+      { value: 'all', label: 'Todos', searchText: 'Todos' },
+      ...contractFilterOptions.map(([id, name]) => ({
+        value: id,
+        label: name,
+        searchText: name,
+      })),
+    ],
+    [contractFilterOptions]
+  );
 
   const filteredRequests = requests.filter((r) => {
     if (activeStatus !== 'all' && r.status !== activeStatus) return false;
@@ -778,75 +820,49 @@ export function GerenciarSolicitacoesGeraisPage() {
                         <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                           Status
                         </label>
-                        <select
+                        <StringSingleSelectDropdown
                           value={activeStatus}
-                          onChange={(e) =>
-                            setActiveStatus(e.target.value as 'all' | Exclude<DpRequestStatus, 'WAITING_MANAGER'>)
+                          onChange={(v) =>
+                            setActiveStatus(v as 'all' | Exclude<DpRequestStatus, 'WAITING_MANAGER'>)
                           }
-                          className={`w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 ${DP_SOLICITACOES_NO_FOCUS_CLS}`}
-                        >
-                          <option value="all">Todos</option>
-                          <option value="IN_REVIEW_DP">Em análise</option>
-                          <option value="IN_FINANCEIRO">No financeiro</option>
-                          <option value="WAITING_RETURN_ACCOUNTING">Pendência contábil</option>
-                          <option value="WAITING_RETURN">Pendência colaborador</option>
-                          <option value="WAITING_RETURN_ADM_TST">Pendência ADM/TST</option>
-                          <option value="WAITING_RETURN_ENGINEERING">Pendência engenharia</option>
-                          <option value="CONCLUDED">Concluída</option>
-                          <option value="CANCELLED">Cancelada</option>
-                        </select>
+                          options={DP_STATUS_FILTER_OPTIONS}
+                          allowEmpty={false}
+                          className={DP_SOLICITACOES_NO_FOCUS_CLS}
+                        />
                       </div>
                       <div>
                         <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                           Urgência
                         </label>
-                        <select
+                        <StringSingleSelectDropdown
                           value={filterUrgency}
-                          onChange={(e) => setFilterUrgency(e.target.value as 'all' | DpUrgency)}
-                          className={`w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 ${DP_SOLICITACOES_NO_FOCUS_CLS}`}
-                        >
-                          <option value="all">Todas</option>
-                          {(Object.keys(URGENCY_LABELS) as DpUrgency[]).map((u) => (
-                            <option key={u} value={u}>
-                              {URGENCY_LABELS[u]}
-                            </option>
-                          ))}
-                        </select>
+                          onChange={(v) => setFilterUrgency(v as 'all' | DpUrgency)}
+                          options={DP_URGENCY_FILTER_OPTIONS}
+                          allowEmpty={false}
+                          className={DP_SOLICITACOES_NO_FOCUS_CLS}
+                        />
                       </div>
                       <div>
                         <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Tipo</label>
-                        <select
+                        <StringSingleSelectDropdown
                           value={filterRequestType}
-                          onChange={(e) => setFilterRequestType(e.target.value as 'all' | DpRequestType)}
-                          className={`w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 ${DP_SOLICITACOES_NO_FOCUS_CLS}`}
-                        >
-                          <option value="all">Todos</option>
-                          {(Object.keys(TYPE_LABELS) as DpRequestType[])
-                            .slice()
-                            .sort((a, b) => TYPE_LABELS[a].localeCompare(TYPE_LABELS[b], 'pt-BR'))
-                            .map((t) => (
-                              <option key={t} value={t}>
-                                {TYPE_LABELS[t]}
-                              </option>
-                            ))}
-                        </select>
+                          onChange={(v) => setFilterRequestType(v as 'all' | DpRequestType)}
+                          options={DP_TYPE_FILTER_OPTIONS}
+                          allowEmpty={false}
+                          className={DP_SOLICITACOES_NO_FOCUS_CLS}
+                        />
                       </div>
                       <div className="sm:col-span-2 lg:col-span-3">
                         <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                           Contrato
                         </label>
-                        <select
+                        <StringSingleSelectDropdown
                           value={filterContractId}
-                          onChange={(e) => setFilterContractId(e.target.value as 'all' | string)}
-                          className={`w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 ${DP_SOLICITACOES_NO_FOCUS_CLS}`}
-                        >
-                          <option value="all">Todos</option>
-                          {contractFilterOptions.map(([id, name]) => (
-                            <option key={id} value={id}>
-                              {name}
-                            </option>
-                          ))}
-                        </select>
+                          onChange={(v) => setFilterContractId(v as 'all' | string)}
+                          options={contractFilterSelectOptions}
+                          allowEmpty={false}
+                          className={DP_SOLICITACOES_NO_FOCUS_CLS}
+                        />
                         {contractFilterOptions.length === 0 && (
                           <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
                             Nenhum contrato na lista atual — altere o status ou aguarde novas solicitações.

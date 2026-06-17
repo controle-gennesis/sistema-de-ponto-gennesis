@@ -35,6 +35,23 @@ import {
   type AprovacaoTabId,
 } from './_components/AprovacoesTabsNav';
 import { useApprovalNotificationCounts } from '@/hooks/useApprovalNotificationCounts';
+import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
+
+const DP_PHASE_FILTER_OPTIONS = labeledToSelectOptions([
+  { value: 'PENDING', label: 'Pendentes' },
+  { value: 'APPROVED', label: 'Aprovadas' },
+  { value: 'REJECTED', label: 'Reprovadas' },
+  { value: 'ALL', label: 'Todas' },
+]);
+
+const ESPELHO_PHASE_FILTER_OPTIONS = labeledToSelectOptions([
+  { value: 'ALL', label: 'Todos os status' },
+  { value: 'PENDING_APPROVAL', label: 'Pendentes' },
+  { value: 'SENT_FOR_CORRECTION', label: 'Correção' },
+  { value: 'APPROVED', label: 'Aprovados' },
+  { value: 'CANCELLED', label: 'Cancelados' },
+]);
 
 type DpUrgency = 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
 type DpRequestStatus =
@@ -1225,16 +1242,12 @@ export default function AprovacoesPage() {
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                   Status
                 </label>
-                <select
+                <StringSingleSelectDropdown
                   value={dpPhase}
-                  onChange={(e) => setDpPhase(e.target.value as DpPhaseFilter)}
-                  className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                >
-                  <option value="PENDING">Pendentes</option>
-                  <option value="APPROVED">Aprovadas</option>
-                  <option value="REJECTED">Reprovadas</option>
-                  <option value="ALL">Todas</option>
-                </select>
+                  onChange={(v) => setDpPhase(v as DpPhaseFilter)}
+                  options={DP_PHASE_FILTER_OPTIONS}
+                  allowEmpty={false}
+                />
               </div>
 
               <div className="flex items-center justify-end gap-2 pt-4 border-t border-gray-200 dark:border-gray-700">
@@ -1268,19 +1281,12 @@ export default function AprovacoesPage() {
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                   Status
                 </label>
-                <select
+                <StringSingleSelectDropdown
                   value={espelhoPhase}
-                  onChange={(e) =>
-                    setEspelhoPhase(e.target.value as EspelhoPhaseFilter)
-                  }
-                  className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                >
-                  <option value="ALL">Todos os status</option>
-                  <option value="PENDING_APPROVAL">Pendentes</option>
-                  <option value="SENT_FOR_CORRECTION">Correção</option>
-                  <option value="APPROVED">Aprovados</option>
-                  <option value="CANCELLED">Cancelados</option>
-                </select>
+                  onChange={(v) => setEspelhoPhase(v as EspelhoPhaseFilter)}
+                  options={ESPELHO_PHASE_FILTER_OPTIONS}
+                  allowEmpty={false}
+                />
               </div>
 
               <div className="flex items-center justify-end gap-2 pt-4 border-t border-gray-200 dark:border-gray-700">

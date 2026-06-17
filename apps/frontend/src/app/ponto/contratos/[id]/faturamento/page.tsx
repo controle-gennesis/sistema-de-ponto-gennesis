@@ -6,6 +6,7 @@ import { useParams, useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft, Receipt, Trash2 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
+import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
@@ -14,6 +15,7 @@ import { formatOsSePastaOrDash, folderForDivSe } from '@/lib/formatOsSePasta';
 import { useContractTableColumnCustomizer } from '@/components/useContractTableColumnCustomizer';
 import { toast } from 'react-hot-toast';
 import { usePermissions } from '@/hooks/usePermissions';
+import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 
 interface ContractBilling {
   id: string;
@@ -222,28 +224,31 @@ export default function FaturamentoListPage() {
                   <div className="flex flex-nowrap items-center gap-4 mt-3 overflow-x-auto pb-1">
                     <div className="flex items-center gap-2 shrink-0">
                       <label className="text-xs font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">Ano:</label>
-                      <select
-                        value={selectedYear || ''}
-                        onChange={(e) => setSelectedYear(e.target.value ? parseInt(e.target.value, 10) : 0)}
-                        className="px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 w-[120px]"
-                      >
-                        <option value="0">Todos</option>
-                        {[2020, 2021, 2022, 2023, 2024, 2025, 2026].map((y) => (
-                          <option key={y} value={y}>{y}</option>
-                        ))}
-                      </select>
+                      <StringSingleSelectDropdown
+                        value={selectedYear ? String(selectedYear) : '0'}
+                        onChange={(v) => setSelectedYear(v === '0' ? 0 : parseInt(v, 10))}
+                        options={labeledToSelectOptions([
+                          { value: '0', label: 'Todos' },
+                          ...[2020, 2021, 2022, 2023, 2024, 2025, 2026].map((y) => ({
+                            value: String(y),
+                            label: String(y),
+                          })),
+                        ])}
+                        allowEmpty={false}
+                        className="w-[120px]"
+                      />
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
                       <label className="text-xs font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">Mês:</label>
-                      <select
-                        value={selectedMonth}
-                        onChange={(e) => setSelectedMonth(parseInt(e.target.value, 10))}
-                        className="px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 w-[160px]"
-                      >
-                        {MESES_FILTRO.map((m) => (
-                          <option key={m.value} value={m.value}>{m.label}</option>
-                        ))}
-                      </select>
+                      <StringSingleSelectDropdown
+                        value={String(selectedMonth)}
+                        onChange={(v) => setSelectedMonth(parseInt(v, 10))}
+                        options={labeledToSelectOptions(
+                          MESES_FILTRO.map((m) => ({ value: String(m.value), label: m.label }))
+                        )}
+                        allowEmpty={false}
+                        className="w-[160px]"
+                      />
                     </div>
                   </div>
                 </div>

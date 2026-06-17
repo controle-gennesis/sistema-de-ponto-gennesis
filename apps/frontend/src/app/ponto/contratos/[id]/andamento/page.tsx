@@ -7,6 +7,7 @@ import Link from 'next/link';
 import jsPDF from 'jspdf';
 import { ArrowLeft, AlertCircle, ClipboardList, Edit2, FileDown, Percent, Plus, X } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
+import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
@@ -23,6 +24,7 @@ import { useContractTableColumnCustomizer } from '@/components/useContractTableC
 import { formatOsSePasta, formatOsSePastaOrDash } from '@/lib/formatOsSePasta';
 import toast from 'react-hot-toast';
 import { usePermissions } from '@/hooks/usePermissions';
+import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 
 interface ContractPleito {
   id: string;
@@ -82,6 +84,75 @@ const MESES_FILTRO = [
 const PLEITO_HISTORY_MARKER = '__PLEITO_HISTORICO__';
 const PLEITO_HISTORY_MARKER_GERADO_100 = '__PLEITO_HISTORICO__GERADO_100__';
 const HISTORICO_ETIQUETA_GERADO_100 = 'Gerado 100%';
+
+const MESES_FILTRO_SELECT_OPTIONS = labeledToSelectOptions(
+  MESES_FILTRO.map((m) => ({ value: String(m.value), label: m.label }))
+);
+
+const ANDAMENTO_YEAR_FILTER_OPTIONS = labeledToSelectOptions([
+  { value: '0', label: 'Todos' },
+  ...[2020, 2021, 2022, 2023, 2024, 2025, 2026].map((y) => ({
+    value: String(y),
+    label: String(y),
+  })),
+]);
+
+const FILTER_STATUS_ORCAMENTO_OPTIONS = labeledToSelectOptions([
+  { value: '', label: 'Todos' },
+  ...STATUS_ORCAMENTO_OPCOES.map((op) => ({ value: op, label: op })),
+  { value: '—', label: '— (vazio)' },
+]);
+
+const FILTER_STATUS_EXECUCAO_OPTIONS = labeledToSelectOptions([
+  { value: '', label: 'Todos' },
+  ...STATUS_EXECUCAO_OPCOES.map((op) => ({ value: op, label: op })),
+  { value: '—', label: '— (vazio)' },
+]);
+
+const FILTER_STATUS_FATURAMENTO_OPTIONS = labeledToSelectOptions([
+  { value: '', label: 'Todos' },
+  { value: '0', label: '0% (não faturado)' },
+  { value: '1-25', label: '1% a 25%' },
+  { value: '26-50', label: '26% a 50%' },
+  { value: '51-75', label: '51% a 75%' },
+  { value: '76-99', label: '76% a 99%' },
+  { value: '100', label: '100% ou mais' },
+  { value: 'sem-orcamento', label: 'Sem orçamento' },
+]);
+
+const FILTER_BUDGET_EMPTY_OPTIONS = labeledToSelectOptions([
+  { value: 'all', label: 'Todos' },
+  { value: 'empty', label: 'Sem orçamento (vazio)' },
+  { value: 'filled', label: 'Com orçamento' },
+]);
+
+const FATURAMENTO_CATEGORIA_OPTIONS = labeledToSelectOptions([
+  { value: 'sem-orcamento', label: 'Sem orçamento' },
+  { value: '0', label: '0% (não faturado)' },
+  { value: '1-25', label: '1% a 25%' },
+  { value: '26-50', label: '26% a 50%' },
+  { value: '51-75', label: '51% a 75%' },
+  { value: '76-99', label: '76% a 99%' },
+  { value: '100', label: '100% ou mais' },
+]);
+
+const HIST_MONTH_FILTER_OPTIONS = labeledToSelectOptions([
+  { value: 'all', label: 'Mês: Todos' },
+  ...MESES_FILTRO.filter((m) => m.value > 0).map((m) => ({
+    value: String(m.value),
+    label: m.label,
+  })),
+]);
+
+const HIST_ETIQUETA_FILTER_OPTIONS = labeledToSelectOptions([
+  { value: 'all', label: 'Etiqueta: Todas' },
+  { value: 'gerado-100', label: HISTORICO_ETIQUETA_GERADO_100 },
+]);
+
+const BILLING_STATUS_ROW_OPTIONS = labeledToSelectOptions([
+  { value: 'nao-pago', label: 'Não pago' },
+  { value: 'pago', label: 'Pago' },
+]);
 
 function displayReportsBilling(value: string | null | undefined): string {
   const t = (value || '').trim();
@@ -635,6 +706,16 @@ export default function AndamentoListPage() {
     });
     return Array.from(years).sort((a, b) => b - a);
   }, [generatedPleitos]);
+
+  const histYearFilterOptions = useMemo(
+    () =>
+      labeledToSelectOptions([
+        { value: 'all', label: 'Ano: Todos' },
+        ...historicoYears.map((y) => ({ value: String(y), label: String(y) })),
+      ]),
+    [historicoYears]
+  );
+
   const filteredHistoricoPleitos = useMemo(() => {
     const osQuery = histOsFilter.trim().toLowerCase();
     const pastaQuery = histPastaFilter.trim().toLowerCase();
@@ -1063,77 +1144,57 @@ export default function AndamentoListPage() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 items-end">
                   <div className="flex items-center gap-2">
                     <label className="text-xs font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">Ano:</label>
-                    <select
-                      value={selectedYear || ''}
-                      onChange={(e) => setSelectedYear(e.target.value ? parseInt(e.target.value, 10) : 0)}
-                      className="px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 w-full"
-                    >
-                      <option value="0">Todos</option>
-                      {[2020, 2021, 2022, 2023, 2024, 2025, 2026].map((y) => (
-                        <option key={y} value={y}>{y}</option>
-                      ))}
-                    </select>
+                    <StringSingleSelectDropdown
+                      value={selectedYear ? String(selectedYear) : '0'}
+                      onChange={(v) => setSelectedYear(v === '0' ? 0 : parseInt(v, 10))}
+                      options={ANDAMENTO_YEAR_FILTER_OPTIONS}
+                      allowEmpty={false}
+                      className="w-full"
+                    />
                   </div>
 
                   <div className="flex items-center gap-2">
                     <label className="text-xs font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">Mês:</label>
-                    <select
-                      value={selectedMonth}
-                      onChange={(e) => setSelectedMonth(parseInt(e.target.value, 10))}
-                      className="px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 w-full"
-                    >
-                      {MESES_FILTRO.map((m) => (
-                        <option key={m.value} value={m.value}>{m.label}</option>
-                      ))}
-                    </select>
+                    <StringSingleSelectDropdown
+                      value={String(selectedMonth)}
+                      onChange={(v) => setSelectedMonth(parseInt(v, 10))}
+                      options={MESES_FILTRO_SELECT_OPTIONS}
+                      allowEmpty={false}
+                      className="w-full"
+                    />
                   </div>
 
                   <div className="flex items-center gap-2">
                     <label className="text-xs font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">Status Orçamento:</label>
-                    <select
+                    <StringSingleSelectDropdown
                       value={filterStatusOrcamento}
-                      onChange={(e) => setFilterStatusOrcamento(e.target.value)}
-                      className="px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 w-full"
-                    >
-                      <option value="">Todos</option>
-                      {STATUS_ORCAMENTO_OPCOES.map((op) => (
-                        <option key={op} value={op}>{op}</option>
-                      ))}
-                      <option value="—">— (vazio)</option>
-                    </select>
+                      onChange={setFilterStatusOrcamento}
+                      options={FILTER_STATUS_ORCAMENTO_OPTIONS}
+                      allowEmpty={false}
+                      className="w-full"
+                    />
                   </div>
 
                   <div className="flex items-center gap-2">
                     <label className="text-xs font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">Status Execução:</label>
-                    <select
+                    <StringSingleSelectDropdown
                       value={filterStatusExecucao}
-                      onChange={(e) => setFilterStatusExecucao(e.target.value)}
-                      className="px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 w-full"
-                    >
-                      <option value="">Todos</option>
-                      {STATUS_EXECUCAO_OPCOES.map((op) => (
-                        <option key={op} value={op}>{op}</option>
-                      ))}
-                      <option value="—">— (vazio)</option>
-                    </select>
+                      onChange={setFilterStatusExecucao}
+                      options={FILTER_STATUS_EXECUCAO_OPTIONS}
+                      allowEmpty={false}
+                      className="w-full"
+                    />
                   </div>
 
                   <div className="flex items-center gap-2">
                     <label className="text-xs font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">Status Faturamento (%):</label>
-                    <select
+                    <StringSingleSelectDropdown
                       value={filterStatusFaturamento}
-                      onChange={(e) => setFilterStatusFaturamento(e.target.value)}
-                      className="px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 w-full"
-                    >
-                      <option value="">Todos</option>
-                      <option value="0">0% (não faturado)</option>
-                      <option value="1-25">1% a 25%</option>
-                      <option value="26-50">26% a 50%</option>
-                      <option value="51-75">51% a 75%</option>
-                      <option value="76-99">76% a 99%</option>
-                      <option value="100">100% ou mais</option>
-                      <option value="sem-orcamento">Sem orçamento</option>
-                    </select>
+                      onChange={setFilterStatusFaturamento}
+                      options={FILTER_STATUS_FATURAMENTO_OPTIONS}
+                      allowEmpty={false}
+                      className="w-full"
+                    />
                   </div>
                 </div>
 
@@ -1141,15 +1202,13 @@ export default function AndamentoListPage() {
                 <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 items-end">
                   <div className="flex items-center gap-2">
                     <label className="text-xs font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">Orçamento:</label>
-                      <select
+                      <StringSingleSelectDropdown
                         value={filterBudgetEmpty}
-                        onChange={(e) => setFilterBudgetEmpty(e.target.value as 'all' | 'empty' | 'filled')}
-                        className="px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 w-full"
-                      >
-                        <option value="all">Todos</option>
-                        <option value="empty">Sem orçamento (vazio)</option>
-                        <option value="filled">Com orçamento</option>
-                      </select>
+                        onChange={(v) => setFilterBudgetEmpty(v as 'all' | 'empty' | 'filled')}
+                        options={FILTER_BUDGET_EMPTY_OPTIONS}
+                        allowEmpty={false}
+                        className="w-full"
+                      />
                   </div>
 
                   <div className="flex items-center gap-2">
@@ -1313,36 +1372,34 @@ export default function AndamentoListPage() {
                             <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100 whitespace-nowrap">{p.startDate ? formatDate(p.startDate) : '-'}</td>
                             <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100 whitespace-nowrap">{p.endDate ? formatDate(p.endDate) : '-'}</td>
                             <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100" onClick={(e) => e.stopPropagation()}>
-                              <select
+                              <StringSingleSelectDropdown
                                 value={budgetStatusCurrent}
-                                disabled={savingPleitoId === p.id}
-                                onChange={(e) => {
-                                  const v = e.target.value;
+                                onChange={(v) => {
                                   updatePleitoInline(p.id, { budgetStatus: v ? v : null });
                                 }}
-                                className={`${pleitoStatusSelectBase} ${budgetStatusPillClass(budgetStatusCurrent || null)}`}
-                              >
-                                <option value="">— (vazio)</option>
-                                {budgetStatusOptions.map((opt) => (
-                                  <option key={opt} value={opt}>{opt}</option>
-                                ))}
-                              </select>
+                                options={labeledToSelectOptions([
+                                  { value: '', label: '— (vazio)' },
+                                  ...budgetStatusOptions.map((opt) => ({ value: opt, label: opt })),
+                                ])}
+                                disabled={savingPleitoId === p.id}
+                                allowEmpty={false}
+                                className={budgetStatusPillClass(budgetStatusCurrent || null)}
+                              />
                             </td>
                             <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100" onClick={(e) => e.stopPropagation()}>
-                              <select
+                              <StringSingleSelectDropdown
                                 value={executionStatusCurrent}
-                                disabled={savingPleitoId === p.id}
-                                onChange={(e) => {
-                                  const v = e.target.value;
+                                onChange={(v) => {
                                   updatePleitoInline(p.id, { executionStatus: v ? v : null });
                                 }}
-                                className={`${pleitoStatusSelectBase} ${executionStatusPillClass(executionStatusCurrent || null)}`}
-                              >
-                                <option value="">— (vazio)</option>
-                                {executionStatusOptions.map((opt) => (
-                                  <option key={opt} value={opt}>{opt}</option>
-                                ))}
-                              </select>
+                                options={labeledToSelectOptions([
+                                  { value: '', label: '— (vazio)' },
+                                  ...executionStatusOptions.map((opt) => ({ value: opt, label: opt })),
+                                ])}
+                                disabled={savingPleitoId === p.id}
+                                allowEmpty={false}
+                                className={executionStatusPillClass(executionStatusCurrent || null)}
+                              />
                             </td>
                             <td className="px-4 py-3 text-sm text-right font-medium text-gray-900 dark:text-gray-100">{p.budget ? formatCurrency(Number(p.budget)) : '-'}</td>
                             <td className="px-4 py-3 text-sm text-right text-gray-900 dark:text-gray-100 whitespace-nowrap">{p.budgetAmount1 != null && Number(p.budgetAmount1) > 0 ? formatCurrency(Number(p.budgetAmount1)) : '-'}</td>
@@ -1350,11 +1407,10 @@ export default function AndamentoListPage() {
                             <td className="px-4 py-3 text-sm text-right text-gray-900 dark:text-gray-100 whitespace-nowrap">{p.budgetAmount3 != null && Number(p.budgetAmount3) > 0 ? formatCurrency(Number(p.budgetAmount3)) : '-'}</td>
                             <td className="px-4 py-3 text-sm text-right text-gray-900 dark:text-gray-100 whitespace-nowrap">{p.budgetAmount4 != null && Number(p.budgetAmount4) > 0 ? formatCurrency(Number(p.budgetAmount4)) : '-'}</td>
                             <td className="px-4 py-3 text-sm text-center text-gray-900 dark:text-gray-100" onClick={(e) => e.stopPropagation()}>
-                              <select
+                              <StringSingleSelectDropdown
                                 value={faturamentoCategoria}
-                                disabled={savingPleitoId === p.id}
-                                onChange={(e) => {
-                                  const nextCat = e.target.value as FaturamentoCategoria;
+                                onChange={(v) => {
+                                  const nextCat = v as FaturamentoCategoria;
                                   if (nextCat === 'sem-orcamento') {
                                     updatePleitoInline(p.id, { budget: null });
                                     return;
@@ -1366,16 +1422,10 @@ export default function AndamentoListPage() {
                                     : 1;
                                   updatePleitoInline(p.id, { budget: nextBudget.toFixed(2) });
                                 }}
-                                className="w-full bg-transparent border border-gray-200 dark:border-gray-700 rounded px-2 py-1 text-sm text-gray-900 dark:text-gray-100 disabled:opacity-60"
-                              >
-                                <option value="sem-orcamento">Sem orçamento</option>
-                                <option value="0">0% (não faturado)</option>
-                                <option value="1-25">1% a 25%</option>
-                                <option value="26-50">26% a 50%</option>
-                                <option value="51-75">51% a 75%</option>
-                                <option value="76-99">76% a 99%</option>
-                                <option value="100">100% ou mais</option>
-                              </select>
+                                options={FATURAMENTO_CATEGORIA_OPTIONS}
+                                disabled={savingPleitoId === p.id}
+                                allowEmpty={false}
+                              />
                             </td>
                             <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100">
                               {p.startDate && p.endDate
@@ -1540,26 +1590,18 @@ export default function AndamentoListPage() {
                   ) : (
                     <div className="space-y-4">
                       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
-                        <select
+                        <StringSingleSelectDropdown
                           value={histMonthFilter}
-                          onChange={(e) => setHistMonthFilter(e.target.value)}
-                          className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                        >
-                          <option value="all">Mês: Todos</option>
-                          {MESES_FILTRO.filter((m) => m.value > 0).map((m) => (
-                            <option key={m.value} value={String(m.value)}>{m.label}</option>
-                          ))}
-                        </select>
-                        <select
+                          onChange={setHistMonthFilter}
+                          options={HIST_MONTH_FILTER_OPTIONS}
+                          allowEmpty={false}
+                        />
+                        <StringSingleSelectDropdown
                           value={histYearFilter}
-                          onChange={(e) => setHistYearFilter(e.target.value)}
-                          className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                        >
-                          <option value="all">Ano: Todos</option>
-                          {historicoYears.map((y) => (
-                            <option key={y} value={String(y)}>{y}</option>
-                          ))}
-                        </select>
+                          onChange={setHistYearFilter}
+                          options={histYearFilterOptions}
+                          allowEmpty={false}
+                        />
                         <input
                           type="text"
                           value={histOsFilter}
@@ -1581,14 +1623,12 @@ export default function AndamentoListPage() {
                           placeholder="Descrição"
                           className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
                         />
-                        <select
+                        <StringSingleSelectDropdown
                           value={histEtiquetaFilter}
-                          onChange={(e) => setHistEtiquetaFilter(e.target.value)}
-                          className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                        >
-                          <option value="all">Etiqueta: Todas</option>
-                          <option value="gerado-100">{HISTORICO_ETIQUETA_GERADO_100}</option>
-                        </select>
+                          onChange={setHistEtiquetaFilter}
+                          options={HIST_ETIQUETA_FILTER_OPTIONS}
+                          allowEmpty={false}
+                        />
                       </div>
                       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                         <div className="flex flex-col sm:flex-row sm:items-center gap-2">
@@ -1673,23 +1713,21 @@ export default function AndamentoListPage() {
                                   />
                                 </td>
                                 <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100" onClick={(e) => e.stopPropagation()}>
-                                  <select
+                                  <StringSingleSelectDropdown
                                     value={rowDraft.billingStatus}
-                                    disabled={isSavingHistoricoPleitos}
-                                    onChange={(e) =>
+                                    onChange={(v) =>
                                       setHistoricoDrafts((prev) => ({
                                         ...prev,
                                         [p.id]: {
                                           ...rowDraft,
-                                          billingStatus: e.target.value === 'pago' ? 'pago' : 'nao-pago'
-                                        }
+                                          billingStatus: v === 'pago' ? 'pago' : 'nao-pago',
+                                        },
                                       }))
                                     }
-                                    className="w-full bg-transparent border border-gray-200 dark:border-gray-700 rounded px-2 py-1 text-sm text-gray-900 dark:text-gray-100 disabled:opacity-60"
-                                  >
-                                    <option value="nao-pago">Não pago</option>
-                                    <option value="pago">Pago</option>
-                                  </select>
+                                    options={BILLING_STATUS_ROW_OPTIONS}
+                                    disabled={isSavingHistoricoPleitos}
+                                    allowEmpty={false}
+                                  />
                                 </td>
                                 <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                                   <input

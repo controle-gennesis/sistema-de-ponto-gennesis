@@ -5,7 +5,9 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Loader2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Modal } from '@/components/ui/Modal';
+import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import api from '@/lib/api';
+import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import {
   MONTHS_PT,
   STATUS_OPTIONS,
@@ -15,6 +17,11 @@ import {
   type EntryFormState,
   type FinancialControlEntry,
 } from '@/lib/financialControlEntry';
+
+const MONTH_SELECT_OPTIONS = labeledToSelectOptions(
+  MONTHS_PT.map((label, idx) => ({ value: String(idx + 1), label }))
+);
+const STATUS_SELECT_OPTIONS = labeledToSelectOptions(STATUS_OPTIONS);
 
 function CurrencyInput({
   value,
@@ -199,18 +206,12 @@ export function FinancialControlEntryFormModal({
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
               Mês <span className="text-red-500">*</span>
             </label>
-            <select
-              required
-              value={form.paymentMonth}
-              onChange={(e) => setForm({ ...form, paymentMonth: parseInt(e.target.value, 10) })}
-              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 dark:bg-gray-800 dark:text-white"
-            >
-              {MONTHS_PT.map((label, idx) => (
-                <option key={idx} value={idx + 1}>
-                  {label}
-                </option>
-              ))}
-            </select>
+            <StringSingleSelectDropdown
+              value={String(form.paymentMonth)}
+              onChange={(v) => setForm({ ...form, paymentMonth: parseInt(v, 10) })}
+              options={MONTH_SELECT_OPTIONS}
+              allowEmpty={false}
+            />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
@@ -229,19 +230,12 @@ export function FinancialControlEntryFormModal({
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Status</label>
-            <select
+            <StringSingleSelectDropdown
               value={form.status}
-              onChange={(e) =>
-                setForm({ ...form, status: e.target.value as EntryFormState['status'] })
-              }
-              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 dark:bg-gray-800 dark:text-white"
-            >
-              {STATUS_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
+              onChange={(v) => setForm({ ...form, status: v as EntryFormState['status'] })}
+              options={STATUS_SELECT_OPTIONS}
+              allowEmpty={false}
+            />
           </div>
         </div>
 

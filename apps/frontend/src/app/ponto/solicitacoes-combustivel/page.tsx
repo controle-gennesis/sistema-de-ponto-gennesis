@@ -22,6 +22,8 @@ import {
   ListRowNavigableLabel,
   rowActionMenuButtonClass,
 } from '@/components/ui/listTableUi';
+import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 
 type FuelVehicleType = 'PRIVATE' | 'COMPANY';
 type FuelTankLevelAfter = 'RESERVE' | 'QUARTER' | 'HALF' | 'THREE_QUARTERS' | 'FULL';
@@ -34,6 +36,16 @@ type FuelRefuelStatus =
   | 'APPROVED'
   | 'REJECTED'
   | 'CANCELLED';
+
+const STATUS_FILTER_OPTIONS = labeledToSelectOptions([
+  { value: 'PENDING_SUPPLIES', label: 'Aguardando Suprimentos' },
+  { value: 'AWAITING_REFUEL', label: 'Aprovadas — aguardando abastecimento' },
+  { value: 'COMPLETED', label: 'Concluídas' },
+  { value: 'ALL', label: 'Todos' },
+  { value: 'PENDING_MANAGER', label: 'Aguardando gestor' },
+  { value: 'REJECTED', label: 'Rejeitadas' },
+  { value: 'CANCELLED', label: 'Canceladas' },
+]);
 
 type FuelRefuelRequest = {
   id: string;
@@ -701,19 +713,13 @@ export default function SolicitacoesCombustivelPage() {
               <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                 Status
               </label>
-              <select
+              <StringSingleSelectDropdown
                 value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value as 'ALL' | FuelRefuelStatus)}
-                className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-              >
-                <option value="PENDING_SUPPLIES">Aguardando Suprimentos</option>
-                <option value="AWAITING_REFUEL">Aprovadas — aguardando abastecimento</option>
-                <option value="COMPLETED">Concluídas</option>
-                <option value="ALL">Todos</option>
-                <option value="PENDING_MANAGER">Aguardando gestor</option>
-                <option value="REJECTED">Rejeitadas</option>
-                <option value="CANCELLED">Canceladas</option>
-              </select>
+                onChange={(value) => setStatusFilter(value as 'ALL' | FuelRefuelStatus)}
+                options={STATUS_FILTER_OPTIONS}
+                allowEmpty={false}
+                className="w-full"
+              />
             </div>
 
             <div className="flex items-center justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">

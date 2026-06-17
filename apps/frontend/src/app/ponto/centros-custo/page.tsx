@@ -23,6 +23,19 @@ import toast from 'react-hot-toast';
 import api from '@/lib/api';
 import { normalizeCostCentersResponse } from '@/lib/costCenters';
 import { POLOS_LIST, COMPANIES_LIST } from '@/constants/payrollFilters';
+import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { filterOptionsWithAll, labeledToSelectOptions } from '@/lib/selectOptionBuilders';
+
+const ACTIVE_STATUS_FILTER_OPTIONS = labeledToSelectOptions([
+  { value: 'all', label: 'Todos' },
+  { value: 'true', label: 'Ativo' },
+  { value: 'false', label: 'Inativo' },
+]);
+
+const IMPORT_ACTIVE_OPTIONS = labeledToSelectOptions([
+  { value: 'Ativo', label: 'Ativo' },
+  { value: 'Inativo', label: 'Inativo' },
+]);
 
 interface CostCenter {
   id: string;
@@ -45,6 +58,10 @@ export default function CentrosCustoPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [isActiveFilter, setIsActiveFilter] = useState<string>('all'); // 'all', 'true', 'false'
   const [stateFilter, setStateFilter] = useState<string>('all'); // 'all', 'DF', 'GO'
+  const stateFilterSelectOptions = useMemo(
+    () => filterOptionsWithAll(ESTADOS_LIST, 'Todos'),
+    []
+  );
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(20);
   const [showForm, setShowForm] = useState(false);
@@ -290,32 +307,23 @@ export default function CentrosCustoPage() {
                 <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                   Status
                 </label>
-                <select
+                <StringSingleSelectDropdown
                   value={isActiveFilter}
-                  onChange={(e) => setIsActiveFilter(e.target.value)}
-                  className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                >
-                  <option value="all">Todos</option>
-                  <option value="true">Ativo</option>
-                  <option value="false">Inativo</option>
-                </select>
+                  onChange={setIsActiveFilter}
+                  options={ACTIVE_STATUS_FILTER_OPTIONS}
+                  allowEmpty={false}
+                />
               </div>
               <div>
                 <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                   Estado
                 </label>
-                <select
+                <StringSingleSelectDropdown
                   value={stateFilter}
-                  onChange={(e) => setStateFilter(e.target.value)}
-                  className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                >
-                  <option value="all">Todos</option>
-                  {ESTADOS_LIST.map((estado) => (
-                    <option key={estado} value={estado}>
-                      {estado}
-                    </option>
-                  ))}
-                </select>
+                  onChange={setStateFilter}
+                  options={stateFilterSelectOptions}
+                  allowEmpty={false}
+                />
               </div>
               <div className="flex items-center justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
                 <button
@@ -509,7 +517,7 @@ export default function CentrosCustoPage() {
                       <button
                         onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
                         disabled={currentPage === 1}
-                        className="px-3 py-2 text-sm font-medium text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        className="px-3 py-2 text-sm font-medium text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                       >
                         Anterior
                       </button>
@@ -536,7 +544,7 @@ export default function CentrosCustoPage() {
                             className={`px-3 py-2 text-sm font-medium rounded-md ${
                               isActive
                                 ? 'bg-red-600 text-white'
-                                : 'text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
+                                : 'text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
                             } transition-colors`}
                           >
                             {pageNumber}
@@ -547,7 +555,7 @@ export default function CentrosCustoPage() {
                       <button
                         onClick={() => setCurrentPage(prev => Math.min(prev + 1, pagination.totalPages))}
                         disabled={currentPage === pagination.totalPages}
-                        className="px-3 py-2 text-sm font-medium text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        className="px-3 py-2 text-sm font-medium text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                       >
                         Próxima
                       </button>
@@ -709,14 +717,13 @@ function CostCenterFormModal({
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                 Polo
               </label>
-              <select
+              <StringSingleSelectDropdown
                 value={formData.polo}
-                onChange={(e) => setFormData({ ...formData, polo: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
-              >
-                <option value="">Selecione</option>
-                {POLOS_LIST.map(p => <option key={p} value={p}>{p}</option>)}
-              </select>
+                onChange={(polo) => setFormData({ ...formData, polo })}
+                options={POLOS_LIST}
+                placeholder="Selecione"
+                emptyOptionLabel="Selecione"
+              />
             </div>
             </div>
             <div className="flex items-center">
@@ -1336,14 +1343,12 @@ function ImportCostCentersModal({ isOpen, onClose, onSuccess }: { isOpen: boolea
                             />
                           </td>
                           <td className="px-4 py-2">
-                            <select
+                            <StringSingleSelectDropdown
                               value={row.dados.Ativo || 'Ativo'}
-                              onChange={(e) => updateRow(index, 'Ativo', e.target.value)}
-                              className="w-full px-2 py-1 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                            >
-                              <option value="Ativo">Ativo</option>
-                              <option value="Inativo">Inativo</option>
-                            </select>
+                              onChange={(v) => updateRow(index, 'Ativo', v)}
+                              options={IMPORT_ACTIVE_OPTIONS}
+                              allowEmpty={false}
+                            />
                           </td>
                           <td className="px-4 py-2">
                             <button

@@ -84,7 +84,7 @@
 
 @layer components {
   .btn {
-    @apply inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none ring-offset-background;
+    @apply inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none disabled:opacity-50 disabled:pointer-events-none;
   }
   
   .btn-primary {
@@ -128,7 +128,7 @@
   }
   
   .input {
-    @apply flex h-10 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent disabled:cursor-not-allowed disabled:opacity-50;
+    @apply flex h-10 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-0 disabled:cursor-not-allowed disabled:opacity-50;
   }
   
   /* Ajustar padding e cursor para inputs de data e hora */
@@ -156,7 +156,7 @@
   }
   
   .input-error {
-    @apply input border-error-500 focus:ring-error-500;
+    @apply input border-error-500;
   }
 
   /* Campos de data/hora do Kanban — evita indicador absoluto que estoura a modal */
@@ -181,16 +181,16 @@
   
   /* Estilos para selects */
   select {
-    @apply flex h-10 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent disabled:cursor-not-allowed disabled:opacity-50;
+    @apply flex h-10 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-0 disabled:cursor-not-allowed disabled:opacity-50;
   }
   
   select option {
-    @apply bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100;
+    @apply bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100;
   }
   
   /* Estilos para textarea */
   textarea {
-    @apply flex min-h-[80px] w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent disabled:cursor-not-allowed disabled:opacity-50;
+    @apply flex min-h-[80px] w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-0 disabled:cursor-not-allowed disabled:opacity-50;
   }
 
   /* Modal novo grupo — descrição: mesmo foco vermelho do input (evita anel azul do textarea global) */
@@ -198,7 +198,7 @@
     /* Mesmo tom de placeholder que o input ao lado (o textarea global usa dark:placeholder:text-gray-500). */
     @apply min-h-0 w-full rounded-xl border border-transparent bg-gray-100 dark:bg-gray-800 px-4 py-2.5 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-400
       shadow-none ring-0 ring-offset-0
-      focus:border-red-500/50 focus:outline-none focus:ring-2 focus:ring-red-500/30
+      focus:outline-none focus:ring-0
       resize-none disabled:cursor-not-allowed disabled:opacity-50;
   }
 
@@ -564,4 +564,113 @@
     animation: none !important;
     transition: none !important;
   }
+}
+
+/* === Campos de formulário: sem destaque visual ao focar (global) === */
+:is(
+  input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):not([type='hidden']):not([type='submit']):not([type='button']):not([type='reset']):not([type='image']),
+  textarea,
+  select,
+  [role='combobox']
+):is(:focus, :focus-visible) {
+  outline: none !important;
+  box-shadow: none !important;
+  --tw-ring-shadow: 0 0 #0000 !important;
+  --tw-ring-offset-shadow: 0 0 #0000 !important;
+  --tw-ring-width: 0px !important;
+  --tw-ring-offset-width: 0px !important;
+}
+
+:is(input, textarea, select)[class*='border-transparent']:is(:focus, :focus-visible) {
+  border-color: transparent !important;
+}
+
+/* === Campos de formulário: borda vermelha animada ao focar (global) === */
+:is(
+  input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):not([type='hidden']):not([type='submit']):not([type='button']):not([type='reset']),
+  textarea,
+  select,
+  [role='combobox'],
+  button[data-form-field-trigger='true'],
+  button[data-form-field-shell='true'],
+  [data-form-field-shell='true']
+):not([class*='border-transparent']) {
+  transition: border-color 0.2s ease;
+}
+
+@keyframes form-field-focus-border {
+  from {
+    border-color: rgb(209 213 219);
+  }
+  to {
+    border-color: rgb(220 38 38);
+  }
+}
+
+@keyframes form-field-focus-border-dark {
+  from {
+    border-color: rgb(75 85 99);
+  }
+  to {
+    border-color: rgb(248 113 113);
+  }
+}
+
+:is(
+  input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):not([type='hidden']):not([type='submit']):not([type='button']):not([type='reset']),
+  textarea,
+  select,
+  [role='combobox'],
+  button[data-form-field-trigger='true'],
+  button[data-form-field-shell='true']
+):not([class*='border-transparent']):is(:focus, :focus-visible),
+button[data-form-field-trigger='true'][aria-expanded='true']:not([class*='border-transparent']),
+[data-form-field-shell='true']:focus-within:not([class*='border-transparent']) {
+  outline: none !important;
+  box-shadow: none !important;
+  --tw-ring-shadow: 0 0 #0000 !important;
+  --tw-ring-offset-shadow: 0 0 #0000 !important;
+  --tw-ring-width: 0px !important;
+  --tw-ring-offset-width: 0px !important;
+  --tw-border-opacity: 1 !important;
+  animation: form-field-focus-border 0.22s ease-out forwards;
+}
+
+html:not(.dark)
+  :is(
+    input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):not([type='hidden']):not([type='submit']):not([type='button']):not([type='reset']),
+    textarea,
+    select,
+    [role='combobox'],
+    button[data-form-field-trigger='true'],
+    button[data-form-field-shell='true']
+  ):not([class*='border-transparent']):is(:focus, :focus-visible),
+html:not(.dark)
+  button[data-form-field-trigger='true'][aria-expanded='true']:not([class*='border-transparent']),
+html:not(.dark) [data-form-field-shell='true']:focus-within:not([class*='border-transparent']) {
+  border-color: rgb(220 38 38) !important;
+}
+
+html.dark
+  :is(
+    input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):not([type='hidden']):not([type='submit']):not([type='button']):not([type='reset']),
+    textarea,
+    select,
+    [role='combobox'],
+    button[data-form-field-trigger='true'],
+    button[data-form-field-shell='true']
+  ):not([class*='border-transparent']):is(:focus, :focus-visible),
+html.dark
+  button[data-form-field-trigger='true'][aria-expanded='true']:not([class*='border-transparent']),
+html.dark [data-form-field-shell='true']:focus-within:not([class*='border-transparent']) {
+  border-color: rgb(248 113 113) !important;
+  animation-name: form-field-focus-border-dark;
+}
+
+/* Gatilhos customizados: sem outline/anel (borda vermelha vem da regra acima) */
+button[data-form-field-trigger='true']:is(:focus, :focus-visible) {
+  outline: none !important;
+  box-shadow: none !important;
+  --tw-ring-shadow: 0 0 #0000 !important;
+  --tw-ring-offset-shadow: 0 0 #0000 !important;
 }

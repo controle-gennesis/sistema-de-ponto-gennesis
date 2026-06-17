@@ -14,6 +14,15 @@ import { usePermissions } from '@/hooks/usePermissions';
 import { FdStatusBadges } from '@/components/engenharia/FdStatusBadges';
 import { formatCurrencyDisplay, type FichaDemandaApprovalRecord } from '@/lib/fichaDemandaApproval';
 import { listTableRowClasses, rowActionMenuButtonClass } from '@/components/ui/listTableUi';
+import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
+
+const FD_PHASE_FILTER_OPTIONS = labeledToSelectOptions([
+  { value: 'PENDING', label: 'Aguardando aprovação' },
+  { value: 'APPROVED', label: 'Aprovadas' },
+  { value: 'REJECTED', label: 'Reprovadas' },
+  { value: 'ALL', label: 'Todas' },
+]);
 
 type FdPhaseFilter = 'PENDING' | 'APPROVED' | 'REJECTED' | 'ALL';
 
@@ -361,16 +370,13 @@ export function FdApprovalsSection() {
       <Modal isOpen={isFdFiltersOpen} onClose={() => setIsFdFiltersOpen(false)} title="Filtro — Fichas de Demanda" size="sm">
         <div className="space-y-4">
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Status</label>
-          <select
+          <StringSingleSelectDropdown
             value={fdPhase}
-            onChange={(e) => setFdPhase(e.target.value as FdPhaseFilter)}
-            className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-          >
-            <option value="PENDING">Aguardando aprovação</option>
-            <option value="APPROVED">Aprovadas</option>
-            <option value="REJECTED">Reprovadas</option>
-            <option value="ALL">Todas</option>
-          </select>
+            onChange={(value) => setFdPhase(value as FdPhaseFilter)}
+            options={FD_PHASE_FILTER_OPTIONS}
+            allowEmpty={false}
+            className="w-full"
+          />
           <div className="flex justify-end gap-2">
             <Button type="button" variant="outline" onClick={() => setIsFdFiltersOpen(false)}>
               Fechar

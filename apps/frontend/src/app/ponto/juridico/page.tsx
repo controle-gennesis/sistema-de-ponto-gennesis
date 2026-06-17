@@ -37,6 +37,17 @@ import {
   Legend,
   ResponsiveContainer,
 } from 'recharts';
+import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
+
+const JURIDICO_STATUS_FILTER_OPTIONS = labeledToSelectOptions([
+  { value: 'todos', label: 'Todos os status' },
+  { value: 'ARQUIVADO', label: 'Arquivados' },
+  { value: 'ANDAMENTO PROCESSUAL', label: 'Em Andamento' },
+  { value: 'SUSPENSO', label: 'Suspensos' },
+  { value: 'ACORDO', label: 'Acordos' },
+  { value: 'AUDIÊNCIA INSTRUÇÃO', label: 'Em Instrução' },
+]);
 import { processosJuridicos, calcularEstatisticas, ProcessoJuridico } from '@/data/juridico-processos';
 
 const COLORS = {
@@ -439,18 +450,12 @@ export default function JuridicoPage() {
                         className="pl-10 pr-4 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                       />
                     </div>
-                    <select
+                    <StringSingleSelectDropdown
                       value={statusFilter}
-                      onChange={(e) => setStatusFilter(e.target.value)}
-                      className="px-4 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                    >
-                      <option value="todos">Todos os status</option>
-                      <option value="ARQUIVADO">Arquivados</option>
-                      <option value="ANDAMENTO PROCESSUAL">Em Andamento</option>
-                      <option value="SUSPENSO">Suspensos</option>
-                      <option value="ACORDO">Acordos</option>
-                      <option value="AUDIÊNCIA INSTRUÇÃO">Em Instrução</option>
-                    </select>
+                      onChange={setStatusFilter}
+                      options={JURIDICO_STATUS_FILTER_OPTIONS}
+                      allowEmpty={false}
+                    />
                   </div>
                 </div>
               </div>

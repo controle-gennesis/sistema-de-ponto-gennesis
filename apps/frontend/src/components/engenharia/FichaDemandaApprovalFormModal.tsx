@@ -6,6 +6,8 @@ import { useQuery } from '@tanstack/react-query';
 import { Calendar, Loader2, Minus, Paperclip, Plus, Trash2, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '@/lib/api';
+import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import {
   adjustCurrency,
   currencyDigitsToFormatted,
@@ -216,6 +218,39 @@ export function FichaDemandaApprovalFormModal({
     return options;
   }, [pleitosData]);
 
+  const solicitanteSelectOptions = useMemo(
+    () =>
+      labeledToSelectOptions([
+        { value: '', label: 'Selecione o solicitante' },
+        ...users.map((u) => ({ value: u.id, label: u.name })),
+      ]),
+    [users]
+  );
+
+  const contratoSelectOptions = useMemo(
+    () =>
+      labeledToSelectOptions([
+        { value: '', label: 'Selecione o contrato' },
+        ...contracts.map((c) => ({
+          value: c.id,
+          label: `${c.number} — ${c.name}`,
+        })),
+      ]),
+    [contracts]
+  );
+
+  const obraSelectOptions = useMemo(() => {
+    const emptyLabel = !form.contratoId
+      ? 'Selecione um contrato primeiro'
+      : loadingObras
+        ? 'Carregando obras...'
+        : 'Selecione a obra';
+    return labeledToSelectOptions([
+      { value: '', label: emptyLabel },
+      ...obras.map((obra) => ({ value: obra, label: obra })),
+    ]);
+  }, [form.contratoId, loadingObras, obras]);
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const error = validateFichaDemandaForm(form);
@@ -305,55 +340,31 @@ export function FichaDemandaApprovalFormModal({
               <div className="grid grid-cols-1 gap-4">
                 <div>
                   <FieldLabel required>Solicitante</FieldLabel>
-                  <select
+                  <StringSingleSelectDropdown
                     value={form.solicitanteId}
-                    onChange={(e) => setForm({ ...form, solicitanteId: e.target.value })}
-                    className={fieldClass}
-                  >
-                    <option value="">Selecione o solicitante</option>
-                    {users.map((u) => (
-                      <option key={u.id} value={u.id}>
-                        {u.name}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={(v) => setForm({ ...form, solicitanteId: v })}
+                    options={solicitanteSelectOptions}
+                    allowEmpty={false}
+                  />
                 </div>
                 <div>
                   <FieldLabel required>Contrato</FieldLabel>
-                  <select
+                  <StringSingleSelectDropdown
                     value={form.contratoId}
-                    onChange={(e) => setForm({ ...form, contratoId: e.target.value, obra: '' })}
-                    className={fieldClass}
-                  >
-                    <option value="">Selecione o contrato</option>
-                    {contracts.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.number} — {c.name}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={(v) => setForm({ ...form, contratoId: v, obra: '' })}
+                    options={contratoSelectOptions}
+                    allowEmpty={false}
+                  />
                 </div>
                 <div>
                   <FieldLabel required>Obra</FieldLabel>
-                  <select
+                  <StringSingleSelectDropdown
                     value={form.obra}
-                    onChange={(e) => setForm({ ...form, obra: e.target.value })}
-                    className={fieldClass}
+                    onChange={(v) => setForm({ ...form, obra: v })}
+                    options={obraSelectOptions}
                     disabled={!form.contratoId || loadingObras}
-                  >
-                    <option value="">
-                      {!form.contratoId
-                        ? 'Selecione um contrato primeiro'
-                        : loadingObras
-                          ? 'Carregando obras...'
-                          : 'Selecione a obra'}
-                    </option>
-                    {obras.map((obra) => (
-                      <option key={obra} value={obra}>
-                        {obra}
-                      </option>
-                    ))}
-                  </select>
+                    allowEmpty={false}
+                  />
                 </div>
               </div>
             </div>

@@ -13,6 +13,8 @@ import {
   type ExtratoCaixaFiltroSalvo,
   type ExtratoFiltroAllValues
 } from '@/lib/extratoCaixaFiltrosSalvos';
+import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 
 type ExtratoFiltrosSalvosPanelProps = {
   filterDraft: ExtratoCaixaFiltroPayload;
@@ -44,6 +46,11 @@ export function ExtratoFiltrosSalvosPanel({
   const selectedPreset = useMemo(
     () => filtrosSalvos.find((f) => f.id === selectedId) ?? null,
     [filtrosSalvos, selectedId]
+  );
+
+  const presetSelectOptions = useMemo(
+    () => labeledToSelectOptions(filtrosSalvos.map((f) => ({ value: f.id, label: f.nome }))),
+    [filtrosSalvos]
   );
 
   const saveMutation = useMutation({
@@ -138,31 +145,24 @@ export function ExtratoFiltrosSalvosPanel({
           >
             Selecionar filtro
           </label>
-          <select
-            id="extrato-filtro-salvo-select"
+          <StringSingleSelectDropdown
             value={selectedId}
-            onChange={(e) => {
-              const id = e.target.value;
+            onChange={(id) => {
               setSelectedId(id);
               const preset = filtrosSalvos.find((f) => f.id === id);
               if (preset) setSaveName(preset.nome);
             }}
+            options={presetSelectOptions}
             disabled={busy || filtrosSalvos.length === 0}
-            className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-          >
-            <option value="">
-              {isLoading
+            placeholder={
+              isLoading
                 ? 'Carregando…'
                 : filtrosSalvos.length === 0
                   ? 'Nenhum filtro salvo ainda'
-                  : 'Escolha um filtro…'}
-            </option>
-            {filtrosSalvos.map((f) => (
-              <option key={f.id} value={f.id}>
-                {f.nome}
-              </option>
-            ))}
-          </select>
+                  : 'Escolha um filtro…'
+            }
+            className="w-full"
+          />
           {selectedPreset ? (
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400" title={describeExtratoFiltroPreset(selectedPreset.payload)}>
               {describeExtratoFiltroPreset(selectedPreset.payload)}
@@ -207,7 +207,7 @@ export function ExtratoFiltrosSalvosPanel({
             maxLength={80}
             disabled={busy}
             placeholder="Ex.: Polo DF — saídas"
-            className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 disabled:opacity-60 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+            className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 disabled:opacity-60 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
           />
         </div>
         <button

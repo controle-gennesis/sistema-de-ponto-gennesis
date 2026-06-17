@@ -30,6 +30,7 @@ import {
 import { getListTableRowClassName, ListRowNavigableLabel } from '@/components/ui/listTableUi';
 import { useRowActionMenu } from '@/hooks/useRowActionMenu';
 import { Modal } from '@/components/ui/Modal';
+import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
@@ -41,6 +42,25 @@ import {
   normalizeSupplierCategory,
   parseSuppliersFromFile
 } from '@/lib/supplierImport';
+import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
+
+const SUPPLIER_ACTIVE_FILTER_OPTIONS = labeledToSelectOptions([
+  { value: 'all', label: 'Todos (ativos e inativos)' },
+  { value: 'true', label: 'Somente ativos' },
+  { value: 'false', label: 'Somente inativos' },
+]);
+
+const PARTY_TYPE_SELECT_OPTIONS = labeledToSelectOptions([
+  { value: 'Fornecedor', label: 'Fornecedor' },
+  { value: 'Cliente', label: 'Cliente' },
+  { value: 'Cliente/Fornecedor', label: 'Cliente/Fornecedor' },
+]);
+
+const CATEGORY_SELECT_OPTIONS = labeledToSelectOptions([
+  { value: '', label: 'Selecione...' },
+  { value: 'Pessoa Física', label: 'Pessoa Física' },
+  { value: 'Pessoa Jurídica', label: 'Pessoa Jurídica' },
+]);
 
 interface Supplier {
   id: string;
@@ -595,15 +615,12 @@ export default function FornecedoresPage() {
             <div className="space-y-4">
               <div>
                 <label className={labelClass}>Status na listagem</label>
-                <select
+                <StringSingleSelectDropdown
                   value={supplierActiveFilter}
-                  onChange={(e) => setSupplierActiveFilter(e.target.value)}
-                  className={inputClass}
-                >
-                  <option value="all">Todos (ativos e inativos)</option>
-                  <option value="true">Somente ativos</option>
-                  <option value="false">Somente inativos</option>
-                </select>
+                  onChange={setSupplierActiveFilter}
+                  options={SUPPLIER_ACTIVE_FILTER_OPTIONS}
+                  allowEmpty={false}
+                />
               </div>
               <div className="flex items-center justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
                 <button
@@ -901,27 +918,21 @@ export default function FornecedoresPage() {
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <div>
                       <label className={labelClass}>Cliente/Fornecedor</label>
-                      <select
+                      <StringSingleSelectDropdown
                         value={formData.partyType}
-                        onChange={(e) => setFormData({ ...formData, partyType: e.target.value })}
-                        className={inputClass}
-                      >
-                        <option value="Fornecedor">Fornecedor</option>
-                        <option value="Cliente">Cliente</option>
-                        <option value="Cliente/Fornecedor">Cliente/Fornecedor</option>
-                      </select>
+                        onChange={(v) => setFormData({ ...formData, partyType: v })}
+                        options={PARTY_TYPE_SELECT_OPTIONS}
+                        allowEmpty={false}
+                      />
                     </div>
                     <div>
                       <label className={labelClass}>Categoria</label>
-                      <select
+                      <StringSingleSelectDropdown
                         value={formData.category}
-                        onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                        className={inputClass}
-                      >
-                        <option value="">Selecione...</option>
-                        <option value="Pessoa Física">Pessoa Física</option>
-                        <option value="Pessoa Jurídica">Pessoa Jurídica</option>
-                      </select>
+                        onChange={(v) => setFormData({ ...formData, category: v })}
+                        options={CATEGORY_SELECT_OPTIONS}
+                        allowEmpty={false}
+                      />
                     </div>
                     <div>
                       <label className={labelClass}>Nome Fantasia</label>

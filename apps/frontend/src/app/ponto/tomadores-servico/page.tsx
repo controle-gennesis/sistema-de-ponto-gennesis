@@ -15,6 +15,8 @@ import toast from 'react-hot-toast';
 import api from '@/lib/api';
 import { useEspelhoNfBootstrap } from '@/hooks/useEspelhoNfBootstrap';
 import { useCostCenters } from '@/hooks/useCostCenters';
+import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 
 interface ServiceTakerRow {
   id: string;
@@ -113,6 +115,44 @@ export default function TomadoresEspelhoNfPage() {
     for (const b of bankAccounts) m.set(b.id, b.name || b.id);
     return m;
   }, [bankAccounts]);
+
+  const costCenterFormOptions = useMemo(
+    () =>
+      labeledToSelectOptions([
+        { value: '', label: 'Selecione…' },
+        ...costCenters
+          .map((cc) => {
+            const id = (cc as { id?: string }).id;
+            if (!id) return null;
+            const lab =
+              (cc as { label?: string }).label ||
+              (cc as { name?: string }).name ||
+              (cc as { code?: string }).code ||
+              id;
+            return { value: id, label: lab };
+          })
+          .filter((item): item is { value: string; label: string } => item !== null),
+      ]),
+    [costCenters]
+  );
+
+  const taxCodeFormOptions = useMemo(
+    () =>
+      labeledToSelectOptions([
+        { value: '', label: 'Selecione…' },
+        ...taxCodes.map((tx) => ({ value: tx.id, label: tx.cityName || tx.id })),
+      ]),
+    [taxCodes]
+  );
+
+  const bankAccountFormOptions = useMemo(
+    () =>
+      labeledToSelectOptions([
+        { value: '', label: 'Selecione…' },
+        ...bankAccounts.map((b) => ({ value: b.id, label: b.name })),
+      ]),
+    [bankAccounts]
+  );
 
   const rows = useMemo(() => {
     const list = (bootstrap?.takers ?? []) as ServiceTakerRow[];
@@ -448,28 +488,12 @@ export default function TomadoresEspelhoNfPage() {
                     <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                       Centro de Custo *
                     </label>
-                    <select
+                    <StringSingleSelectDropdown
                       value={formData.costCenterId}
-                      onChange={(e) => setFormData({ ...formData, costCenterId: e.target.value })}
-                      className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-                      required
-                    >
-                      <option value="">Selecione…</option>
-                      {costCenters.map((cc) => {
-                        const id = (cc as { id?: string }).id;
-                        if (!id) return null;
-                        const lab =
-                          (cc as { label?: string }).label ||
-                          (cc as { name?: string }).name ||
-                          (cc as { code?: string }).code ||
-                          id;
-                        return (
-                          <option key={id} value={id}>
-                            {lab}
-                          </option>
-                        );
-                      })}
-                    </select>
+                      onChange={(v) => setFormData({ ...formData, costCenterId: v })}
+                      options={costCenterFormOptions}
+                      allowEmpty={false}
+                    />
                   </div>
                   <div>
                     <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">CNPJ</label>
@@ -485,37 +509,23 @@ export default function TomadoresEspelhoNfPage() {
                     <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                       Código Tributário *
                     </label>
-                    <select
+                    <StringSingleSelectDropdown
                       value={formData.taxCodeId}
-                      onChange={(e) => setFormData({ ...formData, taxCodeId: e.target.value })}
-                      className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-                      required
-                    >
-                      <option value="">Selecione…</option>
-                      {taxCodes.map((tx) => (
-                        <option key={tx.id} value={tx.id}>
-                          {tx.cityName || tx.id}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={(v) => setFormData({ ...formData, taxCodeId: v })}
+                      options={taxCodeFormOptions}
+                      allowEmpty={false}
+                    />
                   </div>
                   <div>
                     <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                       Conta Bancária *
                     </label>
-                    <select
+                    <StringSingleSelectDropdown
                       value={formData.bankAccountId}
-                      onChange={(e) => setFormData({ ...formData, bankAccountId: e.target.value })}
-                      className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-                      required
-                    >
-                      <option value="">Selecione…</option>
-                      {bankAccounts.map((b) => (
-                        <option key={b.id} value={b.id}>
-                          {b.name}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={(v) => setFormData({ ...formData, bankAccountId: v })}
+                      options={bankAccountFormOptions}
+                      allowEmpty={false}
+                    />
                   </div>
                 </div>
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">

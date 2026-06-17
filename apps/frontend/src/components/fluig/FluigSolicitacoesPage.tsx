@@ -24,12 +24,19 @@ import {
   X,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
+import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { Modal } from '@/components/ui/Modal';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Loading } from '@/components/ui/Loading';
 import { useCostCenters } from '@/hooks/useCostCenters';
 import api from '@/lib/api';
 import * as XLSX from 'xlsx';
+
+const FLUIG_RECORDS_PER_PAGE_OPTIONS = [
+  { value: '25', label: '25', searchText: '25' },
+  { value: '50', label: '50', searchText: '50' },
+  { value: '100', label: '100', searchText: '100' },
+];
 
 export const G5_RELATORIO_DATASET_ID = 'G5-Relatorio-DF-GO-TODOS-SETORES';
 
@@ -1215,7 +1222,7 @@ export function FluigSolicitacoesPage({
                         onClick={() => handleDatasetTabClick(idx)}
                         className={`px-4 py-2 rounded-md text-sm font-medium transition-colors whitespace-nowrap ${
                           activeTab === idx
-                            ? 'bg-white dark:bg-gray-700 text-red-600 dark:text-red-400 shadow-sm'
+                            ? 'bg-white dark:bg-gray-800 text-red-600 dark:text-red-400 shadow-sm'
                             : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
                         }`}
                       >
@@ -1293,7 +1300,7 @@ export function FluigSolicitacoesPage({
                               setShowFornecedorDropdown(false);
                               setShowNaturezaOrcamentariaDropdown(false);
                             }}
-                            className="w-full h-10 pl-10 pr-11 text-left rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500 dark:focus:ring-red-400 focus:border-transparent relative"
+                            className="w-full h-10 pl-10 pr-11 text-left rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500 dark:focus:ring-red-400 focus:border-transparent relative"
                           >
                             <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4 pointer-events-none" />
                             <span className="block pr-6 text-sm truncate">
@@ -1309,13 +1316,13 @@ export function FluigSolicitacoesPage({
                           </button>
                         </div>
                         {showFilialDropdown && (
-                          <div className="absolute z-30 mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-lg p-3">
+                          <div className="absolute z-30 mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-lg p-3">
                             <input
                               type="text"
                               placeholder="Pesquisar..."
                               value={selectedFiliaisSearch}
                               onChange={(e) => setSelectedFiliaisSearch(e.target.value)}
-                              className="mb-2 block w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-red-500 dark:focus:ring-red-400"
+                              className="mb-2 block w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-red-500 dark:focus:ring-red-400"
                             />
                             <div className="flex items-center gap-2 mb-2">
                               <label htmlFor="select-all-filial" className="flex items-center gap-3 cursor-pointer group">
@@ -1406,7 +1413,7 @@ export function FluigSolicitacoesPage({
                               setShowFornecedorDropdown(false);
                               setShowNaturezaOrcamentariaDropdown(false);
                             }}
-                            className="w-full h-10 pl-10 pr-11 text-left rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500 dark:focus:ring-red-400 focus:border-transparent relative"
+                            className="w-full h-10 pl-10 pr-11 text-left rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500 dark:focus:ring-red-400 focus:border-transparent relative"
                           >
                             <Layers className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4 pointer-events-none" />
                             <span className="block pr-6 text-sm truncate">
@@ -1422,13 +1429,13 @@ export function FluigSolicitacoesPage({
                           </button>
                         </div>
                         {showCCDropdown && (
-                          <div className="absolute z-30 mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-lg p-3">
+                          <div className="absolute z-30 mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-lg p-3">
                             <input
                               type="text"
                               placeholder="Pesquisar..."
                               value={selectedCCSearch}
                               onChange={(e) => setSelectedCCSearch(e.target.value)}
-                              className="mb-2 block w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-red-500 dark:focus:ring-red-400"
+                              className="mb-2 block w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-red-500 dark:focus:ring-red-400"
                             />
                             <div className="flex items-center gap-2 mb-2">
                               <label htmlFor="select-all-cc" className="flex items-center gap-3 cursor-pointer group">
@@ -1526,7 +1533,7 @@ export function FluigSolicitacoesPage({
                               setShowFornecedorDropdown(false);
                               setShowNaturezaOrcamentariaDropdown(false);
                             }}
-                            className="w-full h-10 pl-10 pr-11 text-left rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500 dark:focus:ring-red-400 focus:border-transparent relative"
+                            className="w-full h-10 pl-10 pr-11 text-left rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500 dark:focus:ring-red-400 focus:border-transparent relative"
                           >
                             <Users className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4 pointer-events-none" />
                             <span className="block pr-6 text-sm truncate">
@@ -1542,13 +1549,13 @@ export function FluigSolicitacoesPage({
                           </button>
                         </div>
                         {showSetorSolicitanteDropdown && (
-                          <div className="absolute z-30 mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-lg p-3">
+                          <div className="absolute z-30 mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-lg p-3">
                             <input
                               type="text"
                               placeholder="Pesquisar..."
                               value={selectedSetorSolicitanteSearch}
                               onChange={(e) => setSelectedSetorSolicitanteSearch(e.target.value)}
-                              className="mb-2 block w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-red-500 dark:focus:ring-red-400"
+                              className="mb-2 block w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-red-500 dark:focus:ring-red-400"
                             />
                             <div className="flex items-center gap-2 mb-2">
                               <label htmlFor="select-all-setor-solicitante" className="flex items-center gap-3 cursor-pointer group">
@@ -1639,7 +1646,7 @@ export function FluigSolicitacoesPage({
                               setShowFornecedorDropdown(false);
                               setShowNaturezaOrcamentariaDropdown(false);
                             }}
-                            className="w-full h-10 pl-10 pr-11 text-left rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500 dark:focus:ring-red-400 focus:border-transparent relative"
+                            className="w-full h-10 pl-10 pr-11 text-left rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500 dark:focus:ring-red-400 focus:border-transparent relative"
                           >
                             <AlertCircle className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4 pointer-events-none" />
                             <span className="block pr-6 text-sm truncate">
@@ -1655,13 +1662,13 @@ export function FluigSolicitacoesPage({
                           </button>
                         </div>
                         {showUrgenciaDropdown && (
-                          <div className="absolute z-30 mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-lg p-3">
+                          <div className="absolute z-30 mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-lg p-3">
                             <input
                               type="text"
                               placeholder="Pesquisar..."
                               value={selectedUrgenciaSearch}
                               onChange={(e) => setSelectedUrgenciaSearch(e.target.value)}
-                              className="mb-2 block w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-red-500 dark:focus:ring-red-400"
+                              className="mb-2 block w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-red-500 dark:focus:ring-red-400"
                             />
                             <div className="flex items-center gap-2 mb-2">
                               <label htmlFor="select-all-urgencia" className="flex items-center gap-3 cursor-pointer group">
@@ -1752,7 +1759,7 @@ export function FluigSolicitacoesPage({
                               setShowUrgenciaDropdown(false);
                               setShowNaturezaOrcamentariaDropdown(false);
                             }}
-                            className="w-full h-10 pl-10 pr-11 text-left rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500 dark:focus:ring-red-400 focus:border-transparent relative"
+                            className="w-full h-10 pl-10 pr-11 text-left rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500 dark:focus:ring-red-400 focus:border-transparent relative"
                           >
                             <Truck className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4 pointer-events-none" />
                             <span className="block pr-6 text-sm truncate">
@@ -1768,13 +1775,13 @@ export function FluigSolicitacoesPage({
                           </button>
                         </div>
                         {showFornecedorDropdown && (
-                          <div className="absolute z-30 mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-lg p-3">
+                          <div className="absolute z-30 mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-lg p-3">
                             <input
                               type="text"
                               placeholder="Pesquisar..."
                               value={selectedFornecedoresSearch}
                               onChange={(e) => setSelectedFornecedoresSearch(e.target.value)}
-                              className="mb-2 block w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-red-500 dark:focus:ring-red-400"
+                              className="mb-2 block w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-red-500 dark:focus:ring-red-400"
                             />
                             <div className="flex items-center gap-2 mb-2">
                               <label htmlFor="select-all-fornecedor" className="flex items-center gap-3 cursor-pointer group">
@@ -1867,7 +1874,7 @@ export function FluigSolicitacoesPage({
                               setShowUrgenciaDropdown(false);
                               setShowFornecedorDropdown(false);
                             }}
-                            className="w-full h-10 pl-10 pr-11 text-left rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500 dark:focus:ring-red-400 focus:border-transparent relative"
+                            className="w-full h-10 pl-10 pr-11 text-left rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500 dark:focus:ring-red-400 focus:border-transparent relative"
                           >
                             <Landmark className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4 pointer-events-none" />
                             <span className="block pr-6 text-sm truncate">
@@ -1883,13 +1890,13 @@ export function FluigSolicitacoesPage({
                           </button>
                         </div>
                         {showNaturezaOrcamentariaDropdown && (
-                          <div className="absolute z-30 mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-lg p-3">
+                          <div className="absolute z-30 mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-lg p-3">
                             <input
                               type="text"
                               placeholder="Pesquisar..."
                               value={selectedNaturezaOrcamentariaSearch}
                               onChange={(e) => setSelectedNaturezaOrcamentariaSearch(e.target.value)}
-                              className="mb-2 block w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-red-500 dark:focus:ring-red-400"
+                              className="mb-2 block w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-red-500 dark:focus:ring-red-400"
                             />
                             <div className="flex items-center gap-2 mb-2">
                               <label htmlFor="select-all-natureza-orcamentaria" className="flex items-center gap-3 cursor-pointer group">
@@ -2136,15 +2143,13 @@ export function FluigSolicitacoesPage({
                               <label className="text-sm text-gray-600 dark:text-gray-400">
                                 Por página
                               </label>
-                              <select
-                                value={recordsPerPage}
-                                onChange={(e) => setRecordsPerPage(Number(e.target.value) as 25 | 50 | 100)}
-                                className="text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500/50 focus:border-red-500 dark:focus:ring-red-500/30 dark:focus:border-red-500 transition-shadow min-w-[5rem]"
-                              >
-                                <option value={25}>25</option>
-                                <option value={50}>50</option>
-                                <option value={100}>100</option>
-                              </select>
+                              <StringSingleSelectDropdown
+                                value={String(recordsPerPage)}
+                                onChange={(v) => setRecordsPerPage(Number(v) as 25 | 50 | 100)}
+                                options={FLUIG_RECORDS_PER_PAGE_OPTIONS}
+                                allowEmpty={false}
+                                className="min-w-[5rem]"
+                              />
                             </div>
                           )}
                           <div

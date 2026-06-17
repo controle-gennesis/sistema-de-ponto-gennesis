@@ -4,6 +4,7 @@ import { X, Calendar, User, Building, DollarSign, Clock, AlertTriangle, CreditCa
 import { PayrollEmployee } from '@/types';
 import api from '@/lib/api';
 import { useCostCenters } from '@/hooks/useCostCenters';
+import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 
 interface PayrollDetailModalProps {
   employee: PayrollEmployee;
@@ -602,30 +603,19 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                   <span className="text-sm text-gray-600 dark:text-gray-400">Alocação Final:</span>
                   {editingField === 'alocacaoFinal' ? (
                     <div className="flex items-center justify-end gap-2">
-                      <select
+                      <StringSingleSelectDropdown
                         value={alocacaoFinal || ''}
-                        onChange={(e) => setAlocacaoFinal(e.target.value || null)}
-                        className="text-sm px-2 py-1 border border-gray-300 dark:border-gray-600 rounded dark:bg-gray-700 dark:text-gray-100 w-64 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        autoFocus
-                        onKeyDown={(e) => {
-                          if (e.key === 'Escape') {
-                            handleCancelEdit();
-                          }
-                        }}
-                      >
-                        <option value="">Selecione um centro de custo</option>
-                        {loadingCostCenters ? (
-                          <option disabled>Carregando centros de custo...</option>
-                        ) : costCentersList.length === 0 ? (
-                          <option disabled>Nenhum centro de custo disponível</option>
-                        ) : (
-                          costCentersList.map((center) => (
-                            <option key={center} value={center}>
-                              {center}
-                            </option>
-                          ))
-                        )}
-                      </select>
+                        onChange={(value) => setAlocacaoFinal(value || null)}
+                        options={costCentersList}
+                        disabled={loadingCostCenters}
+                        placeholder={
+                          loadingCostCenters
+                            ? 'Carregando centros de custo...'
+                            : 'Selecione um centro de custo'
+                        }
+                        emptyOptionsMessage="Nenhum centro de custo disponível"
+                        className="w-64"
+                      />
                       <button
                         onClick={handleSaveManualValues}
                         disabled={isSaving}
@@ -1100,7 +1090,7 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                               const value = e.target.value.replace(/[^0-9.,]/g, '');
                               setHorasExtrasValue(value ? parseFloat(value.replace(',', '.')) : null);
                             }}
-                            className="w-24 px-2 py-1 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100"
+                            className="w-24 px-2 py-1 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100"
                             placeholder="0"
                             onClick={(e) => e.stopPropagation()}
                             autoFocus
@@ -1205,7 +1195,7 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                               const value = e.target.value.replace(/[^0-9.,]/g, '');
                               setDsrHEValue(value ? parseFloat(value.replace(',', '.')) : null);
                             }}
-                            className="w-24 px-2 py-1 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100"
+                            className="w-24 px-2 py-1 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100"
                             placeholder="0"
                             onClick={(e) => e.stopPropagation()}
                             autoFocus
@@ -1349,7 +1339,7 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                               const value = e.target.value.replace(/[^0-9.,]/g, '');
                               setDescontoPorFaltas(value ? parseFloat(value.replace(',', '.')) : null);
                             }}
-                            className="w-24 px-2 py-1 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100"
+                            className="w-24 px-2 py-1 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100"
                             placeholder="0"
                             onClick={(e) => e.stopPropagation()}
                             autoFocus
@@ -1451,7 +1441,7 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                               const value = e.target.value.replace(/[^0-9.,]/g, '');
                               setDsrPorFalta(value ? parseFloat(value.replace(',', '.')) : null);
                             }}
-                            className="w-24 px-2 py-1 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100"
+                            className="w-24 px-2 py-1 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100"
                             placeholder="0"
                             onClick={(e) => e.stopPropagation()}
                             autoFocus
@@ -1916,7 +1906,7 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                               setInssRescisao(parseFloat(value.replace(',', '.')) || 0);
                             }}
                             disabled={isPayrollFinalized}
-                            className="w-20 px-2 py-1 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="w-20 px-2 py-1 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
                             placeholder="0"
                             onClick={(e) => e.stopPropagation()}
                             autoFocus
@@ -2001,7 +1991,7 @@ export function PayrollDetailModal({ employee, month, year, isOpen, onClose, onE
                               setInss13(parseFloat(value.replace(',', '.')) || 0);
                             }}
                             disabled={isPayrollFinalized}
-                            className="w-20 px-2 py-1 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="w-20 px-2 py-1 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
                             placeholder="0"
                             onClick={(e) => e.stopPropagation()}
                             autoFocus

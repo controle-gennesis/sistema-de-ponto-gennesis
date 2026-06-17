@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
@@ -18,6 +18,7 @@ import {
 const ROW_ACTION_MENU_WIDTH_PX = 224;
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Modal } from '@/components/ui/Modal';
+import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
@@ -30,6 +31,7 @@ import {
   pleitoStatusReadOnlySpanClass,
   pleitoStatusSelectBase
 } from '@/lib/pleitoStatusStyles';
+import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 
 const RVI_RVF_OPCOES = ['FEITO', 'PENDENTE'];
 
@@ -71,6 +73,45 @@ const MESES = [
   { value: '11', label: 'Novembro' },
   { value: '12', label: 'Dezembro' }
 ];
+
+const CREATION_MONTH_SELECT_OPTIONS = labeledToSelectOptions([
+  { value: '', label: 'Selecione' },
+  ...MESES.map((m) => ({ value: m.value, label: m.label })),
+]);
+const BUDGET_STATUS_SELECT_OPTIONS = labeledToSelectOptions([
+  { value: '', label: 'Selecione' },
+  ...STATUS_ORCAMENTO_OPCOES.map((op) => ({ value: op, label: op })),
+  { value: OUTRO_STATUS, label: 'Outro (cadastrar novo)' },
+]);
+const EXECUTION_STATUS_SELECT_OPTIONS = labeledToSelectOptions([
+  { value: '', label: 'Selecione' },
+  ...STATUS_EXECUCAO_OPCOES.map((op) => ({ value: op, label: op })),
+]);
+const RVI_RVF_SELECT_OPTIONS = labeledToSelectOptions([
+  { value: '', label: 'Selecione' },
+  ...RVI_RVF_OPCOES.map((op) => ({ value: op, label: op })),
+]);
+const FILTER_MONTH_OPTIONS = labeledToSelectOptions([
+  { value: '', label: 'Todos' },
+  ...MESES.map((m) => ({ value: m.value, label: m.label })),
+]);
+const FILTER_YEAR_OPTIONS = labeledToSelectOptions([
+  { value: '', label: 'Todos' },
+  ...ANOS_FILTRO.map((y) => ({ value: String(y), label: String(y) })),
+]);
+const FILTER_BUDGET_STATUS_OPTIONS = labeledToSelectOptions([
+  { value: '', label: 'Todos' },
+  ...STATUS_ORCAMENTO_OPCOES.map((op) => ({ value: op, label: op })),
+]);
+const FILTER_PENDING_BILLING_OPTIONS = labeledToSelectOptions([
+  { value: '', label: 'Todos' },
+  { value: 'sim', label: 'Com valor pendente' },
+  { value: 'nao', label: 'Sem pendência' },
+]);
+const BILLING_STATUS_ROW_OPTIONS = labeledToSelectOptions([
+  { value: 'nao-pago', label: 'Não pago' },
+  { value: 'pago', label: 'Pago' },
+]);
 
 function getCurrentMonthYear() {
   const d = new Date();
@@ -436,6 +477,19 @@ function AndamentoDaOsPageContent() {
   const rows = (listData?.data || []) as Pleito[];
   const pagination = listData?.pagination || { page: 1, limit: 20, total: 0, totalPages: 1 };
   const contractsForFilter = (contractsListData?.data || []) as Array<{ id: string; name: string; number: string }>;
+
+  const contractFilterOptions = useMemo(
+    () =>
+      labeledToSelectOptions([
+        { value: '', label: 'Todos' },
+        ...contractsForFilter.map((c) => ({
+          value: c.id,
+          label: c.number ? `${c.number} — ${c.name}` : c.name,
+        })),
+      ]),
+    [contractsForFilter]
+  );
+
   const itemsPerPage = 20;
   const totalFiltered = pagination.total;
   const totalPages = Math.max(1, pagination.totalPages);
@@ -510,61 +564,43 @@ function AndamentoDaOsPageContent() {
                 <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                   Contrato
                 </label>
-                <select
+                <StringSingleSelectDropdown
                   value={filterContractId}
-                  onChange={(e) => {
-                    setFilterContractId(e.target.value);
+                  onChange={(v) => {
+                    setFilterContractId(v);
                     setCurrentPage(1);
                   }}
-                  className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                >
-                  <option value="">Todos</option>
-                  {contractsForFilter.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.number ? `${c.number} — ${c.name}` : c.name}
-                    </option>
-                  ))}
-                </select>
+                  options={contractFilterOptions}
+                  allowEmpty={false}
+                />
               </div>
               <div>
                 <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                   Mês de criação
                 </label>
-                <select
+                <StringSingleSelectDropdown
                   value={filterMonth}
-                  onChange={(e) => {
-                    setFilterMonth(e.target.value);
+                  onChange={(v) => {
+                    setFilterMonth(v);
                     setCurrentPage(1);
                   }}
-                  className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                >
-                  <option value="">Todos</option>
-                  {MESES.map((m) => (
-                    <option key={m.value} value={m.value}>
-                      {m.label}
-                    </option>
-                  ))}
-                </select>
+                  options={FILTER_MONTH_OPTIONS}
+                  allowEmpty={false}
+                />
               </div>
               <div>
                 <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                   Ano de criação
                 </label>
-                <select
+                <StringSingleSelectDropdown
                   value={filterYear}
-                  onChange={(e) => {
-                    setFilterYear(e.target.value);
+                  onChange={(v) => {
+                    setFilterYear(v);
                     setCurrentPage(1);
                   }}
-                  className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                >
-                  <option value="">Todos</option>
-                  {ANOS_FILTRO.map((y) => (
-                    <option key={y} value={String(y)}>
-                      {y}
-                    </option>
-                  ))}
-                </select>
+                  options={FILTER_YEAR_OPTIONS}
+                  allowEmpty={false}
+                />
               </div>
               <div>
                 <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -578,45 +614,36 @@ function AndamentoDaOsPageContent() {
                     setCurrentPage(1);
                   }}
                   placeholder="Contém..."
-                  className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                  className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
                 />
               </div>
               <div>
                 <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                   Status orçamento
                 </label>
-                <select
+                <StringSingleSelectDropdown
                   value={filterBudgetStatus}
-                  onChange={(e) => {
-                    setFilterBudgetStatus(e.target.value);
+                  onChange={(v) => {
+                    setFilterBudgetStatus(v);
                     setCurrentPage(1);
                   }}
-                  className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                >
-                  <option value="">Todos</option>
-                  {STATUS_ORCAMENTO_OPCOES.map((op) => (
-                    <option key={op} value={op}>
-                      {op}
-                    </option>
-                  ))}
-                </select>
+                  options={FILTER_BUDGET_STATUS_OPTIONS}
+                  allowEmpty={false}
+                />
               </div>
               <div className="sm:col-span-2">
                 <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                   Pendente faturamento
                 </label>
-                <select
+                <StringSingleSelectDropdown
                   value={filterPendingBilling}
-                  onChange={(e) => {
-                    setFilterPendingBilling((e.target.value as 'sim' | 'nao' | '') || '');
+                  onChange={(v) => {
+                    setFilterPendingBilling((v as 'sim' | 'nao' | '') || '');
                     setCurrentPage(1);
                   }}
-                  className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                >
-                  <option value="">Todos</option>
-                  <option value="sim">Com valor pendente</option>
-                  <option value="nao">Sem pendência</option>
-                </select>
+                  options={FILTER_PENDING_BILLING_OPTIONS}
+                  allowEmpty={false}
+                />
               </div>
             </div>
             <div className="mt-6 flex items-center justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
@@ -957,16 +984,12 @@ function AndamentoDaOsPageContent() {
                   <div className="flex gap-2 items-end">
                     <div className="flex-1">
                       <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Mês de criação</label>
-                      <select
+                      <StringSingleSelectDropdown
                         value={form.creationMonth || ''}
-                        onChange={(e) => setForm({ ...form, creationMonth: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm"
-                      >
-                        <option value="">Selecione</option>
-                        {MESES.map((m) => (
-                          <option key={m.value} value={m.value}>{m.label}</option>
-                        ))}
-                      </select>
+                        onChange={(v) => setForm({ ...form, creationMonth: v })}
+                        options={CREATION_MONTH_SELECT_OPTIONS}
+                        allowEmpty={false}
+                      />
                     </div>
                     <div className="w-24">
                       <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Ano</label>
@@ -985,25 +1008,19 @@ function AndamentoDaOsPageContent() {
                   <Input label="Data término" name="endDate" form={form} setForm={setForm} type="date" />
                   <div>
                     <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Status orçamento</label>
-                    <select
+                    <StringSingleSelectDropdown
                       value={form.budgetStatus || ''}
-                      onChange={(e) => setForm({ ...form, budgetStatus: e.target.value })}
+                      onChange={(v) => setForm({ ...form, budgetStatus: v })}
+                      options={BUDGET_STATUS_SELECT_OPTIONS}
+                      allowEmpty={false}
                       className={
                         form.budgetStatus && form.budgetStatus !== ''
-                          ? `${pleitoStatusSelectBase} ${
-                              form.budgetStatus === OUTRO_STATUS
-                                ? budgetStatusPillClass(form.budgetStatusCustom || null)
-                                : budgetStatusPillClass(form.budgetStatus)
-                            }`
-                          : 'w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm'
+                          ? form.budgetStatus === OUTRO_STATUS
+                            ? budgetStatusPillClass(form.budgetStatusCustom || null)
+                            : budgetStatusPillClass(form.budgetStatus)
+                          : ''
                       }
-                    >
-                      <option value="">Selecione</option>
-                      {STATUS_ORCAMENTO_OPCOES.map((op) => (
-                        <option key={op} value={op}>{op}</option>
-                      ))}
-                      <option value={OUTRO_STATUS}>Outro (cadastrar novo)</option>
-                    </select>
+                    />
                     {form.budgetStatus === OUTRO_STATUS && (
                       <input
                         type="text"
@@ -1045,20 +1062,17 @@ function AndamentoDaOsPageContent() {
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Status execução</label>
-                    <select
+                    <StringSingleSelectDropdown
                       value={form.executionStatus || ''}
-                      onChange={(e) => setForm({ ...form, executionStatus: e.target.value })}
+                      onChange={(v) => setForm({ ...form, executionStatus: v })}
+                      options={EXECUTION_STATUS_SELECT_OPTIONS}
+                      allowEmpty={false}
                       className={
                         form.executionStatus && form.executionStatus !== ''
-                          ? `${pleitoStatusSelectBase} ${executionStatusPillClass(form.executionStatus)}`
-                          : 'w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm'
+                          ? executionStatusPillClass(form.executionStatus)
+                          : ''
                       }
-                    >
-                      <option value="">Selecione</option>
-                      {STATUS_EXECUCAO_OPCOES.map((op) => (
-                        <option key={op} value={op}>{op}</option>
-                      ))}
-                    </select>
+                    />
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Status faturamento (%)</label>
@@ -1103,29 +1117,21 @@ function AndamentoDaOsPageContent() {
                   ))}
                   <div>
                     <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">RVI</label>
-                    <select
+                    <StringSingleSelectDropdown
                       value={form.pv || ''}
-                      onChange={(e) => setForm({ ...form, pv: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm"
-                    >
-                      <option value="">Selecione</option>
-                      {RVI_RVF_OPCOES.map((op) => (
-                        <option key={op} value={op}>{op}</option>
-                      ))}
-                    </select>
+                      onChange={(v) => setForm({ ...form, pv: v })}
+                      options={RVI_RVF_SELECT_OPTIONS}
+                      allowEmpty={false}
+                    />
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">RVF</label>
-                    <select
+                    <StringSingleSelectDropdown
                       value={form.ipi || ''}
-                      onChange={(e) => setForm({ ...form, ipi: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm"
-                    >
-                      <option value="">Selecione</option>
-                      {RVI_RVF_OPCOES.map((op) => (
-                        <option key={op} value={op}>{op}</option>
-                      ))}
-                    </select>
+                      onChange={(v) => setForm({ ...form, ipi: v })}
+                      options={RVI_RVF_SELECT_OPTIONS}
+                      allowEmpty={false}
+                    />
                   </div>
                   <Input label="Feedback Relatorios" name="reportsBilling" form={form} setForm={setForm} />
                   <Input label="Engenheiro" name="engineer" form={form} setForm={setForm} />

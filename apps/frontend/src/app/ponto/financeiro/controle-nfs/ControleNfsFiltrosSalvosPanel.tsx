@@ -10,6 +10,8 @@ import {
   type ControleNfsCardsFilterPreset
 } from './controleNfsCardsFilterStorage';
 import type { ControleNfsCardsFilterState } from './controleNfsTypes';
+import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 
 type ControleNfsFiltrosSalvosPanelProps = {
   filterDraft: ControleNfsCardsFilterState;
@@ -33,6 +35,11 @@ export function ControleNfsFiltrosSalvosPanel({
   const selectedPreset = useMemo(
     () => presets.find((preset) => preset.id === selectedId) ?? null,
     [presets, selectedId]
+  );
+
+  const presetSelectOptions = useMemo(
+    () => labeledToSelectOptions(presets.map((preset) => ({ value: preset.id, label: preset.name }))),
+    [presets]
   );
 
   const persistPresets = (next: ControleNfsCardsFilterPreset[]) => {
@@ -103,27 +110,20 @@ export function ControleNfsFiltrosSalvosPanel({
           >
             Selecionar filtro
           </label>
-          <select
-            id="controle-nfs-filtro-salvo-select"
+          <StringSingleSelectDropdown
             value={selectedId}
-            onChange={(event) => {
-              const id = event.target.value;
+            onChange={(id) => {
               setSelectedId(id);
               const preset = presets.find((item) => item.id === id);
               if (preset) setSaveName(preset.name);
             }}
+            options={presetSelectOptions}
             disabled={disabled || presets.length === 0}
-            className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-          >
-            <option value="">
-              {presets.length === 0 ? 'Nenhum filtro salvo ainda' : 'Escolha um filtro…'}
-            </option>
-            {presets.map((preset) => (
-              <option key={preset.id} value={preset.id}>
-                {preset.name}
-              </option>
-            ))}
-          </select>
+            placeholder={
+              presets.length === 0 ? 'Nenhum filtro salvo ainda' : 'Escolha um filtro…'
+            }
+            className="w-full"
+          />
           {selectedPreset ? (
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
               {cardsFilterSummaryLabel(selectedPreset.filter)}
@@ -168,7 +168,7 @@ export function ControleNfsFiltrosSalvosPanel({
             maxLength={80}
             disabled={disabled}
             placeholder="Ex.: TJGO — 2024"
-            className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 disabled:opacity-60 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+            className="w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 disabled:opacity-60 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
           />
         </div>
         <button

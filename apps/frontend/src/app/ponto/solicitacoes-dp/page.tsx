@@ -177,7 +177,7 @@ const STATUS_ROW_BADGE: Record<DpRequestStatus, string> = {
 const SENSITIVE_DP_REQUEST_TYPES = ['RESCISAO', 'ALTERACAO_FUNCAO_SALARIO'] as const;
 
 const inputFieldCls =
-  `border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${DP_SOLICITACOES_NO_FOCUS_CLS}`;
+  `border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 ${DP_SOLICITACOES_NO_FOCUS_CLS}`;
 
 /** Polos no formulário de solicitação DP (UF); alinha com o cadastro BRASÍLIA/GOIÁS → DF/GO. */
 const DP_POLO_OPTIONS = ['DF', 'GO'] as const;
@@ -979,7 +979,7 @@ export function SolicitacoesGeraisPage() {
                                             setReturnComment((p) => ({ ...p, [r.id]: e.target.value }))
                                           }
                                           placeholder="Digite seu retorno para o DP..."
-                                          className={`w-full px-3 py-2.5 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 min-h-[88px] ${DP_SOLICITACOES_NO_FOCUS_CLS}`}
+                                          className={`w-full px-3 py-2.5 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 min-h-[88px] ${DP_SOLICITACOES_NO_FOCUS_CLS}`}
                                         />
                                         <Button
                                           size="sm"
