@@ -6,7 +6,7 @@ import type { MultiSelectSearchOption } from '@/components/ui/MultiSelectSearchD
 import { stringsToSelectOptions } from '@/lib/selectOptionBuilders';
 
 export type StringSingleSelectDropdownProps = {
-  value: string;
+  value: string | undefined;
   onChange: (value: string) => void;
   options: string[] | MultiSelectSearchOption[];
   disabled?: boolean;
@@ -42,7 +42,7 @@ export function StringSingleSelectDropdown({
 
   return (
     <SingleSelectSearchDropdown
-      value={value}
+      value={value ?? ''}
       onChange={onChange}
       options={dropdownOptions}
       disabled={disabled}

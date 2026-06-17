@@ -3032,7 +3032,7 @@ export function OcPurchaseOrdersPanel({
                   }
                   correctionReason={parseLastOcCorrectionReason(selectedOrder.notes)}
                   supplierField={{
-                    supplierId: selectedOrder.supplierId ?? '',
+                    supplierId: selectedOrder.supplier?.id ?? '',
                     supplierLabel:
                       getOcSupplierLabel(selectedOrder.supplier as OcSupplierOption) ||
                       selectedOrder.supplier?.name ||
