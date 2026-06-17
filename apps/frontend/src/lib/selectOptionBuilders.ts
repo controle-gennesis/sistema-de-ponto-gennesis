@@ -1,6 +1,6 @@
 import type { MultiSelectSearchOption } from '@/components/ui/MultiSelectSearchDropdown';
 
-export function stringsToSelectOptions(items: string[]): MultiSelectSearchOption[] {
+export function stringsToSelectOptions(items: readonly string[]): MultiSelectSearchOption[] {
   return items.map((item) => ({
     value: item,
     label: item,
@@ -9,7 +9,7 @@ export function stringsToSelectOptions(items: string[]): MultiSelectSearchOption
 }
 
 export function labeledToSelectOptions(
-  items: Array<{ value: string; label: string; searchText?: string }>
+  items: ReadonlyArray<{ value: string; label: string; searchText?: string }>
 ): MultiSelectSearchOption[] {
   return items.map((item) => ({
     value: item.value,
@@ -48,7 +48,7 @@ export function selectTriggerErrorCls(hasError: boolean): string {
 
 /** Opções de filtro com valor "all" como primeira opção (ex.: Todos / Todas). */
 export function filterOptionsWithAll(
-  items: string[],
+  items: readonly string[],
   allLabel = 'Todos'
 ): MultiSelectSearchOption[] {
   const filtered = items.filter((item) => item !== 'Todos' && item !== 'Todas');
