@@ -89,10 +89,17 @@ const DP_FEEDBACK_NEXT_STATUSES = [
   'CANCELLED',
 ] as const;
 
+const FEEDBACK_NEXT_STATUSES = [
+  ...DP_FEEDBACK_NEXT_STATUSES,
+  ...ADM_TST_FEEDBACK_NEXT_STATUSES.filter(
+    (status) => !(DP_FEEDBACK_NEXT_STATUSES as readonly string[]).includes(status)
+  ),
+] as const;
+
 const feedbackDpRequestSchema = z
   .object({
     feedback: z.string().min(1),
-    nextStatus: z.enum(DP_FEEDBACK_NEXT_STATUSES),
+    nextStatus: z.enum(FEEDBACK_NEXT_STATUSES),
     /** Texto extra ao concluir (se vazio, usa `feedback` como comentário de conclusão). */
     conclusionComment: z.string().optional(),
     responsibleNote: z.string().optional(),

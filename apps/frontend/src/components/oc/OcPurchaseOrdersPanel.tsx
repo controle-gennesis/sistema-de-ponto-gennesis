@@ -39,6 +39,7 @@ import toast from 'react-hot-toast';
 import api from '@/lib/api';
 import { normalizeCostCentersResponse } from '@/lib/costCenters';
 import { absoluteUploadUrl } from '@/lib/apiOrigin';
+import { parseLastOcCorrectionInfo } from '@/lib/ocCorrectionNotes';
 import { exportPurchaseOrderPdf } from '@/lib/exportPurchaseOrderPdf';
 import { PaymentConditionSelect, buildPaymentConditionLabelMap } from '@/components/oc/PaymentConditionSelect';
 import {
@@ -59,6 +60,7 @@ import {
   canAttachComprovanteForBoletoOrder,
   canSubmitBoletoToProofValidation,
   canSubmitProofValidationWithFinancialEntry,
+  getProofValidationSubmitBlockers,
   lastPaidInstallmentProofUrl,
   hasAwaitingInstallmentPayment,
   awaitingBoletoInstallmentHasProof,
@@ -99,6 +101,7 @@ export {
   canAttachComprovanteForBoletoOrder,
   canSubmitBoletoToProofValidation,
   canSubmitProofValidationWithFinancialEntry,
+  getProofValidationSubmitBlockers,
   lastPaidInstallmentProofUrl,
   hasAwaitingInstallmentPayment,
   awaitingBoletoInstallmentHasProof,
@@ -354,16 +357,6 @@ function orderFreightValue(o: Pick<PurchaseOrder, 'freightAmount' | 'amountToPay
   const paid = o.amountToPay != null && o.amountToPay !== '' ? Number(o.amountToPay) : NaN;
   if (Number.isFinite(paid)) return Math.max(0, paid - items);
   return 0;
-}
-
-function parseLastOcCorrectionReason(notes?: string | null): string | null {
-  if (!notes?.trim()) return null;
-  const blocks = notes.split(/\n\n+/);
-  for (let i = blocks.length - 1; i >= 0; i--) {
-    const match = blocks[i].match(/^\[Correção OC[^\]]*\]\s*([\s\S]+)$/);
-    if (match) return match[1].trim();
-  }
-  return null;
 }
 
 function movementNotesText(notes: unknown): string | null {
@@ -1087,17 +1080,30 @@ export function OcPurchaseOrdersPanel({
     }
   });
 
-  const { data: hasFinancialControlEntry = false, isFetching: financialEntryCheckLoading } = useQuery({
-    queryKey: ['financial-control-has-entry', selectedOrder?.orderNumber],
+  const shouldTrackFinancialEntryForOc =
+    !!selectedOrder?.orderNumber?.trim() &&
+    (selectedOrder.status === 'APPROVED' || selectedOrder.status === 'PENDING_PROOF_CORRECTION');
+
+  const { data: financialEntriesByOc = [], isFetching: financialEntriesLoading } = useQuery({
+    queryKey: ['financial-control-by-oc', selectedOrder?.orderNumber],
     queryFn: async () => {
-      const oc = selectedOrder!.orderNumber.trim();
-      const res = await api.get(`/financial-control/check-by-oc/${encodeURIComponent(oc)}`);
-      return res.data?.data?.hasEntry === true;
+      const res = await api.get(
+        `/financial-control/by-oc/${encodeURIComponent(selectedOrder!.orderNumber)}`
+      );
+      return (res.data?.data || []) as FinancialControlEntry[];
     },
-    enabled:
-      !!selectedOrder?.orderNumber?.trim() &&
-      (selectedOrder.status === 'APPROVED' || selectedOrder.status === 'PENDING_PROOF_CORRECTION')
+    enabled: shouldTrackFinancialEntryForOc,
   });
+
+  const hasFinancialEntryForOc = financialEntriesByOc.length > 0;
+
+  const proofValidationBlockers = selectedOrder
+    ? getProofValidationSubmitBlockers(selectedOrder, hasFinancialEntryForOc)
+    : [];
+  const canSubmitProofValidation =
+    !!selectedOrder &&
+    !financialEntriesLoading &&
+    canSubmitProofValidationWithFinancialEntry(selectedOrder, hasFinancialEntryForOc);
 
   const approveMutation = useMutation({
     mutationFn: async ({ id, currentStatus }: { id: string; currentStatus: string }) => {
@@ -1491,19 +1497,6 @@ export function OcPurchaseOrdersPanel({
   const selectedOrderInFinancialLaunchPhase = selectedOrder
     ? isOcInFinancialLaunchPhase(selectedOrder)
     : false;
-
-  const { data: financialEntriesByOc = [] } = useQuery({
-    queryKey: ['financial-control-by-oc', selectedOrder?.orderNumber],
-    queryFn: async () => {
-      const res = await api.get(
-        `/financial-control/by-oc/${encodeURIComponent(selectedOrder!.orderNumber)}`
-      );
-      return (res.data?.data || []) as FinancialControlEntry[];
-    },
-    enabled: !!selectedOrder?.orderNumber && selectedOrderInFinancialLaunchPhase,
-  });
-
-  const hasFinancialEntryForOc = financialEntriesByOc.length > 0;
 
   const tabCounts = useMemo(() => computeOcTabCounts(allOrders), [allOrders]);
 
@@ -2899,7 +2892,7 @@ export function OcPurchaseOrdersPanel({
             <OcPurchaseOrderFormFields
               mode="edit"
               values={editOcForm}
-              correctionReason={parseLastOcCorrectionReason(selectedOrder.notes)}
+              correctionInfo={parseLastOcCorrectionInfo(selectedOrder.notes)}
               parseMoneyInput={parseMoneyInput}
               onChange={(patch) => setEditOcForm((prev) => (prev ? { ...prev, ...patch } : prev))}
               onItemChange={(index, patch) =>
@@ -3030,7 +3023,7 @@ export function OcPurchaseOrdersPanel({
                         selectedOrder.paymentCondition
                       : undefined
                   }
-                  correctionReason={parseLastOcCorrectionReason(selectedOrder.notes)}
+                  correctionInfo={parseLastOcCorrectionInfo(selectedOrder.notes)}
                   supplierField={{
                     supplierId: selectedOrder.supplier?.id ?? '',
                     supplierLabel:
@@ -3834,11 +3827,7 @@ export function OcPurchaseOrdersPanel({
                       <>
                         <button
                           type="button"
-                          disabled={
-                            submitProofValidationMutation.isPending ||
-                            !canSubmitBoletoToProofValidation(selectedOrder) ||
-                            !hasFinancialEntryForOc
-                          }
+                          disabled={submitProofValidationMutation.isPending || !canSubmitProofValidation}
                           onClick={() => submitProofValidationMutation.mutate(selectedOrder.id)}
                           className="inline-flex items-center justify-center gap-2 px-3 py-2 text-sm rounded-lg bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50"
                         >
@@ -3846,11 +3835,16 @@ export function OcPurchaseOrdersPanel({
                             ? 'Enviando…'
                             : 'Enviar para Validação Comprovante'}
                         </button>
-                        {!hasFinancialEntryForOc ? (
-                          <p className="text-xs text-amber-700 dark:text-amber-300">
-                            Registre o lançamento no Controle Financeiro para habilitar o envio à validação.
-                          </p>
-                        ) : null}
+                        {!financialEntriesLoading &&
+                          !canSubmitProofValidation &&
+                          proofValidationBlockers.map((message) => (
+                            <p
+                              key={message}
+                              className="text-xs text-amber-700 dark:text-amber-300"
+                            >
+                              {message}
+                            </p>
+                          ))}
                       </>
                     )}
                   </div>
@@ -4033,23 +4027,24 @@ export function OcPurchaseOrdersPanel({
                           {attachPaymentProofMutation.isPending ? 'Enviando…' : 'Anexar / substituir comprovante'}
                         </button>
                       </div>
-                      {!financialEntryCheckLoading && !hasFinancialControlEntry && (
-                        <p className="text-xs text-amber-800 dark:text-amber-200 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-md px-2 py-1.5">
-                          Para enviar o comprovante para validação, registre primeiro o lançamento no Controle
-                          Financeiro (menu ⋮ da OC → Fazer lançamento).
-                        </p>
-                      )}
+                      {!financialEntriesLoading &&
+                      !canSubmitProofValidation &&
+                      proofValidationBlockers.length > 0 ? (
+                        <div className="space-y-1">
+                          {proofValidationBlockers.map((message) => (
+                            <p
+                              key={message}
+                              className="text-xs text-amber-800 dark:text-amber-200 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-md px-2 py-1.5"
+                            >
+                              {message}
+                            </p>
+                          ))}
+                        </div>
+                      ) : null}
                       <div className="flex flex-col sm:flex-row flex-wrap gap-2 pt-1">
                         <button
                           type="button"
-                          disabled={
-                            submitProofValidationMutation.isPending ||
-                            financialEntryCheckLoading ||
-                            !canSubmitProofValidationWithFinancialEntry(
-                              selectedOrder,
-                              hasFinancialControlEntry
-                            )
-                          }
+                          disabled={submitProofValidationMutation.isPending || !canSubmitProofValidation}
                           onClick={() => submitProofValidationMutation.mutate(selectedOrder.id)}
                           className="inline-flex items-center justify-center gap-2 px-3 py-2 text-sm rounded-lg bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50"
                         >
@@ -4059,11 +4054,6 @@ export function OcPurchaseOrdersPanel({
                               ? 'Reenviar para validação do comprovante'
                               : 'Enviar para Validação Comprovante'}
                         </button>
-                        {!hasFinancialEntryForOc ? (
-                          <p className="text-xs text-amber-700 dark:text-amber-300 w-full sm:w-auto">
-                            Registre o lançamento no Controle Financeiro para habilitar o envio à validação.
-                          </p>
-                        ) : null}
                       </div>
                     </>
                   )}

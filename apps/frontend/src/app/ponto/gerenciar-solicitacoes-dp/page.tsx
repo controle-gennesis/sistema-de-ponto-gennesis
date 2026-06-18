@@ -160,7 +160,7 @@ const STATUS_LABELS: Record<DpRequestStatus, string> = {
   WAITING_RETURN_ENGINEERING: 'Pendência engenharia',
   WAITING_SUPPLIES: 'Aguardando setor de suprimentos',
   WAITING_PAYMENT: 'Aguardando pagamento',
-  CONCLUDED: 'Concluída',
+  CONCLUDED: 'Finalizada',
   CANCELLED: 'Cancelada',
 };
 
@@ -326,7 +326,7 @@ const MANAGE_CARD_LIST_CONFIG: Record<
     iconColor: 'text-yellow-600 dark:text-yellow-400',
   },
   CONCLUDED: {
-    title: 'Solicitações Concluídas',
+    title: 'Solicitações Finalizadas',
     subtitle: 'Histórico de solicitações finalizadas pelo DP.',
     Icon: CheckCircle,
     iconBg: 'bg-green-100 dark:bg-green-900/30',
@@ -367,7 +367,7 @@ const MANAGE_STAT_CARDS: {
   },
   {
     filter: 'CONCLUDED',
-    label: 'Concluídas',
+    label: 'Finalizadas',
     iconBg: 'bg-green-100 dark:bg-green-900/30',
     iconColor: 'text-green-600 dark:text-green-400',
     Icon: CheckCircle,
@@ -643,8 +643,10 @@ export function GerenciarSolicitacoesGeraisPage({
       value: formatIsoDateRangeToBr(r.prazoInicio, r.prazoFim),
     },
     { label: 'Criada em', value: formatDateTime(r.createdAt) },
-    { label: 'Aprovada em', value: formatDateTime(r.managerApprovedAt) },
-    { label: 'Concluída em', value: formatDateTime(r.dpConcludedAt) },
+    ...(scope === 'ADM_TST'
+      ? []
+      : [{ label: 'Aprovada em', value: formatDateTime(r.managerApprovedAt) }]),
+    { label: 'Finalizada em', value: formatDateTime(r.dpConcludedAt) },
   ];
 
   const selectCardFilter = (filter: ManageCardFilter) => {

@@ -232,6 +232,28 @@ export function canSubmitProofValidationWithFinancialEntry(
   return canSubmitBoletoToProofValidation(o);
 }
 
+/** Mensagens do que falta para habilitar "Enviar para Validação Comprovante". */
+export function getProofValidationSubmitBlockers(
+  o: OrderProofValidationPick,
+  hasFinancialControlEntry: boolean
+): string[] {
+  const blockers: string[] = [];
+  if (!hasFinancialControlEntry) {
+    blockers.push(
+      'Registre o lançamento no Controle Financeiro para habilitar o envio à validação.'
+    );
+  } else if (!canSubmitBoletoToProofValidation(o)) {
+    if (o.paymentType === 'BOLETO' && useParallelBoletoPaymentFlow(o)) {
+      blockers.push(
+        'Anexe o comprovante de pagamento em todas as parcelas antes de enviar para validação.'
+      );
+    } else {
+      blockers.push('Anexe o comprovante de pagamento antes de enviar para validação.');
+    }
+  }
+  return blockers;
+}
+
 export function canSubmitBoletoToProofValidation(o: OrderProofValidationPick): boolean {
   if ((o.paymentProofUrl || '').trim()) return true;
   if (o.paymentType !== 'BOLETO') return false;

@@ -30,7 +30,7 @@ export const DP_STATUS_LABELS: Record<DpFlowFeedbackStatus, string> = {
   WAITING_RETURN: 'Pendência colaborador',
   WAITING_RETURN_ADM_TST: 'Pendência ADM/TST',
   WAITING_RETURN_ENGINEERING: 'Pendência engenharia',
-  CONCLUDED: 'Concluída',
+  CONCLUDED: 'Finalizada',
   CANCELLED: 'Cancelada',
 };
 

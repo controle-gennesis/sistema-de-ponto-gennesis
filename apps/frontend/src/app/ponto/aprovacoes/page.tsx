@@ -137,7 +137,7 @@ const STATUS_LABELS: Record<DpRequestStatus, string> = {
   WAITING_RETURN_ACCOUNTING: 'Pendência contábil',
   WAITING_RETURN_ADM_TST: 'Pendência ADM/TST',
   WAITING_RETURN_ENGINEERING: 'Pendência engenharia',
-  CONCLUDED: 'Concluída',
+  CONCLUDED: 'Finalizada',
   CANCELLED: 'Cancelada',
 };
 

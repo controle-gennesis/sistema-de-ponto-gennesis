@@ -164,6 +164,7 @@ export function FinancialControlEntryModal({
     onSuccess: () => {
       toast.success('Lançamento criado com sucesso');
       queryClient.invalidateQueries({ queryKey: ['financial-control'] });
+      queryClient.invalidateQueries({ queryKey: ['financial-control-by-oc'] });
       queryClient.invalidateQueries({ queryKey: ['financial-control-has-entry'] });
       onClose();
     },
@@ -186,6 +187,8 @@ export function FinancialControlEntryModal({
     onSuccess: () => {
       toast.success('Lançamento atualizado');
       queryClient.invalidateQueries({ queryKey: ['financial-control'] });
+      queryClient.invalidateQueries({ queryKey: ['financial-control-by-oc'] });
+      queryClient.invalidateQueries({ queryKey: ['financial-control-has-entry'] });
       onClose();
     },
     onError: (err: { response?: { data?: { message?: string } } }) => {

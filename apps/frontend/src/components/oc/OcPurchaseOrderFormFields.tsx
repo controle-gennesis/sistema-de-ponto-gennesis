@@ -11,6 +11,10 @@ import {
   maskCurrencyInputBrOrEmpty
 } from '@/lib/maskCurrencyBr';
 import { formatCurrencyBR } from '@/app/ponto/gerenciar-materiais/_lib/ocAmounts';
+import {
+  formatOcCorrectionAuthor,
+  type OcCorrectionInfo,
+} from '@/lib/ocCorrectionNotes';
 
 export const OC_PIX_KEY_TYPES = ['ALEATÓRIA', 'CELULAR', 'CNPJ', 'CPF', 'E-MAIL'] as const;
 
@@ -85,7 +89,7 @@ type OcPurchaseOrderFormFieldsProps = {
   mode: 'view' | 'edit';
   values: OcPurchaseOrderFormValues;
   paymentConditionLabel?: string;
-  correctionReason?: string | null;
+  correctionInfo?: OcCorrectionInfo | null;
   onChange?: (patch: Partial<OcPurchaseOrderFormValues>) => void;
   onItemChange?: (index: number, patch: Partial<OcFormLineItem>) => void;
   supplierField?: SupplierFieldProps;
@@ -105,7 +109,7 @@ export function OcPurchaseOrderFormFields({
   mode,
   values,
   paymentConditionLabel,
-  correctionReason,
+  correctionInfo,
   onChange,
   onItemChange,
   supplierField,
@@ -117,12 +121,23 @@ export function OcPurchaseOrderFormFields({
 
   return (
     <div className="space-y-4 text-sm">
-      {correctionReason ? (
+      {correctionInfo ? (
         <div className="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50/80 dark:bg-amber-900/20 px-3 py-2">
           <p className="text-xs font-semibold text-amber-800 dark:text-amber-300 uppercase tracking-wide mb-1">
-            Motivo da correção
+            {correctionInfo.kind === 'proof' ? 'Correção do comprovante' : 'Correção solicitada'}
           </p>
-          <p className="text-sm text-amber-900 dark:text-amber-100 whitespace-pre-wrap">{correctionReason}</p>
+          {formatOcCorrectionAuthor(correctionInfo) ? (
+            <p className="text-xs font-medium text-amber-900 dark:text-amber-100">
+              Enviado por: {formatOcCorrectionAuthor(correctionInfo)}
+              {correctionInfo.at ? (
+                <span className="font-normal text-amber-800/90 dark:text-amber-200/90"> · {correctionInfo.at}</span>
+              ) : null}
+            </p>
+          ) : null}
+          <p className="mt-2 text-xs font-semibold text-amber-800 dark:text-amber-300 uppercase tracking-wide mb-1">
+            Motivo
+          </p>
+          <p className="text-sm text-amber-900 dark:text-amber-100 whitespace-pre-wrap">{correctionInfo.reason}</p>
         </div>
       ) : null}
 

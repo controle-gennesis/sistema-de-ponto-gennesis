@@ -287,7 +287,7 @@ const STATUS_LABELS: Record<DpRequestStatus, string> = {
   WAITING_RETURN_ENGINEERING: 'Pendência engenharia',
   WAITING_SUPPLIES: 'Aguardando setor de suprimentos',
   WAITING_PAYMENT: 'Aguardando pagamento',
-  CONCLUDED: 'Concluída',
+  CONCLUDED: 'Finalizada',
   CANCELLED: 'Cancelada',
 };
 
@@ -802,8 +802,10 @@ export function SolicitacoesGeraisPage() {
       value: formatIsoDateRangeToBr(r.prazoInicio, r.prazoFim),
     },
     { label: 'Criada em', value: formatDateTime(r.createdAt) },
-    { label: 'Aprovada em', value: formatDateTime(r.managerApprovedAt) },
-    { label: 'Concluída em', value: formatDateTime(r.dpConcludedAt) },
+    ...(isAdmTstRequestType(r.requestType)
+      ? []
+      : [{ label: 'Aprovada em', value: formatDateTime(r.managerApprovedAt) }]),
+    { label: 'Finalizada em', value: formatDateTime(r.dpConcludedAt) },
   ];
 
   if (loadingUser) {

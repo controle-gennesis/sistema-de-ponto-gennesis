@@ -8,6 +8,35 @@ import {
   extractOcNumberFromMovementNotes,
   type StockPaymentSlipParsed
 } from '../utils/stockMovementNotes';
+function labelForOcCorrectionSource(previousStatus: string): string {
+  if (previousStatus === 'PENDING') return 'Gestor';
+  if (previousStatus === 'PENDING_DIRETORIA') return 'Diretoria';
+  if (previousStatus === 'PENDING_COMPRAS' || previousStatus === 'DRAFT') return 'Compras';
+  return 'Aprovação';
+}
+
+async function resolveUserDisplayName(userId?: string): Promise<string | null> {
+  if (!userId) return null;
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { name: true, email: true },
+  });
+  const name = (user?.name || user?.email || '').trim();
+  return name || null;
+}
+
+function buildOcCorrectionNoteHeader(params: {
+  prefix: string;
+  role: string;
+  actorName: string | null;
+}): string {
+  const at = new Date().toLocaleString('pt-BR');
+  if (params.actorName) {
+    return `[${params.prefix} — ${params.role} em ${at} — ${params.actorName}]`;
+  }
+  return `[${params.prefix} — ${params.role} em ${at}]`;
+}
+
 export type BoletoInstallmentPaymentStatus = 'PENDING_BOLETO' | 'AWAITING_PAYMENT' | 'PAID';
 
 export type BoletoInstallmentStored = {
@@ -882,12 +911,24 @@ export class PurchaseOrderService {
     }
 
     if (status === 'PENDING_PROOF_CORRECTION' && options?.rejectionReason?.trim()) {
-      const note = `[Correção comprovante ${new Date().toLocaleString('pt-BR')}] ${options.rejectionReason.trim()}`;
+      const actorName = await resolveUserDisplayName(userId);
+      const header = buildOcCorrectionNoteHeader({
+        prefix: 'Correção comprovante',
+        role: 'Financeiro',
+        actorName,
+      });
+      const note = `${header}\n${options.rejectionReason.trim()}`;
       data.notes = order.notes ? `${order.notes}\n\n${note}` : note;
     }
 
     if (status === 'IN_REVIEW' && options?.rejectionReason?.trim()) {
-      const note = `[Correção OC ${new Date().toLocaleString('pt-BR')}] ${options.rejectionReason.trim()}`;
+      const actorName = await resolveUserDisplayName(userId);
+      const header = buildOcCorrectionNoteHeader({
+        prefix: 'Correção OC',
+        role: labelForOcCorrectionSource(st),
+        actorName,
+      });
+      const note = `${header}\n${options.rejectionReason.trim()}`;
       data.notes = order.notes ? `${order.notes}\n\n${note}` : note;
     }
 
