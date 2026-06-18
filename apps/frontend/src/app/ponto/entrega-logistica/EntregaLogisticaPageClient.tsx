@@ -20,6 +20,7 @@ import {
 import type { LucideIcon } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
+import { FilterStatCard } from '@/components/ui/FilterStatCard';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
@@ -281,27 +282,24 @@ const STAT_CARDS: {
 ];
 
 const thBase =
-  'px-3 sm:px-6 py-4 align-middle text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 whitespace-nowrap';
+  'px-3 py-3 align-middle text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 whitespace-nowrap sm:px-4';
 const thLeftClass = `${thBase} text-left`;
 const thCenterClass = `${thBase} text-center`;
-const tdBase = 'px-3 sm:px-6 py-4 align-middle text-sm text-gray-900 dark:text-gray-100';
+const tdBase = 'px-3 py-3 align-middle text-sm text-gray-900 dark:text-gray-100 sm:px-4';
 const tdLeftClass = `${tdBase} text-left`;
 const tdCenterClass = `${tdBase} text-center whitespace-nowrap`;
-const tdTruncateCenterClass = `${tdCenterClass} max-w-[180px] truncate`;
+const tdTruncateLeftClass = `${tdLeftClass} truncate`;
+const tdTruncateCenterClass = `${tdCenterClass} truncate`;
 
 const TABLE_COLUMNS = [
-  { key: 'id', label: 'ID', align: 'left' as const },
-  { key: 'supplier', label: 'Fornecedor', align: 'left' as const },
-  { key: 'oc', label: 'OC', align: 'center' as const },
-  { key: 'contract', label: 'Contrato', align: 'center' as const },
-  { key: 'driver', label: 'Motorista', align: 'center' as const },
-  { key: 'status', label: 'Status', align: 'center' as const },
-  { key: 'value', label: 'Valor', align: 'center' as const },
+  { key: 'id', label: 'ID', align: 'center' as const, width: 'w-[6%]' },
+  { key: 'supplier', label: 'Fornecedor', align: 'left' as const, width: 'w-[24%]' },
+  { key: 'oc', label: 'OC', align: 'center' as const, width: 'w-[10%]' },
+  { key: 'contract', label: 'Contrato', align: 'center' as const, width: 'w-[12%]' },
+  { key: 'driver', label: 'Motorista', align: 'center' as const, width: 'w-[18%]' },
+  { key: 'status', label: 'Status', align: 'center' as const, width: 'w-[12%]' },
+  { key: 'value', label: 'Valor', align: 'center' as const, width: 'w-[10%]' },
 ];
-
-function statCardClassName(): string {
-  return 'cursor-pointer transition-shadow hover:shadow-md';
-}
 
 function cardFilterToStatus(filter: CardFilter): string | undefined {
   if (filter === 'pending') return 'PENDING';
@@ -548,43 +546,19 @@ export default function EntregaLogisticaPageClient() {
           </div>
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-3">
-            {STAT_CARDS.map((card) => {
-              const StatIcon = card.Icon;
-              const isActive = cardFilter === card.filter;
-              return (
-                <Card key={card.filter} padding="none" className={statCardClassName()}>
-                  <CardContent
-                    className="!pt-0 h-full w-full p-4 sm:p-6"
-                    role="button"
-                    tabIndex={0}
-                    aria-pressed={isActive}
-                    onClick={() => setCardFilter(card.filter)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        setCardFilter(card.filter);
-                      }
-                    }}
-                  >
-                    <div className="flex items-center gap-3 sm:gap-4">
-                      <div
-                        className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg sm:h-12 sm:w-12 ${card.iconBg}`}
-                      >
-                        <StatIcon className={`h-5 w-5 sm:h-6 sm:w-6 ${card.iconColor}`} />
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">
-                          {card.label}
-                        </p>
-                        <p className="text-xl font-bold tabular-nums text-gray-900 dark:text-gray-100 sm:text-2xl">
-                          {loadingStats ? '—' : deliveryStats[card.countKey]}
-                        </p>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              );
-            })}
+            {STAT_CARDS.map((card) => (
+              <FilterStatCard
+                key={card.filter}
+                label={card.label}
+                count={deliveryStats[card.countKey]}
+                icon={card.Icon}
+                iconBg={card.iconBg}
+                iconColor={card.iconColor}
+                isActive={cardFilter === card.filter}
+                loading={loadingStats}
+                onClick={() => setCardFilter(card.filter)}
+              />
+            ))}
           </div>
 
           <Card className="w-full">
@@ -658,13 +632,13 @@ export default function EntregaLogisticaPageClient() {
                     </span>
                   </div>
                   <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
+                    <table className="w-full min-w-[52rem] table-fixed text-sm">
                       <thead className="border-b border-gray-200 dark:border-gray-700">
                         <tr>
                           {TABLE_COLUMNS.map((col) => (
                             <th
                               key={col.key}
-                              className={col.align === 'center' ? thCenterClass : thLeftClass}
+                              className={`${col.align === 'center' ? thCenterClass : thLeftClass} ${col.width}`}
                             >
                               {col.label}
                             </th>
@@ -682,13 +656,13 @@ export default function EntregaLogisticaPageClient() {
                               setDetailRow(row);
                             }}
                           >
-                            <td className={`${tdLeftClass} whitespace-nowrap`}>
+                            <td className={tdCenterClass}>
                               <ListRowNavigableLabel className="font-medium">
                                 {row.displayNumber}
                               </ListRowNavigableLabel>
                             </td>
                             <td
-                              className={`${tdLeftClass} max-w-[180px] truncate`}
+                              className={tdTruncateLeftClass}
                               title={row.supplier?.name ?? undefined}
                             >
                               {row.supplier?.name ?? '—'}

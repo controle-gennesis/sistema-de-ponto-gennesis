@@ -6,6 +6,7 @@ import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
+import { FilterStatCard } from '@/components/ui/FilterStatCard';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -318,10 +319,6 @@ const MANAGE_STAT_CARDS: {
   },
 ];
 
-function manageStatCardClassName(): string {
-  return 'cursor-pointer transition-shadow hover:shadow-md';
-}
-
 export function GerenciarSolicitacoesGeraisPage() {
   const queryClient = useQueryClient();
 
@@ -581,44 +578,20 @@ export function GerenciarSolicitacoesGeraisPage() {
             </p>
           </div>
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-4">
-            {MANAGE_STAT_CARDS.map((card) => {
-              const StatIcon = card.Icon;
-              const isActive = cardFilter === card.filter;
-              return (
-                <Card key={card.filter} padding="none" className={manageStatCardClassName()}>
-                  <CardContent
-                    className="!pt-0 h-full w-full p-4 sm:p-6"
-                    role="button"
-                    tabIndex={0}
-                    aria-pressed={isActive}
-                    onClick={() => selectCardFilter(card.filter)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        selectCardFilter(card.filter);
-                      }
-                    }}
-                  >
-                    <div className="flex items-center gap-3 sm:gap-4">
-                      <div
-                        className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg sm:h-12 sm:w-12 ${card.iconBg}`}
-                      >
-                        <StatIcon className={`h-5 w-5 sm:h-6 sm:w-6 ${card.iconColor}`} />
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">
-                          {card.label}
-                        </p>
-                        <p className="text-xl font-bold tabular-nums text-gray-900 dark:text-gray-100 sm:text-2xl">
-                          {loadingStats ? '—' : manageStats[card.countKey]}
-                        </p>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              );
-            })}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 2xl:grid-cols-4">
+            {MANAGE_STAT_CARDS.map((card) => (
+              <FilterStatCard
+                key={card.filter}
+                label={card.label}
+                count={manageStats[card.countKey]}
+                icon={card.Icon}
+                iconBg={card.iconBg}
+                iconColor={card.iconColor}
+                isActive={cardFilter === card.filter}
+                loading={loadingStats}
+                onClick={() => selectCardFilter(card.filter)}
+              />
+            ))}
           </div>
 
           <Card className="w-full">

@@ -5,8 +5,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { CalendarRange, Car, ClipboardCheck, FileText, Plus, Search, X } from 'lucide-react';
+import { Car, CheckCircle, ClipboardCheck, Clock, FileText, Plus, Search, Users, X, XCircle, type LucideIcon } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
+import { FilterStatCard } from '@/components/ui/FilterStatCard';
 import { Modal } from '@/components/ui/Modal';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
@@ -154,10 +155,104 @@ function formatDateTimeLabel(value: string): string {
   return format(date, 'dd/MM/yyyy HH:mm:ss', { locale: ptBR });
 }
 
+type ReservationCardFilter = 'all' | 'pending' | 'CONCLUDED' | 'CANCELLED';
+
+const DEFAULT_CARD_FILTER: ReservationCardFilter = 'all';
+
+const RESERVATION_CARD_LIST_CONFIG: Record<
+  ReservationCardFilter,
+  {
+    title: string;
+    subtitle: string;
+    Icon: LucideIcon;
+    iconBg: string;
+    iconColor: string;
+  }
+> = {
+  all: {
+    title: 'Todas as reservas',
+    subtitle: 'Visão geral das suas solicitações de uso da frota.',
+    Icon: Users,
+    iconBg: 'bg-blue-100 dark:bg-blue-900/30',
+    iconColor: 'text-blue-600 dark:text-blue-400',
+  },
+  pending: {
+    title: 'Reservas pendentes',
+    subtitle: 'Aguardando aprovação do Suprimentos ou vistoria.',
+    Icon: Clock,
+    iconBg: 'bg-yellow-100 dark:bg-yellow-900/30',
+    iconColor: 'text-yellow-600 dark:text-yellow-400',
+  },
+  CONCLUDED: {
+    title: 'Reservas concluídas',
+    subtitle: 'Reservas vistoriadas e finalizadas.',
+    Icon: CheckCircle,
+    iconBg: 'bg-green-100 dark:bg-green-900/30',
+    iconColor: 'text-green-600 dark:text-green-400',
+  },
+  CANCELLED: {
+    title: 'Reservas canceladas',
+    subtitle: 'Solicitações canceladas ou rejeitadas.',
+    Icon: XCircle,
+    iconBg: 'bg-red-100 dark:bg-red-900/30',
+    iconColor: 'text-red-600 dark:text-red-400',
+  },
+};
+
+const RESERVATION_STAT_CARDS: {
+  filter: ReservationCardFilter;
+  label: string;
+  iconBg: string;
+  iconColor: string;
+  Icon: LucideIcon;
+  countKey: keyof { total: number; pending: number; concluded: number; cancelled: number };
+}[] = [
+  {
+    filter: 'all',
+    label: 'Registros',
+    iconBg: 'bg-blue-100 dark:bg-blue-900/30',
+    iconColor: 'text-blue-600 dark:text-blue-400',
+    Icon: Users,
+    countKey: 'total',
+  },
+  {
+    filter: 'pending',
+    label: 'Pendentes',
+    iconBg: 'bg-yellow-100 dark:bg-yellow-900/30',
+    iconColor: 'text-yellow-600 dark:text-yellow-400',
+    Icon: Clock,
+    countKey: 'pending',
+  },
+  {
+    filter: 'CONCLUDED',
+    label: 'Concluídas',
+    iconBg: 'bg-green-100 dark:bg-green-900/30',
+    iconColor: 'text-green-600 dark:text-green-400',
+    Icon: CheckCircle,
+    countKey: 'concluded',
+  },
+  {
+    filter: 'CANCELLED',
+    label: 'Canceladas',
+    iconBg: 'bg-red-100 dark:bg-red-900/30',
+    iconColor: 'text-red-600 dark:text-red-400',
+    Icon: XCircle,
+    countKey: 'cancelled',
+  },
+];
+
+function cardFilterToApiParam(filter: ReservationCardFilter): string | undefined {
+  if (filter === 'all') return undefined;
+  if (filter === 'pending') return 'PENDING_SUPPLIES,COMPLETED';
+  if (filter === 'CONCLUDED') return 'INSPECTED';
+  return 'CANCELLED,REJECTED';
+}
+
 export default function ReservaVeiculosPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState('');
+  const [cardFilter, setCardFilter] = useState<ReservationCardFilter>(DEFAULT_CARD_FILTER);
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage] = useState(20);
   const [showForm, setShowForm] = useState(false);
@@ -182,12 +277,22 @@ export default function ReservaVeiculosPage() {
     }
   });
 
+  const { data: statsData, isLoading: loadingStats } = useQuery({
+    queryKey: ['vehicle-reservations', 'stats'],
+    queryFn: async () => {
+      const res = await api.get('/vehicle-reservations', { params: { limit: 500, page: 1 } });
+      return (res.data?.data || []) as VehicleReservation[];
+    },
+    enabled: !loadingUser,
+  });
+
   const { data: listData, isLoading } = useQuery({
-    queryKey: ['vehicle-reservations', searchTerm, currentPage, itemsPerPage],
+    queryKey: ['vehicle-reservations', searchTerm, cardFilter, currentPage, itemsPerPage],
     queryFn: async () => {
       const res = await api.get('/vehicle-reservations', {
         params: {
           search: searchTerm || undefined,
+          status: cardFilterToApiParam(cardFilter),
           page: currentPage,
           limit: itemsPerPage
         }
@@ -221,6 +326,25 @@ export default function ReservaVeiculosPage() {
     limit: itemsPerPage,
     total: 0,
     totalPages: 1
+  };
+
+  const reservationStats = useMemo(() => {
+    const list = statsData || [];
+    const pending = list.filter(
+      (r) => r.status === 'PENDING_SUPPLIES' || r.status === 'COMPLETED'
+    ).length;
+    const concluded = list.filter((r) => r.status === 'INSPECTED').length;
+    const cancelled = list.filter(
+      (r) => r.status === 'CANCELLED' || r.status === 'REJECTED'
+    ).length;
+    return { total: list.length, pending, concluded, cancelled };
+  }, [statsData]);
+
+  const listHeader = RESERVATION_CARD_LIST_CONFIG[cardFilter];
+  const ListHeaderIcon = listHeader.Icon;
+
+  const selectCardFilter = (filter: ReservationCardFilter) => {
+    setCardFilter(filter);
   };
 
   const employeeSelectOptions = useMemo<MultiSelectSearchOption[]>(
@@ -272,7 +396,7 @@ export default function ReservaVeiculosPage() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm]);
+  }, [searchTerm, cardFilter]);
 
   const openCreateForm = () => {
     const userName = userData?.data?.name ? String(userData.data.name) : '';
@@ -460,23 +584,35 @@ export default function ReservaVeiculosPage() {
             </p>
           </div>
 
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 2xl:grid-cols-4">
+            {RESERVATION_STAT_CARDS.map((card) => (
+              <FilterStatCard
+                key={card.filter}
+                label={card.label}
+                count={reservationStats[card.countKey]}
+                icon={card.Icon}
+                iconBg={card.iconBg}
+                iconColor={card.iconColor}
+                isActive={cardFilter === card.filter}
+                loading={loadingStats}
+                onClick={() => selectCardFilter(card.filter)}
+              />
+            ))}
+          </div>
+
           <Card className={cadastroListClasses.card}>
             <CardHeader className={cadastroListClasses.cardHeader}>
               <div className={cadastroListClasses.cardHeaderRow}>
                 <div className={cadastroListClasses.cardHeaderIconRow}>
-                  <div className="rounded-lg bg-red-100 p-2 sm:p-3 dark:bg-red-900/30">
-                    <CalendarRange className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6" />
+                  <div className={`rounded-lg p-2 sm:p-3 ${listHeader.iconBg}`}>
+                    <ListHeaderIcon className={`h-5 w-5 sm:h-6 sm:w-6 ${listHeader.iconColor}`} />
                   </div>
                   <div className="min-w-0">
                     <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 sm:text-xl">
-                      Reservas
+                      {listHeader.title}
                     </h2>
                     <p className="text-sm text-gray-500 dark:text-gray-400">
-                      {isLoading
-                        ? 'Carregando...'
-                        : pagination.total === 1
-                          ? '1 reserva registrada'
-                          : `${pagination.total} reservas registradas`}
+                      {listHeader.subtitle}
                     </p>
                   </div>
                 </div>
@@ -522,7 +658,9 @@ export default function ReservaVeiculosPage() {
                   hint={
                     searchTerm.trim()
                       ? 'Tente ajustar a busca'
-                      : 'Clique em Nova reserva para solicitar um veículo'
+                      : cardFilter === 'all'
+                        ? 'Clique em Nova reserva para solicitar um veículo'
+                        : 'Nenhuma reserva neste filtro'
                   }
                 />
               ) : (

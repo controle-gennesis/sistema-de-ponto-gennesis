@@ -1,7 +1,7 @@
 import React from 'react';
 import { clsx } from 'clsx';
 
-export interface CardProps {
+export interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
   children: React.ReactNode;
   className?: string;
   padding?: 'none' | 'sm' | 'md' | 'lg';
@@ -11,6 +11,7 @@ export const Card: React.FC<CardProps> = ({
   children,
   className,
   padding = 'md',
+  ...rest
 }) => {
   const paddingClasses = {
     none: '',
@@ -25,7 +26,7 @@ export const Card: React.FC<CardProps> = ({
     className
   );
 
-  return <div className={classes}>{children}</div>;
+  return <div className={classes} {...rest}>{children}</div>;
 };
 
 export interface CardHeaderProps {

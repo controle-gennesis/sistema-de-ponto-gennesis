@@ -6,6 +6,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { CheckCircle2, Clock, Filter, PackageCheck, Search, X } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
+import { FilterStatCard } from '@/components/ui/FilterStatCard';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
@@ -321,54 +322,25 @@ export default function RecebimentoEntregasPageClient() {
             </p>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
-            <Card padding="none" className="cursor-pointer transition-shadow hover:shadow-md">
-              <CardContent
-                className="!pt-0 h-full w-full p-4 sm:p-6"
-                role="button"
-                tabIndex={0}
-                onClick={() => setViewTab('pending')}
-                onKeyDown={(e) => e.key === 'Enter' && setViewTab('pending')}
-              >
-                <div className="flex items-center">
-                  <div className="p-2 sm:p-3 bg-amber-100 dark:bg-amber-900/30 rounded-lg flex-shrink-0">
-                    <PackageCheck className="w-5 h-5 sm:w-6 sm:h-6 text-amber-600 dark:text-amber-400" />
-                  </div>
-                  <div className="ml-3 sm:ml-4 min-w-0 flex-1">
-                    <p className="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400">
-                      Pendentes
-                    </p>
-                    <p className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100 mt-1">
-                      {summary.awaitingEngineering}
-                    </p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card padding="none" className="cursor-pointer transition-shadow hover:shadow-md">
-              <CardContent
-                className="!pt-0 h-full w-full p-4 sm:p-6"
-                role="button"
-                tabIndex={0}
-                onClick={() => setViewTab('received')}
-                onKeyDown={(e) => e.key === 'Enter' && setViewTab('received')}
-              >
-                <div className="flex items-center">
-                  <div className="p-2 sm:p-3 bg-green-100 dark:bg-green-900/30 rounded-lg flex-shrink-0">
-                    <CheckCircle2 className="w-5 h-5 sm:w-6 sm:h-6 text-green-600 dark:text-green-400" />
-                  </div>
-                  <div className="ml-3 sm:ml-4 min-w-0 flex-1">
-                    <p className="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400">
-                      Recebidas
-                    </p>
-                    <p className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100 mt-1">
-                      {summary.delivered}
-                    </p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6">
+            <FilterStatCard
+              label="Pendentes"
+              count={summary.awaitingEngineering}
+              icon={PackageCheck}
+              iconBg="bg-amber-100 dark:bg-amber-900/30"
+              iconColor="text-amber-600 dark:text-amber-400"
+              isActive={viewTab === 'pending'}
+              onClick={() => setViewTab('pending')}
+            />
+            <FilterStatCard
+              label="Recebidas"
+              count={summary.delivered}
+              icon={CheckCircle2}
+              iconBg="bg-green-100 dark:bg-green-900/30"
+              iconColor="text-green-600 dark:text-green-400"
+              isActive={viewTab === 'received'}
+              onClick={() => setViewTab('received')}
+            />
           </div>
 
           <Card className="w-full">
