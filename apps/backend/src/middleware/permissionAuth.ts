@@ -5,6 +5,11 @@ import { userHasDpApprovePermission } from '../lib/dpApprovalAccess';
 import { userHasFuelApprovePermission } from '../lib/fuelApprovalAccess';
 import { userHasFuelSuppliesAccess } from '../lib/fuelSuppliesAccess';
 import { userHasVehicleReservationSuppliesAccess } from '../lib/vehicleReservationSuppliesAccess';
+import { userHasLogisticsDeliveryAccess } from '../lib/logisticsDeliveryAccess';
+import {
+  userHasLogisticsDeliveryCompletionAccess,
+  userHasLogisticsDeliveryReadAccess,
+} from '../lib/logisticsDeliveryCompletionAccess';
 import { AuthRequest } from './auth';
 import { createError } from './errorHandler';
 
@@ -116,6 +121,62 @@ export const requireVehicleReservationSuppliesAccess = async (
     const ok = await userHasVehicleReservationSuppliesAccess(req.user.id, req.user.isAdmin);
     if (!ok) {
       return next(createError('Você não tem permissão para esta ação', 403));
+    }
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+};
+
+/** Entregas logísticas — Suprimentos. */
+export const requireLogisticsDeliveryAccess = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    if (!req.user) {
+      return next(createError('Usuário não autenticado', 401));
+    }
+    const ok = await userHasLogisticsDeliveryAccess(req.user.id, req.user.isAdmin);
+    if (!ok) {
+      return next(createError('Você não tem permissão para esta ação', 403));
+    }
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+};
+
+/** Leitura de solicitações logísticas — Suprimentos ou finalização (Principal). */
+export const requireLogisticsDeliveryReadAccess = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    if (!req.user) {
+      return next(createError('Usuário não autenticado', 401));
+    }
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+};
+
+/** Finalização de entregas logísticas — Principal. */
+export const requireLogisticsDeliveryCompletionAccess = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    if (!req.user) {
+      return next(createError('Usuário não autenticado', 401));
+    }
+    const ok = await userHasLogisticsDeliveryCompletionAccess(req.user.id, req.user.isAdmin);
+    if (!ok) {
+      return next(createError('Você não tem permissão para finalizar entregas logísticas', 403));
     }
     return next();
   } catch (error) {

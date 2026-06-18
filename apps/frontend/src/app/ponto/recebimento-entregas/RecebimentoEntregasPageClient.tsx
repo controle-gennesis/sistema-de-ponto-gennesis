@@ -322,9 +322,9 @@ export default function RecebimentoEntregasPageClient() {
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
-            <Card className="cursor-pointer transition-shadow hover:shadow-md">
+            <Card padding="none" className="cursor-pointer transition-shadow hover:shadow-md">
               <CardContent
-                className="p-4 sm:p-6"
+                className="!pt-0 h-full w-full p-4 sm:p-6"
                 role="button"
                 tabIndex={0}
                 onClick={() => setViewTab('pending')}
@@ -346,9 +346,9 @@ export default function RecebimentoEntregasPageClient() {
               </CardContent>
             </Card>
 
-            <Card className="cursor-pointer transition-shadow hover:shadow-md">
+            <Card padding="none" className="cursor-pointer transition-shadow hover:shadow-md">
               <CardContent
-                className="p-4 sm:p-6"
+                className="!pt-0 h-full w-full p-4 sm:p-6"
                 role="button"
                 tabIndex={0}
                 onClick={() => setViewTab('received')}

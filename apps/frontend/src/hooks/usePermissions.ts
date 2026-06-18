@@ -444,6 +444,10 @@ export function useRoutePermission(route: string) {
     '/ponto/mapa-cotacao': isAdministrator || isDepartmentCompras || can(pk('/ponto/mapa-cotacao')),
     '/ponto/ordem-de-compra': isAdministrator || isDepartmentCompras || can(pk('/ponto/ordem-de-compra')),
     '/ponto/controle-entregas': isAdministrator || can(pk('/ponto/controle-entregas')),
+    '/ponto/entregas-logistica':
+      isAdministrator || isDepartmentCompras || can(pk('/ponto/entregas-logistica')),
+    '/ponto/entrega-logistica':
+      isAdministrator || can(pk('/ponto/entrega-logistica')),
     '/ponto/estoque': isAdministrator || isDepartmentCompras || can(pk('/ponto/estoque')),
     '/ponto/ajuste-estoque': isAdministrator || isDepartmentCompras || can(pk('/ponto/ajuste-estoque')),
     '/ponto/furo-estoque': isAdministrator || isDepartmentCompras || can(pk('/ponto/furo-estoque')),

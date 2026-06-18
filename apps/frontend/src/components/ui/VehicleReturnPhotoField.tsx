@@ -3,12 +3,6 @@
 import React, { useRef, useState } from 'react';
 import { Camera, X } from 'lucide-react';
 
-type VehicleReturnPhotoFieldProps = {
-  value: string;
-  onChange: (value: string) => void;
-  disabled?: boolean;
-};
-
 function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -18,10 +12,23 @@ function readFileAsDataUrl(file: File): Promise<string> {
   });
 }
 
+type VehicleReturnPhotoFieldProps = {
+  value: string;
+  onChange: (value: string) => void;
+  disabled?: boolean;
+  emptyLabel?: string;
+  photoAlt?: string;
+};
+
+const emptyPhotoButtonClassName =
+  'flex h-40 w-full flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-gray-300 bg-white text-gray-500 transition-colors hover:border-red-400 hover:bg-red-50/40 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-400 dark:hover:border-red-500 dark:hover:bg-red-950/20 dark:hover:text-red-400';
+
 export function VehicleReturnPhotoField({
   value,
   onChange,
-  disabled = false
+  disabled = false,
+  emptyLabel = 'Tocar para fotografar o veículo',
+  photoAlt = 'Foto do veículo',
 }: VehicleReturnPhotoFieldProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(false);
@@ -51,7 +58,7 @@ export function VehicleReturnPhotoField({
       {value ? (
         <div className="relative overflow-hidden rounded-lg border border-gray-300 bg-gray-50 dark:border-gray-600 dark:bg-gray-900">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={value} alt="Foto do veículo" className="mx-auto max-h-48 w-full object-contain" />
+          <img src={value} alt={photoAlt} className="mx-auto max-h-48 w-full object-contain" />
           {!disabled ? (
             <button
               type="button"
@@ -68,11 +75,11 @@ export function VehicleReturnPhotoField({
           type="button"
           disabled={disabled || loading}
           onClick={() => inputRef.current?.click()}
-          className="flex h-40 w-full flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-gray-300 bg-white text-gray-500 transition-colors hover:border-red-400 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-400 dark:hover:border-red-500 dark:hover:text-red-400"
+          className={emptyPhotoButtonClassName}
         >
           <Camera className="h-8 w-8" />
           <span className="text-sm font-medium">
-            {loading ? 'Carregando foto...' : 'Tocar para fotografar o veículo'}
+            {loading ? 'Carregando foto...' : emptyLabel}
           </span>
         </button>
       )}

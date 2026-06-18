@@ -109,4 +109,60 @@ export class ServiceOrderService {
 
     return dedupeServiceOrderListItems(mapped);
   }
+
+  /** Ordens de serviço vinculadas a pleitos do contrato selecionado. */
+  async listByContract(contractId: string): Promise<ServiceOrderListItem[]> {
+    const contract = await prisma.contract.findUnique({
+      where: { id: contractId },
+      select: { id: true },
+    });
+    if (!contract) {
+      throw new Error('Contrato não encontrado');
+    }
+
+    const rows = await prisma.service_orders.findMany({
+      where: {
+        pleitos: {
+          some: {
+            updatedContractId: contractId,
+          },
+        },
+      },
+      orderBy: [{ ano: 'desc' }, { numero: 'desc' }],
+      include: {
+        pleitos: {
+          where: { updatedContractId: contractId },
+          orderBy: { createdAt: 'asc' },
+          select: {
+            divSe: true,
+            folderNumber: true,
+            reportsBilling: true,
+            updatedContract: {
+              select: { name: true, number: true },
+            },
+          },
+        },
+      },
+    });
+
+    const mapped = rows.map((so) => {
+      const pleitos = so.pleitos;
+      const label = buildServiceOrderDisplayLabel(so.numero, so.ano, pleitos);
+      const src = pleitos.find((p) => (p.divSe || '').trim()) ?? pleitos[0];
+      const contractRow = src?.updatedContract;
+      return {
+        id: so.id,
+        numero: so.numero,
+        ano: so.ano,
+        status: so.status,
+        label,
+        divSe: src?.divSe?.trim() || null,
+        folderNumber: src?.folderNumber?.trim() || null,
+        contractName: contractRow?.name ?? null,
+        contractNumber: contractRow?.number ?? null,
+      };
+    });
+
+    return dedupeServiceOrderListItems(mapped);
+  }
 }

@@ -612,9 +612,9 @@ export default function ControleEntregasPageClient() {
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 2xl:grid-cols-4 gap-4 sm:gap-6">
-            <Card className="cursor-pointer transition-shadow hover:shadow-md">
+            <Card padding="none" className="cursor-pointer transition-shadow hover:shadow-md">
               <CardContent
-                className="p-4 sm:p-6"
+                className="!pt-0 h-full w-full p-4 sm:p-6"
                 role="button"
                 tabIndex={0}
                 onClick={() => setViewFilter('all')}
@@ -636,9 +636,9 @@ export default function ControleEntregasPageClient() {
               </CardContent>
             </Card>
 
-            <Card className="cursor-pointer transition-shadow hover:shadow-md">
+            <Card padding="none" className="cursor-pointer transition-shadow hover:shadow-md">
               <CardContent
-                className="p-4 sm:p-6"
+                className="!pt-0 h-full w-full p-4 sm:p-6"
                 role="button"
                 tabIndex={0}
                 onClick={() => setViewFilter('awaiting')}
@@ -660,9 +660,9 @@ export default function ControleEntregasPageClient() {
               </CardContent>
             </Card>
 
-            <Card className="cursor-pointer transition-shadow hover:shadow-md">
+            <Card padding="none" className="cursor-pointer transition-shadow hover:shadow-md">
               <CardContent
-                className="p-4 sm:p-6"
+                className="!pt-0 h-full w-full p-4 sm:p-6"
                 role="button"
                 tabIndex={0}
                 onClick={() => setViewFilter('received')}
@@ -684,9 +684,9 @@ export default function ControleEntregasPageClient() {
               </CardContent>
             </Card>
 
-            <Card className="cursor-pointer transition-shadow hover:shadow-md">
+            <Card padding="none" className="cursor-pointer transition-shadow hover:shadow-md">
               <CardContent
-                className="p-4 sm:p-6"
+                className="!pt-0 h-full w-full p-4 sm:p-6"
                 role="button"
                 tabIndex={0}
                 onClick={() => setViewFilter('overdue')}

@@ -586,9 +586,9 @@ export function GerenciarSolicitacoesGeraisPage() {
               const StatIcon = card.Icon;
               const isActive = cardFilter === card.filter;
               return (
-                <Card key={card.filter} className={manageStatCardClassName()}>
+                <Card key={card.filter} padding="none" className={manageStatCardClassName()}>
                   <CardContent
-                    className="p-4 sm:p-6"
+                    className="!pt-0 h-full w-full p-4 sm:p-6"
                     role="button"
                     tabIndex={0}
                     aria-pressed={isActive}

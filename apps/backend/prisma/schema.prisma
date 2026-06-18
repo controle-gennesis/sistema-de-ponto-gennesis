@@ -91,6 +91,8 @@ model User {
   fuelRefuelRequestsSuppliesApproved      FuelRefuelRequest[] @relation("FuelRefuelSupplies")
   vehicleReservationsCreated              VehicleReservation[] @relation("VehicleReservationCreator")
   vehicleReservationsSuppliesApproved     VehicleReservation[] @relation("VehicleReservationSuppliesApprover")
+  logisticsDeliveryRequestsCreated        LogisticsDeliveryRequest[] @relation("LogisticsDeliveryCreator")
+  logisticsDeliveryCompletionsReported    LogisticsDeliveryCompletion[] @relation("LogisticsDeliveryCompleter")
   vehicleReservationsBaixaReported        VehicleReservation[] @relation("VehicleReservationBaixaReporter")
   vehicleReservationsVistoriaReported     VehicleReservation[] @relation("VehicleReservationVistoriaReporter")
 
@@ -960,6 +962,7 @@ model CostCenter {
   stockShortfalls        StockShortfall[]
   espelhoNfServiceTakers EspelhoNfServiceTaker[]
   espelhoNfMirrors       EspelhoNfMirror[]
+  logisticsDeliveryRequests LogisticsDeliveryRequest[]
 
   @@index([code])
   @@index([isActive])
@@ -1154,6 +1157,7 @@ model Contract {
   demandSheetApprovals DemandSheetApproval[]
   materialDeliveries   MaterialDelivery[]
   fuelRefuelRequests   FuelRefuelRequest[]
+  logisticsDeliveryRequests LogisticsDeliveryRequest[]
 
   @@index([costCenterId])
   @@index([number])
@@ -1600,6 +1604,7 @@ model Supplier {
   quoteMapSupplierItems QuoteMapSupplierItem[] @relation("QuoteMapSupplierItemSupplier")
   quoteMapWinnerItems   QuoteMapWinnerItem[]   @relation("QuoteMapWinnerSupplier")
   materialDeliveries    MaterialDelivery[]
+  logisticsDeliveryRequests LogisticsDeliveryRequest[]
 
   @@index([code])
   @@index([isActive])
@@ -1769,6 +1774,7 @@ model PurchaseOrder {
   items             PurchaseOrderItem[]
   stockShortfalls   StockShortfall[]
   materialDeliveries MaterialDelivery[]
+  logisticsDeliveryRequests LogisticsDeliveryRequest[]
 
   @@index([orderNumber])
   @@index([materialRequestId])
@@ -2850,4 +2856,121 @@ model FuelRefuelRequest {
   @@index([status])
   @@index([refuelDate])
   @@map("fuel_refuel_requests")
+}
+
+enum LogisticsDeliveryUrgency {
+  NORMAL
+  URGENT
+}
+
+enum LogisticsDeliveryRequestStatus {
+  PENDING
+  COMPLETED
+}
+
+enum LogisticsDeliveryOutcome {
+  DELIVERED
+  PARTIAL
+  NOT_DELIVERED
+}
+
+/// Solicitação de entrega logística (tb solicitação logística).
+model LogisticsDeliveryRequest {
+  id            String @id @default(cuid())
+  displayNumber Int    @unique
+
+  status LogisticsDeliveryRequestStatus @default(PENDING)
+
+  requestedAt DateTime
+  urgency     LogisticsDeliveryUrgency @default(NORMAL)
+
+  contractId String?
+  contract   Contract? @relation(fields: [contractId], references: [id], onDelete: SetNull)
+
+  costCenterId String?
+  costCenter   CostCenter? @relation(fields: [costCenterId], references: [id], onDelete: SetNull)
+
+  serviceOrderId     String?
+  serviceOrderNumber String?
+
+  purchaseOrderId     String?
+  purchaseOrderNumber String?
+  purchaseOrder       PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id], onDelete: SetNull)
+
+  movementId String
+
+  supplierId String?
+  supplier   Supplier? @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+
+  driverName String?
+
+  materialId   String?
+  materialName String?
+
+  materialAttachmentUrl  String?
+  materialAttachmentName String?
+
+  value            Decimal  @db.Decimal(15, 2)
+  history          String?  @db.Text
+  observations     String?  @db.Text
+  expectedDelivery DateTime?
+
+  createdBy String
+  creator   User   @relation("LogisticsDeliveryCreator", fields: [createdBy], references: [id], onDelete: Restrict)
+
+  completion LogisticsDeliveryCompletion?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([createdBy])
+  @@index([status])
+  @@index([contractId])
+  @@index([costCenterId])
+  @@index([purchaseOrderId])
+  @@index([supplierId])
+  @@index([requestedAt])
+  @@map("logistics_delivery_requests")
+}
+
+/// Feedback de entrega logística (tb feedback entrega fornecedor log).
+model LogisticsDeliveryCompletion {
+  id                String @id @default(cuid())
+  deliveryRequestId String @unique
+  deliveryRequest   LogisticsDeliveryRequest @relation(fields: [deliveryRequestId], references: [id], onDelete: Cascade)
+
+  receivingLocation    String
+  receivingResponsible String
+  receivedAt           DateTime
+  deliveryOutcome      LogisticsDeliveryOutcome
+
+  locationPhotoUrl String
+  locationPhotoKey String?
+  observations     String? @db.Text
+
+  completedBy String
+  completer   User   @relation("LogisticsDeliveryCompleter", fields: [completedBy], references: [id], onDelete: Restrict)
+
+  invoiceAttachments LogisticsDeliveryInvoiceAttachment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([completedBy])
+  @@index([receivedAt])
+  @@map("logistics_delivery_completions")
+}
+
+/// Notas fiscais anexadas na finalização (tb nf feedback log).
+model LogisticsDeliveryInvoiceAttachment {
+  id             String @id @default(cuid())
+  completionId   String
+  completion     LogisticsDeliveryCompletion @relation(fields: [completionId], references: [id], onDelete: Cascade)
+  attachmentUrl  String
+  attachmentName String?
+
+  createdAt DateTime @default(now())
+
+  @@index([completionId])
+  @@map("logistics_delivery_invoice_attachments")
 }

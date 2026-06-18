@@ -1127,7 +1127,7 @@ const DEMONSTRATIVO_CARD_CLICKABLE_CLASS =
 
 const DEMONSTRATIVO_RECORTE_CARD_CLASS = 'flex h-full flex-col';
 const DEMONSTRATIVO_RECORTE_CARD_BUTTON_CLASS = 'flex h-full w-full flex-col text-left';
-const DEMONSTRATIVO_RECORTE_CARD_CONTENT_CLASS = 'flex flex-1 flex-col p-4 sm:p-6';
+const DEMONSTRATIVO_RECORTE_CARD_CONTENT_CLASS = 'flex flex-1 flex-col !pt-0 p-4 sm:p-6';
 const DEMONSTRATIVO_RECORTE_CARD_BODY_CLASS = 'flex h-full items-start';
 const DEMONSTRATIVO_RECORTE_CARD_TEXT_CLASS =
   'ml-3 flex min-w-0 flex-1 flex-col sm:ml-4';
@@ -3810,6 +3810,7 @@ export default function AnaliseExtratoPage() {
 
                   <div className="grid grid-cols-1 items-stretch gap-4 sm:grid-cols-2 sm:gap-6">
                     <Card
+                      padding="none"
                       className={`${DEMONSTRATIVO_RECORTE_CARD_CLASS} border-rose-200 dark:border-rose-800/60 ${DEMONSTRATIVO_CARD_CLICKABLE_CLASS}`}
                     >
                       <button
@@ -3847,6 +3848,7 @@ export default function AnaliseExtratoPage() {
                     </Card>
 
                     <Card
+                      padding="none"
                       className={`${DEMONSTRATIVO_RECORTE_CARD_CLASS} border-emerald-200 dark:border-emerald-800/60 ${DEMONSTRATIVO_CARD_CLICKABLE_CLASS}`}
                     >
                       <button
@@ -3891,6 +3893,7 @@ export default function AnaliseExtratoPage() {
                     </Card>
 
                     <Card
+                      padding="none"
                       className={`${DEMONSTRATIVO_RECORTE_CARD_CLASS} border-violet-200 dark:border-violet-800/60 ${DEMONSTRATIVO_CARD_CLICKABLE_CLASS}`}
                     >
                       <button
@@ -3928,6 +3931,7 @@ export default function AnaliseExtratoPage() {
                     </Card>
 
                     <Card
+                      padding="none"
                       className={`${DEMONSTRATIVO_RECORTE_CARD_CLASS} border-sky-200 dark:border-sky-800/60 ${DEMONSTRATIVO_CARD_CLICKABLE_CLASS}`}
                     >
                       <button
@@ -3972,6 +3976,7 @@ export default function AnaliseExtratoPage() {
                     </Card>
 
                     <Card
+                      padding="none"
                       className={`${DEMONSTRATIVO_RECORTE_CARD_CLASS} border-amber-200 dark:border-amber-800/60 ${DEMONSTRATIVO_CARD_CLICKABLE_CLASS}`}
                     >
                       <button
@@ -4009,6 +4014,7 @@ export default function AnaliseExtratoPage() {
                     </Card>
 
                     <Card
+                      padding="none"
                       className={`${DEMONSTRATIVO_RECORTE_CARD_CLASS} border-fuchsia-200 dark:border-fuchsia-800/60 ${DEMONSTRATIVO_CARD_CLICKABLE_CLASS}`}
                     >
                       <button
@@ -4046,6 +4052,7 @@ export default function AnaliseExtratoPage() {
                     </Card>
 
                     <Card
+                      padding="none"
                       className={`${DEMONSTRATIVO_RECORTE_CARD_CLASS} border-orange-200 dark:border-orange-800/60 ${DEMONSTRATIVO_CARD_CLICKABLE_CLASS}`}
                     >
                       <button
@@ -4083,6 +4090,7 @@ export default function AnaliseExtratoPage() {
                     </Card>
 
                     <Card
+                      padding="none"
                       className={`${DEMONSTRATIVO_RECORTE_CARD_CLASS} border-teal-200 dark:border-teal-800/60`}
                     >
                       <CardContent className={DEMONSTRATIVO_RECORTE_CARD_CONTENT_CLASS}>
@@ -4136,14 +4144,14 @@ export default function AnaliseExtratoPage() {
                       </CardContent>
                     </Card>
 
-                    <Card className={DEMONSTRATIVO_CARD_CLICKABLE_CLASS}>
+                    <Card padding="none" className={DEMONSTRATIVO_CARD_CLICKABLE_CLASS}>
                       <button
                         type="button"
-                        className="w-full text-left"
+                        className="h-full w-full text-left"
                         onClick={() => setDemonstrativoDetalhe('entradas')}
                         aria-label="Ver detalhes das Entradas"
                       >
-                        <CardContent className="p-4 sm:p-6">
+                        <CardContent className="!pt-0 p-4 sm:p-6">
                           <div className="flex items-center">
                             <div className="flex-shrink-0 rounded-lg bg-green-100 p-2 sm:p-3 dark:bg-green-900/30">
                               <ArrowDownLeft className="h-5 w-5 text-green-600 dark:text-green-400 sm:h-6 sm:w-6" />

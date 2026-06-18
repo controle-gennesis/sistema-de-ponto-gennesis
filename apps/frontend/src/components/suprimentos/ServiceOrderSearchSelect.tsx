@@ -8,7 +8,8 @@ import {
 } from '@/hooks/useServiceOrdersByCostCenter';
 
 type ServiceOrderSearchSelectProps = {
-  costCenterId: string;
+  costCenterId?: string;
+  contractId?: string;
   serviceOrders: ServiceOrderOption[];
   loading: boolean;
   serviceOrderId: string;
@@ -17,17 +18,20 @@ type ServiceOrderSearchSelectProps = {
   onClear: () => void;
   inputSize?: 'sm' | 'md';
   emptyCostCenterHint?: string;
+  emptyContractHint?: string;
   required?: boolean;
 };
 
 export function ServiceOrderSearchSelect({
-  costCenterId,
+  costCenterId = '',
+  contractId = '',
   serviceOrders,
   loading,
   serviceOrderId,
   onSelect,
   onClear,
-  emptyCostCenterHint = 'Selecione o centro de custo para listar as ordens de serviço'
+  emptyCostCenterHint = 'Selecione o centro de custo para listar as ordens de serviço',
+  emptyContractHint = 'Selecione o contrato para listar as ordens de serviço',
 }: ServiceOrderSearchSelectProps) {
   const options = useMemo(
     () =>
@@ -52,7 +56,12 @@ export function ServiceOrderSearchSelect({
     else onClear();
   };
 
-  if (!costCenterId) {
+  const useContractScope = !!contractId.trim();
+  const scopeReady = useContractScope ? !!contractId.trim() : !!costCenterId.trim();
+  const emptyHint = useContractScope ? emptyContractHint : emptyCostCenterHint;
+  const emptyScopeLabel = useContractScope ? 'contrato' : 'centro de custo';
+
+  if (!scopeReady) {
     return (
       <SingleSelectSearchDropdown
         value=""
@@ -60,7 +69,7 @@ export function ServiceOrderSearchSelect({
         options={[]}
         disabled
         allowEmpty={false}
-        placeholder={emptyCostCenterHint}
+        placeholder={emptyHint}
         noFocusRing
       />
     );
@@ -89,13 +98,14 @@ export function ServiceOrderSearchSelect({
         allowEmpty
         placeholder="Digite para buscar ordem de serviço..."
         searchPlaceholder="Pesquisar..."
-        emptyOptionsMessage="Nenhuma ordem de serviço cadastrada neste centro de custo."
+        emptyOptionsMessage={`Nenhuma ordem de serviço cadastrada neste ${emptyScopeLabel}.`}
         emptySearchMessage="Nenhuma ordem de serviço encontrada."
         noFocusRing
       />
       {serviceOrders.length === 0 ? (
         <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
-          Nenhuma ordem de serviço cadastrada neste centro de custo no módulo de Contratos (Engenharia).
+          Nenhuma ordem de serviço cadastrada neste {emptyScopeLabel} no módulo de Contratos
+          (Engenharia).
         </p>
       ) : null}
     </div>

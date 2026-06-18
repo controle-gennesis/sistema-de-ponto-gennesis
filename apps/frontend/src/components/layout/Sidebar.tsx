@@ -162,6 +162,8 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
     isAdministrator || isDepartmentCompras || can(pk('/ponto/solicitacoes-combustivel'));
   const canSeeVehicleReservationSupplies =
     isAdministrator || isDepartmentCompras || can(pk('/ponto/solicitacoes-reserva-veiculos'));
+  const canSeeEntregaLogistica =
+    isAdministrator || can(pk('/ponto/entrega-logistica'));
 
   const { data: pendingFuroCount = 0 } = useQuery({
     queryKey: ['stock-shortfalls-pending-count'],
@@ -217,6 +219,19 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
     staleTime: 20_000,
   });
 
+  const { data: entregaLogisticaPendingCount = 0 } = useQuery({
+    queryKey: ['logistics-delivery-pending-count'],
+    queryFn: async () => {
+      const res = await api.get('/logistics-delivery-requests/pending-count');
+      const n = Number(res.data?.data?.count ?? res.data?.count);
+      return Number.isFinite(n) && n > 0 ? n : 0;
+    },
+    enabled: canSeeEntregaLogistica && !isLoading,
+    refetchInterval: 60_000,
+    refetchOnWindowFocus: true,
+    staleTime: 20_000,
+  });
+
   const { counts: fdNotificationCounts } = useFdNotificationCounts();
   const { counts: approvalCounts } = useApprovalNotificationCounts();
 
@@ -227,11 +242,12 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
     if (href === '/ponto/recebimento-entregas') return recebimentoPendingCount;
     if (href === '/ponto/solicitacoes-combustivel') return fuelSuppliesPendingCount;
     if (href === '/ponto/solicitacoes-reserva-veiculos') return vehicleReservationSuppliesPendingCount;
+    if (href === '/ponto/entrega-logistica') return entregaLogisticaPendingCount;
     return 0;
   };
 
   const moduleBadgeCountForId = (categoryId: string): number => {
-    if (categoryId === 'main') return approvalCounts.total;
+    if (categoryId === 'main') return approvalCounts.total + entregaLogisticaPendingCount;
     if (categoryId === 'suprimentos') {
       return (
         fdNotificationCounts.pendingPurchase +
@@ -383,6 +399,13 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
             description: 'Solicitar reserva de veículos da frota',
             permission:
               isAdministrator || isDepartmentCompras || can(pk('/ponto/reserva-veiculos'))
+          },
+          {
+            name: 'Entrega da Logística',
+            href: '/ponto/entrega-logistica',
+            icon: Truck,
+            description: 'Finalizar solicitações de entrega logística',
+            permission: isAdministrator || can(pk('/ponto/entrega-logistica'))
           },
         ]
       },
@@ -669,6 +692,13 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
             icon: Truck,
             description: 'Acompanhar entregas de material e recebimento pela engenharia',
             permission: isAdministrator || can(pk('/ponto/controle-entregas'))
+          },
+          {
+            name: 'Entregas Logística',
+            href: '/ponto/entregas-logistica',
+            icon: Truck,
+            description: 'Registrar solicitações de entrega logística',
+            permission: isAdministrator || isDepartmentCompras || can(pk('/ponto/entregas-logistica'))
           },
           {
             name: 'Estoque',

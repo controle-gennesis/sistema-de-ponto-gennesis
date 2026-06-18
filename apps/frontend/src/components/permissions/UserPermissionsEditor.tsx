@@ -176,6 +176,7 @@ function inferCategoryFromHref(href: string): string {
       '/ponto/solicitacoes-dp',
       '/ponto/drive',
       '/ponto/reserva-veiculos',
+      '/ponto/entrega-logistica',
     ].some((p) => h === p)
   ) {
     return 'Principal';
@@ -231,6 +232,7 @@ function inferCategoryFromHref(href: string): string {
       '/ponto/furo-estoque',
       '/ponto/ajuste-estoque',
       '/ponto/controle-entregas',
+      '/ponto/entregas-logistica',
       '/ponto/fds-aprovadas',
       '/ponto/solicitacoes-combustivel',
       '/ponto/solicitacoes-reserva-veiculos',

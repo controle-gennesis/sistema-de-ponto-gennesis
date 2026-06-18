@@ -77,20 +77,41 @@ export function filterServiceOrdersByQuery(
 export function useServiceOrdersByCostCenter(costCenterId: string) {
   const trimmed = costCenterId.trim();
   const { data, isLoading, error, isFetching } = useQuery({
-    queryKey: ['service-orders', trimmed],
+    queryKey: ['service-orders', 'cost-center', trimmed],
     queryFn: async () => {
       const res = await api.get('/service-orders', {
-        params: { costCenterId: trimmed }
+        params: { costCenterId: trimmed },
       });
       return normalizeServiceOrdersResponse(res.data);
     },
     enabled: !!trimmed,
-    staleTime: 60_000
+    staleTime: 60_000,
   });
 
   return {
     serviceOrders: data ?? [],
     isLoading: isLoading || isFetching,
-    error
+    error,
+  };
+}
+
+export function useServiceOrdersByContract(contractId: string) {
+  const trimmed = contractId.trim();
+  const { data, isLoading, error, isFetching } = useQuery({
+    queryKey: ['service-orders', 'contract', trimmed],
+    queryFn: async () => {
+      const res = await api.get('/service-orders', {
+        params: { contractId: trimmed },
+      });
+      return normalizeServiceOrdersResponse(res.data);
+    },
+    enabled: !!trimmed,
+    staleTime: 60_000,
+  });
+
+  return {
+    serviceOrders: data ?? [],
+    isLoading: isLoading || isFetching,
+    error,
   };
 }

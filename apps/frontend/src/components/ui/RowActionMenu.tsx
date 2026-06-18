@@ -70,6 +70,8 @@ type RowActionMenuPortalProps = {
   deleteDisabled?: boolean;
   deleteDisabledTitle?: string;
   extraItems?: RowActionMenuExtraItem[];
+  /** Oculta Editar/Excluir — exibe só `extraItems` */
+  hideDefaultActions?: boolean;
   zIndex?: { backdrop: number; menu: number };
 };
 
@@ -82,6 +84,7 @@ export function RowActionMenuPortal({
   deleteDisabled = false,
   deleteDisabledTitle,
   extraItems = [],
+  hideDefaultActions = false,
   zIndex = { backdrop: 1050, menu: 1051 }
 }: RowActionMenuPortalProps) {
   if (!menu || typeof document === 'undefined') return null;
@@ -99,22 +102,24 @@ export function RowActionMenuPortal({
         className="fixed w-56 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800"
         style={{ top: menu.top, left: menu.left, zIndex: zIndex.menu }}
       >
-        <button
-          type="button"
-          role="menuitem"
-          disabled={editDisabled}
-          onClick={(e) => {
-            e.stopPropagation();
-            if (editDisabled) return;
-            onClose();
-            onEdit();
-          }}
-          className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-gray-300 dark:hover:bg-gray-700"
-        >
-          <Edit className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
-          <span>Editar</span>
-        </button>
-        {extraItems.map((item) => (
+        {!hideDefaultActions ? (
+          <button
+            type="button"
+            role="menuitem"
+            disabled={editDisabled}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (editDisabled) return;
+              onClose();
+              onEdit();
+            }}
+            className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-gray-300 dark:hover:bg-gray-700"
+          >
+            <Edit className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
+            <span>Editar</span>
+          </button>
+        ) : null}
+        {extraItems.map((item, index) => (
           <button
             key={item.label}
             type="button"
@@ -127,7 +132,11 @@ export function RowActionMenuPortal({
               onClose();
               item.onClick();
             }}
-            className={`flex w-full items-center gap-2 border-t border-gray-200 px-3 py-2.5 text-left text-sm hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-700 ${
+            className={`flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-700 ${
+              hideDefaultActions && index === 0
+                ? ''
+                : 'border-t border-gray-200 dark:border-gray-700'
+            } ${
               item.disabled
                 ? 'cursor-not-allowed text-gray-400 dark:text-gray-500'
                 : 'text-gray-700 dark:text-gray-300'
@@ -137,30 +146,32 @@ export function RowActionMenuPortal({
             <span>{item.label}</span>
           </button>
         ))}
-        <button
-          type="button"
-          role="menuitem"
-          disabled={deleteDisabled}
-          onClick={(e) => {
-            e.stopPropagation();
-            if (deleteDisabled) return;
-            onClose();
-            onDelete();
-          }}
-          title={deleteDisabled ? deleteDisabledTitle : 'Excluir'}
-          className={`flex w-full items-center gap-2 border-t border-gray-200 px-3 py-2.5 text-left text-sm hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-700 ${
-            deleteDisabled
-              ? 'cursor-not-allowed text-gray-400 dark:text-gray-500'
-              : 'text-gray-700 dark:text-gray-300'
-          }`}
-        >
-          <Trash2
-            className={`h-4 w-4 shrink-0 ${
-              deleteDisabled ? 'text-gray-400 dark:text-gray-500' : 'text-red-600 dark:text-red-400'
+        {!hideDefaultActions ? (
+          <button
+            type="button"
+            role="menuitem"
+            disabled={deleteDisabled}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (deleteDisabled) return;
+              onClose();
+              onDelete();
+            }}
+            title={deleteDisabled ? deleteDisabledTitle : 'Excluir'}
+            className={`flex w-full items-center gap-2 border-t border-gray-200 px-3 py-2.5 text-left text-sm hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-700 ${
+              deleteDisabled
+                ? 'cursor-not-allowed text-gray-400 dark:text-gray-500'
+                : 'text-gray-700 dark:text-gray-300'
             }`}
-          />
-          <span>Excluir</span>
-        </button>
+          >
+            <Trash2
+              className={`h-4 w-4 shrink-0 ${
+                deleteDisabled ? 'text-gray-400 dark:text-gray-500' : 'text-red-600 dark:text-red-400'
+              }`}
+            />
+            <span>Excluir</span>
+          </button>
+        ) : null}
       </div>
     </>,
     document.body
