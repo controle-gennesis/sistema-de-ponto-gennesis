@@ -68,6 +68,26 @@ const CREATE_TARGET_DEPARTMENT_LABELS: Record<'DP' | 'ADM_TST', string> = {
   ADM_TST: 'ADM/TST',
 };
 
+const CREATE_TARGET_DEPARTMENT_OPTIONS: Array<{
+  value: 'DP' | 'ADM_TST';
+  label: string;
+  icon: LucideIcon;
+}> = [
+  {
+    value: 'DP',
+    label: CREATE_TARGET_DEPARTMENT_LABELS.DP,
+    icon: Users,
+  },
+  {
+    value: 'ADM_TST',
+    label: CREATE_TARGET_DEPARTMENT_LABELS.ADM_TST,
+    icon: ClipboardList,
+  },
+];
+
+const createTargetDepartmentButtonCls =
+  'group flex w-full items-center gap-4 rounded-xl border border-gray-200 bg-white p-4 text-left shadow-sm transition-[border-color,background-color,box-shadow] hover:border-red-300 hover:bg-red-50/90 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/35 dark:border-gray-600 dark:bg-gray-800/70 dark:hover:border-red-700/70 dark:hover:bg-red-950/25';
+
 type DpContractSummary = { id: string; number: string; name: string };
 
 type DpRequest = {
@@ -1099,6 +1119,7 @@ export function SolicitacoesGeraisPage() {
         <Modal
           isOpen={isCreateModalOpen}
           onClose={closeCreateModal}
+          scrollContent={!!createTargetDepartment}
           title={
             createTargetDepartment ? (
               <div className="flex min-w-0 items-center gap-2">
@@ -1111,11 +1132,7 @@ export function SolicitacoesGeraisPage() {
                   <ArrowLeft className="h-5 w-5" />
                 </button>
                 <h3 className="min-w-0 truncate text-lg font-semibold text-gray-900 dark:text-gray-100">
-                  Nova solicitação
-                  <span className="font-normal text-gray-500 dark:text-gray-400">
-                    {' '}
-                    · {CREATE_TARGET_DEPARTMENT_LABELS[createTargetDepartment]}
-                  </span>
+                  Nova solicitação - {CREATE_TARGET_DEPARTMENT_LABELS[createTargetDepartment]}
                 </h3>
               </div>
             ) : (
@@ -1127,45 +1144,37 @@ export function SolicitacoesGeraisPage() {
           elevated
         >
           {!createTargetDepartment ? (
-            <div className="mx-auto max-w-md space-y-6 py-2">
-              <p className="text-center text-sm leading-relaxed text-gray-600 dark:text-gray-400">
+            <div className="space-y-5">
+              <p className="text-center text-sm text-gray-600 dark:text-gray-400">
                 Selecione o destino da solicitação
               </p>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setCreateTargetDepartment('DP');
-                    setForm((p) => ({ ...p, requestType: '', prazoInicio: '', prazoFim: '' }));
-                    setDetails({});
-                  }}
-                  className="group relative flex flex-col items-center gap-3 rounded-2xl border border-gray-200 bg-gray-50/80 px-4 py-7 transition-all hover:-translate-y-0.5 hover:border-red-400 hover:bg-red-50 hover:shadow-md dark:border-gray-600 dark:bg-gray-900/50 dark:hover:border-red-700 dark:hover:bg-red-950/30 dark:hover:shadow-red-950/20"
-                >
-                  <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-red-100 transition-colors group-hover:bg-red-200 dark:bg-red-950/60 dark:group-hover:bg-red-900/50">
-                    <Users className="h-6 w-6 text-red-600 dark:text-red-400" />
-                  </div>
-                  <span className="text-sm font-semibold leading-snug text-gray-900 dark:text-gray-100">
-                    Departamento Pessoal
-                  </span>
-                  <ChevronRight className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-red-500 opacity-0 transition-all group-hover:translate-x-0.5 group-hover:opacity-100" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setCreateTargetDepartment('ADM_TST');
-                    setForm((p) => ({ ...p, requestType: '', prazoInicio: '', prazoFim: '' }));
-                    setDetails({});
-                  }}
-                  className="group relative flex flex-col items-center gap-3 rounded-2xl border border-gray-200 bg-gray-50/80 px-4 py-7 transition-all hover:-translate-y-0.5 hover:border-red-400 hover:bg-red-50 hover:shadow-md dark:border-gray-600 dark:bg-gray-900/50 dark:hover:border-red-700 dark:hover:bg-red-950/30 dark:hover:shadow-red-950/20"
-                >
-                  <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-red-100 transition-colors group-hover:bg-red-200 dark:bg-red-950/60 dark:group-hover:bg-red-900/50">
-                    <ClipboardList className="h-6 w-6 text-red-600 dark:text-red-400" />
-                  </div>
-                  <span className="text-sm font-semibold leading-snug text-gray-900 dark:text-gray-100">
-                    ADM/TST
-                  </span>
-                  <ChevronRight className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-red-500 opacity-0 transition-all group-hover:translate-x-0.5 group-hover:opacity-100" />
-                </button>
+              <div className="grid w-full grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6">
+                {CREATE_TARGET_DEPARTMENT_OPTIONS.map((option) => {
+                  const Icon = option.icon;
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => {
+                        setCreateTargetDepartment(option.value);
+                        setForm((p) => ({ ...p, requestType: '', prazoInicio: '', prazoFim: '' }));
+                        setDetails({});
+                      }}
+                      className={createTargetDepartmentButtonCls}
+                    >
+                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-red-100 transition-colors group-hover:bg-red-200 dark:bg-red-950/55 dark:group-hover:bg-red-900/45">
+                        <Icon className="h-5 w-5 shrink-0 text-red-600 dark:text-red-400" aria-hidden />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{option.label}</p>
+                      </div>
+                      <ChevronRight
+                        className="h-4 w-4 shrink-0 text-red-500/40 transition-colors group-hover:text-red-500 dark:text-red-400/40 dark:group-hover:text-red-400"
+                        aria-hidden
+                      />
+                    </button>
+                  );
+                })}
               </div>
             </div>
           ) : (
