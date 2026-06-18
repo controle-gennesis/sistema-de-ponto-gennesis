@@ -74,7 +74,13 @@ type DpRequestType =
   | 'HORA_EXTRA'
   | 'OUTRAS_SOLICITACOES'
   | 'RESCISAO'
-  | 'RETIFICACAO_ALOCACAO';
+  | 'RETIFICACAO_ALOCACAO'
+  | 'ADM_VIAGENS'
+  | 'ADM_EPI_FARDAMENTO'
+  | 'ADM_MANUTENCAO_ESCRITORIO'
+  | 'ADM_MATERIAL_ESCRITORIO'
+  | 'ADM_INFORMATICA'
+  | 'ADM_TREINAMENTOS_NR';
 
 type DpContractSummary = { id: string; number: string; name: string };
 type EspelhoApprovalItem = {
@@ -292,6 +298,12 @@ const TYPE_LABELS: Record<DpRequestType, string> = {
   OUTRAS_SOLICITACOES: 'Outras solicitações',
   RESCISAO: 'Rescisão',
   RETIFICACAO_ALOCACAO: 'Retificação de alocação',
+  ADM_VIAGENS: 'Viagens',
+  ADM_EPI_FARDAMENTO: "EPI's e fardamento",
+  ADM_MANUTENCAO_ESCRITORIO: 'Manutenção do escritório',
+  ADM_MATERIAL_ESCRITORIO: 'Material de escritório',
+  ADM_INFORMATICA: 'Informática',
+  ADM_TREINAMENTOS_NR: "Treinamentos e NR's",
 };
 const ESPELHO_BADGE_CLASS: Record<EspelhoApprovalStatus, string> = {
   PENDING_APPROVAL:

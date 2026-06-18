@@ -18,10 +18,18 @@ export type MultiSelectSearchOption = {
   searchText?: string;
   /** Quando definido, exibe um indicador de cor ao lado do rótulo. */
   swatchColor?: string;
+  /** Classe CSS aplicada ao texto do rótulo (ex.: cor do status). */
+  labelClassName?: string;
 };
 
 function OptionLabelContent({ opt }: { opt: MultiSelectSearchOption }) {
-  if (!opt.swatchColor) return <>{opt.label}</>;
+  const label = opt.labelClassName ? (
+    <span className={`truncate ${opt.labelClassName}`}>{opt.label}</span>
+  ) : (
+    <span className="truncate">{opt.label}</span>
+  );
+
+  if (!opt.swatchColor) return label;
   return (
     <span className="flex min-w-0 flex-1 items-center gap-2.5">
       <span
@@ -29,7 +37,7 @@ function OptionLabelContent({ opt }: { opt: MultiSelectSearchOption }) {
         style={{ backgroundColor: opt.swatchColor }}
         aria-hidden
       />
-      <span className="truncate">{opt.label}</span>
+      {label}
     </span>
   );
 }

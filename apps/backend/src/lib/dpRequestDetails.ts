@@ -95,6 +95,21 @@ export const dpDetailsSchemas = {
     valores: z.string().optional(),
     observacoes: strOpt,
   }),
+  ADM_VIAGENS: z.object({
+    dataIda: str,
+    dataVolta: str,
+    employeeIds: z.array(z.string().min(1)).min(1).max(20),
+    cidade: str,
+    motivoViagem: str,
+    numeroDias: z.union([z.string().min(1), z.number()]).transform((v) => String(v)),
+    pedagio: z.enum(['SIM', 'NAO']),
+    observacoes: strOpt,
+  }),
+  ADM_EPI_FARDAMENTO: z.object({ detalhes: str }),
+  ADM_MANUTENCAO_ESCRITORIO: z.object({ detalhes: str }),
+  ADM_MATERIAL_ESCRITORIO: z.object({ detalhes: str }),
+  ADM_INFORMATICA: z.object({ detalhes: str }),
+  ADM_TREINAMENTOS_NR: z.object({ detalhes: str }),
 } as const;
 
 export type DpRequestTypeKey = keyof typeof dpDetailsSchemas;

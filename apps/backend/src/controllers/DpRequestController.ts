@@ -6,11 +6,20 @@ import { prisma } from '../lib/prisma';
 import { createError } from '../middleware/errorHandler';
 import {
   assertCanAttachCostCenterToDpRequest,
+  assertCanAttachContractToDpRequest,
   assertManagerCanActOnDpContract,
   getManagerDpApprovalContractScope,
   userMayCreateSensitiveDpRequest,
 } from '../lib/dpApprovalAccess';
 import { parseDpRequestDetails } from '../lib/dpRequestDetails';
+import {
+  isAdmTstDpRequestType,
+  admTstManagerApprovalExclusionWhere,
+  admTstOnlyWhere,
+  ADM_TST_FEEDBACK_NEXT_STATUSES,
+  ADM_TST_MAY_ACT_STATUSES,
+} from '../lib/dpRequestAdmTst';
+import { assertUserCanManageDpRequest } from '../lib/dpApprovalAccess';
 
 const SENSITIVE_MANAGER_ONLY_DP_TYPES = ['RESCISAO', 'ALTERACAO_FUNCAO_SALARIO'] as const;
 
@@ -25,6 +34,12 @@ const DP_REQUEST_TYPES = [
   'OUTRAS_SOLICITACOES',
   'RESCISAO',
   'RETIFICACAO_ALOCACAO',
+  'ADM_VIAGENS',
+  'ADM_EPI_FARDAMENTO',
+  'ADM_MANUTENCAO_ESCRITORIO',
+  'ADM_MATERIAL_ESCRITORIO',
+  'ADM_INFORMATICA',
+  'ADM_TREINAMENTOS_NR',
 ] as const;
 
 const createDpRequestSchema = z.object({
@@ -34,7 +49,7 @@ const createDpRequestSchema = z.object({
   /** Prazo desejado para retorno/acompanhamento pelo DP (independe das datas de período em férias, atestado etc.). */
   prazoInicio: z.string().min(1).optional(),
   prazoFim: z.string().min(1).optional(),
-  costCenterId: z.string().min(1),
+  contractId: z.string().min(1),
 
   // Persistimos para histórico (mesmo que possamos derivar do centro de custo depois).
   company: z.string().min(1).optional(),
@@ -211,35 +226,37 @@ async function attachDpContractSummaries<T extends { contractId: string | null }
 }
 
 export class DpRequestController {
-  /** Todos os centros de custo ativos para o formulário de solicitação geral. */
+  /** Contratos ativos (via centro de custo) para o formulário de solicitação geral. */
   async getEligibleContracts(req: AuthRequest, res: Response) {
     try {
       if (!req.user) throw createError('Usuário não autenticado', 401);
 
-      const costCenters = await prisma.costCenter.findMany({
-        where: { isActive: true },
+      const contracts = await prisma.contract.findMany({
+        where: { costCenter: { isActive: true } },
         select: {
           id: true,
           name: true,
-          code: true,
-          company: true,
-          polo: true,
-          contracts: {
-            select: { id: true, name: true, number: true },
-            orderBy: { name: 'asc' },
-            take: 1,
+          number: true,
+          costCenterId: true,
+          costCenter: {
+            select: { company: true, polo: true, name: true, code: true },
           },
         },
         orderBy: { name: 'asc' },
         take: 2000,
       });
 
-      const data = costCenters.map((cc) => ({
-        id: cc.id,
-        name: cc.name.trim() || cc.code,
-        code: cc.code,
-        contractId: cc.contracts[0]?.id ?? null,
-        costCenter: { company: cc.company ?? null, polo: cc.polo ?? null },
+      const data = contracts.map((c) => ({
+        id: c.id,
+        name: c.name.trim() || c.number,
+        number: c.number,
+        costCenterId: c.costCenterId,
+        costCenter: {
+          company: c.costCenter.company ?? null,
+          polo: c.costCenter.polo ?? null,
+          name: c.costCenter.name ?? null,
+          code: c.costCenter.code ?? null,
+        },
       }));
 
       return res.json({ success: true, data });
@@ -304,31 +321,24 @@ export class DpRequestController {
         return res.status(400).json({ error: msg });
       }
 
-      await assertCanAttachCostCenterToDpRequest(req, validated.costCenterId);
+      await assertCanAttachContractToDpRequest(req, validated.contractId);
 
-      const costCenter = await prisma.costCenter.findFirst({
-        where: { id: validated.costCenterId, isActive: true },
+      const contract = await prisma.contract.findUnique({
+        where: { id: validated.contractId },
         include: {
-          contracts: {
-            orderBy: { name: 'asc' },
-            take: 1,
-          },
+          costCenter: true,
         },
       });
-      if (!costCenter) throw createError('Centro de custo não encontrado', 404);
+      if (!contract || !contract.costCenter?.isActive) {
+        throw createError('Contrato não encontrado', 404);
+      }
 
-      const contract = costCenter.contracts[0] ?? null;
+      const costCenter = contract.costCenter;
 
       const isSensitiveType = (SENSITIVE_MANAGER_ONLY_DP_TYPES as readonly string[]).includes(
         validated.requestType
       );
       if (isSensitiveType) {
-        if (!contract) {
-          throw createError(
-            'Este tipo de solicitação exige um centro de custo com contrato vinculado no sistema.',
-            400
-          );
-        }
         const ok = await userMayCreateSensitiveDpRequest(
           actorUserId,
           req.user.isAdmin,
@@ -344,6 +354,10 @@ export class DpRequestController {
 
       const company = validated.company ?? costCenter.company ?? '';
       const polo = validated.polo ?? costCenter.polo ?? '';
+      const sectorSolicitante = (employee.department ?? '').trim();
+      if (!sectorSolicitante) {
+        throw createError('Setor do solicitante não cadastrado no perfil do funcionário', 400);
+      }
 
       const typeLabel: Record<string, string> = {
         ADMISSAO: 'Admissão',
@@ -356,13 +370,23 @@ export class DpRequestController {
         HORA_EXTRA: 'Hora extra',
         BENEFICIOS_VIAGEM: 'Benefícios de viagem',
         OUTRAS_SOLICITACOES: 'Outras solicitações',
+        ADM_VIAGENS: 'Viagens',
+        ADM_EPI_FARDAMENTO: "EPI's e fardamento",
+        ADM_MANUTENCAO_ESCRITORIO: 'Manutenção do escritório',
+        ADM_MATERIAL_ESCRITORIO: 'Material de escritório',
+        ADM_INFORMATICA: 'Informática',
+        ADM_TREINAMENTOS_NR: "Treinamentos e NR's",
       };
-      const title = `Solicitação DP · ${typeLabel[validated.requestType] ?? validated.requestType.replace(/_/g, ' ')}`;
+      const isAdmRequest = isAdmTstDpRequestType(validated.requestType);
+      const titlePrefix = isAdmRequest ? 'Solicitação ADM/TST' : 'Solicitação DP';
+      const title = `${titlePrefix} · ${typeLabel[validated.requestType] ?? validated.requestType.replace(/_/g, ' ')}`;
 
       const { prazoInicio, prazoFim } = computePrazos(validated.prazoInicio, validated.prazoFim);
 
       const DP_DISPLAY_NUMBER_ADVISORY_LOCK = 91827364;
       const createdAtIso = new Date().toISOString();
+      const actorName = (employee.user?.name || employee.user?.email || '').trim() || undefined;
+      const initialStatus = isAdmRequest ? 'IN_REVIEW_DP' : 'WAITING_MANAGER';
 
       const created = await prisma.$transaction(async (tx) => {
         await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(${DP_DISPLAY_NUMBER_ADVISORY_LOCK})`);
@@ -375,23 +399,26 @@ export class DpRequestController {
             urgency: validated.urgency,
             requestType: validated.requestType,
             title,
-            sectorSolicitante: employee.department,
+            sectorSolicitante,
             solicitanteNome: employee.user?.name ?? '',
             solicitanteEmail: employee.user?.email ?? actorEmail,
             prazoInicio,
             prazoFim,
             details: parsedDetails as Prisma.InputJsonValue,
-            contractId: contract?.id ?? null,
+            contractId: contract.id,
             costCenterId: costCenter.id,
             company: company || null,
             polo: polo || null,
-            status: 'WAITING_MANAGER',
+            status: initialStatus,
             statusHistory: [
               {
                 at: createdAtIso,
-                status: 'WAITING_MANAGER',
+                status: initialStatus,
                 actorUserId: actorUserId,
-                actorName: (employee.user?.name || employee.user?.email || '').trim() || undefined,
+                actorName,
+                ...(isAdmRequest
+                  ? { note: 'Encaminhada para ADM/TST (sem aprovação do gestor)' }
+                  : {}),
               },
             ] as Prisma.InputJsonValue,
           },
@@ -411,34 +438,57 @@ export class DpRequestController {
     }
   }
 
-  async getForApproval(req: AuthRequest, res: Response) {
-    try {
-      if (!req.user) throw createError('Usuário não autenticado', 401);
+  private async listManageQueue(req: AuthRequest, res: Response, scope: 'DP' | 'ADM_TST') {
+    if (!req.user) throw createError('Usuário não autenticado', 401);
 
-      const { status } = req.query;
-      const where: any = {};
-      if (status && typeof status === 'string' && status !== 'all') {
-        where.status = status;
-      }
+    const { status } = req.query;
+    const where: Prisma.DpRequestWhereInput = {
+      ...(scope === 'ADM_TST' ? admTstOnlyWhere() : admTstManagerApprovalExclusionWhere()),
+    };
+    if (status && typeof status === 'string' && status !== 'all') {
+      where.status = status as Prisma.EnumDpRequestStatusFilter['equals'];
+    }
 
-      const requests = await prisma.dpRequest.findMany({
-        where,
-        include: {
-          employee: {
-            select: {
-              costCenter: true,
-              user: { select: { name: true, email: true } },
-            },
+    const requests = await prisma.dpRequest.findMany({
+      where,
+      include: {
+        employee: {
+          select: {
+            costCenter: true,
+            user: { select: { name: true, email: true } },
           },
         },
-        orderBy: { createdAt: 'desc' },
-      });
+      },
+      orderBy: { createdAt: 'desc' },
+    });
 
-      const data = await attachDpContractSummaries(requests);
+    const data = await attachDpContractSummaries(requests);
+    return res.json({ success: true, data });
+  }
 
-      return res.json({ success: true, data });
+  /** Fila de gerenciamento do Departamento Pessoal (sem solicitações ADM/TST). */
+  async getForApproval(req: AuthRequest, res: Response) {
+    try {
+      return await this.listManageQueue(req, res, 'DP');
     } catch (e) {
-      return res.status(500).json({ error: 'Erro ao buscar solicitações DP para aprovação' });
+      const err = e as { statusCode?: number; message?: string };
+      if (err?.statusCode) {
+        return res.status(err.statusCode).json({ error: err.message || 'Erro' });
+      }
+      return res.status(500).json({ error: 'Erro ao buscar solicitações para gerenciamento' });
+    }
+  }
+
+  /** Fila de gerenciamento ADM/TST. */
+  async getForAdmTstManagement(req: AuthRequest, res: Response) {
+    try {
+      return await this.listManageQueue(req, res, 'ADM_TST');
+    } catch (e) {
+      const err = e as { statusCode?: number; message?: string };
+      if (err?.statusCode) {
+        return res.status(err.statusCode).json({ error: err.message || 'Erro' });
+      }
+      return res.status(500).json({ error: 'Erro ao buscar solicitações ADM/TST' });
     }
   }
 
@@ -483,7 +533,7 @@ export class DpRequestController {
                 };
 
       const requests = await prisma.dpRequest.findMany({
-        where: { ...phaseFilter, ...scope },
+        where: { ...phaseFilter, ...scope, ...admTstManagerApprovalExclusionWhere() },
         include: {
           employee: {
             select: {
@@ -513,6 +563,9 @@ export class DpRequestController {
       if (!dpRequest) throw createError('Solicitação DP não encontrada', 404);
       if (dpRequest.status !== 'WAITING_MANAGER') {
         throw createError('A solicitação não está aguardando aprovação do gestor', 400);
+      }
+      if (isAdmTstDpRequestType(dpRequest.requestType)) {
+        throw createError('Solicitações ADM/TST não passam por aprovação do gestor', 400);
       }
 
       await assertManagerCanActOnDpContract(
@@ -572,6 +625,9 @@ export class DpRequestController {
       if (!dpRequest) throw createError('Solicitação DP não encontrada', 404);
       if (dpRequest.status !== 'WAITING_MANAGER') {
         throw createError('A solicitação não está aguardando aprovação do gestor', 400);
+      }
+      if (isAdmTstDpRequestType(dpRequest.requestType)) {
+        throw createError('Solicitações ADM/TST não passam por aprovação do gestor', 400);
       }
 
       await assertManagerCanActOnDpContract(
@@ -634,22 +690,39 @@ export class DpRequestController {
       const dpRequest = await prisma.dpRequest.findUnique({ where: { id: requestId } });
       if (!dpRequest) throw createError('Solicitação DP não encontrada', 404);
 
+      await assertUserCanManageDpRequest(
+        req.user.id,
+        req.user.isAdmin,
+        dpRequest.requestType
+      );
+
       const payload = feedbackDpRequestSchema.parse(req.body);
 
       const current = dpRequest.status;
-      const dpMayAct: string[] = [
-        'IN_REVIEW_DP',
-        'IN_FINANCEIRO',
-        'WAITING_RETURN',
-        'WAITING_RETURN_ACCOUNTING',
-        'WAITING_RETURN_ADM_TST',
-        'WAITING_RETURN_ENGINEERING',
-      ];
-      if (!dpMayAct.includes(current)) {
-        throw createError('A solicitação não está na etapa correta para feedback do DP', 400);
+      const isAdmTst = isAdmTstDpRequestType(dpRequest.requestType);
+
+      if (isAdmTst) {
+        if (!(ADM_TST_MAY_ACT_STATUSES as readonly string[]).includes(current)) {
+          throw createError('A solicitação não está na etapa correta para feedback ADM/TST', 400);
+        }
+      } else {
+        const dpMayAct: string[] = [
+          'IN_REVIEW_DP',
+          'IN_FINANCEIRO',
+          'WAITING_RETURN',
+          'WAITING_RETURN_ACCOUNTING',
+          'WAITING_RETURN_ADM_TST',
+          'WAITING_RETURN_ENGINEERING',
+        ];
+        if (!dpMayAct.includes(current)) {
+          throw createError('A solicitação não está na etapa correta para feedback do DP', 400);
+        }
       }
 
       const next = payload.nextStatus;
+      if (isAdmTst && !(ADM_TST_FEEDBACK_NEXT_STATUSES as readonly string[]).includes(next)) {
+        throw createError('Etapa inválida para solicitação ADM/TST', 400);
+      }
       const responsible = (payload.responsibleNote || '').trim();
       const dpActorName = await getUserDisplayName(req.user.id);
       const cancellationReason = (payload.cancellationReason || '').trim();

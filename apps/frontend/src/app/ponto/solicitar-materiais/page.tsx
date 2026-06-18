@@ -280,7 +280,6 @@ type NewMaterialRequestFormData = ReturnType<typeof emptyNewFormData>;
 function validateNewMaterialRequestForm(formData: NewMaterialRequestFormData): string | null {
   if (!formData.costCenterId.trim()) return 'Selecione o centro de custo.';
   if (!formData.serviceOrderId.trim()) return 'Selecione a ordem de serviço.';
-  if (!formData.obra.trim()) return 'Informe a obra.';
   if (!formData.demandSheet.trim()) return 'Informe a ficha de demanda.';
   if (!formData.demandSheetAttachmentUrl.trim()) return 'Anexe o arquivo da ficha de demanda.';
 
@@ -1009,7 +1008,7 @@ function SolicitarMateriaisPage() {
       costCenterId: formData.costCenterId,
       serviceOrderId: formData.serviceOrderId,
       serviceOrder: formData.serviceOrder || undefined,
-      obra: formData.obra.trim(),
+      obra: formData.obra.trim() || undefined,
       description: formData.description,
       priority: formData.priority,
       demandSheet: formData.demandSheet.trim(),
@@ -1659,15 +1658,14 @@ function SolicitarMateriaisPage() {
 
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                      Obra *
+                      Obra
                     </label>
                     <input
                       type="text"
-                      required
                       value={formData.obra}
                       onChange={(e) => setFormData({ ...formData, obra: e.target.value })}
                       className={FORM_FIELD_INPUT_CLS}
-                      placeholder="Identificação da obra"
+                      placeholder="Identificação da obra (opcional)"
                     />
                   </div>
 

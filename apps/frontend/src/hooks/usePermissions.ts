@@ -396,6 +396,8 @@ export function useRoutePermission(route: string) {
       isAdministrator || isDepartmentPessoal || can(pk('/ponto/solicitacoes-dp')),
     '/ponto/gerenciar-solicitacoes-gerais':
       isAdministrator || isDepartmentPessoal || can(pk('/ponto/gerenciar-solicitacoes-dp')),
+    '/ponto/gerenciar-solicitacoes-adm-tst':
+      isAdministrator || can(pk('/ponto/gerenciar-solicitacoes-adm-tst')),
     '/ponto/ferias': isAdministrator || can(pk('/ponto/ferias')),
     '/ponto/gerenciar-ferias': isAdministrator || isDepartmentPessoal || permissions.canManageVacations,
     '/ponto/gerenciar-feriados': isAdministrator || isDepartmentPessoal || can(pk('/ponto/gerenciar-feriados')),

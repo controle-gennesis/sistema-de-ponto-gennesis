@@ -61,9 +61,6 @@ export interface UpdateMaterialRequestCorrectionData {
 
 export class MaterialRequestService {
   private assertCreateMaterialRequestFields(data: CreateMaterialRequestData) {
-    if (!(data.obra || '').trim()) {
-      throw new Error('Obra é obrigatória');
-    }
     if (!(data.demandSheet || '').trim()) {
       throw new Error('Ficha de demanda é obrigatória');
     }
@@ -272,7 +269,7 @@ export class MaterialRequestService {
 
     this.assertCreateMaterialRequestFields(data);
 
-    const obra = (data.obra || '').trim();
+    const obra = (data.obra || '').trim() || null;
     const demandSheet = (data.demandSheet || '').trim();
     const demandSheetAttachmentUrl = (data.demandSheetAttachmentUrl || '').trim();
     const demandSheetAttachmentName = (data.demandSheetAttachmentName || '').trim();

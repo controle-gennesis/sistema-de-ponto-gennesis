@@ -457,10 +457,10 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
             permission: isAdministrator || can(pk('/ponto/gerenciar-solicitacoes'))
           },
           {
-            name: 'Gerenciar Solicitações Gerais',
+            name: 'Gerenciar Solicitações',
             href: '/ponto/gerenciar-solicitacoes-gerais',
             icon: FileText,
-            description: 'Aprovar solicitações do DP',
+            description: 'Tramitar solicitações do Departamento Pessoal',
             permission:
               isAdministrator || isDepartmentPessoal || can(pk('/ponto/gerenciar-solicitacoes-dp')),
           },
@@ -507,6 +507,20 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
             permission: isAdministrator || can(pk('/ponto/aniversariantes'))
           }
         ]
+      },
+      {
+        id: 'adm-tst',
+        name: 'ADM/TST',
+        icon: ClipboardList,
+        items: [
+          {
+            name: 'Gerenciar Solicitações',
+            href: '/ponto/gerenciar-solicitacoes-adm-tst',
+            icon: FileText,
+            description: 'Tramitar solicitações administrativas',
+            permission: isAdministrator || can(pk('/ponto/gerenciar-solicitacoes-adm-tst')),
+          },
+        ],
       },
       {
         id: 'financeiro',

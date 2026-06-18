@@ -481,18 +481,6 @@ export default function MapaCotacaoPage() {
     return list;
   }, [selectedRequest, selectedSupplierIds, freightBySupplier, unitPriceBySupplierItem, ocItemQtyByItemId]);
 
-  useEffect(() => {
-    // quando winners mudarem, a seleção de geração "default" acompanha (apenas se ainda estiver vazia)
-    if (!selectedRequest) return;
-    if (!winnersByItem || winnersByItem.length === 0) return;
-    const anySelected = generateSupplierIds.size > 0;
-    if (anySelected) return;
-
-    const winnerSuppliers = new Set<string>();
-    for (const w of winnersByItem) winnerSuppliers.add(w.winnerSupplierId);
-    setGenerateSupplierIds(winnerSuppliers);
-  }, [selectedRequest, winnersByItem, unitPriceBySupplierItem]); // eslint-disable-line react-hooks/exhaustive-deps
-
   const wonItemsBySupplier = useMemo(() => {
     const map: Record<string, typeof ocItems> = {};
     for (const s of Array.from(selectedSupplierIds)) map[s] = [];
@@ -506,6 +494,19 @@ export default function MapaCotacaoPage() {
 
     return map;
   }, [winnersByItem, ocItems, selectedSupplierIds]);
+
+  /** Remove fornecedores que não venceram mais (ex.: após alterar preços) — nunca marca automaticamente. */
+  useEffect(() => {
+    if (!selectedRequest) return;
+    setGenerateSupplierIds((prev) => {
+      const next = new Set<string>();
+      for (const sid of Array.from(prev)) {
+        if ((wonItemsBySupplier[sid] ?? []).length > 0) next.add(sid);
+      }
+      if (next.size === prev.size && Array.from(next).every((id) => prev.has(id))) return prev;
+      return next;
+    });
+  }, [selectedRequest, wonItemsBySupplier]);
 
   const computedSupplierTotals = useMemo(() => {
     const out: Record<string, { itemsTotal: number; freight: number; amountToPay: number }> = {};
@@ -530,7 +531,12 @@ export default function MapaCotacaoPage() {
   const generateOrdersMutation = useMutation({
     mutationFn: async () => {
       if (!selectedRequest) throw new Error('Selecione uma requisição na fase RMs Aprovadas.');
-      if (generateSupplierIds.size === 0) throw new Error('Selecione ao menos um fornecedor vencedor.');
+      const suppliersToGenerate = Array.from(generateSupplierIds).filter(
+        (sid) => (wonItemsBySupplier[sid] ?? []).length > 0
+      );
+      if (suppliersToGenerate.length === 0) {
+        throw new Error('Marque ao menos um fornecedor em "Gerar OC" para continuar.');
+      }
       setIsGenerating(true);
 
       try {
@@ -606,7 +612,7 @@ export default function MapaCotacaoPage() {
           amountToPay?: number;
         }> = [];
 
-        for (const supplierId of Array.from(generateSupplierIds)) {
+        for (const supplierId of suppliersToGenerate) {
           const totals = computedSupplierTotals[supplierId];
           const supplierName = suppliers.find((s) => s.id === supplierId)?.name ?? 'fornecedor';
           const fallbackDraft = {
@@ -649,7 +655,7 @@ export default function MapaCotacaoPage() {
 
         // 4) Gerar as OCs no backend
         const result = await api.post(`/quote-maps/${mapId}/generate`, {
-          generateSupplierIds: Array.from(generateSupplierIds),
+          generateSupplierIds: suppliersToGenerate,
           paymentBySupplier: paymentBySupplierPayload,
           itemQuantities: itemQuantitiesForSave
         });
@@ -821,7 +827,7 @@ export default function MapaCotacaoPage() {
                         className="flex h-10 items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700 transition-colors hover:bg-blue-100 disabled:opacity-50 dark:border-blue-800/60 dark:bg-blue-950/30 dark:text-blue-300 dark:hover:bg-blue-900/40"
                       >
                         <Plus className="h-4 w-4 shrink-0" />
-                        <span>{isGenerating ? 'Gerando…' : 'Gerar OCs vencedoras'}</span>
+                        <span>{isGenerating ? 'Gerando…' : 'Gerar OCs selecionadas'}</span>
                       </button>
                     </div>
                   </div>

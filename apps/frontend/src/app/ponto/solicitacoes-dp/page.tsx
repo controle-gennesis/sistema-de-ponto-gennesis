@@ -7,7 +7,9 @@ import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
-import { getListTableRowClassName, ListRowNavigableLabel, rowActionMenuButtonClass } from '@/components/ui/listTableUi';
+import { getListTableRowClassName, ListRowNavigableLabel, listTableRowClasses, rowActionMenuButtonClass } from '@/components/ui/listTableUi';
+import { RowActionMenuCell, RowActionMenuPortal } from '@/components/ui/RowActionMenu';
+import { useRowActionMenu } from '@/hooks/useRowActionMenu';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
@@ -16,12 +18,25 @@ import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDr
 import type { MultiSelectSearchOption } from '@/components/ui/MultiSelectSearchDropdown';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'react-hot-toast';
-import { ClipboardList, Eye, Filter, Loader2, Plus, RotateCcw, Search, X } from 'lucide-react';
+import { ArrowLeft, ChevronRight, ClipboardList, FileText, Filter, Loader2, MailPlus, MoreVertical, Plus, RotateCcw, Search, Users, X, type LucideIcon } from 'lucide-react';
+import { FilterStatCard } from '@/components/ui/FilterStatCard';
 import { ButtonSeg, DpSolicitacaoTypeFields, type DpFormRequestType } from './DpSolicitacaoTypeFields';
+import {
+  AdmTstSolicitacaoTypeFields,
+  ADM_TYPE_LABELS,
+  type AdmFormRequestType,
+} from './AdmTstSolicitacaoTypeFields';
 import { usePermissions } from '@/hooks/usePermissions';
 import { buildDpRequestTimeline } from '@/lib/dpRequestTimeline';
 import { DpRequestDetailsPreview } from '@/lib/dpRequestDetailsPreview';
 import { DP_SOLICITACOES_NO_FOCUS_CLS, formatIsoDateRangeToBr } from '@/lib/dpSolicitacoesUi';
+import {
+  ADM_TST_STATUS_LABELS,
+  buildAdmTstStatusFilterOptions,
+  getAdmTstStatusLabel,
+  getAdmTstStatusRowBadge,
+  isAdmTstFlowStatus,
+} from '@/lib/dpRequestAdmTstUi';
 import {
   DpRequestHistoryMetaCard,
   DpRequestHistoryModalFooter,
@@ -41,9 +56,17 @@ type DpRequestStatus =
   | 'WAITING_RETURN_ACCOUNTING'
   | 'WAITING_RETURN_ADM_TST'
   | 'WAITING_RETURN_ENGINEERING'
+  | 'WAITING_SUPPLIES'
+  | 'WAITING_PAYMENT'
   | 'CONCLUDED'
   | 'CANCELLED';
-type DpRequestType = DpFormRequestType;
+type DpRequestType = DpFormRequestType | AdmFormRequestType;
+type CreateTargetDepartment = 'DP' | 'ADM_TST' | null;
+
+const CREATE_TARGET_DEPARTMENT_LABELS: Record<'DP' | 'ADM_TST', string> = {
+  DP: 'Departamento Pessoal',
+  ADM_TST: 'ADM/TST',
+};
 
 type DpContractSummary = { id: string; number: string; name: string };
 
@@ -121,7 +144,7 @@ const URGENCY_ROW_BADGE: Record<DpUrgency, string> = {
   URGENT: 'text-red-700 dark:text-red-300',
 };
 
-const TYPE_LABELS: Record<DpRequestType, string> = {
+const DP_TYPE_LABELS: Record<DpFormRequestType, string> = {
   ADMISSAO: 'Admissão',
   ADVERTENCIA_SUSPENSAO: 'Medida disciplinar',
   ALTERACAO_FUNCAO_SALARIO: 'Alteração de função/salário',
@@ -133,6 +156,90 @@ const TYPE_LABELS: Record<DpRequestType, string> = {
   RESCISAO: 'Rescisão',
   RETIFICACAO_ALOCACAO: 'Retificação de alocação',
 };
+
+const TYPE_LABELS: Record<DpRequestType, string> = {
+  ...DP_TYPE_LABELS,
+  ...ADM_TYPE_LABELS,
+};
+
+function getRequestDestinationLabel(requestType: DpRequestType): string {
+  return requestType.startsWith('ADM_')
+    ? CREATE_TARGET_DEPARTMENT_LABELS.ADM_TST
+    : CREATE_TARGET_DEPARTMENT_LABELS.DP;
+}
+
+function isAdmTstRequestType(requestType: DpRequestType): boolean {
+  return requestType.startsWith('ADM_');
+}
+
+type DestinationCardFilter = 'all' | 'DP' | 'ADM_TST';
+
+const DESTINATION_LIST_CONFIG: Record<
+  DestinationCardFilter,
+  {
+    title: string;
+    subtitle: string;
+    Icon: LucideIcon;
+    iconBg: string;
+    iconColor: string;
+  }
+> = {
+  all: {
+    title: 'Todas as solicitações',
+    subtitle: 'Suas solicitações para Departamento Pessoal e ADM/TST.',
+    Icon: MailPlus,
+    iconBg: 'bg-blue-100 dark:bg-blue-900/30',
+    iconColor: 'text-blue-600 dark:text-blue-400',
+  },
+  DP: {
+    title: 'Departamento Pessoal',
+    subtitle: 'Solicitações enviadas ao Departamento Pessoal.',
+    Icon: Users,
+    iconBg: 'bg-red-100 dark:bg-red-900/30',
+    iconColor: 'text-red-600 dark:text-red-400',
+  },
+  ADM_TST: {
+    title: 'ADM/TST',
+    subtitle: 'Solicitações enviadas ao ADM/TST.',
+    Icon: ClipboardList,
+    iconBg: 'bg-indigo-100 dark:bg-indigo-900/30',
+    iconColor: 'text-indigo-600 dark:text-indigo-400',
+  },
+};
+
+const DESTINATION_STAT_CARDS: {
+  filter: DestinationCardFilter;
+  label: string;
+  iconBg: string;
+  iconColor: string;
+  Icon: LucideIcon;
+  countKey: keyof { total: number; dp: number; admTst: number };
+}[] = [
+  {
+    filter: 'all',
+    label: 'Registros',
+    iconBg: 'bg-blue-100 dark:bg-blue-900/30',
+    iconColor: 'text-blue-600 dark:text-blue-400',
+    Icon: MailPlus,
+    countKey: 'total',
+  },
+  {
+    filter: 'DP',
+    label: 'Departamento Pessoal',
+    iconBg: 'bg-red-100 dark:bg-red-900/30',
+    iconColor: 'text-red-600 dark:text-red-400',
+    Icon: Users,
+    countKey: 'dp',
+  },
+  {
+    filter: 'ADM_TST',
+    label: 'ADM/TST',
+    iconBg: 'bg-indigo-100 dark:bg-indigo-900/30',
+    iconColor: 'text-indigo-600 dark:text-indigo-400',
+    Icon: ClipboardList,
+    countKey: 'admTst',
+  },
+];
 
 async function fileToDpAttachment(file: File) {
   const max = 2 * 1024 * 1024;
@@ -158,6 +265,8 @@ const STATUS_LABELS: Record<DpRequestStatus, string> = {
   WAITING_RETURN_ACCOUNTING: 'Pendência contábil',
   WAITING_RETURN_ADM_TST: 'Pendência ADM/TST',
   WAITING_RETURN_ENGINEERING: 'Pendência engenharia',
+  WAITING_SUPPLIES: 'Aguardando setor de suprimentos',
+  WAITING_PAYMENT: 'Aguardando pagamento',
   CONCLUDED: 'Concluída',
   CANCELLED: 'Cancelada',
 };
@@ -170,6 +279,8 @@ const STATUS_ROW_BADGE: Record<DpRequestStatus, string> = {
   WAITING_RETURN_ACCOUNTING: 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300',
   WAITING_RETURN_ADM_TST: 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300',
   WAITING_RETURN_ENGINEERING: 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300',
+  WAITING_SUPPLIES: 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300',
+  WAITING_PAYMENT: 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300',
   CONCLUDED: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300',
   CANCELLED: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
 };
@@ -203,7 +314,8 @@ function isDpFormPolo(v: string): v is (typeof DP_POLO_OPTIONS)[number] {
 export function SolicitacoesGeraisPage() {
   const queryClient = useQueryClient();
   const { canCreateSensitiveDpRequestType, isLoading: loadingPerms } = usePermissions();
-  const [activeTab, setActiveTab] = useState<'list' | 'new'>('list');
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [createTargetDepartment, setCreateTargetDepartment] = useState<CreateTargetDepartment>(null);
   const [historyRequest, setHistoryRequest] = useState<DpRequest | null>(null);
   const [historyModalTab, setHistoryModalTab] = useState<'detalhes' | 'timeline'>('detalhes');
   const historyFeedbackText = React.useMemo(
@@ -238,19 +350,19 @@ export function SolicitacoesGeraisPage() {
   };
 
   const { data: contractsResp } = useQuery({
-    queryKey: ['solicitacoes-dp-centros-custo'],
+    queryKey: ['solicitacoes-dp-contratos'],
     queryFn: async () => {
       const res = await api.get('/solicitacoes-dp/contratos-elegiveis');
       return res.data?.data ?? [];
     },
   });
 
-  const costCenters = (contractsResp ?? []) as Array<{
+  const eligibleContracts = (contractsResp ?? []) as Array<{
     id: string;
     name: string;
-    code?: string;
-    contractId?: string | null;
-    costCenter?: { company?: string | null; polo?: string | null };
+    number?: string;
+    costCenterId?: string;
+    costCenter?: { company?: string | null; polo?: string | null; name?: string | null; code?: string | null };
   }>;
 
   const payrollMonthYear = React.useMemo(() => {
@@ -291,7 +403,7 @@ export function SolicitacoesGeraisPage() {
     requestType: DpRequestType | '';
     prazoInicio: string;
     prazoFim: string;
-    costCenterId: string;
+    contractId: string;
     company: string;
     polo: string;
   }>({
@@ -299,12 +411,36 @@ export function SolicitacoesGeraisPage() {
     requestType: '',
     prazoInicio: '',
     prazoFim: '',
-    costCenterId: '',
+    contractId: '',
     company: '',
     polo: '',
   });
 
   const resetCreateForm = () => {
+    setCreateTargetDepartment(null);
+    setForm((p) => ({
+      ...p,
+      requestType: '',
+      prazoInicio: '',
+      prazoFim: '',
+      contractId: '',
+      company: '',
+      polo: '',
+    }));
+    setDetails({});
+    setAtestadoFile(null);
+    setHoraExtraFile(null);
+    setAtestadoFileName('');
+    setHoraExtraFileName('');
+  };
+
+  const closeCreateModal = () => {
+    resetCreateForm();
+    setIsCreateModalOpen(false);
+  };
+
+  const backToDepartmentSelection = () => {
+    setCreateTargetDepartment(null);
     setForm((p) => ({ ...p, requestType: '', prazoInicio: '', prazoFim: '' }));
     setDetails({});
     setAtestadoFile(null);
@@ -313,37 +449,46 @@ export function SolicitacoesGeraisPage() {
     setHoraExtraFileName('');
   };
 
-  const selectedCostCenterContractId = React.useMemo(() => {
-    if (!form.costCenterId) return '';
-    return costCenters.find((c) => c.id === form.costCenterId)?.contractId ?? '';
-  }, [form.costCenterId, costCenters]);
+  const selectedContractId = form.contractId;
 
   const selectableRequestTypeEntries = React.useMemo(() => {
-    return Object.entries(TYPE_LABELS).filter(([k]) => {
+    if (!createTargetDepartment) return [];
+    const source =
+      createTargetDepartment === 'ADM_TST'
+        ? (Object.entries(ADM_TYPE_LABELS) as [AdmFormRequestType, string][])
+        : (Object.entries(DP_TYPE_LABELS) as [DpFormRequestType, string][]);
+    return source.filter(([k]) => {
+      if (createTargetDepartment !== 'DP') return true;
       if ((SENSITIVE_DP_REQUEST_TYPES as readonly string[]).includes(k)) {
-        return canCreateSensitiveDpRequestType(selectedCostCenterContractId);
+        return canCreateSensitiveDpRequestType(selectedContractId);
       }
       return true;
     });
-  }, [selectedCostCenterContractId, canCreateSensitiveDpRequestType]);
+  }, [createTargetDepartment, selectedContractId, canCreateSensitiveDpRequestType]);
 
   React.useEffect(() => {
     if (loadingPerms) return;
     if (
       (form.requestType === 'RESCISAO' || form.requestType === 'ALTERACAO_FUNCAO_SALARIO') &&
-      !canCreateSensitiveDpRequestType(selectedCostCenterContractId)
+      !canCreateSensitiveDpRequestType(selectedContractId)
     ) {
       setForm((p) => ({ ...p, requestType: '', prazoInicio: '', prazoFim: '' }));
       setDetails({});
     }
-  }, [selectedCostCenterContractId, form.requestType, canCreateSensitiveDpRequestType, loadingPerms]);
+  }, [selectedContractId, form.requestType, canCreateSensitiveDpRequestType, loadingPerms]);
 
   useEffect(() => {
     if (form.requestType !== 'ADVERTENCIA_SUSPENSAO') return;
     setDetails((d) => (d.punicao ? d : { ...d, punicao: 'ADVERTENCIA' }));
   }, [form.requestType]);
 
+  useEffect(() => {
+    if (form.requestType !== 'ADM_VIAGENS') return;
+    setDetails((d) => (d.pedagio ? d : { ...d, pedagio: 'NAO' }));
+  }, [form.requestType]);
+
   const [myStatusFilter, setMyStatusFilter] = useState<'all' | DpRequestStatus>('all');
+  const [destinationFilter, setDestinationFilter] = useState<DestinationCardFilter>('all');
   const [filterUrgency, setFilterUrgency] = useState<'all' | DpUrgency>('all');
   const [filterRequestType, setFilterRequestType] = useState<'all' | DpRequestType>('all');
   const [filterContractId, setFilterContractId] = useState<'all' | string>('all');
@@ -359,7 +504,32 @@ export function SolicitacoesGeraisPage() {
     enabled: !loadingUser,
   });
 
+  const { data: statsResp, isLoading: loadingStats } = useQuery({
+    queryKey: ['dp-my-requests', 'stats'],
+    queryFn: async () => {
+      const res = await api.get('/solicitacoes-dp/minhas', { params: { status: 'all' } });
+      return res.data?.data ?? [];
+    },
+    enabled: !loadingUser,
+  });
+
   const myRequests = (myResp as DpRequest[]) || [];
+
+  const destinationStats = React.useMemo(() => {
+    const list = (statsResp as DpRequest[]) || [];
+    const admTst = list.filter((r) => isAdmTstRequestType(r.requestType)).length;
+    const dp = list.length - admTst;
+    return { total: list.length, dp, admTst };
+  }, [statsResp]);
+
+  const handleDestinationFilter = (filter: DestinationCardFilter) => {
+    setDestinationFilter(filter);
+    setMyStatusFilter('all');
+    setFilterUrgency('all');
+    setFilterRequestType('all');
+    setFilterContractId('all');
+    setMySearch('');
+  };
 
   const contractFilterOptions = React.useMemo(() => {
     const map = new Map<string, string>();
@@ -381,14 +551,14 @@ export function SolicitacoesGeraisPage() {
     [selectableRequestTypeEntries]
   );
 
-  const costCenterSelectOptions = React.useMemo<MultiSelectSearchOption[]>(
+  const contractSelectOptions = React.useMemo<MultiSelectSearchOption[]>(
     () =>
-      costCenters.map((c) => ({
+      eligibleContracts.map((c) => ({
         value: c.id,
         label: c.name,
-        searchText: [c.name, c.code].filter(Boolean).join(' '),
+        searchText: [c.name, c.number].filter(Boolean).join(' '),
       })),
-    [costCenters]
+    [eligibleContracts]
   );
 
   const companySelectOptions = React.useMemo<MultiSelectSearchOption[]>(() => {
@@ -404,17 +574,22 @@ export function SolicitacoesGeraisPage() {
     []
   );
 
-  const myStatusFilterOptions = React.useMemo<MultiSelectSearchOption[]>(
-    () => [
+  const myStatusFilterOptions = React.useMemo<MultiSelectSearchOption[]>(() => {
+    if (destinationFilter === 'ADM_TST') {
+      return buildAdmTstStatusFilterOptions();
+    }
+    const dpStatuses = (Object.entries(STATUS_LABELS) as [DpRequestStatus, string][]).filter(
+      ([value]) => value !== 'WAITING_MANAGER'
+    );
+    return [
       { value: 'all', label: 'Todos' },
-      ...(Object.entries(STATUS_LABELS) as [DpRequestStatus, string][]).map(([value, label]) => ({
+      ...dpStatuses.map(([value, label]) => ({
         value,
         label,
         searchText: label,
       })),
-    ],
-    []
-  );
+    ];
+  }, [destinationFilter]);
 
   const filterUrgencyOptions = React.useMemo<MultiSelectSearchOption[]>(
     () => [
@@ -455,22 +630,24 @@ export function SolicitacoesGeraisPage() {
     [contractFilterOptions]
   );
 
-  const handleCostCenterChange = (id: string) => {
+  const handleContractChange = (id: string) => {
     if (!id) {
-      setForm((p) => ({ ...p, costCenterId: '', company: '', polo: '' }));
+      setForm((p) => ({ ...p, contractId: '', company: '', polo: '' }));
       return;
     }
-    const cc = costCenters.find((x) => x.id === id);
-    const meta = cc?.costCenter;
+    const contract = eligibleContracts.find((x) => x.id === id);
+    const meta = contract?.costCenter;
     setForm((p) => ({
       ...p,
-      costCenterId: id,
+      contractId: id,
       company: meta?.company?.trim() ?? '',
       polo: mapCostCenterPoloToFormPolo(meta?.polo),
     }));
   };
 
   const filteredMyRequests = myRequests.filter((r) => {
+    if (destinationFilter === 'DP' && isAdmTstRequestType(r.requestType)) return false;
+    if (destinationFilter === 'ADM_TST' && !isAdmTstRequestType(r.requestType)) return false;
     if (filterUrgency !== 'all' && r.urgency !== filterUrgency) return false;
     if (filterRequestType !== 'all' && r.requestType !== filterRequestType) return false;
     if (filterContractId !== 'all') {
@@ -487,10 +664,18 @@ export function SolicitacoesGeraisPage() {
     return r.id.toLowerCase() === qLower;
   });
 
+  const {
+    rowActionMenu,
+    rowForActionMenu,
+    toggleRowActionMenu,
+    closeRowActionMenu,
+    isRowMenuOpen,
+  } = useRowActionMenu(filteredMyRequests);
+
   const createMutation = useMutation({
     mutationFn: async () => {
       if (!form.requestType) throw new Error('Selecione o tipo de solicitação');
-      if (!form.costCenterId) throw new Error('Selecione o centro de custo');
+      if (!form.contractId) throw new Error('Selecione o contrato');
 
       if (!form.prazoInicio || !form.prazoFim) {
         throw new Error('Informe o prazo (início e fim) em que o DP deve dar retorno sobre a solicitação');
@@ -506,11 +691,10 @@ export function SolicitacoesGeraisPage() {
         if (!horaExtraFile) throw new Error('Anexe a autorização de hora extra');
         d.anexoAutorizacao = await fileToDpAttachment(horaExtraFile);
       }
-
       const payload: Record<string, unknown> = {
         urgency: form.urgency,
         requestType: form.requestType,
-        costCenterId: form.costCenterId,
+        contractId: form.contractId,
         company: form.company || undefined,
         polo: form.polo || undefined,
         details: d,
@@ -522,10 +706,9 @@ export function SolicitacoesGeraisPage() {
       return res.data?.data as DpRequest;
     },
     onSuccess: async () => {
-      toast.success('Solicitação DP criada com sucesso!');
+      toast.success('Solicitação criada com sucesso!');
       await queryClient.invalidateQueries({ queryKey: ['dp-my-requests'] });
-      resetCreateForm();
-      setActiveTab('list');
+      closeCreateModal();
     },
     onError: (err: any) => {
       toast.error(err?.response?.data?.error || err?.message || 'Erro ao criar solicitação DP');
@@ -548,7 +731,26 @@ export function SolicitacoesGeraisPage() {
     },
   });
 
-  const buildTimeline = (r: DpRequest) => buildDpRequestTimeline(r, STATUS_LABELS, formatDuration);
+  const getStatusLabel = (r: DpRequest) => {
+    if (isAdmTstRequestType(r.requestType) && isAdmTstFlowStatus(r.status)) {
+      return getAdmTstStatusLabel(r.status);
+    }
+    return STATUS_LABELS[r.status] ?? r.status;
+  };
+
+  const getStatusRowBadge = (r: DpRequest) => {
+    if (isAdmTstRequestType(r.requestType) && isAdmTstFlowStatus(r.status)) {
+      return getAdmTstStatusRowBadge(r.status);
+    }
+    return STATUS_ROW_BADGE[r.status] ?? 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300';
+  };
+
+  const buildTimeline = (r: DpRequest) => {
+    const labels = isAdmTstRequestType(r.requestType)
+      ? { ...STATUS_LABELS, ...ADM_TST_STATUS_LABELS }
+      : STATUS_LABELS;
+    return buildDpRequestTimeline(r, labels, formatDuration);
+  };
 
   const buildHistoryMetaFields = (r: DpRequest): DpRequestHistoryMetaField[] => [
     {
@@ -560,12 +762,16 @@ export function SolicitacoesGeraisPage() {
       value: TYPE_LABELS[r.requestType] ?? r.requestType,
     },
     {
+      label: 'Destino',
+      value: getRequestDestinationLabel(r.requestType),
+    },
+    {
       label: 'Status',
       value: (
         <span
-          className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${STATUS_ROW_BADGE[r.status]}`}
+          className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${getStatusRowBadge(r)}`}
         >
-          {STATUS_LABELS[r.status] ?? r.status}
+          {getStatusLabel(r)}
         </span>
       ),
     },
@@ -586,6 +792,9 @@ export function SolicitacoesGeraisPage() {
     );
   }
 
+  const listHeader = DESTINATION_LIST_CONFIG[destinationFilter];
+  const ListHeaderIcon = listHeader.Icon;
+
   return (
     <ProtectedRoute route="/ponto/solicitacoes-gerais">
       <MainLayout userRole={'EMPLOYEE'} userName={user?.name || ''} onLogout={handleLogout}>
@@ -599,18 +808,34 @@ export function SolicitacoesGeraisPage() {
             </p>
           </div>
 
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-3">
+            {DESTINATION_STAT_CARDS.map((card) => (
+              <FilterStatCard
+                key={card.filter}
+                label={card.label}
+                count={destinationStats[card.countKey]}
+                icon={card.Icon}
+                iconBg={card.iconBg}
+                iconColor={card.iconColor}
+                isActive={destinationFilter === card.filter}
+                loading={loadingStats}
+                onClick={() => handleDestinationFilter(card.filter)}
+              />
+            ))}
+          </div>
+
           <Card className="w-full">
             <CardHeader className="border-b-0 pb-1">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                 <div className="flex items-center space-x-3">
-                  <div className="p-2 sm:p-3 bg-red-100 dark:bg-red-900/30 rounded-lg">
-                    <ClipboardList className="w-5 h-5 sm:w-6 sm:h-6 text-red-600 dark:text-red-400" />
+                  <div className={`rounded-lg p-2 sm:p-3 ${listHeader.iconBg}`}>
+                    <ListHeaderIcon className={`h-5 w-5 sm:w-6 sm:h-6 ${listHeader.iconColor}`} />
                   </div>
                   <div>
-                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Solicitações Gerais</h3>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">
-                      Visualize, filtre e acompanhe o andamento das solicitações.
-                    </p>
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                      {listHeader.title}
+                    </h3>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">{listHeader.subtitle}</p>
                   </div>
                 </div>
                 <div className="flex flex-shrink-0 flex-wrap items-center gap-2 sm:justify-end">
@@ -648,7 +873,7 @@ export function SolicitacoesGeraisPage() {
                     type="button"
                     onClick={() => {
                       resetCreateForm();
-                      setActiveTab('new');
+                      setIsCreateModalOpen(true);
                     }}
                     className="flex h-10 items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
                   >
@@ -659,178 +884,7 @@ export function SolicitacoesGeraisPage() {
               </div>
             </CardHeader>
             <CardContent>
-              {activeTab === 'new' ? (
-                <Modal
-                  isOpen={true}
-                  onClose={() => setActiveTab('list')}
-                  title="Nova solicitação"
-                  size="xl"
-                  contentOverflowVisible
-                  elevated
-                >
-                  <form
-                    className="grid grid-cols-1 gap-4 md:grid-cols-2"
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      void createMutation.mutate();
-                    }}
-                  >
-                  <div className="md:col-span-2">
-                    <label className="block text-sm font-medium mb-1 text-gray-800 dark:text-gray-200">
-                      Urgência
-                    </label>
-                    <div className="flex gap-2">
-                      <ButtonSeg
-                        active={form.urgency === 'MEDIUM'}
-                        onClick={() => setForm((p) => ({ ...p, urgency: 'MEDIUM' }))}
-                        label="Normal"
-                      />
-                      <ButtonSeg
-                        active={form.urgency === 'URGENT'}
-                        onClick={() => setForm((p) => ({ ...p, urgency: 'URGENT' }))}
-                        label="Urgente"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="md:col-span-2">
-                    <label className="block text-sm font-medium mb-1">Tipo de solicitação *</label>
-                    <SingleSelectSearchDropdown
-                      value={form.requestType}
-                      onChange={(rt) => {
-                        setForm((p) => ({
-                          ...p,
-                          requestType: rt as DpRequestType | '',
-                          prazoInicio: '',
-                          prazoFim: '',
-                        }));
-                        setDetails({});
-                        setAtestadoFile(null);
-                        setHoraExtraFile(null);
-                        setAtestadoFileName('');
-                        setHoraExtraFileName('');
-                      }}
-                      options={requestTypeSelectOptions}
-                      allowEmpty
-                      placeholder="Selecione o tipo..."
-                      searchPlaceholder="Pesquisar..."
-                      noFocusRing
-                    />
-                  </div>
-
-                  <DpSolicitacaoTypeFields
-                    requestType={form.requestType}
-                    details={details}
-                    patchDetails={patchDetails}
-                    employees={payrollEmployees}
-                    setEmployeeId={setSingleEmployeeId}
-                    onAtestadoFile={(f) => {
-                      setAtestadoFile(f);
-                      setAtestadoFileName(f?.name ?? '');
-                    }}
-                    onHoraExtraFile={(f) => {
-                      setHoraExtraFile(f);
-                      setHoraExtraFileName(f?.name ?? '');
-                    }}
-                    atestadoFileName={atestadoFileName}
-                    horaExtraFileName={horaExtraFileName}
-                  />
-
-                  {form.requestType &&
-                    (['FERIAS', 'ATESTADO_MEDICO', 'BENEFICIOS_VIAGEM'].includes(form.requestType) ||
-                      form.requestType === 'RETIFICACAO_ALOCACAO') && (
-                    <div className="md:col-span-2 rounded-lg border border-dashed border-gray-200 dark:border-gray-600 p-3 text-xs text-gray-600 dark:text-gray-400">
-                      {['FERIAS', 'ATESTADO_MEDICO', 'BENEFICIOS_VIAGEM'].includes(form.requestType) ? (
-                        <span>
-                          As datas acima são o <strong>período</strong> (férias, atestado ou viagem). Abaixo, informe o{' '}
-                          <strong>prazo</strong> em que o DP deve responder — são campos diferentes.
-                        </span>
-                      ) : (
-                        <span>
-                          A data de retificação acima não substitui o prazo de retorno do DP; preencha os campos abaixo.
-                        </span>
-                      )}
-                    </div>
-                  )}
-
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:col-span-2">
-                    <div>
-                      <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                        Início do prazo *
-                      </label>
-                      <DatePickerField
-                        value={form.prazoInicio}
-                        onChange={(prazoInicio) => setForm((p) => ({ ...p, prazoInicio }))}
-                        placeholder="dd/mm/aaaa"
-                        noFocusRing
-                        aria-label="Início do prazo"
-                      />
-                    </div>
-                    <div>
-                      <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                        Fim do prazo *
-                      </label>
-                      <DatePickerField
-                        value={form.prazoFim}
-                        onChange={(prazoFim) => setForm((p) => ({ ...p, prazoFim }))}
-                        placeholder="dd/mm/aaaa"
-                        noFocusRing
-                        aria-label="Fim do prazo"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="md:col-span-2 grid grid-cols-1 sm:grid-cols-3 gap-4">
-                    <div className="min-w-0">
-                      <label className="block text-sm font-medium mb-1">Centro de custo *</label>
-                      <SingleSelectSearchDropdown
-                        value={form.costCenterId}
-                        onChange={handleCostCenterChange}
-                        options={costCenterSelectOptions}
-                        allowEmpty
-                        placeholder="Selecionar centro de custo..."
-                        searchPlaceholder="Pesquisar..."
-                        noFocusRing
-                      />
-                    </div>
-                    <div className="min-w-0">
-                      <label className="block text-sm font-medium mb-1">Empresa</label>
-                      <SingleSelectSearchDropdown
-                        value={form.company}
-                        onChange={(company) => setForm((p) => ({ ...p, company }))}
-                        options={companySelectOptions}
-                        allowEmpty
-                        placeholder="Selecione a empresa..."
-                        searchPlaceholder="Pesquisar..."
-                        noFocusRing
-                      />
-                    </div>
-                    <div className="min-w-0">
-                      <label className="block text-sm font-medium mb-1">Polo</label>
-                      <SingleSelectSearchDropdown
-                        value={isDpFormPolo(form.polo) ? form.polo : ''}
-                        onChange={(polo) => setForm((p) => ({ ...p, polo }))}
-                        options={poloSelectOptions}
-                        allowEmpty
-                        placeholder="Selecione o polo..."
-                        searchPlaceholder="Pesquisar..."
-                        noFocusRing
-                      />
-                    </div>
-                  </div>
-
-                      <div className="md:col-span-2 flex justify-end gap-3">
-                        <Button type="button" variant="outline" onClick={() => setActiveTab('list')}>
-                          Cancelar
-                        </Button>
-                        <Button type="submit" disabled={createMutation.isPending}>
-                          {createMutation.isPending ? 'Enviando...' : 'Enviar solicitação'}
-                        </Button>
-                      </div>
-                    </form>
-                </Modal>
-              ) : (
-                <div className="space-y-4">
+              <div className="space-y-4">
                   {loadingMy ? (
                     <div className="flex flex-col items-center justify-center gap-3 py-12 text-gray-600 dark:text-gray-400">
                       <Loader2 className="h-8 w-8 shrink-0 animate-spin text-red-600 dark:text-red-400" aria-hidden />
@@ -861,6 +915,7 @@ export function SolicitacoesGeraisPage() {
                         onClick={() => {
                           setMySearch('');
                           setMyStatusFilter('all');
+                          setDestinationFilter('all');
                           setFilterUrgency('all');
                           setFilterRequestType('all');
                           setFilterContractId('all');
@@ -893,13 +948,13 @@ export function SolicitacoesGeraisPage() {
                                 ID
                               </th>
                               <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                                Status
-                              </th>
-                              <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                                Urgência
+                                Destino
                               </th>
                               <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                                 Tipo
+                              </th>
+                              <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                                Urgência
                               </th>
                               <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                                 Contrato
@@ -908,14 +963,12 @@ export function SolicitacoesGeraisPage() {
                                 Prazo
                               </th>
                               <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                                Setor
-                              </th>
-                              <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                                 Solicitante
                               </th>
-                              <th className="px-3 sm:px-6 py-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                                Ação
+                              <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                                Status
                               </th>
+                              <th className={listTableRowClasses.actionTh}>Ação</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
@@ -930,12 +983,11 @@ export function SolicitacoesGeraisPage() {
                                       {r.displayNumber ?? '—'}
                                     </ListRowNavigableLabel>
                                   </td>
-                                  <td className="px-3 sm:px-6 py-3 align-middle text-center">
-                                    <span
-                                      className={`inline-flex items-center justify-center rounded-full px-2.5 py-1 text-xs font-medium ${STATUS_ROW_BADGE[r.status]}`}
-                                    >
-                                      {STATUS_LABELS[r.status] ?? r.status}
-                                    </span>
+                                  <td className="px-3 sm:px-6 py-3 align-middle text-center text-sm text-gray-700 dark:text-gray-300 whitespace-nowrap">
+                                    {getRequestDestinationLabel(r.requestType)}
+                                  </td>
+                                  <td className="px-3 sm:px-6 py-3 align-middle text-center text-sm text-gray-700 dark:text-gray-300">
+                                    {TYPE_LABELS[r.requestType] ?? r.requestType}
                                   </td>
                                   <td className="px-3 sm:px-6 py-3 align-middle text-center">
                                     <span
@@ -944,9 +996,6 @@ export function SolicitacoesGeraisPage() {
                                       {URGENCY_LABELS[r.urgency]}
                                     </span>
                                   </td>
-                                  <td className="px-3 sm:px-6 py-3 align-middle text-center text-sm text-gray-700 dark:text-gray-300">
-                                    {TYPE_LABELS[r.requestType] ?? r.requestType}
-                                  </td>
                                   <td className="px-3 sm:px-6 py-3 align-middle text-center text-sm text-gray-700 dark:text-gray-300 max-w-[280px]">
                                     {r.contract?.name ?? '—'}
                                   </td>
@@ -954,23 +1003,41 @@ export function SolicitacoesGeraisPage() {
                                     {formatIsoDateRangeToBr(r.prazoInicio, r.prazoFim)}
                                   </td>
                                   <td className="px-3 sm:px-6 py-3 align-middle text-center text-sm text-gray-700 dark:text-gray-300">
-                                    {r.sectorSolicitante}
+                                    <div className="flex flex-col items-center gap-0.5">
+                                      <span>{r.solicitanteNome || '—'}</span>
+                                      {r.sectorSolicitante?.trim() ? (
+                                        <span className="text-xs text-gray-500 dark:text-gray-400">
+                                          {r.sectorSolicitante}
+                                        </span>
+                                      ) : null}
+                                    </div>
                                   </td>
-                                  <td className="px-3 sm:px-6 py-3 align-middle text-center text-sm text-gray-700 dark:text-gray-300">
-                                    {r.solicitanteNome}
+                                  <td className="px-3 sm:px-6 py-3 align-middle text-center">
+                                    <span
+                                      className={`inline-flex items-center justify-center rounded-full px-2.5 py-1 text-xs font-medium ${getStatusRowBadge(r)}`}
+                                    >
+                                      {getStatusLabel(r)}
+                                    </span>
                                   </td>
-                                  <td className="px-3 sm:px-6 py-3 align-middle text-right" onClick={(e) => e.stopPropagation()}>
-                                    {r.status === 'WAITING_RETURN' ? (
+                                  {r.status === 'WAITING_RETURN' ? (
+                                    <td
+                                      className={`${listTableRowClasses.actionTd} text-right`}
+                                      onClick={(e) => e.stopPropagation()}
+                                    >
                                       <div className="ml-auto max-w-[280px] space-y-2 text-left">
                                         <div className="flex justify-end">
                                           <button
                                             type="button"
-                                            onClick={() => openHistoryRequest(r)}
-                                            title="Ver histórico"
-                                            aria-label="Ver histórico"
-                                            className={rowActionMenuButtonClass(false)}
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              toggleRowActionMenu(r.id, e.currentTarget as HTMLButtonElement);
+                                            }}
+                                            className={rowActionMenuButtonClass(isRowMenuOpen(r.id))}
+                                            aria-label="Menu de ações"
+                                            aria-expanded={isRowMenuOpen(r.id)}
+                                            aria-haspopup="menu"
                                           >
-                                            <Eye className="h-4 w-4 shrink-0" strokeWidth={2} />
+                                            <MoreVertical className="h-4 w-4" />
                                           </button>
                                         </div>
                                         <textarea
@@ -989,32 +1056,291 @@ export function SolicitacoesGeraisPage() {
                                           {requesterReturnMutation.isPending ? 'Enviando...' : 'Responder ao DP'}
                                         </Button>
                                       </div>
-                                    ) : (
-                                      <div className="flex justify-end">
-                                        <button
-                                          type="button"
-                                          onClick={() => openHistoryRequest(r)}
-                                          title="Ver histórico"
-                                          aria-label="Ver histórico"
-                                          className={rowActionMenuButtonClass(false)}
-                                        >
-                                          <Eye className="h-4 w-4 shrink-0" strokeWidth={2} />
-                                        </button>
-                                      </div>
-                                    )}
-                                  </td>
+                                    </td>
+                                  ) : (
+                                    <RowActionMenuCell
+                                      isOpen={isRowMenuOpen(r.id)}
+                                      onToggle={(e) =>
+                                        toggleRowActionMenu(r.id, e.currentTarget as HTMLButtonElement)
+                                      }
+                                    />
+                                  )}
                                 </tr>
                             ))}
                           </tbody>
                         </table>
                       </div>
+
+                      {rowActionMenu && rowForActionMenu ? (
+                        <RowActionMenuPortal
+                          menu={rowActionMenu}
+                          onClose={closeRowActionMenu}
+                          onEdit={() => {}}
+                          onDelete={() => {}}
+                          hideDefaultActions
+                          extraItems={[
+                            {
+                              label: 'Ver detalhes',
+                              onClick: () => openHistoryRequest(rowForActionMenu),
+                              icon: (
+                                <FileText className="h-4 w-4 shrink-0 text-gray-500 dark:text-gray-400" />
+                              ),
+                            },
+                          ]}
+                        />
+                      ) : null}
                     </>
                   )}
                 </div>
-              )}
             </CardContent>
           </Card>
         </div>
+
+        <Modal
+          isOpen={isCreateModalOpen}
+          onClose={closeCreateModal}
+          title={
+            createTargetDepartment ? (
+              <div className="flex min-w-0 items-center gap-2">
+                <button
+                  type="button"
+                  onClick={backToDepartmentSelection}
+                  className="shrink-0 rounded-md p-1 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+                  aria-label="Voltar"
+                >
+                  <ArrowLeft className="h-5 w-5" />
+                </button>
+                <h3 className="min-w-0 truncate text-lg font-semibold text-gray-900 dark:text-gray-100">
+                  Nova solicitação
+                  <span className="font-normal text-gray-500 dark:text-gray-400">
+                    {' '}
+                    · {CREATE_TARGET_DEPARTMENT_LABELS[createTargetDepartment]}
+                  </span>
+                </h3>
+              </div>
+            ) : (
+              'Nova solicitação'
+            )
+          }
+          size={createTargetDepartment ? 'xl' : 'md'}
+          contentOverflowVisible
+          elevated
+        >
+          {!createTargetDepartment ? (
+            <div className="mx-auto max-w-md space-y-6 py-2">
+              <p className="text-center text-sm leading-relaxed text-gray-600 dark:text-gray-400">
+                Selecione o destino da solicitação
+              </p>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCreateTargetDepartment('DP');
+                    setForm((p) => ({ ...p, requestType: '', prazoInicio: '', prazoFim: '' }));
+                    setDetails({});
+                  }}
+                  className="group relative flex flex-col items-center gap-3 rounded-2xl border border-gray-200 bg-gray-50/80 px-4 py-7 transition-all hover:-translate-y-0.5 hover:border-red-400 hover:bg-red-50 hover:shadow-md dark:border-gray-600 dark:bg-gray-900/50 dark:hover:border-red-700 dark:hover:bg-red-950/30 dark:hover:shadow-red-950/20"
+                >
+                  <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-red-100 transition-colors group-hover:bg-red-200 dark:bg-red-950/60 dark:group-hover:bg-red-900/50">
+                    <Users className="h-6 w-6 text-red-600 dark:text-red-400" />
+                  </div>
+                  <span className="text-sm font-semibold leading-snug text-gray-900 dark:text-gray-100">
+                    Departamento Pessoal
+                  </span>
+                  <ChevronRight className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-red-500 opacity-0 transition-all group-hover:translate-x-0.5 group-hover:opacity-100" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCreateTargetDepartment('ADM_TST');
+                    setForm((p) => ({ ...p, requestType: '', prazoInicio: '', prazoFim: '' }));
+                    setDetails({});
+                  }}
+                  className="group relative flex flex-col items-center gap-3 rounded-2xl border border-gray-200 bg-gray-50/80 px-4 py-7 transition-all hover:-translate-y-0.5 hover:border-red-400 hover:bg-red-50 hover:shadow-md dark:border-gray-600 dark:bg-gray-900/50 dark:hover:border-red-700 dark:hover:bg-red-950/30 dark:hover:shadow-red-950/20"
+                >
+                  <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-red-100 transition-colors group-hover:bg-red-200 dark:bg-red-950/60 dark:group-hover:bg-red-900/50">
+                    <ClipboardList className="h-6 w-6 text-red-600 dark:text-red-400" />
+                  </div>
+                  <span className="text-sm font-semibold leading-snug text-gray-900 dark:text-gray-100">
+                    ADM/TST
+                  </span>
+                  <ChevronRight className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-red-500 opacity-0 transition-all group-hover:translate-x-0.5 group-hover:opacity-100" />
+                </button>
+              </div>
+            </div>
+          ) : (
+          <form
+            className="grid grid-cols-1 gap-4 md:grid-cols-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void createMutation.mutate();
+            }}
+          >
+            <div className="md:col-span-2">
+              <label className="mb-1 block text-sm font-medium text-gray-800 dark:text-gray-200">
+                Urgência
+              </label>
+              <div className="flex gap-2">
+                <ButtonSeg
+                  active={form.urgency === 'MEDIUM'}
+                  onClick={() => setForm((p) => ({ ...p, urgency: 'MEDIUM' }))}
+                  label="Normal"
+                />
+                <ButtonSeg
+                  active={form.urgency === 'URGENT'}
+                  onClick={() => setForm((p) => ({ ...p, urgency: 'URGENT' }))}
+                  label="Urgente"
+                />
+              </div>
+            </div>
+
+            <div className="md:col-span-2">
+              <label className="mb-1 block text-sm font-medium">Tipo de solicitação *</label>
+              <SingleSelectSearchDropdown
+                value={form.requestType}
+                onChange={(rt) => {
+                  setForm((p) => ({
+                    ...p,
+                    requestType: rt as DpRequestType | '',
+                    prazoInicio: '',
+                    prazoFim: '',
+                  }));
+                  setDetails({});
+                  setAtestadoFile(null);
+                  setHoraExtraFile(null);
+                  setAtestadoFileName('');
+                  setHoraExtraFileName('');
+                }}
+                options={requestTypeSelectOptions}
+                allowEmpty
+                placeholder="Selecione o tipo..."
+                searchPlaceholder="Pesquisar..."
+                noFocusRing
+              />
+            </div>
+
+            {createTargetDepartment === 'DP' ? (
+              <DpSolicitacaoTypeFields
+                requestType={form.requestType as DpFormRequestType | ''}
+                details={details}
+                patchDetails={patchDetails}
+                employees={payrollEmployees}
+                setEmployeeId={setSingleEmployeeId}
+                onAtestadoFile={(f) => {
+                  setAtestadoFile(f);
+                  setAtestadoFileName(f?.name ?? '');
+                }}
+                onHoraExtraFile={(f) => {
+                  setHoraExtraFile(f);
+                  setHoraExtraFileName(f?.name ?? '');
+                }}
+                atestadoFileName={atestadoFileName}
+                horaExtraFileName={horaExtraFileName}
+              />
+            ) : (
+              <AdmTstSolicitacaoTypeFields
+                requestType={form.requestType as AdmFormRequestType | ''}
+                details={details}
+                patchDetails={patchDetails}
+                employees={payrollEmployees}
+              />
+            )}
+
+            {createTargetDepartment === 'DP' &&
+              form.requestType &&
+              (['FERIAS', 'ATESTADO_MEDICO', 'BENEFICIOS_VIAGEM'].includes(form.requestType) ||
+                form.requestType === 'RETIFICACAO_ALOCACAO') && (
+                <div className="rounded-lg border border-dashed border-gray-200 p-3 text-xs text-gray-600 dark:border-gray-600 dark:text-gray-400 md:col-span-2">
+                  {['FERIAS', 'ATESTADO_MEDICO', 'BENEFICIOS_VIAGEM'].includes(form.requestType) ? (
+                    <span>
+                      As datas acima são o <strong>período</strong> (férias, atestado ou viagem). Abaixo, informe o{' '}
+                      <strong>prazo</strong> em que o DP deve responder — são campos diferentes.
+                    </span>
+                  ) : (
+                    <span>
+                      A data de retificação acima não substitui o prazo de retorno do DP; preencha os campos abaixo.
+                    </span>
+                  )}
+                </div>
+              )}
+
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:col-span-2">
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Início do prazo *
+                </label>
+                <DatePickerField
+                  value={form.prazoInicio}
+                  onChange={(prazoInicio) => setForm((p) => ({ ...p, prazoInicio }))}
+                  placeholder="dd/mm/aaaa"
+                  noFocusRing
+                  aria-label="Início do prazo"
+                />
+              </div>
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Fim do prazo *
+                </label>
+                <DatePickerField
+                  value={form.prazoFim}
+                  onChange={(prazoFim) => setForm((p) => ({ ...p, prazoFim }))}
+                  placeholder="dd/mm/aaaa"
+                  noFocusRing
+                  aria-label="Fim do prazo"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 md:col-span-2">
+              <div className="min-w-0">
+                <label className="mb-1 block text-sm font-medium">Contrato *</label>
+                <SingleSelectSearchDropdown
+                  value={form.contractId}
+                  onChange={handleContractChange}
+                  options={contractSelectOptions}
+                  allowEmpty
+                  placeholder="Selecionar contrato..."
+                  searchPlaceholder="Pesquisar..."
+                  noFocusRing
+                />
+              </div>
+              <div className="min-w-0">
+                <label className="mb-1 block text-sm font-medium">Empresa</label>
+                <SingleSelectSearchDropdown
+                  value={form.company}
+                  onChange={(company) => setForm((p) => ({ ...p, company }))}
+                  options={companySelectOptions}
+                  allowEmpty
+                  placeholder="Selecione a empresa..."
+                  searchPlaceholder="Pesquisar..."
+                  noFocusRing
+                />
+              </div>
+              <div className="min-w-0">
+                <label className="mb-1 block text-sm font-medium">Polo</label>
+                <SingleSelectSearchDropdown
+                  value={isDpFormPolo(form.polo) ? form.polo : ''}
+                  onChange={(polo) => setForm((p) => ({ ...p, polo }))}
+                  options={poloSelectOptions}
+                  allowEmpty
+                  placeholder="Selecione o polo..."
+                  searchPlaceholder="Pesquisar..."
+                  noFocusRing
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 md:col-span-2">
+              <Button type="button" variant="outline" onClick={closeCreateModal}>
+                Cancelar
+              </Button>
+              <Button type="submit" disabled={createMutation.isPending}>
+                {createMutation.isPending ? 'Enviando...' : 'Enviar solicitação'}
+              </Button>
+            </div>
+          </form>
+          )}
+        </Modal>
 
         {isFiltersModalOpen && (
           <div className="fixed inset-0 z-[1000] flex items-center justify-center">
@@ -1145,7 +1471,13 @@ export function SolicitacoesGeraisPage() {
                   />
 
                   {historyFeedbackText ? (
-                    <DpRequestHistorySectionCard title="Feedback do DP">
+                    <DpRequestHistorySectionCard
+                      title={
+                        historyRequest.requestType.startsWith('ADM_')
+                          ? 'Feedback ADM/TST'
+                          : 'Feedback do DP'
+                      }
+                    >
                       <p className="whitespace-pre-wrap break-words text-sm text-gray-700 dark:text-gray-300">
                         {historyFeedbackText}
                       </p>

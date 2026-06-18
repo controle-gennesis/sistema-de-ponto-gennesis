@@ -3,9 +3,11 @@ import { prisma } from './prisma';
 import { createError } from '../middleware/errorHandler';
 import { getContractAccessForUser } from './contractAccess';
 import { AuthRequest } from '../middleware/auth';
+import { isAdmTstDpRequestType } from './dpRequestAdmTst';
 
 export const DP_APPROVE_MODULE_KEY = pathToModuleKey('/ponto/controle/aprovar-solicitacoes-dp');
 export const DP_MANAGE_MODULE_KEY = pathToModuleKey('/ponto/gerenciar-solicitacoes-dp');
+export const ADM_TST_MANAGE_MODULE_KEY = pathToModuleKey('/ponto/gerenciar-solicitacoes-adm-tst');
 export const DP_SOLICITACOES_MODULE_KEY = pathToModuleKey('/ponto/solicitacoes-dp');
 /** Controle: rescisão e alteração de função/salário (além de admin, gerenciar DP ou Gestor DP no contrato). */
 export const DP_SENSITIVE_CREATE_MODULE_KEY = pathToModuleKey('/ponto/controle/criar-tipos-restritos-dp');
@@ -31,6 +33,39 @@ export async function userHasDpManagePermission(userId: string): Promise<boolean
     where: { userId, module: DP_MANAGE_MODULE_KEY, action: PERMISSION_ACCESS_ACTION, allowed: true },
   });
   return !!row;
+}
+
+export async function userHasAdmTstManagePermission(userId: string): Promise<boolean> {
+  const row = await prisma.userPermission.findFirst({
+    where: {
+      userId,
+      module: ADM_TST_MANAGE_MODULE_KEY,
+      action: PERMISSION_ACCESS_ACTION,
+      allowed: true,
+    },
+  });
+  return !!row;
+}
+
+/** Gestor da fila DP ou ADM/TST conforme o tipo da solicitação. */
+export async function assertUserCanManageDpRequest(
+  userId: string,
+  isAdmin: boolean,
+  requestType: string
+): Promise<void> {
+  if (isAdmin) return;
+  const isAdm = isAdmTstDpRequestType(requestType);
+  const allowed = isAdm
+    ? await userHasAdmTstManagePermission(userId)
+    : await userHasDpManagePermission(userId);
+  if (!allowed) {
+    throw createError(
+      isAdm
+        ? 'Sem permissão para gerenciar solicitações ADM/TST'
+        : 'Sem permissão para gerenciar solicitações do Departamento Pessoal',
+      403
+    );
+  }
 }
 
 export async function userHasSolicitacoesDpModule(userId: string): Promise<boolean> {
@@ -181,36 +216,17 @@ export async function assertCanAttachCostCenterToDpRequest(
   throw createError('Sem permissão para usar este centro de custo na solicitação', 403);
 }
 
-/** @deprecated mantido para compatibilidade interna */
-export async function assertCanAttachContractToDpRequest(req: AuthRequest, contractId: string): Promise<void> {
-  if (!req.user) throw createError('Usuário não autenticado', 401);
-  if (req.user.isAdmin) return;
-  if (await userHasDpManagePermission(req.user.id)) return;
-  if (await userHasSolicitacoesDpModule(req.user.id)) return;
-
-  const access = await getContractAccessForUser(req.user.id, false);
-  if (access.filter === 'ids' && access.ids.includes(contractId)) {
-    return;
-  }
-
-  if (await userHasDpApprovePermission(req.user.id)) {
-    const row = await prisma.userDpApprovalContract.findFirst({
-      where: { userId: req.user.id, contractId },
-      select: { id: true },
-    });
-    if (row) return;
-    const legacy = await prisma.userPermission.findFirst({
-      where: {
-        userId: req.user.id,
-        module: DP_APPROVE_MODULE_KEY,
-        action: PERMISSION_ACCESS_ACTION,
-        allowed: true,
-      },
-    });
-    if (legacy && access.filter === 'ids' && access.ids.includes(contractId)) return;
-  }
-
-  throw createError('Sem permissão para usar este contrato na solicitação', 403);
+/** Pode vincular contrato ao formulário de solicitação geral. */
+export async function assertCanAttachContractToDpRequest(
+  req: AuthRequest,
+  contractId: string
+): Promise<void> {
+  const contract = await prisma.contract.findUnique({
+    where: { id: contractId },
+    select: { id: true, costCenterId: true },
+  });
+  if (!contract) throw createError('Contrato não encontrado', 404);
+  await assertCanAttachCostCenterToDpRequest(req, contract.costCenterId);
 }
 
 export async function userMayCreateSensitiveDpRequest(

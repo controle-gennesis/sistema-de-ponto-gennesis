@@ -5,6 +5,7 @@ import { AuthRequest } from '../middleware/auth';
 import { createError } from '../middleware/errorHandler';
 import { prisma } from '../lib/prisma';
 import { getManagerDpApprovalContractScope } from '../lib/dpApprovalAccess';
+import { admTstManagerApprovalExclusionWhere } from '../lib/dpRequestAdmTst';
 import { getManagerFuelApprovalContractScope } from '../lib/fuelApprovalAccess';
 import {
   userHasOcComprasApprovePermission,
@@ -59,7 +60,11 @@ export class ApprovalNotificationController {
       const dpScope = await getManagerDpApprovalContractScope(userId, isAdmin);
       if (dpScope !== null) {
         dp = await prisma.dpRequest.count({
-          where: { status: 'WAITING_MANAGER', ...dpScope },
+          where: {
+            status: 'WAITING_MANAGER',
+            ...dpScope,
+            ...admTstManagerApprovalExclusionWhere(),
+          },
         });
       }
 

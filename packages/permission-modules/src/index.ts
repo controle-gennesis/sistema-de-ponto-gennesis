@@ -63,7 +63,14 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
   { key: pathToModuleKey('/ponto/gerenciar-atestados'), name: 'Gerenciar Ausências', href: '/ponto/gerenciar-atestados', category: 'Departamento Pessoal' },
   { key: pathToModuleKey('/ponto/solicitacoes'), name: 'Alterações de Ponto', href: '/ponto/solicitacoes', category: 'Departamento Pessoal' },
   { key: pathToModuleKey('/ponto/gerenciar-solicitacoes'), name: 'Gerenciar Alterações de Ponto', href: '/ponto/gerenciar-solicitacoes', category: 'Departamento Pessoal' },
-  { key: pathToModuleKey('/ponto/gerenciar-solicitacoes-dp'), name: 'Gerenciar Solicitações Gerais', href: '/ponto/gerenciar-solicitacoes-dp', category: 'Departamento Pessoal' },
+  { key: pathToModuleKey('/ponto/gerenciar-solicitacoes-dp'), name: 'Gerenciar Solicitações', href: '/ponto/gerenciar-solicitacoes-dp', category: 'Departamento Pessoal' },
+  // ADM/TST
+  {
+    key: pathToModuleKey('/ponto/gerenciar-solicitacoes-adm-tst'),
+    name: 'Gerenciar Solicitações',
+    href: '/ponto/gerenciar-solicitacoes-adm-tst',
+    category: 'ADM/TST',
+  },
   { key: pathToModuleKey('/ponto/ferias'), name: 'Férias', href: '/ponto/ferias', category: 'Departamento Pessoal' },
   { key: pathToModuleKey('/ponto/gerenciar-ferias'), name: 'Gerenciar Férias', href: '/ponto/gerenciar-ferias', category: 'Departamento Pessoal' },
   { key: pathToModuleKey('/ponto/gerenciar-feriados'), name: 'Gerenciar Feriados', href: '/ponto/gerenciar-feriados', category: 'Departamento Pessoal' },

@@ -405,7 +405,7 @@ export class QuoteMapService {
     if (map.createdBy !== userId) throw new Error('Você não tem permissão para gerar a OC deste mapa');
 
     const supplierIds = Array.from(new Set(data.generateSupplierIds));
-    if (supplierIds.length === 0) throw new Error('Selecione ao menos um fornecedor vencedor para gerar OC');
+    if (supplierIds.length === 0) throw new Error('Selecione ao menos um fornecedor para gerar OC');
 
     const rm = await this.db.materialRequest.findUnique({
       where: { id: map.materialRequestId },
@@ -465,15 +465,19 @@ export class QuoteMapService {
       itemsBySupplier[w.winnerSupplierId].push(w);
     }
 
+    const supplierIdsToGenerate = supplierIds.filter((id) => (itemsBySupplier[id] ?? []).length > 0);
+    if (supplierIdsToGenerate.length === 0) {
+      throw new Error('Nenhum dos fornecedores marcados venceu itens neste mapa');
+    }
+
     const createdOrders = [];
 
-    for (const supplierId of supplierIds) {
+    for (const supplierId of supplierIdsToGenerate) {
       const pay = paymentMap.get(supplierId);
-      if (!pay) throw new Error(`Informe o pagamento para o fornecedor ${supplierId}`);
+      if (!pay) throw new Error(`Informe o pagamento para o fornecedor selecionado`);
 
       const freight = freightBySupplier[supplierId] ?? new Decimal(0);
       const winnerItems = itemsBySupplier[supplierId] ?? [];
-      if (!winnerItems.length) continue;
 
       let itemsTotal = new Decimal(0);
       const items = (winnerItems as any[]).map((w: any) => {

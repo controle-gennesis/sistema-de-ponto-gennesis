@@ -340,6 +340,48 @@ export function DpRequestDetailsPreview({ requestType, details }: Props) {
     );
   }
 
+  if (requestType === 'ADM_VIAGENS') {
+    const employeeCount = Array.isArray(d.employeeIds) ? d.employeeIds.length : 0;
+    return (
+      <div className={sectionBaseCls}>
+        <h3 className={titleCls}>Detalhes da viagem (ADM/TST)</h3>
+        <div className={keyValueCls}>
+          <span className={keyCls}>Período:</span> {formatYmdToBr(d.dataIda)} à {formatYmdToBr(d.dataVolta)}
+        </div>
+        <div className={keyValueCls}>
+          <span className={keyCls}>Colaboradores:</span> {employeeCount > 0 ? `${employeeCount} selecionado(s)` : '—'}
+        </div>
+        <div className={keyValueCls}>
+          <span className={keyCls}>Cidade:</span> {renderValueOrDash(toTrimmedString(d.cidade))}
+        </div>
+        <div className={keyValueCls}>
+          <span className={keyCls}>Motivo:</span> {renderValueOrDash(toTrimmedString(d.motivoViagem))}
+        </div>
+        <div className={keyValueCls}>
+          <span className={keyCls}>Nº de dias:</span> {renderValueOrDash(toTrimmedString(d.numeroDias))}
+        </div>
+        <div className={keyValueCls}>
+          <span className={keyCls}>Pedágio:</span>{' '}
+          {d.pedagio === 'SIM' ? 'Sim' : d.pedagio === 'NAO' ? 'Não' : '—'}
+        </div>
+        {toTrimmedString(d.observacoes) ? (
+          <div className={keyValueCls}>
+            <span className={keyCls}>Observações:</span> {d.observacoes as string}
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  if (requestType.startsWith('ADM_') && 'detalhes' in d) {
+    return (
+      <div className={sectionBaseCls}>
+        <h3 className={titleCls}>Detalhes da solicitação (ADM/TST)</h3>
+        <div className={keyValueCls}>{renderValueOrDash(toTrimmedString(d.detalhes))}</div>
+      </div>
+    );
+  }
+
   return (
     <div className={sectionBaseCls}>
       <h3 className={titleCls}>Detalhes da solicitação</h3>

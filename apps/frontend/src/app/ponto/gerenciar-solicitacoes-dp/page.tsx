@@ -24,10 +24,22 @@ import {
   XCircle,
   type LucideIcon,
 } from 'lucide-react';
-import { getListTableRowClassName, ListRowNavigableLabel, rowActionMenuButtonClass } from '@/components/ui/listTableUi';
+import { getListTableRowClassName, ListRowNavigableLabel, listTableRowClasses } from '@/components/ui/listTableUi';
+import { RowActionMenuCell, RowActionMenuPortal } from '@/components/ui/RowActionMenu';
+import { useRowActionMenu } from '@/hooks/useRowActionMenu';
 import { buildDpRequestTimeline } from '@/lib/dpRequestTimeline';
 import { DpRequestDetailsPreview } from '@/lib/dpRequestDetailsPreview';
 import { DP_SOLICITACOES_NO_FOCUS_CLS, formatIsoDateRangeToBr } from '@/lib/dpSolicitacoesUi';
+import {
+  ADM_TST_MAY_SEND_FEEDBACK_STATUSES,
+  ADM_TST_STATUS_LABELS,
+  buildAdmTstFeedbackSelectOptions,
+  buildAdmTstStatusFilterOptions,
+  getAdmTstStatusLabel,
+  getAdmTstStatusRowBadge,
+  isAdmTstFlowStatus,
+} from '@/lib/dpRequestAdmTstUi';
+import { buildDpFeedbackSelectOptions, buildDpStatusFilterOptions } from '@/lib/dpRequestDpUi';
 import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
@@ -49,6 +61,8 @@ type DpRequestStatus =
   | 'WAITING_RETURN_ACCOUNTING'
   | 'WAITING_RETURN_ADM_TST'
   | 'WAITING_RETURN_ENGINEERING'
+  | 'WAITING_SUPPLIES'
+  | 'WAITING_PAYMENT'
   | 'CONCLUDED'
   | 'CANCELLED';
 
@@ -60,6 +74,8 @@ type DpDpFeedbackNextStatus =
   | 'WAITING_RETURN_ACCOUNTING'
   | 'WAITING_RETURN_ADM_TST'
   | 'WAITING_RETURN_ENGINEERING'
+  | 'WAITING_SUPPLIES'
+  | 'WAITING_PAYMENT'
   | 'CONCLUDED'
   | 'CANCELLED';
 type DpRequestType =
@@ -72,7 +88,13 @@ type DpRequestType =
   | 'HORA_EXTRA'
   | 'OUTRAS_SOLICITACOES'
   | 'RESCISAO'
-  | 'RETIFICACAO_ALOCACAO';
+  | 'RETIFICACAO_ALOCACAO'
+  | 'ADM_VIAGENS'
+  | 'ADM_EPI_FARDAMENTO'
+  | 'ADM_MANUTENCAO_ESCRITORIO'
+  | 'ADM_MATERIAL_ESCRITORIO'
+  | 'ADM_INFORMATICA'
+  | 'ADM_TREINAMENTOS_NR';
 
 type DpContractSummary = { id: string; number: string; name: string };
 
@@ -136,6 +158,8 @@ const STATUS_LABELS: Record<DpRequestStatus, string> = {
   WAITING_RETURN_ACCOUNTING: 'Pendência contábil',
   WAITING_RETURN_ADM_TST: 'Pendência ADM/TST',
   WAITING_RETURN_ENGINEERING: 'Pendência engenharia',
+  WAITING_SUPPLIES: 'Aguardando setor de suprimentos',
+  WAITING_PAYMENT: 'Aguardando pagamento',
   CONCLUDED: 'Concluída',
   CANCELLED: 'Cancelada',
 };
@@ -148,26 +172,16 @@ const STATUS_ROW_BADGE: Record<DpRequestStatus, string> = {
   WAITING_RETURN_ACCOUNTING: 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300',
   WAITING_RETURN_ADM_TST: 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300',
   WAITING_RETURN_ENGINEERING: 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300',
+  WAITING_SUPPLIES: 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300',
+  WAITING_PAYMENT: 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300',
   CONCLUDED: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300',
   CANCELLED: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
 };
 
-const DP_FEEDBACK_NEXT_OPTIONS: { value: DpDpFeedbackNextStatus; label: string }[] = [
-  { value: 'IN_REVIEW_DP', label: 'Em análise' },
-  { value: 'IN_FINANCEIRO', label: 'No financeiro' },
-  { value: 'WAITING_RETURN_ACCOUNTING', label: 'Pendência contábil' },
-  { value: 'WAITING_RETURN', label: 'Pendência colaborador' },
-  { value: 'WAITING_RETURN_ADM_TST', label: 'Pendência ADM/TST' },
-  { value: 'WAITING_RETURN_ENGINEERING', label: 'Pendência engenharia' },
-  { value: 'CONCLUDED', label: 'Concluída' },
-  { value: 'CANCELLED', label: 'Cancelada' },
-];
-
-const DP_FEEDBACK_SELECT_OPTIONS = DP_FEEDBACK_NEXT_OPTIONS.map((o) => ({
-  value: o.value,
-  label: o.label,
-  searchText: o.label,
-}));
+const DP_FEEDBACK_SELECT_OPTIONS = buildDpFeedbackSelectOptions();
+const ADM_TST_FEEDBACK_SELECT_OPTIONS = buildAdmTstFeedbackSelectOptions();
+const DP_STATUS_FILTER_OPTIONS = buildDpStatusFilterOptions();
+const ADM_TST_STATUS_FILTER_OPTIONS = buildAdmTstStatusFilterOptions();
 
 const CAN_DP_SEND_FEEDBACK: DpRequestStatus[] = [
   'IN_REVIEW_DP',
@@ -177,6 +191,8 @@ const CAN_DP_SEND_FEEDBACK: DpRequestStatus[] = [
   'WAITING_RETURN_ADM_TST',
   'WAITING_RETURN_ENGINEERING',
 ];
+
+const CAN_ADM_TST_SEND_FEEDBACK: DpRequestStatus[] = [...ADM_TST_MAY_SEND_FEEDBACK_STATUSES];
 
 const URGENCY_LABELS: Record<DpUrgency, string> = {
   LOW: 'Baixa',
@@ -203,19 +219,13 @@ const TYPE_LABELS: Record<DpRequestType, string> = {
   OUTRAS_SOLICITACOES: 'Outras solicitações',
   RESCISAO: 'Rescisão',
   RETIFICACAO_ALOCACAO: 'Retificação de alocação',
+  ADM_VIAGENS: 'Viagens',
+  ADM_EPI_FARDAMENTO: "EPI's e fardamento",
+  ADM_MANUTENCAO_ESCRITORIO: 'Manutenção do escritório',
+  ADM_MATERIAL_ESCRITORIO: 'Material de escritório',
+  ADM_INFORMATICA: 'Informática',
+  ADM_TREINAMENTOS_NR: "Treinamentos e NR's",
 };
-
-const DP_STATUS_FILTER_OPTIONS = labeledToSelectOptions([
-  { value: 'all', label: 'Todos' },
-  { value: 'IN_REVIEW_DP', label: 'Em análise' },
-  { value: 'IN_FINANCEIRO', label: 'No financeiro' },
-  { value: 'WAITING_RETURN_ACCOUNTING', label: 'Pendência contábil' },
-  { value: 'WAITING_RETURN', label: 'Pendência colaborador' },
-  { value: 'WAITING_RETURN_ADM_TST', label: 'Pendência ADM/TST' },
-  { value: 'WAITING_RETURN_ENGINEERING', label: 'Pendência engenharia' },
-  { value: 'CONCLUDED', label: 'Concluída' },
-  { value: 'CANCELLED', label: 'Cancelada' },
-]);
 
 const DP_URGENCY_FILTER_OPTIONS = labeledToSelectOptions([
   { value: 'all', label: 'Todas' },
@@ -228,12 +238,66 @@ const DP_URGENCY_FILTER_OPTIONS = labeledToSelectOptions([
 const DP_TYPE_FILTER_OPTIONS = labeledToSelectOptions([
   { value: 'all', label: 'Todos' },
   ...(Object.keys(TYPE_LABELS) as DpRequestType[])
+    .filter((t) => !t.startsWith('ADM_'))
     .slice()
     .sort((a, b) => TYPE_LABELS[a].localeCompare(TYPE_LABELS[b], 'pt-BR'))
     .map((t) => ({ value: t, label: TYPE_LABELS[t] })),
 ]);
 
-const LIST_TABLE_ACTION_ICON_CLASS = rowActionMenuButtonClass(false);
+const ADM_TST_TYPE_FILTER_OPTIONS = labeledToSelectOptions([
+  { value: 'all', label: 'Todos' },
+  ...(Object.keys(TYPE_LABELS) as DpRequestType[])
+    .filter((t) => t.startsWith('ADM_'))
+    .slice()
+    .sort((a, b) => TYPE_LABELS[a].localeCompare(TYPE_LABELS[b], 'pt-BR'))
+    .map((t) => ({ value: t, label: TYPE_LABELS[t] })),
+]);
+
+export type GerenciarSolicitacoesScope = 'DP' | 'ADM_TST';
+
+const MANAGE_SCOPE_CONFIG: Record<
+  GerenciarSolicitacoesScope,
+  {
+    route: string;
+    apiPath: string;
+    queryKeyPrefix: string;
+    pageTitle: string;
+    pageSubtitle: string;
+    pendingListSubtitle: string;
+    concludedListSubtitle: string;
+    typeFilterOptions: ReturnType<typeof labeledToSelectOptions>;
+    statusFilterOptions: ReturnType<typeof labeledToSelectOptions>;
+    feedbackSelectOptions: typeof DP_FEEDBACK_SELECT_OPTIONS;
+    canSendFeedbackStatuses: DpRequestStatus[];
+  }
+> = {
+  DP: {
+    route: '/ponto/gerenciar-solicitacoes-gerais',
+    apiPath: '/solicitacoes-dp/gerenciar',
+    queryKeyPrefix: 'dp-manage-dp',
+    pageTitle: 'Gerenciar Solicitações',
+    pageSubtitle: 'Registre retornos e altere etapas após a aprovação do gestor.',
+    pendingListSubtitle: 'Solicitações em tramitação após a aprovação do gestor.',
+    concludedListSubtitle: 'Histórico de solicitações finalizadas pelo DP.',
+    typeFilterOptions: DP_TYPE_FILTER_OPTIONS,
+    statusFilterOptions: DP_STATUS_FILTER_OPTIONS,
+    feedbackSelectOptions: DP_FEEDBACK_SELECT_OPTIONS,
+    canSendFeedbackStatuses: CAN_DP_SEND_FEEDBACK,
+  },
+  ADM_TST: {
+    route: '/ponto/gerenciar-solicitacoes-adm-tst',
+    apiPath: '/solicitacoes-dp/gerenciar-adm-tst',
+    queryKeyPrefix: 'dp-manage-adm-tst',
+    pageTitle: 'Gerenciar Solicitações',
+    pageSubtitle: 'Registre retornos e altere etapas das solicitações administrativas.',
+    pendingListSubtitle: 'Solicitações ADM/TST em tramitação.',
+    concludedListSubtitle: 'Histórico de solicitações ADM/TST finalizadas.',
+    typeFilterOptions: ADM_TST_TYPE_FILTER_OPTIONS,
+    statusFilterOptions: ADM_TST_STATUS_FILTER_OPTIONS,
+    feedbackSelectOptions: ADM_TST_FEEDBACK_SELECT_OPTIONS,
+    canSendFeedbackStatuses: CAN_ADM_TST_SEND_FEEDBACK,
+  },
+};
 
 type ManageCardFilter = 'all' | 'pending' | 'CONCLUDED' | 'CANCELLED';
 
@@ -319,7 +383,12 @@ const MANAGE_STAT_CARDS: {
   },
 ];
 
-export function GerenciarSolicitacoesGeraisPage() {
+export function GerenciarSolicitacoesGeraisPage({
+  scope = 'DP',
+}: {
+  scope?: GerenciarSolicitacoesScope;
+}) {
+  const scopeConfig = MANAGE_SCOPE_CONFIG[scope];
   const queryClient = useQueryClient();
 
   const [cardFilter, setCardFilter] = useState<ManageCardFilter>('pending');
@@ -360,10 +429,10 @@ export function GerenciarSolicitacoesGeraisPage() {
   };
 
   const { data: resp, isLoading: loadingList } = useQuery({
-    queryKey: ['dp-manage', cardFilter],
+    queryKey: [scopeConfig.queryKeyPrefix, cardFilter],
     queryFn: async () => {
       const statusParam = cardFilter === 'pending' || cardFilter === 'all' ? 'all' : cardFilter;
-      const res = await api.get('/solicitacoes-dp/gerenciar', { params: { status: statusParam } });
+      const res = await api.get(scopeConfig.apiPath, { params: { status: statusParam } });
       let data = (res.data?.data ?? []) as DpRequest[];
       if (cardFilter === 'pending') {
         data = data.filter((r) => r.status !== 'CONCLUDED' && r.status !== 'CANCELLED');
@@ -374,9 +443,9 @@ export function GerenciarSolicitacoesGeraisPage() {
   });
 
   const { data: statsResp, isLoading: loadingStats } = useQuery({
-    queryKey: ['dp-manage', 'stats'],
+    queryKey: [scopeConfig.queryKeyPrefix, 'stats'],
     queryFn: async () => {
-      const res = await api.get('/solicitacoes-dp/gerenciar', { params: { status: 'all' } });
+      const res = await api.get(scopeConfig.apiPath, { params: { status: 'all' } });
       return res.data?.data ?? [];
     },
     enabled: !loadingUser,
@@ -425,13 +494,20 @@ export function GerenciarSolicitacoesGeraisPage() {
     const qRaw = search.trim();
     if (!qRaw) return true;
     const qLower = qRaw.toLowerCase();
-    // Só ID: número exibido (igualdade exata, aceita "01" → 1) ou UUID completo — nunca substring no UUID.
     if (r.displayNumber != null) {
       if (String(r.displayNumber) === qRaw) return true;
       if (/^\d+$/.test(qRaw) && r.displayNumber === Number(qRaw)) return true;
     }
     return r.id.toLowerCase() === qLower;
   });
+
+  const {
+    rowActionMenu,
+    rowForActionMenu,
+    toggleRowActionMenu,
+    closeRowActionMenu,
+    isRowMenuOpen,
+  } = useRowActionMenu(filteredRequests);
 
   const getCostCenterLabel = (r: DpRequest): string | null => {
     const fromDetails = typeof r.details?.costCenter === 'string' ? r.details.costCenter.trim() : '';
@@ -445,7 +521,30 @@ export function GerenciarSolicitacoesGeraisPage() {
     return r.contract?.name ?? '—';
   };
 
-  const buildTimeline = (r: DpRequest) => buildDpRequestTimeline(r, STATUS_LABELS, formatDuration);
+  const statusLabelsForScope = useMemo(
+    () =>
+      scope === 'ADM_TST'
+        ? { ...STATUS_LABELS, ...ADM_TST_STATUS_LABELS }
+        : STATUS_LABELS,
+    [scope]
+  );
+
+  const buildTimeline = (r: DpRequest) =>
+    buildDpRequestTimeline(r, statusLabelsForScope, formatDuration);
+
+  const getStatusLabel = (status: DpRequestStatus) => {
+    if (scope === 'ADM_TST' && isAdmTstFlowStatus(status)) {
+      return getAdmTstStatusLabel(status);
+    }
+    return STATUS_LABELS[status];
+  };
+
+  const getStatusRowBadge = (status: DpRequestStatus) => {
+    if (scope === 'ADM_TST' && isAdmTstFlowStatus(status)) {
+      return getAdmTstStatusRowBadge(status);
+    }
+    return STATUS_ROW_BADGE[status];
+  };
 
   const feedbackMutation = useMutation({
     mutationFn: async ({
@@ -473,7 +572,7 @@ export function GerenciarSolicitacoesGeraisPage() {
       toast.success('Feedback registrado');
       cancelRowDraft(vars.id);
       closeHistoryRequest();
-      await queryClient.invalidateQueries({ queryKey: ['dp-manage'] });
+      await queryClient.invalidateQueries({ queryKey: [scopeConfig.queryKeyPrefix] });
     },
     onError: (err: any) => toast.error(err?.response?.data?.error || err?.message || 'Erro'),
   });
@@ -531,9 +630,9 @@ export function GerenciarSolicitacoesGeraisPage() {
       label: 'Status',
       value: (
         <span
-          className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${STATUS_ROW_BADGE[r.status]}`}
+          className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${getStatusRowBadge(r.status)}`}
         >
-          {STATUS_LABELS[r.status]}
+          {getStatusLabel(r.status)}
         </span>
       ),
     },
@@ -555,26 +654,34 @@ export function GerenciarSolicitacoesGeraisPage() {
 
   const listHeader = MANAGE_CARD_LIST_CONFIG[cardFilter];
   const ListHeaderIcon = listHeader.Icon;
+  const listSubtitle =
+    cardFilter === 'pending'
+      ? scopeConfig.pendingListSubtitle
+      : cardFilter === 'CONCLUDED'
+        ? scopeConfig.concludedListSubtitle
+        : listHeader.subtitle;
   const hasActiveModalFilter =
     activeStatus !== 'all' ||
     filterUrgency !== 'all' ||
     filterRequestType !== 'all' ||
     filterContractId !== 'all';
 
+  const hideTableColumns = !loadingList && filteredRequests.length === 0;
+
   if (loadingUser) {
     return <Loading message="Carregando..." fullScreen size="lg" />;
   }
 
   return (
-    <ProtectedRoute route="/ponto/gerenciar-solicitacoes-gerais">
+    <ProtectedRoute route={scopeConfig.route}>
       <MainLayout userRole={'EMPLOYEE'} userName={user?.name || ''} onLogout={handleLogout}>
         <div className="space-y-6">
           <div className="text-center">
             <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">
-              Gerenciar Solicitações
+              {scopeConfig.pageTitle}
             </h1>
             <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400">
-              Registre retornos e altere etapas após a aprovação do gestor.
+              {scopeConfig.pageSubtitle}
             </p>
           </div>
 
@@ -605,7 +712,7 @@ export function GerenciarSolicitacoesGeraisPage() {
                     <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
                       {listHeader.title}
                     </h3>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">{listHeader.subtitle}</p>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">{listSubtitle}</p>
                   </div>
                 </div>
                 <div className="flex flex-shrink-0 flex-wrap items-center gap-2 sm:justify-end">
@@ -654,6 +761,7 @@ export function GerenciarSolicitacoesGeraisPage() {
                 <Loading message="Carregando solicitações..." />
               ) : (
                 <>
+                  {!hideTableColumns && (
                   <div className="mb-2 flex flex-col gap-1 text-sm text-gray-600 dark:text-gray-400 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
                     <span>
                       Mostrando {filteredRequests.length === 0 ? 0 : 1} a {filteredRequests.length} de{' '}
@@ -661,21 +769,20 @@ export function GerenciarSolicitacoesGeraisPage() {
                     </span>
                     <span>Página 1 de 1</span>
                   </div>
+                  )}
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm">
+                      {!hideTableColumns && (
                       <thead className="border-b border-gray-200 dark:border-gray-700">
                         <tr>
                           <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                             ID
                           </th>
                           <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                            Status
+                            Tipo
                           </th>
                           <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                             Urgência
-                          </th>
-                          <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                            Tipo
                           </th>
                           <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                             Contrato
@@ -686,11 +793,13 @@ export function GerenciarSolicitacoesGeraisPage() {
                           <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                             Solicitante
                           </th>
-                          <th className="px-3 sm:px-6 py-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                            Ação
+                          <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                            Status
                           </th>
+                          <th className={listTableRowClasses.actionTh}>Ação</th>
                         </tr>
                       </thead>
+                      )}
                       <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
                         {filteredRequests.map((r) => {
                           return (
@@ -704,12 +813,8 @@ export function GerenciarSolicitacoesGeraisPage() {
                                   {r.displayNumber ?? '—'}
                                 </ListRowNavigableLabel>
                               </td>
-                              <td className="px-3 sm:px-6 py-3 align-middle text-center">
-                                <span
-                                  className={`inline-flex items-center justify-center rounded-full px-2.5 py-1 text-xs font-medium ${STATUS_ROW_BADGE[r.status]}`}
-                                >
-                                  {STATUS_LABELS[r.status]}
-                                </span>
+                              <td className="px-3 sm:px-6 py-3 align-middle text-center text-sm text-gray-700 dark:text-gray-300">
+                                {TYPE_LABELS[r.requestType] ?? r.requestType}
                               </td>
                               <td className="px-3 sm:px-6 py-3 align-middle text-center">
                                 <span
@@ -718,31 +823,37 @@ export function GerenciarSolicitacoesGeraisPage() {
                                   {URGENCY_LABELS[r.urgency]}
                                 </span>
                               </td>
-                              <td className="px-3 sm:px-6 py-3 align-middle text-center text-sm text-gray-700 dark:text-gray-300">
-                                {TYPE_LABELS[r.requestType] ?? r.requestType}
-                              </td>
                               <td className="px-3 sm:px-6 py-3 align-middle text-center text-sm text-gray-700 dark:text-gray-300 max-w-[220px]">
                                 {getContratoColunaLabel(r)}
                               </td>
                               <td className="px-3 sm:px-6 py-3 align-middle text-center text-sm text-gray-700 dark:text-gray-300 whitespace-nowrap">
                                 {formatIsoDateRangeToBr(r.prazoInicio, r.prazoFim)}
                               </td>
-                              <td className="px-3 sm:px-6 py-3 align-middle text-center text-sm font-medium text-gray-900 dark:text-gray-100">
-                                {r.solicitanteNome}
-                              </td>
-                              <td className="px-3 sm:px-6 py-3 align-middle text-right" onClick={(e) => e.stopPropagation()}>
-                                <div className="flex justify-end">
-                                  <button
-                                    type="button"
-                                    onClick={() => openHistoryRequest(r)}
-                                    title="Ver detalhes e histórico"
-                                    aria-label="Ver detalhes e histórico"
-                                    className={LIST_TABLE_ACTION_ICON_CLASS}
-                                  >
-                                    <FileText className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden />
-                                  </button>
+                              <td className="px-3 sm:px-6 py-3 align-middle text-center text-sm text-gray-700 dark:text-gray-300">
+                                <div className="flex flex-col items-center gap-0.5">
+                                  <span className="font-medium text-gray-900 dark:text-gray-100">
+                                    {r.solicitanteNome || '—'}
+                                  </span>
+                                  {r.sectorSolicitante?.trim() ? (
+                                    <span className="text-xs text-gray-500 dark:text-gray-400">
+                                      {r.sectorSolicitante}
+                                    </span>
+                                  ) : null}
                                 </div>
                               </td>
+                              <td className="px-3 sm:px-6 py-3 align-middle text-center">
+                                <span
+                                  className={`inline-flex items-center justify-center rounded-full px-2.5 py-1 text-xs font-medium ${getStatusRowBadge(r.status)}`}
+                                >
+                                  {getStatusLabel(r.status)}
+                                </span>
+                              </td>
+                              <RowActionMenuCell
+                                isOpen={isRowMenuOpen(r.id)}
+                                onToggle={(e) =>
+                                  toggleRowActionMenu(r.id, e.currentTarget as HTMLButtonElement)
+                                }
+                              />
                             </tr>
                           );
                         })}
@@ -766,6 +877,25 @@ export function GerenciarSolicitacoesGeraisPage() {
                       </tbody>
                     </table>
                   </div>
+
+                  {rowActionMenu && rowForActionMenu ? (
+                    <RowActionMenuPortal
+                      menu={rowActionMenu}
+                      onClose={closeRowActionMenu}
+                      onEdit={() => {}}
+                      onDelete={() => {}}
+                      hideDefaultActions
+                      extraItems={[
+                        {
+                          label: 'Ver detalhes',
+                          onClick: () => openHistoryRequest(rowForActionMenu),
+                          icon: (
+                            <FileText className="h-4 w-4 shrink-0 text-gray-500 dark:text-gray-400" />
+                          ),
+                        },
+                      ]}
+                    />
+                  ) : null}
                 </>
               )}
             </CardContent>
@@ -793,13 +923,16 @@ export function GerenciarSolicitacoesGeraisPage() {
                         <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                           Status
                         </label>
-                        <StringSingleSelectDropdown
+                        <SingleSelectSearchDropdown
                           value={activeStatus}
                           onChange={(v) =>
                             setActiveStatus(v as 'all' | Exclude<DpRequestStatus, 'WAITING_MANAGER'>)
                           }
-                          options={DP_STATUS_FILTER_OPTIONS}
+                          options={scopeConfig.statusFilterOptions}
                           allowEmpty={false}
+                          placeholder="Todos"
+                          searchPlaceholder="Pesquisar..."
+                          noFocusRing
                           className={DP_SOLICITACOES_NO_FOCUS_CLS}
                         />
                       </div>
@@ -820,7 +953,7 @@ export function GerenciarSolicitacoesGeraisPage() {
                         <StringSingleSelectDropdown
                           value={filterRequestType}
                           onChange={(v) => setFilterRequestType(v as 'all' | DpRequestType)}
-                          options={DP_TYPE_FILTER_OPTIONS}
+                          options={scopeConfig.typeFilterOptions}
                           allowEmpty={false}
                           className={DP_SOLICITACOES_NO_FOCUS_CLS}
                         />
@@ -894,8 +1027,10 @@ export function GerenciarSolicitacoesGeraisPage() {
                     details={historyRequest.details}
                   />
 
-                  {CAN_DP_SEND_FEEDBACK.includes(historyRequest.status) ? (
-                    <DpRequestHistorySectionCard title="Registrar feedback">
+                  {scopeConfig.canSendFeedbackStatuses.includes(historyRequest.status) ? (
+                    <DpRequestHistorySectionCard
+                      title={scope === 'ADM_TST' ? 'Feedback ADM/TST' : 'Registrar feedback'}
+                    >
                       <div className="space-y-3">
                         <div>
                           <label className="mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400">
@@ -922,7 +1057,7 @@ export function GerenciarSolicitacoesGeraisPage() {
                                 [historyRequest.id]: value as DpDpFeedbackNextStatus,
                               }))
                             }
-                            options={DP_FEEDBACK_SELECT_OPTIONS}
+                            options={scopeConfig.feedbackSelectOptions}
                             allowEmpty={false}
                             placeholder="Selecione o feedback..."
                             searchPlaceholder="Pesquisar..."
@@ -958,7 +1093,7 @@ export function GerenciarSolicitacoesGeraisPage() {
                     <Button type="button" variant="outline" onClick={closeHistoryRequest}>
                       Fechar
                     </Button>
-                    {CAN_DP_SEND_FEEDBACK.includes(historyRequest.status) ? (
+                    {scopeConfig.canSendFeedbackStatuses.includes(historyRequest.status) ? (
                       <Button
                         type="button"
                         onClick={() => submitDpFeedback(historyRequest)}

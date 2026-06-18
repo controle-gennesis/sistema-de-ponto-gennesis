@@ -82,7 +82,13 @@ function computeFloatingPos(trigger: HTMLElement): FloatingPos {
 }
 
 function OptionLabelContent({ opt }: { opt: MultiSelectSearchOption }) {
-  if (!opt.swatchColor) return <>{opt.label}</>;
+  const label = opt.labelClassName ? (
+    <span className={`truncate ${opt.labelClassName}`}>{opt.label}</span>
+  ) : (
+    <span className="truncate">{opt.label}</span>
+  );
+
+  if (!opt.swatchColor) return label;
   return (
     <span className="flex min-w-0 flex-1 items-center gap-2.5">
       <span
@@ -90,7 +96,7 @@ function OptionLabelContent({ opt }: { opt: MultiSelectSearchOption }) {
         style={{ backgroundColor: opt.swatchColor }}
         aria-hidden
       />
-      <span className="truncate">{opt.label}</span>
+      {label}
     </span>
   );
 }
