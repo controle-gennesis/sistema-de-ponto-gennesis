@@ -191,6 +191,29 @@ export class FinancialControlController {
     }
   }
 
+  /** Lançamentos do controle financeiro para várias OCs (listagem Pagamento). */
+  async getByOcNumbersBatch(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const raw = String(req.query.numbers || '').trim();
+      const numbers = [...new Set(raw.split(',').map((n) => n.trim()).filter(Boolean))];
+      if (numbers.length === 0) {
+        res.json({ success: true, data: [] });
+        return;
+      }
+      const entries = await prisma.financialControlEntry.findMany({
+        where: {
+          OR: numbers.map((ocNumber) => ({
+            ocNumber: { equals: ocNumber, mode: 'insensitive' as const },
+          })),
+        },
+        orderBy: [{ paymentYear: 'desc' }, { paymentMonth: 'desc' }, { createdAt: 'desc' }],
+      });
+      res.json({ success: true, data: entries });
+    } catch (error) {
+      next(error);
+    }
+  }
+
   async getById(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;

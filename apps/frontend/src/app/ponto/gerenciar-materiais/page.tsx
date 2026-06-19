@@ -1,20 +1,25 @@
 'use client';
 
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Pencil, X } from 'lucide-react';
+import { Pencil, X, CheckCircle, ClipboardList, Clock, Wrench, XCircle } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import api from '@/lib/api';
 import { absoluteUploadUrl } from '@/lib/apiOrigin';
 import toast from 'react-hot-toast';
-import { OcPurchaseOrdersPanel, OcStyledCheckbox, type PurchaseOrder } from '@/components/oc/OcPurchaseOrdersPanel';
-import { PaymentConditionSelect } from '@/components/oc/PaymentConditionSelect';
-import type { FluxTab, MaterialRequest } from './_lib/types';
-import { fluxTabToOcTab, orderNeedsFinanceBoleto } from './_lib/flux';
+import { OcStyledCheckbox, type PurchaseOrder } from '@/components/oc/OcPurchaseOrdersPanel';
+import { PaymentConditionSelect, resolvePaymentConditionMeta } from '@/components/oc/PaymentConditionSelect';
+import {
+  OcBoletoCreationFields,
+  resizeOcBoletoCreationSlots,
+  type OcBoletoCreationSlot
+} from '@/components/oc/OcBoletoCreationFields';
+import type { MaterialRequest } from './_lib/types';
 import { getStatusInfo, materialItemLabel, rmSolicitante } from './_lib/display';
 import {
   formatCurrencyBR,
@@ -25,22 +30,22 @@ import {
   parseCurrencyBR
 } from './_lib/ocAmounts';
 import { maskCurrencyInputBrOrEmpty, parseCurrencyInputBr } from '@/lib/maskCurrencyBr';
-import { FluxGlobalSearch } from './_components/FluxGlobalSearch';
-import { FluxTabsNav } from './_components/FluxTabsNav';
+import { FilterStatCard } from '@/components/ui/FilterStatCard';
 import { MaterialRequestsRmList } from './_components/MaterialRequestsRmList';
 import { AsyncSearchSelectDropdown } from '@/components/ui/AsyncSearchSelectDropdown';
 import { searchOcSuppliers } from '@/components/oc/searchOcSuppliers';
 import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
 import { OC_PIX_KEY_TYPE_OPTIONS } from '@/components/oc/OcPurchaseOrderFormFields';
 import {
-  getFluxTabForPurchaseOrder,
   getMaterialRequestCancellationReason,
   getMaterialRequestDisplayStatus,
-  isMaterialRequestEffectivelyCancelled,
-  matchesMaterialRequestSearch,
-  matchesPurchaseOrderSearch,
-  normalizeFluxSearch
+  isMaterialRequestEffectivelyCancelled
 } from './_lib/search';
+import {
+  DEFAULT_RM_CARD_FILTER,
+  filterMaterialRequestsByCard,
+  type RmCardFilter
+} from './_lib/rmCardFilter';
 
 const ocFieldCls =
   'w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-0 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 disabled:cursor-not-allowed disabled:opacity-50';
@@ -80,14 +85,61 @@ const ocPaymentSegmentCls = (active: boolean) =>
 const ocFieldCompactCls =
   'w-full min-w-0 rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-0 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 disabled:cursor-not-allowed disabled:opacity-50';
 
+const RM_STAT_CARDS: {
+  filter: RmCardFilter;
+  label: string;
+  iconBg: string;
+  iconColor: string;
+  Icon: LucideIcon;
+  countKey: keyof { total: number; pending: number; approved: number; inReview: number; cancelled: number };
+}[] = [
+  {
+    filter: 'all',
+    label: 'Total',
+    iconBg: 'bg-blue-100 dark:bg-blue-900/30',
+    iconColor: 'text-blue-600 dark:text-blue-400',
+    Icon: ClipboardList,
+    countKey: 'total'
+  },
+  {
+    filter: 'pending',
+    label: 'Pendentes',
+    iconBg: 'bg-yellow-100 dark:bg-yellow-900/30',
+    iconColor: 'text-yellow-600 dark:text-yellow-400',
+    Icon: Clock,
+    countKey: 'pending'
+  },
+  {
+    filter: 'approved',
+    label: 'Aprovadas',
+    iconBg: 'bg-green-100 dark:bg-green-900/30',
+    iconColor: 'text-green-600 dark:text-green-400',
+    Icon: CheckCircle,
+    countKey: 'approved'
+  },
+  {
+    filter: 'inReview',
+    label: 'Em correção',
+    iconBg: 'bg-amber-100 dark:bg-amber-900/30',
+    iconColor: 'text-amber-600 dark:text-amber-400',
+    Icon: Wrench,
+    countKey: 'inReview'
+  },
+  {
+    filter: 'cancelled',
+    label: 'Canceladas',
+    iconBg: 'bg-red-100 dark:bg-red-900/30',
+    iconColor: 'text-red-600 dark:text-red-400',
+    Icon: XCircle,
+    countKey: 'cancelled'
+  }
+];
+
 export default function GerenciarMateriaisPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
   
   const [selectedRequest, setSelectedRequest] = useState<MaterialRequest | null>(null);
-  const [showApprovalModal, setShowApprovalModal] = useState(false);
-  const [showCorrectionModal, setShowCorrectionModal] = useState(false);
-  const [showCancelModal, setShowCancelModal] = useState(false);
   const [showCreateOCModal, setShowCreateOCModal] = useState(false);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [ocSupplierId, setOcSupplierId] = useState('');
@@ -98,6 +150,7 @@ export default function GerenciarMateriaisPage() {
   const [ocPixKeyType, setOcPixKeyType] = useState('');
   const [ocPixKey, setOcPixKey] = useState('');
   const [ocObservations, setOcObservations] = useState('');
+  const [ocBoletoSlots, setOcBoletoSlots] = useState<OcBoletoCreationSlot[]>([{ url: '', name: '' }]);
   const [ocFreteStr, setOcFreteStr] = useState('');
   const [ocSelectedItemIds, setOcSelectedItemIds] = useState<Set<string>>(new Set());
   /** Quantidade na OC por item (texto livre: pode ficar vazio enquanto digita). */
@@ -113,7 +166,31 @@ export default function GerenciarMateriaisPage() {
       setOcPixKeyType('');
       setOcPixKey('');
     }
+    if (ocPaymentType === OC_TYPE_AVISTA) {
+      setOcBoletoSlots([{ url: '', name: '' }]);
+    }
   }, [ocPaymentType]);
+
+  const { data: boletoPaymentConditions } = useQuery({
+    queryKey: ['payment-conditions', 'BOLETO'],
+    queryFn: async () => {
+      const res = await api.get('/payment-conditions', {
+        params: { paymentType: 'BOLETO', activeOnly: 'true' }
+      });
+      return (res.data?.data || []) as Array<{ code: string; parcelCount: number; parcelDueDays: unknown }>;
+    },
+    enabled: showCreateOCModal && ocPaymentType === OC_TYPE_BOLETO
+  });
+
+  const ocBoletoParcelMeta = useMemo(
+    () => resolvePaymentConditionMeta(ocPaymentCondition, boletoPaymentConditions),
+    [ocPaymentCondition, boletoPaymentConditions]
+  );
+
+  useEffect(() => {
+    if (ocPaymentType !== OC_TYPE_BOLETO) return;
+    setOcBoletoSlots((prev) => resizeOcBoletoCreationSlots(ocBoletoParcelMeta.parcelCount, prev));
+  }, [ocPaymentType, ocPaymentCondition, ocBoletoParcelMeta.parcelCount]);
 
   const resetOcForm = () => {
     setOcSupplierId('');
@@ -124,6 +201,7 @@ export default function GerenciarMateriaisPage() {
     setOcPixKeyType('');
     setOcPixKey('');
     setOcObservations('');
+    setOcBoletoSlots([{ url: '', name: '' }]);
     setOcFreteStr('');
     setOcSelectedItemIds(new Set());
     setOcQuantityStrByItemId({});
@@ -202,9 +280,8 @@ export default function GerenciarMateriaisPage() {
   const clearOcItems = () => {
     setOcSelectedItemIds(new Set());
   };
-  const [fluxTab, setFluxTab] = useState<FluxTab>('rm_PENDING');
+  const [rmCardFilter, setRmCardFilter] = useState<RmCardFilter>(DEFAULT_RM_CARD_FILTER);
   const [searchTerm, setSearchTerm] = useState('');
-  const prevFluxGroupRef = useRef<'rm' | 'oc' | null>(null);
 
   const handleLogout = () => {
     localStorage.removeItem('token');
@@ -238,26 +315,6 @@ export default function GerenciarMateriaisPage() {
     }
   });
 
-  // Aprovar requisição
-  const approveMutation = useMutation({
-    mutationFn: async (id: string) => {
-      const res = await api.patch(`/material-requests/${id}/status`, {
-        status: 'APPROVED'
-      });
-      return res.data;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['material-requests-manage'] });
-      setShowApprovalModal(false);
-      setSelectedRequest(null);
-      toast.success('Requisição aprovada.');
-    },
-    onError: (error: { response?: { data?: { message?: string; error?: string } } }) => {
-      toast.error(error.response?.data?.message || error.response?.data?.error || 'Erro ao aprovar');
-    }
-  });
-
-
   // Criar Ordem de Compra
   const createOCMutation = useMutation({
     mutationFn: async ({
@@ -272,7 +329,10 @@ export default function GerenciarMateriaisPage() {
       freightAmount,
       selectedItemIds,
       quantityByItemId,
-      unitPriceByItemId
+      unitPriceByItemId,
+      boletoAttachmentUrl,
+      boletoAttachmentName,
+      creationBoletoInstallments
     }: {
       request: MaterialRequest;
       supplierId: string;
@@ -286,6 +346,9 @@ export default function GerenciarMateriaisPage() {
       selectedItemIds: string[];
       quantityByItemId: Record<string, number>;
       unitPriceByItemId: Record<string, number>;
+      boletoAttachmentUrl?: string;
+      boletoAttachmentName?: string;
+      creationBoletoInstallments?: Array<{ boletoUrl: string; boletoName?: string }>;
     }) => {
       const selectedSet = new Set(selectedItemIds);
       const selectedItems = request.items.filter((it) => selectedSet.has(it.id));
@@ -319,6 +382,12 @@ export default function GerenciarMateriaisPage() {
         paymentDetails: paymentDetails.trim() || undefined,
         pixKeyType: paymentType === OC_TYPE_AVISTA ? pixKeyType.trim() || undefined : undefined,
         pixKey: paymentType === OC_TYPE_AVISTA ? pixKey.trim() || undefined : undefined,
+        boletoAttachmentUrl:
+          paymentType === OC_TYPE_BOLETO ? boletoAttachmentUrl?.trim() || undefined : undefined,
+        boletoAttachmentName:
+          paymentType === OC_TYPE_BOLETO ? boletoAttachmentName?.trim() || undefined : undefined,
+        creationBoletoInstallments:
+          paymentType === OC_TYPE_BOLETO ? creationBoletoInstallments : undefined,
         notes: observations.trim() || undefined,
         freightAmount
       });
@@ -340,41 +409,6 @@ export default function GerenciarMateriaisPage() {
           error.response?.data?.message ||
           'Erro ao criar OC'
       );
-    }
-  });
-
-  const correctionMutation = useMutation({
-    mutationFn: async ({ id }: { id: string }) => {
-      const res = await api.patch(`/material-requests/${id}/status`, {
-        status: 'IN_REVIEW'
-      });
-      return res.data;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['material-requests-manage'] });
-      setShowCorrectionModal(false);
-      setSelectedRequest(null);
-      toast.success('Requisição enviada para Correção RM.');
-    },
-    onError: (error: { response?: { data?: { message?: string; error?: string } } }) => {
-      toast.error(error.response?.data?.message || error.response?.data?.error || 'Erro ao enviar para correção');
-    }
-  });
-
-  const cancelByApproverMutation = useMutation({
-    mutationFn: async (id: string) => {
-      const res = await api.patch(`/material-requests/${id}/status`, { status: 'CANCELLED' });
-      return res.data;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['material-requests-manage'] });
-      queryClient.invalidateQueries({ queryKey: ['material-requests'] });
-      setShowCancelModal(false);
-      setSelectedRequest(null);
-      toast.success('Requisição cancelada.');
-    },
-    onError: (error: { response?: { data?: { message?: string; error?: string } } }) => {
-      toast.error(error.response?.data?.message || error.response?.data?.error || 'Erro ao cancelar');
     }
   });
 
@@ -418,7 +452,6 @@ export default function GerenciarMateriaisPage() {
     approved: normalizedRequests.filter(
       (r: MaterialRequest) =>
         r.status === 'APPROVED' &&
-        !materialRequestIdsWithOc.has(r.id) &&
         !isMaterialRequestEffectivelyCancelled(r, ordersByMaterialRequestId.get(r.id) ?? [])
     ).length,
     cancelled: normalizedRequests.filter((r: MaterialRequest) =>
@@ -427,136 +460,17 @@ export default function GerenciarMateriaisPage() {
     inReview: normalizedRequests.filter((r: MaterialRequest) => r.status === 'IN_REVIEW').length
   };
 
-  const ocTabCounts = useMemo(() => {
-    const compras = allOrders.filter((o) => o.status === 'PENDING_COMPRAS' || o.status === 'DRAFT').length;
-    const gestor = allOrders.filter((o) => o.status === 'PENDING').length;
-    const diretoria = allOrders.filter((o) => o.status === 'PENDING_DIRETORIA').length;
-    const emCorrecao = allOrders.filter((o) => o.status === 'IN_REVIEW').length;
-    const attachBoleto = allOrders.filter((o) => orderNeedsFinanceBoleto(o)).length;
-    const aprovadas = allOrders.filter(
-      (o) => o.status === 'APPROVED' && !orderNeedsFinanceBoleto(o)
-    ).length;
-    const proofValidation = allOrders.filter((o) => o.status === 'PENDING_PROOF_VALIDATION').length;
-    const proofCorrection = allOrders.filter((o) => o.status === 'PENDING_PROOF_CORRECTION').length;
-    const attachNf = allOrders.filter((o) => o.status === 'PENDING_NF_ATTACHMENT').length;
-    const finalizadas = allOrders.filter((o) => o.status === 'FINALIZED' || o.status === 'SENT').length;
-    return {
-      compras,
-      gestor,
-      diretoria,
-      IN_REVIEW: emCorrecao,
-      APPROVED: aprovadas,
-      ATTACH_BOLETO: attachBoleto,
-      PROOF_VALIDATION: proofValidation,
-      PROOF_CORRECTION: proofCorrection,
-      ATTACH_NF: attachNf,
-      FINALIZADAS: finalizadas
-    };
-  }, [allOrders]);
-
-  const normalizedSearchTerm = normalizeFluxSearch(searchTerm);
-  const searchActive = normalizedSearchTerm.length > 0;
-
-  // Filtrar requisições (somente quando uma fase SC/RM está ativa)
-  const filteredRequests = useMemo(() => {
-    if (!fluxTab.startsWith('rm_')) return [];
-
-    return normalizedRequests.filter((request: MaterialRequest) => {
-      const orders = ordersByMaterialRequestId.get(request.id) ?? [];
-
-      if (fluxTab === 'rm_CANCELLED') {
-        if (!isMaterialRequestEffectivelyCancelled(request, orders)) return false;
-      } else if (fluxTab === 'rm_APPROVED') {
-        if (request.status !== 'APPROVED') return false;
-        if (materialRequestIdsWithOc.has(request.id)) return false;
-        if (isMaterialRequestEffectivelyCancelled(request, orders)) return false;
-      } else {
-        const rmKey = fluxTab.replace(/^rm_/, '') as MaterialRequest['status'];
-        if (request.status !== rmKey) return false;
-      }
-
-      return matchesMaterialRequestSearch(request, normalizedSearchTerm);
-    });
-  }, [normalizedRequests, fluxTab, normalizedSearchTerm, materialRequestIdsWithOc, ordersByMaterialRequestId]);
-
-  const rmMatchCountsByFluxTab = useMemo(() => {
-    const base = {
-      pending: 0,
-      inReview: 0,
-      approved: 0,
-      cancelled: 0
-    };
-
-    normalizedRequests.forEach((request: MaterialRequest) => {
-      const orders = ordersByMaterialRequestId.get(request.id) ?? [];
-      if (request.status === 'APPROVED' && materialRequestIdsWithOc.has(request.id)) {
-        if (!isMaterialRequestEffectivelyCancelled(request, orders)) return;
-      }
-      if (!matchesMaterialRequestSearch(request, normalizedSearchTerm)) return;
-
-      if (request.status === 'PENDING') base.pending += 1;
-      if (request.status === 'IN_REVIEW') base.inReview += 1;
-      if (
-        request.status === 'APPROVED' &&
-        !materialRequestIdsWithOc.has(request.id) &&
-        !isMaterialRequestEffectivelyCancelled(request, orders)
-      ) {
-        base.approved += 1;
-      }
-      if (isMaterialRequestEffectivelyCancelled(request, orders)) base.cancelled += 1;
-    });
-
-    return base;
-  }, [normalizedRequests, normalizedSearchTerm, materialRequestIdsWithOc, ordersByMaterialRequestId]);
-
-  const ocMatchCountsByFluxTab = useMemo(() => {
-    const base = {
-      compras: 0,
-      gestor: 0,
-      diretoria: 0,
-      IN_REVIEW: 0,
-      APPROVED: 0,
-      ATTACH_BOLETO: 0,
-      PROOF_VALIDATION: 0,
-      PROOF_CORRECTION: 0,
-      ATTACH_NF: 0,
-      FINALIZADAS: 0
-    };
-
-    allOrders.forEach((order) => {
-      if (!matchesPurchaseOrderSearch(order, normalizedSearchTerm)) return;
-      const tab = getFluxTabForPurchaseOrder(order);
-      if (!tab) return;
-      if (tab === 'oc_compras') base.compras += 1;
-      if (tab === 'oc_gestor') base.gestor += 1;
-      if (tab === 'oc_diretoria') base.diretoria += 1;
-      if (tab === 'oc_IN_REVIEW') base.IN_REVIEW += 1;
-      if (tab === 'oc_APPROVED') base.APPROVED += 1;
-      if (tab === 'oc_ATTACH_BOLETO') base.ATTACH_BOLETO += 1;
-      if (tab === 'oc_PROOF_VALIDATION') base.PROOF_VALIDATION += 1;
-      if (tab === 'oc_PROOF_CORRECTION') base.PROOF_CORRECTION += 1;
-      if (tab === 'oc_ATTACH_NF') base.ATTACH_NF += 1;
-      if (tab === 'oc_FINALIZADAS') base.FINALIZADAS += 1;
-    });
-
-    return base;
-  }, [allOrders, normalizedSearchTerm]);
-
-  useEffect(() => {
-    const group = fluxTab.startsWith('oc_') ? 'oc' : 'rm';
-    if (prevFluxGroupRef.current === null) {
-      prevFluxGroupRef.current = group;
-      return;
-    }
-    if (prevFluxGroupRef.current !== group) {
-      prevFluxGroupRef.current = group;
-      if (group === 'oc') {
-        document.getElementById('fluxo-oc')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      } else {
-        document.getElementById('secao-fluxo-tabs')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }
-    }
-  }, [fluxTab]);
+  const filteredRequests = useMemo(
+    () =>
+      filterMaterialRequestsByCard(
+        normalizedRequests,
+        rmCardFilter,
+        searchTerm,
+        materialRequestIdsWithOc,
+        ordersByMaterialRequestId
+      ),
+    [normalizedRequests, rmCardFilter, searchTerm, materialRequestIdsWithOc, ordersByMaterialRequestId]
+  );
 
   const user = userData?.data || {
     name: 'Usuário',
@@ -573,17 +487,11 @@ export default function GerenciarMateriaisPage() {
     );
   }
 
-  const handleApprove = () => {
-    if (selectedRequest) {
-      approveMutation.mutate(selectedRequest.id);
-    }
-  };
-
   return (
     <ProtectedRoute route="/ponto/gerenciar-materiais">
-      <MainLayout 
-        userRole={user.role} 
-        userName={user.name} 
+      <MainLayout
+        userRole={user.role}
+        userName={user.name}
         onLogout={handleLogout}
       >
         <div className="space-y-6">
@@ -592,78 +500,44 @@ export default function GerenciarMateriaisPage() {
               Requisições de Materiais
             </h1>
             <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400">
-              Acompanhe solicitações, aprovações e ordens de compra em um único fluxo.
+              Acompanhe o status das requisições de materiais.
             </p>
           </div>
 
-          <div className="scroll-mt-4 space-y-4">
-            <FluxGlobalSearch
-              searchTerm={searchTerm}
-              onSearchChange={setSearchTerm}
-              onNavigate={setFluxTab}
-              requests={normalizedRequests}
-              orders={allOrders}
-              materialRequestIdsWithOc={materialRequestIdsWithOc}
-            />
-
-            <FluxTabsNav
-              fluxTab={fluxTab}
-              onFluxTab={setFluxTab}
-              stats={stats}
-              ocTabCounts={ocTabCounts}
-              embeddedInCard
-              searchActive={searchActive}
-              rmSearchCounts={rmMatchCountsByFluxTab}
-              ocSearchCounts={ocMatchCountsByFluxTab}
-            />
-
-            <div className="mt-4">
-              {fluxTab.startsWith('rm_') && (
-                <MaterialRequestsRmList
-                  fluxTab={fluxTab}
-                  searchTerm={searchTerm}
-                  onSearchChange={setSearchTerm}
-                  hideSearch
-                  loadingRequests={loadingRequests}
-                  filteredRequests={filteredRequests}
-                  ordersByMaterialRequestId={ordersByMaterialRequestId}
-                  currentUserId={userData?.data?.id}
-                  onCreateOc={(request) => {
-                    setSelectedRequest(request);
-                    resetOcForm();
-                    setShowCreateOCModal(true);
-                  }}
-                  onApprove={(request) => {
-                    setSelectedRequest(request);
-                    setShowApprovalModal(true);
-                  }}
-                  onCorrection={(request) => {
-                    setSelectedRequest(request);
-                    setShowCorrectionModal(true);
-                  }}
-                  onCancel={(request) => {
-                    setSelectedRequest(request);
-                    setShowCancelModal(true);
-                  }}
-                  onDetails={(request) => {
-                    setSelectedRequest(request);
-                    setShowDetailsModal(true);
-                  }}
-                />
-              )}
-
-              {fluxTab.startsWith('oc_') && (
-                <OcPurchaseOrdersPanel
-                  embedded
-                  hideTabs
-                  hideSearch
-                  activeTab={fluxTabToOcTab(fluxTab)}
-                  searchTerm={searchTerm}
-                  onSearchChange={setSearchTerm}
-                />
-              )}
-            </div>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5">
+            {RM_STAT_CARDS.map((card) => (
+              <FilterStatCard
+                key={card.filter}
+                label={card.label}
+                count={stats[card.countKey]}
+                icon={card.Icon}
+                iconBg={card.iconBg}
+                iconColor={card.iconColor}
+                isActive={rmCardFilter === card.filter}
+                loading={loadingRequests}
+                onClick={() => setRmCardFilter(card.filter)}
+              />
+            ))}
           </div>
+
+          <MaterialRequestsRmList
+            cardFilter={rmCardFilter}
+            searchTerm={searchTerm}
+            onSearchChange={setSearchTerm}
+            loadingRequests={loadingRequests}
+            filteredRequests={filteredRequests}
+            ordersByMaterialRequestId={ordersByMaterialRequestId}
+            currentUserId={userData?.data?.id}
+            onCreateOc={(request) => {
+              setSelectedRequest(request);
+              resetOcForm();
+              setShowCreateOCModal(true);
+            }}
+            onDetails={(request) => {
+              setSelectedRequest(request);
+              setShowDetailsModal(true);
+            }}
+          />
         </div>
 
         {/* Modal Detalhes */}
@@ -818,36 +692,6 @@ export default function GerenciarMateriaisPage() {
           </div>
           );
         })()}
-
-        {/* Modal de Aprovação */}
-        {showApprovalModal && selectedRequest && (
-          <div className="fixed inset-0 z-[1000] flex items-center justify-center">
-            <div className="absolute inset-0 bg-black/50" onClick={() => setShowApprovalModal(false)} />
-            <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">
-                Aprovar Requisição
-              </h3>
-              <p className="text-sm text-gray-600 dark:text-gray-400 mb-6">
-                Tem certeza que deseja aprovar esta requisição de material?
-              </p>
-              <div className="flex justify-end gap-3">
-                <button
-                  onClick={() => setShowApprovalModal(false)}
-                  className="px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600"
-                >
-                  Cancelar
-                </button>
-                <button
-                  onClick={handleApprove}
-                  disabled={approveMutation.isPending}
-                  className="px-4 py-2 bg-green-600 dark:bg-green-700 text-white rounded-lg hover:bg-green-700 dark:hover:bg-green-800 disabled:opacity-50"
-                >
-                  {approveMutation.isPending ? 'Aprovando...' : 'Aprovar'}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* Modal Criar OC */}
         {showCreateOCModal && selectedRequest && (
@@ -1139,19 +983,30 @@ export default function GerenciarMateriaisPage() {
                   </div>
                 </>
               ) : (
-                <div>
-                  <label htmlFor="ocPaymentDetails" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    Dados do pagamento
-                  </label>
-                  <textarea
-                    id="ocPaymentDetails"
-                    value={ocPaymentDetails}
-                    onChange={(e) => setOcPaymentDetails(e.target.value)}
-                    rows={3}
-                    className={`${ocFieldCls} resize-y`}
-                    placeholder="Conta, agência, favorecido, etc."
+                <>
+                  <div>
+                    <label htmlFor="ocPaymentDetails" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Dados do pagamento
+                    </label>
+                    <textarea
+                      id="ocPaymentDetails"
+                      value={ocPaymentDetails}
+                      onChange={(e) => setOcPaymentDetails(e.target.value)}
+                      rows={3}
+                      className={`${ocFieldCls} resize-y`}
+                      placeholder="Conta, agência, favorecido, etc."
+                    />
+                  </div>
+
+                  <OcBoletoCreationFields
+                    idPrefix="oc-create-boleto"
+                    parcelCount={ocBoletoParcelMeta.parcelCount}
+                    parcelDueDays={ocBoletoParcelMeta.parcelDueDays}
+                    slots={ocBoletoSlots}
+                    onChange={setOcBoletoSlots}
+                    disabled={createOCMutation.isPending}
                   />
-                </div>
+                </>
               )}
 
               <div>
@@ -1239,6 +1094,22 @@ export default function GerenciarMateriaisPage() {
                       toast.error('Informe a chave PIX.');
                       return;
                     }
+                    if (ocPaymentType === OC_TYPE_BOLETO) {
+                      if (ocBoletoParcelMeta.parcelCount > 1) {
+                        if (
+                          ocBoletoSlots.length !== ocBoletoParcelMeta.parcelCount ||
+                          !ocBoletoSlots.every((s) => s.url.trim())
+                        ) {
+                          toast.error(
+                            `Anexe os ${ocBoletoParcelMeta.parcelCount} boletos (um para cada parcela).`
+                          );
+                          return;
+                        }
+                      } else if (!ocBoletoSlots[0]?.url.trim()) {
+                        toast.error('Anexe o boleto para pagamento via boleto.');
+                        return;
+                      }
+                    }
                     const unitPriceByItemId = Object.fromEntries(
                       Array.from(ocSelectedItemIds).map((id) => [
                         id,
@@ -1271,7 +1142,18 @@ export default function GerenciarMateriaisPage() {
                       freightAmount: ocFreteParsed ?? 0,
                       selectedItemIds: Array.from(ocSelectedItemIds),
                       quantityByItemId,
-                      unitPriceByItemId
+                      unitPriceByItemId,
+                      ...(ocBoletoParcelMeta.parcelCount > 1
+                        ? {
+                            creationBoletoInstallments: ocBoletoSlots.map((s) => ({
+                              boletoUrl: s.url.trim(),
+                              boletoName: s.name.trim() || undefined
+                            }))
+                          }
+                        : {
+                            boletoAttachmentUrl: ocBoletoSlots[0]?.url ?? '',
+                            boletoAttachmentName: ocBoletoSlots[0]?.name ?? ''
+                          })
                     });
                   }}
                   disabled={
@@ -1286,73 +1168,16 @@ export default function GerenciarMateriaisPage() {
                         ocPaymentDetails,
                         ocPixKeyType,
                         ocPixKey
-                      ))
+                      )) ||
+                    (ocPaymentType === OC_TYPE_BOLETO &&
+                      (ocBoletoParcelMeta.parcelCount > 1
+                        ? ocBoletoSlots.length !== ocBoletoParcelMeta.parcelCount ||
+                          !ocBoletoSlots.every((s) => s.url.trim())
+                        : !ocBoletoSlots[0]?.url.trim()))
                   }
                   className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
                 >
                   {createOCMutation.isPending ? 'Criando...' : 'Criar OC'}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Modal Cancelar (compras) */}
-        {showCancelModal && selectedRequest && (
-          <div className="fixed inset-0 z-[1000] flex items-center justify-center">
-            <div className="absolute inset-0 bg-black/50" onClick={() => setShowCancelModal(false)} />
-            <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">
-                Cancelar requisição
-              </h3>
-              <p className="text-sm text-gray-600 dark:text-gray-400 mb-6">
-                A RM ficará como <strong>Cancelada</strong> e sairá do fluxo de análise. Confirma?
-              </p>
-              <div className="flex justify-end gap-3">
-                <button
-                  type="button"
-                  onClick={() => setShowCancelModal(false)}
-                  className="px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600"
-                >
-                  Voltar
-                </button>
-                <button
-                  type="button"
-                  onClick={() => selectedRequest && cancelByApproverMutation.mutate(selectedRequest.id)}
-                  disabled={cancelByApproverMutation.isPending}
-                  className="px-4 py-2 bg-gray-700 dark:bg-gray-600 text-white rounded-lg hover:bg-gray-800 disabled:opacity-50"
-                >
-                  {cancelByApproverMutation.isPending ? 'Cancelando...' : 'Confirmar cancelamento'}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Modal Enviar para Correção RM */}
-        {showCorrectionModal && selectedRequest && (
-          <div className="fixed inset-0 z-[1000] flex items-center justify-center">
-            <div className="absolute inset-0 bg-black/50" onClick={() => setShowCorrectionModal(false)} />
-            <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">
-                Enviar para Correção RM
-              </h3>
-              <p className="text-sm text-gray-600 dark:text-gray-400 mb-6">
-                O solicitante poderá ajustar a requisição e reenviá-la para análise.
-              </p>
-              <div className="flex justify-end gap-3">
-                <button
-                  onClick={() => setShowCorrectionModal(false)}
-                  className="px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600"
-                >
-                  Cancelar
-                </button>
-                <button
-                  onClick={() => selectedRequest && correctionMutation.mutate({ id: selectedRequest.id })}
-                  disabled={correctionMutation.isPending}
-                  className="px-4 py-2 bg-amber-600 dark:bg-amber-700 text-white rounded-lg hover:bg-amber-700 dark:hover:bg-amber-800 disabled:opacity-50"
-                >
-                  {correctionMutation.isPending ? 'Enviando...' : 'Enviar para correção'}
                 </button>
               </div>
             </div>

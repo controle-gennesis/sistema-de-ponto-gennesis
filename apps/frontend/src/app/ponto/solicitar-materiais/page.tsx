@@ -27,7 +27,11 @@ import { Loading } from '@/components/ui/Loading';
 import api from '@/lib/api';
 import { absoluteUploadUrl } from '@/lib/apiOrigin';
 import toast from 'react-hot-toast';
-import { getListTableRowClassName, ListRowNavigableLabel, rowActionMenuButtonClass } from '@/components/ui/listTableUi';
+import { getListTableRowClassName, ListRowNavigableLabel } from '@/components/ui/listTableUi';
+import { RowActionMenuCell, RowActionMenuPortal, cadastroListClasses } from '@/components/ui/RowActionMenu';
+import { useRowActionMenu } from '@/hooks/useRowActionMenu';
+import { formatRmListDisplayId } from '@/app/ponto/gerenciar-materiais/_lib/rmListDisplay';
+import { formatOcListDisplayId } from '@/components/oc/ocListDisplay';
 import { useCostCenters } from '@/hooks/useCostCenters';
 import { useServiceOrdersByCostCenter } from '@/hooks/useServiceOrdersByCostCenter';
 import { ServiceOrderSearchSelect } from '@/components/suprimentos/ServiceOrderSearchSelect';
@@ -38,7 +42,8 @@ import { FORM_FIELD_INPUT_CLS, FORM_FIELD_TEXTAREA_CLS } from '@/lib/formFieldUi
 import {
   purchaseOrderPhaseLabel,
   ocStatusTextClass,
-  OC_STATUS_LABELS_PT
+  ocStatusBadgeClass,
+  OC_STATUS_LABELS_PT,
 } from '@/components/oc/ocStatusLabels';
 /** Rótulo da OC sem prefixo "OC -" para caber melhor na coluna Fase atual. */
 function purchaseOrderPhaseShortLabel(status: string): string {
@@ -94,15 +99,6 @@ function rmStatusLabelPt(status: string): string {
   return m[status] || status;
 }
 
-function rmStatusRowClass(status: string): string {
-  if (status === 'APPROVED') return 'text-green-600 dark:text-green-400';
-  if (status === 'PENDING') return 'text-amber-600 dark:text-amber-400';
-  if (status === 'IN_REVIEW') return 'text-orange-600 dark:text-orange-400';
-  if (status === 'REJECTED') return 'text-red-600 dark:text-red-400';
-  if (status === 'CANCELLED') return 'text-gray-500 dark:text-gray-400';
-  return 'text-gray-600 dark:text-gray-400';
-}
-
 function rmStatusBadgeClass(status: string): string {
   const base = 'inline-flex rounded-full px-2.5 py-1 text-xs font-semibold';
   if (status === 'APPROVED')
@@ -130,36 +126,61 @@ function sortPurchaseOrdersForDisplay(orders: RmListPurchaseOrder[]): RmListPurc
   );
 }
 
-function materialRequestFaseAtualLines(request: {
+function materialRequestRmFaseAtual(request: {
+  status?: string;
+}): { text: string; badgeClassName: string } {
+  const rm = String(request.status || '');
+  return {
+    text: rmStatusLabelPt(rm),
+    badgeClassName: rmStatusBadgeClass(rm)
+  };
+}
+
+const ocWaitBadgeClass =
+  'inline-flex rounded-full px-2.5 py-1 text-xs font-semibold whitespace-nowrap bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300';
+
+type MaterialRequestOcListRow = {
+  key: string;
+  id: string;
+  idTitle?: string;
+  status: string;
+  statusBadgeClassName: string;
+};
+
+function materialRequestOcListRows(request: {
   status?: string;
   purchaseOrders?: RmListPurchaseOrder[];
-}): { key: string; text: string; className: string }[] {
+}): MaterialRequestOcListRow[] {
   const rm = String(request.status || '');
   const pos = Array.isArray(request.purchaseOrders) ? request.purchaseOrders : [];
 
-  if (!RM_POST_APPROVAL.has(rm)) {
-    return [{ key: 'rm', text: `SC · ${rmStatusLabelPt(rm)}`, className: rmStatusRowClass(rm) }];
-  }
+  if (!RM_POST_APPROVAL.has(rm)) return [];
 
   if (pos.length === 0) {
     if (rm === 'APPROVED') {
-      return [{ key: 'rm', text: 'SC aprovada · aguardando OC', className: rmStatusRowClass('APPROVED') }];
+      return [
+        {
+          key: 'wait-oc',
+          id: '—',
+          status: 'Aguardando OC',
+          statusBadgeClassName: ocWaitBadgeClass
+        }
+      ];
     }
-    return [{ key: 'rm', text: `SC · ${rmStatusLabelPt(rm)}`, className: rmStatusRowClass(rm) }];
+    return [];
   }
 
-  const sorted = sortPurchaseOrdersForDisplay(pos);
-  return [
-    { key: 'rm', text: `SC · ${rmStatusLabelPt(rm)}`, className: rmStatusRowClass(rm) },
-    ...sorted.map((po) => {
-      const num = (po.orderNumber && String(po.orderNumber).trim()) || po.id.slice(0, 8);
-      return {
-        key: `po-${po.id}`,
-        text: `OC ${num} · ${purchaseOrderPhaseShortLabel(po.status)}`,
-        className: ocStatusTextClass(po.status)
-      };
-    })
-  ];
+  return sortPurchaseOrdersForDisplay(pos).map((po) => {
+    const fullNumber = po.orderNumber && String(po.orderNumber).trim() ? String(po.orderNumber) : '';
+    const id = fullNumber ? formatOcListDisplayId(fullNumber) : po.id.slice(0, 8);
+    return {
+      key: `po-${po.id}`,
+      id,
+      idTitle: fullNumber || undefined,
+      status: purchaseOrderPhaseShortLabel(po.status),
+      statusBadgeClassName: ocStatusBadgeClass(po.status)
+    };
+  });
 }
 
 const RM_FASE_FILTER_ORDER = [
@@ -828,6 +849,16 @@ function SolicitarMateriaisPage() {
   const listStartItem = listTotal === 0 ? 0 : listStartIndex + 1;
   const listEndItem = Math.min(listStartIndex + LIST_ITEMS_PER_PAGE, listTotal);
 
+  const {
+    rowActionMenu,
+    rowForActionMenu,
+    toggleRowActionMenu,
+    closeRowActionMenu,
+    isRowMenuOpen
+  } = useRowActionMenu(
+    paginatedRequests as Array<{ id: string; status?: string }>
+  );
+
   const clearListFilters = () => {
     setRmListFaseAtual('');
     setRmListObra('');
@@ -1229,7 +1260,7 @@ function SolicitarMateriaisPage() {
                       type="search"
                       value={rmListSearch}
                       onChange={(e) => setRmListSearch(e.target.value)}
-                      placeholder="Nº SC, OS, obra, centro de custo..."
+                      placeholder="RM, OS, obra, centro de custo..."
                       className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
                     />
                     {rmListSearch && (
@@ -1313,28 +1344,34 @@ function SolicitarMateriaisPage() {
                     <table className="w-full text-sm">
                       <thead className="border-b border-gray-200 dark:border-gray-700">
                         <tr>
-                          <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">
-                            Nº SC
+                          <th className="w-[4%] min-w-[3rem] max-w-[4.5rem] px-2 sm:px-3 py-4 !pl-2 sm:!pl-3 !pr-1 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">
+                            RM
                           </th>
-                          <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">
+                          <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">
                             Data
                           </th>
-                          <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                          <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                             Centro de Custo
                           </th>
-                          <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">
+                          <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">
                             OS
                           </th>
-                          <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">
+                          <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">
                             Obra
                           </th>
-                          <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                          <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                             Descrição
                           </th>
-                          <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider min-w-[160px]">
-                            Fase Atual
+                          <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap min-w-[100px]">
+                            Status
                           </th>
-                          <th className="px-3 sm:px-6 py-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">
+                          <th className="w-[4%] min-w-[3rem] max-w-[4.5rem] px-2 sm:px-3 py-4 !pl-2 sm:!pl-3 !pr-1 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">
+                            OC
+                          </th>
+                          <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap min-w-[120px]">
+                            Status OC
+                          </th>
+                          <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">
                             Ação
                           </th>
                         </tr>
@@ -1347,24 +1384,32 @@ function SolicitarMateriaisPage() {
                               status?: string;
                               purchaseOrders?: RmListPurchaseOrder[];
                             }
-                          ) => (
+                          ) => {
+                            const rmFase = materialRequestRmFaseAtual(request);
+                            const ocRows = materialRequestOcListRows(request);
+                            return (
                             <tr
                               key={request.id}
                               onClick={() => setDetailViewId(request.id)}
                               className={getListTableRowClassName(true)}
                             >
-                              <td className="px-3 sm:px-6 py-3 text-sm font-medium text-gray-900 dark:text-gray-100 whitespace-nowrap">
-                                <ListRowNavigableLabel className="font-medium whitespace-nowrap">
-                                  {String(request.requestNumber || '—')}
+                              <td
+                                className={`${cadastroListClasses.tdMono} w-[4%] min-w-[3rem] max-w-[4.5rem] text-center !pl-2 sm:!pl-3 !pr-1 py-3`}
+                                title={request.requestNumber ? String(request.requestNumber) : undefined}
+                              >
+                                <ListRowNavigableLabel className="font-medium">
+                                  {formatRmListDisplayId(
+                                    request.requestNumber ? String(request.requestNumber) : null
+                                  )}
                                 </ListRowNavigableLabel>
                               </td>
-                              <td className="px-3 sm:px-6 py-3 text-sm text-gray-700 dark:text-gray-300 whitespace-nowrap">
+                              <td className="px-3 sm:px-6 py-3 text-center text-sm text-gray-700 dark:text-gray-300 whitespace-nowrap">
                                 {request.requestedAt
                                   ? new Date(String(request.requestedAt)).toLocaleDateString('pt-BR')
                                   : '—'}
                               </td>
                               <td
-                                className="px-3 sm:px-6 py-3 text-sm text-gray-700 dark:text-gray-300 max-w-[200px]"
+                                className="px-3 sm:px-6 py-3 text-center text-sm text-gray-700 dark:text-gray-300 max-w-[200px]"
                                 title={rmCostCenterName(request as Parameters<typeof rmCostCenterName>[0])}
                               >
                                 <span className="line-clamp-2">
@@ -1372,74 +1417,109 @@ function SolicitarMateriaisPage() {
                                 </span>
                               </td>
                               <td
-                                className="px-3 sm:px-6 py-3 text-sm text-gray-700 dark:text-gray-300 max-w-[120px] truncate"
+                                className="px-3 sm:px-6 py-3 text-center text-sm text-gray-700 dark:text-gray-300 max-w-[120px] truncate"
                                 title={rmOsLine(request as Parameters<typeof rmOsLine>[0])}
                               >
                                 {rmOsLine(request as Parameters<typeof rmOsLine>[0])}
                               </td>
                               <td
-                                className="px-3 sm:px-6 py-3 text-sm text-gray-700 dark:text-gray-300 max-w-[120px] truncate"
+                                className="px-3 sm:px-6 py-3 text-center text-sm text-gray-700 dark:text-gray-300 max-w-[120px] truncate"
                                 title={String(request.obra || '')}
                               >
                                 {request.obra ? String(request.obra) : '—'}
                               </td>
-                              <td className="px-3 sm:px-6 py-3 text-sm text-gray-600 dark:text-gray-400 max-w-[220px]">
+                              <td className="px-3 sm:px-6 py-3 text-center text-sm text-gray-600 dark:text-gray-400 max-w-[220px]">
                                 <span className="line-clamp-2" title={String(request.description || '')}>
                                   {request.description ? String(request.description) : '—'}
                                 </span>
                               </td>
-                              <td className="px-3 sm:px-6 py-3 align-middle">
-                                <div className="flex flex-col justify-center gap-0.5 text-xs sm:text-sm">
-                                  {materialRequestFaseAtualLines(request).map((line) => (
-                                    <span
-                                      key={line.key}
-                                      className={`font-medium whitespace-normal break-words ${line.className}`}
-                                      title={line.text}
-                                    >
-                                      {line.text}
-                                    </span>
-                                  ))}
-                                </div>
+                              <td className="px-3 sm:px-6 py-3 text-center align-middle">
+                                <span className={rmFase.badgeClassName} title={rmFase.text}>
+                                  {rmFase.text}
+                                </span>
                               </td>
-                              <td className="px-3 sm:px-6 py-3 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                                <div className="inline-flex items-center justify-end gap-1">
-                                  {request.status === 'IN_REVIEW' ? (
-                                    <>
-                                      <button
-                                        type="button"
-                                        onClick={() => setCorrectionEditId(request.id)}
-                                        className="inline-flex items-center justify-center gap-1 px-2 py-1 text-xs font-medium rounded-md border border-amber-600 text-amber-700 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/30"
-                                        title="Editar correção"
+                              <td className={`${cadastroListClasses.tdMono} w-[4%] min-w-[3rem] max-w-[4.5rem] text-center !pl-2 sm:!pl-3 !pr-1 py-3 align-middle`}>
+                                {ocRows.length === 0 ? (
+                                  <span className="text-xs sm:text-sm text-gray-400 dark:text-gray-500">—</span>
+                                ) : (
+                                  <div className="flex flex-col items-center justify-center gap-0.5 text-xs sm:text-sm">
+                                    {ocRows.map((row) => (
+                                      <span
+                                        key={row.key}
+                                        className="font-medium whitespace-nowrap"
+                                        title={row.idTitle}
                                       >
-                                        <Pencil className="w-3.5 h-3.5" />
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => resubmitAfterCorrectionMutation.mutate(request.id)}
-                                        disabled={resubmitAfterCorrectionMutation.isPending}
-                                        className="inline-flex items-center justify-center gap-1 px-2 py-1 text-xs font-medium rounded-md bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50"
-                                        title="Reenviar"
-                                      >
-                                        <Send className="w-3.5 h-3.5" />
-                                      </button>
-                                    </>
-                                  ) : null}
-                                  <button
-                                    type="button"
-                                    onClick={() => setDetailViewId(request.id)}
-                                    className={rowActionMenuButtonClass(false)}
-                                    aria-label="Ver detalhes"
-                                  >
-                                    <Eye className="w-4 h-4" />
-                                  </button>
-                                </div>
+                                        {row.id}
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
                               </td>
+                              <td className="px-3 sm:px-6 py-3 text-center align-middle">
+                                {ocRows.length === 0 ? (
+                                  <span className="text-xs sm:text-sm text-gray-400 dark:text-gray-500">—</span>
+                                ) : (
+                                  <div className="flex flex-col items-center justify-center gap-1">
+                                    {ocRows.map((row) => (
+                                      <span
+                                        key={row.key}
+                                        className={row.statusBadgeClassName}
+                                        title={row.status}
+                                      >
+                                        {row.status}
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+                              </td>
+                              <RowActionMenuCell
+                                align="center"
+                                isOpen={isRowMenuOpen(request.id)}
+                                onToggle={(e) =>
+                                  toggleRowActionMenu(request.id, e.currentTarget as HTMLButtonElement)
+                                }
+                              />
                             </tr>
-                          )
+                            );
+                          }
                         )}
                       </tbody>
                     </table>
                   </div>
+                  {rowActionMenu && rowForActionMenu ? (
+                    <RowActionMenuPortal
+                      menu={rowActionMenu}
+                      onClose={closeRowActionMenu}
+                      onEdit={() => {}}
+                      onDelete={() => {}}
+                      hideDefaultActions
+                      extraItems={[
+                        {
+                          label: 'Ver detalhes',
+                          onClick: () => setDetailViewId(rowForActionMenu.id),
+                          icon: <Eye className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
+                        },
+                        ...(rowForActionMenu.status === 'IN_REVIEW'
+                          ? [
+                              {
+                                label: 'Editar correção',
+                                onClick: () => setCorrectionEditId(rowForActionMenu.id),
+                                icon: (
+                                  <Pencil className="h-4 w-4 shrink-0 text-amber-500 dark:text-amber-400" />
+                                )
+                              },
+                              {
+                                label: 'Reenviar',
+                                onClick: () => resubmitAfterCorrectionMutation.mutate(rowForActionMenu.id),
+                                disabled: resubmitAfterCorrectionMutation.isPending,
+                                disabledTitle: 'Enviando...',
+                                icon: <Send className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                              }
+                            ]
+                          : [])
+                      ]}
+                    />
+                  ) : null}
                   {listTotalPages > 1 && (
                     <div className="mt-4 flex items-center justify-center gap-2">
                       <button

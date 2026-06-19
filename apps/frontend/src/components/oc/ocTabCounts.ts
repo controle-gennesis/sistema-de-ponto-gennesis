@@ -13,22 +13,7 @@ export function computeOcTabCounts(allOrders: PurchaseOrder[]): OcTabCounts {
   const proofCorrection = allOrders.filter((o) => o.status === 'PENDING_PROOF_CORRECTION').length;
   const attachNf = allOrders.filter((o) => o.status === 'PENDING_NF_ATTACHMENT').length;
   const outras = allOrders.filter(
-    (o) =>
-      o.status !== 'REJECTED' &&
-      o.status !== 'CANCELLED' &&
-      ![
-        'PENDING_COMPRAS',
-        'PENDING',
-        'DRAFT',
-        'PENDING_DIRETORIA',
-        'IN_REVIEW',
-        'APPROVED',
-        'PENDING_PROOF_VALIDATION',
-        'PENDING_PROOF_CORRECTION',
-        'PENDING_NF_ATTACHMENT',
-        'FINALIZED',
-        'SENT'
-      ].includes(o.status)
+    (o) => o.status === 'REJECTED' || o.status === 'CANCELLED'
   ).length;
 
   return {

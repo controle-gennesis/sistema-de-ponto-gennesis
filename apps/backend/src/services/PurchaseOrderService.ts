@@ -250,6 +250,39 @@ function ymdAddDays(ymdOrDate: Date | string, addDays: number): string {
   return d.toISOString().slice(0, 10);
 }
 
+function splitAmountInInstallments(total: number, n: number): number[] {
+  if (!Number.isFinite(total) || n < 1) return Array.from({ length: Math.max(n, 0) }, () => 0);
+  const cents = Math.round(total * 100);
+  const q = Math.floor(cents / n);
+  const r = cents % n;
+  const out: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const c = q + (i === n - 1 ? r : 0);
+    out.push(c / 100);
+  }
+  return out;
+}
+
+function buildCreationPaymentInstallments(
+  drafts: { boletoUrl: string; boletoName?: string | null }[],
+  parcelCount: number,
+  parcelDueDays: number[],
+  totalAmount: number,
+  orderDate: Date
+): BoletoInstallmentStored[] {
+  const amounts = splitAmountInInstallments(totalAmount, parcelCount);
+  return Array.from({ length: parcelCount }, (_, i) => ({
+    amount: amounts[i] ?? 0,
+    dueDate: ymdAddDays(
+      orderDate,
+      parcelDueDays[i] ?? parcelDueDays[parcelDueDays.length - 1] ?? 30
+    ),
+    boletoUrl: (drafts[i]?.boletoUrl || '').trim(),
+    boletoName: (drafts[i]?.boletoName || '').trim() || null,
+    paymentStatus: 'PENDING_BOLETO' as const
+  }));
+}
+
 async function enrichOrdersParcelPlans<T extends { paymentCondition: string | null }>(
   orders: T[]
 ): Promise<Array<T & { paymentParcelCount: number; paymentParcelDueDays: number[] }>> {
@@ -267,6 +300,41 @@ async function enrichOrdersParcelPlans<T extends { paymentCondition: string | nu
   });
 }
 
+/** Boleto anexado na criação (parcela única): pula fase Anexar Boleto e libera Pagamento. */
+function buildCreationBoletoAutoReleaseData(
+  order: {
+    paymentType: string | null;
+    boletoAttachmentUrl: string | null;
+    boletoAttachmentName: string | null;
+    paymentBoletoUrl: string | null;
+    paymentBoletoName: string | null;
+    paymentBoletoPhaseReleased: boolean;
+  },
+  paymentParcelCount: number
+): {
+  paymentBoletoUrl?: string;
+  paymentBoletoName?: string | null;
+  paymentBoletoPhaseReleased: boolean;
+} | null {
+  if (order.paymentType !== 'BOLETO') return null;
+  if (order.paymentBoletoPhaseReleased) return null;
+  if (paymentParcelCount > 1) return null;
+  const creationUrl = (order.boletoAttachmentUrl || '').trim();
+  if (!creationUrl) return null;
+
+  const data: {
+    paymentBoletoUrl?: string;
+    paymentBoletoName?: string | null;
+    paymentBoletoPhaseReleased: boolean;
+  } = { paymentBoletoPhaseReleased: true };
+
+  if (!(order.paymentBoletoUrl || '').trim()) {
+    data.paymentBoletoUrl = creationUrl;
+    data.paymentBoletoName = (order.boletoAttachmentName || '').trim() || null;
+  }
+  return data;
+}
+
 export interface CreatePurchaseOrderData {
   materialRequestId?: string;
   quoteMapId?: string;
@@ -280,6 +348,8 @@ export interface CreatePurchaseOrderData {
   pixKey?: string;
   boletoAttachmentUrl?: string;
   boletoAttachmentName?: string;
+  /** Um boleto por parcela quando a condição de pagamento tem parcelCount > 1. */
+  creationBoletoInstallments?: Array<{ boletoUrl: string; boletoName?: string | null }>;
   /** Frete (R$). Total a pagar gravado = soma dos itens + frete. */
   freightAmount?: number;
   /** @deprecated Ignorado: o total é sempre calculado como itens + frete. */
@@ -432,6 +502,42 @@ export class PurchaseOrderService {
     const itemsSum = items.reduce((s, row) => s.plus(row.totalPrice), new Decimal(0));
     const amountToPay = itemsSum.plus(freight);
 
+    let paymentBoletoInstallments: Prisma.InputJsonValue | undefined;
+    let boletoAttachmentUrl = data.boletoAttachmentUrl || null;
+    let boletoAttachmentName = data.boletoAttachmentName || null;
+
+    if (data.paymentType === 'BOLETO' && data.paymentCondition) {
+      const cond = await prisma.paymentCondition.findUnique({
+        where: { code: data.paymentCondition },
+        select: { parcelCount: true, parcelDueDays: true }
+      });
+      const parcelCount = cond?.parcelCount && cond.parcelCount >= 1 ? cond.parcelCount : 1;
+      const parcelDueDays = normalizeParcelDueDaysJson(cond?.parcelDueDays);
+
+      if (parcelCount > 1) {
+        const drafts = data.creationBoletoInstallments;
+        if (!Array.isArray(drafts) || drafts.length !== parcelCount) {
+          throw new Error(`Anexe ${parcelCount} boletos (um para cada parcela).`);
+        }
+        for (let i = 0; i < parcelCount; i++) {
+          if (!(drafts[i]?.boletoUrl || '').trim()) {
+            throw new Error(`Anexe o boleto da parcela ${i + 1}.`);
+          }
+        }
+        paymentBoletoInstallments = buildCreationPaymentInstallments(
+          drafts,
+          parcelCount,
+          parcelDueDays,
+          Number(amountToPay),
+          new Date()
+        ) as unknown as Prisma.InputJsonValue;
+        boletoAttachmentUrl = null;
+        boletoAttachmentName = null;
+      } else if (!(boletoAttachmentUrl || '').trim()) {
+        throw new Error('Anexe o boleto para pagamento via boleto.');
+      }
+    }
+
     const createDataBase = {
       orderNumber,
       materialRequestId: data.materialRequestId || null,
@@ -444,8 +550,9 @@ export class PurchaseOrderService {
       paymentDetails: data.paymentDetails || null,
       pixKeyType: data.pixKeyType?.trim() || null,
       pixKey: data.pixKey?.trim() || null,
-      boletoAttachmentUrl: data.boletoAttachmentUrl || null,
-      boletoAttachmentName: data.boletoAttachmentName || null,
+      boletoAttachmentUrl,
+      boletoAttachmentName,
+      ...(paymentBoletoInstallments ? { paymentBoletoInstallments } : {}),
       freightAmount: freight,
       amountToPay,
       notes: data.notes || null,
@@ -573,7 +680,8 @@ export class PurchaseOrderService {
       }),
       prisma.purchaseOrder.count({ where })
     ]);
-    const enriched = await enrichOrdersParcelPlans(orders);
+    let enriched = await enrichOrdersParcelPlans(orders);
+    enriched = await this.applyCreationBoletoAutoReleaseToListedOrders(enriched);
     return { orders: enriched, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } };
   }
 
@@ -677,6 +785,11 @@ export class PurchaseOrderService {
       await this.syncInstallmentProofsFromOrderPaymentProof(id);
     } catch (err) {
       console.error('[PurchaseOrder] syncInstallmentProofsFromOrderPaymentProof on getById', order.orderNumber, err);
+    }
+    try {
+      await this.maybeSkipAttachBoletoFromCreation(id);
+    } catch (err) {
+      console.error('[PurchaseOrder] maybeSkipAttachBoletoFromCreation on getById', order.orderNumber, err);
     }
 
     const refreshed = await prisma.purchaseOrder.findUnique({
@@ -891,6 +1004,11 @@ export class PurchaseOrderService {
     if (status === 'APPROVED' && userId) {
       data.approvedBy = userId;
       data.approvedAt = new Date();
+      const [meta] = await enrichOrdersParcelPlans([{ paymentCondition: order.paymentCondition }]);
+      const release = buildCreationBoletoAutoReleaseData(order, meta.paymentParcelCount);
+      if (release) {
+        Object.assign(data, release);
+      }
     }
 
     if (status === 'IN_REVIEW' || (status === 'PENDING_COMPRAS' && st === 'IN_REVIEW')) {
@@ -1851,6 +1969,66 @@ export class PurchaseOrderService {
       data.paymentBoletoName = null;
     }
     await prisma.purchaseOrder.update({ where: { id: orderId }, data });
+  }
+
+  /**
+   * Boleto já anexado na criação (parcela única): copia para pagamento e libera fase Pagamento.
+   */
+  async maybeSkipAttachBoletoFromCreation(orderId: string): Promise<boolean> {
+    const order = await prisma.purchaseOrder.findUnique({
+      where: { id: orderId },
+      select: {
+        id: true,
+        status: true,
+        paymentType: true,
+        paymentCondition: true,
+        boletoAttachmentUrl: true,
+        boletoAttachmentName: true,
+        paymentBoletoUrl: true,
+        paymentBoletoName: true,
+        paymentBoletoPhaseReleased: true
+      }
+    });
+    if (!order || order.status !== 'APPROVED' || order.paymentType !== 'BOLETO') return false;
+
+    const [meta] = await enrichOrdersParcelPlans([order]);
+    const release = buildCreationBoletoAutoReleaseData(order, meta.paymentParcelCount);
+    if (!release) return false;
+
+    await prisma.purchaseOrder.update({
+      where: { id: orderId },
+      data: { ...release, updatedAt: new Date() }
+    });
+    return true;
+  }
+
+  /** Corrige OCs já aprovadas que tinham boleto na criação mas ainda pediam reanexo. */
+  async applyCreationBoletoAutoReleaseToListedOrders<T extends {
+    id: string;
+    status: string;
+    paymentType: string | null;
+    paymentCondition: string | null;
+    boletoAttachmentUrl: string | null;
+    boletoAttachmentName: string | null;
+    paymentBoletoUrl: string | null;
+    paymentBoletoName: string | null;
+    paymentBoletoPhaseReleased: boolean;
+    paymentParcelCount: number;
+  }>(orders: T[]): Promise<T[]> {
+    const next = [...orders];
+    for (let i = 0; i < next.length; i++) {
+      const o = next[i];
+      if (o.status !== 'APPROVED' || o.paymentType !== 'BOLETO' || o.paymentBoletoPhaseReleased) continue;
+      if (!(o.boletoAttachmentUrl || '').trim()) continue;
+      const release = buildCreationBoletoAutoReleaseData(o, o.paymentParcelCount);
+      if (!release) continue;
+      await prisma.purchaseOrder.update({
+        where: { id: o.id },
+        data: { ...release, updatedAt: new Date() }
+      });
+      next[i] = { ...o, ...release };
+    }
+    return next;
   }
 
   /**

@@ -12,6 +12,7 @@ export type ApprovalNotificationCounts = {
   fd: number;
   fuel: number;
   oc: number;
+  rm: number;
   total: number;
 };
 
@@ -21,6 +22,7 @@ const emptyCounts: ApprovalNotificationCounts = {
   fd: 0,
   fuel: 0,
   oc: 0,
+  rm: 0,
   total: 0,
 };
 
@@ -31,10 +33,15 @@ export function useApprovalNotificationCounts() {
     canApproveEspelhoNf,
     canApproveFuel,
     canApproveOc,
+    canApproveMaterialRequests,
   } = usePermissions();
 
   const canFetch =
-    canAccessDpApproverPages || canApproveEspelhoNf || canApproveFuel || canApproveOc;
+    canAccessDpApproverPages ||
+    canApproveEspelhoNf ||
+    canApproveFuel ||
+    canApproveOc ||
+    canApproveMaterialRequests;
   const enabled = !isLoading && canFetch;
 
   const mainQuery = useQuery({
@@ -49,6 +56,7 @@ export function useApprovalNotificationCounts() {
         fd: Number(data?.fd ?? 0) || 0,
         fuel: Number(data?.fuel ?? 0) || 0,
         oc: Number(data?.oc ?? 0) || 0,
+        rm: Number(data?.rm ?? 0) || 0,
         espelhoMirrors: Number(data?.espelhoMirrors ?? 0) || 0,
       };
     },
@@ -84,9 +92,10 @@ export function useApprovalNotificationCounts() {
     const fd = base?.fd ?? 0;
     const fuel = canApproveFuel ? (base?.fuel ?? 0) : 0;
     const oc = base?.oc ?? 0;
-    const total = dp + espelho + fd + fuel + oc;
-    return { dp, espelho, fd, fuel, oc, total };
-  }, [mainQuery.data, espelhoQuery.data, canApproveEspelhoNf, canApproveFuel]);
+    const rm = canApproveMaterialRequests ? (base?.rm ?? 0) : 0;
+    const total = dp + espelho + fd + fuel + oc + rm;
+    return { dp, espelho, fd, fuel, oc, rm, total };
+  }, [mainQuery.data, espelhoQuery.data, canApproveEspelhoNf, canApproveFuel, canApproveMaterialRequests]);
 
   return {
     counts,

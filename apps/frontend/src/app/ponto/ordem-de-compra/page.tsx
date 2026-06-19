@@ -12,12 +12,12 @@ import {
   type OcTab,
   type PurchaseOrder
 } from '@/components/oc/OcPurchaseOrdersPanel';
-import { OcFluxTabsNav } from '@/components/oc/OcFluxTabsNav';
+import { OcFluxTabsNav, OC_FLUX_DEFAULT_TAB } from '@/components/oc/OcFluxTabsNav';
 import { computeOcTabCounts } from '@/components/oc/ocTabCounts';
 
 export default function OrdemDeCompraPage() {
   const router = useRouter();
-  const [ocTab, setOcTab] = useState<OcTab>('compras');
+  const [ocTab, setOcTab] = useState<OcTab>(OC_FLUX_DEFAULT_TAB);
   const [searchTerm, setSearchTerm] = useState('');
 
   const handleLogout = () => {

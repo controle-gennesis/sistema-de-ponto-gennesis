@@ -2,7 +2,7 @@
 
 import { NotificationCountBadge } from '@/components/ui/NotificationCountBadge';
 
-export type AprovacaoTabId = 'dp' | 'espelho' | 'fd' | 'fuel' | 'oc';
+export type AprovacaoTabId = 'dp' | 'espelho' | 'fd' | 'fuel' | 'rm' | 'oc';
 
 export type AprovacaoTabDef = {
   id: AprovacaoTabId;

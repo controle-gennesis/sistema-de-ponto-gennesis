@@ -4,59 +4,98 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import {
-  Ban,
   CheckCircle,
   ClipboardList,
+  Clock,
   Eye,
   FileText,
   MoreVertical,
   Pencil,
   Search,
   Wrench,
-  X
+  X,
+  XCircle
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { getListTableRowClassName, ListRowNavigableLabel, rowActionMenuButtonClass } from '@/components/ui/listTableUi';
+import { cadastroListClasses } from '@/components/ui/RowActionMenu';
 import { Loading } from '@/components/ui/Loading';
 import type { PurchaseOrder } from '@/components/oc/OcPurchaseOrdersPanel';
-import type { FluxTab, MaterialRequest } from '../_lib/types';
+import type { MaterialRequest } from '../_lib/types';
+import type { RmCardFilter } from '../_lib/rmCardFilter';
 import {
-  formatDate,
   getPriorityInfo,
+  getStatusInfo,
   joinOrderNumbersPt,
   rmSolicitante,
   rmTitulo
 } from '../_lib/display';
+import { getMaterialRequestDisplayStatus } from '../_lib/search';
+import { formatRmListDisplayId } from '../_lib/rmListDisplay';
+const cellPad = 'px-2 sm:px-3 py-3';
+const cellPadTh = 'px-2 sm:px-3 py-4';
+const rmColCls = 'w-[4%] min-w-[3rem] max-w-[4.5rem]';
+const actionColCls = 'w-[4%] min-w-[3rem] max-w-[4.5rem]';
+const thTextCls = `${cellPadTh} text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider`;
+const thCenterCls = `${cellPadTh} text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap`;
+const rmThCls = `${thCenterCls} ${rmColCls} !pl-2 sm:!pl-3 !pr-1`;
+const rmTdCls = `${cadastroListClasses.tdMono} ${rmColCls} text-center !pl-2 sm:!pl-3 !pr-1`;
+const tdTextCls = `${cellPad} text-center text-sm text-gray-700 dark:text-gray-300 min-w-0`;
+const tdMutedCls = `${cellPad} text-center text-sm text-gray-600 dark:text-gray-400 min-w-0`;
+const tdCenterCls = `${cellPad} text-center text-sm min-w-0`;
+
 const LIST_ITEMS_PER_PAGE = 12;
 const RM_ACTION_MENU_WIDTH_PX = 224;
+const actionThCls = `${cadastroListClasses.thRight} ${actionColCls} !pl-1 !pr-2 sm:!pr-3`;
+const actionTdCls = `${actionColCls} !pl-1 !pr-2 sm:!pr-3 py-3 align-middle`;
 
 const MENU_ITEM_CLASS =
   'w-full flex items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700';
 const MENU_ITEM_BORDER_CLASS = `${MENU_ITEM_CLASS} border-t border-gray-200 dark:border-gray-700`;
 
-const FLUX_TAB_META: Partial<
-  Record<FluxTab, { title: string; subtitle: string }>
+const RM_CARD_LIST_CONFIG: Record<
+  RmCardFilter,
+  { title: string; subtitle: string; iconBg: string; iconColor: string; Icon: typeof ClipboardList }
 > = {
-  rm_PENDING: {
-    title: 'Requisições Pendentes',
-    subtitle: 'Aprove, envie para correção ou cancele a solicitação'
+  all: {
+    title: 'Todas as requisições',
+    subtitle: 'Visão geral das solicitações de materiais.',
+    iconBg: 'bg-blue-100 dark:bg-blue-900/30',
+    iconColor: 'text-blue-600 dark:text-blue-400',
+    Icon: ClipboardList
   },
-  rm_IN_REVIEW: {
-    title: 'Correção RM',
-    subtitle: 'Solicitações devolvidas ao solicitante para ajuste'
+  pending: {
+    title: 'Requisições pendentes',
+    subtitle: 'Aprove, envie para correção ou cancele a solicitação.',
+    iconBg: 'bg-yellow-100 dark:bg-yellow-900/30',
+    iconColor: 'text-yellow-600 dark:text-yellow-400',
+    Icon: Clock
   },
-  rm_APPROVED: {
-    title: 'RMs Aprovadas',
-    subtitle: 'SC aprovadas sem OC — crie a ordem de compra quando necessário'
+  approved: {
+    title: 'Requisições aprovadas',
+    subtitle: 'Solicitações aprovadas, com ou sem ordem de compra gerada.',
+    iconBg: 'bg-green-100 dark:bg-green-900/30',
+    iconColor: 'text-green-600 dark:text-green-400',
+    Icon: CheckCircle
   },
-  rm_CANCELLED: {
-    title: 'Solicitações Canceladas',
-    subtitle: 'Histórico de requisições Canceladas'
+  inReview: {
+    title: 'Em correção',
+    subtitle: 'Solicitações devolvidas ao solicitante para ajuste.',
+    iconBg: 'bg-amber-100 dark:bg-amber-900/30',
+    iconColor: 'text-amber-600 dark:text-amber-400',
+    Icon: Wrench
+  },
+  cancelled: {
+    title: 'Requisições canceladas',
+    subtitle: 'Histórico de solicitações canceladas.',
+    iconBg: 'bg-red-100 dark:bg-red-900/30',
+    iconColor: 'text-red-600 dark:text-red-400',
+    Icon: XCircle
   }
 };
 
 export function MaterialRequestsRmList({
-  fluxTab,
+  cardFilter,
   searchTerm,
   onSearchChange,
   loadingRequests,
@@ -64,14 +103,11 @@ export function MaterialRequestsRmList({
   ordersByMaterialRequestId,
   currentUserId,
   onCreateOc,
-  onApprove,
-  onCorrection,
-  onCancel,
   onDetails,
   flushInCard = false,
   hideSearch = false
 }: {
-  fluxTab: FluxTab;
+  cardFilter: RmCardFilter;
   searchTerm: string;
   onSearchChange: (value: string) => void;
   hideSearch?: boolean;
@@ -81,9 +117,6 @@ export function MaterialRequestsRmList({
   ordersByMaterialRequestId: Map<string, PurchaseOrder[]>;
   currentUserId?: string;
   onCreateOc: (r: MaterialRequest) => void;
-  onApprove: (r: MaterialRequest) => void;
-  onCorrection: (r: MaterialRequest) => void;
-  onCancel: (r: MaterialRequest) => void;
   onDetails: (r: MaterialRequest) => void;
 }) {
   const [listCurrentPage, setListCurrentPage] = useState(1);
@@ -93,10 +126,9 @@ export function MaterialRequestsRmList({
     left: number;
   } | null>(null);
 
-  const meta = FLUX_TAB_META[fluxTab] ?? {
-    title: 'Requisições de materiais',
-    subtitle: 'Gerencie solicitações do fluxo SC / RM'
-  };
+  const meta = RM_CARD_LIST_CONFIG[cardFilter];
+  const ListHeaderIcon = meta.Icon;
+  const showStatusColumn = cardFilter === 'all';
 
   const listTotal = filteredRequests.length;
   const listTotalPages = Math.max(1, Math.ceil(listTotal / LIST_ITEMS_PER_PAGE));
@@ -119,7 +151,7 @@ export function MaterialRequestsRmList({
 
   useEffect(() => {
     setListCurrentPage(1);
-  }, [fluxTab, searchTerm, listTotal]);
+  }, [cardFilter, searchTerm, listTotal]);
 
   useEffect(() => {
     if (listCurrentPage > listTotalPages) {
@@ -146,8 +178,8 @@ export function MaterialRequestsRmList({
           }
         >
           <div className="flex items-center space-x-3">
-            <div className="p-2 sm:p-3 bg-blue-100 dark:bg-blue-900/30 rounded-lg flex-shrink-0">
-              <ClipboardList className="w-5 h-5 sm:w-6 sm:h-6 text-blue-600 dark:text-blue-400" />
+            <div className={`p-2 sm:p-3 rounded-lg flex-shrink-0 ${meta.iconBg}`}>
+              <ListHeaderIcon className={`w-5 h-5 sm:w-6 sm:h-6 ${meta.iconColor}`} />
             </div>
             <div className="min-w-0">
               <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{meta.title}</h3>
@@ -190,8 +222,10 @@ export function MaterialRequestsRmList({
             <ClipboardList className="w-12 h-12 text-gray-400 dark:text-gray-500 mx-auto mb-4" />
             <p className="text-gray-500 dark:text-gray-400">
               {searchTerm.trim()
-                ? 'Nenhuma requisição corresponde à busca nesta fase'
-                : 'Nenhuma requisição encontrada'}
+                ? 'Nenhuma requisição corresponde à busca neste filtro'
+                : cardFilter === 'all'
+                  ? 'Nenhuma requisição encontrada'
+                  : 'Nenhuma requisição neste filtro'}
             </p>
             {searchTerm.trim() ? (
               <button
@@ -214,31 +248,32 @@ export function MaterialRequestsRmList({
               </span>
             </div>
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className={`${cadastroListClasses.table} text-sm`}>
+                <colgroup>
+                  <col className="w-[4%]" />
+                  <col className={showStatusColumn ? 'w-[13%]' : 'w-[15%]'} />
+                  <col className={showStatusColumn ? 'w-[15%]' : 'w-[17%]'} />
+                  <col className={showStatusColumn ? 'w-[34%]' : 'w-[36%]'} />
+                  <col className={showStatusColumn ? 'w-[9%]' : 'w-[11%]'} />
+                  {showStatusColumn ? <col className="w-[11%]" /> : null}
+                  <col className={showStatusColumn ? 'w-[10%]' : 'w-[13%]'} />
+                  <col className="w-[4%]" />
+                </colgroup>
                 <thead className="border-b border-gray-200 dark:border-gray-700">
                   <tr>
-                    <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">
-                      Nº SC
+                    <th scope="col" className={rmThCls}>
+                      RM
                     </th>
-                    <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                      Solicitante
-                    </th>
-                    <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                      Centro de Custo
-                    </th>
-                    <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                      Descrição
-                    </th>
-                    <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">
-                      Prioridade
-                    </th>
-                    <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">
-                      OC gerada
-                    </th>
-                    <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">
-                      Criado em
-                    </th>
-                    <th className="px-3 sm:px-6 py-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">
+                    <th className={thTextCls}>Solicitante</th>
+                    <th className={thTextCls}>Centro de Custo</th>
+                    <th className={thTextCls}>Descrição</th>
+                    <th className={thCenterCls}>Prioridade</th>
+                    {showStatusColumn && <th className={thCenterCls}>Status</th>}
+                    <th className={thCenterCls}>OC gerada</th>
+                    <th
+                      scope="col"
+                      className={actionThCls}
+                    >
                       Ação
                     </th>
                   </tr>
@@ -248,6 +283,8 @@ export function MaterialRequestsRmList({
                     const priorityInfo = getPriorityInfo(request.priority);
                     const ocs = ordersByMaterialRequestId.get(request.id) ?? [];
                     const ocNums = ocs.map((o) => o.orderNumber).filter((n): n is string => Boolean(n));
+                    const displayStatus = getMaterialRequestDisplayStatus(request, ocs);
+                    const statusInfo = getStatusInfo(displayStatus);
 
                     return (
                       <tr
@@ -255,21 +292,21 @@ export function MaterialRequestsRmList({
                         onClick={() => onDetails(request)}
                         className={getListTableRowClassName(true)}
                       >
-                        <td className="px-3 sm:px-6 py-3 text-sm whitespace-nowrap">
+                        <td
+                          className={rmTdCls}
+                          title={request.requestNumber || undefined}
+                        >
                           <ListRowNavigableLabel className="font-medium">
-                            {request.requestNumber || `#${request.id.slice(0, 8)}`}
+                            {formatRmListDisplayId(request.requestNumber)}
                           </ListRowNavigableLabel>
                         </td>
-                        <td className="px-3 sm:px-6 py-3 text-sm text-gray-700 dark:text-gray-300 max-w-[140px] truncate">
-                          {rmSolicitante(request)?.name || '—'}
+                        <td className={tdTextCls}>
+                          <span className="block truncate">{rmSolicitante(request)?.name || '—'}</span>
                         </td>
-                        <td
-                          className="px-3 sm:px-6 py-3 text-sm text-gray-700 dark:text-gray-300 max-w-[160px]"
-                          title={request.costCenter?.name}
-                        >
+                        <td className={tdTextCls} title={request.costCenter?.name}>
                           <span className="line-clamp-2">{request.costCenter?.name || '—'}</span>
                         </td>
-                        <td className="px-3 sm:px-6 py-3 text-sm text-gray-600 dark:text-gray-400 max-w-[200px]">
+                        <td className={tdMutedCls}>
                           <span className="line-clamp-2" title={request.description || ''}>
                             {request.description || '—'}
                           </span>
@@ -277,14 +314,21 @@ export function MaterialRequestsRmList({
                             {rmTitulo(request)}
                           </span>
                         </td>
-                        <td className="px-3 sm:px-6 py-3 whitespace-nowrap">
-                          <span
-                            className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${priorityInfo.color}`}
-                          >
+                        <td className={tdCenterCls}>
+                          <span className={`text-xs font-medium whitespace-nowrap ${priorityInfo.color}`}>
                             {priorityInfo.label}
                           </span>
                         </td>
-                        <td className="px-3 sm:px-6 py-3 text-sm text-gray-700 dark:text-gray-300 max-w-[120px]">
+                        {showStatusColumn && (
+                          <td className={tdCenterCls}>
+                            <span
+                              className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap ${statusInfo.color}`}
+                            >
+                              {statusInfo.label}
+                            </span>
+                          </td>
+                        )}
+                        <td className={tdCenterCls}>
                           {ocNums.length > 0 ? (
                             <span className="line-clamp-2" title={joinOrderNumbersPt(ocNums)}>
                               {joinOrderNumbersPt(ocNums)}
@@ -293,32 +337,31 @@ export function MaterialRequestsRmList({
                             '—'
                           )}
                         </td>
-                        <td className="px-3 sm:px-6 py-3 text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">
-                          {formatDate(request.createdAt)}
-                        </td>
-                        <td className="px-3 sm:px-6 py-3 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              const rect = e.currentTarget.getBoundingClientRect();
-                              setActionMenu((prev) => {
-                                if (prev?.requestId === request.id) return null;
-                                let left = rect.right - RM_ACTION_MENU_WIDTH_PX;
-                                left = Math.max(
-                                  8,
-                                  Math.min(left, window.innerWidth - RM_ACTION_MENU_WIDTH_PX - 8)
-                                );
-                                return { requestId: request.id, top: rect.bottom + 4, left };
-                              });
-                            }}
-                            className={rowActionMenuButtonClass(actionMenu?.requestId === request.id)}
-                            aria-label="Menu de ações"
-                            aria-expanded={actionMenu?.requestId === request.id}
-                            aria-haspopup="menu"
-                          >
-                            <MoreVertical className="h-4 w-4" />
-                          </button>
+                        <td className={actionTdCls} onClick={(e) => e.stopPropagation()}>
+                          <div className="flex justify-end">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const rect = e.currentTarget.getBoundingClientRect();
+                                setActionMenu((prev) => {
+                                  if (prev?.requestId === request.id) return null;
+                                  let left = rect.right - RM_ACTION_MENU_WIDTH_PX;
+                                  left = Math.max(
+                                    8,
+                                    Math.min(left, window.innerWidth - RM_ACTION_MENU_WIDTH_PX - 8)
+                                  );
+                                  return { requestId: request.id, top: rect.bottom + 4, left };
+                                });
+                              }}
+                              className={rowActionMenuButtonClass(actionMenu?.requestId === request.id)}
+                              aria-label="Menu de ações"
+                              aria-expanded={actionMenu?.requestId === request.id}
+                              aria-haspopup="menu"
+                            >
+                              <MoreVertical className="h-4 w-4" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -374,7 +417,8 @@ export function MaterialRequestsRmList({
                 <Eye className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
                 <span>Ver detalhes</span>
               </button>
-              {requestForMenu.status === 'APPROVED' && fluxTab === 'rm_APPROVED' && (
+              {requestForMenu.status === 'APPROVED' &&
+                (ordersByMaterialRequestId.get(requestForMenu.id) ?? []).length === 0 && (
                 <button
                   type="button"
                   role="menuitem"
@@ -389,49 +433,6 @@ export function MaterialRequestsRmList({
                   <span>Criar Ordem de Compra</span>
                 </button>
               )}
-              {requestForMenu.status === 'PENDING' && (
-                <>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setActionMenu(null);
-                      onApprove(requestForMenu);
-                    }}
-                    className={MENU_ITEM_BORDER_CLASS}
-                  >
-                    <CheckCircle className="h-4 w-4 shrink-0 text-green-600 dark:text-green-400" />
-                    <span>Aprovar requisição</span>
-                  </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setActionMenu(null);
-                      onCorrection(requestForMenu);
-                    }}
-                    className={MENU_ITEM_BORDER_CLASS}
-                  >
-                    <Wrench className="h-4 w-4 shrink-0 text-amber-500 dark:text-amber-400" />
-                    <span>Enviar para correção RM</span>
-                  </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setActionMenu(null);
-                      onCancel(requestForMenu);
-                    }}
-                    className={MENU_ITEM_BORDER_CLASS}
-                  >
-                    <Ban className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
-                    <span>Cancelar requisição</span>
-                  </button>
-                </>
-              )}
               {requestForMenu.status === 'IN_REVIEW' &&
                 currentUserId === rmSolicitante(requestForMenu)?.id && (
                   <Link
@@ -444,21 +445,6 @@ export function MaterialRequestsRmList({
                     <span>Editar RM</span>
                   </Link>
                 )}
-              {requestForMenu.status === 'IN_REVIEW' && (
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setActionMenu(null);
-                    onCancel(requestForMenu);
-                  }}
-                  className={MENU_ITEM_BORDER_CLASS}
-                >
-                  <Ban className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
-                  <span>Cancelar requisição</span>
-                </button>
-              )}
             </div>
           </>,
           document.body

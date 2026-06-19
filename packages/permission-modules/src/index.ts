@@ -223,6 +223,12 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
     category: 'Controle',
   },
   {
+    key: pathToModuleKey('/ponto/controle/aprovar-requisicoes-materiais'),
+    name: 'Aprovar Requisições de Materiais',
+    href: '/ponto/controle/aprovar-requisicoes-materiais',
+    category: 'Controle',
+  },
+  {
     key: pathToModuleKey('/ponto/controle/ver-valores-kanban'),
     name: 'Ver valores do Kanban',
     href: '/ponto/controle/ver-valores-kanban',

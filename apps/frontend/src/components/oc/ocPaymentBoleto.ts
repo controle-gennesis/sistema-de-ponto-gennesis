@@ -100,16 +100,61 @@ export function allMultiInstallmentsPaid(rows: BoletoInstallmentRow[], n: number
 export type OrderBoletoPhasePick = {
   status: string;
   paymentType?: string | null;
+  boletoAttachmentUrl?: string | null;
   paymentBoletoUrl?: string | null;
   paymentBoletoInstallments?: unknown;
   paymentParcelCount?: number;
   paymentBoletoPhaseReleased?: boolean | null;
 };
 
+export function hasCreationBoletoAttachment(o: { boletoAttachmentUrl?: string | null }): boolean {
+  return !!((o.boletoAttachmentUrl || '').trim());
+}
+
+/** Boleto efetivo para parcela única (criação ou fase Anexar Boleto). */
+export function effectivePaymentBoletoUrl(o: {
+  paymentBoletoUrl?: string | null;
+  boletoAttachmentUrl?: string | null;
+  paymentParcelCount?: number;
+}): string {
+  const payment = (o.paymentBoletoUrl || '').trim();
+  if (payment) return payment;
+  if ((o.paymentParcelCount ?? 1) <= 1 && hasCreationBoletoAttachment(o)) {
+    return (o.boletoAttachmentUrl || '').trim();
+  }
+  return '';
+}
+
+export function effectivePaymentBoletoName(o: {
+  paymentBoletoName?: string | null;
+  boletoAttachmentName?: string | null;
+  paymentBoletoUrl?: string | null;
+  boletoAttachmentUrl?: string | null;
+  paymentParcelCount?: number;
+}): string {
+  if ((o.paymentBoletoUrl || '').trim()) {
+    return (o.paymentBoletoName || '').trim() || 'Boleto pagamento';
+  }
+  if ((o.paymentParcelCount ?? 1) <= 1 && hasCreationBoletoAttachment(o)) {
+    return (o.boletoAttachmentName || '').trim() || 'Boleto criação OC';
+  }
+  return 'Boleto';
+}
+
+/** Parcela única com boleto na criação: equivalente a fase Pagamento liberada. */
+export function isCreationBoletoPaymentPhaseReady(o: OrderBoletoPhasePick): boolean {
+  if (o.paymentType !== 'BOLETO') return false;
+  if ((o.paymentParcelCount ?? 1) > 1) return false;
+  return hasCreationBoletoAttachment(o);
+}
+
 /** OC na fase Pagamento (ou correção) em que o lançamento no Controle Financeiro é exigido. */
 export function isOcInFinancialLaunchPhase(o: OrderBoletoPhasePick): boolean {
   if (o.status !== 'APPROVED' && o.status !== 'PENDING_PROOF_CORRECTION') return false;
-  if (o.paymentType === 'BOLETO') return o.paymentBoletoPhaseReleased === true;
+  if (o.paymentType === 'BOLETO') {
+    if (o.paymentBoletoPhaseReleased === true) return true;
+    return isCreationBoletoPaymentPhaseReady(o);
+  }
   return true;
 }
 
@@ -142,7 +187,7 @@ export function installmentStatusLabel(st: BoletoInstallmentPaymentStatus): stri
 export function canSendCurrentBoletoToPayment(o: OrderBoletoPhasePick): boolean {
   if (o.status !== 'APPROVED' || o.paymentType !== 'BOLETO') return false;
   const n = o.paymentParcelCount ?? 1;
-  if (n <= 1) return !!((o.paymentBoletoUrl || '').trim());
+  if (n <= 1) return !!effectivePaymentBoletoUrl(o);
   const rows = parsePaymentBoletoInstallments(o.paymentBoletoInstallments);
   if (rows.length < n) return false;
   if (allInstallmentsHaveBoleto(rows, n)) return true;
@@ -185,7 +230,8 @@ export function orderNeedsPaymentBoleto(o: OrderBoletoPhasePick): boolean {
   if (o.status !== 'APPROVED' || o.paymentType !== 'BOLETO') return false;
   const n = o.paymentParcelCount ?? 1;
   if (n <= 1) {
-    if (!((o.paymentBoletoUrl || '').trim())) return true;
+    if (isCreationBoletoPaymentPhaseReady(o)) return false;
+    if (!effectivePaymentBoletoUrl(o)) return true;
     if (o.paymentBoletoPhaseReleased === undefined) return false;
     return o.paymentBoletoPhaseReleased !== true;
   }
@@ -305,9 +351,11 @@ export function lastPaidInstallmentProofUrl(
 
 export function hasAnyPaymentBoletoAttachment(o: {
   paymentBoletoUrl?: string | null;
+  boletoAttachmentUrl?: string | null;
+  paymentParcelCount?: number;
   paymentBoletoInstallments?: unknown;
 }): boolean {
-  if ((o.paymentBoletoUrl || '').trim()) return true;
+  if (effectivePaymentBoletoUrl(o)) return true;
   return parsePaymentBoletoInstallments(o.paymentBoletoInstallments).some((x) => (x.boletoUrl || '').trim());
 }
 

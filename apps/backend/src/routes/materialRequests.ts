@@ -9,6 +9,11 @@ import { AuthRequest } from '../middleware/auth';
 import { MaterialRequestService } from '../services/MaterialRequestService';
 import { createError } from '../middleware/errorHandler';
 import { backendUploadsRoot } from '../lib/uploads';
+import { prisma } from '../lib/prisma';
+import {
+  assertUserCanApproveMaterialRequests,
+  isRmApproverStatusChange,
+} from '../lib/rmApprovalAccess';
 
 const router = Router();
 const materialRequestService = new MaterialRequestService();
@@ -201,6 +206,14 @@ router.patch('/:id/status', async (req: AuthRequest, res: Response, next: NextFu
     if (!req.user?.id) throw createError('Usuário não autenticado', 401);
     const { id } = req.params;
     const { status } = req.body;
+
+    const existing = await prisma.materialRequest.findUnique({ where: { id } });
+    if (!existing) throw createError('Requisição não encontrada', 404);
+
+    if (isRmApproverStatusChange(status, existing.requestedBy, req.user.id)) {
+      await assertUserCanApproveMaterialRequests(req.user.id, req.user.isAdmin);
+    }
+
     const request = await materialRequestService.updateMaterialRequestStatus(id, {
       status,
       approvedBy: status === 'APPROVED' ? req.user.id : undefined,
@@ -209,8 +222,9 @@ router.patch('/:id/status', async (req: AuthRequest, res: Response, next: NextFu
     }, req.user.id);
     res.json({ success: true, data: request, message: 'Status atualizado' });
   } catch (error) {
-    if (error instanceof Error && /Apenas |Aprove apenas|Não é possível cancelar/.test(error.message)) {
-      res.status(400).json({ success: false, message: error.message });
+    if (error instanceof Error && /Apenas |Aprove apenas|Não é possível cancelar|Sem permissão/.test(error.message)) {
+      const status = /Sem permissão/.test(error.message) ? 403 : 400;
+      res.status(status).json({ success: false, message: error.message });
       return;
     }
     next(error);

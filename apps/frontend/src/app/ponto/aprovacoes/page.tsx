@@ -30,6 +30,7 @@ import {
 import { OcApprovalsSection } from './_components/OcApprovalsSection';
 import { FdApprovalsSection } from './_components/FdApprovalsSection';
 import { FuelApprovalsSection } from './_components/FuelApprovalsSection';
+import { RmApprovalsSection } from './_components/RmApprovalsSection';
 import {
   AprovacoesTabsNav,
   type AprovacaoTabId,
@@ -358,7 +359,7 @@ export default function AprovacoesPage() {
     }
   };
 
-  const { canAccessDpApproverPages, canApproveEspelhoNf, canApproveOc, canApproveFuel } =
+  const { canAccessDpApproverPages, canApproveEspelhoNf, canApproveOc, canApproveFuel, canApproveMaterialRequests } =
     usePermissions();
   const canApproveDp = canAccessDpApproverPages;
   const [activeTab, setActiveTab] = useState<AprovacaoTabId>('dp');
@@ -592,6 +593,13 @@ export default function AprovacoesPage() {
         count: approvalCounts.fuel,
       });
     }
+    if (canApproveMaterialRequests) {
+      tabs.push({
+        id: 'rm',
+        label: 'Requisições de Materiais',
+        count: approvalCounts.rm,
+      });
+    }
     if (canApproveOc) {
       tabs.push({
         id: 'oc',
@@ -600,7 +608,7 @@ export default function AprovacoesPage() {
       });
     }
     return tabs;
-  }, [canApproveDp, canApproveEspelhoNf, canApproveFuel, canApproveOc, approvalCounts]);
+  }, [canApproveDp, canApproveEspelhoNf, canApproveFuel, canApproveMaterialRequests, canApproveOc, approvalCounts]);
 
   useEffect(() => {
     if (approvalTabs.length === 0) return;
@@ -1070,6 +1078,8 @@ export default function AprovacoesPage() {
           {canApproveDp && activeTab === 'fd' && <FdApprovalsSection />}
 
           {canApproveFuel && activeTab === 'fuel' && <FuelApprovalsSection />}
+
+          {canApproveMaterialRequests && activeTab === 'rm' && <RmApprovalsSection />}
 
           {canApproveOc && activeTab === 'oc' && <OcApprovalsSection />}
 

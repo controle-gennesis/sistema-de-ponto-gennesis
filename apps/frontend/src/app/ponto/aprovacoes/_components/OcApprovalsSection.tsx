@@ -38,6 +38,7 @@ export function OcApprovalsSection() {
           activeTab={tab}
           searchTerm={searchTerm}
           onSearchChange={setSearchTerm}
+          allowApprovalActions
         />
       ))}
     </div>

@@ -45,15 +45,15 @@ export function getStatusInfo(status: string): {
 export function getPriorityInfo(priority: string): { label: string; color: string } {
   switch (priority) {
     case 'URGENT':
-      return { label: 'Urgente', color: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400' };
+      return { label: 'Urgente', color: 'text-red-600 dark:text-red-400' };
     case 'HIGH':
-      return { label: 'Alta', color: 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400' };
+      return { label: 'Alta', color: 'text-orange-600 dark:text-orange-400' };
     case 'MEDIUM':
-      return { label: 'Média', color: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400' };
+      return { label: 'Média', color: 'text-yellow-600 dark:text-yellow-400' };
     case 'LOW':
-      return { label: 'Baixa', color: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400' };
+      return { label: 'Baixa', color: 'text-blue-600 dark:text-blue-400' };
     default:
-      return { label: 'Média', color: 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400' };
+      return { label: 'Média', color: 'text-gray-600 dark:text-gray-400' };
   }
 }
 

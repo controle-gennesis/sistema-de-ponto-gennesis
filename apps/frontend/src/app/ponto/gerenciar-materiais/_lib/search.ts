@@ -15,16 +15,16 @@ export const FLUX_TAB_LABELS: Record<FluxTab, string> = {
   rm_IN_REVIEW: 'Correção RM',
   rm_APPROVED: 'RMs Aprovadas',
   rm_CANCELLED: 'Canceladas',
-  oc_compras: 'OC - Aprovação Compras',
-  oc_gestor: 'OC - Aprovação Gestor',
-  oc_diretoria: 'OC - Aprovação Diretoria',
-  oc_IN_REVIEW: 'Correção OC',
+  oc_compras: 'Aprovação Compras',
+  oc_gestor: 'Aprovação Gestor',
+  oc_diretoria: 'Aprovação Diretoria',
+  oc_IN_REVIEW: 'Correção',
   oc_ATTACH_BOLETO: 'Anexar Boleto',
   oc_APPROVED: 'Pagamento',
   oc_PROOF_VALIDATION: 'Validação Comprovante',
   oc_PROOF_CORRECTION: 'Correção Comprovante',
   oc_ATTACH_NF: 'Anexar NF',
-  oc_FINALIZADAS: 'OC - Finalizadas'
+  oc_FINALIZADAS: 'Finalizadas'
 };
 
 const OC_CLOSED_STATUSES = new Set(['REJECTED', 'CANCELLED']);

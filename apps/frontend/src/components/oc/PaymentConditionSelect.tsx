@@ -50,6 +50,16 @@ export function formatPaymentConditionDisplay(
   return extra ? `${r.label} — ${extra}` : r.label;
 }
 
+export function resolvePaymentConditionMeta(
+  code: string,
+  rows: PaymentConditionRow[] | undefined
+): { parcelCount: number; parcelDueDays: number[] } {
+  const row = (rows || []).find((r) => r.code === code);
+  const parcelCount = row?.parcelCount && row.parcelCount >= 1 ? row.parcelCount : 1;
+  const parcelDueDays = normalizeParcelDueDaysClient(row?.parcelDueDays);
+  return { parcelCount, parcelDueDays };
+}
+
 type Props = {
   paymentType: 'AVISTA' | 'BOLETO';
   value: string;

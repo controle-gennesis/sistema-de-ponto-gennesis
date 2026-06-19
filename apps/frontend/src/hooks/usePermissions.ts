@@ -206,6 +206,12 @@ export function usePermissions() {
     isAdministrator || !!permissionData?.isAdmin || can(pk('/ponto/controle/aprovar-oc-gestor'));
   const canApproveOc = canApproveOcCompras || canApproveOcDiretoria || canApproveOcGestor;
 
+  /** Bloco «Requisições de Materiais» na tela de Aprovações (somente permissão Controle). */
+  const canApproveMaterialRequests =
+    isAdministrator ||
+    !!permissionData?.isAdmin ||
+    can(pk('/ponto/controle/aprovar-requisicoes-materiais'));
+
   /** Bloco «Solicitações de Combustível» na tela de Aprovações (somente permissão Controle). */
   const canApproveFuel =
     isAdministrator ||
@@ -310,6 +316,7 @@ export function usePermissions() {
     canApproveOcCompras,
     canApproveOcDiretoria,
     canApproveOcGestor,
+    canApproveMaterialRequests,
     canApproveFuel,
     canViewKanbanValues,
     canAccessContract,
@@ -384,7 +391,8 @@ export function useRoutePermission(route: string) {
       can(pk('/ponto/controle/aprovar-combustivel')) ||
       can(pk('/ponto/controle/aprovar-oc-compras')) ||
       can(pk('/ponto/controle/aprovar-oc-gestor')) ||
-      can(pk('/ponto/controle/aprovar-oc-diretoria')),
+      can(pk('/ponto/controle/aprovar-oc-diretoria')) ||
+      can(pk('/ponto/controle/aprovar-requisicoes-materiais')),
     '/ponto/funcionarios':
       isAdministrator || isDepartmentPessoal || permissions.canManageEmployees,
     '/ponto/aniversariantes': isAdministrator || isDepartmentPessoal || can(pk('/ponto/aniversariantes')),

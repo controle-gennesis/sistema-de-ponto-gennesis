@@ -15,22 +15,24 @@ export type OcTabCounts = {
   outras: number;
 };
 
+export const OC_FLUX_DEFAULT_TAB: OcTab = 'compras';
+
 const OC_FLUX_TABS: ReadonlyArray<{
   id: OcTab;
   label: string;
   countKey: keyof OcTabCounts | 'FINALIZADAS';
 }> = [
-  { id: 'compras', label: 'OC - Aprovação Compras', countKey: 'compras' },
-  { id: 'gestor', label: 'OC - Aprovação Gestor', countKey: 'gestor' },
-  { id: 'diretoria', label: 'OC - Aprovação Diretoria', countKey: 'diretoria' },
-  { id: 'IN_REVIEW', label: 'Correção OC', countKey: 'IN_REVIEW' },
+  { id: 'compras', label: 'Aprovação Compras', countKey: 'compras' },
+  { id: 'gestor', label: 'Aprovação Gestor', countKey: 'gestor' },
+  { id: 'diretoria', label: 'Aprovação Diretoria', countKey: 'diretoria' },
   { id: 'ATTACH_BOLETO', label: 'Anexar Boleto', countKey: 'ATTACH_BOLETO' },
   { id: 'APPROVED', label: 'Pagamento', countKey: 'APPROVED' },
   { id: 'PROOF_VALIDATION', label: 'Validação Comprovante', countKey: 'PROOF_VALIDATION' },
   { id: 'PROOF_CORRECTION', label: 'Correção Comprovante', countKey: 'PROOF_CORRECTION' },
   { id: 'ATTACH_NF', label: 'Anexar NF', countKey: 'ATTACH_NF' },
-  { id: 'FINALIZADAS', label: 'OC - Finalizadas', countKey: 'FINALIZADAS' },
-  { id: 'outras', label: 'Demais status', countKey: 'outras' }
+  { id: 'FINALIZADAS', label: 'Finalizadas', countKey: 'FINALIZADAS' },
+  { id: 'IN_REVIEW', label: 'Correção', countKey: 'IN_REVIEW' },
+  { id: 'outras', label: 'Canceladas', countKey: 'outras' }
 ];
 
 export function OcFluxTabsNav({
@@ -58,7 +60,7 @@ export function OcFluxTabsNav({
               onClick={() => onActiveTab(tab.id)}
               className={`flex items-center gap-2 whitespace-nowrap rounded-t-lg border-b-2 px-2 py-2 text-xs font-medium transition-colors sm:px-3 sm:text-sm ${
                 activeTab === tab.id
-                  ? 'border-blue-500 text-blue-600 dark:border-blue-400 dark:text-blue-400'
+                  ? 'border-red-500 text-red-600 dark:border-red-400 dark:text-red-400'
                   : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
               }`}
             >
@@ -66,7 +68,7 @@ export function OcFluxTabsNav({
               <span
                 className={`rounded-full px-2 py-0.5 text-xs ${
                   activeTab === tab.id
-                    ? 'bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400'
+                    ? 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400'
                     : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'
                 }`}
               >

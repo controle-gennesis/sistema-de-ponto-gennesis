@@ -166,6 +166,7 @@ export function FinancialControlEntryModal({
       queryClient.invalidateQueries({ queryKey: ['financial-control'] });
       queryClient.invalidateQueries({ queryKey: ['financial-control-by-oc'] });
       queryClient.invalidateQueries({ queryKey: ['financial-control-has-entry'] });
+      queryClient.invalidateQueries({ queryKey: ['financial-control-batch-by-oc'] });
       onClose();
     },
     onError: (err: { response?: { data?: { message?: string } } }) => {
@@ -189,6 +190,7 @@ export function FinancialControlEntryModal({
       queryClient.invalidateQueries({ queryKey: ['financial-control'] });
       queryClient.invalidateQueries({ queryKey: ['financial-control-by-oc'] });
       queryClient.invalidateQueries({ queryKey: ['financial-control-has-entry'] });
+      queryClient.invalidateQueries({ queryKey: ['financial-control-batch-by-oc'] });
       onClose();
     },
     onError: (err: { response?: { data?: { message?: string } } }) => {

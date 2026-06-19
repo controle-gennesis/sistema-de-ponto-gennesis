@@ -34,6 +34,8 @@ import {
   ListRowNavigableLabel,
   rowActionMenuButtonClass
 } from '@/components/ui/listTableUi';
+import { cadastroListClasses } from '@/components/ui/RowActionMenu';
+import { formatOcListDisplayId } from '@/components/oc/ocListDisplay';
 import { Loading } from '@/components/ui/Loading';
 import toast from 'react-hot-toast';
 import api from '@/lib/api';
@@ -74,6 +76,9 @@ import {
   financeProofTargetInstallmentIndices,
   shouldShowOrderLevelPaymentProofInDocuments,
   isOcInFinancialLaunchPhase,
+  effectivePaymentBoletoUrl,
+  effectivePaymentBoletoName,
+  isCreationBoletoPaymentPhaseReady,
 } from '@/components/oc/ocPaymentBoleto';
 import { purchaseOrderPhaseLabel } from '@/components/oc/ocStatusLabels';
 import { OcAttachmentActions } from '@/components/oc/OcAttachmentActions';
@@ -87,6 +92,12 @@ import {
 import { OcFluxTabsNav } from '@/components/oc/OcFluxTabsNav';
 import { computeOcTabCounts } from '@/components/oc/ocTabCounts';
 import { parseCurrencyInputBr } from '@/lib/maskCurrencyBr';
+import { isOcBoletoPaymentType } from '@/components/oc/ocUploadBoleto';
+import {
+  getOcPaymentListStatus,
+  ocPaymentListStatusClass,
+  ocPaymentListStatusLabel,
+} from '@/components/oc/ocPaymentListStatus';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 
@@ -709,6 +720,216 @@ export type OcTab =
   | 'FINALIZADAS'
   | 'outras';
 
+const ocListDocThCls =
+  'px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider min-w-[5.5rem]';
+const ocListDocTdCls = 'px-3 sm:px-6 py-4 align-middle text-xs min-w-[5.5rem]';
+const ocListDocCellInnerCls = 'flex w-full items-center justify-center text-center';
+
+function ocListShowsDocumentColumns(tab: OcTab): boolean {
+  return (
+    tab === 'APPROVED' ||
+    tab === 'PROOF_VALIDATION' ||
+    tab === 'PROOF_CORRECTION' ||
+    tab === 'FINALIZADAS'
+  );
+}
+
+function ocListShowsComprovanteColumn(tab: OcTab): boolean {
+  return tab === 'PROOF_VALIDATION' || tab === 'PROOF_CORRECTION';
+}
+
+function ocListShowsBoletoColumn(tab: OcTab): boolean {
+  return (
+    tab === 'APPROVED' ||
+    tab === 'PROOF_VALIDATION' ||
+    tab === 'PROOF_CORRECTION' ||
+    tab === 'FINALIZADAS'
+  );
+}
+
+function ocListShowsNfColumn(tab: OcTab): boolean {
+  return tab === 'FINALIZADAS';
+}
+
+function ocListShowsPaymentStatusColumn(tab: OcTab): boolean {
+  return tab === 'APPROVED';
+}
+
+function canUserAttachNfOnOrder(order: PurchaseOrder, currentUserId?: string | null): boolean {
+  return (
+    order.status === 'PENDING_NF_ATTACHMENT' &&
+    !!currentUserId &&
+    order.creator?.id === currentUserId
+  );
+}
+
+function OcListDownloadIconLink({
+  url,
+  fileName,
+  label = 'Baixar arquivo'
+}: {
+  url: string;
+  fileName: string;
+  label?: string;
+}) {
+  const name = fileName.trim() || 'arquivo';
+  return (
+    <a
+      href={absoluteUploadUrl(url)}
+      target="_blank"
+      rel="noopener noreferrer"
+      title={name}
+      aria-label={`${label}: ${name}`}
+      className="inline-flex rounded-md p-1.5 text-red-600 transition-colors hover:bg-red-50 hover:text-red-700 dark:text-red-400 dark:hover:bg-red-950/40 dark:hover:text-red-300"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <Download className="h-5 w-5 shrink-0" />
+    </a>
+  );
+}
+
+function OcListBoletoCellContent({ order }: { order: PurchaseOrder }) {
+  if (!isOcBoletoPaymentType(order.paymentType)) {
+    return <span className="text-gray-400 dark:text-gray-500">—</span>;
+  }
+
+  const parcelCount = order.paymentParcelCount ?? 1;
+  if (parcelCount > 1) {
+    const inst = parsePaymentBoletoInstallments(order.paymentBoletoInstallments);
+    return (
+      <div className="mx-auto flex max-w-[11rem] flex-col items-center gap-1 text-center">
+        {Array.from({ length: parcelCount }, (_, idx) => {
+          const row = inst[idx];
+          const st = rowStatus(row);
+          const amt = Number.isFinite(row?.amount) ? row.amount : null;
+          return (
+            <div key={idx} className="text-[11px] leading-tight text-gray-700 dark:text-gray-300 space-y-0.5">
+              <div>
+                <span className="text-gray-500 dark:text-gray-400 font-medium">{romanParcelLabel(idx)}:</span>{' '}
+                {st === 'PAID' ? (
+                  <span className="text-emerald-600 dark:text-emerald-400 font-medium">
+                    {installmentStatusLabel(st)}
+                  </span>
+                ) : st === 'AWAITING_PAYMENT' ? (
+                  <span className="text-amber-700 dark:text-amber-300 font-medium">
+                    {installmentStatusLabel(st)}
+                  </span>
+                ) : (row?.boletoUrl || '').trim() ? (
+                  <OcListDownloadIconLink
+                    url={row.boletoUrl || ''}
+                    fileName={row.boletoName?.trim() || `Boleto ${romanParcelLabel(idx)}`}
+                    label="Baixar boleto"
+                  />
+                ) : (
+                  <span className="text-gray-400 dark:text-gray-500">—</span>
+                )}
+              </div>
+              {amt != null || row?.dueDate ? (
+                <div className="text-[10px] text-gray-500 dark:text-gray-400">
+                  {amt != null
+                    ? amt.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+                    : null}
+                  {amt != null && row?.dueDate ? ' · ' : null}
+                  {row?.dueDate
+                    ? new Date(`${row.dueDate}T12:00:00`).toLocaleDateString('pt-BR')
+                    : null}
+                </div>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  const boletoUrl = effectivePaymentBoletoUrl(order);
+  if (boletoUrl) {
+    return (
+      <OcListDownloadIconLink
+        url={boletoUrl}
+        fileName={effectivePaymentBoletoName(order)}
+        label="Baixar boleto"
+      />
+    );
+  }
+
+  return <span className="text-gray-400 dark:text-gray-500">Não anexado</span>;
+}
+
+function OcListComprovanteCellContent({ order }: { order: PurchaseOrder }) {
+  const proofUrl = (order.paymentProofUrl || '').trim();
+  if (proofUrl) {
+    return (
+      <OcListDownloadIconLink
+        url={proofUrl}
+        fileName={order.paymentProofName?.trim() || 'Comprovante pagamento'}
+        label="Baixar comprovante"
+      />
+    );
+  }
+
+  const parcelCount = order.paymentParcelCount ?? 1;
+  if (parcelCount > 1 && order.paymentType === 'BOLETO') {
+    const inst = parsePaymentBoletoInstallments(order.paymentBoletoInstallments);
+    const withProof = inst
+      .map((row, idx) => ({ row, idx }))
+      .filter(({ row }) => (row.installmentProofUrl || '').trim());
+    if (withProof.length > 0) {
+      return (
+        <div className="mx-auto flex max-w-[11rem] flex-col items-center gap-1 text-center">
+          {withProof.map(({ row, idx }) => (
+            <div key={idx} className="text-[11px] leading-tight">
+              <span className="text-gray-500 dark:text-gray-400 font-medium">{romanParcelLabel(idx)}:</span>{' '}
+              <OcListDownloadIconLink
+                url={row.installmentProofUrl || ''}
+                fileName={row.installmentProofName?.trim() || `Comprovante ${romanParcelLabel(idx)}`}
+                label="Baixar comprovante"
+              />
+            </div>
+          ))}
+        </div>
+      );
+    }
+  }
+
+  const fromLast = lastPaidInstallmentProofUrl(order);
+  if (fromLast) {
+    return (
+      <OcListDownloadIconLink
+        url={fromLast.url}
+        fileName={fromLast.name || 'Comprovante pagamento'}
+        label="Baixar comprovante"
+      />
+    );
+  }
+
+  return <span className="text-gray-400 dark:text-gray-500">Não anexado</span>;
+}
+
+function OcListNfCellContent({ order }: { order: PurchaseOrder }) {
+  const nfs = parseOcNfAttachments(order.nfAttachments);
+  if (nfs.length === 0) {
+    return <span className="text-gray-400 dark:text-gray-500">Não anexada</span>;
+  }
+  return (
+    <div className="mx-auto flex max-w-[11rem] flex-col items-center gap-1 text-center">
+      {nfs.map((nf, idx) => (
+        <a
+          key={`${nf.url}-${idx}`}
+          href={absoluteUploadUrl(nf.url)}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 hover:underline font-medium"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <FileText className="w-3.5 h-3.5 shrink-0" />
+          {nf.name?.trim() || `NF ${idx + 1}`}
+        </a>
+      ))}
+    </div>
+  );
+}
+
 export type OcPurchaseOrdersPanelProps = {
   /** Quando true, painel integrado ao fluxo SC/RM (mesma página). */
   embedded?: boolean;
@@ -729,6 +950,8 @@ export type OcPurchaseOrdersPanelProps = {
    * `undefined` = sem filtro (admin). `[]` = nenhum contrato vinculado.
    */
   gestorCostCenterIds?: string[];
+  /** Habilita aprovar/reprovar/correção nas fases Compras, Gestor e Diretoria (tela de Aprovações). */
+  allowApprovalActions?: boolean;
 };
 
 const normalizeOcSearch = (value?: string | null) =>
@@ -740,19 +963,19 @@ const normalizeOcSearch = (value?: string | null) =>
 
 const EMBEDDED_OC_TAB_META: Record<OcTab, { title: string; subtitle: string }> = {
   compras: {
-    title: 'OC - Aprovação Compras',
+    title: 'Aprovação Compras',
     subtitle: 'Ordens aguardando aprovação do setor de compras'
   },
   gestor: {
-    title: 'OC - Aprovação Gestor',
+    title: 'Aprovação Gestor',
     subtitle: 'Ordens aguardando aprovação do gestor'
   },
   diretoria: {
-    title: 'OC - Aprovação Diretoria',
+    title: 'Aprovação Diretoria',
     subtitle: 'Ordens aguardando aprovação da diretoria'
   },
   IN_REVIEW: {
-    title: 'Correção OC',
+    title: 'Correção',
     subtitle: 'Ordens devolvidas para correção antes de seguir no fluxo'
   },
   APPROVED: {
@@ -776,12 +999,12 @@ const EMBEDDED_OC_TAB_META: Record<OcTab, { title: string; subtitle: string }> =
     subtitle: 'Após comprovante validado, anexe a nota fiscal e conclua'
   },
   FINALIZADAS: {
-    title: 'OC - Finalizadas',
+    title: 'Finalizadas',
     subtitle: 'Histórico de ordens que concluíram o fluxo'
   },
   outras: {
-    title: 'Demais status',
-    subtitle: 'Ordens em outros status do fluxo'
+    title: 'Canceladas',
+    subtitle: 'Ordens canceladas ou reprovadas'
   }
 };
 
@@ -925,7 +1148,8 @@ export function OcPurchaseOrdersPanel({
   onSearchChange,
   hideSearch = false,
   flushInCard = false,
-  gestorCostCenterIds
+  gestorCostCenterIds,
+  allowApprovalActions = false
 }: OcPurchaseOrdersPanelProps) {
   const queryClient = useQueryClient();
   const {
@@ -1519,8 +1743,11 @@ export function OcPurchaseOrdersPanel({
     setApprovalListPhase('pending');
   }, [activeTab]);
 
-  const showListApprovalActions =
-    approvalListPhase === 'pending' ? showOcApprovalActions : () => false;
+  const showListApprovalActions = (status: string) =>
+    allowApprovalActions &&
+    isOcApprovalTab(activeTab) &&
+    approvalListPhase === 'pending' &&
+    showOcApprovalActions(status);
 
   const orders = useMemo(() => {
     if (activeTab === 'compras') {
@@ -1570,24 +1797,7 @@ export function OcPurchaseOrdersPanel({
       return allOrders.filter((o) => o.status === 'PENDING_NF_ATTACHMENT');
     }
     if (activeTab === 'outras') {
-      return allOrders.filter(
-        (o) =>
-          o.status !== 'REJECTED' &&
-          o.status !== 'CANCELLED' &&
-          ![
-            'PENDING_COMPRAS',
-            'PENDING',
-            'DRAFT',
-            'PENDING_DIRETORIA',
-            'IN_REVIEW',
-            'APPROVED',
-            'PENDING_PROOF_VALIDATION',
-            'PENDING_PROOF_CORRECTION',
-            'PENDING_NF_ATTACHMENT',
-            'FINALIZED',
-            'SENT'
-          ].includes(o.status)
-      );
+      return allOrders.filter((o) => o.status === 'REJECTED' || o.status === 'CANCELLED');
     }
     return allOrders;
   }, [allOrders, activeTab, gestorCostCenterIds, approvalListPhase, currentUserId]);
@@ -1704,6 +1914,37 @@ export function OcPurchaseOrdersPanel({
     | undefined;
 
   const displayedOrders = activeTab === 'FINALIZADAS' ? finalizedOrders : filteredOrdersBySearch;
+
+  const paymentTabOrderNumbers = useMemo(
+    () =>
+      activeTab === 'APPROVED'
+        ? [...new Set(displayedOrders.map((o) => o.orderNumber.trim()).filter(Boolean))].sort()
+        : [],
+    [activeTab, displayedOrders]
+  );
+
+  const { data: financialEntriesForPaymentTab = [] } = useQuery({
+    queryKey: ['financial-control-batch-by-oc', paymentTabOrderNumbers.join('|')],
+    queryFn: async () => {
+      const res = await api.get('/financial-control/by-oc-batch', {
+        params: { numbers: paymentTabOrderNumbers.join(',') },
+      });
+      return (res.data?.data || []) as FinancialControlEntry[];
+    },
+    enabled: activeTab === 'APPROVED' && paymentTabOrderNumbers.length > 0,
+  });
+
+  const financialEntriesByOcNumber = useMemo(() => {
+    const map = new Map<string, FinancialControlEntry[]>();
+    for (const entry of financialEntriesForPaymentTab) {
+      const key = (entry.ocNumber || '').trim().toLowerCase();
+      if (!key) continue;
+      const list = map.get(key) ?? [];
+      list.push(entry);
+      map.set(key, list);
+    }
+    return map;
+  }, [financialEntriesForPaymentTab]);
 
   const userEmployee = userData?.data?.employee as
     | { department?: string | null; position?: string | null }
@@ -2100,8 +2341,8 @@ export function OcPurchaseOrdersPanel({
             <CardHeader className={`border-b-0 pb-1 ${flushInTabsCard ? 'pt-4' : ''}`}>
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                 <div className="flex items-center space-x-3">
-                  <div className="p-2 sm:p-3 bg-blue-100 dark:bg-blue-900/30 rounded-lg flex-shrink-0">
-                    <FileText className="w-5 h-5 sm:w-6 sm:h-6 text-blue-600 dark:text-blue-400" />
+                  <div className="p-2 sm:p-3 bg-red-100 dark:bg-red-900/30 rounded-lg flex-shrink-0">
+                    <FileText className="w-5 h-5 sm:w-6 sm:h-6 text-red-600 dark:text-red-400" />
                   </div>
                   <div className="min-w-0">
                     <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
@@ -2206,37 +2447,46 @@ export function OcPurchaseOrdersPanel({
                           </div>
                         </th>
                       )}
-                      <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                        Nº OC
+                      <th
+                        scope="col"
+                        className={`${cadastroListClasses.th} w-[4.5rem] min-w-[4.5rem] max-w-[4.5rem] text-center`}
+                      >
+                        OC
                       </th>
                       <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                         Fornecedor
                       </th>
-                      <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                      <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                         SC
                       </th>
-                      <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                      <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                         Data
                       </th>
-                      <th className="px-3 sm:px-6 py-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                      <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                         Valor Total
                       </th>
-                      <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                        Status
-                      </th>
+                      {ocListShowsPaymentStatusColumn(activeTab) && (
+                        <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">
+                          Status
+                        </th>
+                      )}
                       {activeTab === 'ATTACH_BOLETO' && (
                         <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider min-w-[200px]">
                           Boleto (pagamento)
                         </th>
                       )}
-                      {(activeTab === 'APPROVED' ||
-                        activeTab === 'PROOF_VALIDATION' ||
-                        activeTab === 'PROOF_CORRECTION' ||
-                        activeTab === 'ATTACH_NF' ||
-                        activeTab === 'FINALIZADAS') && (
-                        <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider min-w-[140px]">
-                          NF / Boleto / Comprovante
-                        </th>
+                      {ocListShowsDocumentColumns(activeTab) && (
+                        <>
+                          {ocListShowsBoletoColumn(activeTab) && (
+                            <th className={ocListDocThCls}>Boleto</th>
+                          )}
+                          {ocListShowsComprovanteColumn(activeTab) && (
+                            <th className={ocListDocThCls}>Comprovante</th>
+                          )}
+                          {ocListShowsNfColumn(activeTab) && (
+                            <th className={ocListDocThCls}>NF</th>
+                          )}
+                        </>
                       )}
                       <th className="px-3 sm:px-6 py-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                         {isIntegratedFlux ? 'Ação' : 'Ações'}
@@ -2245,11 +2495,6 @@ export function OcPurchaseOrdersPanel({
                   </thead>
                   <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
                     {displayedOrders.map((o: PurchaseOrder) => {
-                      const latestMovement = latestOcMovementByOrderNumber.get(
-                        normalizeOcNumberKey(o.orderNumber)
-                      );
-                      const ocMovementTag = latestMovement ? buildOcTagFromMovement(latestMovement) : null;
-                      const ocAttachmentTags = parseOcAttachmentTagsFromNotes(latestMovement?.notes);
                       return (
                       <tr
                         key={o.id}
@@ -2286,63 +2531,43 @@ export function OcPurchaseOrdersPanel({
                             </div>
                           </td>
                         )}
-                        <td className="px-3 sm:px-6 py-4 text-sm">
-                          <ListRowNavigableLabel className="font-mono font-medium">
-                            {o.orderNumber}
+                        <td
+                          className={`${cadastroListClasses.tdMono} w-[4.5rem] min-w-[4.5rem] max-w-[4.5rem] text-center`}
+                          title={o.orderNumber}
+                        >
+                          <ListRowNavigableLabel className="font-medium">
+                            {formatOcListDisplayId(o.orderNumber)}
                           </ListRowNavigableLabel>
                         </td>
                         <td className="px-3 sm:px-6 py-4 text-sm text-gray-900 dark:text-gray-100">
                           {o.supplier?.name || '-'}
                         </td>
-                        <td className="px-3 sm:px-6 py-4 text-sm text-gray-600 dark:text-gray-400">
+                        <td className="px-3 sm:px-6 py-4 text-sm text-center text-gray-600 dark:text-gray-400">
                           {o.materialRequest?.requestNumber || '-'}
                         </td>
-                        <td className="px-3 sm:px-6 py-4 text-sm text-gray-900 dark:text-gray-100">
+                        <td className="px-3 sm:px-6 py-4 text-sm text-center text-gray-900 dark:text-gray-100">
                           {formatDate(o.orderDate)}
                         </td>
-                        <td className="px-3 sm:px-6 py-4 text-sm text-right text-gray-900 dark:text-gray-100">
+                        <td className="px-3 sm:px-6 py-4 text-sm text-center tabular-nums text-gray-900 dark:text-gray-100">
                           {formatCurrency(orderGrandTotal(o))}
                         </td>
-                        <td className="px-3 sm:px-6 py-4 text-center">
-                          <div className="flex flex-col items-center gap-1">
-                            <span
-                              className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${
-                                STATUS_COLORS[o.status] ||
-                                'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300'
-                              }`}
-                            >
-                              {purchaseOrderPhaseLabel(o.status)}
-                            </span>
-                            {ocMovementTag && (
-                              <span className={`inline-flex px-2 py-1 rounded-full text-[10px] font-semibold ${ocMovementTag.colorClass}`}>
-                                {ocMovementTag.label}
-                              </span>
-                            )}
-                            {ocAttachmentTags.map((attachmentTag) =>
-                              attachmentTag.url ? (
-                                <a
-                                  key={attachmentTag.key}
-                                  href={absoluteUploadUrl(attachmentTag.url)}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  onClick={(e) => e.stopPropagation()}
-                                  className={`inline-flex max-w-[9rem] px-2 py-1 rounded-full text-[10px] font-semibold hover:opacity-90 whitespace-nowrap ${attachmentTag.colorClass}`}
-                                  title={attachmentTag.titleHint ?? attachmentTag.label}
-                                >
-                                  {attachmentTag.label}
-                                </a>
-                              ) : (
+                        {ocListShowsPaymentStatusColumn(activeTab) && (
+                          <td className="px-3 sm:px-6 py-4 text-center whitespace-nowrap">
+                            {(() => {
+                              const entries =
+                                financialEntriesByOcNumber.get(o.orderNumber.trim().toLowerCase()) ??
+                                [];
+                              const paymentStatus = getOcPaymentListStatus(o, entries);
+                              return (
                                 <span
-                                  key={attachmentTag.key}
-                                  className={`inline-flex max-w-[9rem] px-2 py-1 rounded-full text-[10px] font-semibold whitespace-nowrap ${attachmentTag.colorClass}`}
-                                  title={attachmentTag.titleHint ?? attachmentTag.label}
+                                  className={`text-xs font-medium ${ocPaymentListStatusClass(paymentStatus)}`}
                                 >
-                                  {attachmentTag.label}
+                                  {ocPaymentListStatusLabel(paymentStatus)}
                                 </span>
-                              )
-                            )}
-                          </div>
-                        </td>
+                              );
+                            })()}
+                          </td>
+                        )}
                         {activeTab === 'ATTACH_BOLETO' && (
                           <td
                             className="px-3 sm:px-6 py-4 align-middle"
@@ -2416,153 +2641,30 @@ export function OcPurchaseOrdersPanel({
                             </div>
                           </td>
                         )}
-                        {(activeTab === 'APPROVED' ||
-                          activeTab === 'PROOF_VALIDATION' ||
-                          activeTab === 'PROOF_CORRECTION' ||
-                          activeTab === 'ATTACH_NF' ||
-                          activeTab === 'FINALIZADAS') && (
-                          <td
-                            className="px-3 sm:px-6 py-4 align-top"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            <div className="flex flex-col gap-2 text-xs max-w-[200px]">
-                              <div>
-                                <span className="text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400 block mb-0.5">
-                                  NF (criação)
-                                </span>
-                                {o.boletoAttachmentUrl ? (
-                                  <a
-                                    href={absoluteUploadUrl(o.boletoAttachmentUrl || '')}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 hover:underline font-medium"
-                                  >
-                                    <FileText className="w-3.5 h-3.5 shrink-0" />
-                                    {o.boletoAttachmentName?.trim() || 'Abrir arquivo'}
-                                  </a>
-                                ) : (
-                                  <span className="text-gray-400 dark:text-gray-500">Não anexada</span>
-                                )}
-                              </div>
-                              <div>
-                                <span className="text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400 block mb-0.5">
-                                  Boleto
-                                </span>
-                                {(o.paymentParcelCount ?? 1) > 1 ? (
-                                  (() => {
-                                    const inst = parsePaymentBoletoInstallments(o.paymentBoletoInstallments);
-                                    const n = o.paymentParcelCount ?? 1;
-                                    return (
-                                      <div className="flex flex-col gap-1">
-                                        {Array.from({ length: n }, (_, idx) => {
-                                          const row = inst[idx];
-                                          const st = rowStatus(row);
-                                          const amt = Number.isFinite(row?.amount) ? row.amount : null;
-                                          return (
-                                            <div key={idx} className="text-[11px] leading-tight text-gray-700 dark:text-gray-300 space-y-0.5">
-                                              <div>
-                                                <span className="text-gray-500 dark:text-gray-400 font-medium">
-                                                  {romanParcelLabel(idx)}:
-                                                </span>{' '}
-                                                {st === 'PAID' ? (
-                                                  <span className="text-emerald-600 dark:text-emerald-400 font-medium">
-                                                    {installmentStatusLabel(st)}
-                                                  </span>
-                                                ) : st === 'AWAITING_PAYMENT' ? (
-                                                  <span className="text-amber-700 dark:text-amber-300 font-medium">
-                                                    {installmentStatusLabel(st)}
-                                                  </span>
-                                                ) : (row?.boletoUrl || '').trim() ? (
-                                                  <a
-                                                    href={absoluteUploadUrl(row.boletoUrl || '')}
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 hover:underline font-medium"
-                                                  >
-                                                    <Banknote className="w-3.5 h-3.5 shrink-0" />
-                                                    {row.boletoName?.trim() || 'Abrir'}
-                                                  </a>
-                                                ) : (
-                                                  <span className="text-gray-400 dark:text-gray-500">—</span>
-                                                )}
-                                              </div>
-                                              {amt != null || row?.dueDate ? (
-                                                <div className="pl-3 text-[10px] text-gray-500 dark:text-gray-400">
-                                                  {amt != null ? (
-                                                    <span>
-                                                      {amt.toLocaleString('pt-BR', {
-                                                        style: 'currency',
-                                                        currency: 'BRL'
-                                                      })}
-                                                    </span>
-                                                  ) : null}
-                                                  {amt != null && row?.dueDate ? ' · ' : null}
-                                                  {row?.dueDate
-                                                    ? new Date(`${row.dueDate}T12:00:00`).toLocaleDateString('pt-BR')
-                                                    : null}
-                                                </div>
-                                              ) : null}
-                                            </div>
-                                          );
-                                        })}
-                                      </div>
-                                    );
-                                  })()
-                                ) : o.paymentBoletoUrl ? (
-                                  <a
-                                    href={absoluteUploadUrl(o.paymentBoletoUrl || '')}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 hover:underline font-medium"
-                                  >
-                                    <Banknote className="w-3.5 h-3.5 shrink-0" />
-                                    {o.paymentBoletoName?.trim() || 'Abrir boleto'}
-                                  </a>
-                                ) : (
-                                  <span className="text-gray-400 dark:text-gray-500">Não anexado</span>
-                                )}
-                              </div>
-                              <div>
-                                <span className="text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400 block mb-0.5">
-                                  Comprovante
-                                </span>
-                                {o.paymentProofUrl ? (
-                                  <a
-                                    href={absoluteUploadUrl(o.paymentProofUrl || '')}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 hover:underline font-medium"
-                                  >
-                                    <Receipt className="w-3.5 h-3.5 shrink-0" />
-                                    {o.paymentProofName?.trim() || 'Abrir comprovante'}
-                                  </a>
-                                ) : (
-                                  <span className="text-gray-400 dark:text-gray-500">Não anexado</span>
-                                )}
-                              </div>
-                              {parseOcNfAttachments(o.nfAttachments).length > 0 && (
-                                <div>
-                                  <span className="text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400 block mb-0.5">
-                                    NF (pós-comprovante)
-                                  </span>
-                                  <div className="flex flex-col gap-1">
-                                    {parseOcNfAttachments(o.nfAttachments).map((nf, idx) => (
-                                      <a
-                                        key={`${nf.url}-${idx}`}
-                                        href={absoluteUploadUrl(nf.url)}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 hover:underline font-medium"
-                                      >
-                                        <FileText className="w-3.5 h-3.5 shrink-0" />
-                                        {nf.name?.trim() || `NF ${idx + 1}`}
-                                      </a>
-                                    ))}
-                                  </div>
+                        {ocListShowsDocumentColumns(activeTab) && (
+                          <>
+                            {ocListShowsBoletoColumn(activeTab) && (
+                              <td className={ocListDocTdCls}>
+                                <div className={ocListDocCellInnerCls}>
+                                  <OcListBoletoCellContent order={o} />
                                 </div>
-                              )}
-                            </div>
-                          </td>
+                              </td>
+                            )}
+                            {ocListShowsComprovanteColumn(activeTab) && (
+                              <td className={ocListDocTdCls}>
+                                <div className={ocListDocCellInnerCls}>
+                                  <OcListComprovanteCellContent order={o} />
+                                </div>
+                              </td>
+                            )}
+                            {ocListShowsNfColumn(activeTab) && (
+                              <td className={ocListDocTdCls}>
+                                <div className={ocListDocCellInnerCls}>
+                                  <OcListNfCellContent order={o} />
+                                </div>
+                              </td>
+                            )}
+                          </>
                         )}
                         <td
                           className="px-3 sm:px-6 py-4 text-right whitespace-nowrap"
@@ -3423,35 +3525,49 @@ export function OcPurchaseOrdersPanel({
               >
                 <div>
                   <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">Fases anteriores</p>
-                  <OcDetailDocRow label="NF na criação da OC">
-                    {selectedOrder.boletoAttachmentUrl ? (
-                      <OcAttachmentActions
-                        url={selectedOrder.boletoAttachmentUrl}
-                        fileName={selectedOrder.boletoAttachmentName || 'NF criação OC'}
-                      />
-                    ) : (
-                      <span className="text-gray-500 dark:text-gray-400">Não anexada</span>
-                    )}
-                  </OcDetailDocRow>
-                  <OcDetailDocRow label="Boleto (Anexar Boleto)">
-                    {(selectedOrder.paymentParcelCount ?? 1) > 1 ? (
-                      <BoletoParcelasList
-                        order={selectedOrder}
-                        showComprovante
-                        editable={canEditBoletoParcels && !boletoParcelsEditorInAttachBox}
-                        hint="Histórico por parcela: valor, vencimento, boleto e comprovante (quando houver)."
-                        onSaved={handleBoletoParcelsSaved}
-                      />
-                    ) : selectedOrder.paymentBoletoUrl ? (
-                      <OcAttachmentActions
-                        url={selectedOrder.paymentBoletoUrl}
-                        fileName={selectedOrder.paymentBoletoName || 'Boleto pagamento'}
-                        icon={Banknote}
-                      />
-                    ) : (
-                      <span className="text-gray-500 dark:text-gray-400">Não anexado</span>
-                    )}
-                  </OcDetailDocRow>
+                  {isOcBoletoPaymentType(selectedOrder.paymentType) ? (
+                    <>
+                      <OcDetailDocRow
+                        label={
+                          isCreationBoletoPaymentPhaseReady(selectedOrder)
+                            ? 'Boleto'
+                            : 'Boleto (criação da OC)'
+                        }
+                      >
+                        {selectedOrder.boletoAttachmentUrl ? (
+                          <OcAttachmentActions
+                            url={selectedOrder.boletoAttachmentUrl}
+                            fileName={selectedOrder.boletoAttachmentName || 'Boleto criação OC'}
+                            icon={Banknote}
+                          />
+                        ) : (
+                          <span className="text-gray-500 dark:text-gray-400">Não anexado</span>
+                        )}
+                      </OcDetailDocRow>
+                      {!isCreationBoletoPaymentPhaseReady(selectedOrder) ||
+                      (selectedOrder.paymentParcelCount ?? 1) > 1 ? (
+                      <OcDetailDocRow label="Boleto (Anexar Boleto)">
+                        {(selectedOrder.paymentParcelCount ?? 1) > 1 ? (
+                          <BoletoParcelasList
+                            order={selectedOrder}
+                            showComprovante
+                            editable={canEditBoletoParcels && !boletoParcelsEditorInAttachBox}
+                            hint="Histórico por parcela: valor, vencimento, boleto e comprovante (quando houver)."
+                            onSaved={handleBoletoParcelsSaved}
+                          />
+                        ) : effectivePaymentBoletoUrl(selectedOrder) ? (
+                          <OcAttachmentActions
+                            url={effectivePaymentBoletoUrl(selectedOrder)}
+                            fileName={effectivePaymentBoletoName(selectedOrder)}
+                            icon={Banknote}
+                          />
+                        ) : (
+                          <span className="text-gray-500 dark:text-gray-400">Não anexado</span>
+                        )}
+                      </OcDetailDocRow>
+                      ) : null}
+                    </>
+                  ) : null}
                   {shouldShowOrderLevelPaymentProofInDocuments(selectedOrder) ? (
                     <OcDetailDocRow label="Comprovante (Pagamento)">
                       <OcAttachmentActions
@@ -4474,6 +4590,38 @@ export function OcPurchaseOrdersPanel({
                 )}
                 <span>Baixar OC</span>
               </button>
+              {canUserAttachNfOnOrder(orderForActionMenu, currentUserId) && (
+                <label
+                  role="menuitem"
+                  className={`${OC_MENU_ITEM_CLASS} border-t border-gray-200 dark:border-gray-700 cursor-pointer`}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {appendNfMutation.isPending &&
+                  appendNfMutation.variables?.id === orderForActionMenu.id ? (
+                    <Loader2 className="h-4 w-4 shrink-0 animate-spin text-teal-600 dark:text-teal-400" />
+                  ) : (
+                    <FileText className="h-4 w-4 shrink-0 text-teal-600 dark:text-teal-400" />
+                  )}
+                  <span>Anexar NF</span>
+                  <input
+                    type="file"
+                    accept=".pdf,image/*"
+                    className="hidden"
+                    disabled={
+                      appendNfMutation.isPending &&
+                      appendNfMutation.variables?.id === orderForActionMenu.id
+                    }
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      e.target.value = '';
+                      setOcActionMenu(null);
+                      if (file) {
+                        appendNfMutation.mutate({ id: orderForActionMenu.id, file });
+                      }
+                    }}
+                  />
+                </label>
+              )}
               {orderForActionMenu.status === 'PENDING_PROOF_VALIDATION' && (
                 <button
                   type="button"

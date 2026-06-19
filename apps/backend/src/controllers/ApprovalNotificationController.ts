@@ -12,6 +12,7 @@ import {
   userHasOcDiretoriaApprovePermission,
   userHasOcGestorApprovePermission,
 } from '../lib/ocApprovalAccess';
+import { userHasRmApprovePermission } from '../lib/rmApprovalAccess';
 import { fuelRefuelRequestService } from '../services/FuelRefuelRequestService';
 
 const ESPELHO_APPROVE_MODULE_KEY = pathToModuleKey('/ponto/controle/aprovar-espelho-nf');
@@ -101,6 +102,11 @@ export class ApprovalNotificationController {
         });
       }
 
+      let rm = 0;
+      if (isAdmin || (await userHasRmApprovePermission(userId))) {
+        rm = await prisma.materialRequest.count({ where: { status: 'PENDING' } });
+      }
+
       let espelhoMirrors = 0;
       if (isAdmin || (await userHasEspelhoApprovePermission(userId))) {
         espelhoMirrors = await prisma.espelhoNfMirror.count();
@@ -111,8 +117,9 @@ export class ApprovalNotificationController {
         fd,
         fuel,
         oc,
+        rm,
         espelhoMirrors,
-        total: dp + fd + fuel + oc,
+        total: dp + fd + fuel + oc + rm,
       };
 
       return res.json({ success: true, data });

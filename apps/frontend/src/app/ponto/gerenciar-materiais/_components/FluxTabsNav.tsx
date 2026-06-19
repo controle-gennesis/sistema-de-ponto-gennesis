@@ -83,10 +83,10 @@ export function FluxTabsNav({
           />
           {(
             [
-              { id: 'oc_compras' as const, label: 'OC - Aprovação Compras', count: ocCounts.compras },
-              { id: 'oc_gestor' as const, label: 'OC - Aprovação Gestor', count: ocCounts.gestor },
-              { id: 'oc_diretoria' as const, label: 'OC - Aprovação Diretoria', count: ocCounts.diretoria },
-              { id: 'oc_IN_REVIEW' as const, label: 'Correção OC', count: ocCounts.IN_REVIEW },
+              { id: 'oc_compras' as const, label: 'Aprovação Compras', count: ocCounts.compras },
+              { id: 'oc_gestor' as const, label: 'Aprovação Gestor', count: ocCounts.gestor },
+              { id: 'oc_diretoria' as const, label: 'Aprovação Diretoria', count: ocCounts.diretoria },
+              { id: 'oc_IN_REVIEW' as const, label: 'Correção', count: ocCounts.IN_REVIEW },
               {
                 id: 'oc_ATTACH_BOLETO' as const,
                 label: 'Anexar Boleto',
@@ -106,7 +106,7 @@ export function FluxTabsNav({
               { id: 'oc_ATTACH_NF' as const, label: 'Anexar NF', count: ocCounts.ATTACH_NF },
               {
                 id: 'oc_FINALIZADAS' as const,
-                label: 'OC - Finalizadas',
+                label: 'Finalizadas',
                 count: ocCounts.FINALIZADAS
               }
             ] as const
