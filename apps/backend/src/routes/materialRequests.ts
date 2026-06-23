@@ -12,6 +12,8 @@ import { backendUploadsRoot } from '../lib/uploads';
 import { prisma } from '../lib/prisma';
 import {
   assertUserCanApproveMaterialRequests,
+  assertUserCanApproveMaterialRequestForCostCenter,
+  getRmApproverListScopeCostCenterIds,
   isRmApproverStatusChange,
 } from '../lib/rmApprovalAccess';
 
@@ -126,15 +128,48 @@ router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
     const pageNum = Math.max(1, parseInt(String(page), 10) || 1);
     const limitNum = Math.min(Math.max(parseInt(String(limit), 10) || 500, 1), 500);
 
-    const result = await materialRequestService.listMaterialRequests({
+    let scopeCostCenterIds: string[] | null = null;
+    if (req.user?.id && !requestedBy) {
+      scopeCostCenterIds = await getRmApproverListScopeCostCenterIds(
+        req.user.id,
+        !!req.user.isAdmin,
+      );
+    }
+
+    const listFilters: Parameters<MaterialRequestService['listMaterialRequests']>[0] = {
       status: status as string,
       costCenterId: costCenterId as string,
       projectId: projectId as string,
       requestedBy: requestedBy as string,
       priority: priority as string,
       page: pageNum,
-      limit: limitNum
-    });
+      limit: limitNum,
+    };
+
+    if (scopeCostCenterIds !== null) {
+      if (scopeCostCenterIds.length === 0) {
+        res.json({
+          success: true,
+          data: [],
+          pagination: { page: pageNum, limit: limitNum, total: 0, totalPages: 1 },
+        });
+        return;
+      }
+      if (listFilters.costCenterId) {
+        if (!scopeCostCenterIds.includes(listFilters.costCenterId)) {
+          res.json({
+            success: true,
+            data: [],
+            pagination: { page: pageNum, limit: limitNum, total: 0, totalPages: 1 },
+          });
+          return;
+        }
+      } else {
+        listFilters.costCenterIds = scopeCostCenterIds;
+      }
+    }
+
+    const result = await materialRequestService.listMaterialRequests(listFilters);
 
     res.json({
       success: true,
@@ -212,6 +247,11 @@ router.patch('/:id/status', async (req: AuthRequest, res: Response, next: NextFu
 
     if (isRmApproverStatusChange(status, existing.requestedBy, req.user.id)) {
       await assertUserCanApproveMaterialRequests(req.user.id, req.user.isAdmin);
+      await assertUserCanApproveMaterialRequestForCostCenter(
+        req.user.id,
+        !!req.user.isAdmin,
+        existing.costCenterId,
+      );
     }
 
     const request = await materialRequestService.updateMaterialRequestStatus(id, {

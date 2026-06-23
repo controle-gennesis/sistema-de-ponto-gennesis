@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Pencil, X, CheckCircle, ClipboardList, Clock, Wrench, XCircle } from 'lucide-react';
+import { Pencil, X, CheckCircle, ClipboardList, Clock, ShoppingCart, XCircle } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
@@ -13,7 +13,11 @@ import api from '@/lib/api';
 import { absoluteUploadUrl } from '@/lib/apiOrigin';
 import toast from 'react-hot-toast';
 import { OcStyledCheckbox, type PurchaseOrder } from '@/components/oc/OcPurchaseOrdersPanel';
-import { PaymentConditionSelect, resolvePaymentConditionMeta } from '@/components/oc/PaymentConditionSelect';
+import {
+  PaymentConditionSelect,
+  resolvePaymentConditionMeta,
+  type PaymentConditionRow
+} from '@/components/oc/PaymentConditionSelect';
 import {
   OcBoletoCreationFields,
   resizeOcBoletoCreationSlots,
@@ -44,8 +48,10 @@ import {
 import {
   DEFAULT_RM_CARD_FILTER,
   filterMaterialRequestsByCard,
+  isMaterialRequestAwaitingOc,
   type RmCardFilter
 } from './_lib/rmCardFilter';
+import { formatRmListDisplayId } from './_lib/rmListDisplay';
 
 const ocFieldCls =
   'w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-0 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 disabled:cursor-not-allowed disabled:opacity-50';
@@ -91,7 +97,7 @@ const RM_STAT_CARDS: {
   iconBg: string;
   iconColor: string;
   Icon: LucideIcon;
-  countKey: keyof { total: number; pending: number; approved: number; inReview: number; cancelled: number };
+  countKey: keyof { total: number; pending: number; approved: number; awaitingOc: number; cancelled: number };
 }[] = [
   {
     filter: 'all',
@@ -118,12 +124,12 @@ const RM_STAT_CARDS: {
     countKey: 'approved'
   },
   {
-    filter: 'inReview',
-    label: 'Em correção',
+    filter: 'awaitingOc',
+    label: 'Aguardando OC',
     iconBg: 'bg-amber-100 dark:bg-amber-900/30',
     iconColor: 'text-amber-600 dark:text-amber-400',
-    Icon: Wrench,
-    countKey: 'inReview'
+    Icon: ShoppingCart,
+    countKey: 'awaitingOc'
   },
   {
     filter: 'cancelled',
@@ -177,7 +183,7 @@ export default function GerenciarMateriaisPage() {
       const res = await api.get('/payment-conditions', {
         params: { paymentType: 'BOLETO', activeOnly: 'true' }
       });
-      return (res.data?.data || []) as Array<{ code: string; parcelCount: number; parcelDueDays: unknown }>;
+      return (res.data?.data || []) as PaymentConditionRow[];
     },
     enabled: showCreateOCModal && ocPaymentType === OC_TYPE_BOLETO
   });
@@ -189,7 +195,9 @@ export default function GerenciarMateriaisPage() {
 
   useEffect(() => {
     if (ocPaymentType !== OC_TYPE_BOLETO) return;
-    setOcBoletoSlots((prev) => resizeOcBoletoCreationSlots(ocBoletoParcelMeta.parcelCount, prev));
+    setOcBoletoSlots((prev) =>
+      resizeOcBoletoCreationSlots(ocBoletoParcelMeta.parcelCount, prev, ocBoletoParcelMeta.parcelDueDays)
+    );
   }, [ocPaymentType, ocPaymentCondition, ocBoletoParcelMeta.parcelCount]);
 
   const resetOcForm = () => {
@@ -304,7 +312,9 @@ export default function GerenciarMateriaisPage() {
     queryFn: async () => {
       const res = await api.get('/material-requests', { params: { limit: 500 } });
       return res.data;
-    }
+    },
+    staleTime: 0,
+    refetchOnMount: 'always',
   });
 
   const { data: ordersData } = useQuery({
@@ -394,7 +404,7 @@ export default function GerenciarMateriaisPage() {
       return res.data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['material-requests-manage'] });
+      queryClient.invalidateQueries({ queryKey: ['material-requests-manage'], refetchType: 'all' });
       queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
       queryClient.invalidateQueries({ queryKey: ['material-deliveries'] });
       queryClient.invalidateQueries({ queryKey: ['material-deliveries-summary'] });
@@ -441,7 +451,9 @@ export default function GerenciarMateriaisPage() {
       map.get(mid)!.push(o);
     }
     map.forEach((list) => {
-      list.sort((a, b) => (a.orderNumber || '').localeCompare(b.orderNumber || '', 'pt-BR', { numeric: true }));
+      list.sort((a, b) =>
+        (b.orderNumber || '').localeCompare(a.orderNumber || '', 'pt-BR', { numeric: true })
+      );
     });
     return map;
   }, [allOrders]);
@@ -457,7 +469,9 @@ export default function GerenciarMateriaisPage() {
     cancelled: normalizedRequests.filter((r: MaterialRequest) =>
       isMaterialRequestEffectivelyCancelled(r, ordersByMaterialRequestId.get(r.id) ?? [])
     ).length,
-    inReview: normalizedRequests.filter((r: MaterialRequest) => r.status === 'IN_REVIEW').length
+    awaitingOc: normalizedRequests.filter((r: MaterialRequest) =>
+      isMaterialRequestAwaitingOc(r, ordersByMaterialRequestId.get(r.id) ?? [])
+    ).length
   };
 
   const filteredRequests = useMemo(
@@ -528,11 +542,6 @@ export default function GerenciarMateriaisPage() {
             filteredRequests={filteredRequests}
             ordersByMaterialRequestId={ordersByMaterialRequestId}
             currentUserId={userData?.data?.id}
-            onCreateOc={(request) => {
-              setSelectedRequest(request);
-              resetOcForm();
-              setShowCreateOCModal(true);
-            }}
             onDetails={(request) => {
               setSelectedRequest(request);
               setShowDetailsModal(true);
@@ -586,7 +595,10 @@ export default function GerenciarMateriaisPage() {
               <div className="space-y-4">
                 <div>
                   <p className="text-xs text-gray-500 dark:text-gray-400">Número</p>
-                  <p className="font-medium text-gray-900 dark:text-gray-100">{selectedRequest.requestNumber || `#${selectedRequest.id.slice(0, 8)}`}</p>
+                  <p className="font-medium text-gray-900 dark:text-gray-100">
+                    {formatRmListDisplayId(selectedRequest.requestNumber) ||
+                      `#${selectedRequest.id.slice(0, 8)}`}
+                  </p>
                 </div>
                 <div>
                   <p className="text-xs text-gray-500 dark:text-gray-400">Status</p>
@@ -719,7 +731,7 @@ export default function GerenciarMateriaisPage() {
                     Criar Ordem de Compra
                   </h3>
                   <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">
-                    SC: {selectedRequest.requestNumber || selectedRequest.id.slice(0, 8)}
+                    RM: {formatRmListDisplayId(selectedRequest.requestNumber) || selectedRequest.id.slice(0, 8)}
                   </p>
                 </div>
                 <button

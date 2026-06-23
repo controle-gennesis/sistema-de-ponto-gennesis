@@ -1,4 +1,8 @@
-import { parsePaymentBoletoInstallments } from '@/components/oc/ocPaymentBoleto';
+import {
+  parsePaymentBoletoInstallments,
+  visiblePaymentBoletoInstallmentIndex,
+  type OrderBoletoPhasePick,
+} from '@/components/oc/ocPaymentBoleto';
 
 export type FinancialControlStatus =
   | 'PROCESSO_COMPLETO'
@@ -98,6 +102,20 @@ export function calcRemainingDays(dueDate: string, paidDate: string): number | n
   return Math.floor((a - b) / (1000 * 60 * 60 * 24));
 }
 
+export function todayDateInputValue(): string {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+export function formatDateDisplayPtBr(isoDate: string): string {
+  if (!isoDate) return '—';
+  const d = new Date(`${isoDate}T12:00:00`);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleDateString('pt-BR');
+}
 export function dateInputValue(value: string | null | undefined): string {
   if (!value) return '';
   const d = new Date(value);
@@ -174,16 +192,31 @@ export function buildFinancialEntryPayload(form: EntryFormState) {
   };
 }
 
+/** Monta payload do lançamento rápido da OC (valor da parcela + juros opcionais). */
+export function buildQuickLaunchPayload(form: EntryFormState, interestValue = ''): ReturnType<typeof buildFinancialEntryPayload> {
+  const base = parseCurrencyInput(form.originalValue || form.finalValue) ?? 0;
+  const interest = parseCurrencyInput(interestValue) ?? 0;
+  const total = Math.round((base + interest) * 100) / 100;
+  const interestNote = interest > 0 ? `Juros: ${formatCurrencyValue(interest)}` : '';
+  const receivedNote = [form.receivedNote, interestNote].filter(Boolean).join(' | ');
+  return buildFinancialEntryPayload({
+    ...form,
+    originalValue: formatCurrencyValue(base),
+    finalValue: formatCurrencyValue(total),
+    receivedNote,
+  });
+}
+
 function orderItemsTotal(items: Array<{ totalPrice: number }>): number {
   return items.reduce((sum, item) => sum + Number(item.totalPrice || 0), 0);
 }
 
 export function orderGrandTotalForFinancialEntry(order: {
-  items: Array<{ totalPrice: number }>;
+  items?: Array<{ totalPrice: number }>;
   freightAmount?: number | string | null;
   amountToPay?: number | string | null;
 }): number {
-  const items = orderItemsTotal(order.items);
+  const items = orderItemsTotal(order.items ?? []);
   const fRaw = order.freightAmount;
   if (fRaw != null && fRaw !== '' && Number.isFinite(Number(fRaw))) {
     return Math.round((items + Number(fRaw)) * 100) / 100;
@@ -194,26 +227,25 @@ export function orderGrandTotalForFinancialEntry(order: {
 }
 
 /** Pré-preenche o formulário a partir de uma OC (fase pagamento). */
-export function buildFormFromPurchaseOrder(order: {
-  orderNumber: string;
-  orderDate: string;
-  paymentType?: string | null;
-  paymentBoletoInstallments?: unknown;
-  paymentParcelCount?: number;
-  supplier?: { name: string };
-  materialRequest?: {
-    serviceOrder?: string | null;
-    requestNumber?: string;
-    costCenter?: { name?: string | null; code?: string | null };
-  } | null;
-  items: Array<{ totalPrice: number }>;
-  freightAmount?: number | string | null;
-  amountToPay?: number | string | null;
-}): EntryFormState {
+export function buildFormFromPurchaseOrder(
+  order: OrderBoletoPhasePick & {
+    orderNumber: string;
+    orderDate: string;
+    paymentType?: string | null;
+    supplier?: { name?: string | null };
+    materialRequest?: {
+      serviceOrder?: string | null;
+      requestNumber?: string;
+      costCenter?: { name?: string | null; code?: string | null };
+    } | null;
+    items?: Array<{ totalPrice: number }>;
+    freightAmount?: number | string | null;
+    amountToPay?: number | string | null;
+  }
+): EntryFormState {
   const now = new Date();
-  const base = buildInitialForm(now.getMonth() + 1, now.getFullYear());
-  const total = orderGrandTotalForFinancialEntry(order);
-  const totalStr = formatCurrencyValue(total);
+  const todayStr = todayDateInputValue();
+  const ocTotal = orderGrandTotalForFinancialEntry(order);
 
   const osCode =
     order.materialRequest?.serviceOrder?.trim() ||
@@ -223,33 +255,48 @@ export function buildFormFromPurchaseOrder(order: {
 
   let parcelNumber = '';
   let dueDate = '';
-  if (order.paymentType === 'BOLETO' && order.paymentBoletoInstallments) {
+  let installmentAmount = ocTotal;
+  const n = order.paymentParcelCount ?? 1;
+
+  if (order.paymentType === 'BOLETO') {
     const rows = parsePaymentBoletoInstallments(order.paymentBoletoInstallments);
-    const n = order.paymentParcelCount ?? rows.length ?? 1;
-    const idx = rows.findIndex((r) => r.paymentStatus !== 'PAID');
-    const pick = idx >= 0 ? rows[idx] : rows[0];
+    const parcelTotal = n > 1 ? n : rows.length || 1;
+    const idx = visiblePaymentBoletoInstallmentIndex(order);
+    const pick = idx != null ? rows[idx] : rows[0];
     if (pick) {
       dueDate = pick.dueDate || '';
-      parcelNumber = n > 1 ? `${idx >= 0 ? idx + 1 : 1}/${n}` : '1/1';
+      parcelNumber = parcelTotal > 1 ? `${(idx ?? 0) + 1}/${parcelTotal}` : '1/1';
+      if (Number.isFinite(pick.amount) && pick.amount > 0) {
+        installmentAmount = pick.amount;
+      }
+    } else if (parcelTotal > 1) {
+      parcelNumber = `1/${parcelTotal}`;
     }
+  } else if (n > 1) {
+    parcelNumber = `1/${n}`;
   }
 
-  const scRef = order.materialRequest?.requestNumber
-    ? `SC: ${order.materialRequest.requestNumber}`
+  const amountStr = formatCurrencyValue(installmentAmount);
+  const rmRef = order.materialRequest?.requestNumber
+    ? `RM: ${order.materialRequest.requestNumber}`
     : '';
 
   return {
-    ...base,
+    paymentMonth: now.getMonth() + 1,
+    paymentYear: now.getFullYear(),
+    status: 'PAGO',
     osCode,
-    supplierName: order.supplier?.name || '',
-    ocNumber: order.orderNumber,
-    originalValue: totalStr,
-    finalValue: totalStr,
+    supplierName: (order.supplier?.name || '').trim(),
+    parcelNumber,
     emissionDate: dateInputValue(order.orderDate),
     boleto: order.paymentType === 'BOLETO' ? 'Sim' : 'Não',
-    parcelNumber,
     dueDate,
-    notes: scRef,
+    originalValue: amountStr,
+    ocNumber: order.orderNumber,
+    finalValue: amountStr,
+    paidDate: todayStr,
+    remainingDays: '',
     receivedNote: `Lançamento originado da OC ${order.orderNumber}`,
+    notes: rmRef,
   };
 }

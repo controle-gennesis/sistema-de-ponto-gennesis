@@ -300,9 +300,9 @@ export class StockController {
             console.error('[StockShortfall] syncForOrderNumber', ocNum, err);
           }
           try {
-            await purchaseOrderService.syncBoletoInstallmentsFromStockReceipt(ocNum);
+            await purchaseOrderService.syncDocumentsFromStockReceipt(ocNum);
           } catch (err) {
-            console.error('[PurchaseOrder] syncBoletoInstallmentsFromStockReceipt', ocNum, err);
+            console.error('[PurchaseOrder] syncDocumentsFromStockReceipt', ocNum, err);
           }
         }
       }

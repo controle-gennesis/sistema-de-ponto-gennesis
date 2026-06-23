@@ -6,9 +6,20 @@ import {
   normalizeFluxSearch
 } from './search';
 
-export type RmCardFilter = 'all' | 'pending' | 'approved' | 'inReview' | 'cancelled';
+export type RmCardFilter = 'all' | 'pending' | 'approved' | 'awaitingOc' | 'cancelled';
 
 export const DEFAULT_RM_CARD_FILTER: RmCardFilter = 'all';
+
+export function isMaterialRequestAwaitingOc(
+  request: MaterialRequest,
+  orders: PurchaseOrder[]
+): boolean {
+  return (
+    request.status === 'APPROVED' &&
+    !isMaterialRequestEffectivelyCancelled(request, orders) &&
+    orders.length === 0
+  );
+}
 
 export function matchesRmCardFilter(
   request: MaterialRequest,
@@ -27,7 +38,7 @@ export function matchesRmCardFilter(
   }
 
   if (filter === 'pending') return request.status === 'PENDING';
-  if (filter === 'inReview') return request.status === 'IN_REVIEW';
+  if (filter === 'awaitingOc') return isMaterialRequestAwaitingOc(request, orders);
 
   return true;
 }

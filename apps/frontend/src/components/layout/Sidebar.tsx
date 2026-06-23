@@ -126,6 +126,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
     canApproveEspelhoNf,
     canApproveOc,
     canApproveFuel,
+    canApproveMaterialRequests,
     canAccessOsRoutePage,
     canAccessRecebimentoEntregasRoutePage,
   } = usePermissions();
@@ -133,6 +134,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
   const searchInputRef = useRef<HTMLInputElement>(null);
   const profileAvatarInputRef = useRef<HTMLInputElement>(null);
   const profileAvatarSectionRef = useRef<HTMLDivElement>(null);
+  const sidebarRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
   const [profileAvatarMenu, setProfileAvatarMenu] = useState(false);
   const [profileCropSrc, setProfileCropSrc] = useState<string | null>(null);
@@ -237,6 +239,9 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
 
   const navBadgeCountForHref = (href: string): number => {
     if (href === '/ponto/aprovacoes') return approvalCounts.total;
+    if (href === '/ponto/gerenciar-materiais' && canApproveMaterialRequests) {
+      return approvalCounts.rm;
+    }
     if (href === '/ponto/fds-aprovadas') return fdNotificationCounts.pendingPurchase;
     if (href === '/ponto/furo-estoque') return pendingFuroCount;
     if (href === '/ponto/recebimento-entregas') return recebimentoPendingCount;
@@ -253,7 +258,8 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
         fdNotificationCounts.pendingPurchase +
         pendingFuroCount +
         fuelSuppliesPendingCount +
-        vehicleReservationSuppliesPendingCount
+        vehicleReservationSuppliesPendingCount +
+        (canApproveMaterialRequests ? approvalCounts.rm : 0)
       );
     }
     if (categoryId === 'engenharia') return recebimentoPendingCount;
@@ -383,7 +389,11 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
             // Aparece automaticamente para quem é gestor (decide Solicitações Gerais)
             // ou tem a permissão «Aprovar Espelho da Nota Fiscal» (Controle).
             permission:
-              canAccessDpApproverPages || canApproveEspelhoNf || canApproveOc || canApproveFuel,
+              canAccessDpApproverPages ||
+              canApproveEspelhoNf ||
+              canApproveOc ||
+              canApproveFuel ||
+              canApproveMaterialRequests,
           },
           {
             name: 'Solicitações Gerais',
@@ -603,6 +613,13 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
             permission: canAccessOsRoutePage
           },
           {
+            name: 'Solicitação de Materiais',
+            href: '/ponto/solicitar-materiais',
+            icon: ShoppingCart,
+            description: 'Solicitar materiais para compra (SC)',
+            permission: isAdministrator || can(pk('/ponto/solicitar-materiais'))
+          },
+          {
             name: 'Pleitos Gerados',
             href: '/ponto/pleitos-gerados',
             icon: FileCheck,
@@ -672,13 +689,6 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
         name: 'Suprimentos',
         icon: Warehouse,
         items: [
-          {
-            name: 'Solicitação de Materiais',
-            href: '/ponto/solicitar-materiais',
-            icon: ShoppingCart,
-            description: 'Solicitar materiais para compra (SC)',
-            permission: isAdministrator || can(pk('/ponto/solicitar-materiais'))
-          },
           {
             name: 'Requisições de Materiais',
             href: '/ponto/gerenciar-materiais',
@@ -941,7 +951,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
     ? displayedModuleId
     : activeModuleId ?? (onHomeRoute || onRailFooterRoute ? null : displayedModuleId);
 
-  const handleCollapseSidebar = () => {
+  const closeSidebarPanel = useCallback(() => {
     userPickedModuleRef.current = false;
     if (activeModuleId) {
       setSelectedModuleId(activeModuleId);
@@ -949,9 +959,14 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
       setSelectedModuleId(menuItems[0].id);
     }
     setCollapsed(true);
+    setIsOpen(false);
+  }, [activeModuleId, menuItems, onHomeRoute, onRailFooterRoute, setCollapsed]);
+
+  const handleCollapseSidebar = () => {
+    closeSidebarPanel();
   };
 
-  // Ao mudar de rota: recolhe em home/atalhos do rodapé ou sincroniza módulo ativo
+  // Ao mudar de rota: recolhe só em home/atalhos do rodapé; demais rotas mantêm o painel aberto
   React.useEffect(() => {
     if (pathname === prevPathnameRef.current) return;
     prevPathnameRef.current = pathname;
@@ -985,14 +1000,28 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
   const handleSelectModule = (categoryId: string) => {
     const panelOpen = !isCollapsed || isOpen;
     if (panelOpen && displayedModuleId === categoryId) {
-      setCollapsed(true);
-      setIsOpen(false);
+      closeSidebarPanel();
       return;
     }
     userPickedModuleRef.current = true;
     setSelectedModuleId(categoryId);
     if (isCollapsed) setCollapsed(false);
   };
+
+  // Fecha o painel ao clicar fora da sidebar no desktop (mobile usa o overlay)
+  React.useEffect(() => {
+    if (effectiveCollapsed) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const sidebarEl = sidebarRef.current;
+      if (!sidebarEl) return;
+      if (sidebarEl.contains(event.target as Node)) return;
+      closeSidebarPanel();
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    return () => document.removeEventListener('pointerdown', handlePointerDown);
+  }, [effectiveCollapsed, closeSidebarPanel]);
 
   useLayoutEffect(() => {
     const savedModule = readSelectedModuleId();
@@ -1027,12 +1056,13 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
       {isOpen && (
         <div
           className="lg:hidden fixed inset-0 bg-black bg-opacity-50 z-30"
-          onClick={() => setIsOpen(false)}
+          onClick={closeSidebarPanel}
         />
       )}
 
       {/* Dual-tier Sidebar */}
       <div
+        ref={sidebarRef}
         className={`fixed top-0 left-0 flex h-full transform overflow-visible transition-all ${SIDEBAR_TRANSITION_CLASS} z-[100] ${
           isOpen ? 'translate-x-0' : '-translate-x-full'
         } lg:translate-x-0`}
@@ -1072,7 +1102,6 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
                   <div key={category.id} className="relative flex justify-center overflow-visible">
                     <Link
                       href={singleItem.href}
-                      onClick={() => setIsOpen(false)}
                       className={`relative z-10 w-10 h-10 overflow-visible rounded-xl transition-all duration-200 flex items-center justify-center ${
                         active
                           ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-500'
@@ -1121,7 +1150,6 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
             <div className="flex flex-col items-center gap-2">
               <Link
                 href="/ponto/conversas"
-                onClick={() => setIsOpen(false)}
                 title="Chat"
                 aria-label={`Chat${chatUnreadCount > 0 ? `, ${chatUnreadCount} não lidas` : ''}`}
                 className={`relative z-10 w-10 h-10 overflow-visible rounded-xl transition-all duration-200 flex items-center justify-center ${
@@ -1135,7 +1163,6 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
               </Link>
               <Link
                 href="/ponto/kanban"
-                onClick={() => setIsOpen(false)}
                 title="Tasks"
                 aria-label="Tasks"
                 className={`w-10 h-10 rounded-xl transition-all duration-200 flex items-center justify-center ${
@@ -1148,7 +1175,6 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
               </Link>
               <Link
                 href="/ponto/drive"
-                onClick={() => setIsOpen(false)}
                 title="Drive"
                 aria-label="Drive"
                 className={`w-10 h-10 rounded-xl transition-all duration-200 flex items-center justify-center ${
@@ -1301,7 +1327,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
                   <ArrowLeftToLine className="w-5 h-5 flex-shrink-0" />
                 </button>
                 <button
-                  onClick={() => setIsOpen(false)}
+                  onClick={closeSidebarPanel}
                   className="lg:hidden w-8 h-8 flex items-center justify-center hover:bg-gray-100 dark:hover:bg-gray-800 rounded text-gray-600 dark:text-gray-300"
                   aria-label="Fechar menu"
                 >
@@ -1351,7 +1377,6 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
                           <Link
                             key={item.href}
                             href={item.href}
-                            onClick={() => setIsOpen(false)}
                             className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 ${
                               active
                                 ? 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-500'
@@ -1383,7 +1408,6 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
                     <Link
                       key={item.href}
                       href={item.href}
-                      onClick={() => setIsOpen(false)}
                       className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 ${
                         active
                           ? 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-500'

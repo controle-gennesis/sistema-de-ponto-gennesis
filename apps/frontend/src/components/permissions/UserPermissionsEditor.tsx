@@ -30,6 +30,7 @@ import {
 import { Card, CardContent } from '@/components/ui/Card';
 import { Loading } from '@/components/ui/Loading';
 import api from '@/lib/api';
+import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
 
 /** Orçamento e relatórios fotográficos: só pela aba «Contratos», não pela matriz «Acesso». */
 const HIDDEN_FROM_ACCESS_MATRIX = new Set<string>([
@@ -49,7 +50,13 @@ type ContractModuleFlags = {
 };
 
 type UserPermissionPayload = {
-  user: { id: string; name: string; email: string; employee?: { position?: string | null } };
+  user: {
+    id: string;
+    name: string;
+    email: string;
+    profilePhotoUrl?: string | null;
+    employee?: { position?: string | null };
+  };
   isAdmin: boolean;
   permissions: PermissionItem[];
   allowedContractIds: string[];
@@ -68,6 +75,7 @@ export type PermissionsTargetPreview = {
   name: string;
   email: string;
   position?: string;
+  profilePhotoUrl?: string | null;
 };
 
 function serializePermissionSet(s: Set<string>): string {
@@ -78,6 +86,14 @@ const CONTRACTS_MODULE_KEY = pathToModuleKey('/ponto/contratos');
 const EMPLOYEES_MODULE_KEY = pathToModuleKey('/ponto/funcionarios');
 /** Removido da UI (gestor por contrato na aba Contratos); ainda pode existir no banco até o próximo salvamento. */
 const DEPRECATED_DP_APPROVE_CONTROLE_KEY = pathToModuleKey('/ponto/controle/aprovar-solicitacoes-dp');
+const DEPRECATED_OC_GESTOR_CONTROLE_KEY = pathToModuleKey('/ponto/controle/aprovar-oc-gestor');
+const DEPRECATED_RM_APPROVE_CONTROLE_KEY = pathToModuleKey('/ponto/controle/aprovar-requisicoes-materiais');
+
+const DEPRECATED_CONTROLE_KEYS = new Set([
+  DEPRECATED_DP_APPROVE_CONTROLE_KEY,
+  DEPRECATED_OC_GESTOR_CONTROLE_KEY,
+  DEPRECATED_RM_APPROVE_CONTROLE_KEY,
+]);
 const CONTRACT_ACTIONS = ['ver', 'criar', 'editar', 'excluir'] as const;
 type ContractAction = (typeof CONTRACT_ACTIONS)[number];
 
@@ -132,7 +148,7 @@ function buildPermissionsSnapshotForCache(
   }
   const out: PermissionItem[] = [];
   for (const module of Array.from(modules)) {
-    if (module === DEPRECATED_DP_APPROVE_CONTROLE_KEY) continue;
+    if (DEPRECATED_CONTROLE_KEYS.has(module)) continue;
     out.push({ module, action: PERMISSION_ACCESS_ACTION });
   }
   for (const action of Array.from(contractActions)) {
@@ -214,6 +230,9 @@ function inferCategoryFromHref(href: string): string {
       '/ponto/contratos/relatorios',
       '/ponto/andamento-da-os',
       '/ponto/pleitos-gerados',
+      '/ponto/aprovacao-fds',
+      '/ponto/recebimento-entregas',
+      '/ponto/solicitar-materiais',
     ].some((p) => h === p)
   ) {
     return 'Engenharia';
@@ -224,7 +243,6 @@ function inferCategoryFromHref(href: string): string {
   if (h === '/ponto/juridico') return 'Jurídico';
   if (
     [
-      '/ponto/solicitar-materiais',
       '/ponto/gerenciar-materiais',
       '/ponto/mapa-cotacao',
       '/ponto/ordem-de-compra',
@@ -630,7 +648,7 @@ export function UserPermissionsEditor({
     const next = new Set<string>(
       perms.filter((p) => p.action === PERMISSION_ACCESS_ACTION).map((p) => p.module)
     );
-    next.delete(DEPRECATED_DP_APPROVE_CONTROLE_KEY);
+    DEPRECATED_CONTROLE_KEYS.forEach((k) => next.delete(k));
     PERMISSION_MODULE_KEYS_MANAGED_ONLY_ON_CONTRACT_MATRIX.forEach((k) => next.delete(k));
     const nextContract = new Set<ContractAction>();
     const nextEmployee = new Set<ContractAction>();
@@ -693,7 +711,9 @@ export function UserPermissionsEditor({
         currentSelected.add(EMPLOYEES_MODULE_KEY);
       }
 
-      const basePermissions = Array.from(currentSelected).map((module) => ({ module }));
+      const basePermissions = Array.from(currentSelected)
+        .filter((module) => !DEPRECATED_CONTROLE_KEYS.has(module))
+        .map((module) => ({ module }));
       const contractActionPermissions = currentContractActions.map((action) => ({
         module: CONTRACTS_MODULE_KEY,
         action,
@@ -850,7 +870,7 @@ export function UserPermissionsEditor({
     for (const m of PERMISSION_MODULES) {
       const cat = moduleCategory(m);
       if (cat !== PERMISSION_CONTROLE_CATEGORY) continue;
-      if (m.key === DEPRECATED_DP_APPROVE_CONTROLE_KEY) continue;
+      if (DEPRECATED_CONTROLE_KEYS.has(m.key)) continue;
       const list = map.get(cat) ?? [];
       list.push(m);
       map.set(cat, list);
@@ -1014,7 +1034,7 @@ export function UserPermissionsEditor({
           .filter((p) => p.action === PERMISSION_ACCESS_ACTION)
           .map((p) => p.module)
       );
-      nextGeneral.delete(DEPRECATED_DP_APPROVE_CONTROLE_KEY);
+      DEPRECATED_CONTROLE_KEYS.forEach((k) => nextGeneral.delete(k));
       PERMISSION_MODULE_KEYS_MANAGED_ONLY_ON_CONTRACT_MATRIX.forEach((k) => nextGeneral.delete(k));
       const nextContractActions = new Set<ContractAction>();
       const nextEmployeeActions = new Set<ContractAction>();
@@ -1200,6 +1220,15 @@ export function UserPermissionsEditor({
   const displayName = userPermissionData?.user?.name ?? preview.name;
   const displayPosition =
     userPermissionData?.user?.employee?.position ?? preview.position ?? 'Sem cargo definido';
+  const displayPhotoHref = resolveApiMediaUrl(
+    userPermissionData?.user?.profilePhotoUrl ?? preview.profilePhotoUrl ?? null,
+  );
+  const displayInitials = displayName
+    .split(' ')
+    .map((n) => n[0])
+    .join('')
+    .slice(0, 2)
+    .toUpperCase();
 
   const labelFor = (mod: PermissionModuleDef) => displayModuleName(mod);
 
@@ -1280,18 +1309,23 @@ export function UserPermissionsEditor({
         {/* Perfil */}
         <div className="border-b border-gray-200 bg-white px-4 py-5 dark:border-gray-700 dark:bg-gray-800 sm:px-6">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex min-w-0 items-start gap-4">
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border-2 border-blue-500 bg-white text-sm font-bold text-blue-600 dark:border-blue-400 dark:bg-gray-800 dark:text-blue-400">
-                {displayName
-                  .split(' ')
-                  .map((n) => n[0])
-                  .join('')
-                  .slice(0, 2)
-                  .toUpperCase()}
+            <div className="flex min-w-0 items-center gap-4">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-red-600">
+                {displayPhotoHref ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={displayPhotoHref}
+                    alt=""
+                    className="h-full w-full object-cover"
+                    referrerPolicy="no-referrer"
+                  />
+                ) : (
+                  <span className="text-sm font-bold text-white">{displayInitials}</span>
+                )}
               </div>
               <div className="min-w-0">
                 <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{displayName}</h2>
-                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                <p className="text-sm text-gray-500 dark:text-gray-400">
                   <span className="text-gray-700 dark:text-gray-300">{displayPosition}</span>
                 </p>
               </div>
@@ -1592,7 +1626,7 @@ export function UserPermissionsEditor({
                         <th
                           scope="col"
                           className="px-1 pb-3 text-center text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-400 dark:text-gray-500"
-                          title="Aprovar solicitações ao DP, criar rescisão/alteração de função-salário neste contrato"
+                          title="Gestor do contrato: aprova solicitações DP/FD, requisições de materiais e OCs na fase gestor deste contrato"
                         >
                           Gestor
                         </th>

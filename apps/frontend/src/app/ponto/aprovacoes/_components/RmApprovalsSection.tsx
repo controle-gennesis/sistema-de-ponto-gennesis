@@ -66,7 +66,7 @@ const MENU_ITEM_BORDER_CLASS = `${MENU_ITEM_CLASS} border-t border-gray-200 dark
 
 export function RmApprovalsSection() {
   const queryClient = useQueryClient();
-  const { canApproveMaterialRequests } = usePermissions();
+  const { canApproveMaterialRequests, gestorScopedCostCenterIds } = usePermissions();
 
   const [searchTerm, setSearchTerm] = useState('');
   const [rmPhase, setRmPhase] = useState<RmPhaseFilter>('PENDING');
@@ -100,9 +100,16 @@ export function RmApprovalsSection() {
     if (rmPhase === 'ALL') {
       list = requests.filter((r) => r.status === 'PENDING' || r.status === 'IN_REVIEW');
     }
+    if (gestorScopedCostCenterIds !== undefined) {
+      const allowed = new Set(gestorScopedCostCenterIds);
+      list = list.filter((r) => {
+        const ccId = r.costCenter?.id;
+        return ccId ? allowed.has(ccId) : false;
+      });
+    }
     if (!normalized) return list;
     return list.filter((r) => matchesMaterialRequestSearch(r, normalized));
-  }, [requests, searchTerm, rmPhase]);
+  }, [requests, searchTerm, rmPhase, gestorScopedCostCenterIds]);
 
   const requestForMenu = useMemo(() => {
     if (!actionMenu) return null;
@@ -116,10 +123,12 @@ export function RmApprovalsSection() {
   }, [actionMenu, requestForMenu]);
 
   const invalidateRmQueries = async () => {
-    await queryClient.invalidateQueries({ queryKey: ['approvals', 'material-requests'] });
-    await queryClient.invalidateQueries({ queryKey: ['material-requests-manage'] });
-    await queryClient.invalidateQueries({ queryKey: ['material-requests'] });
-    await queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['approvals', 'material-requests'] }),
+      queryClient.invalidateQueries({ queryKey: ['material-requests-manage'], refetchType: 'all' }),
+      queryClient.invalidateQueries({ queryKey: ['material-requests'], refetchType: 'all' }),
+      queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] }),
+    ]);
   };
 
   const approveMutation = useMutation({
@@ -199,7 +208,7 @@ export function RmApprovalsSection() {
                   type="text"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  placeholder="Buscar por SC, solicitante, material..."
+                  placeholder="Buscar por RM, solicitante, material..."
                   className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
                 />
                 {searchTerm ? (
@@ -338,7 +347,8 @@ export function RmApprovalsSection() {
             <div>
               <p className="text-xs text-gray-500 dark:text-gray-400">Número</p>
               <p className="font-medium text-gray-900 dark:text-gray-100">
-                {detailRequest.requestNumber || `#${detailRequest.id.slice(0, 8)}`}
+                {formatRmListDisplayId(detailRequest.requestNumber) ||
+                  `#${detailRequest.id.slice(0, 8)}`}
               </p>
             </div>
             <div>
@@ -375,7 +385,7 @@ export function RmApprovalsSection() {
         <Modal isOpen onClose={() => setApproveTarget(null)} title="Aprovar Requisição" size="md">
           <p className="mb-6 text-sm text-gray-600 dark:text-gray-400">
             Confirmar aprovação da requisição{' '}
-            <strong>{approveTarget.requestNumber || formatRmListDisplayId(approveTarget.requestNumber)}</strong>?
+            <strong>{formatRmListDisplayId(approveTarget.requestNumber)}</strong>?
           </p>
           <div className="flex justify-end gap-3">
             <button

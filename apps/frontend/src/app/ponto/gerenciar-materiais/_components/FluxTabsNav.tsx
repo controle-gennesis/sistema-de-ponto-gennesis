@@ -1,4 +1,5 @@
 import type { FluxTab, GerenciarStats } from '../_lib/types';
+import { TabCountBadge } from '@/components/ui/TabCountBadge';
 
 type OcTabCounts = {
   compras: number;
@@ -66,15 +67,7 @@ export function FluxTabsNav({
               }`}
             >
               {tab.label}
-              <span
-                className={`px-2 py-0.5 rounded-full text-xs ${
-                  fluxTab === tab.id
-                    ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'
-                    : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400'
-                }`}
-              >
-                {tab.count}
-              </span>
+              <TabCountBadge count={tab.count} active={fluxTab === tab.id} tone="blue" />
             </button>
           ))}
           <span
@@ -122,15 +115,7 @@ export function FluxTabsNav({
               }`}
             >
               {tab.label}
-              <span
-                className={`px-2 py-0.5 rounded-full text-xs ${
-                  fluxTab === tab.id
-                    ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'
-                    : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400'
-                }`}
-              >
-                {tab.count}
-              </span>
+              <TabCountBadge count={tab.count} active={fluxTab === tab.id} tone="blue" />
             </button>
           ))}
           <span
@@ -147,15 +132,7 @@ export function FluxTabsNav({
             }`}
           >
             Canceladas
-            <span
-              className={`px-2 py-0.5 rounded-full text-xs ${
-                fluxTab === 'rm_CANCELLED'
-                  ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'
-                  : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400'
-              }`}
-            >
-              {rmCancelled}
-            </span>
+            <TabCountBadge count={rmCancelled} active={fluxTab === 'rm_CANCELLED'} tone="blue" />
           </button>
         </nav>
       </div>

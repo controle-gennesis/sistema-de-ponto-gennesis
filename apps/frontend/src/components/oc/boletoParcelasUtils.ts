@@ -1,8 +1,13 @@
 import {
   parsePaymentBoletoInstallments,
+  rowStatus,
   type BoletoInstallmentRow,
   type BoletoInstallmentPaymentStatus
 } from '@/components/oc/ocPaymentBoleto';
+import {
+  formatCurrencyInputBrFromNumber,
+  parseCurrencyInputBr
+} from '@/lib/maskCurrencyBr';
 
 export type BoletoParcelasOrderFields = {
   orderDate?: string | null;
@@ -73,23 +78,176 @@ export function formatDueDateBr(ymd: string | undefined | null): string {
 }
 
 export function parseMoneyInput(value: string): number | null {
-  const cleaned = value.trim().replace(/[R$\s]/g, '').replace(/\./g, '').replace(',', '.');
-  if (!cleaned) return null;
-  const x = parseFloat(cleaned);
-  return Number.isFinite(x) ? x : null;
+  return parseCurrencyInputBr(value);
+}
+
+export function parseOrderTotalAmount(order: BoletoParcelasOrderFields): number {
+  const total = Number(order.amountToPay);
+  return Number.isFinite(total) ? total : 0;
+}
+
+/** Ao editar o valor de uma parcela, ajusta as demais editáveis para manter a soma = total da OC. */
+export function redistributeInstallmentAmounts(
+  rows: RowDraft[],
+  editedIndex: number,
+  rawEditedValue: string,
+  orderTotal: number,
+  rowLocked: boolean[]
+): { rows: RowDraft[]; wasCapped: boolean } {
+  if (rows.length <= 1) {
+    const parsed = parseMoneyInput(rawEditedValue);
+    if (parsed == null) {
+      return {
+        rows: rows.map((r, i) => (i === editedIndex ? { ...r, amount: rawEditedValue } : r)),
+        wasCapped: false
+      };
+    }
+    const maxAllowed = Math.max(0, orderTotal);
+    const clamped = Math.max(0, Math.min(parsed, maxAllowed));
+    return {
+      rows: rows.map((r, i) =>
+        i === editedIndex ? { ...r, amount: formatCurrencyInputBrFromNumber(clamped) } : r
+      ),
+      wasCapped: parsed > maxAllowed + 0.001
+    };
+  }
+
+  const next = rows.map((r) => ({ ...r }));
+
+  const parsedEdited = parseMoneyInput(rawEditedValue);
+  if (parsedEdited == null) {
+    next[editedIndex] = { ...next[editedIndex], amount: rawEditedValue };
+    return { rows: next, wasCapped: false };
+  }
+
+  const lockedSum = rows.reduce((s, r, i) => {
+    if (i === editedIndex || !rowLocked[i]) return s;
+    return s + (parseMoneyInput(r.amount) ?? 0);
+  }, 0);
+
+  const maxAllowed = Math.max(0, orderTotal - lockedSum);
+  const clamped = Math.max(0, Math.min(parsedEdited, maxAllowed));
+  const wasCapped = parsedEdited > maxAllowed + 0.001;
+
+  next[editedIndex] = { ...next[editedIndex], amount: formatCurrencyInputBrFromNumber(clamped) };
+
+  const remainder = Math.max(0, Math.round((orderTotal - lockedSum - clamped) * 100) / 100);
+
+  const otherEditableIndices = rows
+    .map((_, i) => i)
+    .filter((i) => i !== editedIndex && !rowLocked[i]);
+
+  if (otherEditableIndices.length === 0) {
+    return { rows: next, wasCapped };
+  }
+
+  if (otherEditableIndices.length === 1) {
+    const j = otherEditableIndices[0];
+    next[j] = { ...next[j], amount: formatCurrencyInputBrFromNumber(remainder) };
+    return { rows: next, wasCapped };
+  }
+
+  const parts = splitAmountInInstallments(remainder, otherEditableIndices.length);
+  otherEditableIndices.forEach((j, k) => {
+    next[j] = { ...next[j], amount: formatCurrencyInputBrFromNumber(parts[k] ?? 0) };
+  });
+  return { rows: next, wasCapped };
+}
+
+export function sumInstallmentAmounts(rows: RowDraft[]): number {
+  return rows.reduce((s, r) => s + (parseMoneyInput(r.amount) ?? 0), 0);
+}
+
+export function validateInstallmentAmountsSum(
+  rows: RowDraft[],
+  orderTotal: number
+): { valid: boolean; message?: string; sum: number } {
+  if (orderTotal <= 0 || rows.length === 0) {
+    return { valid: true, sum: 0 };
+  }
+
+  const parsed = rows.map((r) => parseMoneyInput(r.amount));
+  if (parsed.some((a) => a == null)) {
+    return { valid: false, message: 'Informe o valor de todas as parcelas.', sum: 0 };
+  }
+
+  const amounts = parsed as number[];
+  if (amounts.some((a) => a < 0)) {
+    return { valid: false, message: 'Valor da parcela inválido.', sum: sumInstallmentAmounts(rows) };
+  }
+  if (amounts.some((a) => a > orderTotal + 0.001)) {
+    return {
+      valid: false,
+      message: `Nenhuma parcela pode ultrapassar o total da OC (${formatMoneyDisplay(orderTotal)}).`,
+      sum: sumInstallmentAmounts(rows)
+    };
+  }
+
+  const sum = amounts.reduce((a, b) => a + b, 0);
+  const sumCents = Math.round(sum * 100);
+  const totalCents = Math.round(orderTotal * 100);
+
+  if (sumCents > totalCents) {
+    return {
+      valid: false,
+      message: `A soma das parcelas (${formatMoneyDisplay(sum)}) ultrapassa o total da OC (${formatMoneyDisplay(orderTotal)}).`,
+      sum
+    };
+  }
+
+  if (sumCents !== totalCents) {
+    return {
+      valid: false,
+      message: `A soma das parcelas (${formatMoneyDisplay(sum)}) deve ser igual ao total da OC (${formatMoneyDisplay(orderTotal)}).`,
+      sum
+    };
+  }
+
+  return { valid: true, sum };
+}
+
+/** Corrige parcelas salvas com soma ou valor acima do total da OC (mantém parcelas já no financeiro/pagas). */
+export function normalizeRowAmountsToOrderTotal(rows: RowDraft[], orderTotal: number): RowDraft[] {
+  if (orderTotal <= 0 || rows.length === 0) return rows;
+  if (validateInstallmentAmountsSum(rows, orderTotal).valid) return rows;
+
+  const locked = rows.map((r) => {
+    const st = rowStatus(draftToRow(r));
+    return st === 'PAID' || st === 'AWAITING_PAYMENT';
+  });
+
+  const lockedSum = rows.reduce(
+    (s, r, i) => (locked[i] ? s + (parseMoneyInput(r.amount) ?? 0) : s),
+    0
+  );
+  const remainder = Math.max(0, Math.round((orderTotal - lockedSum) * 100) / 100);
+  const editableIndices = rows.map((_, i) => i).filter((i) => !locked[i]);
+  if (editableIndices.length === 0) return rows;
+
+  const parts = splitAmountInInstallments(remainder, editableIndices.length);
+  const next = rows.map((r) => ({ ...r }));
+  editableIndices.forEach((idx, k) => {
+    next[idx] = {
+      ...next[idx],
+      amount: formatCurrencyInputBrFromNumber(parts[k] ?? 0)
+    };
+  });
+  return next;
 }
 
 export function buildInitialRows(order: BoletoParcelasOrderFields): RowDraft[] {
   const n = order.paymentParcelCount ?? 1;
   const days = order.paymentParcelDueDays?.length ? order.paymentParcelDueDays : [30];
   const existing = parsePaymentBoletoInstallments(order.paymentBoletoInstallments);
-  const total = Number(order.amountToPay);
-  const amounts = splitAmountInInstallments(Number.isFinite(total) ? total : 0, n);
-  return Array.from({ length: n }, (_, i) => {
+  const total = parseOrderTotalAmount(order);
+  const amounts = splitAmountInInstallments(total, n);
+  const rows = Array.from({ length: n }, (_, i) => {
     const ex = existing[i];
     const d = days[i] ?? days[days.length - 1] ?? 30;
     return {
-      amount: formatMoneyBr(Number.isFinite(ex?.amount) ? ex.amount : amounts[i] ?? 0),
+      amount: formatCurrencyInputBrFromNumber(
+        Number.isFinite(ex?.amount) ? ex.amount : amounts[i] ?? 0
+      ),
       dueDate: ex?.dueDate || ymdAddDays(order.orderDate, d),
       boletoUrl: ex?.boletoUrl ?? null,
       boletoName: ex?.boletoName ?? null,
@@ -97,6 +255,7 @@ export function buildInitialRows(order: BoletoParcelasOrderFields): RowDraft[] {
       paymentStatus: ex?.paymentStatus
     };
   });
+  return normalizeRowAmountsToOrderTotal(rows, total);
 }
 
 export function draftToRow(d: RowDraft): BoletoInstallmentRow {

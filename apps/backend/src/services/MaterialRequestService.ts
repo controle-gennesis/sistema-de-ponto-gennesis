@@ -341,6 +341,7 @@ export class MaterialRequestService {
   async listMaterialRequests(filters: {
     status?: string;
     costCenterId?: string;
+    costCenterIds?: string[];
     projectId?: string;
     requestedBy?: string;
     priority?: string;
@@ -360,6 +361,8 @@ export class MaterialRequestService {
 
     if (filters.costCenterId) {
       where.costCenterId = filters.costCenterId;
+    } else if (filters.costCenterIds?.length) {
+      where.costCenterId = { in: filters.costCenterIds };
     }
 
     if (filters.projectId) {

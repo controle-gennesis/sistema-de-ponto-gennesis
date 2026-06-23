@@ -95,6 +95,7 @@ function sanitizeMaterialDisplayText(value?: string | null): string {
 /** Título do material: nome do cadastro em destaque; descrição vai no subtítulo. */
 export function materialItemLabel(item: MaterialLineItem): string {
   const m = item.material;
+  if (!m) return 'Material';
   const name = sanitizeMaterialDisplayText(m.name);
   if (name) return name;
   const desc = sanitizeMaterialDisplayText(m.description);
@@ -107,6 +108,7 @@ export function materialItemLabel(item: MaterialLineItem): string {
 /** Linha auxiliar: descrição quando existir e for diferente do nome. */
 export function materialItemSubtitle(item: MaterialLineItem): string | null {
   const m = item.material;
+  if (!m) return null;
   const name = sanitizeMaterialDisplayText(m.name);
   const desc = sanitizeMaterialDisplayText(m.description);
   if (desc && name && desc !== name) return desc;

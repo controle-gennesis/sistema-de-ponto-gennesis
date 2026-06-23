@@ -51,3 +51,26 @@ export function isNaturezaIncludedInContractPaidTotal(natureza: string): boolean
   if (!key || key === '—' || key === '-') return false;
   return !isNaturezaExcludedFromContractPaidTotal(natureza);
 }
+
+/** Espelha apps/frontend/.../gastosOperacionaisNaturezaModal.ts */
+const GASTOS_OPERACIONAIS_MOV_FINANCEIRA_NATUREZAS = ['REPASSE AO ADM - SAIDA - SV'] as const;
+
+const GASTOS_OPERACIONAIS_MOV_FINANCEIRA_KEYS = new Set(
+  GASTOS_OPERACIONAIS_MOV_FINANCEIRA_NATUREZAS.map((n) => normalizeNaturezaLabel(n))
+);
+
+export function isGastosOperacionaisMovFinanceiraNatureza(natureza: string): boolean {
+  return GASTOS_OPERACIONAIS_MOV_FINANCEIRA_KEYS.has(normalizeNaturezaLabel(natureza));
+}
+
+/** Total da listagem de Gastos Operacionais: operacionais + repasse ao ADM. */
+export function isGastosOperacionaisHiddenNatureza(natureza: string): boolean {
+  if (isGastosOperacionaisMovFinanceiraNatureza(natureza)) return false;
+  return isNaturezaExcludedFromContractPaidTotal(natureza);
+}
+
+export function shouldCountInGastosOperacionaisTotal(natureza: string): boolean {
+  const key = normalizeNaturezaLabel(natureza);
+  if (!key || key === '—' || key === '-') return false;
+  return !isGastosOperacionaisHiddenNatureza(natureza);
+}

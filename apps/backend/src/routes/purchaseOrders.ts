@@ -265,7 +265,8 @@ router.patch('/:id/status', async (req: AuthRequest, res: Response, next: NextFu
       req.user.id,
       !!req.user.isAdmin,
       String(existing?.status ?? ''),
-      String(status)
+      String(status),
+      existing?.materialRequest?.costCenter?.id ?? null,
     );
     const order = await service.updateStatus(req.params.id, status, req.user?.id, {
       rejectionReason: typeof rejectionReason === 'string' ? rejectionReason : undefined

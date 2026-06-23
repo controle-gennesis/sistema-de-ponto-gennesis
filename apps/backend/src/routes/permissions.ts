@@ -9,6 +9,7 @@ import {
 } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { createError } from '../middleware/errorHandler';
+import { getContractGestorCostCenterIds } from '../lib/contractGestorApprovalAccess';
 import { filterValidPermissionPayload, removeOrphanUserPermissions } from '../lib/permissionRegistrySync';
 import { CONTRACTS_MODULE_KEY } from '../lib/contractAccess';
 
@@ -69,6 +70,7 @@ router.get('/me', async (req: AuthRequest, res, next) => {
           permissions: [],
           allowedContractIds: [],
           dpApprovalContractIds: [],
+          gestorCostCenterIds: [],
           contractModuleFlags: {},
         },
       });
@@ -98,6 +100,8 @@ router.get('/me', async (req: AuthRequest, res, next) => {
       select: { contractId: true },
     });
 
+    const gestorCostCenterIds = await getContractGestorCostCenterIds(req.user.id);
+
     const contractModuleFlags: Record<
       string,
       {
@@ -123,6 +127,7 @@ router.get('/me', async (req: AuthRequest, res, next) => {
         permissions,
         allowedContractIds: allowedContractIds.map((r) => r.contractId),
         dpApprovalContractIds: dpApprovalContractIds.map((r) => r.contractId),
+        gestorCostCenterIds,
         contractModuleFlags,
       },
     });
@@ -241,6 +246,7 @@ router.get('/users/:userId', requirePermissionManagerOrAdministrator, async (req
         id: true,
         name: true,
         email: true,
+        profilePhotoUrl: true,
         employee: {
           select: {
             position: true,

@@ -28,6 +28,14 @@ type GastosOperacionaisDetailRow = {
   polo?: string | null;
 };
 
+type GastosOperacionaisNaturezaDetailRow = {
+  contract: string;
+  month: number;
+  year: number;
+  natureza: string;
+  total: number;
+};
+
 function normalizeGastosCcLookupKey(value: string): string {
   return normalizeCentroCustoName(value);
 }
@@ -558,6 +566,7 @@ export class ContractController {
           data: {
             configured: false,
             detailRows: [] as GastosOperacionaisDetailRow[],
+            naturezaDetailRows: [] as GastosOperacionaisNaturezaDetailRow[],
             fetchedAt: new Date().toISOString(),
             message:
               'Integração TOTVS RM não configurada. Defina TOTVS_RM_BASE_URL e TOTVS_RM_USER + TOTVS_RM_PASSWORD (Basic) ou TOTVS_RM_BEARER_TOKEN.'
@@ -574,6 +583,7 @@ export class ContractController {
           data: {
             configured: true,
             detailRows,
+            naturezaDetailRows: result.naturezaDetailRows,
             fetchedAt: new Date().toISOString(),
             costCenterCount: result.costCenterCount,
             totalRowCount: result.totalRowCount,
@@ -592,6 +602,7 @@ export class ContractController {
           data: {
             configured: true,
             detailRows: [] as GastosOperacionaisDetailRow[],
+            naturezaDetailRows: [] as GastosOperacionaisNaturezaDetailRow[],
             fetchedAt: new Date().toISOString()
           }
         });

@@ -2,6 +2,7 @@ import type { GastosOperacionaisRow } from './ControleGeralGastosOperacionaisPan
 import {
   GASTOS_OPERACIONAIS_LOCALITIES,
   isContractExcludedFromPresentation,
+  normalizeContractOrderKey,
   normalizeGastosOperacionaisContractName,
   resolveVisibleLocalityItems,
   sortContractNamesByCustomOrder,
@@ -14,6 +15,11 @@ import {
   isContractInVisibleLocalities,
   type GastosOperacionaisLocalityOverrideMap
 } from './gastosOperacionaisLocalityOverrides';
+import {
+  isGastosOperacionaisMovFinanceiraNatureza,
+  shouldShowInGastosNaturezaModal
+} from './gastosOperacionaisNaturezaModal';
+import { normalizeNaturezaLabel } from '@/lib/contractPaidNaturezaExclusions';
 
 export type QueryGastosDetailRow = {
   month: number;
@@ -23,21 +29,195 @@ export type QueryGastosDetailRow = {
   polo?: string | null;
 };
 
+export type QueryGastosNaturezaDetailRow = {
+  month: number;
+  year: number;
+  contract: string;
+  natureza: string;
+  total: number;
+};
+
+export type GastosNaturezaAggRow = {
+  natureza: string;
+  total: number;
+  /** Movimentação financeira — visível no detalhe, fora do total operacional. */
+  excludedFromOperationalTotal?: boolean;
+};
+
 export type GastosOperacionaisFilters = {
   localities: GastosOperacionaisLocality[];
   polos: string[];
-  months: number[];
-  years: number[];
+  /** YYYY-MM-DD (fuso local). Vazio = sem limite inferior. */
+  periodFrom: string;
+  /** YYYY-MM-DD (fuso local). Vazio = sem limite superior. */
+  periodTo: string;
   contracts: string[];
 };
 
 export const EMPTY_GASTOS_OPERACIONAIS_FILTERS: GastosOperacionaisFilters = {
   localities: [],
   polos: [],
-  months: [],
-  years: [],
+  periodFrom: '',
+  periodTo: '',
   contracts: []
 };
+
+export function parseGastosPeriodYmd(ymd: string): Date | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd.trim());
+  if (!match) return null;
+
+  const year = Number.parseInt(match[1], 10);
+  const month = Number.parseInt(match[2], 10);
+  const day = Number.parseInt(match[3], 10);
+  if (!Number.isFinite(year) || month < 1 || month > 12 || day < 1 || day > 31) {
+    return null;
+  }
+
+  const date = new Date(year, month - 1, day, 12, 0, 0, 0);
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) {
+    return null;
+  }
+
+  return date;
+}
+
+function getGastosRowMonthBounds(
+  row: Pick<QueryGastosDetailRow, 'month' | 'year'>
+): { start: Date; end: Date } {
+  const start = new Date(row.year, row.month - 1, 1, 12, 0, 0, 0);
+  const end = new Date(row.year, row.month, 0, 12, 0, 0, 0);
+  return { start, end };
+}
+
+/** Inclui linhas mensais cujo mês civil intersecta o intervalo (dados agregados por mês). */
+export function rowIntersectsGastosPeriod(
+  row: Pick<QueryGastosDetailRow, 'month' | 'year'>,
+  periodFrom: string,
+  periodTo: string
+): boolean {
+  if (!periodFrom && !periodTo) return true;
+
+  const from = periodFrom ? parseGastosPeriodYmd(periodFrom) : null;
+  const to = periodTo ? parseGastosPeriodYmd(periodTo) : null;
+  if ((periodFrom && !from) || (periodTo && !to)) return true;
+
+  const { start: monthStart, end: monthEnd } = getGastosRowMonthBounds(row);
+  const rangeStart = from ?? monthStart;
+  const rangeEnd = to ?? monthEnd;
+  if (rangeStart > rangeEnd) return false;
+
+  return monthStart <= rangeEnd && monthEnd >= rangeStart;
+}
+
+/** Deriva meses/anos para a API de faturamento (mesma lógica do filtro multi mês/ano). */
+export function deriveEmissaoMonthYearFromPeriod(
+  periodFrom: string,
+  periodTo: string
+): { months: number[]; years: number[] } {
+  if (!periodFrom && !periodTo) return { months: [], years: [] };
+
+  const from = periodFrom
+    ? parseGastosPeriodYmd(periodFrom)
+    : parseGastosPeriodYmd('1900-01-01');
+  const to = periodTo ? parseGastosPeriodYmd(periodTo) : parseGastosPeriodYmd('2100-12-31');
+  if (!from || !to || from > to) return { months: [], years: [] };
+
+  const months = new Set<number>();
+  const years = new Set<number>();
+  let cursor = new Date(from.getFullYear(), from.getMonth(), 1, 12, 0, 0, 0);
+  const endMarker = new Date(to.getFullYear(), to.getMonth(), 1, 12, 0, 0, 0);
+
+  while (cursor <= endMarker) {
+    months.add(cursor.getMonth() + 1);
+    years.add(cursor.getFullYear());
+    cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1, 12, 0, 0, 0);
+  }
+
+  return {
+    months: Array.from(months).sort((a, b) => a - b),
+    years: Array.from(years).sort((a, b) => a - b)
+  };
+}
+
+export function formatGastosPeriodFilterLabel(periodFrom: string, periodTo: string): string | null {
+  if (!periodFrom && !periodTo) return null;
+
+  const format = (ymd: string) => {
+    const date = parseGastosPeriodYmd(ymd);
+    return date ? date.toLocaleDateString('pt-BR') : ymd;
+  };
+
+  if (periodFrom && periodTo) return `${format(periodFrom)} – ${format(periodTo)}`;
+  if (periodFrom) return `A partir de ${format(periodFrom)}`;
+  return `Até ${format(periodTo)}`;
+}
+
+export function getSingleCalendarMonthFromPeriod(
+  periodFrom: string,
+  periodTo: string
+): { month: number; year: number } | null {
+  if (!periodFrom && !periodTo) return null;
+
+  const from = periodFrom ? parseGastosPeriodYmd(periodFrom) : null;
+  const to = periodTo ? parseGastosPeriodYmd(periodTo) : null;
+  const start = from ?? to;
+  const end = to ?? from;
+  if (!start || !end) return null;
+  if (start.getFullYear() !== end.getFullYear() || start.getMonth() !== end.getMonth()) {
+    return null;
+  }
+
+  return { month: start.getMonth() + 1, year: start.getFullYear() };
+}
+
+export function getSingleYearFromPeriod(periodFrom: string, periodTo: string): number | null {
+  if (!periodFrom && !periodTo) return null;
+
+  const from = periodFrom ? parseGastosPeriodYmd(periodFrom) : null;
+  const to = periodTo ? parseGastosPeriodYmd(periodTo) : null;
+  const startYear = (from ?? to)?.getFullYear();
+  const endYear = (to ?? from)?.getFullYear();
+  if (startYear == null || endYear == null || startYear !== endYear) return null;
+
+  return startYear;
+}
+
+function gastosContractsMatch(a: string, b: string): boolean {
+  return (
+    normalizeContractOrderKey(normalizeGastosOperacionaisContractName(a)) ===
+    normalizeContractOrderKey(normalizeGastosOperacionaisContractName(b))
+  );
+}
+
+export function aggregateGastosNaturezaForContract(
+  naturezaDetailRows: readonly QueryGastosNaturezaDetailRow[],
+  contract: string,
+  periodFrom: string,
+  periodTo: string
+): GastosNaturezaAggRow[] {
+  const map = new Map<string, GastosNaturezaAggRow>();
+
+  for (const row of naturezaDetailRows) {
+    if (!gastosContractsMatch(row.contract, contract)) continue;
+    if (!rowIntersectsGastosPeriod(row, periodFrom, periodTo)) continue;
+    if (!shouldShowInGastosNaturezaModal(row.natureza)) continue;
+
+    const isMovFinanceira = isGastosOperacionaisMovFinanceiraNatureza(row.natureza);
+    const key = normalizeNaturezaLabel(row.natureza) || '—';
+    const current = map.get(key);
+    if (current) {
+      current.total += row.total;
+    } else {
+      map.set(key, {
+        natureza: row.natureza,
+        total: row.total,
+        excludedFromOperationalTotal: isMovFinanceira
+      });
+    }
+  }
+
+  return Array.from(map.values()).sort((a, b) => Math.abs(b.total) - Math.abs(a.total));
+}
 
 type QueryContractPayload = {
   contract: string;
@@ -167,8 +347,7 @@ export function filterGastosDetailRowsByPolo(
     if (filters.polos.length && !filters.polos.includes(resolveDetailRowPolo(row))) {
       return false;
     }
-    if (filters.months.length && !filters.months.includes(row.month)) return false;
-    if (filters.years.length && !filters.years.includes(row.year)) return false;
+    if (!rowIntersectsGastosPeriod(row, filters.periodFrom, filters.periodTo)) return false;
     if (filters.contracts.length && !filters.contracts.includes(row.contract)) return false;
     return true;
   });
@@ -190,8 +369,7 @@ export function filterGastosDetailRows(
     ) {
       return false;
     }
-    if (filters.months.length && !filters.months.includes(row.month)) return false;
-    if (filters.years.length && !filters.years.includes(row.year)) return false;
+    if (!rowIntersectsGastosPeriod(row, filters.periodFrom, filters.periodTo)) return false;
     if (filters.contracts.length && !filters.contracts.includes(row.contract)) return false;
     return true;
   });

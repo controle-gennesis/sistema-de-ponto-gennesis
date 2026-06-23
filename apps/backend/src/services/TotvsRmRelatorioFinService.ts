@@ -5,7 +5,7 @@ dotenv.config({ path: path.join(__dirname, '../../.env') });
 
 import axios, { AxiosError } from 'axios';
 import https from 'https';
-import { isNaturezaExcludedFromContractPaidTotal } from '../constants/contractPaidNaturezaExclusions';
+import { isNaturezaExcludedFromContractPaidTotal, shouldCountInGastosOperacionaisTotal } from '../constants/contractPaidNaturezaExclusions';
 
 function normPathRel(p: string): string {
   return p.replace(/\/$/, '').trim();
@@ -296,6 +296,52 @@ function scorePoloColumn(key: string): number {
   if (u.includes('FILIAL') && (u.includes('COD') || u.includes('SIGLA'))) return 28;
   if (u.includes('ESTADO') && u.includes('SIGLA')) return 24;
   return 0;
+}
+
+function scoreNaturezaCodeColumn(key: string): number {
+  const u = normHeaderKey(key);
+  const compact = u.replace(/\s/g, '');
+  if (compact === 'CODIGONATUREZA' || (u.includes('CODIGO') && u.includes('NATUREZA'))) return 30;
+  if (u.includes('CODNAT') || u.includes('COD_NATUREZ') || u.includes('CODNATUREZA')) return 20;
+  return 0;
+}
+
+function looksLikeHierarchicalNatureCode(value: string): boolean {
+  const t = value.trim();
+  if (!t) return false;
+  return /^\d+(\.\d+)+$/.test(t);
+}
+
+function resolveNatureLabelFromRow(
+  row: Record<string, unknown>,
+  nameCol: string | null,
+  codeCol: string | null
+): string {
+  const preferredCols = [nameCol, codeCol].filter(Boolean) as string[];
+  const seen = new Set<string>();
+
+  for (const col of preferredCols) {
+    if (seen.has(col)) continue;
+    seen.add(col);
+    const value = String(row[col] ?? '').trim();
+    if (!value) continue;
+    if (col === nameCol || !looksLikeHierarchicalNatureCode(value)) return value;
+  }
+
+  for (const [key, raw] of Object.entries(row)) {
+    const header = normHeaderKey(key);
+    if (!header.includes('NATUREZA')) continue;
+    if (header.includes('COD') || header.includes('CODIGO')) continue;
+    const value = String(raw ?? '').trim();
+    if (value && !looksLikeHierarchicalNatureCode(value)) return value;
+  }
+
+  for (const col of preferredCols) {
+    const value = String(row[col] ?? '').trim();
+    if (value) return value;
+  }
+
+  return '—';
 }
 
 function scoreNaturezaColumn(key: string): number {
@@ -1138,6 +1184,13 @@ export class TotvsRmRelatorioFinService {
    */
   async listGastosOperacionaisDetailRows(): Promise<{
     detailRows: Array<{ contract: string; month: number; year: number; total: number; polo: string | null }>;
+    naturezaDetailRows: Array<{
+      contract: string;
+      month: number;
+      year: number;
+      natureza: string;
+      total: number;
+    }>;
     ccColumn: string | null;
     valueColumn: string | null;
     dateColumn: string | null;
@@ -1149,6 +1202,7 @@ export class TotvsRmRelatorioFinService {
     if (!rows.length) {
       return {
         detailRows: [],
+        naturezaDetailRows: [],
         ccColumn: null,
         valueColumn: null,
         dateColumn: null,
@@ -1183,6 +1237,15 @@ export class TotvsRmRelatorioFinService {
     const solNatCol = pickNaturezaColumn(
       solicitationRows,
       new Set([...solCcExclude, solValCol].filter(Boolean) as string[])
+    );
+    const solNatCodeExclude = new Set(
+      [...solCcExclude, solValCol, solNatCol].filter(Boolean) as string[]
+    );
+    const solNatCodeCol = pickColumn(
+      solicitationRows,
+      scoreNaturezaCodeColumn,
+      process.env.TOTVS_RM_NATUREZA_CODE_COLUMN,
+      solNatCodeExclude
     );
 
     const solUseStatus = ['1', 'true', 'yes'].includes(
@@ -1234,6 +1297,7 @@ export class TotvsRmRelatorioFinService {
     }
 
     const byCcYm = new Map<string, Map<string, number>>();
+    const byCcYmNat = new Map<string, Map<string, Map<string, number>>>();
     const poloByCc = new Map<string, string>();
     const costCenters = new Set<string>();
 
@@ -1247,9 +1311,8 @@ export class TotvsRmRelatorioFinService {
         continue;
       }
 
-      const nkRaw = solNatCol ? String(row[solNatCol] ?? '').trim() : '';
+      const nkRaw = resolveNatureLabelFromRow(row, solNatCol, solNatCodeCol);
       const natLabel = nkRaw === '' ? '—' : nkRaw;
-      if (isNaturezaExcludedFromContractPaidTotal(natLabel)) continue;
 
       const cc = resolveCcDisplayLabelFromRow(row, solCcNameCol, solCcCodeCol);
       if (!cc) continue;
@@ -1271,9 +1334,17 @@ export class TotvsRmRelatorioFinService {
 
       costCenters.add(cc);
       const ym = `${year}-${pad2(month)}`;
-      const ccBucket = byCcYm.get(cc) ?? new Map<string, number>();
-      ccBucket.set(ym, (ccBucket.get(ym) ?? 0) + v);
-      byCcYm.set(cc, ccBucket);
+      if (shouldCountInGastosOperacionaisTotal(natLabel)) {
+        const ccBucket = byCcYm.get(cc) ?? new Map<string, number>();
+        ccBucket.set(ym, (ccBucket.get(ym) ?? 0) + v);
+        byCcYm.set(cc, ccBucket);
+      }
+
+      const ccNatBucket = byCcYmNat.get(cc) ?? new Map<string, Map<string, number>>();
+      const ymNatBucket = ccNatBucket.get(ym) ?? new Map<string, number>();
+      ymNatBucket.set(natLabel, (ymNatBucket.get(natLabel) ?? 0) + v);
+      ccNatBucket.set(ym, ymNatBucket);
+      byCcYmNat.set(cc, ccNatBucket);
     }
 
     const detailRows: Array<{
@@ -1294,6 +1365,26 @@ export class TotvsRmRelatorioFinService {
       }
     }
 
+    const naturezaDetailRows: Array<{
+      contract: string;
+      month: number;
+      year: number;
+      natureza: string;
+      total: number;
+    }> = [];
+    for (const [contract, ymNatMap] of byCcYmNat) {
+      for (const [ym, natMap] of ymNatMap) {
+        const [yearStr, monthStr] = ym.split('-');
+        const year = Number(yearStr);
+        const month = Number(monthStr);
+        if (!Number.isFinite(year) || !Number.isFinite(month)) continue;
+        for (const [natureza, total] of natMap) {
+          if (total === 0) continue;
+          naturezaDetailRows.push({ contract, month, year, natureza, total });
+        }
+      }
+    }
+
     detailRows.sort((a, b) => {
       const byContract = a.contract.localeCompare(b.contract, 'pt-BR');
       if (byContract !== 0) return byContract;
@@ -1301,8 +1392,17 @@ export class TotvsRmRelatorioFinService {
       return a.month - b.month;
     });
 
+    naturezaDetailRows.sort((a, b) => {
+      const byContract = a.contract.localeCompare(b.contract, 'pt-BR');
+      if (byContract !== 0) return byContract;
+      if (a.year !== b.year) return a.year - b.year;
+      if (a.month !== b.month) return a.month - b.month;
+      return a.natureza.localeCompare(b.natureza, 'pt-BR');
+    });
+
     return {
       detailRows,
+      naturezaDetailRows,
       ccColumn: solCcNameCol ?? solCcCodeCol,
       valueColumn: solValCol,
       dateColumn: solDateCol,

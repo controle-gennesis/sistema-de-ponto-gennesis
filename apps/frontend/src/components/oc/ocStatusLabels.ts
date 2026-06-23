@@ -22,6 +22,36 @@ export function purchaseOrderPhaseLabel(status: string): string {
   return OC_STATUS_LABELS_PT[status] || status;
 }
 
+/** Chaves de status de entrega da OC na listagem (cores ajustáveis em `ocDeliveryStatusBadgeClass`). */
+export type OcDeliveryStatusBadgeKey =
+  | 'pending'
+  | 'cancelled'
+  | 'received'
+  | 'received_partial'
+  | 'site'
+  | 'site_partial';
+
+/** Badge de status de entrega — mesmo formato visual da coluna STATUS (pill semibold). */
+export function ocDeliveryStatusBadgeClass(key: OcDeliveryStatusBadgeKey): string {
+  const base = 'inline-flex rounded-full px-2.5 py-1 text-xs font-semibold whitespace-nowrap';
+  switch (key) {
+    case 'pending':
+      return `${base} bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300`;
+    case 'cancelled':
+      return `${base} bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200`;
+    case 'received':
+      return `${base} bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-200`;
+    case 'received_partial':
+      return `${base} bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200`;
+    case 'site':
+      return `${base} bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-200`;
+    case 'site_partial':
+      return `${base} bg-cyan-100 text-cyan-800 dark:bg-cyan-900/40 dark:text-cyan-200`;
+    default:
+      return `${base} bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300`;
+  }
+}
+
 /** Classes de badge (pill) alinhadas às cores do fluxo da OC. */
 export function ocStatusBadgeClass(status: string): string {
   const base = 'inline-flex rounded-full px-2.5 py-1 text-xs font-semibold whitespace-nowrap';

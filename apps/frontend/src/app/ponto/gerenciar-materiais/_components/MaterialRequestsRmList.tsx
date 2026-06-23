@@ -8,17 +8,17 @@ import {
   ClipboardList,
   Clock,
   Eye,
-  FileText,
   MoreVertical,
   Pencil,
   Search,
-  Wrench,
+  ShoppingCart,
   X,
   XCircle
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { getListTableRowClassName, ListRowNavigableLabel, rowActionMenuButtonClass } from '@/components/ui/listTableUi';
 import { cadastroListClasses } from '@/components/ui/RowActionMenu';
+import { ListPagination } from '@/components/ui/ListPagination';
 import { Loading } from '@/components/ui/Loading';
 import type { PurchaseOrder } from '@/components/oc/OcPurchaseOrdersPanel';
 import type { MaterialRequest } from '../_lib/types';
@@ -26,20 +26,25 @@ import type { RmCardFilter } from '../_lib/rmCardFilter';
 import {
   getPriorityInfo,
   getStatusInfo,
-  joinOrderNumbersPt,
   rmSolicitante,
   rmTitulo
 } from '../_lib/display';
 import { getMaterialRequestDisplayStatus } from '../_lib/search';
 import { formatRmListDisplayId } from '../_lib/rmListDisplay';
+import {
+  materialRequestOcListRows,
+} from '@/components/oc/materialRequestOcListRows';
 const cellPad = 'px-2 sm:px-3 py-3';
 const cellPadTh = 'px-2 sm:px-3 py-4';
 const rmColCls = 'w-[4%] min-w-[3rem] max-w-[4.5rem]';
+const ocColCls = 'w-[5%] min-w-[3.5rem]';
 const actionColCls = 'w-[4%] min-w-[3rem] max-w-[4.5rem]';
 const thTextCls = `${cellPadTh} text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider`;
 const thCenterCls = `${cellPadTh} text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap`;
 const rmThCls = `${thCenterCls} ${rmColCls} !pl-2 sm:!pl-3 !pr-1`;
 const rmTdCls = `${cadastroListClasses.tdMono} ${rmColCls} text-center !pl-2 sm:!pl-3 !pr-1`;
+const ocThCls = `${thCenterCls} ${ocColCls}`;
+const ocTdCls = `${cadastroListClasses.tdMono} ${ocColCls} text-center align-middle !px-2 sm:!px-3`;
 const tdTextCls = `${cellPad} text-center text-sm text-gray-700 dark:text-gray-300 min-w-0`;
 const tdMutedCls = `${cellPad} text-center text-sm text-gray-600 dark:text-gray-400 min-w-0`;
 const tdCenterCls = `${cellPad} text-center text-sm min-w-0`;
@@ -78,12 +83,12 @@ const RM_CARD_LIST_CONFIG: Record<
     iconColor: 'text-green-600 dark:text-green-400',
     Icon: CheckCircle
   },
-  inReview: {
-    title: 'Em correção',
-    subtitle: 'Solicitações devolvidas ao solicitante para ajuste.',
+  awaitingOc: {
+    title: 'Aguardando OC',
+    subtitle: 'Requisições aprovadas sem ordem de compra — prontas para mapa de cotação.',
     iconBg: 'bg-amber-100 dark:bg-amber-900/30',
     iconColor: 'text-amber-600 dark:text-amber-400',
-    Icon: Wrench
+    Icon: ShoppingCart
   },
   cancelled: {
     title: 'Requisições canceladas',
@@ -102,7 +107,6 @@ export function MaterialRequestsRmList({
   filteredRequests,
   ordersByMaterialRequestId,
   currentUserId,
-  onCreateOc,
   onDetails,
   flushInCard = false,
   hideSearch = false
@@ -116,7 +120,6 @@ export function MaterialRequestsRmList({
   filteredRequests: MaterialRequest[];
   ordersByMaterialRequestId: Map<string, PurchaseOrder[]>;
   currentUserId?: string;
-  onCreateOc: (r: MaterialRequest) => void;
   onDetails: (r: MaterialRequest) => void;
 }) {
   const [listCurrentPage, setListCurrentPage] = useState(1);
@@ -251,12 +254,13 @@ export function MaterialRequestsRmList({
               <table className={`${cadastroListClasses.table} text-sm`}>
                 <colgroup>
                   <col className="w-[4%]" />
-                  <col className={showStatusColumn ? 'w-[13%]' : 'w-[15%]'} />
-                  <col className={showStatusColumn ? 'w-[15%]' : 'w-[17%]'} />
-                  <col className={showStatusColumn ? 'w-[34%]' : 'w-[36%]'} />
-                  <col className={showStatusColumn ? 'w-[9%]' : 'w-[11%]'} />
-                  {showStatusColumn ? <col className="w-[11%]" /> : null}
-                  <col className={showStatusColumn ? 'w-[10%]' : 'w-[13%]'} />
+                  <col className={showStatusColumn ? 'w-[12%]' : 'w-[14%]'} />
+                  <col className={showStatusColumn ? 'w-[14%]' : 'w-[16%]'} />
+                  <col className={showStatusColumn ? 'w-[28%]' : 'w-[30%]'} />
+                  <col className={showStatusColumn ? 'w-[8%]' : 'w-[10%]'} />
+                  {showStatusColumn ? <col className="w-[10%]" /> : null}
+                  <col className={ocColCls} />
+                  <col className={showStatusColumn ? 'w-[12%]' : 'w-[14%]'} />
                   <col className="w-[4%]" />
                 </colgroup>
                 <thead className="border-b border-gray-200 dark:border-gray-700">
@@ -269,7 +273,8 @@ export function MaterialRequestsRmList({
                     <th className={thTextCls}>Descrição</th>
                     <th className={thCenterCls}>Prioridade</th>
                     {showStatusColumn && <th className={thCenterCls}>Status</th>}
-                    <th className={thCenterCls}>OC gerada</th>
+                    <th className={ocThCls}>OC</th>
+                    <th className={thCenterCls}>Status OC</th>
                     <th
                       scope="col"
                       className={actionThCls}
@@ -282,7 +287,7 @@ export function MaterialRequestsRmList({
                   {paginatedRequests.map((request) => {
                     const priorityInfo = getPriorityInfo(request.priority);
                     const ocs = ordersByMaterialRequestId.get(request.id) ?? [];
-                    const ocNums = ocs.map((o) => o.orderNumber).filter((n): n is string => Boolean(n));
+                    const ocRows = materialRequestOcListRows(request, ocs);
                     const displayStatus = getMaterialRequestDisplayStatus(request, ocs);
                     const statusInfo = getStatusInfo(displayStatus);
 
@@ -328,13 +333,38 @@ export function MaterialRequestsRmList({
                             </span>
                           </td>
                         )}
-                        <td className={tdCenterCls}>
-                          {ocNums.length > 0 ? (
-                            <span className="line-clamp-2" title={joinOrderNumbersPt(ocNums)}>
-                              {joinOrderNumbersPt(ocNums)}
-                            </span>
+                        <td className={ocTdCls}>
+                          {ocRows.length === 0 ? (
+                            <span className="block text-center text-xs sm:text-sm text-gray-400 dark:text-gray-500">—</span>
                           ) : (
-                            '—'
+                            <div className="mx-auto flex w-full flex-col items-center justify-center gap-0.5 text-xs sm:text-sm">
+                              {ocRows.map((row) => (
+                                <span
+                                  key={row.key}
+                                  className="block w-full text-center font-medium whitespace-nowrap"
+                                  title={row.idTitle}
+                                >
+                                  {row.id}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </td>
+                        <td className={`${tdCenterCls} align-middle`}>
+                          {ocRows.length === 0 ? (
+                            <span className="text-xs sm:text-sm text-gray-400 dark:text-gray-500">—</span>
+                          ) : (
+                            <div className="flex flex-col items-center justify-center gap-1">
+                              {ocRows.map((row) => (
+                                <span
+                                  key={row.key}
+                                  className={row.statusBadgeClassName}
+                                  title={row.status}
+                                >
+                                  {row.status}
+                                </span>
+                              ))}
+                            </div>
                           )}
                         </td>
                         <td className={actionTdCls} onClick={(e) => e.stopPropagation()}>
@@ -369,26 +399,11 @@ export function MaterialRequestsRmList({
                 </tbody>
               </table>
             </div>
-            {listTotalPages > 1 && (
-              <div className="mt-4 flex items-center justify-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setListCurrentPage((prev) => Math.max(prev - 1, 1))}
-                  disabled={listCurrentPage === 1}
-                  className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
-                >
-                  Anterior
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setListCurrentPage((prev) => Math.min(prev + 1, listTotalPages))}
-                  disabled={listCurrentPage === listTotalPages}
-                  className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
-                >
-                  Próxima
-                </button>
-              </div>
-            )}
+            <ListPagination
+              currentPage={listCurrentPage}
+              totalPages={listTotalPages}
+              onPageChange={setListCurrentPage}
+            />
           </>
         )}
       </CardContent>
@@ -417,22 +432,6 @@ export function MaterialRequestsRmList({
                 <Eye className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
                 <span>Ver detalhes</span>
               </button>
-              {requestForMenu.status === 'APPROVED' &&
-                (ordersByMaterialRequestId.get(requestForMenu.id) ?? []).length === 0 && (
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setActionMenu(null);
-                    onCreateOc(requestForMenu);
-                  }}
-                  className={MENU_ITEM_BORDER_CLASS}
-                >
-                  <FileText className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
-                  <span>Criar Ordem de Compra</span>
-                </button>
-              )}
               {requestForMenu.status === 'IN_REVIEW' &&
                 currentUserId === rmSolicitante(requestForMenu)?.id && (
                   <Link

@@ -76,6 +76,44 @@ export function parsePaymentSlipsFromMovementNotes(
   return out;
 }
 
+export type StockInvoiceParsed = {
+  name: string;
+  url: string;
+};
+
+export function parseInvoicesFromMovementNotes(
+  notes: string | null | undefined
+): StockInvoiceParsed[] {
+  if (!notes) return [];
+  const out: StockInvoiceParsed[] = [];
+  const re = /NF:\s*(.*?)\s*\|\s*URL:\s*([^\s|]+)/gi;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(notes)) !== null) {
+    const name = (match[1] || '').trim() || 'Nota fiscal';
+    const url = (match[2] || '').trim();
+    if (!url) continue;
+    out.push({ name, url });
+  }
+  return out;
+}
+
+export function collectInvoicesForOrderFromMovements(
+  movements: Array<{ notes: string | null }>,
+  orderNumber: string
+): StockInvoiceParsed[] {
+  const out: StockInvoiceParsed[] = [];
+  const seen = new Set<string>();
+  for (const mov of movements) {
+    if (!movementNotesMatchOc(mov.notes, orderNumber)) continue;
+    for (const invoice of parseInvoicesFromMovementNotes(mov.notes)) {
+      if (!invoice.url || seen.has(invoice.url)) continue;
+      seen.add(invoice.url);
+      out.push(invoice);
+    }
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+}
+
 export function collectPaymentSlipsForOrderFromMovements(
   movements: Array<{ notes: string | null }>,
   orderNumber: string
@@ -98,4 +136,80 @@ export function collectPaymentSlipsForOrderFromMovements(
     if (ta !== tb) return ta - tb;
     return a.name.localeCompare(b.name, 'pt-BR');
   });
+}
+
+/** Associa boletos de uma movimentação às parcelas pelo vencimento. */
+export function matchPaymentSlipsToParcelIndices(
+  slips: StockPaymentSlipParsed[],
+  parcelDueDatesYmd: string[]
+): Map<number, StockPaymentSlipParsed> {
+  const result = new Map<number, StockPaymentSlipParsed>();
+  const n = parcelDueDatesYmd.length;
+  if (n === 0 || slips.length === 0) return result;
+
+  const sortedSlips = [...slips].sort((a, b) => {
+    const ta = a.dueDateYmd ? new Date(a.dueDateYmd).getTime() : 0;
+    const tb = b.dueDateYmd ? new Date(b.dueDateYmd).getTime() : 0;
+    return ta - tb;
+  });
+  const sortedIndices = Array.from({ length: n }, (_, i) => i).sort(
+    (a, b) => new Date(parcelDueDatesYmd[a]).getTime() - new Date(parcelDueDatesYmd[b]).getTime()
+  );
+
+  if (sortedSlips.length === n) {
+    sortedIndices.forEach((parcelIdx, k) => {
+      const slip = sortedSlips[k];
+      if (slip?.url) result.set(parcelIdx, slip);
+    });
+    return result;
+  }
+
+  const used = new Set<number>();
+  for (const slip of sortedSlips) {
+    if (!slip.url) continue;
+    let bestIdx = -1;
+    let bestDist = Infinity;
+    for (let i = 0; i < n; i++) {
+      if (used.has(i)) continue;
+      const parcelDue = new Date(parcelDueDatesYmd[i]).getTime();
+      const slipDue = slip.dueDateYmd ? new Date(slip.dueDateYmd).getTime() : parcelDue;
+      const dist = Math.abs(slipDue - parcelDue);
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestIdx = i;
+      }
+    }
+    if (bestIdx >= 0) {
+      used.add(bestIdx);
+      result.set(bestIdx, slip);
+    }
+  }
+  return result;
+}
+
+/**
+ * Boletos mais recentes por parcela (movimentações devem vir da mais nova para a mais antiga).
+ * Substituições no estoque prevalecem sobre entradas anteriores.
+ */
+export function collectLatestPaymentSlipsPerParcelFromMovements(
+  movements: Array<{ notes: string | null }>,
+  orderNumber: string,
+  parcelDueDatesYmd: string[]
+): Map<number, StockPaymentSlipParsed> {
+  const result = new Map<number, StockPaymentSlipParsed>();
+  const n = parcelDueDatesYmd.length;
+  if (n === 0) return result;
+
+  for (const mov of movements) {
+    if (!movementNotesMatchOc(mov.notes, orderNumber)) continue;
+    const slips = parsePaymentSlipsFromMovementNotes(mov.notes);
+    if (slips.length === 0) continue;
+
+    const matched = matchPaymentSlipsToParcelIndices(slips, parcelDueDatesYmd);
+    for (const [idx, slip] of matched) {
+      if (!result.has(idx)) result.set(idx, slip);
+    }
+    if (result.size >= n) break;
+  }
+  return result;
 }

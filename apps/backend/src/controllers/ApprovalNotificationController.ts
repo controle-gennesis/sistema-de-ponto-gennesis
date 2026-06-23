@@ -11,8 +11,10 @@ import {
   userHasOcComprasApprovePermission,
   userHasOcDiretoriaApprovePermission,
   userHasOcGestorApprovePermission,
+  OC_APPROVE_GESTOR_MODULE_KEY,
 } from '../lib/ocApprovalAccess';
 import { userHasRmApprovePermission } from '../lib/rmApprovalAccess';
+import { getContractGestorListScopeCostCenterIds } from '../lib/contractGestorApprovalAccess';
 import { fuelRefuelRequestService } from '../services/FuelRefuelRequestService';
 
 const ESPELHO_APPROVE_MODULE_KEY = pathToModuleKey('/ponto/controle/aprovar-espelho-nf');
@@ -92,9 +94,16 @@ export class ApprovalNotificationController {
         });
       }
       if (isAdmin || (await userHasOcGestorApprovePermission(userId))) {
-        oc += await prisma.purchaseOrder.count({
-          where: { status: 'PENDING' },
-        });
+        const gestorScope = await getContractGestorListScopeCostCenterIds(
+          userId,
+          isAdmin,
+          OC_APPROVE_GESTOR_MODULE_KEY,
+        );
+        const gestorWhere: Prisma.PurchaseOrderWhereInput = { status: 'PENDING' };
+        if (gestorScope !== null) {
+          gestorWhere.materialRequest = { costCenterId: { in: gestorScope } };
+        }
+        oc += await prisma.purchaseOrder.count({ where: gestorWhere });
       }
       if (isAdmin || (await userHasOcDiretoriaApprovePermission(userId))) {
         oc += await prisma.purchaseOrder.count({
@@ -104,7 +113,16 @@ export class ApprovalNotificationController {
 
       let rm = 0;
       if (isAdmin || (await userHasRmApprovePermission(userId))) {
-        rm = await prisma.materialRequest.count({ where: { status: 'PENDING' } });
+        const rmScope = await getContractGestorListScopeCostCenterIds(
+          userId,
+          isAdmin,
+          pathToModuleKey('/ponto/controle/aprovar-requisicoes-materiais'),
+        );
+        const rmWhere: Prisma.MaterialRequestWhereInput = { status: 'PENDING' };
+        if (rmScope !== null) {
+          rmWhere.costCenterId = { in: rmScope };
+        }
+        rm = await prisma.materialRequest.count({ where: rmWhere });
       }
 
       let espelhoMirrors = 0;

@@ -1,6 +1,10 @@
 import { pathToModuleKey, PERMISSION_ACCESS_ACTION } from '@sistema-ponto/permission-modules';
 import { prisma } from './prisma';
 import { createError } from '../middleware/errorHandler';
+import {
+  assertUserIsContractGestorForCostCenter,
+  userHasContractGestorAssignment,
+} from './contractGestorApprovalAccess';
 
 export const OC_APPROVE_COMPRAS_MODULE_KEY = pathToModuleKey('/ponto/controle/aprovar-oc-compras');
 export const OC_APPROVE_GESTOR_MODULE_KEY = pathToModuleKey('/ponto/controle/aprovar-oc-gestor');
@@ -17,7 +21,7 @@ export function ocApprovalPhaseForStatus(status: string): OcApprovalPhase | null
 
 async function userHasModule(userId: string, module: string): Promise<boolean> {
   const row = await prisma.userPermission.findFirst({
-    where: { userId, module, action: PERMISSION_ACCESS_ACTION, allowed: true }
+    where: { userId, module, action: PERMISSION_ACCESS_ACTION, allowed: true },
   });
   return !!row;
 }
@@ -26,7 +30,9 @@ export async function userHasOcComprasApprovePermission(userId: string): Promise
   return userHasModule(userId, OC_APPROVE_COMPRAS_MODULE_KEY);
 }
 
+/** Gestor por contrato ou permissão legada Controle. */
 export async function userHasOcGestorApprovePermission(userId: string): Promise<boolean> {
+  if (await userHasContractGestorAssignment(userId)) return true;
   return userHasModule(userId, OC_APPROVE_GESTOR_MODULE_KEY);
 }
 
@@ -37,7 +43,8 @@ export async function userHasOcDiretoriaApprovePermission(userId: string): Promi
 export async function assertUserMayActOnOcApprovalPhase(
   userId: string,
   isAdmin: boolean,
-  phase: OcApprovalPhase
+  phase: OcApprovalPhase,
+  materialRequestCostCenterId?: string | null,
 ): Promise<void> {
   if (isAdmin) return;
 
@@ -52,6 +59,12 @@ export async function assertUserMayActOnOcApprovalPhase(
     if (!(await userHasOcGestorApprovePermission(userId))) {
       throw createError('Sem permissão para aprovar OCs na fase do gestor', 403);
     }
+    await assertUserIsContractGestorForCostCenter(
+      userId,
+      isAdmin,
+      OC_APPROVE_GESTOR_MODULE_KEY,
+      materialRequestCostCenterId,
+    );
     return;
   }
 
@@ -65,7 +78,8 @@ export async function assertOcApprovalStatusChange(
   userId: string,
   isAdmin: boolean,
   currentStatus: string,
-  newStatus: string
+  newStatus: string,
+  materialRequestCostCenterId?: string | null,
 ): Promise<void> {
   const phase = ocApprovalPhaseForStatus(currentStatus);
   if (!phase) return;
@@ -75,9 +89,9 @@ export async function assertOcApprovalStatusChange(
     'PENDING_DIRETORIA',
     'APPROVED',
     'IN_REVIEW',
-    'REJECTED'
+    'REJECTED',
   ]);
   if (!approvalActions.has(newStatus)) return;
 
-  await assertUserMayActOnOcApprovalPhase(userId, isAdmin, phase);
+  await assertUserMayActOnOcApprovalPhase(userId, isAdmin, phase, materialRequestCostCenterId);
 }

@@ -10,17 +10,13 @@ import toast from 'react-hot-toast';
 import api from '@/lib/api';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
-import { PaymentConditionSelect, resolvePaymentConditionMeta } from '@/components/oc/PaymentConditionSelect';
-import {
-  OcBoletoCreationFields,
-  resizeOcBoletoCreationSlots,
-  type OcBoletoCreationSlot
-} from '@/components/oc/OcBoletoCreationFields';
+import { PaymentConditionSelect } from '@/components/oc/PaymentConditionSelect';
 import { OC_PIX_KEY_TYPE_OPTIONS } from '@/components/oc/OcPurchaseOrderFormFields';
 import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
 import { MultiSelectSearchDropdown } from '@/components/ui/MultiSelectSearchDropdown';
 import { maskCurrencyInputBrOrEmpty, parseCurrencyInputBr } from '@/lib/maskCurrencyBr';
 import { materialItemLabel, materialItemSubtitle } from '../gerenciar-materiais/_lib/display';
+import { formatRmListDisplayId } from '../gerenciar-materiais/_lib/rmListDisplay';
 
 type MaterialRequestItem = {
   id: string;
@@ -73,8 +69,6 @@ type PurchaseOrderCreateInput = {
   paymentDetails: string | undefined;
   notes: string | undefined;
   amountToPay: number;
-  boletoAttachmentUrl?: string;
-  boletoAttachmentName?: string;
 };
 
 function parseCurrencyBR(input: string): number | null {
@@ -207,8 +201,7 @@ function emptyPaymentDraft() {
     pixKeyType: '',
     pixKey: '',
     observations: '',
-    amountToPayStr: '',
-    boletoSlots: [{ url: '', name: '' }] as OcBoletoCreationSlot[]
+    amountToPayStr: ''
   };
 }
 
@@ -248,7 +241,6 @@ export default function MapaCotacaoPage() {
         pixKey: string;
         observations: string;
         amountToPayStr: string;
-        boletoSlots: OcBoletoCreationSlot[];
       }
     >
   >({});
@@ -277,16 +269,6 @@ export default function MapaCotacaoPage() {
     }
   });
 
-  const { data: boletoPaymentConditions } = useQuery({
-    queryKey: ['payment-conditions', 'BOLETO'],
-    queryFn: async () => {
-      const res = await api.get('/payment-conditions', {
-        params: { paymentType: 'BOLETO', activeOnly: 'true' }
-      });
-      return (res.data?.data || []) as Array<{ code: string; parcelCount: number; parcelDueDays: unknown }>;
-    }
-  });
-
   const allOrders: PurchaseOrderLite[] = ordersData?.data || [];
 
   /** Mesma regra da aba "RMs Aprovadas" em Gerenciar materiais: aprovadas e ainda sem OC */
@@ -312,11 +294,11 @@ export default function MapaCotacaoPage() {
   const materialRequestOptions = useMemo(
     () =>
       approvedRequests.map((r) => {
-        const num = r.requestNumber || r.id.slice(0, 8);
+        const num = formatRmListDisplayId(r.requestNumber) || r.id.slice(0, 8);
         const date = formatDateTimeBR(r.createdAt);
         return {
           value: r.id,
-          label: `${num} (${date})`,
+          label: num,
           searchText: `${num} ${date} ${r.id}`
         };
       }),
@@ -627,9 +609,6 @@ export default function MapaCotacaoPage() {
           pixKey?: string;
           observations?: string;
           amountToPay?: number;
-          boletoAttachmentUrl?: string;
-          boletoAttachmentName?: string;
-          creationBoletoInstallments?: Array<{ boletoUrl: string; boletoName?: string }>;
         }> = [];
 
         for (const supplierId of suppliersToGenerate) {
@@ -642,15 +621,12 @@ export default function MapaCotacaoPage() {
             pixKeyType: '',
             pixKey: '',
             observations: '',
-            amountToPayStr: totals ? String(totals.amountToPay) : '',
-            boletoSlots: [{ url: '', name: '' }]
+            amountToPayStr: totals ? String(totals.amountToPay) : ''
           };
 
           const draft = paymentDraftBySupplier[supplierId] ?? fallbackDraft;
           const paymentType = draft.paymentType ?? OC_TYPE_AVISTA;
           const paymentCondition = draft.paymentCondition ?? paymentConditionDefault(paymentType);
-          const boletoMeta = resolvePaymentConditionMeta(paymentCondition, boletoPaymentConditions);
-          const boletoSlots = draft.boletoSlots ?? [{ url: '', name: '' }];
 
           if (paymentType === OC_TYPE_AVISTA) {
             if (!draft.paymentDetails?.trim()) {
@@ -662,17 +638,6 @@ export default function MapaCotacaoPage() {
             if (!draft.pixKey?.trim()) {
               throw new Error(`Informe a chave PIX para "${supplierName}".`);
             }
-          } else if (boletoMeta.parcelCount > 1) {
-            if (
-              boletoSlots.length !== boletoMeta.parcelCount ||
-              !boletoSlots.every((s) => s.url.trim())
-            ) {
-              throw new Error(
-                `Anexe os ${boletoMeta.parcelCount} boletos para "${supplierName}" (um por parcela).`
-              );
-            }
-          } else if (!boletoSlots[0]?.url.trim()) {
-            throw new Error(`Anexe o boleto para "${supplierName}".`);
           }
 
           paymentBySupplierPayload.push({
@@ -683,20 +648,7 @@ export default function MapaCotacaoPage() {
             pixKeyType: paymentType === OC_TYPE_AVISTA ? draft.pixKeyType?.trim() || undefined : undefined,
             pixKey: paymentType === OC_TYPE_AVISTA ? draft.pixKey?.trim() || undefined : undefined,
             observations: draft.observations?.trim() || undefined,
-            amountToPay: totals?.amountToPay,
-            ...(paymentType === OC_TYPE_BOLETO && boletoMeta.parcelCount > 1
-              ? {
-                  creationBoletoInstallments: boletoSlots.map((s) => ({
-                    boletoUrl: s.url.trim(),
-                    boletoName: s.name.trim() || undefined
-                  }))
-                }
-              : paymentType === OC_TYPE_BOLETO
-                ? {
-                    boletoAttachmentUrl: boletoSlots[0]?.url.trim() || undefined,
-                    boletoAttachmentName: boletoSlots[0]?.name.trim() || undefined
-                  }
-                : {})
+            amountToPay: totals?.amountToPay
           });
         }
 
@@ -811,11 +763,7 @@ export default function MapaCotacaoPage() {
                   ) : (
                     <div className="mt-4 min-w-0">
                       <MultiSelectSearchDropdown
-                        label={
-                          selectedSupplierIds.size > 0
-                            ? `Fornecedores · ${selectedSupplierIds.size} selecionado${selectedSupplierIds.size === 1 ? '' : 's'}`
-                            : 'Fornecedores'
-                        }
+                        label="Fornecedores"
                         options={supplierOptions}
                         selected={Array.from(selectedSupplierIds)}
                         onChange={(ids) => setSelectedSupplierIds(new Set(ids))}
@@ -824,7 +772,9 @@ export default function MapaCotacaoPage() {
                         emptyOptionsMessage="Nenhum fornecedor cadastrado."
                         emptySearchMessage="Nenhum fornecedor encontrado."
                         listMaxHeight={280}
+                        menuInline
                         noFocusRing
+                        hideFocus
                       />
                     </div>
                   )}
@@ -1106,12 +1056,6 @@ export default function MapaCotacaoPage() {
                                 const paymentConditionValue =
                                   paymentDraftBySupplier[sid]?.paymentCondition ??
                                   paymentConditionDefault(payType);
-                                const boletoMeta = resolvePaymentConditionMeta(
-                                  paymentConditionValue,
-                                  boletoPaymentConditions
-                                );
-                                const boletoSlots =
-                                  paymentDraftBySupplier[sid]?.boletoSlots ?? [{ url: '', name: '' }];
 
                                 return (
                                   <div
@@ -1241,8 +1185,7 @@ export default function MapaCotacaoPage() {
                                                   [sid]: {
                                                     ...(prev[sid] ?? emptyPaymentDraft()),
                                                     paymentType: OC_TYPE_AVISTA,
-                                                    paymentCondition: paymentConditionDefault(OC_TYPE_AVISTA),
-                                                    boletoSlots: [{ url: '', name: '' }]
+                                                    paymentCondition: paymentConditionDefault(OC_TYPE_AVISTA)
                                                   }
                                                 }));
                                               }}
@@ -1262,8 +1205,7 @@ export default function MapaCotacaoPage() {
                                                     paymentType: OC_TYPE_BOLETO,
                                                     paymentCondition: paymentConditionDefault(OC_TYPE_BOLETO),
                                                     pixKeyType: '',
-                                                    pixKey: '',
-                                                    boletoSlots: [{ url: '', name: '' }]
+                                                    pixKey: ''
                                                   }
                                                 }));
                                               }}
@@ -1287,16 +1229,11 @@ export default function MapaCotacaoPage() {
                                             paymentType={payType === OC_TYPE_AVISTA ? 'AVISTA' : 'BOLETO'}
                                             value={paymentConditionValue}
                                             onChange={(v) => {
-                                              const meta = resolvePaymentConditionMeta(v, boletoPaymentConditions);
                                               setPaymentDraftBySupplier((prev) => ({
                                                 ...prev,
                                                 [sid]: {
                                                   ...(prev[sid] ?? emptyPaymentDraft()),
-                                                  paymentCondition: v,
-                                                  boletoSlots: resizeOcBoletoCreationSlots(
-                                                    meta.parcelCount,
-                                                    prev[sid]?.boletoSlots
-                                                  )
+                                                  paymentCondition: v
                                                 }
                                               }));
                                             }}
@@ -1419,23 +1356,10 @@ export default function MapaCotacaoPage() {
                                             </div>
                                           </div>
                                         ) : (
-                                          <OcBoletoCreationFields
-                                            idPrefix={`boleto-${sid}`}
-                                            labelClassName={mapLabelCls}
-                                            parcelCount={boletoMeta.parcelCount}
-                                            parcelDueDays={boletoMeta.parcelDueDays}
-                                            slots={boletoSlots}
-                                            onChange={(next) => {
-                                              setPaymentDraftBySupplier((prev) => ({
-                                                ...prev,
-                                                [sid]: {
-                                                  ...(prev[sid] ?? emptyPaymentDraft()),
-                                                  boletoSlots: next
-                                                }
-                                              }));
-                                            }}
-                                            disabled={isGenerating}
-                                          />
+                                          <p className="text-sm text-gray-600 dark:text-gray-400">
+                                            Os boletos e vencimentos serão informados na fase{' '}
+                                            <strong>Anexar Boleto</strong> da Ordem de Compra, após a aprovação.
+                                          </p>
                                         )}
 
                                         <div>

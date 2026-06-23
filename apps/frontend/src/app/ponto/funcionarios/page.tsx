@@ -215,6 +215,7 @@ export default function FuncionariosPage() {
               name: emp.name,
               email: emp.email || '',
               position: emp.employee?.position,
+              profilePhotoUrl: emp.profilePhotoUrl ?? null,
             });
           }}
         />

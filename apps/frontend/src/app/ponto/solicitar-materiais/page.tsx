@@ -18,8 +18,13 @@ import {
   Eye,
   RotateCcw,
   ChevronUp,
-  ChevronDown
+  ChevronDown,
+  ClipboardList,
+  Clock,
+  CheckCircle,
+  XCircle
 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
@@ -29,9 +34,15 @@ import { absoluteUploadUrl } from '@/lib/apiOrigin';
 import toast from 'react-hot-toast';
 import { getListTableRowClassName, ListRowNavigableLabel } from '@/components/ui/listTableUi';
 import { RowActionMenuCell, RowActionMenuPortal, cadastroListClasses } from '@/components/ui/RowActionMenu';
+import { ListPagination } from '@/components/ui/ListPagination';
 import { useRowActionMenu } from '@/hooks/useRowActionMenu';
 import { formatRmListDisplayId } from '@/app/ponto/gerenciar-materiais/_lib/rmListDisplay';
-import { formatOcListDisplayId } from '@/components/oc/ocListDisplay';
+import {
+  materialRequestOcListRows,
+  purchaseOrderPhaseShortLabel,
+  sortMaterialRequestPurchaseOrders,
+  type MaterialRequestOcListPurchaseOrder,
+} from '@/components/oc/materialRequestOcListRows';
 import { useCostCenters } from '@/hooks/useCostCenters';
 import { useServiceOrdersByCostCenter } from '@/hooks/useServiceOrdersByCostCenter';
 import { ServiceOrderSearchSelect } from '@/components/suprimentos/ServiceOrderSearchSelect';
@@ -42,14 +53,18 @@ import { FORM_FIELD_INPUT_CLS, FORM_FIELD_TEXTAREA_CLS } from '@/lib/formFieldUi
 import {
   purchaseOrderPhaseLabel,
   ocStatusTextClass,
-  ocStatusBadgeClass,
   OC_STATUS_LABELS_PT,
 } from '@/components/oc/ocStatusLabels';
-/** Rótulo da OC sem prefixo "OC -" para caber melhor na coluna Fase atual. */
-function purchaseOrderPhaseShortLabel(status: string): string {
-  const full = purchaseOrderPhaseLabel(status);
-  return full.replace(/^OC\s*-\s*/i, '').trim() || full;
-}
+import type { PurchaseOrder } from '@/components/oc/OcPurchaseOrdersPanel';
+import { FilterStatCard } from '@/components/ui/FilterStatCard';
+import type { MaterialRequest } from '@/app/ponto/gerenciar-materiais/_lib/types';
+import { isMaterialRequestEffectivelyCancelled } from '@/app/ponto/gerenciar-materiais/_lib/search';
+import {
+  DEFAULT_RM_CARD_FILTER,
+  isMaterialRequestAwaitingOc,
+  matchesRmCardFilter,
+  type RmCardFilter
+} from '@/app/ponto/gerenciar-materiais/_lib/rmCardFilter';
 
 function rmPriorityLabelPt(p: string | undefined): string {
   const m: Record<string, string> = {
@@ -86,6 +101,56 @@ function DetailField({
   );
 }
 
+const RM_STAT_CARDS: {
+  filter: RmCardFilter;
+  label: string;
+  iconBg: string;
+  iconColor: string;
+  Icon: LucideIcon;
+  countKey: keyof { total: number; pending: number; approved: number; awaitingOc: number; cancelled: number };
+}[] = [
+  {
+    filter: 'all',
+    label: 'Total',
+    iconBg: 'bg-blue-100 dark:bg-blue-900/30',
+    iconColor: 'text-blue-600 dark:text-blue-400',
+    Icon: ClipboardList,
+    countKey: 'total'
+  },
+  {
+    filter: 'pending',
+    label: 'Pendentes',
+    iconBg: 'bg-yellow-100 dark:bg-yellow-900/30',
+    iconColor: 'text-yellow-600 dark:text-yellow-400',
+    Icon: Clock,
+    countKey: 'pending'
+  },
+  {
+    filter: 'approved',
+    label: 'Aprovadas',
+    iconBg: 'bg-green-100 dark:bg-green-900/30',
+    iconColor: 'text-green-600 dark:text-green-400',
+    Icon: CheckCircle,
+    countKey: 'approved'
+  },
+  {
+    filter: 'awaitingOc',
+    label: 'Aguardando OC',
+    iconBg: 'bg-amber-100 dark:bg-amber-900/30',
+    iconColor: 'text-amber-600 dark:text-amber-400',
+    Icon: ShoppingCart,
+    countKey: 'awaitingOc'
+  },
+  {
+    filter: 'cancelled',
+    label: 'Canceladas',
+    iconBg: 'bg-red-100 dark:bg-red-900/30',
+    iconColor: 'text-red-600 dark:text-red-400',
+    Icon: XCircle,
+    countKey: 'cancelled'
+  }
+];
+
 function rmStatusLabelPt(status: string): string {
   const m: Record<string, string> = {
     PENDING: 'Pendente',
@@ -116,16 +181,6 @@ function rmStatusBadgeClass(status: string): string {
   return `${base} bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300`;
 }
 
-type RmListPurchaseOrder = { id: string; status: string; orderNumber?: string | null };
-
-const RM_POST_APPROVAL = new Set(['APPROVED', 'PARTIALLY_FULFILLED', 'FULFILLED']);
-
-function sortPurchaseOrdersForDisplay(orders: RmListPurchaseOrder[]): RmListPurchaseOrder[] {
-  return [...orders].sort((a, b) =>
-    (a.orderNumber || '').localeCompare(b.orderNumber || '', 'pt-BR', { numeric: true })
-  );
-}
-
 function materialRequestRmFaseAtual(request: {
   status?: string;
 }): { text: string; badgeClassName: string } {
@@ -134,53 +189,6 @@ function materialRequestRmFaseAtual(request: {
     text: rmStatusLabelPt(rm),
     badgeClassName: rmStatusBadgeClass(rm)
   };
-}
-
-const ocWaitBadgeClass =
-  'inline-flex rounded-full px-2.5 py-1 text-xs font-semibold whitespace-nowrap bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300';
-
-type MaterialRequestOcListRow = {
-  key: string;
-  id: string;
-  idTitle?: string;
-  status: string;
-  statusBadgeClassName: string;
-};
-
-function materialRequestOcListRows(request: {
-  status?: string;
-  purchaseOrders?: RmListPurchaseOrder[];
-}): MaterialRequestOcListRow[] {
-  const rm = String(request.status || '');
-  const pos = Array.isArray(request.purchaseOrders) ? request.purchaseOrders : [];
-
-  if (!RM_POST_APPROVAL.has(rm)) return [];
-
-  if (pos.length === 0) {
-    if (rm === 'APPROVED') {
-      return [
-        {
-          key: 'wait-oc',
-          id: '—',
-          status: 'Aguardando OC',
-          statusBadgeClassName: ocWaitBadgeClass
-        }
-      ];
-    }
-    return [];
-  }
-
-  return sortPurchaseOrdersForDisplay(pos).map((po) => {
-    const fullNumber = po.orderNumber && String(po.orderNumber).trim() ? String(po.orderNumber) : '';
-    const id = fullNumber ? formatOcListDisplayId(fullNumber) : po.id.slice(0, 8);
-    return {
-      key: `po-${po.id}`,
-      id,
-      idTitle: fullNumber || undefined,
-      status: purchaseOrderPhaseShortLabel(po.status),
-      statusBadgeClassName: ocStatusBadgeClass(po.status)
-    };
-  });
 }
 
 const RM_FASE_FILTER_ORDER = [
@@ -220,7 +228,7 @@ const RM_PRIORITY_OPTIONS = [
 
 /** Filtro "Fase atual": `rm:STATUS` = fase da SC; `oc:STATUS` = alguma OC com esse status. */
 function requestMatchesFaseAtualFilter(
-  request: { status?: string; purchaseOrders?: RmListPurchaseOrder[] },
+  request: { status?: string; purchaseOrders?: MaterialRequestOcListPurchaseOrder[] },
   filterKey: string
 ): boolean {
   if (!filterKey) return true;
@@ -547,6 +555,7 @@ function SolicitarMateriaisPage() {
   const [rmListDateTo, setRmListDateTo] = useState('');
   const [isListFiltersModalOpen, setIsListFiltersModalOpen] = useState(false);
   const [listCurrentPage, setListCurrentPage] = useState(1);
+  const [rmCardFilter, setRmCardFilter] = useState<RmCardFilter>(DEFAULT_RM_CARD_FILTER);
 
   const handleLogout = () => {
     localStorage.removeItem('token');
@@ -639,8 +648,11 @@ function SolicitarMateriaisPage() {
       return res.data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['material-requests'] });
-      queryClient.invalidateQueries({ queryKey: ['material-requests-manage'] });
+      void Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['material-requests'], refetchType: 'all' }),
+        queryClient.invalidateQueries({ queryKey: ['material-requests-manage'], refetchType: 'all' }),
+        queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] }),
+      ]);
       toast.success('Requisição reenviada para análise.');
     },
     onError: (error: { response?: { data?: { message?: string; error?: string } } }) => {
@@ -682,8 +694,13 @@ function SolicitarMateriaisPage() {
       return res.data;
     },
     onSuccess: (_data, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['material-requests'] });
-      queryClient.invalidateQueries({ queryKey: ['material-requests-manage'] });
+      void Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['material-requests'], refetchType: 'all' }),
+        queryClient.invalidateQueries({ queryKey: ['material-requests-manage'], refetchType: 'all' }),
+        ...(variables.submitForApproval
+          ? [queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] })]
+          : []),
+      ]);
       setCorrectionEditId(null);
       toast.success(
         variables.submitForApproval
@@ -711,7 +728,11 @@ function SolicitarMateriaisPage() {
       return res.data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['material-requests'] });
+      void Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['material-requests'], refetchType: 'all' }),
+        queryClient.invalidateQueries({ queryKey: ['material-requests-manage'], refetchType: 'all' }),
+        queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] }),
+      ]);
       setActiveTab('list');
       setFormData({
         costCenterId: '',
@@ -738,6 +759,51 @@ function SolicitarMateriaisPage() {
   const requests = useMemo(
     () => requestsData?.data?.requests ?? requestsData?.data ?? EMPTY_REQUEST_LIST,
     [requestsData]
+  );
+
+  const normalizedRequests = useMemo(
+    () => (Array.isArray(requests) ? requests : []) as MaterialRequest[],
+    [requests]
+  );
+
+  const ordersByMaterialRequestId = useMemo(() => {
+    const map = new Map<string, PurchaseOrder[]>();
+    for (const request of normalizedRequests) {
+      const embedded = (request as MaterialRequest & { purchaseOrders?: PurchaseOrder[] }).purchaseOrders;
+      const orders = Array.isArray(embedded) ? [...embedded] : [];
+      orders.sort((a, b) =>
+        (b.orderNumber || '').localeCompare(a.orderNumber || '', 'pt-BR', { numeric: true })
+      );
+      map.set(request.id, orders);
+    }
+    return map;
+  }, [normalizedRequests]);
+
+  const materialRequestIdsWithOc = useMemo(() => {
+    const ids = new Set<string>();
+    for (const [id, orders] of Array.from(ordersByMaterialRequestId)) {
+      if (orders.length > 0) ids.add(id);
+    }
+    return ids;
+  }, [ordersByMaterialRequestId]);
+
+  const rmStats = useMemo(
+    () => ({
+      total: normalizedRequests.length,
+      pending: normalizedRequests.filter((r) => r.status === 'PENDING').length,
+      approved: normalizedRequests.filter(
+        (r) =>
+          r.status === 'APPROVED' &&
+          !isMaterialRequestEffectivelyCancelled(r, ordersByMaterialRequestId.get(r.id) ?? [])
+      ).length,
+      cancelled: normalizedRequests.filter((r) =>
+        isMaterialRequestEffectivelyCancelled(r, ordersByMaterialRequestId.get(r.id) ?? [])
+      ).length,
+      awaitingOc: normalizedRequests.filter((r) =>
+        isMaterialRequestAwaitingOc(r, ordersByMaterialRequestId.get(r.id) ?? [])
+      ).length
+    }),
+    [normalizedRequests, ordersByMaterialRequestId]
   );
 
   const obraOptionsFromRequests = useMemo(() => {
@@ -768,7 +834,7 @@ function SolicitarMateriaisPage() {
     const options: { value: string; label: string; searchText?: string }[] = [{ value: '', label: 'Todas' }];
     for (const st of RM_FASE_FILTER_ORDER) {
       const label = rmStatusLabelPt(st);
-      options.push({ value: `rm:${st}`, label, searchText: `SC ${label}` });
+      options.push({ value: `rm:${st}`, label, searchText: `RM ${label}` });
     }
     for (const st of OC_FASE_FILTER_ORDER) {
       if (!(st in OC_STATUS_LABELS_PT)) continue;
@@ -791,7 +857,7 @@ function SolicitarMateriaisPage() {
   const filteredRequests = useMemo(() => {
     let list = Array.isArray(requests) ? [...requests] : [];
     if (rmListFaseAtual) {
-      list = list.filter((r: { status?: string; purchaseOrders?: RmListPurchaseOrder[] }) =>
+      list = list.filter((r: { status?: string; purchaseOrders?: MaterialRequestOcListPurchaseOrder[] }) =>
         requestMatchesFaseAtualFilter(r, rmListFaseAtual)
       );
     }
@@ -811,6 +877,17 @@ function SolicitarMateriaisPage() {
         if (rmListDateFrom && ymd < rmListDateFrom) return false;
         if (rmListDateTo && ymd > rmListDateTo) return false;
         return true;
+      });
+    }
+    if (rmCardFilter !== 'all') {
+      list = list.filter((r: { id: string; status?: string }) => {
+        const orders = ordersByMaterialRequestId.get(r.id) ?? [];
+        return matchesRmCardFilter(
+          r as MaterialRequest,
+          rmCardFilter,
+          materialRequestIdsWithOc,
+          orders
+        );
       });
     }
     const q = rmListSearch.trim().toLowerCase();
@@ -839,7 +916,10 @@ function SolicitarMateriaisPage() {
     rmListObra,
     rmListCostCenterId,
     rmListDateFrom,
-    rmListDateTo
+    rmListDateTo,
+    rmCardFilter,
+    ordersByMaterialRequestId,
+    materialRequestIdsWithOc
   ]);
 
   const listTotal = filteredRequests.length;
@@ -865,12 +945,21 @@ function SolicitarMateriaisPage() {
     setRmListCostCenterId('');
     setRmListDateFrom('');
     setRmListDateTo('');
+    setRmCardFilter(DEFAULT_RM_CARD_FILTER);
     setListCurrentPage(1);
   };
 
   useEffect(() => {
     setListCurrentPage(1);
-  }, [rmListSearch, rmListFaseAtual, rmListObra, rmListCostCenterId, rmListDateFrom, rmListDateTo]);
+  }, [
+    rmListSearch,
+    rmListFaseAtual,
+    rmListObra,
+    rmListCostCenterId,
+    rmListDateFrom,
+    rmListDateTo,
+    rmCardFilter
+  ]);
 
   useEffect(() => {
     if (listCurrentPage > listTotalPages) {
@@ -1239,12 +1328,28 @@ function SolicitarMateriaisPage() {
             <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400">Solicite materiais para seus projetos</p>
           </div>
 
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5">
+            {RM_STAT_CARDS.map((card) => (
+              <FilterStatCard
+                key={card.filter}
+                label={card.label}
+                count={rmStats[card.countKey]}
+                icon={card.Icon}
+                iconBg={card.iconBg}
+                iconColor={card.iconColor}
+                isActive={rmCardFilter === card.filter}
+                loading={loadingRequests}
+                onClick={() => setRmCardFilter(card.filter)}
+              />
+            ))}
+          </div>
+
           <Card>
             <CardHeader className="border-b-0 pb-1">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                 <div className="flex items-center space-x-3">
-                  <div className="p-2 sm:p-3 bg-blue-100 dark:bg-blue-900/30 rounded-lg flex-shrink-0">
-                    <ShoppingCart className="w-5 h-5 sm:w-6 sm:h-6 text-blue-600 dark:text-blue-400" />
+                  <div className="p-2 sm:p-3 bg-red-100 dark:bg-red-900/30 rounded-lg flex-shrink-0">
+                    <ShoppingCart className="w-5 h-5 sm:w-6 sm:h-6 text-red-600 dark:text-red-400" />
                   </div>
                   <div className="min-w-0">
                     <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Minhas Solicitações</h3>
@@ -1286,7 +1391,7 @@ function SolicitarMateriaisPage() {
                   <button
                     type="button"
                     onClick={() => setIsNewRequestModalOpen(true)}
-                    className="flex h-10 items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700 transition-colors hover:bg-blue-100 dark:border-blue-800/60 dark:bg-blue-950/30 dark:text-blue-300 dark:hover:bg-blue-900/40"
+                    className="flex h-10 items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
                   >
                     <Plus className="h-4 w-4 shrink-0" />
                     <span>Nova Solicitação</span>
@@ -1382,11 +1487,14 @@ function SolicitarMateriaisPage() {
                             request: Record<string, unknown> & {
                               id: string;
                               status?: string;
-                              purchaseOrders?: RmListPurchaseOrder[];
+                              purchaseOrders?: MaterialRequestOcListPurchaseOrder[];
                             }
                           ) => {
                             const rmFase = materialRequestRmFaseAtual(request);
-                            const ocRows = materialRequestOcListRows(request);
+                            const ocRows = materialRequestOcListRows(
+                              request,
+                              Array.isArray(request.purchaseOrders) ? request.purchaseOrders : []
+                            );
                             return (
                             <tr
                               key={request.id}
@@ -1520,26 +1628,11 @@ function SolicitarMateriaisPage() {
                       ]}
                     />
                   ) : null}
-                  {listTotalPages > 1 && (
-                    <div className="mt-4 flex items-center justify-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setListCurrentPage((prev) => Math.max(prev - 1, 1))}
-                        disabled={listCurrentPage === 1}
-                        className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
-                      >
-                        Anterior
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setListCurrentPage((prev) => Math.min(prev + 1, listTotalPages))}
-                        disabled={listCurrentPage === listTotalPages}
-                        className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
-                      >
-                        Próxima
-                      </button>
-                    </div>
-                  )}
+                  <ListPagination
+                    currentPage={listCurrentPage}
+                    totalPages={listTotalPages}
+                    onPageChange={setListCurrentPage}
+                  />
                 </>
               )}
             </CardContent>
@@ -1957,9 +2050,9 @@ function SolicitarMateriaisPage() {
                   </h3>
                   {!loadingDetailRm && detailRmData ? (
                     <p className="mt-0.5 truncate text-sm text-gray-500 dark:text-gray-400">
-                      {String(
-                        (detailRmData as { requestNumber?: string }).requestNumber || 'Solicitação'
-                      )}
+                      {formatRmListDisplayId(
+                        (detailRmData as { requestNumber?: string }).requestNumber
+                      ) || 'Solicitação'}
                     </p>
                   ) : null}
                 </div>
@@ -2012,7 +2105,7 @@ function SolicitarMateriaisPage() {
                         <div className="flex flex-wrap items-center gap-2">
                           {statusKey ? (
                             <span className={rmStatusBadgeClass(statusKey)}>
-                              SC · {rmStatusLabelPt(statusKey)}
+                              RM · {rmStatusLabelPt(statusKey)}
                             </span>
                           ) : null}
                           {d.priority ? (
@@ -2027,8 +2120,12 @@ function SolicitarMateriaisPage() {
                             Informações gerais
                           </h4>
                           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                            <DetailField label="Nº SC">
-                              <span className="font-semibold">{String(d.requestNumber || '—')}</span>
+                            <DetailField label="Nº RM">
+                              <span className="font-semibold">
+                                {formatRmListDisplayId(
+                                  d.requestNumber ? String(d.requestNumber) : null
+                                )}
+                              </span>
                             </DetailField>
                             <DetailField label="Data da solicitação">
                               {requestedDate && !Number.isNaN(requestedDate.getTime()) ? (
@@ -2120,7 +2217,7 @@ function SolicitarMateriaisPage() {
                               Ordens de compra ({pos.length})
                             </h4>
                             <ul className="space-y-2">
-                              {sortPurchaseOrdersForDisplay(pos as RmListPurchaseOrder[]).map((po) => {
+                              {sortMaterialRequestPurchaseOrders(pos as MaterialRequestOcListPurchaseOrder[]).map((po) => {
                                 const num =
                                   (po.orderNumber && String(po.orderNumber).trim()) || po.id.slice(0, 8);
                                 return (

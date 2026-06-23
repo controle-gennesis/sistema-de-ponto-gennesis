@@ -95,6 +95,7 @@ export function usePermissions() {
   const allowedContractIdSet = new Set(allowedContractIds);
   const dpApprovalContractIds: string[] = permissionData?.dpApprovalContractIds ?? [];
   const dpApprovalContractIdSet = new Set(dpApprovalContractIds);
+  const gestorCostCenterIds: string[] = permissionData?.gestorCostCenterIds ?? [];
 
   type ContractModuleFlagRow = {
     orcamento: boolean;
@@ -202,15 +203,39 @@ export function usePermissions() {
     isAdministrator || !!permissionData?.isAdmin || can(pk('/ponto/controle/aprovar-oc-compras'));
   const canApproveOcDiretoria =
     isAdministrator || !!permissionData?.isAdmin || can(pk('/ponto/controle/aprovar-oc-diretoria'));
+  const hasLegacyOcGestorControle =
+    !isAdministrator && !permissionData?.isAdmin && can(pk('/ponto/controle/aprovar-oc-gestor'));
+  const hasLegacyRmApproveControle =
+    !isAdministrator &&
+    !permissionData?.isAdmin &&
+    can(pk('/ponto/controle/aprovar-requisicoes-materiais'));
+  /** Gestor por contrato (aba Contratos) ou permissão legada Controle. */
   const canApproveOcGestor =
-    isAdministrator || !!permissionData?.isAdmin || can(pk('/ponto/controle/aprovar-oc-gestor'));
+    isAdministrator ||
+    !!permissionData?.isAdmin ||
+    dpApprovalContractIds.length > 0 ||
+    can(pk('/ponto/controle/aprovar-oc-gestor'));
   const canApproveOc = canApproveOcCompras || canApproveOcDiretoria || canApproveOcGestor;
 
-  /** Bloco «Requisições de Materiais» na tela de Aprovações (somente permissão Controle). */
+  /** Aprovação de RMs: gestor por contrato ou permissão legada Controle. */
   const canApproveMaterialRequests =
     isAdministrator ||
     !!permissionData?.isAdmin ||
+    dpApprovalContractIds.length > 0 ||
     can(pk('/ponto/controle/aprovar-requisicoes-materiais'));
+
+  /**
+   * undefined = sem filtro (admin ou legado Controle).
+   * string[] = centros de custo dos contratos em que é gestor.
+   */
+  const gestorScopedCostCenterIds: string[] | undefined =
+    isAdministrator || !!permissionData?.isAdmin
+      ? undefined
+      : hasLegacyOcGestorControle || hasLegacyRmApproveControle
+        ? undefined
+        : dpApprovalContractIds.length > 0
+          ? gestorCostCenterIds
+          : undefined;
 
   /** Bloco «Solicitações de Combustível» na tela de Aprovações (somente permissão Controle). */
   const canApproveFuel =
@@ -309,6 +334,8 @@ export function usePermissions() {
     canAction,
     allowedContractIds,
     dpApprovalContractIds,
+    gestorCostCenterIds,
+    gestorScopedCostCenterIds,
     canCreateSensitiveDpRequestType,
     canAccessDpApproverPages,
     canApproveEspelhoNf,

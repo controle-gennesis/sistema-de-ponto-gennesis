@@ -27,6 +27,7 @@ import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDr
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import api from '@/lib/api';
 import toast from 'react-hot-toast';
+import { formatRmListDisplayId } from '@/app/ponto/gerenciar-materiais/_lib/rmListDisplay';
 import {
   formatCurrencyInputBrFromNumber,
   maskCurrencyInputBrOrEmpty,
@@ -773,7 +774,9 @@ export default function ControleEntregasPageClient() {
                                   {row.deliveryNumber}
                                 </ListRowNavigableLabel>
                               </td>
-                              <td className={`${tdCenterClass} whitespace-nowrap`}>{row.rmNumber || '—'}</td>
+                              <td className={`${tdCenterClass} whitespace-nowrap`}>
+                                {formatRmListDisplayId(row.rmNumber)}
+                              </td>
                               <td className={`${tdCenterClass} whitespace-nowrap`}>{row.movementId || '—'}</td>
                               <td className={`${tdCenterClass} whitespace-nowrap`}>{row.movementNumber || '—'}</td>
                               <td className={tdCenterClass} title={`${contractLabel(row)} · ${row.polo}`}>
@@ -853,7 +856,7 @@ export default function ControleEntregasPageClient() {
           {detailRow ? (
             <div className="space-y-6">
               <DetailSection title="Identificação">
-                <DetailField label="N° RM">{detailRow.rmNumber || '—'}</DetailField>
+                <DetailField label="N° RM">{formatRmListDisplayId(detailRow.rmNumber)}</DetailField>
                 <DetailField label="ID Mov">{detailRow.movementId || '—'}</DetailField>
                 <DetailField label="Nº Mov">{detailRow.movementNumber || '—'}</DetailField>
                 <DetailField label="Contrato">{contractLabel(detailRow)}</DetailField>

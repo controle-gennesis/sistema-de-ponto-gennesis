@@ -494,7 +494,7 @@ export function MultiSelectSearchDropdown({
       window.removeEventListener('resize', syncFloatingPos);
       window.removeEventListener('scroll', onScroll, true);
     };
-  }, [open, menuInline, syncFloatingPos, filtered.length, search]);
+  }, [open, menuInline, syncFloatingPos, filtered.length, search, selected.length]);
 
   useEffect(() => {
     if (disabled && open) {

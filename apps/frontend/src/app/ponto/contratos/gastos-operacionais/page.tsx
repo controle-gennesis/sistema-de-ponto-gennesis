@@ -8,7 +8,10 @@ import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import api from '@/lib/api';
 import { ControleGeralGastosOperacionaisPanel } from '../controle-geral/ControleGeralGastosOperacionaisPanel';
-import type { QueryGastosDetailRow } from '../controle-geral/buildQueryGastosRows';
+import type {
+  QueryGastosDetailRow,
+  QueryGastosNaturezaDetailRow
+} from '../controle-geral/buildQueryGastosRows';
 import { normalizeGastosOperacionaisContractName } from '../controle-geral/gastosOperacionaisContractOrder';
 import { resolveGastosPoloFromContractName } from '@/lib/extratoCaixaPolo';
 
@@ -18,6 +21,7 @@ type GastosOperacionaisApi = {
   data: {
     configured: boolean;
     detailRows?: QueryGastosDetailRow[];
+    naturezaDetailRows?: QueryGastosNaturezaDetailRow[];
     fetchedAt?: string;
     message?: string;
   };
@@ -48,7 +52,7 @@ export default function GastosOperacionaisPage() {
     isFetching: fetchingGastos,
     refetch: refetchGastos
   } = useQuery({
-    queryKey: ['gastos-operacionais-module-totvs-v4-polo-sigla'],
+    queryKey: ['gastos-operacionais-module-totvs-v8-natureza-label'],
     queryFn: async () => {
       const res = await api.get<GastosOperacionaisApi>('/contracts/gastos-operacionais', {
         timeout: 180_000
@@ -72,9 +76,15 @@ export default function GastosOperacionaisPage() {
         return { ...row, contract, polo };
       });
 
+      const naturezaDetailRows = (payload.data?.naturezaDetailRows ?? []).map((row) => ({
+        ...row,
+        contract: normalizeGastosOperacionaisContractName(row.contract)
+      }));
+
       return {
         gastosOperacionais: {
           detailRows,
+          naturezaDetailRows,
           fetchedAt: payload.data?.fetchedAt ?? new Date().toISOString()
         }
       };
@@ -84,6 +94,7 @@ export default function GastosOperacionaisPage() {
   });
 
   const gastosDetailRows = gastosData?.gastosOperacionais?.detailRows ?? [];
+  const gastosNaturezaDetailRows = gastosData?.gastosOperacionais?.naturezaDetailRows ?? [];
   const gastosErrorMessage = (() => {
     const err = gastosErrorObj as {
       response?: { data?: { message?: string } };
@@ -123,6 +134,7 @@ export default function GastosOperacionaisPage() {
 
           <ControleGeralGastosOperacionaisPanel
             detailRows={gastosDetailRows}
+            naturezaDetailRows={gastosNaturezaDetailRows}
             isLoading={loadingGastos || fetchingGastos}
             isError={gastosError}
             errorMessage={gastosErrorMessage}

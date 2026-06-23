@@ -13,6 +13,7 @@ import { getListTableRowClassName, ListRowNavigableLabel, rowActionMenuButtonCla
 import toast from 'react-hot-toast';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
+import { formatRmListDisplayId } from '@/app/ponto/gerenciar-materiais/_lib/rmListDisplay';
 
 const FURO_STATUS_FILTER_OPTIONS = labeledToSelectOptions([
   { value: 'ABERTO', label: 'Aberto' },
@@ -606,9 +607,9 @@ export default function FuroEstoquePage() {
                       <p className="font-medium">{detail.purchaseOrder.supplier?.name || '—'}</p>
                     </div>
                     <div>
-                      <span className="text-xs text-gray-500 dark:text-gray-400">Requisição (SC)</span>
+                      <span className="text-xs text-gray-500 dark:text-gray-400">Requisição (RM)</span>
                       <p className="font-medium">
-                        {detail.purchaseOrder.materialRequest?.requestNumber || '—'}
+                        {formatRmListDisplayId(detail.purchaseOrder.materialRequest?.requestNumber)}
                       </p>
                     </div>
                     <div>

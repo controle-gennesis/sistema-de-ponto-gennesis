@@ -111,10 +111,15 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
     href: '/ponto/recebimento-entregas',
     category: 'Engenharia',
   },
+  {
+    key: pathToModuleKey('/ponto/solicitar-materiais'),
+    name: 'Solicitação de Materiais',
+    href: '/ponto/solicitar-materiais',
+    category: 'Engenharia',
+  },
   // Jurídico
   { key: pathToModuleKey('/ponto/juridico'), name: 'Processos Trabalhistas', href: '/ponto/juridico', category: 'Jurídico' },
   // Suprimentos
-  { key: pathToModuleKey('/ponto/solicitar-materiais'), name: 'Solicitar Materiais', href: '/ponto/solicitar-materiais', category: 'Suprimentos' },
   { key: pathToModuleKey('/ponto/gerenciar-materiais'), name: 'Requisições de Materiais', href: '/ponto/gerenciar-materiais', category: 'Suprimentos' },
   { key: pathToModuleKey('/ponto/mapa-cotacao'), name: 'Mapa de Cotação', href: '/ponto/mapa-cotacao', category: 'Suprimentos' },
   { key: pathToModuleKey('/ponto/ordem-de-compra'), name: 'Ordens de Compra', href: '/ponto/ordem-de-compra', category: 'Suprimentos' },

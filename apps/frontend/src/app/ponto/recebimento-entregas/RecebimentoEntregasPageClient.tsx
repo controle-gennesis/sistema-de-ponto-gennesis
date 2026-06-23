@@ -18,6 +18,7 @@ import { RowActionMenuCell } from '@/components/ui/RowActionMenu';
 import { getListTableRowClassName, listTableRowClasses, ListRowNavigableLabel } from '@/components/ui/listTableUi';
 import { useRowActionMenu } from '@/hooks/useRowActionMenu';
 import toast from 'react-hot-toast';
+import { formatRmListDisplayId } from '@/app/ponto/gerenciar-materiais/_lib/rmListDisplay';
 import {
   CURRENT_STATUS_OPTIONS,
   DELIVERY_TYPE_OPTIONS,
@@ -469,7 +470,9 @@ export default function RecebimentoEntregasPageClient() {
                                   {row.deliveryNumber}
                                 </ListRowNavigableLabel>
                               </td>
-                              <td className={`${tdCenterClass} whitespace-nowrap`}>{row.rmNumber ?? '—'}</td>
+                              <td className={`${tdCenterClass} whitespace-nowrap`}>
+                                {formatRmListDisplayId(row.rmNumber)}
+                              </td>
                               <td className={`${tdCenterClass} whitespace-nowrap`}>{row.movementId ?? '—'}</td>
                               <td className={`${tdCenterClass} whitespace-nowrap`}>{row.movementNumber ?? '—'}</td>
                               <td className={tdCenterClass} title={`${contractLabel(row)} · ${row.polo}`}>
@@ -644,7 +647,7 @@ export default function RecebimentoEntregasPageClient() {
           {detailRow ? (
             <div className="space-y-6">
               <DetailSection title="Identificação">
-                <DetailField label="N° RM">{detailRow.rmNumber || '—'}</DetailField>
+                <DetailField label="N° RM">{formatRmListDisplayId(detailRow.rmNumber)}</DetailField>
                 <DetailField label="ID Mov">{detailRow.movementId || '—'}</DetailField>
                 <DetailField label="Nº Mov">{detailRow.movementNumber || '—'}</DetailField>
                 <DetailField label="Contrato">{contractLabel(detailRow)}</DetailField>
@@ -753,7 +756,7 @@ export default function RecebimentoEntregasPageClient() {
                 <div>
                   <dt className="text-xs text-gray-500 dark:text-gray-400">N° RM</dt>
                   <dd className="font-medium text-gray-900 dark:text-gray-100">
-                    {confirmRow.rmNumber ?? '—'}
+                    {formatRmListDisplayId(confirmRow.rmNumber)}
                   </dd>
                 </div>
                 <div>

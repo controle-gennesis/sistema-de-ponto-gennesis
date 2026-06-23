@@ -13,6 +13,7 @@ import {
   type PurchaseOrder
 } from '@/components/oc/OcPurchaseOrdersPanel';
 import { OcFluxTabsNav, OC_FLUX_DEFAULT_TAB } from '@/components/oc/OcFluxTabsNav';
+import { OcGlobalSearch } from '@/components/oc/OcGlobalSearch';
 import { computeOcTabCounts } from '@/components/oc/ocTabCounts';
 
 export default function OrdemDeCompraPage() {
@@ -75,6 +76,13 @@ export default function OrdemDeCompraPage() {
             </p>
           </div>
 
+          <OcGlobalSearch
+            searchTerm={searchTerm}
+            onSearchChange={setSearchTerm}
+            onNavigate={setOcTab}
+            orders={allOrders}
+          />
+
           <div className="scroll-mt-4">
             <OcFluxTabsNav
               activeTab={ocTab}
@@ -87,6 +95,7 @@ export default function OrdemDeCompraPage() {
               <OcPurchaseOrdersPanel
                 embedded
                 hideTabs
+                hideSearch
                 activeTab={ocTab}
                 searchTerm={searchTerm}
                 onSearchChange={setSearchTerm}

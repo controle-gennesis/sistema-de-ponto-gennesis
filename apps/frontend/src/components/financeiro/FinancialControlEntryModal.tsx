@@ -16,8 +16,10 @@ import {
   type FinancialControlStatus,
   buildFinancialEntryPayload,
   buildInitialForm,
+  buildQuickLaunchPayload,
   entryToForm,
 } from '@/components/financeiro/financialControlEntry';
+import { FinancialControlOcQuickLaunch } from '@/components/financeiro/FinancialControlOcQuickLaunch';
 
 const MONTH_SELECT_OPTIONS = labeledToSelectOptions(
   MONTHS_PT.map((label, idx) => ({ value: String(idx + 1), label }))
@@ -32,6 +34,8 @@ export type FinancialControlEntryModalProps = {
   initialValues?: Partial<EntryFormState>;
   defaultPaymentMonth?: number;
   defaultPaymentYear?: number;
+  /** Resumo automático sem campos editáveis (lançamento a partir da OC). */
+  simplifiedFromOc?: boolean;
 };
 
 function CurrencyInput({
@@ -135,15 +139,18 @@ export function FinancialControlEntryModal({
   initialValues,
   defaultPaymentMonth,
   defaultPaymentYear,
+  simplifiedFromOc = false,
 }: FinancialControlEntryModalProps) {
   const queryClient = useQueryClient();
   const now = new Date();
   const [form, setForm] = useState<EntryFormState>(() =>
     buildInitialForm(defaultPaymentMonth ?? now.getMonth() + 1, defaultPaymentYear ?? now.getFullYear())
   );
+  const [interestValue, setInterestValue] = useState('');
 
   useEffect(() => {
     if (!isOpen) return;
+    setInterestValue('');
     if (editingEntry) {
       setForm(entryToForm(editingEntry));
       return;
@@ -198,9 +205,15 @@ export function FinancialControlEntryModal({
     },
   });
 
+  const isSaving = createMutation.isPending || updateMutation.isPending;
+  const showQuickLaunch = simplifiedFromOc && !editingEntry;
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const payload = buildFinancialEntryPayload(form);
+    const payload =
+      showQuickLaunch && !editingEntry
+        ? buildQuickLaunchPayload(form, interestValue)
+        : buildFinancialEntryPayload(form);
     if (editingEntry) {
       updateMutation.mutate({ id: editingEntry.id, payload });
     } else {
@@ -208,16 +221,25 @@ export function FinancialControlEntryModal({
     }
   };
 
-  const isSaving = createMutation.isPending || updateMutation.isPending;
-
   return (
     <Modal
       isOpen={isOpen}
       onClose={onClose}
       title={editingEntry ? 'Editar Lançamento' : 'Novo Lançamento'}
-      size="xl"
+      size={showQuickLaunch ? 'md' : 'xl'}
       elevated
     >
+      {showQuickLaunch ? (
+        <FinancialControlOcQuickLaunch
+          form={form}
+          interestValue={interestValue}
+          onInterestChange={setInterestValue}
+          onClose={onClose}
+          onSubmit={handleSubmit}
+          isSaving={isSaving}
+          submitLabel="Criar lançamento"
+        />
+      ) : (
       <form onSubmit={handleSubmit} className="space-y-4" autoComplete="off">
         <input type="text" name="prevent-autofill" autoComplete="off" className="hidden" tabIndex={-1} />
 
@@ -394,6 +416,7 @@ export function FinancialControlEntryModal({
           </button>
         </div>
       </form>
+      )}
     </Modal>
   );
 }

@@ -67,9 +67,45 @@ export type StockReceiptSummaryBatch = {
 
 export type StockReceiptSummary = {
   hasReceipts: boolean;
+  hasExits: boolean;
   lines: StockReceiptSummaryLine[];
   batches: StockReceiptSummaryBatch[];
+  exitBatches: StockReceiptSummaryBatch[];
 };
+
+type StockMovementForBatch = {
+  notes: string | null;
+  createdAt: Date;
+  quantity: number | Prisma.Decimal;
+  material: { name: string; unit: string };
+  user: { name: string | null } | null;
+};
+
+function buildStockMovementBatches(movements: StockMovementForBatch[]): StockReceiptSummaryBatch[] {
+  const batchMap = new Map<string, StockReceiptSummaryBatch>();
+  for (const m of movements) {
+    const key = `${m.notes || ''}::${m.createdAt.toISOString()}`;
+    let batch = batchMap.get(key);
+    if (!batch) {
+      batch = {
+        createdAt: m.createdAt.toISOString(),
+        split: parseMovementSplitFromNotes(m.notes),
+        userName: m.user?.name || '—',
+        items: []
+      };
+      batchMap.set(key, batch);
+    }
+    batch.items.push({
+      materialName: m.material.name,
+      quantity: Number(m.quantity),
+      unit: m.material.unit
+    });
+  }
+
+  return Array.from(batchMap.values()).sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  );
+}
 
 export class StockShortfallService {
   private lastRebuildAt = 0;
@@ -298,7 +334,13 @@ export class StockShortfallService {
    */
   async getReceiptSummaryForOrderNumber(orderNumber: string): Promise<StockReceiptSummary> {
     const trimmed = orderNumber.trim();
-    const empty: StockReceiptSummary = { hasReceipts: false, lines: [], batches: [] };
+    const empty: StockReceiptSummary = {
+      hasReceipts: false,
+      hasExits: false,
+      lines: [],
+      batches: [],
+      exitBatches: []
+    };
     if (!trimmed) return empty;
 
     const po = await prisma.purchaseOrder.findUnique({
@@ -321,9 +363,14 @@ export class StockShortfallService {
 
     const forOc = movements.filter((m) => movementNotesMatchOc(m.notes, trimmed));
     const inMovements = forOc.filter((m) => m.type === 'IN');
+    const outMovements = forOc.filter((m) => m.type === 'OUT');
+    const exitBatches = buildStockMovementBatches(outMovements);
+    const hasExits = exitBatches.length > 0;
+
     if (inMovements.length === 0) {
       return {
         hasReceipts: false,
+        hasExits,
         lines: po.items.map((item) => {
           const eng = item.material;
           const label = (eng?.name || eng?.description || '').trim() || '—';
@@ -336,7 +383,8 @@ export class StockShortfallService {
             unit: item.unit || '—'
           };
         }),
-        batches: []
+        batches: [],
+        exitBatches
       };
     }
 
@@ -374,31 +422,9 @@ export class StockShortfallService {
       });
     }
 
-    const batchMap = new Map<string, StockReceiptSummaryBatch>();
-    for (const m of inMovements) {
-      const key = `${m.notes || ''}::${m.createdAt.toISOString()}`;
-      let batch = batchMap.get(key);
-      if (!batch) {
-        batch = {
-          createdAt: m.createdAt.toISOString(),
-          split: parseMovementSplitFromNotes(m.notes),
-          userName: m.user?.name || '—',
-          items: []
-        };
-        batchMap.set(key, batch);
-      }
-      batch.items.push({
-        materialName: m.material.name,
-        quantity: Number(m.quantity),
-        unit: m.material.unit
-      });
-    }
+    const batches = buildStockMovementBatches(inMovements);
 
-    const batches = Array.from(batchMap.values()).sort(
-      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-    );
-
-    return { hasReceipts: true, lines, batches };
+    return { hasReceipts: true, hasExits, lines, batches, exitBatches };
   }
 
   /** Quantidade de furos abertos (com recálculo leve e limitado por throttle). */

@@ -2,6 +2,7 @@ import type { PurchaseOrder } from '@/components/oc/OcPurchaseOrdersPanel';
 import { orderNeedsFinanceBoleto } from './flux';
 import type { FluxTab, MaterialRequest } from './types';
 import { rmSolicitante } from './display';
+import { formatRmListDisplayId } from './rmListDisplay';
 
 export const normalizeFluxSearch = (value?: string | null) =>
   (value || '')
@@ -188,7 +189,7 @@ export function buildFluxSearchHits(input: {
       kind: 'rm',
       id: request.id,
       tab,
-      title: request.requestNumber || `SC #${request.id.slice(0, 8)}`,
+      title: formatRmListDisplayId(request.requestNumber) || `#${request.id.slice(0, 8)}`,
       subtitle: `${FLUX_TAB_LABELS[tab]} · ${request.costCenter?.name || 'Sem centro de custo'}`
     });
   }

@@ -2,37 +2,26 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Search, X } from 'lucide-react';
-import type { PurchaseOrder } from '@/components/oc/OcPurchaseOrdersPanel';
-import { buildFluxSearchHits, type FluxSearchHit } from '../_lib/search';
-import type { FluxTab, MaterialRequest } from '../_lib/types';
+import type { OcTab, PurchaseOrder } from '@/components/oc/OcPurchaseOrdersPanel';
+import { buildOcGlobalSearchHits, type OcGlobalSearchHit } from '@/components/oc/ocGlobalSearchUtils';
 
-export function FluxGlobalSearch({
+export function OcGlobalSearch({
   searchTerm,
   onSearchChange,
   onNavigate,
-  requests,
-  orders,
-  materialRequestIdsWithOc
+  orders
 }: {
   searchTerm: string;
   onSearchChange: (value: string) => void;
-  onNavigate: (tab: FluxTab) => void;
-  requests: MaterialRequest[];
+  onNavigate: (tab: OcTab) => void;
   orders: PurchaseOrder[];
-  materialRequestIdsWithOc: Set<string>;
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
   const hits = useMemo(
-    () =>
-      buildFluxSearchHits({
-        requests,
-        orders,
-        materialRequestIdsWithOc,
-        searchTerm
-      }),
-    [requests, orders, materialRequestIdsWithOc, searchTerm]
+    () => buildOcGlobalSearchHits(orders, searchTerm),
+    [orders, searchTerm]
   );
 
   useEffect(() => {
@@ -47,7 +36,7 @@ export function FluxGlobalSearch({
     return () => document.removeEventListener('mousedown', onDocClick);
   }, []);
 
-  const selectHit = (hit: FluxSearchHit) => {
+  const selectHit = (hit: OcGlobalSearchHit) => {
     onNavigate(hit.tab);
     setOpen(false);
   };
@@ -74,8 +63,8 @@ export function FluxGlobalSearch({
             selectHit(hits[0]);
           }
         }}
-        placeholder="Buscar RM, OC, solicitante, material, fornecedor..."
-        className="h-11 w-full rounded-xl border border-gray-300 bg-white py-2 pl-10 pr-10 text-sm font-medium text-gray-900 shadow-sm placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+        placeholder="Buscar OC, RM, fornecedor, centro de custo em todas as fases..."
+        className="h-11 w-full rounded-xl border border-gray-300 bg-white py-2 pl-10 pr-10 text-sm font-medium text-gray-900 shadow-sm placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
       />
       {searchTerm ? (
         <button
@@ -95,12 +84,12 @@ export function FluxGlobalSearch({
         <div className="absolute left-2 right-2 top-full z-30 mt-2 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800">
           {hits.length === 0 ? (
             <p className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400">
-              Nenhum resultado em nenhuma fase
+              Nenhuma OC encontrada em nenhuma fase
             </p>
           ) : (
             <ul className="max-h-72 overflow-y-auto py-1" role="listbox">
               {hits.map((hit) => (
-                <li key={`${hit.kind}-${hit.id}`}>
+                <li key={hit.id}>
                   <button
                     type="button"
                     role="option"
@@ -108,7 +97,7 @@ export function FluxGlobalSearch({
                     className="flex w-full flex-col gap-0.5 px-4 py-2.5 text-left transition-colors hover:bg-gray-50 dark:hover:bg-gray-700/60"
                   >
                     <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                      {hit.kind === 'rm' ? 'RM' : 'OC'} · {hit.title}
+                      OC · {hit.title}
                     </span>
                     <span className="text-xs text-gray-500 dark:text-gray-400">{hit.subtitle}</span>
                   </button>
@@ -118,7 +107,7 @@ export function FluxGlobalSearch({
           )}
           {hits.length > 0 ? (
             <p className="border-t border-gray-100 px-4 py-2 text-xs text-gray-500 dark:border-gray-700 dark:text-gray-400">
-              Enter vai para o primeiro · clique para ir à fase
+              Enter vai para o primeiro resultado · clique para ir à fase
             </p>
           ) : null}
         </div>

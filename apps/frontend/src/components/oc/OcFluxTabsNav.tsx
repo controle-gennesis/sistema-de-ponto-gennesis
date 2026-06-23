@@ -1,5 +1,6 @@
 'use client';
 
+import { TabCountBadge } from '@/components/ui/TabCountBadge';
 import type { OcTab } from './OcPurchaseOrdersPanel';
 
 export type OcTabCounts = {
@@ -65,15 +66,7 @@ export function OcFluxTabsNav({
               }`}
             >
               {tab.label}
-              <span
-                className={`rounded-full px-2 py-0.5 text-xs ${
-                  activeTab === tab.id
-                    ? 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400'
-                    : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'
-                }`}
-              >
-                {countFor(tab.countKey)}
-              </span>
+              <TabCountBadge count={countFor(tab.countKey)} active={activeTab === tab.id} tone="red" />
             </button>
           ))}
         </nav>

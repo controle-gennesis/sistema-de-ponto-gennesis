@@ -12,11 +12,21 @@ export type BoletoParcelasModalOrder = BoletoParcelasOrderFields & {
 
 export type BoletoParcelasModalProps = {
   order: BoletoParcelasModalOrder;
+  editable?: boolean;
   onClose: () => void;
   onSaved: (payload: { data: unknown }) => void;
+  onReleaseToPayment?: (orderId: string) => void;
+  releasePending?: boolean;
 };
 
-export function BoletoParcelasModal({ order, onClose, onSaved }: BoletoParcelasModalProps) {
+export function BoletoParcelasModal({
+  order,
+  editable = true,
+  onClose,
+  onSaved,
+  onReleaseToPayment,
+  releasePending = false
+}: BoletoParcelasModalProps) {
   const n = order.paymentParcelCount ?? 1;
 
   return (
@@ -25,10 +35,14 @@ export function BoletoParcelasModal({ order, onClose, onSaved }: BoletoParcelasM
       <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-6">
         <div className="flex items-start justify-between gap-2 mb-4">
           <div>
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Boletos por parcela</h2>
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+              {n > 1 ? 'Boletos por parcela' : 'Anexar boleto'}
+            </h2>
             <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-              {order.orderNumber} — {n} parcela{n > 1 ? 's' : ''} (condição de pagamento). Informe valor,
-              vencimento e arquivo por parcela.
+              {order.orderNumber} —{' '}
+              {n > 1
+                ? `${n} parcelas. A parcela atual é obrigatória; as demais podem ser anexadas agora, se quiser.`
+                : 'Informe vencimento e anexe o arquivo do boleto.'}
             </p>
           </div>
           <button
@@ -43,12 +57,15 @@ export function BoletoParcelasModal({ order, onClose, onSaved }: BoletoParcelasM
 
         <BoletoParcelasList
           order={order}
-          editable
-          hint="Envie uma parcela por vez ao financeiro após anexar o boleto da parcela atual."
-          onSaved={(payload) => {
-            onSaved(payload);
-            onClose();
-          }}
+          editable={editable}
+          hint={
+            editable
+              ? 'A parcela atual é obrigatória. Você pode anexar as demais agora ou depois, uma por vez.'
+              : 'Somente quem criou a OC pode anexar ou editar os boletos.'
+          }
+          onReleaseToPayment={onReleaseToPayment}
+          releasePending={releasePending}
+          onSaved={onSaved}
         />
 
         <div className="mt-4 flex justify-end">

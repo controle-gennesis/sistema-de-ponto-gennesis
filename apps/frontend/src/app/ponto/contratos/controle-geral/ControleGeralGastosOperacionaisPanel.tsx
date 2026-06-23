@@ -22,21 +22,29 @@ import { toast } from 'react-hot-toast';
 import { exportGastosOperacionaisPdf } from '@/lib/exportGastosOperacionaisPdf';
 import { exportControleGeralContratosPdf } from '@/lib/exportControleGeralContratosPdf';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
+import { DatePickerField } from '@/components/ui/DatePickerField';
+import { Modal } from '@/components/ui/Modal';
 import { MultiSelectSearchDropdown } from '@/components/ui/MultiSelectSearchDropdown';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import {
   aggregateGastosDetailRows,
+  aggregateGastosNaturezaForContract,
+  deriveEmissaoMonthYearFromPeriod,
   EMPTY_GASTOS_OPERACIONAIS_FILTERS,
   filterGastosDetailRows,
   filterGastosDetailRowsByPolo,
+  formatGastosPeriodFilterLabel,
   getGastosFilterOptions,
   getGastosPoloFilterOptions,
+  getSingleCalendarMonthFromPeriod,
+  getSingleYearFromPeriod,
   type GastosOperacionaisPoloFilterOptions,
   groupGastosRowsByLocality,
   groupGastosRowsByPolo,
   type GastosOperacionaisFilters,
-  type QueryGastosDetailRow
+  type QueryGastosDetailRow,
+  type QueryGastosNaturezaDetailRow
 } from './buildQueryGastosRows';
 import {
   getLocalityLabel,
@@ -103,6 +111,8 @@ const MONTH_OPTIONS = [
 
 type ControleGeralGastosOperacionaisPanelProps = {
   detailRows: QueryGastosDetailRow[];
+  /** Detalhe por natureza (TOTVS RM) para drill-down ao clicar na linha. */
+  naturezaDetailRows?: QueryGastosNaturezaDetailRow[];
   isLoading: boolean;
   fetchedAt?: string;
   isError?: boolean;
@@ -333,6 +343,9 @@ function formatAnoApuracao(anoMin: number, anoMax: number) {
 const filterLabelClassName =
   'mb-1 block text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400';
 
+const filterFieldLabelClassName =
+  'mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300';
+
 const localitySelectClassName =
   'w-full min-w-[10rem] rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100';
 
@@ -373,6 +386,7 @@ function RowSelectCheckbox({
 
 export function ControleGeralGastosOperacionaisPanel({
   detailRows,
+  naturezaDetailRows = [],
   isLoading,
   fetchedAt,
   isError = false,
@@ -420,15 +434,18 @@ export function ControleGeralGastosOperacionaisPanel({
   const [selectedRowKeys, setSelectedRowKeys] = useState<Set<string>>(() => new Set());
   const [hiddenContractsListMinimized, setHiddenContractsListMinimized] = useState(false);
   const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
+  const [naturezaModalContract, setNaturezaModalContract] = useState<GastosOperacionaisRow | null>(
+    null
+  );
 
-  const emissaoFilterMonths = useMemo(
-    () => [...filters.months].sort((a, b) => a - b),
-    [filters.months]
+  const enableNaturezaBreakdown = naturezaDetailRows.length > 0;
+
+  const emissaoFilter = useMemo(
+    () => deriveEmissaoMonthYearFromPeriod(filters.periodFrom, filters.periodTo),
+    [filters.periodFrom, filters.periodTo]
   );
-  const emissaoFilterYears = useMemo(
-    () => [...filters.years].sort((a, b) => a - b),
-    [filters.years]
-  );
+  const emissaoFilterMonths = emissaoFilter.months;
+  const emissaoFilterYears = emissaoFilter.years;
 
   const {
     data: faturamentoByContract = [],
@@ -524,24 +541,6 @@ export function ControleGeralGastosOperacionaisPanel({
     [filterOptions, readOnlyPoloColumn]
   );
 
-  const monthFilterOptions = useMemo(
-    () =>
-      MONTH_OPTIONS.map((month) => ({
-        value: String(month.value),
-        label: month.label
-      })),
-    []
-  );
-
-  const yearFilterOptions = useMemo(
-    () =>
-      filterOptions.years.map((year) => ({
-        value: String(year),
-        label: String(year)
-      })),
-    [filterOptions.years]
-  );
-
   const contractFilterOptions = useMemo(
     () =>
       filterOptions.contracts.map((contract) => ({
@@ -554,8 +553,7 @@ export function ControleGeralGastosOperacionaisPanel({
 
   const hasActiveFilters =
     (readOnlyPoloColumn ? filters.polos.length > 0 : filters.localities.length > 0) ||
-    filters.months.length > 0 ||
-    filters.years.length > 0 ||
+    Boolean(filters.periodFrom || filters.periodTo) ||
     filters.contracts.length > 0;
 
   const displayRows = useMemo(() => {
@@ -634,6 +632,31 @@ export function ControleGeralGastosOperacionaisPanel({
   const grandSummary = useMemo(
     () => summarizeGastosPanelRows(visibleRowsWithFaturamento),
     [visibleRowsWithFaturamento]
+  );
+
+  const naturezaModalRows = useMemo(() => {
+    if (!naturezaModalContract) return [];
+    return aggregateGastosNaturezaForContract(
+      naturezaDetailRows,
+      naturezaModalContract.contract,
+      filters.periodFrom,
+      filters.periodTo
+    );
+  }, [
+    naturezaDetailRows,
+    naturezaModalContract,
+    filters.periodFrom,
+    filters.periodTo
+  ]);
+
+  const naturezaModalTotal = useMemo(
+    () => naturezaModalRows.reduce((sum, row) => sum + row.total, 0),
+    [naturezaModalRows]
+  );
+
+  const naturezaModalPeriodLabel = useMemo(
+    () => formatGastosPeriodFilterLabel(filters.periodFrom, filters.periodTo),
+    [filters.periodFrom, filters.periodTo]
   );
 
   const totalGastos = grandSummary.gastos;
@@ -752,18 +775,26 @@ export function ControleGeralGastosOperacionaisPanel({
     });
   };
 
-  const handleMonthsChange = (selected: string[]) => {
-    setFilters((prev) => ({
-      ...prev,
-      months: selected.map((value) => Number(value)).filter((value) => Number.isFinite(value))
-    }));
+  const handlePeriodFromChange = (value: string) => {
+    setFilters((prev) => {
+      const periodFrom = value;
+      let periodTo = prev.periodTo;
+      if (periodFrom && periodTo && periodFrom > periodTo) {
+        periodTo = periodFrom;
+      }
+      return { ...prev, periodFrom, periodTo };
+    });
   };
 
-  const handleYearsChange = (selected: string[]) => {
-    setFilters((prev) => ({
-      ...prev,
-      years: selected.map((value) => Number(value)).filter((value) => Number.isFinite(value))
-    }));
+  const handlePeriodToChange = (value: string) => {
+    setFilters((prev) => {
+      let periodFrom = prev.periodFrom;
+      const periodTo = value;
+      if (periodFrom && periodTo && periodFrom > periodTo) {
+        periodFrom = periodTo;
+      }
+      return { ...prev, periodFrom, periodTo };
+    });
   };
 
   const gastosFiltersFields = (
@@ -809,34 +840,24 @@ export function ControleGeralGastosOperacionaisPanel({
       </div>
 
       <div>
-        <span className={filterLabelClassName}>Mês</span>
-        <MultiSelectSearchDropdown
-          options={monthFilterOptions}
-          selected={filters.months.map(String)}
-          onChange={handleMonthsChange}
-          placeholder="Todos os meses"
-          searchPlaceholder="Pesquisar mês..."
-          emptyOptionsMessage="Nenhum mês disponível."
-          emptySearchMessage="Nenhum mês encontrado."
-          listMaxHeight={FILTER_DROPDOWN_LIST_MAX_HEIGHT}
-          menuOverlapContent
+        <label className={filterFieldLabelClassName}>Data inicial</label>
+        <DatePickerField
+          value={filters.periodFrom}
+          onChange={handlePeriodFromChange}
+          placeholder="dd/mm/aaaa"
           noFocusRing
+          aria-label="Data inicial"
         />
       </div>
 
       <div>
-        <span className={filterLabelClassName}>Ano</span>
-        <MultiSelectSearchDropdown
-          options={yearFilterOptions}
-          selected={filters.years.map(String)}
-          onChange={handleYearsChange}
-          placeholder="Todos os anos"
-          searchPlaceholder="Pesquisar ano..."
-          emptyOptionsMessage="Nenhum ano disponível."
-          emptySearchMessage="Nenhum ano encontrado."
-          listMaxHeight={FILTER_DROPDOWN_LIST_MAX_HEIGHT}
-          menuOverlapContent
+        <label className={filterFieldLabelClassName}>Data final</label>
+        <DatePickerField
+          value={filters.periodTo}
+          onChange={handlePeriodToChange}
+          placeholder="dd/mm/aaaa"
           noFocusRing
+          aria-label="Data final"
         />
       </div>
     </div>
@@ -844,25 +865,27 @@ export function ControleGeralGastosOperacionaisPanel({
 
   const buildMesesLabel = useCallback(
     (row: GastosOperacionaisRow) => {
-      if (filters.months.length === 1) {
+      const singleMonth = getSingleCalendarMonthFromPeriod(filters.periodFrom, filters.periodTo);
+      if (singleMonth) {
         return (
-          MONTH_OPTIONS.find((month) => month.value === filters.months[0])?.label ??
-          String(filters.months[0])
+          MONTH_OPTIONS.find((month) => month.value === singleMonth.month)?.label ??
+          String(singleMonth.month)
         );
       }
       return `${row.mesesApuracao} ${row.mesesApuracao === 1 ? 'mês' : 'meses'}`;
     },
-    [filters.months]
+    [filters.periodFrom, filters.periodTo]
   );
 
   const buildAnoLabel = useCallback(
     (row: GastosOperacionaisRow) => {
-      if (filters.years.length === 1) {
-        return String(filters.years[0]);
+      const singleYear = getSingleYearFromPeriod(filters.periodFrom, filters.periodTo);
+      if (singleYear != null) {
+        return String(singleYear);
       }
       return formatAnoApuracao(row.anoMin, row.anoMax);
     },
-    [filters.years]
+    [filters.periodFrom, filters.periodTo]
   );
 
   const buildPdfFilterLines = useCallback((): string[] => {
@@ -879,18 +902,9 @@ export function ControleGeralGastosOperacionaisPanel({
           .join(', ')}`
       );
     }
-    if (filters.months.length) {
-      lines.push(
-        `Meses: ${filters.months
-          .map(
-            (month) =>
-              MONTH_OPTIONS.find((option) => option.value === month)?.label ?? String(month)
-          )
-          .join(', ')}`
-      );
-    }
-    if (filters.years.length) {
-      lines.push(`Anos: ${filters.years.join(', ')}`);
+    const periodLabel = formatGastosPeriodFilterLabel(filters.periodFrom, filters.periodTo);
+    if (periodLabel) {
+      lines.push(`Período: ${periodLabel}`);
     }
     if (filters.contracts.length) {
       lines.push(`Contratos: ${filters.contracts.join(', ')}`);
@@ -1332,7 +1346,33 @@ export function ControleGeralGastosOperacionaisPanel({
                           {group.rows.map((row) => (
                             <tr
                               key={row.rowKey}
+                              role={enableNaturezaBreakdown ? 'button' : undefined}
+                              tabIndex={enableNaturezaBreakdown ? 0 : undefined}
+                              title={
+                                enableNaturezaBreakdown
+                                  ? 'Clique para ver naturezas e valores'
+                                  : undefined
+                              }
+                              onClick={
+                                enableNaturezaBreakdown
+                                  ? () => setNaturezaModalContract(row)
+                                  : undefined
+                              }
+                              onKeyDown={
+                                enableNaturezaBreakdown
+                                  ? (event) => {
+                                      if (event.key === 'Enter' || event.key === ' ') {
+                                        event.preventDefault();
+                                        setNaturezaModalContract(row);
+                                      }
+                                    }
+                                  : undefined
+                              }
                               className={`transition-colors hover:bg-gray-50 dark:hover:bg-gray-700/50 ${
+                                enableNaturezaBreakdown
+                                  ? 'cursor-pointer hover:bg-blue-50/40 dark:hover:bg-blue-950/20'
+                                  : ''
+                              } ${
                                 enableRowExclusion && selectedRowKeys.has(row.rowKey)
                                   ? 'bg-blue-50/70 dark:bg-blue-950/20'
                                   : ''
@@ -1340,11 +1380,16 @@ export function ControleGeralGastosOperacionaisPanel({
                             >
                               {enableRowExclusion ? (
                                 <td className="px-3 py-3 text-center">
-                                  <RowSelectCheckbox
-                                    checked={selectedRowKeys.has(row.rowKey)}
-                                    onChange={() => toggleRowSelection(row.rowKey)}
-                                    ariaLabel={`Selecionar ${row.contract}`}
-                                  />
+                                  <div
+                                    onClick={(event) => event.stopPropagation()}
+                                    onKeyDown={(event) => event.stopPropagation()}
+                                  >
+                                    <RowSelectCheckbox
+                                      checked={selectedRowKeys.has(row.rowKey)}
+                                      onChange={() => toggleRowSelection(row.rowKey)}
+                                      ariaLabel={`Selecionar ${row.contract}`}
+                                    />
+                                  </div>
                                 </td>
                               ) : null}
                               <td className={contractCellClassName}>
@@ -1355,7 +1400,7 @@ export function ControleGeralGastosOperacionaisPanel({
                                   return (
                                     <Link
                                       href={detailPath}
-                                      onClick={(e) => e.stopPropagation()}
+                                      onClick={(event) => event.stopPropagation()}
                                       className="inline-flex items-center gap-1.5 text-blue-600 hover:text-blue-700 hover:underline dark:text-blue-400 dark:hover:text-blue-300"
                                     >
                                       <span>{row.contract}</span>
@@ -1365,15 +1410,10 @@ export function ControleGeralGastosOperacionaisPanel({
                                 })()}
                               </td>
                               <td className={dataCenterCellClassName}>
-                                {filters.months.length === 1
-                                  ? MONTH_OPTIONS.find((m) => m.value === filters.months[0])?.label ??
-                                    filters.months[0]
-                                  : `${row.mesesApuracao} ${row.mesesApuracao === 1 ? 'mês' : 'meses'}`}
+                                {buildMesesLabel(row)}
                               </td>
                               <td className={dataCenterCellClassName}>
-                                {filters.years.length === 1
-                                  ? String(filters.years[0])
-                                  : formatAnoApuracao(row.anoMin, row.anoMax)}
+                                {buildAnoLabel(row)}
                               </td>
                               {!hideLocalityColumn ? (
                                 <td className={`${dataCenterCellClassName} text-gray-700 dark:text-gray-300`}>
@@ -1527,6 +1567,86 @@ export function ControleGeralGastosOperacionaisPanel({
           </div>
         </div>
       ) : null}
+
+      <Modal
+        isOpen={naturezaModalContract != null}
+        onClose={() => setNaturezaModalContract(null)}
+        title={
+          naturezaModalContract
+            ? `Naturezas — ${naturezaModalContract.contract}`
+            : 'Naturezas'
+        }
+        size="lg"
+      >
+        {naturezaModalContract ? (
+          <>
+            <p className="mb-1 text-sm text-gray-600 dark:text-gray-400">
+              Gastos por natureza no centro de custo, conforme filtros atuais.
+            </p>
+            {naturezaModalPeriodLabel ? (
+              <p className="mb-4 text-xs text-gray-500 dark:text-gray-400">
+                Período: {naturezaModalPeriodLabel}
+              </p>
+            ) : (
+              <p className="mb-4 text-xs text-gray-500 dark:text-gray-400">
+                Sem filtro de período — todos os meses disponíveis.
+              </p>
+            )}
+            {naturezaModalRows.length === 0 ? (
+              <p className="py-8 text-center text-sm text-gray-500 dark:text-gray-400">
+                Nenhuma natureza encontrada para este contrato no período selecionado.
+              </p>
+            ) : (
+              <div className="max-h-[60vh] overflow-x-auto overflow-y-auto">
+                <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                  <thead className="sticky top-0 bg-gray-50 dark:bg-gray-800">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                        Natureza
+                      </th>
+                      <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                        Valor
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-900">
+                    {naturezaModalRows.map((row) => (
+                      <tr
+                        key={row.natureza}
+                        className={
+                          row.excludedFromOperationalTotal
+                            ? 'bg-gray-50/60 dark:bg-gray-800/40'
+                            : undefined
+                        }
+                      >
+                        <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100">
+                          {row.natureza}
+                          {row.excludedFromOperationalTotal ? (
+                            <span className="ml-2 text-xs font-normal text-gray-500 dark:text-gray-400">
+                              (mov. financeira)
+                            </span>
+                          ) : null}
+                        </td>
+                        <td className="px-4 py-3 text-right text-sm tabular-nums font-medium text-red-600 dark:text-red-400">
+                          {formatCurrency(Math.abs(row.total))}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-t border-gray-200 bg-gray-50 font-semibold dark:border-gray-700 dark:bg-gray-800/80">
+                      <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100">Total</td>
+                      <td className="px-4 py-3 text-right text-sm tabular-nums text-red-600 dark:text-red-400">
+                        {formatCurrency(Math.abs(naturezaModalTotal))}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            )}
+          </>
+        ) : null}
+      </Modal>
     </Card>
   );
 }

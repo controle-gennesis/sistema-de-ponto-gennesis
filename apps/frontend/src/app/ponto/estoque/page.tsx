@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -36,6 +36,23 @@ import {
 import { normalizeCostCentersResponse } from '@/lib/costCenters';
 import { getListTableRowClassName, listTableRowClasses, ListRowNavigableLabel, rowActionMenuButtonClass } from '@/components/ui/listTableUi';
 import { absoluteUploadUrl } from '@/lib/apiOrigin';
+import {
+  buildLinkedOcStockDocuments,
+  buildStockPaymentSlipsForOrder,
+  linkedDocumentSourceLabel,
+  mergeStockPaymentSlipsWithLinked,
+  orderBoletoDocumentsFingerprint
+} from '@/lib/ocStockDocuments';
+import { romanParcelLabel } from '@/components/oc/ocPaymentBoleto';
+import { isOcBoletoPaymentType } from '@/components/oc/ocUploadBoleto';
+import {
+  formatMoneyDisplay,
+  parseOrderTotalAmount,
+  redistributeInstallmentAmounts,
+  validateInstallmentAmountsSum,
+  type RowDraft
+} from '@/components/oc/boletoParcelasUtils';
+import { maskCurrencyInputBrOrEmpty } from '@/lib/maskCurrencyBr';
 import toast from 'react-hot-toast';
 import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
@@ -110,6 +127,27 @@ interface PaymentSlipAttachment {
   dueDate: string;
 }
 
+function paymentSlipsToRowDrafts(slips: PaymentSlipAttachment[]): RowDraft[] {
+  return slips.map((slip) => ({
+    amount: slip.amount,
+    dueDate: slip.dueDate,
+    boletoUrl: slip.url || null,
+    boletoName: slip.originalName || null,
+    uploading: false
+  }));
+}
+
+function mergeRowDraftsIntoPaymentSlips(
+  slips: PaymentSlipAttachment[],
+  drafts: RowDraft[]
+): PaymentSlipAttachment[] {
+  return slips.map((slip, index) => ({
+    ...slip,
+    amount: drafts[index]?.amount ?? slip.amount,
+    dueDate: drafts[index]?.dueDate ?? slip.dueDate
+  }));
+}
+
 const parseCurrencyBrlToNumber = (value: string) => {
   const normalized = value.replace(/[^\d,.-]/g, '').replace(/\./g, '').replace(',', '.');
   const parsed = Number(normalized);
@@ -155,6 +193,18 @@ interface PurchaseOrderDetailItem {
 interface PurchaseOrderDetail {
   id: string;
   items: PurchaseOrderDetailItem[];
+  orderDate?: string;
+  amountToPay?: number | string | null;
+  paymentType?: string | null;
+  paymentCondition?: string | null;
+  paymentParcelCount?: number;
+  paymentParcelDueDays?: number[];
+  nfAttachments?: unknown;
+  paymentBoletoUrl?: string | null;
+  paymentBoletoName?: string | null;
+  boletoAttachmentUrl?: string | null;
+  boletoAttachmentName?: string | null;
+  paymentBoletoInstallments?: unknown;
   materialRequest?: {
     costCenter?: {
       id: string;
@@ -289,6 +339,7 @@ export default function EstoquePage() {
   const [withdrawalSheetFile, setWithdrawalSheetFile] = useState<UploadedInvoice | null>(null);
   const [isUploadingWithdrawalSheet, setIsUploadingWithdrawalSheet] = useState(false);
   const [paymentSlips, setPaymentSlips] = useState<PaymentSlipAttachment[]>([]);
+  const paymentSlipsSeedRef = useRef('');
   const [uploadingPaymentSlipId, setUploadingPaymentSlipId] = useState<string | null>(null);
   const [materialBalanceDetail, setMaterialBalanceDetail] = useState<MaterialBalanceGroup | null>(null);
 
@@ -406,13 +457,15 @@ export default function EstoquePage() {
     [purchaseOrdersData, formData.ocNumber]
   );
 
-  const { data: selectedPurchaseOrderData, isLoading: loadingSelectedPurchaseOrder } = useQuery({
+  const { data: selectedPurchaseOrderData, isLoading: loadingSelectedPurchaseOrder, isFetching: fetchingSelectedPurchaseOrder } = useQuery({
     queryKey: ['purchase-order-detail-for-stock', selectedPurchaseOrder?.id],
     queryFn: async () => {
       const res = await api.get(`/purchase-orders/${selectedPurchaseOrder?.id}`);
       return res.data;
     },
-    enabled: isMovementModalOpen && !!selectedPurchaseOrder?.id
+    enabled: isMovementModalOpen && !!selectedPurchaseOrder?.id,
+    staleTime: 0,
+    refetchOnMount: 'always'
   });
 
   const resetMovementForm = () => {
@@ -427,6 +480,7 @@ export default function EstoquePage() {
     setWithdrawalSheetFile(null);
     setPaymentSlips([]);
     setOcMovementItems([]);
+    paymentSlipsSeedRef.current = '';
   };
 
   const closeMovementModal = () => {
@@ -446,6 +500,7 @@ export default function EstoquePage() {
       queryClient.invalidateQueries({ queryKey: ['stock-movements-oc-tags'] });
       queryClient.invalidateQueries({ queryKey: ['stock-shortfalls-pending-count'] });
       queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
+      queryClient.invalidateQueries({ queryKey: ['purchase-order-detail'] });
       setFormData({
         costCenterId: '',
         type: '',
@@ -501,38 +556,110 @@ export default function EstoquePage() {
       toast.error('Anexe a ficha de retirada para movimentos de saída');
       return;
     }
-    if (formData.type === 'IN' && !invoiceFile) {
-      toast.error('Anexe a nota fiscal para movimentos de entrada');
-      return;
-    }
     if (formData.type === 'IN') {
-      for (let i = 0; i < paymentSlips.length; i += 1) {
-        const slip = paymentSlips[i];
-        if (!slip.url) {
-          toast.error(`Anexe o arquivo do boleto ${i + 1}`);
+      const linkedInvoice = linkedOcStockDocuments.invoices[0];
+      const effectiveInvoice =
+        invoiceFile ??
+        (linkedInvoice ? { url: linkedInvoice.url, originalName: linkedInvoice.name } : null);
+      if (!effectiveInvoice) {
+        toast.error('Anexe a nota fiscal para movimentos de entrada');
+        return;
+      }
+      const parcelCount =
+        selectedOrderDetail && isOcBoletoPaymentType(selectedOrderDetail.paymentType)
+          ? selectedOrderDetail.paymentParcelCount ?? 1
+          : 0;
+      const effectiveSlips = mergeStockPaymentSlipsWithLinked(
+        paymentSlips,
+        linkedOcStockDocuments.boletos
+      );
+      if (parcelCount > 1) {
+        const firstSlip = effectiveSlips[0];
+        if (!(firstSlip?.url || '').trim()) {
+          toast.error('Anexe o arquivo do boleto da parcela I');
           return;
         }
-        const amount = parseCurrencyBrlToNumber(slip.amount);
-        if (Number.isNaN(amount) || amount <= 0) {
-          toast.error(`Informe um valor válido para o boleto ${i + 1}`);
+        const firstAmount = parseCurrencyBrlToNumber(firstSlip.amount);
+        if (Number.isNaN(firstAmount) || firstAmount <= 0) {
+          toast.error('Informe um valor válido para o boleto da parcela I');
           return;
         }
-        if (!slip.dueDate) {
-          toast.error(`Informe a data de vencimento do boleto ${i + 1}`);
+        if (!firstSlip.dueDate) {
+          toast.error('Informe a data de vencimento do boleto da parcela I');
           return;
+        }
+        if (!paymentSlipAmountValidation.valid) {
+          toast.error(
+            paymentSlipAmountValidation.message ||
+              'A soma dos boletos deve ser igual ao total da OC.'
+          );
+          return;
+        }
+        for (let i = 1; i < parcelCount; i += 1) {
+          const slip = effectiveSlips[i];
+          if (!(slip?.url || '').trim()) continue;
+          const amount = parseCurrencyBrlToNumber(slip.amount);
+          if (Number.isNaN(amount) || amount <= 0) {
+            toast.error(`Informe um valor válido para o boleto da parcela ${romanParcelLabel(i)}`);
+            return;
+          }
+          if (!slip.dueDate) {
+            toast.error(
+              `Informe a data de vencimento do boleto da parcela ${romanParcelLabel(i)}`
+            );
+            return;
+          }
+        }
+      } else {
+        for (let i = 0; i < paymentSlips.length; i += 1) {
+          const slip = effectiveSlips[i] ?? paymentSlips[i];
+          if (!(slip.url || '').trim() && !slip.amount.trim() && !slip.dueDate.trim()) continue;
+          if (!slip.url) {
+            toast.error(`Anexe o arquivo do boleto ${i + 1}`);
+            return;
+          }
+          const amount = parseCurrencyBrlToNumber(slip.amount);
+          if (Number.isNaN(amount) || amount <= 0) {
+            toast.error(`Informe um valor válido para o boleto ${i + 1}`);
+            return;
+          }
+          if (!slip.dueDate) {
+            toast.error(`Informe a data de vencimento do boleto ${i + 1}`);
+            return;
+          }
         }
       }
     }
 
+    const linkedInvoiceForSubmit =
+      formData.type === 'IN'
+        ? invoiceFile ??
+          (linkedOcStockDocuments.invoices[0]
+            ? {
+                url: linkedOcStockDocuments.invoices[0].url,
+                originalName: linkedOcStockDocuments.invoices[0].name
+              }
+            : null)
+        : null;
+
+    const effectivePaymentSlips =
+      formData.type === 'IN'
+        ? mergeStockPaymentSlipsWithLinked(paymentSlips, linkedOcStockDocuments.boletos).filter(
+            (slip) => (slip.url || '').trim()
+          )
+        : [];
+
     const paymentSlipNotes =
-      formData.type === 'IN' && paymentSlips.length > 0
-        ? `Boletos:\n${paymentSlips
+      formData.type === 'IN' && effectivePaymentSlips.length > 0
+        ? `Boletos:\n${effectivePaymentSlips
             .map((slip, index) => {
               const amount = parseCurrencyBrlToNumber(slip.amount);
               const amountLabel = Number.isFinite(amount)
                 ? amount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
-                : slip.amount;
-              const dueDateLabel = new Date(`${slip.dueDate}T00:00:00`).toLocaleDateString('pt-BR');
+                : slip.amount || '—';
+              const dueDateLabel = slip.dueDate
+                ? new Date(`${slip.dueDate}T00:00:00`).toLocaleDateString('pt-BR')
+                : '—';
               return `${index + 1}) ${slip.originalName} | Valor: ${amountLabel} | Vencimento: ${dueDateLabel} | URL: ${slip.url}`;
             })
             .join('\n')}`
@@ -544,7 +671,9 @@ export default function EstoquePage() {
       withdrawalSheetFile
         ? `Ficha de Retirada: ${withdrawalSheetFile.originalName} | URL: ${withdrawalSheetFile.url}`
         : '',
-      invoiceFile ? `NF: ${invoiceFile.originalName} | URL: ${invoiceFile.url}` : '',
+      linkedInvoiceForSubmit
+        ? `NF: ${linkedInvoiceForSubmit.originalName} | URL: ${linkedInvoiceForSubmit.url}`
+        : '',
       paymentSlipNotes
     ]
       .filter(Boolean)
@@ -791,6 +920,72 @@ export default function EstoquePage() {
 
   const selectedOrderDetail: PurchaseOrderDetail | null = selectedPurchaseOrderData?.data || null;
 
+  const linkedOcStockDocuments = useMemo(
+    () =>
+      buildLinkedOcStockDocuments(
+        selectedOrderDetail,
+        movementsForOc,
+        formData.ocNumber
+      ),
+    [selectedOrderDetail, movementsForOc, formData.ocNumber]
+  );
+
+  const expectedBoletoParcelCount = useMemo(() => {
+    if (!selectedOrderDetail || !isOcBoletoPaymentType(selectedOrderDetail.paymentType)) return 0;
+    return selectedOrderDetail.paymentParcelCount ?? 1;
+  }, [selectedOrderDetail]);
+
+  const selectedOrderTotal = useMemo(() => {
+    if (!selectedOrderDetail) return 0;
+    return parseOrderTotalAmount(selectedOrderDetail);
+  }, [selectedOrderDetail]);
+
+  const paymentSlipAmountValidation = useMemo(() => {
+    if (expectedBoletoParcelCount <= 1 || selectedOrderTotal <= 0 || paymentSlips.length === 0) {
+      return { valid: true as const };
+    }
+    return validateInstallmentAmountsSum(paymentSlipsToRowDrafts(paymentSlips), selectedOrderTotal);
+  }, [expectedBoletoParcelCount, selectedOrderTotal, paymentSlips]);
+
+  useEffect(() => {
+    if (formData.type !== 'IN') {
+      paymentSlipsSeedRef.current = '';
+      return;
+    }
+    const order = selectedPurchaseOrderData?.data as PurchaseOrderDetail | null | undefined;
+    if (!order?.id || loadingSelectedPurchaseOrder || fetchingSelectedPurchaseOrder) return;
+
+    const seedKey = orderBoletoDocumentsFingerprint(order);
+    if (paymentSlipsSeedRef.current === seedKey) return;
+
+    const seeded = buildStockPaymentSlipsForOrder(order, formData.ocNumber, movementsForOc);
+    paymentSlipsSeedRef.current = seedKey;
+    setPaymentSlips(seeded.length > 0 ? seeded : []);
+  }, [
+    formData.type,
+    formData.ocNumber,
+    selectedPurchaseOrderData,
+    movementsForOc,
+    loadingSelectedPurchaseOrder,
+    fetchingSelectedPurchaseOrder
+  ]);
+
+  useEffect(() => {
+    if (formData.type !== 'IN' || paymentSlips.length === 0) return;
+    if (linkedOcStockDocuments.boletos.length === 0) return;
+    setPaymentSlips((prev) => {
+      const merged = mergeStockPaymentSlipsWithLinked(prev, linkedOcStockDocuments.boletos);
+      const changed = merged.some(
+        (slip, i) =>
+          slip.url !== prev[i]?.url ||
+          slip.originalName !== prev[i]?.originalName ||
+          slip.amount !== prev[i]?.amount ||
+          slip.dueDate !== prev[i]?.dueDate
+      );
+      return changed ? merged : prev;
+    });
+  }, [formData.type, linkedOcStockDocuments.boletos, paymentSlips.length]);
+
   const unresolvedOcMaterialNames = useMemo(() => {
     if (!selectedOrderDetail?.items?.length) return [];
     const names: string[] = [];
@@ -839,7 +1034,7 @@ export default function EstoquePage() {
       .filter((order) => Boolean(order.orderNumber))
       .filter((order, index, arr) => arr.findIndex((x) => x.orderNumber === order.orderNumber) === index)
       .filter((order) => !ocWithTotalOut.has(order.orderNumber))
-      .sort((a, b) => a.orderNumber.localeCompare(b.orderNumber, 'pt-BR'));
+      .sort((a, b) => b.orderNumber.localeCompare(a.orderNumber, 'pt-BR'));
   }, [movementsForOc, purchaseOrders]);
   const contractDropdownOptions = useMemo(() => {
     const byId = new Map<string, { value: string; label: string }>();
@@ -899,6 +1094,8 @@ export default function EstoquePage() {
   };
 
   const handleOcNumberChange = (ocNumber: string) => {
+    paymentSlipsSeedRef.current = '';
+    setPaymentSlips([]);
     setFormData((prev) => ({
       ...prev,
       ocNumber,
@@ -1132,6 +1329,32 @@ export default function EstoquePage() {
           : item
       )
     );
+  };
+
+  const handlePaymentSlipAmountChange = (slipIndex: number, rawValue: string) => {
+    const orderTotal = selectedOrderDetail ? parseOrderTotalAmount(selectedOrderDetail) : 0;
+    if (expectedBoletoParcelCount > 1 && orderTotal > 0) {
+      setPaymentSlips((prev) => {
+        const drafts = paymentSlipsToRowDrafts(prev);
+        const masked = maskCurrencyInputBrOrEmpty(rawValue);
+        const { rows, wasCapped } = redistributeInstallmentAmounts(
+          drafts,
+          slipIndex,
+          masked,
+          orderTotal,
+          prev.map(() => false)
+        );
+        if (wasCapped) {
+          toast.error(
+            `O valor não pode ultrapassar o total da OC (${formatMoneyDisplay(orderTotal)}).`
+          );
+        }
+        return mergeRowDraftsIntoPaymentSlips(prev, rows);
+      });
+      return;
+    }
+    const slip = paymentSlips[slipIndex];
+    if (slip) handlePaymentSlipFieldChange(slip.id, 'amount', rawValue);
   };
 
   const handlePaymentSlipUpload = async (id: string, file: File | null) => {
@@ -1957,7 +2180,7 @@ export default function EstoquePage() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    Número da OC
+                    OC
                   </label>
                   <SingleSelectSearchDropdown
                     value={formData.ocNumber}
@@ -2134,6 +2357,78 @@ export default function EstoquePage() {
                   placeholder="Observações sobre a movimentação..."
                 />
               </div>
+              {formData.type === 'IN' && formData.ocNumber.trim() && (
+                <div className="rounded-lg border border-blue-200 bg-blue-50/60 px-3 py-3 dark:border-blue-900/50 dark:bg-blue-950/20">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-blue-900 dark:text-blue-200">
+                    Documentos já vinculados a esta OC
+                  </p>
+                  {loadingSelectedPurchaseOrder || fetchingSelectedPurchaseOrder ? (
+                    <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">Carregando documentos da OC…</p>
+                  ) : linkedOcStockDocuments.invoices.length === 0 &&
+                    linkedOcStockDocuments.boletos.length === 0 ? (
+                    <p className="mt-2 text-xs text-gray-600 dark:text-gray-400">
+                      Nenhum boleto ou NF encontrado na OC nem em entradas anteriores no estoque.
+                    </p>
+                  ) : (
+                    <div className="mt-2 space-y-3 text-sm">
+                      {linkedOcStockDocuments.invoices.length > 0 && (
+                        <div>
+                          <p className="text-xs font-medium text-gray-700 dark:text-gray-300">Notas fiscais</p>
+                          <ul className="mt-1 space-y-1">
+                            {linkedOcStockDocuments.invoices.map((doc) => (
+                              <li
+                                key={doc.url}
+                                className="flex flex-wrap items-center justify-between gap-2"
+                              >
+                                <a
+                                  href={absoluteUploadUrl(doc.url)}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-blue-600 dark:text-blue-400 hover:underline"
+                                >
+                                  {doc.name}
+                                </a>
+                                <span className="text-[11px] text-gray-500 dark:text-gray-400">
+                                  {linkedDocumentSourceLabel(doc.source)}
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                      {linkedOcStockDocuments.boletos.length > 0 && (
+                        <div>
+                          <p className="text-xs font-medium text-gray-700 dark:text-gray-300">Boletos</p>
+                          <ul className="mt-1 space-y-1">
+                            {linkedOcStockDocuments.boletos.map((doc) => (
+                              <li
+                                key={doc.url}
+                                className="flex flex-wrap items-center justify-between gap-2"
+                              >
+                                <a
+                                  href={absoluteUploadUrl(doc.url)}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-blue-600 dark:text-blue-400 hover:underline"
+                                >
+                                  {doc.name}
+                                </a>
+                                <span className="text-[11px] text-gray-500 dark:text-gray-400">
+                                  {linkedDocumentSourceLabel(doc.source)}
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  <p className="mt-2 text-xs text-gray-600 dark:text-gray-400">
+                    Se o documento já estiver aqui, não é necessário anexar novamente — ele será reutilizado
+                    automaticamente na movimentação e sincronizado com a ordem de compra.
+                  </p>
+                </div>
+              )}
               {formData.type === 'OUT' && (
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
@@ -2182,7 +2477,7 @@ export default function EstoquePage() {
               {formData.type === 'IN' && (
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    Nota Fiscal *
+                    Nota Fiscal{linkedOcStockDocuments.invoices.length === 0 ? ' *' : ''}
                   </label>
                   <div className="flex flex-wrap items-center gap-2">
                     <label className="px-3 py-2 bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-600 text-sm">
@@ -2218,29 +2513,65 @@ export default function EstoquePage() {
                         </button>
                       </>
                     )}
+                    {!invoiceFile && linkedOcStockDocuments.invoices[0] && (
+                      <span className="text-sm text-emerald-700 dark:text-emerald-300">
+                        Usando NF já vinculada: {linkedOcStockDocuments.invoices[0].name}
+                      </span>
+                    )}
                   </div>
                   <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                    Obrigatório para entrada. Formatos aceitos: PDF, XML, PNG, JPG e WEBP (até 15MB).
+                    {linkedOcStockDocuments.invoices.length > 0
+                      ? 'Opcional se a NF já estiver vinculada à OC ou ao estoque.'
+                      : 'Obrigatório para entrada. Formatos aceitos: PDF, XML, PNG, JPG e WEBP (até 15MB).'}
                   </p>
                 </div>
               )}
               {formData.type === 'IN' && (
                 <div className="space-y-2">
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between gap-2">
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                       Boletos para Pagamento
+                      {expectedBoletoParcelCount > 1
+                        ? ` (${expectedBoletoParcelCount} parcelas)`
+                        : ''}
                     </label>
-                    <button
-                      type="button"
-                      onClick={handleAddPaymentSlip}
-                      className="text-sm text-blue-600 dark:text-blue-400 hover:underline"
-                    >
-                      + Adicionar boleto
-                    </button>
+                    {expectedBoletoParcelCount <= 1 ? (
+                      <button
+                        type="button"
+                        onClick={handleAddPaymentSlip}
+                        className="text-sm text-blue-600 dark:text-blue-400 hover:underline"
+                      >
+                        + Adicionar boleto
+                      </button>
+                    ) : null}
                   </div>
+                  {expectedBoletoParcelCount > 1 ? (
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      Esta OC tem {expectedBoletoParcelCount} parcelas — anexe o boleto da{' '}
+                      <span className="font-medium text-gray-700 dark:text-gray-300">parcela I</span>{' '}
+                      (obrigatório). As demais parcelas são opcionais nesta entrada.
+                      {selectedOrderTotal > 0 ? (
+                        <>
+                          {' '}
+                          <span className="font-medium text-gray-700 dark:text-gray-300">
+                            Total da OC: {formatMoneyDisplay(selectedOrderTotal)}
+                          </span>
+                          {' '}
+                          — ao alterar o valor de uma parcela, as demais ajustam automaticamente.
+                        </>
+                      ) : null}
+                    </p>
+                  ) : null}
+                  {!paymentSlipAmountValidation.valid && paymentSlipAmountValidation.message ? (
+                    <p className="text-xs text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 rounded-md px-2.5 py-1.5">
+                      {paymentSlipAmountValidation.message}
+                    </p>
+                  ) : null}
                   {paymentSlips.length === 0 ? (
                     <p className="text-xs text-gray-500 dark:text-gray-400">
-                      Adicione quantos boletos forem necessários.
+                      {linkedOcStockDocuments.boletos.length > 0
+                        ? 'Boletos já vinculados serão reutilizados automaticamente. Adicione apenas se precisar incluir novos.'
+                        : 'Adicione quantos boletos forem necessários.'}
                     </p>
                   ) : (
                     <div className="space-y-3">
@@ -2250,60 +2581,107 @@ export default function EstoquePage() {
                           className="p-3 border border-gray-300 dark:border-gray-600 rounded-lg space-y-2"
                         >
                           <div className="flex items-center justify-between">
-                            <p className="text-sm text-gray-700 dark:text-gray-300">Boleto {index + 1}</p>
-                            <button
-                              type="button"
-                              onClick={() => handleRemovePaymentSlip(slip.id)}
-                              className="text-xs text-red-600 dark:text-red-400 hover:underline"
-                            >
-                              Remover
-                            </button>
+                            <p className="text-sm text-gray-700 dark:text-gray-300">
+                              {expectedBoletoParcelCount > 1
+                                ? `Parcela ${romanParcelLabel(index)}`
+                                : `Boleto ${index + 1}`}
+                              {expectedBoletoParcelCount > 1 ? (
+                                <span
+                                  className={
+                                    index === 0
+                                      ? 'ml-1.5 text-[10px] font-medium text-violet-600 dark:text-violet-400'
+                                      : 'ml-1.5 text-[10px] text-gray-500 dark:text-gray-400'
+                                  }
+                                >
+                                  {index === 0 ? '(obrigatório)' : '(opcional)'}
+                                </span>
+                              ) : null}
+                            </p>
+                            {expectedBoletoParcelCount <= 1 ? (
+                              <button
+                                type="button"
+                                onClick={() => handleRemovePaymentSlip(slip.id)}
+                                className="text-xs text-red-600 dark:text-red-400 hover:underline"
+                              >
+                                Remover
+                              </button>
+                            ) : null}
                           </div>
                           <div className="flex flex-wrap items-center gap-2">
-                            <label className="px-3 py-2 bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-600 text-sm">
-                              {uploadingPaymentSlipId === slip.id ? 'Enviando...' : 'Escolher arquivo'}
-                              <input
-                                type="file"
-                                className="hidden"
-                                accept=".pdf,image/*"
-                                disabled={uploadingPaymentSlipId === slip.id}
-                                onChange={(e) => {
-                                  const selectedFile = e.target.files?.[0] || null;
-                                  void handlePaymentSlipUpload(slip.id, selectedFile);
-                                  e.currentTarget.value = '';
-                                }}
-                              />
-                            </label>
-                            {slip.url && (
-                              <a
-                                href={absoluteUploadUrl(slip.url)}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-sm text-blue-600 dark:text-blue-400 hover:underline"
-                              >
-                                {slip.originalName}
-                              </a>
+                            {slip.url ? (
+                              <>
+                                <a
+                                  href={absoluteUploadUrl(slip.url)}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-sm text-blue-600 dark:text-blue-400 hover:underline"
+                                >
+                                  {slip.originalName || `Boleto parcela ${romanParcelLabel(index)}`}
+                                </a>
+                                <span className="text-xs text-emerald-700 dark:text-emerald-300">
+                                  Vinculado à OC
+                                </span>
+                                <label className="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 cursor-pointer underline">
+                                  {uploadingPaymentSlipId === slip.id ? 'Enviando...' : 'Substituir'}
+                                  <input
+                                    type="file"
+                                    className="hidden"
+                                    accept=".pdf,image/*"
+                                    disabled={uploadingPaymentSlipId === slip.id}
+                                    onChange={(e) => {
+                                      const selectedFile = e.target.files?.[0] || null;
+                                      void handlePaymentSlipUpload(slip.id, selectedFile);
+                                      e.currentTarget.value = '';
+                                    }}
+                                  />
+                                </label>
+                              </>
+                            ) : (
+                              <label className="px-3 py-2 bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-600 text-sm">
+                                {uploadingPaymentSlipId === slip.id ? 'Enviando...' : 'Escolher arquivo'}
+                                <input
+                                  type="file"
+                                  className="hidden"
+                                  accept=".pdf,image/*"
+                                  disabled={uploadingPaymentSlipId === slip.id}
+                                  onChange={(e) => {
+                                    const selectedFile = e.target.files?.[0] || null;
+                                    void handlePaymentSlipUpload(slip.id, selectedFile);
+                                    e.currentTarget.value = '';
+                                  }}
+                                />
+                              </label>
                             )}
                           </div>
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                            <input
-                              type="text"
-                              inputMode="numeric"
-                              placeholder="Valor do boleto"
-                              value={slip.amount}
-                              onChange={(e) =>
-                                handlePaymentSlipFieldChange(slip.id, 'amount', e.target.value)
-                              }
-                              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                            />
-                            <input
-                              type="date"
-                              value={slip.dueDate}
-                              onChange={(e) =>
-                                handlePaymentSlipFieldChange(slip.id, 'dueDate', e.target.value)
-                              }
-                              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                            />
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            <label className="block">
+                              <span className="text-xs text-gray-500 dark:text-gray-400">Valor</span>
+                              <input
+                                type="text"
+                                inputMode="numeric"
+                                placeholder="R$ 0,00"
+                                value={slip.amount}
+                                onChange={(e) =>
+                                  expectedBoletoParcelCount > 1
+                                    ? handlePaymentSlipAmountChange(index, e.target.value)
+                                    : handlePaymentSlipFieldChange(slip.id, 'amount', e.target.value)
+                                }
+                                className="mt-0.5 w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                              />
+                            </label>
+                            <label className="block">
+                              <span className="text-xs text-gray-500 dark:text-gray-400">
+                                Data de vencimento
+                              </span>
+                              <input
+                                type="date"
+                                value={slip.dueDate}
+                                onChange={(e) =>
+                                  handlePaymentSlipFieldChange(slip.id, 'dueDate', e.target.value)
+                                }
+                                className="mt-0.5 w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                              />
+                            </label>
                           </div>
                         </div>
                       ))}
