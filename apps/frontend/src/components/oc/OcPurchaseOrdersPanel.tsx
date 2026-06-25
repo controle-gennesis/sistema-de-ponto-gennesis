@@ -1918,7 +1918,7 @@ export function OcPurchaseOrdersPanel({
   const paymentTabOrderNumbers = useMemo(
     () =>
       activeTab === 'APPROVED'
-        ? [...new Set(displayedOrders.map((o) => o.orderNumber.trim()).filter(Boolean))].sort()
+        ? Array.from(new Set(displayedOrders.map((o) => o.orderNumber.trim()).filter(Boolean))).sort()
         : [],
     [activeTab, displayedOrders]
   );

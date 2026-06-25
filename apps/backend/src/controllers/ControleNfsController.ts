@@ -6,6 +6,7 @@ import {
   fetchControleNfsTotalsSummary,
   fetchControleNfsValorBrutoTotal,
   fetchNfsLotFaturamento,
+  fetchRecebidoMensalByGastosContract,
   listControleNfsTabs,
   parseControleNfsTotalsFilters,
   parseEmissaoApuracaoFilters,
@@ -197,13 +198,41 @@ export class ControleNfsController {
         (await fetchNfsLotFaturamento(toNfsTotalsComputeOptions(filters)));
 
       const entries = buildFaturamentoByGastosContract(summary.byTab, nfsLotFaturamento);
+      const recebidoMensal = await fetchRecebidoMensalByGastosContract(
+        forceRefresh,
+        apuracaoFilter
+      );
 
       res.json({
         success: true,
         data: {
           entries,
+          recebidoMensalEntries: recebidoMensal.entries,
           fetchedAt: new Date().toISOString()
         }
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /** Recebidos mensais por contrato da QUERY BASE DE GASTOS (apuração por recebimento). */
+  async getRecebidoMensalByGastosContract(
+    req: AuthRequest,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
+    try {
+      const forceRefresh = req.query.refresh === '1' || req.query.refresh === 'true';
+      const recebimentoApuracaoFilter = parseEmissaoApuracaoFilters(req.query);
+      const summary = await fetchRecebidoMensalByGastosContract(
+        forceRefresh,
+        recebimentoApuracaoFilter
+      );
+
+      res.json({
+        success: true,
+        data: summary
       });
     } catch (error) {
       next(error);

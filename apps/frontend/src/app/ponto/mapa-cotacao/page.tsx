@@ -10,7 +10,7 @@ import toast from 'react-hot-toast';
 import api from '@/lib/api';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
-import { PaymentConditionSelect, resolvePaymentConditionMeta } from '@/components/oc/PaymentConditionSelect';
+import { PaymentConditionSelect, resolvePaymentConditionMeta, type PaymentConditionRow } from '@/components/oc/PaymentConditionSelect';
 import {
   OcBoletoCreationFields,
   resizeOcBoletoCreationSlots,
@@ -283,7 +283,7 @@ export default function MapaCotacaoPage() {
       const res = await api.get('/payment-conditions', {
         params: { paymentType: 'BOLETO', activeOnly: 'true' }
       });
-      return (res.data?.data || []) as Array<{ code: string; parcelCount: number; parcelDueDays: unknown }>;
+      return (res.data?.data || []) as PaymentConditionRow[];
     }
   });
 

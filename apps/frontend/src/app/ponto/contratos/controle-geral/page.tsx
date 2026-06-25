@@ -229,6 +229,7 @@ export default function ControleGeralContratosPage() {
             showPdfExport
             showContractDetails
             contractsForDetailLookup={rawList}
+            enableContractFluxoModal
           />
 
           {loadingOverview ? (

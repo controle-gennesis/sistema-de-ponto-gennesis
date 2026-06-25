@@ -13,7 +13,7 @@ import api from '@/lib/api';
 import { absoluteUploadUrl } from '@/lib/apiOrigin';
 import toast from 'react-hot-toast';
 import { OcStyledCheckbox, type PurchaseOrder } from '@/components/oc/OcPurchaseOrdersPanel';
-import { PaymentConditionSelect, resolvePaymentConditionMeta } from '@/components/oc/PaymentConditionSelect';
+import { PaymentConditionSelect, resolvePaymentConditionMeta, type PaymentConditionRow } from '@/components/oc/PaymentConditionSelect';
 import {
   OcBoletoCreationFields,
   resizeOcBoletoCreationSlots,
@@ -177,7 +177,7 @@ export default function GerenciarMateriaisPage() {
       const res = await api.get('/payment-conditions', {
         params: { paymentType: 'BOLETO', activeOnly: 'true' }
       });
-      return (res.data?.data || []) as Array<{ code: string; parcelCount: number; parcelDueDays: unknown }>;
+      return (res.data?.data || []) as PaymentConditionRow[];
     },
     enabled: showCreateOCModal && ocPaymentType === OC_TYPE_BOLETO
   });
