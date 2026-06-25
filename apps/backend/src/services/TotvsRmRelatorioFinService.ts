@@ -6,6 +6,14 @@ dotenv.config({ path: path.join(__dirname, '../../.env') });
 import axios, { AxiosError } from 'axios';
 import https from 'https';
 import { isNaturezaExcludedFromContractPaidTotal, shouldCountInGastosOperacionaisTotal } from '../constants/contractPaidNaturezaExclusions';
+import {
+  gastosNaturezaTotalContribution,
+  getGastosOperacionaisNaturezaAggKey
+} from '../constants/gastosOperacionaisDfcBlocks';
+import {
+  gastosContractLookupKey,
+  normalizeGastosOperacionaisContractName
+} from '../lib/gastosOperacionaisContractAliases';
 
 function normPathRel(p: string): string {
   return p.replace(/\/$/, '').trim();
@@ -520,6 +528,302 @@ function parseStatusIncludeNormSet(): Set<string> | null {
     if (p) set.add(p);
   }
   return set.size ? set : null;
+}
+
+function scoreHistoricoColumn(key: string): number {
+  const u = normHeaderKey(key);
+  const c = u.replace(/\s/g, '');
+  if (u === 'HISTORICO' || c === 'HISTORICO') return 100;
+  if (u.includes('HISTORICO')) return 80;
+  if (u.includes('COMPLEMENTO')) return 78;
+  if (u.includes('OBSERV')) return 72;
+  if (u.includes('DESCRICAO') || u.includes('DESCRIÇÃO')) return 68;
+  if (u.includes('TITULO') && u.includes('SOLICIT')) return 70;
+  if (u.includes('MEMO') || u.includes('TEXTO')) return 55;
+  return 0;
+}
+
+function scoreDocumentoColumn(key: string): number {
+  const u = normHeaderKey(key).replace(/\s/g, '');
+  if (u === 'NUMERODOCUMENTO' || u === 'NUMDOCUMENTO') return 90;
+  if (u.includes('NUMERO') && u.includes('DOCUMENTO')) return 85;
+  if (u.includes('DOCUMENTO') && !u.includes('TIPO')) return 50;
+  return 0;
+}
+
+function scoreFornecedorColumn(key: string): number {
+  const u = normHeaderKey(key);
+  if (u.includes('FORNECEDOR') && u.includes('NOME')) return 70;
+  if (u.includes('FORNECEDOR')) return 60;
+  if (u.includes('RAZAO SOCIAL') || u.includes('RAZÃO SOCIAL')) return 50;
+  return 0;
+}
+
+function scoreSolicitacaoIdColumn(key: string): number {
+  const u = normHeaderKey(key).replace(/\s/g, '');
+  if (u === 'IDMOV') return 100;
+  if (u.includes('NUMPROCES') || u.includes('NUMEROPROCESSO')) return 90;
+  if (u.includes('NUMEROPEDIDO')) return 40;
+  return 0;
+}
+
+function parseGastosPeriodYmd(ymd: string): Date | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd.trim());
+  if (!match) return null;
+  const year = Number.parseInt(match[1], 10);
+  const month = Number.parseInt(match[2], 10);
+  const day = Number.parseInt(match[3], 10);
+  if (!Number.isFinite(year) || month < 1 || month > 12 || day < 1 || day > 31) return null;
+  const date = new Date(year, month - 1, day, 12, 0, 0, 0);
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) {
+    return null;
+  }
+  return date;
+}
+
+/** Filtra lançamentos individuais pela data de pagamento exata (não pelo mês civil). */
+function paymentDateIntersectsGastosPeriod(
+  paymentDate: Date,
+  periodFrom: string,
+  periodTo: string
+): boolean {
+  if (!periodFrom && !periodTo) return true;
+  const from = periodFrom ? parseGastosPeriodYmd(periodFrom) : null;
+  const to = periodTo ? parseGastosPeriodYmd(periodTo) : null;
+  if ((periodFrom && !from) || (periodTo && !to)) return true;
+
+  const day = new Date(
+    paymentDate.getFullYear(),
+    paymentDate.getMonth(),
+    paymentDate.getDate(),
+    12,
+    0,
+    0,
+    0
+  );
+  const rangeStart = from ?? day;
+  const rangeEnd = to ?? day;
+  if (rangeStart > rangeEnd) return false;
+  return day >= rangeStart && day <= rangeEnd;
+}
+
+function gastosContractsMatch(a: string, b: string): boolean {
+  return gastosContractLookupKey(a) === gastosContractLookupKey(b);
+}
+
+function pickRowFieldValue(row: Record<string, unknown>, ...candidates: string[]): string {
+  for (const candidate of candidates) {
+    const direct = row[candidate];
+    if (direct != null) {
+      const value = String(direct).trim();
+      if (value) return value;
+    }
+    const candidateNorm = normHeaderKey(candidate);
+    for (const [key, raw] of Object.entries(row)) {
+      if (normHeaderKey(key) !== candidateNorm) continue;
+      const value = String(raw ?? '').trim();
+      if (value) return value;
+    }
+  }
+  return '';
+}
+
+function truncateSolicitacaoTitulo(text: string): string {
+  return text.length > 120 ? `${text.slice(0, 117)}...` : text;
+}
+
+function looksLikeSolicitacaoMetaValue(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed) return true;
+  if (/^\d+([.,]\d+)?$/.test(trimmed)) return true;
+  if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) return true;
+  if (/^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(trimmed)) return true;
+  return false;
+}
+
+function resolveTextoSolicitacaoFromRow(
+  row: Record<string, unknown>,
+  excludeCols: ReadonlySet<string>
+): string {
+  const preferred = pickRowFieldValue(
+    row,
+    'HISTORICO',
+    'HISTÓRICO',
+    'COMPLEMENTO',
+    'OBSERVACAO',
+    'OBSERVAÇÃO',
+    'DESCRICAO',
+    'DESCRIÇÃO',
+    'MEMO',
+    'TEXTO'
+  );
+  if (preferred) return preferred;
+
+  let bestScore = 0;
+  let bestValue = '';
+  for (const [key, raw] of Object.entries(row)) {
+    if (excludeCols.has(key)) continue;
+    const value = String(raw ?? '').trim();
+    if (!value || looksLikeSolicitacaoMetaValue(value)) continue;
+    const score = Math.max(scoreHistoricoColumn(key), scoreDocumentoColumn(key), scoreFornecedorColumn(key));
+    if (score > bestScore) {
+      bestScore = score;
+      bestValue = value;
+    }
+  }
+  return bestValue;
+}
+
+function buildSolicitacaoTitulo(
+  row: Record<string, unknown>,
+  cols: {
+    histCol: string | null;
+    idCol: string | null;
+    fornecedorCol: string | null;
+    docCol: string | null;
+    excludeCols: ReadonlySet<string>;
+    natureza?: string;
+  }
+): string {
+  const histFromCol = cols.histCol ? String(row[cols.histCol] ?? '').trim() : '';
+  const hist =
+    histFromCol ||
+    resolveTextoSolicitacaoFromRow(
+      row,
+      new Set([...cols.excludeCols, cols.histCol, cols.idCol, cols.fornecedorCol, cols.docCol].filter(Boolean) as string[])
+    );
+  if (hist) return truncateSolicitacaoTitulo(hist);
+
+  const fornecedor =
+    (cols.fornecedorCol ? String(row[cols.fornecedorCol] ?? '').trim() : '') ||
+    pickRowFieldValue(
+      row,
+      'FORNECEDOR',
+      'CODIGO-NOME DO FORNECEDOR',
+      'NOME DO FORNECEDOR',
+      'RAZAO SOCIAL',
+      'RAZÃO SOCIAL'
+    );
+  const doc =
+    (cols.docCol ? String(row[cols.docCol] ?? '').trim() : '') ||
+    pickRowFieldValue(row, 'NUMERODOCUMENTO', 'NUMERO DOCUMENTO', 'NÚMERODOCUMENTO', 'DOCUMENTO');
+  if (fornecedor && doc) return truncateSolicitacaoTitulo(`${fornecedor} · Doc. ${doc}`);
+  if (fornecedor) return truncateSolicitacaoTitulo(fornecedor);
+  if (doc) return truncateSolicitacaoTitulo(`Doc. ${doc}`);
+
+  const id =
+    (cols.idCol ? String(row[cols.idCol] ?? '').trim() : '') ||
+    pickRowFieldValue(row, 'IDMOV', 'NUMPROCES', 'NUMEROPROCESSO', 'NUMEROPEDIDO', 'IDXCX');
+  if (id) return `Mov. ${id}`;
+
+  const natureza = (cols.natureza ?? '').trim();
+  if (natureza && natureza !== '—') return truncateSolicitacaoTitulo(natureza);
+
+  return 'Solicitação';
+}
+
+function buildSolicitacaoDetalhes(
+  row: Record<string, unknown>,
+  columns: string[],
+  priorityCols: readonly (string | null)[]
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  const add = (key: string | null) => {
+    if (!key) return;
+    const raw = row[key];
+    if (raw == null) return;
+    const value = String(raw).trim();
+    if (!value || out[key]) return;
+    out[key] = value;
+  };
+
+  for (const key of priorityCols) add(key);
+  for (const key of columns) {
+    if (Object.keys(out).length >= 24) break;
+    if (priorityCols.includes(key)) continue;
+    add(key);
+  }
+  return out;
+}
+
+export interface GastosOperacionaisNaturezaSolicitacaoLancamentoRow {
+  linhaId: string;
+  valor: number;
+  dataISO: string | null;
+  detalhes: Record<string, string>;
+}
+
+export interface GastosOperacionaisNaturezaSolicitacaoRow {
+  linhaId: string;
+  natureza: string;
+  valor: number;
+  dataISO: string | null;
+  dataISOFim?: string | null;
+  titulo: string;
+  detalhes: Record<string, string>;
+  quantidadeLancamentos?: number;
+  lancamentosAgrupados?: GastosOperacionaisNaturezaSolicitacaoLancamentoRow[];
+}
+
+function normalizeSolicitacaoGroupKey(titulo: string): string {
+  return titulo.trim().toUpperCase().replace(/\s+/g, ' ');
+}
+
+function aggregateGastosNaturezaSolicitacoesByTitulo(
+  rows: GastosOperacionaisNaturezaSolicitacaoRow[]
+): GastosOperacionaisNaturezaSolicitacaoRow[] {
+  const groups = new Map<string, GastosOperacionaisNaturezaSolicitacaoRow[]>();
+
+  for (const row of rows) {
+    const key = `${row.natureza}::${normalizeSolicitacaoGroupKey(row.titulo)}`;
+    const bucket = groups.get(key) ?? [];
+    bucket.push(row);
+    groups.set(key, bucket);
+  }
+
+  const aggregated: GastosOperacionaisNaturezaSolicitacaoRow[] = [];
+
+  for (const items of groups.values()) {
+    if (items.length === 1) {
+      aggregated.push(items[0]);
+      continue;
+    }
+
+    const titulo = items[0].titulo;
+    const natureza = items[0].natureza;
+    const valor = items.reduce((sum, item) => sum + item.valor, 0);
+    const dates = items
+      .map((item) => item.dataISO)
+      .filter((date): date is string => Boolean(date))
+      .sort();
+    const dataISO = dates.length ? dates[dates.length - 1] : null;
+    const dataISOFim = dates.length > 1 ? dates[0] : null;
+    const lancamentosAgrupados = [...items]
+      .sort((a, b) => Math.abs(b.valor) - Math.abs(a.valor))
+      .map((item) => ({
+        linhaId: item.linhaId,
+        valor: item.valor,
+        dataISO: item.dataISO,
+        detalhes: item.detalhes
+      }));
+
+    aggregated.push({
+      linhaId: `agg:${normalizeSolicitacaoGroupKey(`${natureza}::${titulo}`)}`,
+      natureza,
+      valor,
+      dataISO,
+      dataISOFim,
+      titulo,
+      quantidadeLancamentos: items.length,
+      lancamentosAgrupados,
+      detalhes: {
+        ...items[0].detalhes,
+        'Lançamentos agrupados': String(items.length)
+      }
+    });
+  }
+
+  return aggregated;
 }
 
 export interface TotvsRelatorioFinNaturezaRow {
@@ -1183,9 +1487,17 @@ export class TotvsRmRelatorioFinService {
    * agrupados por CC + mês/ano — sem depender de contratos cadastrados.
    */
   async listGastosOperacionaisDetailRows(): Promise<{
-    detailRows: Array<{ contract: string; month: number; year: number; total: number; polo: string | null }>;
+    detailRows: Array<{
+      contract: string;
+      dateISO: string;
+      month: number;
+      year: number;
+      total: number;
+      polo: string | null;
+    }>;
     naturezaDetailRows: Array<{
       contract: string;
+      dateISO: string;
       month: number;
       year: number;
       natureza: string;
@@ -1296,8 +1608,8 @@ export class TotvsRmRelatorioFinService {
       );
     }
 
-    const byCcYm = new Map<string, Map<string, number>>();
-    const byCcYmNat = new Map<string, Map<string, Map<string, number>>>();
+    const byCcDate = new Map<string, Map<string, number>>();
+    const byCcDateNat = new Map<string, Map<string, Map<string, number>>>();
     const poloByCc = new Map<string, string>();
     const costCenters = new Set<string>();
 
@@ -1325,62 +1637,70 @@ export class TotvsRmRelatorioFinService {
       const parsed = solDateCol ? parseTotvsRowDate(row[solDateCol]) : null;
       if (!parsed || Number.isNaN(parsed.getTime())) continue;
 
-      const year = parsed.getFullYear();
-      const month = parsed.getMonth() + 1;
-      if (year < 1900 || year > 2100 || month < 1 || month > 12) continue;
+      const dataISO = isoDateOnly(parsed);
 
       const v = parseMoneyBr(row[solValCol]);
       if (v === 0) continue;
 
       costCenters.add(cc);
-      const ym = `${year}-${pad2(month)}`;
       if (shouldCountInGastosOperacionaisTotal(natLabel)) {
-        const ccBucket = byCcYm.get(cc) ?? new Map<string, number>();
-        ccBucket.set(ym, (ccBucket.get(ym) ?? 0) + v);
-        byCcYm.set(cc, ccBucket);
+        const ccBucket = byCcDate.get(cc) ?? new Map<string, number>();
+        ccBucket.set(
+          dataISO,
+          (ccBucket.get(dataISO) ?? 0) + gastosNaturezaTotalContribution(natLabel, v)
+        );
+        byCcDate.set(cc, ccBucket);
       }
 
-      const ccNatBucket = byCcYmNat.get(cc) ?? new Map<string, Map<string, number>>();
-      const ymNatBucket = ccNatBucket.get(ym) ?? new Map<string, number>();
-      ymNatBucket.set(natLabel, (ymNatBucket.get(natLabel) ?? 0) + v);
-      ccNatBucket.set(ym, ymNatBucket);
-      byCcYmNat.set(cc, ccNatBucket);
+      const ccNatBucket = byCcDateNat.get(cc) ?? new Map<string, Map<string, number>>();
+      const dateNatBucket = ccNatBucket.get(dataISO) ?? new Map<string, number>();
+      dateNatBucket.set(natLabel, (dateNatBucket.get(natLabel) ?? 0) + v);
+      ccNatBucket.set(dataISO, dateNatBucket);
+      byCcDateNat.set(cc, ccNatBucket);
     }
 
     const detailRows: Array<{
       contract: string;
+      dateISO: string;
       month: number;
       year: number;
       total: number;
       polo: string | null;
     }> = [];
-    for (const [contract, ymMap] of byCcYm) {
+    for (const [contract, dateMap] of byCcDate) {
       const polo = poloByCc.get(contract) ?? null;
-      for (const [ym, total] of ymMap) {
-        const [yearStr, monthStr] = ym.split('-');
-        const year = Number(yearStr);
-        const month = Number(monthStr);
-        if (!Number.isFinite(year) || !Number.isFinite(month) || total === 0) continue;
-        detailRows.push({ contract, month, year, total, polo });
+      for (const [dateISO, total] of dateMap) {
+        const parsed = parseGastosPeriodYmd(dateISO);
+        if (!parsed || total === 0) continue;
+        detailRows.push({
+          contract,
+          dateISO,
+          month: parsed.getMonth() + 1,
+          year: parsed.getFullYear(),
+          total,
+          polo
+        });
       }
     }
 
     const naturezaDetailRows: Array<{
       contract: string;
+      dateISO: string;
       month: number;
       year: number;
       natureza: string;
       total: number;
     }> = [];
-    for (const [contract, ymNatMap] of byCcYmNat) {
-      for (const [ym, natMap] of ymNatMap) {
-        const [yearStr, monthStr] = ym.split('-');
-        const year = Number(yearStr);
-        const month = Number(monthStr);
-        if (!Number.isFinite(year) || !Number.isFinite(month)) continue;
+    for (const [contract, dateNatMap] of byCcDateNat) {
+      for (const [dateISO, natMap] of dateNatMap) {
+        const parsed = parseGastosPeriodYmd(dateISO);
+        if (!parsed) continue;
+        const month = parsed.getMonth() + 1;
+        const year = parsed.getFullYear();
         for (const [natureza, total] of natMap) {
           if (total === 0) continue;
-          naturezaDetailRows.push({ contract, month, year, natureza, total });
+          if (!shouldCountInGastosOperacionaisTotal(natureza)) continue;
+          naturezaDetailRows.push({ contract, dateISO, month, year, natureza, total });
         }
       }
     }
@@ -1388,15 +1708,13 @@ export class TotvsRmRelatorioFinService {
     detailRows.sort((a, b) => {
       const byContract = a.contract.localeCompare(b.contract, 'pt-BR');
       if (byContract !== 0) return byContract;
-      if (a.year !== b.year) return a.year - b.year;
-      return a.month - b.month;
+      return a.dateISO.localeCompare(b.dateISO);
     });
 
     naturezaDetailRows.sort((a, b) => {
       const byContract = a.contract.localeCompare(b.contract, 'pt-BR');
       if (byContract !== 0) return byContract;
-      if (a.year !== b.year) return a.year - b.year;
-      if (a.month !== b.month) return a.month - b.month;
+      if (a.dateISO !== b.dateISO) return a.dateISO.localeCompare(b.dateISO);
       return a.natureza.localeCompare(b.natureza, 'pt-BR');
     });
 
@@ -1410,6 +1728,199 @@ export class TotvsRmRelatorioFinService {
       totalRowCount: solicitationRows.length,
       costCenterCount: costCenters.size
     };
+  }
+
+  /**
+   * Solicitações individuais do RM para uma natureza agregada no modal de Gastos Operacionais.
+   */
+  async listGastosOperacionaisNaturezaSolicitacoes(input: {
+    contract: string;
+    canonicalNatureza: string;
+    periodFrom: string;
+    periodTo: string;
+  }): Promise<GastosOperacionaisNaturezaSolicitacaoRow[]> {
+    const contract = normalizeGastosOperacionaisContractName(input.contract.trim());
+    const targetAggKey = getGastosOperacionaisNaturezaAggKey(input.canonicalNatureza.trim());
+    if (!contract || !targetAggKey || targetAggKey === '—') return [];
+
+    const rows = await this.getRelatorioRowsCached();
+    if (!rows.length) return [];
+
+    const solicitationRows = await this.resolveSolicitationRows(rows);
+    if (!solicitationRows.length) return [];
+
+    const solCcNameCol = pickCcNameColumn(solicitationRows);
+    const solCcCodeCol = pickColumn(
+      solicitationRows,
+      scoreCcColumn,
+      process.env.TOTVS_RM_CC_CODE_COLUMN ||
+        process.env.TOTVS_RM_SOLICITACOES_CC_COLUMN ||
+        process.env.TOTVS_RM_CC_COLUMN,
+      solCcNameCol ? new Set([solCcNameCol]) : undefined
+    );
+    const solCcCol = solCcNameCol ?? solCcCodeCol;
+    const solCcExclude = new Set(
+      [solCcNameCol, solCcCodeCol].filter(Boolean) as string[]
+    );
+    const solValCol = pickColumn(
+      solicitationRows,
+      scoreValueColumn,
+      process.env.TOTVS_RM_SOLICITACOES_VALUE_COLUMN || process.env.TOTVS_RM_VALUE_COLUMN,
+      solCcExclude.size ? solCcExclude : undefined
+    );
+    const solNatCol = pickNaturezaColumn(
+      solicitationRows,
+      new Set([...solCcExclude, solValCol].filter(Boolean) as string[])
+    );
+    const solNatCodeExclude = new Set(
+      [...solCcExclude, solValCol, solNatCol].filter(Boolean) as string[]
+    );
+    const solNatCodeCol = pickColumn(
+      solicitationRows,
+      scoreNaturezaCodeColumn,
+      process.env.TOTVS_RM_NATUREZA_CODE_COLUMN,
+      solNatCodeExclude
+    );
+
+    const solUseStatus = ['1', 'true', 'yes'].includes(
+      String(process.env.TOTVS_RM_SOLICITACOES_USE_STATUS_FILTER || '').trim().toLowerCase()
+    );
+    const solStatusAllowed = solUseStatus ? parseStatusIncludeNormSet() : null;
+    const solExcludeForStatus = new Set(
+      [...solCcExclude, solValCol, solNatCol].filter(Boolean) as string[]
+    );
+    const solStatusCol =
+      solStatusAllowed && solStatusAllowed.size > 0
+        ? pickColumn(
+            solicitationRows,
+            scoreStatusColumn,
+            process.env.TOTVS_RM_SOLICITACOES_STATUS_COLUMN || process.env.TOTVS_RM_STATUS_COLUMN,
+            solExcludeForStatus
+          )
+        : null;
+
+    const solDateExcludeKeys = new Set<string>(
+      [...solCcExclude, solValCol, solNatCol, solStatusCol].filter(Boolean) as string[]
+    );
+    const solDateEnv =
+      process.env.TOTVS_RM_SOLICITACOES_DATE_COLUMN || process.env.TOTVS_RM_DATE_COLUMN;
+    let solDateCol = pickColumn(
+      solicitationRows,
+      scorePaymentDateColumn,
+      solDateEnv,
+      solDateExcludeKeys
+    );
+    if (!solDateCol && !solDateEnv?.trim()) {
+      solDateCol = pickColumn(solicitationRows, scoreDateColumn, undefined, solDateExcludeKeys);
+    }
+
+    const solMetaExclude = new Set(
+      [...solCcExclude, solValCol, solNatCol, solStatusCol, solDateCol, solNatCodeCol].filter(
+        Boolean
+      ) as string[]
+    );
+    const solHistCol = pickColumn(
+      solicitationRows,
+      scoreHistoricoColumn,
+      process.env.TOTVS_RM_SOLICITACOES_HISTORICO_COLUMN,
+      solMetaExclude
+    );
+    const solIdCol = pickColumn(
+      solicitationRows,
+      scoreSolicitacaoIdColumn,
+      process.env.TOTVS_RM_SOLICITACOES_ID_COLUMN,
+      new Set([...solMetaExclude, solHistCol].filter(Boolean) as string[])
+    );
+    const solFornecedorCol = pickColumn(
+      solicitationRows,
+      scoreFornecedorColumn,
+      process.env.TOTVS_RM_SOLICITACOES_FORNECEDOR_COLUMN,
+      new Set([...solMetaExclude, solHistCol, solIdCol].filter(Boolean) as string[])
+    );
+    const solDocCol = pickColumn(
+      solicitationRows,
+      scoreDocumentoColumn,
+      process.env.TOTVS_RM_SOLICITACOES_DOCUMENTO_COLUMN,
+      new Set([...solMetaExclude, solHistCol, solIdCol, solFornecedorCol].filter(Boolean) as string[])
+    );
+
+    if (!solCcCol || !solValCol) return [];
+
+    const allColumns = allColumnKeys(solicitationRows, SCHEMA_SCAN_ROWS);
+    const priorityCols = [
+      solHistCol,
+      solIdCol,
+      solFornecedorCol,
+      solDocCol,
+      solNatCol,
+      solNatCodeCol,
+      solValCol,
+      solDateCol,
+      solStatusCol,
+      solCcNameCol,
+      solCcCodeCol
+    ];
+
+    const solicitacoes: GastosOperacionaisNaturezaSolicitacaoRow[] = [];
+    let lineIndex = 0;
+
+    for (const row of solicitationRows) {
+      if (
+        solStatusCol &&
+        solStatusAllowed &&
+        solStatusAllowed.size > 0 &&
+        !solStatusAllowed.has(norm(String(row[solStatusCol] ?? '')))
+      ) {
+        continue;
+      }
+
+      const cc = resolveCcDisplayLabelFromRow(row, solCcNameCol, solCcCodeCol);
+      if (!cc || !gastosContractsMatch(cc, contract)) continue;
+
+      const nkRaw = resolveNatureLabelFromRow(row, solNatCol, solNatCodeCol);
+      const natLabel = nkRaw === '' ? '—' : nkRaw;
+      if (!shouldCountInGastosOperacionaisTotal(natLabel)) continue;
+      if (getGastosOperacionaisNaturezaAggKey(natLabel) !== targetAggKey) continue;
+
+      const parsed = solDateCol ? parseTotvsRowDate(row[solDateCol]) : null;
+      if (!parsed || Number.isNaN(parsed.getTime())) continue;
+
+      if (!paymentDateIntersectsGastosPeriod(parsed, input.periodFrom, input.periodTo)) continue;
+
+      const v = parseMoneyBr(row[solValCol]);
+      if (v === 0) continue;
+
+      lineIndex += 1;
+      const dataISO = isoDateOnly(parsed);
+      solicitacoes.push({
+        linhaId: `${gastosContractLookupKey(contract)}:${targetAggKey}:${lineIndex}:${dataISO}:${v}`,
+        natureza: natLabel,
+        valor: v,
+        dataISO,
+        titulo: buildSolicitacaoTitulo(row, {
+          histCol: solHistCol,
+          idCol: solIdCol,
+          fornecedorCol: solFornecedorCol,
+          docCol: solDocCol,
+          excludeCols: solMetaExclude,
+          natureza: natLabel
+        }),
+        detalhes: buildSolicitacaoDetalhes(row, allColumns, priorityCols)
+      });
+    }
+
+    const agrupadas = aggregateGastosNaturezaSolicitacoesByTitulo(solicitacoes);
+
+    agrupadas.sort((a, b) => {
+      const byValor = Math.abs(b.valor) - Math.abs(a.valor);
+      if (byValor !== 0) return byValor;
+      const ta = a.dataISO ? new Date(`${a.dataISO}T12:00:00`).getTime() : 0;
+      const tb = b.dataISO ? new Date(`${b.dataISO}T12:00:00`).getTime() : 0;
+      if (tb !== ta) return tb - ta;
+      return a.titulo.localeCompare(b.titulo, 'pt-BR');
+    });
+
+    return agrupadas;
   }
 }
 

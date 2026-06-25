@@ -16,12 +16,19 @@ import {
   type GastosOperacionaisLocalityOverrideMap
 } from './gastosOperacionaisLocalityOverrides';
 import {
-  isGastosOperacionaisMovFinanceiraNatureza,
   shouldShowInGastosNaturezaModal
 } from './gastosOperacionaisNaturezaModal';
-import { normalizeNaturezaLabel } from '@/lib/contractPaidNaturezaExclusions';
+import {
+  normalizeGastosOperacionaisNaturezaKey,
+  resolveGastosOperacionaisDfcEntry,
+  gastosNaturezaTotalContribution,
+  isGastosOperacionaisPositiveCreditNatureza
+} from './gastosOperacionaisAllowedNaturezas';
+
+export { gastosNaturezaTotalContribution, isGastosOperacionaisPositiveCreditNatureza };
 
 export type QueryGastosDetailRow = {
+  dateISO?: string;
   month: number;
   year: number;
   contract: string;
@@ -30,6 +37,7 @@ export type QueryGastosDetailRow = {
 };
 
 export type QueryGastosNaturezaDetailRow = {
+  dateISO?: string;
   month: number;
   year: number;
   contract: string;
@@ -40,8 +48,35 @@ export type QueryGastosNaturezaDetailRow = {
 export type GastosNaturezaAggRow = {
   natureza: string;
   total: number;
-  /** Movimentação financeira — visível no detalhe, fora do total operacional. */
-  excludedFromOperationalTotal?: boolean;
+  dfcLeafBlockId?: string;
+};
+
+export function getGastosNaturezaAggRowKey(row: Pick<GastosNaturezaAggRow, 'natureza'>): string {
+  const dfcEntry = resolveGastosOperacionaisDfcEntry(row.natureza);
+  return dfcEntry
+    ? `${dfcEntry.leafBlockId}:${normalizeGastosOperacionaisNaturezaKey(dfcEntry.canonicalLabel)}`
+    : normalizeGastosOperacionaisNaturezaKey(row.natureza) || '—';
+}
+
+export type GastosNaturezaModalGroup = {
+  leafBlockId: string;
+  leafLabel: string;
+  rows: GastosNaturezaAggRow[];
+  subtotal: number;
+};
+
+export type GastosNaturezaModalDfcBranch = {
+  branchKey: string;
+  label: string;
+  leafGroups: GastosNaturezaModalGroup[];
+  subtotal: number;
+};
+
+export type GastosNaturezaModalDfcTree = {
+  rootKey: string;
+  rootLabel: string;
+  rootSubtotal: number;
+  branches: GastosNaturezaModalDfcBranch[];
 };
 
 export type GastosOperacionaisFilters = {
@@ -107,6 +142,27 @@ export function rowIntersectsGastosPeriod(
   if (rangeStart > rangeEnd) return false;
 
   return monthStart <= rangeEnd && monthEnd >= rangeStart;
+}
+
+/** Filtra lançamentos pela data de pagamento exata quando `dateISO` está disponível. */
+export function rowPaymentDateIntersectsGastosPeriod(
+  row: Pick<QueryGastosDetailRow | QueryGastosNaturezaDetailRow, 'dateISO' | 'month' | 'year'>,
+  periodFrom: string,
+  periodTo: string
+): boolean {
+  if (row.dateISO) {
+    if (!periodFrom && !periodTo) return true;
+    const paymentDate = parseGastosPeriodYmd(row.dateISO);
+    if (!paymentDate) return false;
+    const from = periodFrom ? parseGastosPeriodYmd(periodFrom) : null;
+    const to = periodTo ? parseGastosPeriodYmd(periodTo) : null;
+    if ((periodFrom && !from) || (periodTo && !to)) return true;
+    const rangeStart = from ?? paymentDate;
+    const rangeEnd = to ?? paymentDate;
+    if (rangeStart > rangeEnd) return false;
+    return paymentDate >= rangeStart && paymentDate <= rangeEnd;
+  }
+  return rowIntersectsGastosPeriod(row, periodFrom, periodTo);
 }
 
 /** Deriva meses/anos para a API de faturamento (mesma lógica do filtro multi mês/ano). */
@@ -199,24 +255,126 @@ export function aggregateGastosNaturezaForContract(
 
   for (const row of naturezaDetailRows) {
     if (!gastosContractsMatch(row.contract, contract)) continue;
-    if (!rowIntersectsGastosPeriod(row, periodFrom, periodTo)) continue;
+    if (!rowPaymentDateIntersectsGastosPeriod(row, periodFrom, periodTo)) continue;
     if (!shouldShowInGastosNaturezaModal(row.natureza)) continue;
 
-    const isMovFinanceira = isGastosOperacionaisMovFinanceiraNatureza(row.natureza);
-    const key = normalizeNaturezaLabel(row.natureza) || '—';
+    const dfcEntry = resolveGastosOperacionaisDfcEntry(row.natureza);
+    const key = dfcEntry
+      ? `${dfcEntry.leafBlockId}:${normalizeGastosOperacionaisNaturezaKey(dfcEntry.canonicalLabel)}`
+      : normalizeGastosOperacionaisNaturezaKey(row.natureza) || '—';
+    const contribution = gastosNaturezaTotalContribution(row.natureza, row.total);
     const current = map.get(key);
     if (current) {
-      current.total += row.total;
+      current.total += contribution;
     } else {
       map.set(key, {
-        natureza: row.natureza,
-        total: row.total,
-        excludedFromOperationalTotal: isMovFinanceira
+        natureza: dfcEntry?.canonicalLabel ?? row.natureza,
+        total: contribution,
+        dfcLeafBlockId: dfcEntry?.leafBlockId
       });
     }
   }
 
   return Array.from(map.values()).sort((a, b) => Math.abs(b.total) - Math.abs(a.total));
+}
+
+export function groupGastosNaturezaModalRows(rows: readonly GastosNaturezaAggRow[]): {
+  dfcTrees: GastosNaturezaModalDfcTree[];
+  ungrouped: GastosNaturezaAggRow[];
+} {
+  const groups = new Map<string, GastosNaturezaModalGroup>();
+  const ungrouped: GastosNaturezaAggRow[] = [];
+  const groupParentPaths = new Map<string, string[]>();
+
+  for (const row of rows) {
+    if (!row.dfcLeafBlockId) {
+      ungrouped.push(row);
+      continue;
+    }
+    const dfcEntry = resolveGastosOperacionaisDfcEntry(row.natureza);
+    const pathLabels = dfcEntry?.pathLabels ? [...dfcEntry.pathLabels] : [row.dfcLeafBlockId];
+    const parentPathLabels = pathLabels.slice(0, -1);
+    const leafLabel = pathLabels[pathLabels.length - 1] ?? row.dfcLeafBlockId;
+
+    const current = groups.get(row.dfcLeafBlockId);
+    if (current) {
+      current.rows.push(row);
+      current.subtotal += gastosNaturezaTotalContribution(row.natureza, row.total);
+    } else {
+      groups.set(row.dfcLeafBlockId, {
+        leafBlockId: row.dfcLeafBlockId,
+        leafLabel,
+        rows: [row],
+        subtotal: gastosNaturezaTotalContribution(row.natureza, row.total)
+      });
+      groupParentPaths.set(row.dfcLeafBlockId, parentPathLabels);
+    }
+  }
+
+  const sortedGroups = Array.from(groups.values())
+    .map((group) => {
+      group.rows.sort((a, b) => Math.abs(b.total) - Math.abs(a.total));
+      return group;
+    })
+    .sort((a, b) => a.leafLabel.localeCompare(b.leafLabel, 'pt-BR', { numeric: true }));
+
+  if (sortedGroups.length === 0) {
+    return {
+      dfcTrees: [],
+      ungrouped: ungrouped.sort((a, b) => Math.abs(b.total) - Math.abs(a.total))
+    };
+  }
+
+  const rootMap = new Map<
+    string,
+    { rootLabel: string; branchMap: Map<string, GastosNaturezaModalDfcBranch> }
+  >();
+
+  for (const group of sortedGroups) {
+    const parentPathLabels = groupParentPaths.get(group.leafBlockId) ?? [];
+    const rootLabel = parentPathLabels[0] ?? '—';
+    const rootKey = rootLabel;
+    const branchLabel = parentPathLabels[parentPathLabels.length - 1] ?? group.leafBlockId;
+    const branchKey = parentPathLabels.slice(1).join('\0') || branchLabel;
+
+    let root = rootMap.get(rootKey);
+    if (!root) {
+      root = { rootLabel, branchMap: new Map() };
+      rootMap.set(rootKey, root);
+    }
+
+    const currentBranch = root.branchMap.get(branchKey);
+    if (currentBranch) {
+      currentBranch.leafGroups.push(group);
+      currentBranch.subtotal += group.subtotal;
+    } else {
+      root.branchMap.set(branchKey, {
+        branchKey,
+        label: branchLabel,
+        leafGroups: [group],
+        subtotal: group.subtotal
+      });
+    }
+  }
+
+  const dfcTrees = Array.from(rootMap.entries())
+    .map(([rootKey, root]) => {
+      const branches = Array.from(root.branchMap.values()).sort((a, b) =>
+        a.label.localeCompare(b.label, 'pt-BR', { numeric: true })
+      );
+      return {
+        rootKey,
+        rootLabel: root.rootLabel,
+        rootSubtotal: branches.reduce((sum, branch) => sum + branch.subtotal, 0),
+        branches
+      };
+    })
+    .sort((a, b) => a.rootLabel.localeCompare(b.rootLabel, 'pt-BR', { numeric: true }));
+
+  return {
+    dfcTrees,
+    ungrouped: ungrouped.sort((a, b) => Math.abs(b.total) - Math.abs(a.total))
+  };
 }
 
 type QueryContractPayload = {
@@ -347,7 +505,7 @@ export function filterGastosDetailRowsByPolo(
     if (filters.polos.length && !filters.polos.includes(resolveDetailRowPolo(row))) {
       return false;
     }
-    if (!rowIntersectsGastosPeriod(row, filters.periodFrom, filters.periodTo)) return false;
+    if (!rowPaymentDateIntersectsGastosPeriod(row, filters.periodFrom, filters.periodTo)) return false;
     if (filters.contracts.length && !filters.contracts.includes(row.contract)) return false;
     return true;
   });
@@ -369,7 +527,7 @@ export function filterGastosDetailRows(
     ) {
       return false;
     }
-    if (!rowIntersectsGastosPeriod(row, filters.periodFrom, filters.periodTo)) return false;
+    if (!rowPaymentDateIntersectsGastosPeriod(row, filters.periodFrom, filters.periodTo)) return false;
     if (filters.contracts.length && !filters.contracts.includes(row.contract)) return false;
     return true;
   });

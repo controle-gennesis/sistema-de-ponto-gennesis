@@ -52,7 +52,7 @@ export default function GastosOperacionaisPage() {
     isFetching: fetchingGastos,
     refetch: refetchGastos
   } = useQuery({
-    queryKey: ['gastos-operacionais-module-totvs-v8-natureza-label'],
+    queryKey: ['gastos-operacionais-module-totvs-v34-adiantamento-predial'],
     queryFn: async () => {
       const res = await api.get<GastosOperacionaisApi>('/contracts/gastos-operacionais', {
         timeout: 180_000

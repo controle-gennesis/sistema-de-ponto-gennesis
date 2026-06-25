@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import api from '@/lib/api';
@@ -30,6 +30,10 @@ import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import {
   aggregateGastosDetailRows,
   aggregateGastosNaturezaForContract,
+  getGastosNaturezaAggRowKey,
+  groupGastosNaturezaModalRows,
+  gastosNaturezaTotalContribution,
+  isGastosOperacionaisPositiveCreditNatureza,
   deriveEmissaoMonthYearFromPeriod,
   EMPTY_GASTOS_OPERACIONAIS_FILTERS,
   filterGastosDetailRows,
@@ -44,8 +48,15 @@ import {
   groupGastosRowsByPolo,
   type GastosOperacionaisFilters,
   type QueryGastosDetailRow,
-  type QueryGastosNaturezaDetailRow
+  type QueryGastosNaturezaDetailRow,
+  type GastosNaturezaAggRow
 } from './buildQueryGastosRows';
+import {
+  GastosNaturezaSolicitacoesBreakdown,
+  formatGastosNaturezaSolicitacaoDataLabel,
+  resolveGastosNaturezaSolicitacaoTitulo,
+  type GastosNaturezaSolicitacaoRow
+} from './gastosNaturezaSolicitacoesBreakdown';
 import {
   getLocalityLabel,
   resolveVisibleLocalityItems,
@@ -153,6 +164,19 @@ function formatCurrency(value: number) {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2
   }).format(value);
+}
+
+function formatGastosNaturezaDate(iso: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso.trim());
+  if (!match) return iso;
+  return `${match[3]}/${match[2]}/${match[1]}`;
+}
+
+function gastosNaturezaModalValueClassName(natureza: string): string {
+  if (isGastosOperacionaisPositiveCreditNatureza(natureza)) {
+    return 'text-green-600 dark:text-green-400';
+  }
+  return 'text-red-600 dark:text-red-400';
 }
 
 function calcGastoFaturamentoPercent(gastos: number, faturamento: number): number | null {
@@ -437,6 +461,46 @@ export function ControleGeralGastosOperacionaisPanel({
   const [naturezaModalContract, setNaturezaModalContract] = useState<GastosOperacionaisRow | null>(
     null
   );
+  const [collapsedNaturezaSections, setCollapsedNaturezaSections] = useState<Set<string>>(
+    () => new Set()
+  );
+  const [expandedNaturezaBreakdownKey, setExpandedNaturezaBreakdownKey] = useState<string | null>(
+    null
+  );
+  const [selectedNaturezaSolicitacao, setSelectedNaturezaSolicitacao] =
+    useState<GastosNaturezaSolicitacaoRow | null>(null);
+  const lastInitializedNaturezaContractRef = useRef<string | null>(null);
+
+  const toggleNaturezaBreakdown = useCallback((rowKey: string) => {
+    setExpandedNaturezaBreakdownKey((prev) => (prev === rowKey ? null : rowKey));
+  }, []);
+
+  const toggleNaturezaSection = useCallback((sectionKey: string) => {
+    setCollapsedNaturezaSections((prev) => {
+      const next = new Set(prev);
+      if (next.has(sectionKey)) next.delete(sectionKey);
+      else next.add(sectionKey);
+      return next;
+    });
+  }, []);
+
+  const areDfcBranchLeafGroupsVisible = useCallback(
+    (rootKey: string, branchKey: string) => {
+      if (collapsedNaturezaSections.has(`dfc:root:${rootKey}`)) return false;
+      if (collapsedNaturezaSections.has(`dfc:branch:${rootKey}:${branchKey}`)) return false;
+      return true;
+    },
+    [collapsedNaturezaSections]
+  );
+
+  const areDfcLeafRowsVisible = useCallback(
+    (rootKey: string, branchKey: string, leafBlockId: string) => {
+      if (!areDfcBranchLeafGroupsVisible(rootKey, branchKey)) return false;
+      if (collapsedNaturezaSections.has(`dfc:leaf:${leafBlockId}`)) return false;
+      return true;
+    },
+    [areDfcBranchLeafGroupsVisible, collapsedNaturezaSections]
+  );
 
   const enableNaturezaBreakdown = naturezaDetailRows.length > 0;
 
@@ -650,13 +714,108 @@ export function ControleGeralGastosOperacionaisPanel({
   ]);
 
   const naturezaModalTotal = useMemo(
-    () => naturezaModalRows.reduce((sum, row) => sum + row.total, 0),
+    () =>
+      naturezaModalRows.reduce(
+        (sum, row) => sum + gastosNaturezaTotalContribution(row.natureza, row.total),
+        0
+      ),
     [naturezaModalRows]
   );
 
-  const naturezaModalPeriodLabel = useMemo(
-    () => formatGastosPeriodFilterLabel(filters.periodFrom, filters.periodTo),
-    [filters.periodFrom, filters.periodTo]
+  const naturezaModalGrouped = useMemo(
+    () => groupGastosNaturezaModalRows(naturezaModalRows),
+    [naturezaModalRows]
+  );
+
+  const allNaturezaSectionKeys = useMemo(() => {
+    const keys = new Set<string>();
+    for (const tree of naturezaModalGrouped.dfcTrees) {
+      keys.add(`dfc:root:${tree.rootKey}`);
+      for (const branch of tree.branches) {
+        keys.add(`dfc:branch:${tree.rootKey}:${branch.branchKey}`);
+        for (const group of branch.leafGroups) {
+          keys.add(`dfc:leaf:${group.leafBlockId}`);
+        }
+      }
+    }
+    if (naturezaModalGrouped.ungrouped.length > 0) {
+      keys.add('dfc:ungrouped');
+    }
+    return keys;
+  }, [naturezaModalGrouped]);
+
+  useEffect(() => {
+    if (!naturezaModalContract) {
+      lastInitializedNaturezaContractRef.current = null;
+      setCollapsedNaturezaSections(new Set());
+      setExpandedNaturezaBreakdownKey(null);
+      setSelectedNaturezaSolicitacao(null);
+      return;
+    }
+    if (allNaturezaSectionKeys.size === 0) return;
+    const contractKey = naturezaModalContract.contract;
+    if (lastInitializedNaturezaContractRef.current === contractKey) return;
+    lastInitializedNaturezaContractRef.current = contractKey;
+    setCollapsedNaturezaSections(new Set(allNaturezaSectionKeys));
+    setExpandedNaturezaBreakdownKey(null);
+    setSelectedNaturezaSolicitacao(null);
+  }, [naturezaModalContract, allNaturezaSectionKeys]);
+
+  const renderNaturezaModalRow = useCallback(
+    (row: GastosNaturezaAggRow, paddingLeft: number) => {
+      const rowKey = getGastosNaturezaAggRowKey(row);
+      const isExpanded = expandedNaturezaBreakdownKey === rowKey;
+
+      return (
+        <React.Fragment key={rowKey}>
+          <tr className="hover:bg-gray-50/80 dark:hover:bg-gray-800/30">
+            <td
+              className="px-4 py-2 text-sm text-gray-800 dark:text-gray-200"
+              style={{ paddingLeft }}
+            >
+              <button
+                type="button"
+                onClick={() => toggleNaturezaBreakdown(rowKey)}
+                className="inline-flex w-full items-center gap-1.5 text-left hover:opacity-80"
+                aria-expanded={isExpanded}
+              >
+                {isExpanded ? (
+                  <ChevronUp className="h-3.5 w-3.5 shrink-0 opacity-60" aria-hidden />
+                ) : (
+                  <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" aria-hidden />
+                )}
+                <span>{row.natureza}</span>
+              </button>
+            </td>
+            <td
+              className={`px-4 py-2 text-right text-sm tabular-nums font-medium whitespace-nowrap ${gastosNaturezaModalValueClassName(row.natureza)}`}
+            >
+              {formatCurrency(Math.abs(row.total))}
+            </td>
+          </tr>
+          {isExpanded && naturezaModalContract ? (
+            <GastosNaturezaSolicitacoesBreakdown
+              row={row}
+              contract={naturezaModalContract.contract}
+              periodFrom={filters.periodFrom}
+              periodTo={filters.periodTo}
+              paddingLeft={paddingLeft}
+              valueClassName={gastosNaturezaModalValueClassName(row.natureza)}
+              formatCurrency={formatCurrency}
+              formatDate={formatGastosNaturezaDate}
+              onOpenSolicitacao={setSelectedNaturezaSolicitacao}
+            />
+          ) : null}
+        </React.Fragment>
+      );
+    },
+    [
+      expandedNaturezaBreakdownKey,
+      naturezaModalContract,
+      filters.periodFrom,
+      filters.periodTo,
+      toggleNaturezaBreakdown
+    ]
   );
 
   const totalGastos = grandSummary.gastos;
@@ -1577,74 +1736,252 @@ export function ControleGeralGastosOperacionaisPanel({
             : 'Naturezas'
         }
         size="lg"
+        scrollContent={false}
       >
         {naturezaModalContract ? (
-          <>
-            <p className="mb-1 text-sm text-gray-600 dark:text-gray-400">
-              Gastos por natureza no centro de custo, conforme filtros atuais.
+          naturezaModalRows.length === 0 ? (
+            <p className="py-8 text-center text-sm text-gray-500 dark:text-gray-400">
+              Nenhuma natureza encontrada para este contrato no período selecionado.
             </p>
-            {naturezaModalPeriodLabel ? (
-              <p className="mb-4 text-xs text-gray-500 dark:text-gray-400">
-                Período: {naturezaModalPeriodLabel}
-              </p>
-            ) : (
-              <p className="mb-4 text-xs text-gray-500 dark:text-gray-400">
-                Sem filtro de período — todos os meses disponíveis.
-              </p>
-            )}
-            {naturezaModalRows.length === 0 ? (
-              <p className="py-8 text-center text-sm text-gray-500 dark:text-gray-400">
-                Nenhuma natureza encontrada para este contrato no período selecionado.
-              </p>
-            ) : (
-              <div className="max-h-[60vh] overflow-x-auto overflow-y-auto">
-                <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                  <thead className="sticky top-0 bg-gray-50 dark:bg-gray-800">
-                    <tr>
-                      <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                        Natureza
-                      </th>
-                      <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                        Valor
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-900">
-                    {naturezaModalRows.map((row) => (
-                      <tr
-                        key={row.natureza}
-                        className={
-                          row.excludedFromOperationalTotal
-                            ? 'bg-gray-50/60 dark:bg-gray-800/40'
-                            : undefined
-                        }
-                      >
-                        <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100">
-                          {row.natureza}
-                          {row.excludedFromOperationalTotal ? (
-                            <span className="ml-2 text-xs font-normal text-gray-500 dark:text-gray-400">
-                              (mov. financeira)
-                            </span>
-                          ) : null}
-                        </td>
-                        <td className="px-4 py-3 text-right text-sm tabular-nums font-medium text-red-600 dark:text-red-400">
-                          {formatCurrency(Math.abs(row.total))}
-                        </td>
-                      </tr>
-                    ))}
+          ) : (
+            <div className="max-h-[60vh] overflow-y-auto overflow-x-hidden">
+              <table className="w-full divide-y divide-gray-200 dark:divide-gray-700">
+                <thead className="sticky top-0 z-10 bg-gray-50 dark:bg-gray-800">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                      Natureza
+                    </th>
+                    <th className="min-w-[10.5rem] shrink-0 px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                      Valor
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-900">
+                    {naturezaModalGrouped.dfcTrees.map((dfcTree) => {
+                      const rootSectionKey = `dfc:root:${dfcTree.rootKey}`;
+
+                      return (
+                        <React.Fragment key={dfcTree.rootKey}>
+                          <tr className="bg-gray-50 font-medium dark:bg-gray-800/50">
+                            <td className="px-4 py-2.5 text-sm text-gray-900 dark:text-gray-100">
+                              <button
+                                type="button"
+                                onClick={() => toggleNaturezaSection(rootSectionKey)}
+                                className="inline-flex w-full items-center gap-1.5 text-left hover:opacity-80"
+                                aria-expanded={!collapsedNaturezaSections.has(rootSectionKey)}
+                              >
+                                {collapsedNaturezaSections.has(rootSectionKey) ? (
+                                  <ChevronDown className="h-4 w-4 shrink-0" aria-hidden />
+                                ) : (
+                                  <ChevronUp className="h-4 w-4 shrink-0" aria-hidden />
+                                )}
+                                <span>{dfcTree.rootLabel}</span>
+                              </button>
+                            </td>
+                            <td className="px-4 py-2.5 text-right text-sm tabular-nums font-semibold whitespace-nowrap text-red-600 dark:text-red-400">
+                              {formatCurrency(dfcTree.rootSubtotal)}
+                            </td>
+                          </tr>
+                          {!collapsedNaturezaSections.has(rootSectionKey)
+                            ? dfcTree.branches.map((branch) => {
+                                const branchSectionKey = `dfc:branch:${dfcTree.rootKey}:${branch.branchKey}`;
+                                const isBranchCollapsed =
+                                  collapsedNaturezaSections.has(branchSectionKey);
+
+                                return (
+                                  <React.Fragment key={`${dfcTree.rootKey}:${branch.branchKey}`}>
+                                    <tr className="bg-gray-50 font-medium dark:bg-gray-800/50">
+                                      <td
+                                        className="px-4 py-2.5 text-sm text-gray-900 dark:text-gray-100"
+                                        style={{ paddingLeft: 32 }}
+                                      >
+                                        <button
+                                          type="button"
+                                          onClick={() => toggleNaturezaSection(branchSectionKey)}
+                                          className="inline-flex w-full items-center gap-1.5 text-left hover:opacity-80"
+                                          aria-expanded={!isBranchCollapsed}
+                                        >
+                                          {isBranchCollapsed ? (
+                                            <ChevronDown className="h-4 w-4 shrink-0" aria-hidden />
+                                          ) : (
+                                            <ChevronUp className="h-4 w-4 shrink-0" aria-hidden />
+                                          )}
+                                          <span>{branch.label}</span>
+                                        </button>
+                                      </td>
+                                      <td className="px-4 py-2.5 text-right text-sm tabular-nums font-semibold whitespace-nowrap text-red-600 dark:text-red-400">
+                                        {formatCurrency(branch.subtotal)}
+                                      </td>
+                                    </tr>
+                                    {areDfcBranchLeafGroupsVisible(dfcTree.rootKey, branch.branchKey)
+                                      ? branch.leafGroups.map((group) => {
+                                          const leafKey = `dfc:leaf:${group.leafBlockId}`;
+                                          const isLeafCollapsed =
+                                            collapsedNaturezaSections.has(leafKey);
+
+                                          return (
+                                            <React.Fragment key={group.leafBlockId}>
+                                              <tr className="bg-gray-100 font-semibold dark:bg-gray-800/80">
+                                                <td
+                                                  className="px-4 py-2.5 text-sm text-gray-900 dark:text-gray-100"
+                                                  style={{ paddingLeft: 48 }}
+                                                >
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => toggleNaturezaSection(leafKey)}
+                                                    className="inline-flex w-full items-center gap-1.5 text-left hover:opacity-80"
+                                                    aria-expanded={!isLeafCollapsed}
+                                                  >
+                                                    {isLeafCollapsed ? (
+                                                      <ChevronDown
+                                                        className="h-4 w-4 shrink-0"
+                                                        aria-hidden
+                                                      />
+                                                    ) : (
+                                                      <ChevronUp
+                                                        className="h-4 w-4 shrink-0"
+                                                        aria-hidden
+                                                      />
+                                                    )}
+                                                    <span>{group.leafLabel}</span>
+                                                  </button>
+                                                </td>
+                                                <td className="px-4 py-2.5 text-right text-sm tabular-nums font-semibold whitespace-nowrap text-red-600 dark:text-red-400">
+                                                  {formatCurrency(group.subtotal)}
+                                                </td>
+                                              </tr>
+                                              {areDfcLeafRowsVisible(
+                                                dfcTree.rootKey,
+                                                branch.branchKey,
+                                                group.leafBlockId
+                                              )
+                                                ? group.rows.map((row) => renderNaturezaModalRow(row, 64))
+                                                : null}
+                                            </React.Fragment>
+                                          );
+                                        })
+                                      : null}
+                                  </React.Fragment>
+                                );
+                              })
+                            : null}
+                        </React.Fragment>
+                      );
+                    })}
+                    {naturezaModalGrouped.ungrouped.length > 0 ? (
+                      <>
+                        <tr className="bg-gray-50 font-semibold dark:bg-gray-800/60">
+                          <td className="px-4 py-2.5 text-sm text-gray-900 dark:text-gray-100">
+                            <button
+                              type="button"
+                              onClick={() => toggleNaturezaSection('dfc:ungrouped')}
+                              className="inline-flex w-full items-center gap-1.5 text-left hover:opacity-80"
+                              aria-expanded={!collapsedNaturezaSections.has('dfc:ungrouped')}
+                            >
+                              {collapsedNaturezaSections.has('dfc:ungrouped') ? (
+                                <ChevronDown className="h-4 w-4 shrink-0" aria-hidden />
+                              ) : (
+                                <ChevronUp className="h-4 w-4 shrink-0" aria-hidden />
+                              )}
+                              <span>Outras naturezas</span>
+                            </button>
+                          </td>
+                          <td className="px-4 py-2.5 text-right text-sm tabular-nums font-semibold whitespace-nowrap text-red-600 dark:text-red-400">
+                            {formatCurrency(
+                              naturezaModalGrouped.ungrouped.reduce(
+                                (sum, row) =>
+                                  sum + gastosNaturezaTotalContribution(row.natureza, row.total),
+                                0
+                              )
+                            )}
+                          </td>
+                        </tr>
+                        {!collapsedNaturezaSections.has('dfc:ungrouped')
+                          ? naturezaModalGrouped.ungrouped.map((row) => renderNaturezaModalRow(row, 32))
+                          : null}
+                      </>
+                    ) : null}
                   </tbody>
                   <tfoot>
                     <tr className="border-t border-gray-200 bg-gray-50 font-semibold dark:border-gray-700 dark:bg-gray-800/80">
                       <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100">Total</td>
-                      <td className="px-4 py-3 text-right text-sm tabular-nums text-red-600 dark:text-red-400">
-                        {formatCurrency(Math.abs(naturezaModalTotal))}
+                      <td className="px-4 py-3 text-right text-sm tabular-nums whitespace-nowrap text-red-600 dark:text-red-400">
+                        {formatCurrency(naturezaModalTotal)}
                       </td>
                     </tr>
                   </tfoot>
                 </table>
               </div>
-            )}
-          </>
+          )
+        ) : null}
+      </Modal>
+
+      <Modal
+        isOpen={selectedNaturezaSolicitacao != null}
+        onClose={() => setSelectedNaturezaSolicitacao(null)}
+        title="Detalhe da solicitação"
+        size="lg"
+      >
+        {selectedNaturezaSolicitacao ? (
+          <div className="space-y-4">
+            <div>
+              <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                {resolveGastosNaturezaSolicitacaoTitulo(selectedNaturezaSolicitacao)}
+              </p>
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                {formatGastosNaturezaSolicitacaoDataLabel(
+                  selectedNaturezaSolicitacao,
+                  formatGastosNaturezaDate
+                )}{' '}
+                · {selectedNaturezaSolicitacao.natureza}
+              </p>
+            </div>
+            <p
+              className={`text-lg font-semibold tabular-nums ${gastosNaturezaModalValueClassName(selectedNaturezaSolicitacao.natureza)}`}
+            >
+              {formatCurrency(Math.abs(selectedNaturezaSolicitacao.valor))}
+            </p>
+            {selectedNaturezaSolicitacao.lancamentosAgrupados &&
+            selectedNaturezaSolicitacao.lancamentosAgrupados.length > 1 ? (
+              <div className="rounded-lg border border-gray-200 dark:border-gray-700">
+                <p className="border-b border-gray-200 px-4 py-2 text-xs font-medium uppercase tracking-wide text-gray-500 dark:border-gray-700 dark:text-gray-400">
+                  Lançamentos que compõem o total
+                </p>
+                <ul className="divide-y divide-gray-200 dark:divide-gray-700">
+                  {selectedNaturezaSolicitacao.lancamentosAgrupados.map((lancamento) => (
+                    <li
+                      key={lancamento.linhaId}
+                      className="flex items-start justify-between gap-4 px-4 py-3 text-sm"
+                    >
+                      <span className="text-gray-700 dark:text-gray-300">
+                        {lancamento.dataISO ? formatGastosNaturezaDate(lancamento.dataISO) : '—'}
+                      </span>
+                      <span
+                        className={`shrink-0 tabular-nums font-medium ${gastosNaturezaModalValueClassName(selectedNaturezaSolicitacao.natureza)}`}
+                      >
+                        {formatCurrency(Math.abs(lancamento.valor))}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            <dl className="divide-y divide-gray-200 rounded-lg border border-gray-200 dark:divide-gray-700 dark:border-gray-700">
+              {Object.entries(selectedNaturezaSolicitacao.detalhes).map(([key, value]) => (
+                <div
+                  key={key}
+                  className="grid grid-cols-1 gap-1 px-4 py-3 sm:grid-cols-3 sm:gap-4"
+                >
+                  <dt className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                    {key}
+                  </dt>
+                  <dd className="whitespace-pre-wrap break-words text-sm text-gray-900 dark:text-gray-100 sm:col-span-2">
+                    {value}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </div>
         ) : null}
       </Modal>
     </Card>

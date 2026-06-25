@@ -22,6 +22,7 @@ const PLEITO_HISTORICO_MARKER = '__PLEITO_HISTORICO__';
 
 type GastosOperacionaisDetailRow = {
   contract: string;
+  dateISO: string;
   month: number;
   year: number;
   total: number;
@@ -30,6 +31,7 @@ type GastosOperacionaisDetailRow = {
 
 type GastosOperacionaisNaturezaDetailRow = {
   contract: string;
+  dateISO: string;
   month: number;
   year: number;
   natureza: string;
@@ -604,6 +606,73 @@ export class ContractController {
             detailRows: [] as GastosOperacionaisDetailRow[],
             naturezaDetailRows: [] as GastosOperacionaisNaturezaDetailRow[],
             fetchedAt: new Date().toISOString()
+          }
+        });
+      }
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /** Solicitações RM de uma natureza (drill-down do modal Gastos Operacionais). */
+  async getGastosOperacionaisNaturezaSolicitacoes(
+    req: AuthRequest,
+    res: Response,
+    next: NextFunction
+  ) {
+    try {
+      if (!req.user) throw createError('Não autenticado', 401);
+      const access = await getContractAccessForUser(req.user.id, req.user.isAdmin);
+      if (access.filter === 'none') {
+        throw createError('Sem permissão para acessar contratos', 403);
+      }
+
+      const contract = String(req.query.contract ?? '').trim();
+      const natureza = String(req.query.natureza ?? '').trim();
+      const periodFrom = String(req.query.periodFrom ?? '').trim();
+      const periodTo = String(req.query.periodTo ?? '').trim();
+
+      if (!contract || !natureza) {
+        throw createError('Informe contract e natureza.', 400);
+      }
+
+      const svc = getTotvsRmRelatorioFinService();
+      if (!svc.isConfigured()) {
+        res.json({
+          success: true,
+          data: {
+            configured: false,
+            solicitacoes: [],
+            message:
+              'Integração TOTVS RM não configurada. Defina TOTVS_RM_BASE_URL e TOTVS_RM_USER + TOTVS_RM_PASSWORD (Basic) ou TOTVS_RM_BEARER_TOKEN.'
+          }
+        });
+        return;
+      }
+
+      try {
+        const solicitacoes = await svc.listGastosOperacionaisNaturezaSolicitacoes({
+          contract,
+          canonicalNatureza: natureza,
+          periodFrom,
+          periodTo
+        });
+        res.json({
+          success: true,
+          data: {
+            configured: true,
+            solicitacoes
+          }
+        });
+      } catch (err) {
+        const message = svc.formatAxiosError(err);
+        console.warn(`[TOTVS RM GASTOS OPERACIONAIS SOLICITACOES]: ${message}`);
+        res.json({
+          success: false,
+          message,
+          data: {
+            configured: true,
+            solicitacoes: []
           }
         });
       }
