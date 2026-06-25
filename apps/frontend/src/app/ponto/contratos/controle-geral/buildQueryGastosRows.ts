@@ -2,6 +2,7 @@ import type { GastosOperacionaisRow } from './ControleGeralGastosOperacionaisPan
 import {
   GASTOS_OPERACIONAIS_LOCALITIES,
   isContractExcludedFromPresentation,
+  listContractsForLocalities,
   normalizeContractOrderKey,
   normalizeGastosOperacionaisContractName,
   resolveVisibleLocalityItems,
@@ -571,6 +572,39 @@ export function aggregateGastosDetailRows(detailRows: QueryGastosDetailRow[]): G
     .filter((row) => row.totalAcumulado !== 0);
 
   return sortContractsByCustomOrder(result);
+}
+
+/**
+ * Garante que contratos do catálogo (ex.: DF/GO - ADM LOCAL) apareçam na tabela
+ * mesmo sem linhas na planilha de gastos — necessário para restaurar ocultos.
+ */
+export function mergeCatalogContractsIntoGastosRows(
+  rows: GastosOperacionaisRow[],
+  visibleLocalities?: readonly GastosOperacionaisLocality[]
+): GastosOperacionaisRow[] {
+  if (!visibleLocalities?.length) return rows;
+
+  const byKey = new Map<string, GastosOperacionaisRow>();
+  for (const row of rows) {
+    byKey.set(normalizeContractOrderKey(row.contract), row);
+  }
+
+  for (const contract of listContractsForLocalities(visibleLocalities)) {
+    const canonical = normalizeGastosOperacionaisContractName(contract);
+    const key = normalizeContractOrderKey(canonical);
+    if (byKey.has(key)) continue;
+
+    byKey.set(key, {
+      rowKey: canonical,
+      contract: canonical,
+      mesesApuracao: 0,
+      anoMin: 0,
+      anoMax: 0,
+      totalAcumulado: 0
+    });
+  }
+
+  return sortContractsByCustomOrder(Array.from(byKey.values()));
 }
 
 export function buildGastosRowsFromSheetRows(rows: string[][]): GastosOperacionaisRow[] {

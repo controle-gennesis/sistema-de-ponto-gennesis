@@ -1,5 +1,6 @@
 import {
   buildCatalogLocalityOverrideMap,
+  getContractLocality,
   normalizeContractOrderKey,
   type GastosOperacionaisLocality
 } from './gastosOperacionaisContractOrder';
@@ -15,7 +16,7 @@ export type EffectiveContractLocality = GastosOperacionaisLocality | 'OUTROS';
 
 /**
  * Localidade efetiva do contrato.
- * Contratos novos na planilha (sem classificação salva) aparecem como "Outros".
+ * Usa override salvo pelo usuário; senão, o catálogo embutido; contratos novos ficam em "Outros".
  */
 export function getEffectiveContractLocality(
   contract: string,
@@ -25,7 +26,7 @@ export function getEffectiveContractLocality(
   if (Object.prototype.hasOwnProperty.call(overrides, key)) {
     return overrides[key] ?? 'OUTROS';
   }
-  return 'OUTROS';
+  return getContractLocality(contract) ?? 'OUTROS';
 }
 
 export function isContractInVisibleLocalities(
@@ -108,24 +109,10 @@ export function saveGastosLocalityOverrides(overrides: GastosOperacionaisLocalit
 }
 
 /**
- * Carrega overrides do usuário e, na primeira vez, importa o catálogo legado
- * sem sobrescrever classificações já salvas.
+ * Carrega overrides do usuário e garante entradas do catálogo embutido (sem sobrescrever o usuário).
  */
 export function loadGastosLocalityOverridesWithCatalogSeed(): GastosOperacionaisLocalityOverrideMap {
   const existing = loadGastosLocalityOverrides();
-
-  if (typeof window === 'undefined') {
-    return existing;
-  }
-
-  if (window.localStorage.getItem(CATALOG_SEED_KEY)) {
-    const migrated = migrateMergedContractLocalityOverrides(existing);
-    if (migrated !== existing) {
-      saveGastosLocalityOverrides(migrated);
-    }
-    return migrated;
-  }
-
   const catalog = buildCatalogLocalityOverrideMap();
   const merged: GastosOperacionaisLocalityOverrideMap = { ...existing };
 
@@ -136,8 +123,15 @@ export function loadGastosLocalityOverridesWithCatalogSeed(): GastosOperacionais
   }
 
   const migrated = migrateMergedContractLocalityOverrides(merged);
-  saveGastosLocalityOverrides(migrated);
-  window.localStorage.setItem(CATALOG_SEED_KEY, '1');
+
+  if (typeof window !== 'undefined') {
+    if (migrated !== existing) {
+      saveGastosLocalityOverrides(migrated);
+    }
+    if (!window.localStorage.getItem(CATALOG_SEED_KEY)) {
+      window.localStorage.setItem(CATALOG_SEED_KEY, '1');
+    }
+  }
 
   return migrated;
 }

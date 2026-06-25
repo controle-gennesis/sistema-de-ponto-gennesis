@@ -1,9 +1,12 @@
 import {
   lotCellMatchesValues,
   NFS_TAB_LOT_BREAKDOWN,
+  tabHasLotBreakdown,
   type LotBreakdownColumn,
   type LotBreakdownTabConfig
 } from '../lib/controleGeralLotBreakdown';
+import { NFS_TAB_GASTOS_COST_CENTERS } from '../lib/controleGeralGastosMapping';
+import { normalizeGastosOperacionaisContractName } from '../lib/gastosOperacionaisContractAliases';
 import { isExcludedNotaForTab } from '../lib/controleNfsExcludedNotes';
 
 export type ControleNfsSheetTab = {
@@ -1311,4 +1314,168 @@ export async function fetchNfsLotFaturamento(
   }
 
   return computeAllLotFaturamento(processedByTabKey, computeOptions);
+}
+
+export type RecebidoMensalByGastosContractEntry = {
+  contract: string;
+  month: number;
+  year: number;
+  recebido: number;
+};
+
+function extractRecebimentoMonthYearForMetric(
+  row: string[],
+  headers: string[]
+): { month: number | null; year: number | null } {
+  const recebimento = extractRowMonthYear(row, headers, 'recebimento');
+  if (recebimento.month != null && recebimento.year != null) {
+    return recebimento;
+  }
+  return extractRowMonthYear(row, headers, 'emissao');
+}
+
+function sumRecebidoByMonthForRows(
+  headers: string[],
+  rows: string[][],
+  rowFilter: (row: string[]) => boolean,
+  tabKey?: string,
+  recebimentoApuracaoFilter?: RecebimentoApuracaoFilter
+): Map<string, number> {
+  const recebidoIdx = findValorRecebidoColumnIndex(headers);
+  const map = new Map<string, number>();
+
+  for (const row of rows) {
+    if (!shouldIncludeRowInNfsMetricSum(row, headers, tabKey)) continue;
+    if (!rowFilter(row)) continue;
+
+    const { month, year } = extractRecebimentoMonthYearForMetric(row, headers);
+    if (month == null || year == null) continue;
+
+    if (
+      recebimentoApuracaoFilter?.months?.length &&
+      !recebimentoApuracaoFilter.months.includes(month)
+    ) {
+      continue;
+    }
+    if (
+      recebimentoApuracaoFilter?.years?.length &&
+      !recebimentoApuracaoFilter.years.includes(year)
+    ) {
+      continue;
+    }
+
+    const parsed = parseCurrencyCell(row[recebidoIdx] ?? '');
+    if (parsed == null || parsed === 0) continue;
+
+    const monthKey = `${year}-${String(month).padStart(2, '0')}`;
+    map.set(monthKey, (map.get(monthKey) ?? 0) + parsed);
+  }
+
+  return map;
+}
+
+export function buildRecebidoMensalByGastosContract(
+  processedByTabKey: Map<string, { headers: string[]; rows: string[][] }>,
+  recebimentoApuracaoFilter?: RecebimentoApuracaoFilter
+): RecebidoMensalByGastosContractEntry[] {
+  const aggregate = new Map<string, RecebidoMensalByGastosContractEntry>();
+
+  const addMonthMap = (contract: string, monthMap: Map<string, number>) => {
+    const canonical = normalizeGastosOperacionaisContractName(contract);
+    for (const [monthKey, recebido] of monthMap.entries()) {
+      const [yearStr, monthStr] = monthKey.split('-');
+      const year = Number(yearStr);
+      const month = Number(monthStr);
+      if (!Number.isFinite(year) || !Number.isFinite(month)) continue;
+
+      const entryKey = `${canonical}:${monthKey}`;
+      const existing = aggregate.get(entryKey);
+      if (existing) {
+        existing.recebido += recebido;
+      } else {
+        aggregate.set(entryKey, { contract: canonical, year, month, recebido });
+      }
+    }
+  };
+
+  for (const config of NFS_TAB_LOT_BREAKDOWN) {
+    const processed = processedByTabKey.get(config.tabKey);
+    if (!processed || processed.headers.length === 0) continue;
+
+    const lotColIndex = findLotBreakdownColumnIndex(processed.headers, config.lotColumn);
+    for (const lot of config.lots) {
+      const rowFilter = (row: string[]) =>
+        lotColIndex >= 0 && lotCellMatchesValues(row[lotColIndex] ?? '', lot.nfsMatchValues);
+      const monthMap = sumRecebidoByMonthForRows(
+        processed.headers,
+        processed.rows,
+        rowFilter,
+        config.tabKey,
+        recebimentoApuracaoFilter
+      );
+      for (const contract of lot.gastosCostCenters) {
+        addMonthMap(contract, monthMap);
+      }
+    }
+  }
+
+  for (const tab of CONTROLE_NFS_SHEET_TABS) {
+    if (tabHasLotBreakdown(tab.key)) continue;
+
+    const processed = processedByTabKey.get(tab.key);
+    if (!processed || processed.headers.length === 0) continue;
+
+    const centers = NFS_TAB_GASTOS_COST_CENTERS[tab.key] ?? [];
+    if (!centers.length) continue;
+
+    const monthMap = sumRecebidoByMonthForRows(
+      processed.headers,
+      processed.rows,
+      () => true,
+      tab.key,
+      recebimentoApuracaoFilter
+    );
+    for (const contract of centers) {
+      addMonthMap(contract, monthMap);
+    }
+  }
+
+  return Array.from(aggregate.values()).sort((a, b) => {
+    if (a.year !== b.year) return a.year - b.year;
+    if (a.month !== b.month) return a.month - b.month;
+    return a.contract.localeCompare(b.contract, 'pt-BR');
+  });
+}
+
+export async function fetchRecebidoMensalByGastosContract(
+  forceRefresh = false,
+  recebimentoApuracaoFilter?: RecebimentoApuracaoFilter
+): Promise<{
+  entries: RecebidoMensalByGastosContractEntry[];
+  fetchedAt: string;
+}> {
+  if (forceRefresh) {
+    sheetCache.clear();
+  }
+
+  const processedByTabKey = new Map<string, { headers: string[]; rows: string[][] }>();
+
+  await Promise.all(
+    CONTROLE_NFS_SHEET_TABS.map(async (tab) => {
+      try {
+        const processed = await getProcessedSheetForTab(tab);
+        processedByTabKey.set(tab.key, processed);
+      } catch {
+        processedByTabKey.set(tab.key, { headers: [], rows: [] });
+      }
+    })
+  );
+
+  return {
+    entries: buildRecebidoMensalByGastosContract(
+      processedByTabKey,
+      recebimentoApuracaoFilter
+    ),
+    fetchedAt: new Date().toISOString()
+  };
 }

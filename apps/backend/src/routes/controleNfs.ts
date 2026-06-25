@@ -17,6 +17,9 @@ router.get('/summary/controle-geral-financial', (req, res, next) =>
 router.get('/summary/faturamento-by-gastos-contract', (req, res, next) =>
   controller.getFaturamentoByGastosContract(req, res, next)
 );
+router.get('/summary/recebido-mensal-by-gastos-contract', (req, res, next) =>
+  controller.getRecebidoMensalByGastosContract(req, res, next)
+);
 router.get('/summary/valor-bruto-total', (req, res, next) =>
   controller.getValorBrutoTotal(req, res, next)
 );

@@ -26,6 +26,21 @@ export function resolveVisibleLocalityItems(
   return GASTOS_OPERACIONAIS_LOCALITIES.filter((locality) => allowed.has(locality.key));
 }
 
+/** Contratos do catálogo para as localidades visíveis (inclui linhas sem gastos na planilha). */
+export function listContractsForLocalities(
+  visibleLocalities?: readonly GastosOperacionaisLocality[]
+): readonly string[] {
+  const contracts: string[] = [];
+  for (const locality of resolveVisibleLocalityItems(visibleLocalities)) {
+    for (const contract of CONTRACTS_BY_LOCALITY[locality.key] ?? []) {
+      if (!isContractExcludedFromPresentation(contract)) {
+        contracts.push(contract);
+      }
+    }
+  }
+  return contracts;
+}
+
 /** Contratos agrupados por localidade (conforme planilha de referência). */
 const CONTRACTS_BY_LOCALITY: Record<GastosOperacionaisLocality, readonly string[]> = {
   CENTRAL: ['ADMINISTRACAO CENTRAL', 'ADM CENTRAL GENNESIS'],

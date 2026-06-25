@@ -29,6 +29,7 @@ import {
 import { toast } from 'react-hot-toast';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Modal } from '@/components/ui/Modal';
+import { Loading } from '@/components/ui/Loading';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { pathToModuleKey } from '@sistema-ponto/permission-modules';
@@ -66,6 +67,9 @@ import {
   type ExtratoFiltroLabelMaps
 } from '@/lib/extratoCaixaFiltrosSalvos';
 import { ExtratoCaixaAjustesPanel } from './ExtratoCaixaAjustesPanel';
+import { ExtratoFluxoDiarioChart } from './ExtratoFluxoDiarioChart';
+import { ExtratoFluxoMensalChart } from './ExtratoFluxoMensalChart';
+import { ExtratoFluxoProjecaoAnualChart } from './ExtratoFluxoProjecaoAnualChart';
 import { ExtratoFiltrosDesmarcadosResumo } from './ExtratoFiltrosDesmarcadosResumo';
 import { ExtratoFiltrosModal } from './ExtratoFiltrosModal';
 import {
@@ -869,8 +873,16 @@ function collectDemonstrativoEntradasItems(
   );
 }
 
+function collectDemonstrativoSaidasItems(
+  filteredItems: ExtratoCaixaItem[]
+): ExtratoCaixaItem[] {
+  return sortItemsForResumoDetalhe(filteredItems.filter((item) => itemHasSaida(item)));
+}
+
 type DemonstrativoDetalheKind =
   | 'entradas'
+  | 'saidas'
+  | 'saldo-liquido'
   | 'receita-liquida'
   | 'gastos-pessoal'
   | 'gastos-assessoria-externa'
@@ -945,17 +957,28 @@ function valorLinhaDemonstrativoDetalhe(
   if (kind === 'gastos-materiais') return -contribuicaoGastosMateriais(item);
   if (kind === 'aporte-capital-socios') return contribuicaoAporteCapitalSocios(item);
   if (kind === 'distribuicao-lucro') return -contribuicaoDistribuicaoLucro(item);
+  if (kind === 'saidas') return item.saida;
+  if (kind === 'saldo-liquido') return itemSaldoLinha(item);
   return itemEntrada(item);
+}
+
+function isDemonstrativoFluxoKind(
+  kind: DemonstrativoDetalheKind | null
+): kind is 'entradas' | 'saidas' | 'saldo-liquido' {
+  return kind === 'entradas' || kind === 'saidas' || kind === 'saldo-liquido';
 }
 
 function ExtratoDemonstrativoDetalheModal({
   kind,
   onClose,
-  items
+  items,
+  chartItems
 }: {
   kind: DemonstrativoDetalheKind | null;
   onClose: () => void;
   items: ExtratoCaixaItem[];
+  /** Série do gráfico geral (ex.: recorte da empresa nos cards de fluxo). */
+  chartItems?: ExtratoCaixaItem[];
 }) {
   const [selectedItem, setSelectedItem] = useState<ExtratoCaixaItem | null>(null);
   const title =
@@ -975,11 +998,45 @@ function ExtratoDemonstrativoDetalheModal({
             ? 'Distribuição de Lucro'
             : kind === 'entradas'
             ? 'Entradas'
+            : kind === 'saidas'
+              ? 'Saídas'
+              : kind === 'saldo-liquido'
+                ? 'Saldo Líquido'
             : '';
   const sorted = useMemo(() => sortItemsForResumoDetalhe(items), [items]);
   const stats = useMemo(() => {
     if (!kind) {
       return { totalEntrada: 0, totalSaida: 0, totalValor: 0 };
+    }
+    if (kind === 'saldo-liquido') {
+      const resumo = computeExtratoStats(sorted);
+      return {
+        totalEntrada: resumo.totalEntrada,
+        totalSaida: resumo.totalSaida,
+        totalValor: resumo.saldoLiquido
+      };
+    }
+    if (kind === 'saidas') {
+      let totalSaida = 0;
+      for (const item of sorted) {
+        totalSaida += item.saida;
+      }
+      return {
+        totalEntrada: 0,
+        totalSaida,
+        totalValor: totalSaida
+      };
+    }
+    if (kind === 'entradas') {
+      let totalEntrada = 0;
+      for (const item of sorted) {
+        totalEntrada += itemEntrada(item);
+      }
+      return {
+        totalEntrada,
+        totalSaida: 0,
+        totalValor: totalEntrada
+      };
     }
     let totalEntrada = 0;
     let totalSaida = 0;
@@ -998,6 +1055,7 @@ function ExtratoDemonstrativoDetalheModal({
   const visiveis = sorted.slice(0, RESUMO_DETALHE_LIMITE);
   const restante = sorted.length - visiveis.length;
   const naturezasIncluidas = kind ? demonstrativoCardNatureLabels(kind) : [];
+  const fluxoChartItems = chartItems ?? items;
 
   if (!kind) return null;
 
@@ -1009,11 +1067,33 @@ function ExtratoDemonstrativoDetalheModal({
         totalValor={stats.totalValor}
       />
 
+      {isDemonstrativoFluxoKind(kind) ? (
+        <>
+          <ExtratoFluxoMensalChart
+            items={fluxoChartItems}
+            title="Evolução Mensal (Acumulado) — empresa"
+          />
+          <ExtratoFluxoMensalChart
+            items={fluxoChartItems}
+            mode="periodo"
+            title="Evolução mensal por mês — empresa"
+          />
+          <ExtratoFluxoDiarioChart
+            items={fluxoChartItems}
+            title="Evolução diária — empresa"
+          />
+          <ExtratoFluxoProjecaoAnualChart
+            items={fluxoChartItems}
+            title="Projeção anual — empresa"
+          />
+        </>
+      ) : null}
+
       <DemonstrativoNaturezasIncluidas labels={naturezasIncluidas} />
 
       <p className="mb-3 text-sm text-gray-600 dark:text-gray-400">
         {sorted.length} movimentação(ões){' '}
-        {kind === 'entradas' ? 'no recorte atual' : 'no total geral'}
+        {isDemonstrativoFluxoKind(kind) ? 'no recorte atual' : 'no total geral'}
         {restante > 0 ? ` — exibindo ${visiveis.length}` : null}. Clique em uma linha para ver os
         detalhes.
       </p>
@@ -1127,12 +1207,14 @@ const DEMONSTRATIVO_CARD_CLICKABLE_CLASS =
 
 const DEMONSTRATIVO_RECORTE_CARD_CLASS = 'flex h-full flex-col';
 const DEMONSTRATIVO_RECORTE_CARD_BUTTON_CLASS = 'flex h-full w-full flex-col text-left';
-const DEMONSTRATIVO_RECORTE_CARD_CONTENT_CLASS = 'flex flex-1 flex-col !pt-0 p-4 sm:p-6';
+const DEMONSTRATIVO_RECORTE_CARD_CONTENT_CLASS = 'flex flex-1 flex-col p-4 sm:p-6';
 const DEMONSTRATIVO_RECORTE_CARD_BODY_CLASS = 'flex h-full items-start';
 const DEMONSTRATIVO_RECORTE_CARD_TEXT_CLASS =
   'ml-3 flex min-w-0 flex-1 flex-col sm:ml-4';
 const DEMONSTRATIVO_RECORTE_CARD_DESC_CLASS =
   'mt-1 flex-1 text-xs leading-relaxed text-gray-500 dark:text-gray-400';
+const DEMONSTRATIVO_FILTRO_HINT_CLASS =
+  'inline-flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400';
 
 function formatMonthYearLabel(monthKey: string): string {
   const year = Number(monthKey.slice(0, 4));
@@ -1476,6 +1558,14 @@ function ExtratoResumoDetalheModal({
         totalEntrada={row.totalEntrada}
         totalValor={row.totalValor}
       />
+
+      <ExtratoFluxoMensalChart items={items} title="Evolução Mensal (Acumulado)" />
+
+      <ExtratoFluxoMensalChart items={items} mode="periodo" title="Evolução mensal — por mês" />
+
+      <ExtratoFluxoDiarioChart items={items} title="Evolução diária" />
+
+      <ExtratoFluxoProjecaoAnualChart items={items} title="Projeção anual" />
 
       <p className="mb-3 text-sm text-gray-600 dark:text-gray-400">
         {sorted.length} movimentação(ões) com os filtros atuais
@@ -1853,6 +1943,31 @@ function itemMatchesCompensacaoPeriod(
   periodTo: string
 ): boolean {
   return itemMatchesDateRange(item.dataCompensacao, periodFrom, periodTo);
+}
+
+function itemMatchesDemonstrativoRecorte(
+  item: ExtratoCaixaItem,
+  params: {
+    periodFrom: string;
+    periodTo: string;
+    ccFilterCodes: string[];
+    ccAllValues: string[];
+    poloFilterIds: string[];
+    poloAllValues: string[];
+    tipoOperacaoFilterValues: string[];
+    tipoOperacaoAllValues: string[];
+  }
+): boolean {
+  return (
+    itemMatchesCompensacaoPeriod(item, params.periodFrom, params.periodTo) &&
+    extratoMatchesAnyCcCodes(item.codCCusto, params.ccFilterCodes, params.ccAllValues) &&
+    extratoMatchesAnyPoloKeys(item, params.poloFilterIds, params.poloAllValues) &&
+    extratoMatchesAnyTipoOperacao(
+      item.tipoOperacao,
+      params.tipoOperacaoFilterValues,
+      params.tipoOperacaoAllValues
+    )
+  );
 }
 
 function sortItemsByDateDesc(items: ExtratoCaixaItem[]): ExtratoCaixaItem[] {
@@ -2450,7 +2565,8 @@ export default function AnaliseExtratoPage() {
   const pageTitle = 'Balanço Financeiro';
   const pageSubtitle = 'Movimentações do balanço financeiro integradas ao TOTVS RM';
 
-  const { isDepartmentFinanceiro, userPosition, can, user } = usePermissions();
+  const { isDepartmentFinanceiro, userPosition, can, user, isLoading: permissionsLoading } =
+    usePermissions();
   const isAdministrator = userPosition === 'Administrador';
   const canAccess =
     isAdministrator ||
@@ -2887,14 +3003,46 @@ export default function AnaliseExtratoPage() {
 
   const extratoStats = useMemo(() => computeExtratoStats(filteredItems), [filteredItems]);
 
-  /** Base do grid do demonstrativo — ignora filtros da tela. */
-  const demonstrativoItems = useMemo(() => sortItemsByDateDesc(items), [items]);
+  /** Base do grid do demonstrativo — data, centro de custo, polo e tipo de operação. */
+  const demonstrativoItems = useMemo(
+    () =>
+      sortItemsByDateDesc(
+        items.filter((item) =>
+          itemMatchesDemonstrativoRecorte(item, {
+            periodFrom,
+            periodTo,
+            ccFilterCodes,
+            ccAllValues,
+            poloFilterIds,
+            poloAllValues,
+            tipoOperacaoFilterValues,
+            tipoOperacaoAllValues
+          })
+        )
+      ),
+    [
+      items,
+      periodFrom,
+      periodTo,
+      ccFilterCodes,
+      ccAllValues,
+      poloFilterIds,
+      poloAllValues,
+      tipoOperacaoFilterValues,
+      tipoOperacaoAllValues
+    ]
+  );
+
+  const demonstrativoStats = useMemo(
+    () => computeExtratoStats(demonstrativoItems),
+    [demonstrativoItems]
+  );
 
   const demonstrativoRoi = useMemo(() => {
-    const { totalEntrada, totalSaida } = extratoStats;
+    const { totalEntrada, totalSaida } = demonstrativoStats;
     if (totalSaida === 0) return null;
     return ((totalEntrada - totalSaida) / totalSaida) * 100;
-  }, [extratoStats]);
+  }, [demonstrativoStats]);
 
   const receitaLiquidaNatureCodes = useMemo(
     () => buildReceitaLiquidaNatureCodes(items, natureFilterOptions),
@@ -3072,6 +3220,28 @@ export default function AnaliseExtratoPage() {
     [filteredItems]
   );
 
+  const demonstrativoSaidasItems = useMemo(
+    () => collectDemonstrativoSaidasItems(filteredItems),
+    [filteredItems]
+  );
+
+  const demonstrativoAjustesManuaisPdf = useMemo((): ExtratoCaixaPdfAjusteRow[] => {
+    return demonstrativoItems
+      .filter(isExtratoAjusteManual)
+      .sort(
+        (a, b) =>
+          (localDayKey(b.dataCompensacao) ?? 0) - (localDayKey(a.dataCompensacao) ?? 0)
+      )
+      .map((item) => ({
+        data: formatDate(item.dataCompensacao),
+        centroCusto: item.ccusto?.trim() || item.codCCusto?.trim() || '—',
+        natureza: item.natureza?.trim() || '—',
+        polo: resolveExtratoPolo(item).label,
+        observacao: item.historico?.trim() || 'Ajuste manual',
+        valor: item.valor
+      }));
+  }, [demonstrativoItems]);
+
   const extratoResumoMensal = useMemo(
     () => buildExtratoResumoMensal(filteredItems),
     [filteredItems]
@@ -3154,10 +3324,28 @@ export default function AnaliseExtratoPage() {
     filteredItems.length
   ]);
 
-  const buildPdfDesmarcadosLines = useCallback((): string[] => {
-    const lines: string[] = [];
+  const buildDemonstrativoPdfFilterLines = useCallback((): string[] => {
+    const lines: string[] = [
+      'Indicadores de categoria: data de compensação, centro de custo, polo e tipo de operação.',
+      'Saídas, entradas, saldo líquido e resumos: todos os filtros aplicados.'
+    ];
+
+    if (periodFrom || periodTo) {
+      const de = periodFrom ? formatIsoDateInputBr(periodFrom) : '—';
+      const ate = periodTo ? formatIsoDateInputBr(periodTo) : '—';
+      lines.push(`Período de compensação: de ${de} até ${ate}`);
+    } else {
+      lines.push('Período: todos os lançamentos disponíveis.');
+    }
 
     for (const campo of filtrosDesmarcados) {
+      if (
+        campo.campo !== 'Centro de custo' &&
+        campo.campo !== 'Polo' &&
+        campo.campo !== 'Tipo de operação'
+      ) {
+        continue;
+      }
       const qtd = campo.desmarcados.length;
       const lista = campo.desmarcados.join(' · ');
       lines.push(
@@ -3165,8 +3353,15 @@ export default function AnaliseExtratoPage() {
       );
     }
 
+    lines.push(
+      `Movimentações (fluxo): ${filteredItems.length.toLocaleString('pt-BR')}`
+    );
+    lines.push(
+      `Movimentações (categorias): ${demonstrativoItems.length.toLocaleString('pt-BR')}`
+    );
+
     return lines;
-  }, [filtrosDesmarcados]);
+  }, [periodFrom, periodTo, filtrosDesmarcados, filteredItems.length, demonstrativoItems.length]);
 
   const handleExportDemonstrativoPdf = useCallback(async () => {
     setExportingDemonstrativoPdf(true);
@@ -3181,10 +3376,10 @@ export default function AnaliseExtratoPage() {
           qtdSaida: extratoStats.qtdSaida
         },
         movimentacoesFiltradas: filteredItems.length,
-        filterLines: buildPdfDesmarcadosLines(),
+        filterLines: buildDemonstrativoPdfFilterLines(),
         roi: demonstrativoRoi,
         roiLabel:
-          'ROI = ((Ganho Obtido − Investimento) ÷ Investimento) × 100 — recorte filtrado',
+          'ROI = ((Ganho Obtido − Investimento) ÷ Investimento) × 100 — período selecionado',
         cards: [
           {
             title: 'Gastos com Pessoal',
@@ -3268,7 +3463,7 @@ export default function AnaliseExtratoPage() {
           polo: extratoResumoPolo,
           centroCusto: extratoResumoCentroCusto
         },
-        ajustesManuais: ajustesManuaisPdf
+        ajustesManuais: demonstrativoAjustesManuaisPdf
       });
 
       toast.success('PDF exportado com sucesso.');
@@ -3279,7 +3474,7 @@ export default function AnaliseExtratoPage() {
     }
   }, [
     pageSubtitle,
-    buildPdfDesmarcadosLines,
+    buildDemonstrativoPdfFilterLines,
     extratoStats,
     filteredItems.length,
     demonstrativoRoi,
@@ -3301,7 +3496,7 @@ export default function AnaliseExtratoPage() {
     extratoResumoMensal,
     extratoResumoPolo,
     extratoResumoCentroCusto,
-    ajustesManuaisPdf
+    demonstrativoAjustesManuaisPdf
   ]);
 
   const handleExportPdf = useCallback(
@@ -3381,28 +3576,30 @@ export default function AnaliseExtratoPage() {
     ]
   );
 
+  if (permissionsLoading) {
+    return <Loading message="Verificando permissões..." fullScreen size="lg" />;
+  }
+
   if (!canAccess) {
     return (
-      <ProtectedRoute route="/ponto/financeiro/analise-extrato">
-        <MainLayout userRole="EMPLOYEE" userName="" onLogout={() => {}}>
-          <Card className="border-red-200 dark:border-red-800">
-            <CardContent className="p-6">
-              <div className="flex items-start gap-3">
-                <AlertCircle className="mt-1 h-6 w-6 flex-shrink-0 text-red-600 dark:text-red-400" />
-                <div>
-                  <h3 className="mb-2 text-lg font-semibold text-red-800 dark:text-red-200">
-                    Acesso Negado
-                  </h3>
-                  <p className="text-sm text-red-700 dark:text-red-300">
-                    Você não tem permissão para acessar esta página. Apenas administradores e
-                    membros do departamento financeiro podem acessar.
-                  </p>
-                </div>
+      <MainLayout userRole="EMPLOYEE" userName={user?.name ?? ''}>
+        <Card className="border-red-200 dark:border-red-800">
+          <CardContent className="p-6">
+            <div className="flex items-start gap-3">
+              <AlertCircle className="mt-1 h-6 w-6 flex-shrink-0 text-red-600 dark:text-red-400" />
+              <div>
+                <h3 className="mb-2 text-lg font-semibold text-red-800 dark:text-red-200">
+                  Acesso Negado
+                </h3>
+                <p className="text-sm text-red-700 dark:text-red-300">
+                  Você não tem permissão para acessar esta página. Apenas administradores e
+                  membros do departamento financeiro podem acessar.
+                </p>
               </div>
-            </CardContent>
-          </Card>
-        </MainLayout>
-      </ProtectedRoute>
+            </div>
+          </CardContent>
+        </Card>
+      </MainLayout>
     );
   }
 
@@ -3688,12 +3885,38 @@ export default function AnaliseExtratoPage() {
               {configured && !loadFailed ? (
                 <div className="space-y-3">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <p className="text-sm text-gray-600 dark:text-gray-400">
-                      Os resultados seguem os filtros aplicados na aba{' '}
-                      <span className="font-medium text-gray-800 dark:text-gray-200">
-                        Extrato de Caixa
+                    <p className={DEMONSTRATIVO_FILTRO_HINT_CLASS}>
+                      <Filter className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden />
+                      <span>
+                        Os cards de categoria consideram{' '}
+                        <span className="font-medium text-gray-600 dark:text-gray-300">
+                          data de compensação
+                        </span>
+                        ,{' '}
+                        <span className="font-medium text-gray-600 dark:text-gray-300">
+                          centro de custo
+                        </span>{' '}
+                        e{' '}
+                        <span className="font-medium text-gray-600 dark:text-gray-300">polo</span>
+                        {' e '}
+                        <span className="font-medium text-gray-600 dark:text-gray-300">
+                          tipo de operação
+                        </span>
+                        .
+                        Saídas, entradas, saldo líquido e resumos seguem{' '}
+                        <span className="font-medium text-gray-600 dark:text-gray-300">
+                          todos os filtros
+                        </span>{' '}
+                        aplicados.
+                        {hasPeriodFilter ? (
+                          <>
+                            {' '}
+                            Período:{' '}
+                            {periodFrom ? formatIsoDateInputBr(periodFrom) : '—'} até{' '}
+                            {periodTo ? formatIsoDateInputBr(periodTo) : '—'}.
+                          </>
+                        ) : null}
                       </span>
-                      .
                     </p>
                     <div className="flex shrink-0 flex-col gap-2 sm:flex-row sm:items-center">
                       {showDashboards ? (
@@ -3728,11 +3951,6 @@ export default function AnaliseExtratoPage() {
                       </button>
                     </div>
                   </div>
-                  {filtrosDesmarcados.length > 0 ? (
-                    <ExtratoFiltrosDesmarcadosResumo
-                      camposDesmarcados={filtrosDesmarcados}
-                    />
-                  ) : null}
                 </div>
               ) : null}
 
@@ -4123,25 +4341,35 @@ export default function AnaliseExtratoPage() {
                   </div>
 
                                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 xl:grid-cols-3">
-                    <Card>
-                      <CardContent className="p-4 sm:p-6">
-                        <div className="flex items-center">
-                          <div className="flex-shrink-0 rounded-lg bg-red-100 p-2 sm:p-3 dark:bg-red-900/30">
-                            <ArrowUpRight className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6" />
+                    <Card padding="none" className={DEMONSTRATIVO_CARD_CLICKABLE_CLASS}>
+                      <button
+                        type="button"
+                        className="h-full w-full text-left"
+                        onClick={() => setDemonstrativoDetalhe('saidas')}
+                        aria-label="Ver detalhes das Saídas"
+                      >
+                        <CardContent className="p-4 sm:p-6">
+                          <div className="flex items-center">
+                            <div className="flex-shrink-0 rounded-lg bg-red-100 p-2 sm:p-3 dark:bg-red-900/30">
+                              <ArrowUpRight className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6" />
+                            </div>
+                            <div className="ml-3 min-w-0 flex-1 sm:ml-4">
+                              <p className="whitespace-normal text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">
+                                Saídas{' '}
+                                <span className="text-gray-400 dark:text-gray-500">
+                                  ({extratoStats.qtdSaida})
+                                </span>
+                              </p>
+                              <p className="mt-1 truncate text-lg font-bold text-red-700 dark:text-red-300 sm:text-2xl">
+                                {formatCurrency(extratoStats.totalSaida)}
+                              </p>
+                              <p className="mt-1 text-xs font-medium text-red-600/90 dark:text-red-400/90">
+                                Clique para ver detalhes
+                              </p>
+                            </div>
                           </div>
-                          <div className="ml-3 min-w-0 flex-1 sm:ml-4">
-                            <p className="whitespace-normal text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">
-                              Saídas{' '}
-                              <span className="text-gray-400 dark:text-gray-500">
-                                ({extratoStats.qtdSaida})
-                              </span>
-                            </p>
-                            <p className="mt-1 truncate text-lg font-bold text-red-700 dark:text-red-300 sm:text-2xl">
-                              {formatCurrency(extratoStats.totalSaida)}
-                            </p>
-                          </div>
-                        </div>
-                      </CardContent>
+                        </CardContent>
+                      </button>
                     </Card>
 
                     <Card padding="none" className={DEMONSTRATIVO_CARD_CLICKABLE_CLASS}>
@@ -4151,7 +4379,7 @@ export default function AnaliseExtratoPage() {
                         onClick={() => setDemonstrativoDetalhe('entradas')}
                         aria-label="Ver detalhes das Entradas"
                       >
-                        <CardContent className="!pt-0 p-4 sm:p-6">
+                        <CardContent className="p-4 sm:p-6">
                           <div className="flex items-center">
                             <div className="flex-shrink-0 rounded-lg bg-green-100 p-2 sm:p-3 dark:bg-green-900/30">
                               <ArrowDownLeft className="h-5 w-5 text-green-600 dark:text-green-400 sm:h-6 sm:w-6" />
@@ -4175,28 +4403,38 @@ export default function AnaliseExtratoPage() {
                       </button>
                     </Card>
 
-                    <Card>
-                      <CardContent className="p-4 sm:p-6">
-                        <div className="flex items-center">
-                          <div className="flex-shrink-0 rounded-lg bg-yellow-100 p-2 sm:p-3 dark:bg-yellow-900/30">
-                            <Wallet className="h-5 w-5 text-yellow-600 dark:text-yellow-400 sm:h-6 sm:w-6" />
+                    <Card padding="none" className={DEMONSTRATIVO_CARD_CLICKABLE_CLASS}>
+                      <button
+                        type="button"
+                        className="h-full w-full text-left"
+                        onClick={() => setDemonstrativoDetalhe('saldo-liquido')}
+                        aria-label="Ver detalhes do Saldo Líquido"
+                      >
+                        <CardContent className="p-4 sm:p-6">
+                          <div className="flex items-center">
+                            <div className="flex-shrink-0 rounded-lg bg-yellow-100 p-2 sm:p-3 dark:bg-yellow-900/30">
+                              <Wallet className="h-5 w-5 text-yellow-600 dark:text-yellow-400 sm:h-6 sm:w-6" />
+                            </div>
+                            <div className="ml-3 min-w-0 flex-1 sm:ml-4">
+                              <p className="whitespace-normal text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">
+                                Saldo Liquido
+                              </p>
+                              <p
+                                className={`mt-1 truncate text-lg font-bold sm:text-2xl ${
+                                  extratoStats.saldoLiquido >= 0
+                                    ? 'text-gray-900 dark:text-gray-100'
+                                    : 'text-red-600 dark:text-red-400'
+                                }`}
+                              >
+                                {formatCurrency(extratoStats.saldoLiquido)}
+                              </p>
+                              <p className="mt-1 text-xs font-medium text-yellow-600/90 dark:text-yellow-400/90">
+                                Clique para ver detalhes
+                              </p>
+                            </div>
                           </div>
-                          <div className="ml-3 min-w-0 flex-1 sm:ml-4">
-                            <p className="whitespace-normal text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">
-                              Saldo Liquido
-                            </p>
-                            <p
-                              className={`mt-1 truncate text-lg font-bold sm:text-2xl ${
-                                extratoStats.saldoLiquido >= 0
-                                  ? 'text-gray-900 dark:text-gray-100'
-                                  : 'text-red-600 dark:text-red-400'
-                              }`}
-                            >
-                              {formatCurrency(extratoStats.saldoLiquido)}
-                            </p>
-                          </div>
-                        </div>
-                      </CardContent>
+                        </CardContent>
+                      </button>
                     </Card>
                   </div>
 
@@ -4242,6 +4480,9 @@ export default function AnaliseExtratoPage() {
         <ExtratoDemonstrativoDetalheModal
           kind={demonstrativoDetalhe}
           onClose={() => setDemonstrativoDetalhe(null)}
+          chartItems={
+            isDemonstrativoFluxoKind(demonstrativoDetalhe) ? filteredItems : undefined
+          }
           items={
             demonstrativoDetalhe === 'receita-liquida'
               ? demonstrativoReceitaLiquidaItems
@@ -4259,6 +4500,10 @@ export default function AnaliseExtratoPage() {
                         ? demonstrativoDistribuicaoLucroItems
                         : demonstrativoDetalhe === 'entradas'
                     ? demonstrativoEntradasItems
+                    : demonstrativoDetalhe === 'saidas'
+                      ? demonstrativoSaidasItems
+                      : demonstrativoDetalhe === 'saldo-liquido'
+                        ? filteredItems
                     : []
           }
         />

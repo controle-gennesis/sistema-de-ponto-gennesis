@@ -20,7 +20,9 @@ function migrateLegacyExcludedContracts(): Set<string> {
     if (!Array.isArray(parsed)) return new Set();
 
     const migrated = new Set(
-      parsed.filter((item): item is string => typeof item === 'string' && item.length > 0)
+      parsed
+        .filter((item): item is string => typeof item === 'string' && item.length > 0)
+        .map((item) => toExcludedKey(item))
     );
     saveControleGeralExcludedContracts(migrated);
     return migrated;
@@ -40,7 +42,9 @@ export function loadControleGeralExcludedContracts(): Set<string> {
     if (!Array.isArray(parsed)) return new Set();
 
     return new Set(
-      parsed.filter((item): item is string => typeof item === 'string' && item.length > 0)
+      parsed
+        .filter((item): item is string => typeof item === 'string' && item.length > 0)
+        .map((item) => toExcludedKey(item))
     );
   } catch {
     return new Set();
@@ -92,10 +96,18 @@ export function removeControleGeralExcludedContract(
   contract: string,
   excluded: Set<string>
 ): Set<string> {
-  const key = toExcludedKey(contract);
-  if (!excluded.has(key)) return excluded;
+  const targetKey = toExcludedKey(contract);
   const next = new Set(excluded);
-  next.delete(key);
+  let changed = false;
+
+  for (const key of Array.from(excluded)) {
+    if (key === targetKey || toExcludedKey(key) === targetKey) {
+      next.delete(key);
+      changed = true;
+    }
+  }
+
+  if (!changed) return excluded;
   saveControleGeralExcludedContracts(next);
   return next;
 }

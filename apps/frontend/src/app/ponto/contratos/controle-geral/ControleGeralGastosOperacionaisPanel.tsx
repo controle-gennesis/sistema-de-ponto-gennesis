@@ -43,6 +43,7 @@ import {
   getGastosPoloFilterOptions,
   getSingleCalendarMonthFromPeriod,
   getSingleYearFromPeriod,
+  mergeCatalogContractsIntoGastosRows,
   type GastosOperacionaisPoloFilterOptions,
   groupGastosRowsByLocality,
   groupGastosRowsByPolo,
@@ -59,6 +60,7 @@ import {
 } from './gastosNaturezaSolicitacoesBreakdown';
 import {
   getLocalityLabel,
+  GASTOS_OPERACIONAIS_CONTRACT_ORDER,
   resolveVisibleLocalityItems,
   type GastosOperacionaisLocality
 } from './gastosOperacionaisContractOrder';
@@ -82,6 +84,7 @@ import {
   buildFaturamentoByContractLookup,
   resolveContractFaturamento,
   resolveContractLiquido,
+  resolveContractNfsTotals,
   resolveContractRecebido,
   type FaturamentoByGastosContractEntry
 } from './buildFaturamentoByContractLookup';
@@ -90,6 +93,9 @@ import {
   resolveGastosContractDetailPath,
   type ContractDetailLookupSource
 } from './buildGastosContractDetailLookup';
+import { ControleGeralFluxoDetalheModal } from './ControleGeralFluxoDetalheModal';
+import { filterGastosDetailRowsForContract, filterRecebidoMensalForContract } from './controleGeralGastosFluxo';
+import type { RecebidoMensalByGastosContractEntry } from './recebidoMensalTypes';
 import { normalizeContractOrderKey } from './gastosOperacionaisContractOrder';
 
 export type GastosOperacionaisRow = {
@@ -155,6 +161,8 @@ type ControleGeralGastosOperacionaisPanelProps = {
   inlineFilters?: boolean;
   /** @deprecated Exportação no cabeçalho usa estilo outline quando inlineFilters está ativo. */
   primaryExportButton?: boolean;
+  /** Habilita modal de detalhes/gráficos ao clicar no contrato (Controle Geral). */
+  enableContractFluxoModal?: boolean;
 };
 
 function formatCurrency(value: number) {
@@ -223,6 +231,79 @@ function gastoRecebidoPercentClassName(gastos: number, recebido: number): string
 
 function calcLucroLiquido(recebido: number, gastos: number): number {
   return recebido - Math.abs(gastos);
+}
+
+function HiddenContractsPanel({
+  contracts,
+  minimized,
+  onToggleMinimized,
+  onRestoreAll,
+  onRestoreOne
+}: {
+  contracts: string[];
+  minimized: boolean;
+  onToggleMinimized: () => void;
+  onRestoreAll: () => void;
+  onRestoreOne: (contract: string) => void;
+}) {
+  if (contracts.length === 0) return null;
+
+  return (
+    <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50/80 px-4 py-3 dark:border-amber-900/40 dark:bg-amber-950/20">
+      <div
+        className={`flex flex-wrap items-center justify-between gap-2 ${minimized ? '' : 'mb-2'}`}
+      >
+        <p className="text-xs font-medium uppercase tracking-wide text-amber-800 dark:text-amber-300">
+          {contracts.length}{' '}
+          {contracts.length === 1 ? 'contrato oculto' : 'contratos ocultos'}
+        </p>
+        <div className="flex flex-wrap items-center gap-1">
+          <button
+            type="button"
+            onClick={onToggleMinimized}
+            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-amber-800 hover:bg-amber-100 dark:text-amber-300 dark:hover:bg-amber-900/40"
+            aria-expanded={!minimized}
+          >
+            {minimized ? (
+              <>
+                <ChevronDown className="h-3.5 w-3.5" aria-hidden />
+                Expandir
+              </>
+            ) : (
+              <>
+                <ChevronUp className="h-3.5 w-3.5" aria-hidden />
+                Minimizar
+              </>
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={onRestoreAll}
+            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-amber-800 hover:bg-amber-100 dark:text-amber-300 dark:hover:bg-amber-900/40"
+          >
+            <RotateCcw className="h-3.5 w-3.5" aria-hidden />
+            Restaurar todos
+          </button>
+        </div>
+      </div>
+      {!minimized ? (
+        <div className="flex flex-wrap gap-2">
+          {contracts.map((contract) => (
+            <button
+              key={contract}
+              type="button"
+              onClick={() => onRestoreOne(contract)}
+              className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-white px-2.5 py-1 text-xs text-amber-900 hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200 dark:hover:bg-amber-900/50"
+              title="Restaurar na visualização"
+            >
+              {contract}
+              <RotateCcw className="h-3 w-3 shrink-0" aria-hidden />
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function lucroLiquidoClassName(value: number): string {
@@ -430,7 +511,8 @@ export function ControleGeralGastosOperacionaisPanel({
   contractsForDetailLookup = [],
   hideDataRefreshControls = false,
   inlineFilters = false,
-  primaryExportButton = false
+  primaryExportButton = false,
+  enableContractFluxoModal = false
 }: ControleGeralGastosOperacionaisPanelProps) {
   const nfsMetricColumnCount = showFaturamentoColumn ? 3 : 0;
   const lucroLiquidoColumnCount = showFaturamentoColumn ? 1 : 0;
@@ -470,6 +552,7 @@ export function ControleGeralGastosOperacionaisPanel({
   const [selectedNaturezaSolicitacao, setSelectedNaturezaSolicitacao] =
     useState<GastosNaturezaSolicitacaoRow | null>(null);
   const lastInitializedNaturezaContractRef = useRef<string | null>(null);
+  const [fluxoModalContract, setFluxoModalContract] = useState<string | null>(null);
 
   const toggleNaturezaBreakdown = useCallback((rowKey: string) => {
     setExpandedNaturezaBreakdownKey((prev) => (prev === rowKey ? null : rowKey));
@@ -512,13 +595,13 @@ export function ControleGeralGastosOperacionaisPanel({
   const emissaoFilterYears = emissaoFilter.years;
 
   const {
-    data: faturamentoByContract = [],
+    data: faturamentoQueryData,
     isFetching: fetchingFaturamento,
     isLoading: loadingFaturamento
   } = useQuery({
     enabled: showFaturamentoColumn,
     queryKey: [
-      'controle-geral-faturamento-by-contract-v18-recebido-filter',
+      'controle-geral-faturamento-by-contract-v19-recebido-mensal',
       emissaoFilterMonths,
       emissaoFilterYears,
       dataRefreshNonce
@@ -535,18 +618,27 @@ export function ControleGeralGastosOperacionaisPanel({
 
       const res = await api.get<{
         success: boolean;
-        data?: { entries?: FaturamentoByGastosContractEntry[] };
+        data?: {
+          entries?: FaturamentoByGastosContractEntry[];
+          recebidoMensalEntries?: RecebidoMensalByGastosContractEntry[];
+        };
       }>('/controle-nfs/summary/faturamento-by-gastos-contract', {
         params,
         timeout: 120_000
       });
 
-      return res.data?.data?.entries ?? [];
+      return {
+        entries: res.data?.data?.entries ?? [],
+        recebidoMensal: res.data?.data?.recebidoMensalEntries ?? []
+      };
     },
     staleTime: 5 * 60 * 1000,
     retry: 1,
     placeholderData: (previousData) => previousData
   });
+
+  const faturamentoByContract = faturamentoQueryData?.entries ?? [];
+  const recebidoMensalByContract = faturamentoQueryData?.recebidoMensal ?? [];
 
   const isPanelLoading =
     isLoading || (showFaturamentoColumn && loadingFaturamento && faturamentoByContract.length === 0);
@@ -624,7 +716,8 @@ export function ControleGeralGastosOperacionaisPanel({
     const filtered = readOnlyPoloColumn
       ? filterGastosDetailRowsByPolo(detailRows, filters)
       : filterGastosDetailRows(detailRows, filters, localityOverrides, visibleLocalities);
-    return aggregateGastosDetailRows(filtered);
+    const aggregated = aggregateGastosDetailRows(filtered);
+    return mergeCatalogContractsIntoGastosRows(aggregated, visibleLocalities);
   }, [detailRows, filters, localityOverrides, readOnlyPoloColumn, visibleLocalities]);
 
   const visibleRows = useMemo(() => {
@@ -669,17 +762,51 @@ export function ControleGeralGastosOperacionaisPanel({
     [visibleRows, faturamentoLookup, showFaturamentoColumn]
   );
 
-  const excludedContractLabels = useMemo(() => {
-    if (!enableRowExclusion) return [];
-    const labels = new Map<string, string>();
-    for (const row of displayRows) {
-      const key = normalizeContractOrderKey(row.contract);
-      if (excludedContracts.has(key)) {
-        labels.set(key, row.contract);
-      }
+  const fluxoModalGastosRows = useMemo(() => {
+    if (!fluxoModalContract) return [];
+    const filtered = readOnlyPoloColumn
+      ? filterGastosDetailRowsByPolo(detailRows, filters)
+      : filterGastosDetailRows(detailRows, filters, localityOverrides, visibleLocalities);
+    return filterGastosDetailRowsForContract(filtered, fluxoModalContract);
+  }, [
+    detailRows,
+    filters,
+    fluxoModalContract,
+    localityOverrides,
+    readOnlyPoloColumn,
+    visibleLocalities
+  ]);
+
+  const fluxoModalNfsTotals = useMemo(() => {
+    if (!fluxoModalContract) return undefined;
+    return resolveContractNfsTotals(fluxoModalContract, faturamentoLookup);
+  }, [fluxoModalContract, faturamentoLookup]);
+
+  const fluxoModalRecebidoMensal = useMemo(() => {
+    if (!fluxoModalContract) return [];
+    return filterRecebidoMensalForContract(recebidoMensalByContract, fluxoModalContract);
+  }, [recebidoMensalByContract, fluxoModalContract]);
+
+  const contractLabelByKey = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const row of aggregateGastosDetailRows(detailRows)) {
+      map.set(normalizeContractOrderKey(row.contract), row.contract);
     }
-    return Array.from(labels.values());
-  }, [displayRows, excludedContracts, enableRowExclusion]);
+    for (const name of GASTOS_OPERACIONAIS_CONTRACT_ORDER) {
+      map.set(normalizeContractOrderKey(name), name);
+    }
+    for (const entry of faturamentoByContract) {
+      map.set(normalizeContractOrderKey(entry.contract), entry.contract);
+    }
+    return map;
+  }, [detailRows, faturamentoByContract]);
+
+  const excludedContractLabels = useMemo(() => {
+    if (!enableRowExclusion || excludedContracts.size === 0) return [];
+    return Array.from(excludedContracts)
+      .map((key) => contractLabelByKey.get(key) ?? contractLabelByKey.get(normalizeContractOrderKey(key)) ?? key)
+      .sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  }, [contractLabelByKey, excludedContracts, enableRowExclusion]);
 
   const localityGroups = useMemo(() => {
     if (readOnlyPoloColumn) {
@@ -1336,6 +1463,16 @@ export function ControleGeralGastosOperacionaisPanel({
             </div>
             ) : null}
 
+            {enableRowExclusion ? (
+              <HiddenContractsPanel
+                contracts={excludedContractLabels}
+                minimized={hiddenContractsListMinimized}
+                onToggleMinimized={() => setHiddenContractsListMinimized((prev) => !prev)}
+                onRestoreAll={handleRestoreAllExcluded}
+                onRestoreOne={handleRestoreExcluded}
+              />
+            ) : null}
+
             {displayRows.length === 0 ? (
               <div className="py-10 text-center text-sm text-gray-500 dark:text-gray-400">
                 Nenhum gasto encontrado para os filtros selecionados.
@@ -1354,65 +1491,6 @@ export function ControleGeralGastosOperacionaisPanel({
               </div>
             ) : (
               <>
-                {enableRowExclusion && excludedContractLabels.length > 0 ? (
-                  <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50/80 px-4 py-3 dark:border-amber-900/40 dark:bg-amber-950/20">
-                    <div
-                      className={`flex flex-wrap items-center justify-between gap-2 ${
-                        hiddenContractsListMinimized ? '' : 'mb-2'
-                      }`}
-                    >
-                      <p className="text-xs font-medium uppercase tracking-wide text-amber-800 dark:text-amber-300">
-                        {excludedContractLabels.length}{' '}
-                        {excludedContractLabels.length === 1 ? 'contrato oculto' : 'contratos ocultos'}
-                      </p>
-                      <div className="flex flex-wrap items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() => setHiddenContractsListMinimized((prev) => !prev)}
-                          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-amber-800 hover:bg-amber-100 dark:text-amber-300 dark:hover:bg-amber-900/40"
-                          aria-expanded={!hiddenContractsListMinimized}
-                        >
-                          {hiddenContractsListMinimized ? (
-                            <>
-                              <ChevronDown className="h-3.5 w-3.5" aria-hidden />
-                              Expandir
-                            </>
-                          ) : (
-                            <>
-                              <ChevronUp className="h-3.5 w-3.5" aria-hidden />
-                              Minimizar
-                            </>
-                          )}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={handleRestoreAllExcluded}
-                          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-amber-800 hover:bg-amber-100 dark:text-amber-300 dark:hover:bg-amber-900/40"
-                        >
-                          <RotateCcw className="h-3.5 w-3.5" aria-hidden />
-                          Restaurar todos
-                        </button>
-                      </div>
-                    </div>
-                    {!hiddenContractsListMinimized ? (
-                      <div className="flex flex-wrap gap-2">
-                        {excludedContractLabels.map((contract) => (
-                          <button
-                            key={contract}
-                            type="button"
-                            onClick={() => handleRestoreExcluded(contract)}
-                            className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-white px-2.5 py-1 text-xs text-amber-900 hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200 dark:hover:bg-amber-900/50"
-                            title="Restaurar na visualização"
-                          >
-                            {contract}
-                            <RotateCcw className="h-3 w-3 shrink-0" aria-hidden />
-                          </button>
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
-                ) : null}
-
                 {enableRowExclusion && selectedRows.length > 0 ? (
                   <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-blue-200 bg-blue-50/80 px-4 py-3 dark:border-blue-900/40 dark:bg-blue-950/20">
                     <p className="text-sm text-blue-900 dark:text-blue-200">
@@ -1510,12 +1588,16 @@ export function ControleGeralGastosOperacionaisPanel({
                               title={
                                 enableNaturezaBreakdown
                                   ? 'Clique para ver naturezas e valores'
-                                  : undefined
+                                  : enableContractFluxoModal
+                                    ? 'Clique para ver detalhes e evolução financeira'
+                                    : undefined
                               }
                               onClick={
                                 enableNaturezaBreakdown
                                   ? () => setNaturezaModalContract(row)
-                                  : undefined
+                                  : enableContractFluxoModal
+                                    ? () => setFluxoModalContract(row.contract)
+                                    : undefined
                               }
                               onKeyDown={
                                 enableNaturezaBreakdown
@@ -1530,7 +1612,9 @@ export function ControleGeralGastosOperacionaisPanel({
                               className={`transition-colors hover:bg-gray-50 dark:hover:bg-gray-700/50 ${
                                 enableNaturezaBreakdown
                                   ? 'cursor-pointer hover:bg-blue-50/40 dark:hover:bg-blue-950/20'
-                                  : ''
+                                  : enableContractFluxoModal
+                                    ? 'cursor-pointer'
+                                    : ''
                               } ${
                                 enableRowExclusion && selectedRowKeys.has(row.rowKey)
                                   ? 'bg-blue-50/70 dark:bg-blue-950/20'
@@ -1552,21 +1636,51 @@ export function ControleGeralGastosOperacionaisPanel({
                                 </td>
                               ) : null}
                               <td className={contractCellClassName}>
-                                {(() => {
-                                  const detailPath = resolveContractDetailPath(row.contract);
-                                  if (!detailPath) return row.contract;
-
-                                  return (
-                                    <Link
-                                      href={detailPath}
-                                      onClick={(event) => event.stopPropagation()}
-                                      className="inline-flex items-center gap-1.5 text-blue-600 hover:text-blue-700 hover:underline dark:text-blue-400 dark:hover:text-blue-300"
+                                <div className="flex items-center gap-2">
+                                  {enableContractFluxoModal ? (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setFluxoModalContract(row.contract);
+                                      }}
+                                      className="inline-flex min-w-0 cursor-pointer items-center gap-1.5 text-left font-medium text-blue-600 hover:text-blue-700 hover:underline dark:text-blue-400 dark:hover:text-blue-300"
+                                      title="Ver detalhes e evolução financeira"
                                     >
-                                      <span>{row.contract}</span>
-                                      <ExternalLink className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden />
+                                      <span className="truncate">{row.contract}</span>
+                                    </button>
+                                  ) : (
+                                    (() => {
+                                      const detailPath = resolveContractDetailPath(row.contract);
+                                      if (!detailPath) return row.contract;
+
+                                      return (
+                                        <Link
+                                          href={detailPath}
+                                          onClick={(event) => event.stopPropagation()}
+                                          className="inline-flex items-center gap-1.5 text-blue-600 hover:text-blue-700 hover:underline dark:text-blue-400 dark:hover:text-blue-300"
+                                        >
+                                          <span>{row.contract}</span>
+                                          <ExternalLink
+                                            className="h-3.5 w-3.5 shrink-0 opacity-70"
+                                            aria-hidden
+                                          />
+                                        </Link>
+                                      );
+                                    })()
+                                  )}
+                                  {enableContractFluxoModal && resolveContractDetailPath(row.contract) ? (
+                                    <Link
+                                      href={resolveContractDetailPath(row.contract)!}
+                                      onClick={(e) => e.stopPropagation()}
+                                      className="inline-flex shrink-0 rounded p-0.5 text-blue-600 opacity-70 hover:bg-blue-50 hover:opacity-100 dark:text-blue-400 dark:hover:bg-blue-950/40"
+                                      title="Abrir cadastro do contrato"
+                                      aria-label={`Abrir cadastro de ${row.contract}`}
+                                    >
+                                      <ExternalLink className="h-3.5 w-3.5" aria-hidden />
                                     </Link>
-                                  );
-                                })()}
+                                  ) : null}
+                                </div>
                               </td>
                               <td className={dataCenterCellClassName}>
                                 {buildMesesLabel(row)}
@@ -1726,6 +1840,7 @@ export function ControleGeralGastosOperacionaisPanel({
           </div>
         </div>
       ) : null}
+
 
       <Modal
         isOpen={naturezaModalContract != null}
@@ -1984,6 +2099,20 @@ export function ControleGeralGastosOperacionaisPanel({
           </div>
         ) : null}
       </Modal>
+
+      {enableContractFluxoModal ? (
+        <ControleGeralFluxoDetalheModal
+          isOpen={fluxoModalContract !== null}
+          onClose={() => setFluxoModalContract(null)}
+          title={fluxoModalContract ? `Contrato: ${fluxoModalContract}` : 'Detalhes do contrato'}
+          contractName={fluxoModalContract}
+          rows={fluxoModalGastosRows}
+          recebidoMensal={fluxoModalRecebidoMensal}
+          nfsTotals={fluxoModalNfsTotals}
+          titleSuffix={fluxoModalContract ?? undefined}
+          loadingRecebido={loadingFaturamento && recebidoMensalByContract.length === 0}
+        />
+      ) : null}
     </Card>
   );
 }
