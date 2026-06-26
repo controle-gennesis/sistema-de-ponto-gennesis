@@ -680,7 +680,8 @@ export class ChatController {
         senderId: userId,
         content,
         attachments,
-        replyToId
+        replyToId,
+        topicId: req.body.topicId != null ? String(req.body.topicId).trim() || undefined : undefined
       });
 
       const hasAttachments = attachments.length > 0;
@@ -928,6 +929,71 @@ export class ChatController {
       const { id } = req.params;
       const chat = await chatService.removeGroupAvatar(id, userId);
       res.json({ success: true, message: 'Foto removida', data: chat });
+    } catch (error: any) {
+      next(error);
+    }
+  }
+
+  /** Lista tópicos de uma conversa */
+  async listChatTopics(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = req.user?.id;
+      if (!userId) throw createError('Usuário não autenticado', 401);
+      const { chatId } = req.params;
+      const topics = await chatService.listChatTopics(chatId, userId);
+      res.json({ success: true, data: topics });
+    } catch (error: any) {
+      next(error);
+    }
+  }
+
+  /** Cria um tópico na conversa */
+  async createChatTopic(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = req.user?.id;
+      if (!userId) throw createError('Usuário não autenticado', 401);
+      const { chatId } = req.params;
+      const title = typeof req.body.title === 'string' ? req.body.title : '';
+      const initialMessage =
+        typeof req.body.initialMessage === 'string' ? req.body.initialMessage : undefined;
+      const topic = await chatService.createChatTopic(chatId, userId, title, initialMessage);
+      res.status(201).json({ success: true, data: topic });
+    } catch (error: any) {
+      next(error);
+    }
+  }
+
+  /** Fixa ou desfixa um tópico */
+  async setChatTopicPinned(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = req.user?.id;
+      if (!userId) throw createError('Usuário não autenticado', 401);
+      const { chatId, topicId } = req.params;
+      const isPinned = Boolean(req.body?.isPinned);
+      const topic = await chatService.setChatTopicPinned(chatId, topicId, userId, isPinned);
+      res.json({ success: true, data: topic });
+    } catch (error: any) {
+      next(error);
+    }
+  }
+
+  /** Reordena tópicos fixados e/ou não fixados */
+  async reorderChatTopics(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = req.user?.id;
+      if (!userId) throw createError('Usuário não autenticado', 401);
+      const { chatId } = req.params;
+      const pinnedIds = Array.isArray(req.body?.pinnedIds)
+        ? req.body.pinnedIds.map(String)
+        : undefined;
+      const unpinnedIds = Array.isArray(req.body?.unpinnedIds)
+        ? req.body.unpinnedIds.map(String)
+        : undefined;
+      const topics = await chatService.reorderChatTopics(chatId, userId, {
+        pinnedIds,
+        unpinnedIds
+      });
+      res.json({ success: true, data: topics });
     } catch (error: any) {
       next(error);
     }

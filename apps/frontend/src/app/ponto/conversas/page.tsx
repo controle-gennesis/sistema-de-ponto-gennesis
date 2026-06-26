@@ -79,6 +79,7 @@ import {
   ownChatUnreadCheckClass,
 } from '@/components/conversas/chatBubbleTheme';
 import { ChatImageComposePanel } from '@/components/conversas/ChatImageComposePanel';
+import { ChatTopicsSidebar, fetchChatTopics } from '@/components/conversas/ChatTopicsSidebar';
 import { MentionHighlightedText } from '@/components/conversas/MentionHighlightedText';
 import {
   formatGennecyMessageContent,
@@ -146,6 +147,7 @@ interface Message {
   sender: UserBasic;
   attachments: MessageAttachment[];
   replyToId?: string | null;
+  topicId?: string | null;
   replyTo?: MessageReplyPreview | null;
   /** Preenchido pela API para o usuário logado: favoritou esta mensagem */
   favorites?: { id: string }[];
@@ -280,16 +282,19 @@ const sendDirectMessage = async ({
   content,
   files,
   replyToId,
+  topicId,
 }: {
   chatId: string;
   content: string;
   files?: File[];
   replyToId?: string;
+  topicId?: string | null;
 }): Promise<{ message: Message; gennecyProcessing?: boolean; gennecyMode?: 'task' | 'chat' | null }> => {
   const form = new FormData();
   form.append('chatId', chatId);
   form.append('content', content);
   if (replyToId) form.append('replyToId', replyToId);
+  if (topicId) form.append('topicId', topicId);
   if (files) files.forEach(f => form.append('attachments', f));
   const res = await api.post('/chats/direct/messages', form);
   return {
@@ -942,6 +947,7 @@ function ConversasContent() {
   const queryClient = useQueryClient();
 
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
+  const [selectedTopicId, setSelectedTopicId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [showUsers, setShowUsers] = useState(false);
   const [groupMembers, setGroupMembers] = useState<string[]>([]);
@@ -1534,6 +1540,9 @@ function ConversasContent() {
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ['directChat', selectedChatId] });
       queryClient.invalidateQueries({ queryKey: ['directChats'] });
+      if (selectedChatId) {
+        queryClient.invalidateQueries({ queryKey: ['chatTopics', selectedChatId] });
+      }
       setMessageInput('');
       setAttachedFiles([]);
       setReplyingTo(null);
@@ -1941,8 +1950,9 @@ function ConversasContent() {
       content: text || '📎',
       files: attachedFiles,
       ...(replyingTo ? { replyToId: replyingTo.id } : {}),
+      ...(selectedTopicId ? { topicId: selectedTopicId } : {}),
     });
-  }, [selectedChatId, messageInput, attachedFiles, replyingTo, sendMutation]);
+  }, [selectedChatId, selectedTopicId, messageInput, attachedFiles, replyingTo, sendMutation]);
 
   const abortVoiceRecording = useCallback(() => {
     const recorder = mediaRecorderRef.current;
@@ -2004,6 +2014,7 @@ function ConversasContent() {
         content: '📎',
         files: [file],
         ...(replyingTo ? { replyToId: replyingTo.id } : {}),
+        ...(selectedTopicId ? { topicId: selectedTopicId } : {}),
       });
     };
     try {
@@ -2011,7 +2022,7 @@ function ConversasContent() {
     } catch {
       abortVoiceRecording();
     }
-  }, [selectedChatId, replyingTo, sendMutation, abortVoiceRecording]);
+  }, [selectedChatId, selectedTopicId, replyingTo, sendMutation, abortVoiceRecording]);
 
   const startVoiceRecording = useCallback(async () => {
     if (!selectedChatId || sendMutation.isPending || voiceRecordingActiveRef.current) return;
@@ -2293,6 +2304,7 @@ function ConversasContent() {
     setStarredMsgSearchQuery('');
     setReplyingTo(null);
     setAttachedFiles([]);
+    setSelectedTopicId(null);
     closeEditModal();
   }, [selectedChatId, closeEditModal]);
 
@@ -2333,6 +2345,30 @@ function ConversasContent() {
       .slice()
       .reverse();
   }, [activeChat]);
+
+  const topicsEnabled =
+    activeChat?.chatType === 'DIRECT' || activeChat?.chatType === 'GROUP';
+
+  const { data: chatTopics = [] } = useQuery({
+    queryKey: ['chatTopics', selectedChatId],
+    queryFn: () => fetchChatTopics(selectedChatId!),
+    enabled: !!selectedChatId && topicsEnabled,
+    refetchInterval: 5000
+  });
+
+  const topicFilteredMessages = useMemo(() => {
+    if (!activeChat) return [];
+    return activeChat.messages.filter((m) => {
+      const msgTopic = m.topicId ?? null;
+      if (selectedTopicId) return msgTopic === selectedTopicId;
+      return !msgTopic;
+    });
+  }, [activeChat, selectedTopicId]);
+
+  const selectedTopicTitle =
+    selectedTopicId != null
+      ? chatTopics.find((t) => t.id === selectedTopicId)?.title ?? null
+      : null;
 
   const starredMsgSearchResults = useMemo(() => {
     const q = starredMsgSearchQuery.trim().toLowerCase();
@@ -3102,6 +3138,27 @@ function ConversasContent() {
                 );
               })()}
 
+              <div className="flex min-h-0 flex-1 overflow-hidden">
+                {topicsEnabled && selectedChatId ? (
+                  <ChatTopicsSidebar
+                    chatId={selectedChatId}
+                    selectedTopicId={selectedTopicId}
+                    onSelectTopic={setSelectedTopicId}
+                    className={isMobileView ? 'hidden' : undefined}
+                  />
+                ) : null}
+
+              <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+              {selectedTopicTitle ? (
+                <div className="flex-shrink-0 border-b border-gray-200 bg-gray-50 px-4 py-2 dark:border-gray-800 dark:bg-gray-950">
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                    Tópico
+                  </p>
+                  <p className="truncate text-sm font-semibold text-gray-900 dark:text-gray-100">
+                    {selectedTopicTitle}
+                  </p>
+                </div>
+              ) : null}
               {/* ── Banner mensagem fixada ── */}
               {activeChat?.pinnedMessage && (
                 <div className="flex-shrink-0 flex items-center gap-2 px-3 py-2 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 group relative overflow-hidden">
@@ -3180,8 +3237,16 @@ function ConversasContent() {
                   <div className="flex items-center justify-center h-full">
                     <Loader2 size={28} className="animate-spin text-gray-500 dark:text-gray-400" />
                   </div>
+                ) : topicFilteredMessages.length === 0 ? (
+                  <div className="flex h-full items-center justify-center px-6 text-center">
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                      {selectedTopicId
+                        ? 'Nenhuma mensagem neste tópico ainda. Seja o primeiro a responder.'
+                        : 'Nenhuma mensagem na conversa geral. Crie um tópico ao lado para organizar assuntos.'}
+                    </p>
+                  </div>
                 ) : (
-                  activeChat?.messages.map((msg, idx) => {
+                  topicFilteredMessages.map((msg, idx) => {
                     const isOwn = Boolean(
                       currentUser?.id &&
                         (msg.senderId === currentUser.id || msg.sender?.id === currentUser.id)
@@ -3191,7 +3256,7 @@ function ConversasContent() {
                       activeChat?.chatType === 'GROUP' || activeChat?.chatType === 'GROUP_CALL';
                     const showSenderColumn =
                       !isOwn && (isGroupChat || isGennecyMsg);
-                    const prevMsg = activeChat.messages[idx - 1];
+                    const prevMsg = topicFilteredMessages[idx - 1];
                     const showDate = !prevMsg || new Date(msg.createdAt).toDateString() !== new Date(prevMsg.createdAt).toDateString();
                     const isClusterStart =
                       !prevMsg ||
@@ -4189,6 +4254,9 @@ function ConversasContent() {
                 </div>
               </div>
               )}
+
+                </div>
+              </div>
 
               {/* ── Sidebar de pesquisa de mensagens ── */}
               {showMsgSearch && (

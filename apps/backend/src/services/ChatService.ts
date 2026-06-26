@@ -25,6 +25,8 @@ export interface SendMessageData {
   content: string;
   /** ID da mensagem citada (mesmo chat; não pode ser mensagem de sistema) */
   replyToId?: string | null;
+  /** Tópico da conversa (opcional; null = mensagem geral) */
+  topicId?: string | null;
   attachments?: Array<{
     fileName: string;
     fileUrl: string;
@@ -1845,7 +1847,7 @@ export class ChatService {
    * Envia uma mensagem em um chat direto ou grupo
    */
   async sendDirectMessage(data: SendMessageData) {
-    const { chatId, senderId, content, attachments = [], replyToId: rawReplyId } = data;
+    const { chatId, senderId, content, attachments = [], replyToId: rawReplyId, topicId: rawTopicId } = data;
 
     const chat = await prisma.chat.findUnique({ where: { id: chatId } });
 
@@ -1882,6 +1884,19 @@ export class ChatService {
       replyToId = parent.id;
     }
 
+    let topicId: string | undefined;
+    const trimmedTopic = typeof rawTopicId === 'string' ? rawTopicId.trim() : '';
+    if (trimmedTopic) {
+      const topic = await prisma.chatTopic.findUnique({
+        where: { id: trimmedTopic },
+        select: { id: true, chatId: true }
+      });
+      if (!topic || topic.chatId !== chatId) {
+        throw new Error('Tópico não encontrado nesta conversa');
+      }
+      topicId = topic.id;
+    }
+
     const message = await prisma.message.create({
       data: {
         chatId,
@@ -1889,6 +1904,7 @@ export class ChatService {
         content,
         isRead: false,
         ...(replyToId ? { replyToId } : {}),
+        ...(topicId ? { topicId } : {}),
         attachments: {
           create: attachments.map(att => ({
             fileName: att.fileName,
@@ -1912,7 +1928,251 @@ export class ChatService {
       data: { lastMessageAt: new Date() }
     });
 
+    if (topicId) {
+      await prisma.chatTopic.update({
+        where: { id: topicId },
+        data: { lastMessageAt: new Date() }
+      });
+    }
+
     return message;
+  }
+
+  private async assertDirectOrGroupChatAccess(chatId: string, userId: string) {
+    const chat = await prisma.chat.findUnique({
+      where: { id: chatId },
+      include: { participants: { select: { userId: true } } }
+    });
+    if (!chat) throw new Error('Chat não encontrado');
+    if (chat.chatType !== ChatType.DIRECT && chat.chatType !== ChatType.GROUP) {
+      throw new Error('Tópicos disponíveis apenas em conversas diretas ou grupos');
+    }
+    const hasAccess = this.isParticipantManagedDirectChat(chat.chatType)
+      ? chat.participants.some((p) => p.userId === userId)
+      : chat.initiatorId === userId || chat.recipientId === userId;
+    if (!hasAccess) throw new Error('Você não tem acesso a este chat');
+    return chat;
+  }
+
+  /**
+   * Lista tópicos de uma conversa (fixados primeiro, depois ordem manual)
+   */
+  private mapChatTopicRow(
+    topic: {
+      id: string;
+      chatId: string;
+      title: string;
+      createdAt: Date;
+      updatedAt: Date;
+      lastMessageAt: Date | null;
+      isPinned: boolean;
+      sortOrder: number;
+      createdBy: { id: string; name: string; email: string; profilePhotoUrl: string | null };
+      _count: { messages: number };
+    }
+  ) {
+    return {
+      id: topic.id,
+      chatId: topic.chatId,
+      title: topic.title,
+      createdAt: topic.createdAt,
+      updatedAt: topic.updatedAt,
+      lastMessageAt: topic.lastMessageAt,
+      isPinned: topic.isPinned,
+      sortOrder: topic.sortOrder,
+      createdBy: topic.createdBy,
+      messageCount: topic._count.messages
+    };
+  }
+
+  private chatTopicInclude() {
+    return {
+      createdBy: { select: this.directChatUserInclude },
+      _count: { select: { messages: true } }
+    } as const;
+  }
+
+  async listChatTopics(chatId: string, userId: string) {
+    await this.assertDirectOrGroupChatAccess(chatId, userId);
+
+    const topics = await prisma.chatTopic.findMany({
+      where: { chatId },
+      orderBy: [{ isPinned: 'desc' }, { sortOrder: 'asc' }, { createdAt: 'asc' }],
+      include: this.chatTopicInclude()
+    });
+
+    return topics.map((topic) => this.mapChatTopicRow(topic));
+  }
+
+  /**
+   * Cria um tópico na conversa (opcionalmente com mensagem inicial)
+   */
+  async createChatTopic(
+    chatId: string,
+    userId: string,
+    title: string,
+    initialMessage?: string
+  ) {
+    await this.assertDirectOrGroupChatAccess(chatId, userId);
+
+    const trimmedTitle = String(title ?? '').trim();
+    if (trimmedTitle.length < 2) {
+      throw new Error('O título do tópico deve ter pelo menos 2 caracteres');
+    }
+    if (trimmedTitle.length > 200) {
+      throw new Error('Título do tópico muito longo (máximo 200 caracteres)');
+    }
+
+    const now = new Date();
+
+    const topUnpinned = await prisma.chatTopic.findFirst({
+      where: { chatId, isPinned: false },
+      orderBy: { sortOrder: 'asc' },
+      select: { sortOrder: true }
+    });
+    const newSortOrder = topUnpinned ? topUnpinned.sortOrder - 1 : 0;
+
+    const topic = await prisma.chatTopic.create({
+      data: {
+        chatId,
+        title: trimmedTitle,
+        createdById: userId,
+        isPinned: false,
+        sortOrder: newSortOrder,
+        lastMessageAt: initialMessage?.trim() ? now : null
+      },
+      include: this.chatTopicInclude()
+    });
+
+    if (initialMessage?.trim()) {
+      await this.sendDirectMessage({
+        chatId,
+        senderId: userId,
+        content: initialMessage.trim(),
+        topicId: topic.id
+      });
+    }
+
+    const refreshed = await prisma.chatTopic.findUnique({
+      where: { id: topic.id },
+      include: this.chatTopicInclude()
+    });
+    if (!refreshed) throw new Error('Erro ao criar tópico');
+
+    return this.mapChatTopicRow(refreshed);
+  }
+
+  /**
+   * Fixa ou desfixa um tópico no topo da conversa
+   */
+  async setChatTopicPinned(
+    chatId: string,
+    topicId: string,
+    userId: string,
+    isPinned: boolean
+  ) {
+    await this.assertDirectOrGroupChatAccess(chatId, userId);
+
+    const topic = await prisma.chatTopic.findFirst({
+      where: { id: topicId, chatId }
+    });
+    if (!topic) throw new Error('Tópico não encontrado');
+
+    if (topic.isPinned === isPinned) {
+      const current = await prisma.chatTopic.findUnique({
+        where: { id: topicId },
+        include: this.chatTopicInclude()
+      });
+      if (!current) throw new Error('Tópico não encontrado');
+      return this.mapChatTopicRow(current);
+    }
+
+    let sortOrder = 0;
+    if (isPinned) {
+      const lastPinned = await prisma.chatTopic.findFirst({
+        where: { chatId, isPinned: true },
+        orderBy: { sortOrder: 'desc' },
+        select: { sortOrder: true }
+      });
+      sortOrder = lastPinned ? lastPinned.sortOrder + 1 : 0;
+    } else {
+      const topUnpinned = await prisma.chatTopic.findFirst({
+        where: { chatId, isPinned: false, id: { not: topicId } },
+        orderBy: { sortOrder: 'asc' },
+        select: { sortOrder: true }
+      });
+      sortOrder = topUnpinned ? topUnpinned.sortOrder - 1 : 0;
+    }
+
+    const updated = await prisma.chatTopic.update({
+      where: { id: topicId },
+      data: { isPinned, sortOrder },
+      include: this.chatTopicInclude()
+    });
+
+    return this.mapChatTopicRow(updated);
+  }
+
+  /**
+   * Reordena tópicos fixados e/ou não fixados (ordem dentro de cada grupo)
+   */
+  async reorderChatTopics(
+    chatId: string,
+    userId: string,
+    data: { pinnedIds?: string[]; unpinnedIds?: string[] }
+  ) {
+    await this.assertDirectOrGroupChatAccess(chatId, userId);
+
+    const all = await prisma.chatTopic.findMany({
+      where: { chatId },
+      select: { id: true, isPinned: true }
+    });
+    const pinnedSet = new Set(all.filter((t) => t.isPinned).map((t) => t.id));
+    const unpinnedSet = new Set(all.filter((t) => !t.isPinned).map((t) => t.id));
+
+    const updates: ReturnType<typeof prisma.chatTopic.update>[] = [];
+
+    if (data.pinnedIds) {
+      if (data.pinnedIds.length !== pinnedSet.size) {
+        throw new Error('Lista de tópicos fixados inválida');
+      }
+      for (const id of data.pinnedIds) {
+        if (!pinnedSet.has(id)) throw new Error('Tópico fixado inválido');
+      }
+      data.pinnedIds.forEach((id, index) => {
+        updates.push(
+          prisma.chatTopic.update({
+            where: { id },
+            data: { sortOrder: index, isPinned: true }
+          })
+        );
+      });
+    }
+
+    if (data.unpinnedIds) {
+      if (data.unpinnedIds.length !== unpinnedSet.size) {
+        throw new Error('Lista de tópicos inválida');
+      }
+      for (const id of data.unpinnedIds) {
+        if (!unpinnedSet.has(id)) throw new Error('Tópico inválido');
+      }
+      data.unpinnedIds.forEach((id, index) => {
+        updates.push(
+          prisma.chatTopic.update({
+            where: { id },
+            data: { sortOrder: index, isPinned: false }
+          })
+        );
+      });
+    }
+
+    if (updates.length === 0) {
+      throw new Error('Informe a nova ordem dos tópicos');
+    }
+
+    await prisma.$transaction(updates);
+
+    return this.listChatTopics(chatId, userId);
   }
 
   /**

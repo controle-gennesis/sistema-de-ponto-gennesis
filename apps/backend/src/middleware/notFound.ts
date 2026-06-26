@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import type { AppError } from './errorHandler';
 
 export const notFound = (req: Request, res: Response, next: NextFunction) => {
   // Garantir que headers CORS sejam enviados mesmo em caso de 404
@@ -8,7 +9,8 @@ export const notFound = (req: Request, res: Response, next: NextFunction) => {
     res.setHeader('Access-Control-Allow-Credentials', 'true');
   }
   
-  const error = new Error(`Rota não encontrada - ${req.originalUrl}`);
+  const error = new Error(`Rota não encontrada - ${req.originalUrl}`) as AppError;
+  error.statusCode = 404;
   res.status(404);
   next(error);
 };

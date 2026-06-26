@@ -45,6 +45,7 @@ model User {
   closedChats       Chat[]                          @relation("ChatCloser")
   receivedChats     Chat[]                          @relation("ChatRecipient")
   chatParticipants  ChatParticipant[]
+  chatTopicsCreated ChatTopic[]                     @relation("ChatTopicCreator")
   finalizedPayrolls PayrollStatus[]                 @relation("PayrollFinalizer")
   materialRequestsRequested MaterialRequest[]       @relation("MaterialRequestRequester")
   materialRequestsApproved  MaterialRequest[]       @relation("MaterialRequestApprover")
@@ -773,6 +774,7 @@ model Chat {
   userPrivacySettings ChatUserPrivacy[]
   parentGroupChat     Chat?           @relation("GroupCallSideChat", fields: [parentGroupChatId], references: [id], onDelete: SetNull)
   groupCallSideChats  Chat[]          @relation("GroupCallSideChat")
+  topics              ChatTopic[]
   
   @@index([initiatorId])
   @@index([recipientDepartment])
@@ -802,6 +804,29 @@ model ChatParticipant {
   @@map("chat_participants")
 }
 
+/// Tópico dentro de uma conversa (estilo threads do ChatGPT)
+model ChatTopic {
+  id            String    @id @default(cuid())
+  chatId        String
+  title         String
+  createdById   String
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  lastMessageAt DateTime?
+  isPinned      Boolean   @default(false)
+  sortOrder     Int       @default(0)
+
+  chat          Chat      @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  createdBy     User      @relation("ChatTopicCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  messages      Message[]
+
+  @@index([chatId])
+  @@index([chatId, lastMessageAt])
+  @@index([chatId, isPinned, sortOrder])
+  @@index([createdById])
+  @@map("chat_topics")
+}
+
 // Modelo de Mensagens dentro de um Chat
 model Message {
   id              String            @id @default(cuid())
@@ -826,6 +851,10 @@ model Message {
   replyTo         Message?          @relation("MessageReplyThread", fields: [replyToId], references: [id], onDelete: SetNull)
   replies         Message[]         @relation("MessageReplyThread")
 
+  /// Tópico da conversa (null = mensagem geral, legado)
+  topicId         String?
+  topic           ChatTopic?        @relation(fields: [topicId], references: [id], onDelete: SetNull)
+
   // Relacionamentos
   chat            Chat              @relation(fields: [chatId], references: [id], onDelete: Cascade)
   sender          User              @relation("MessageSender", fields: [senderId], references: [id], onDelete: Cascade)
@@ -838,6 +867,8 @@ model Message {
   @@index([isRead])
   @@index([createdAt])
   @@index([replyToId])
+  @@index([topicId])
+  @@index([chatId, topicId])
   @@map("messages")
 }
 
