@@ -2,6 +2,11 @@ import { FuelRefuelRequestStatus } from '@prisma/client';
 import { prisma } from './prisma';
 import { getGennecyBotUserId } from '../services/GennecyChatAssistantService';
 import { metaWhatsApp } from '../services/MetaWhatsAppService';
+import {
+  formatFuelSuppliesSlaMessage,
+  formatBrDateTime,
+  getFuelSuppliesSlaHours,
+} from './fuelSuppliesSla';
 
 function stripMarkdown(text: string): string {
   return text.replace(/\*\*/g, '');
@@ -59,6 +64,7 @@ export async function notifyFuelRequesterWaitingManager(
   displayNumber: number,
   sourceWhatsAppPhone?: string | null,
 ) {
+  const slaHours = await getFuelSuppliesSlaHours();
   await notifyFuelRequester(
     sourceChatId,
     sourceWhatsAppPhone,
@@ -66,6 +72,7 @@ export async function notifyFuelRequesterWaitingManager(
       `⏳ Solicitação #${displayNumber} registrada.`,
       'Aguardando aprovação do gestor.',
       '',
+      `Após o gestor, o Suprimentos terá até ${slaHours}h para atender.`,
       'Você receberá uma mensagem quando for encaminhada ao Suprimentos.',
     ].join('\n'),
   );
@@ -76,6 +83,8 @@ export async function notifyFuelRequesterWaitingSupplies(
   displayNumber: number,
   sourceWhatsAppPhone?: string | null,
 ) {
+  const slaHours = await getFuelSuppliesSlaHours();
+  const slaLine = formatFuelSuppliesSlaMessage(slaHours);
   await notifyFuelRequester(
     sourceChatId,
     sourceWhatsAppPhone,
@@ -83,25 +92,44 @@ export async function notifyFuelRequesterWaitingSupplies(
       `⏳ Solicitação #${displayNumber} registrada.`,
       'Aguardando aprovação do Suprimentos.',
       '',
-      'Você receberá uma mensagem aqui quando for aprovada.',
+      slaLine,
+      '',
+      'Você receberá uma mensagem aqui quando for liberada para abastecer.',
     ].join('\n'),
   );
 }
 
+export type FuelSuppliesApprovalNotifyDetails = {
+  gasStationName: string;
+  gasStationAddress?: string | null;
+  refuelDeadlineLabel: string;
+  refuelDeadlineAt: Date;
+  comment?: string | null;
+};
+
 export async function notifyFuelRequesterApprovedBySupplies(
   sourceChatId: string | null | undefined,
   displayNumber: number,
-  comment?: string | null,
+  details: FuelSuppliesApprovalNotifyDetails,
   sourceWhatsAppPhone?: string | null,
 ) {
   const lines = [
-    `✅ Solicitação #${displayNumber} aprovada pelo Suprimentos!`,
+    `✅ Solicitação #${displayNumber} atendida pelo Suprimentos!`,
     'Você já pode abastecer.',
     '',
-    'Depois do abastecimento, abra o menu aqui no WhatsApp e escolha «Informar abastecimento» para enviar hodômetro, litros, valor e cupom fiscal.',
+    `⛽ Posto: ${details.gasStationName}`,
   ];
-  if (comment?.trim()) {
-    lines.push('', `Observação do Suprimentos: ${comment.trim()}`);
+  if (details.gasStationAddress?.trim()) {
+    lines.push(`📍 Endereço: ${details.gasStationAddress.trim()}`);
+  }
+  lines.push(
+    '',
+    `⏰ Prazo para abastecer: ${details.refuelDeadlineLabel} (até ${formatBrDateTime(details.refuelDeadlineAt)})`,
+    '',
+    'Depois do abastecimento, abra o menu aqui no WhatsApp e escolha «Informar abastecimento» para enviar hodômetro, litros, valor e cupom fiscal.',
+  );
+  if (details.comment?.trim()) {
+    lines.push('', `Observação do Suprimentos: ${details.comment.trim()}`);
   }
   await notifyFuelRequester(sourceChatId, sourceWhatsAppPhone, lines.join('\n'));
 }
@@ -154,4 +182,9 @@ export async function buildFuelOpenRequestsStatusMessage(requesterId: string): P
   });
   if (rows.length === 0) return null;
   return ['⏳ Suas solicitações de combustível em andamento:', ...rows.map((r) => formatFuelWaitingLine(r.displayNumber, r.status))].join('\n');
+}
+
+export async function buildFuelSubmissionSlaLine(): Promise<string> {
+  const slaHours = await getFuelSuppliesSlaHours();
+  return formatFuelSuppliesSlaMessage(slaHours);
 }

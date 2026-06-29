@@ -34,6 +34,8 @@ import {
   rowActionMenuButtonClass,
 } from '@/components/ui/listTableUi';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
+import type { MultiSelectSearchOption } from '@/components/ui/MultiSelectSearchDropdown';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 
 type FuelVehicleType = 'PRIVATE' | 'COMPANY';
@@ -164,12 +166,32 @@ function matchesDetailStatusFilter(status: FuelRefuelStatus, filter: DetailStatu
   return status === filter;
 }
 
+type FuelRefuelDeadlineUnit = 'HOURS' | 'DAYS';
+
+type FuelAdministrativeRegion = {
+  id: string;
+  code: string;
+  name: string;
+};
+
+type FuelGasStation = {
+  id: string;
+  regionId: string;
+  name: string;
+  address?: string | null;
+};
+
 type FuelRefuelRequest = {
   id: string;
   displayNumber: number;
   requestedAt: string;
   refuelDate: string;
   route: string;
+  administrativeRegion?: FuelAdministrativeRegion | null;
+  gasStation?: FuelGasStation | null;
+  refuelDeadlineAt?: string | null;
+  refuelDeadlineAmount?: number | null;
+  refuelDeadlineUnit?: FuelRefuelDeadlineUnit | null;
   driverName: string;
   vehiclePlate: string;
   vehicleDescription?: string | null;
@@ -267,6 +289,23 @@ function fuelRefuelTotalValue(
   return litersNum * priceNum;
 }
 
+const DEADLINE_UNIT_OPTIONS = labeledToSelectOptions([
+  { value: 'HOURS', label: 'Horas' },
+  { value: 'DAYS', label: 'Dias' },
+]);
+
+function formatRefuelDeadline(
+  amount?: number | null,
+  unit?: FuelRefuelDeadlineUnit | null,
+  deadlineAt?: string | null,
+): string {
+  if (!amount || !unit) return '—';
+  const unitLabel = unit === 'HOURS' ? (amount === 1 ? 'hora' : 'horas') : amount === 1 ? 'dia' : 'dias';
+  const base = `${amount} ${unitLabel}`;
+  if (!deadlineAt) return base;
+  return `${base} (até ${format(new Date(deadlineAt), 'dd/MM/yyyy HH:mm', { locale: ptBR })})`;
+}
+
 export default function SolicitacoesCombustivelPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -277,6 +316,9 @@ export default function SolicitacoesCombustivelPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [selected, setSelected] = useState<FuelRefuelRequest | null>(null);
   const [suppliesComment, setSuppliesComment] = useState('');
+  const [approveGasStationId, setApproveGasStationId] = useState('');
+  const [refuelDeadlineAmount, setRefuelDeadlineAmount] = useState('24');
+  const [refuelDeadlineUnit, setRefuelDeadlineUnit] = useState<FuelRefuelDeadlineUnit>('HOURS');
   const [rejectReason, setRejectReason] = useState('');
   const [showRejectForm, setShowRejectForm] = useState(false);
 
@@ -326,16 +368,32 @@ export default function SolicitacoesCombustivelPage() {
   });
 
   const approveMutation = useMutation({
-    mutationFn: async (id: string) => {
+    mutationFn: async ({
+      id,
+      gasStationId,
+      amount,
+      unit,
+    }: {
+      id: string;
+      gasStationId: string;
+      amount: number;
+      unit: FuelRefuelDeadlineUnit;
+    }) => {
       const res = await api.put(`/fuel-refuel-requests/${id}/supplies-approve`, {
         comment: suppliesComment.trim() || undefined,
+        gasStationId,
+        refuelDeadlineAmount: amount,
+        refuelDeadlineUnit: unit,
       });
       return res.data;
     },
     onSuccess: () => {
-      toast.success('Solicitação aprovada. O colaborador foi notificado na Gennecy.');
+      toast.success('Solicitação atendida. O colaborador foi notificado no WhatsApp.');
       setSelected(null);
       setSuppliesComment('');
+      setApproveGasStationId('');
+      setRefuelDeadlineAmount('24');
+      setRefuelDeadlineUnit('HOURS');
       setShowRejectForm(false);
       void queryClient.invalidateQueries({ queryKey: ['fuel-refuel-requests'] });
       void queryClient.invalidateQueries({ queryKey: ['fuel-refuel-requests-supplies'] });
@@ -366,6 +424,30 @@ export default function SolicitacoesCombustivelPage() {
       toast.error(err.response?.data?.error || 'Erro ao rejeitar solicitação');
     },
   });
+
+  const regionId = selected?.administrativeRegion?.id;
+
+  const { data: gasStations = [], isLoading: loadingGasStations } = useQuery({
+    queryKey: ['fuel-gas-stations', regionId],
+    queryFn: async () => {
+      const res = await api.get(
+        `/fuel-refuel-requests/administrative-regions/${regionId}/gas-stations`,
+      );
+      return (res.data?.data || []) as FuelGasStation[];
+    },
+    enabled: Boolean(regionId && selected?.status === 'PENDING_SUPPLIES'),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const gasStationSelectOptions = useMemo<MultiSelectSearchOption[]>(
+    () =>
+      gasStations.map((station) => ({
+        value: station.id,
+        label: station.address ? `${station.name} — ${station.address}` : station.name,
+        searchText: [station.name, station.address].filter(Boolean).join(' '),
+      })),
+    [gasStations],
+  );
 
   const records = useMemo(
     () =>
@@ -406,6 +488,17 @@ export default function SolicitacoesCombustivelPage() {
   useEffect(() => {
     if (currentPage > totalPages) setCurrentPage(totalPages);
   }, [currentPage, totalPages]);
+
+  useEffect(() => {
+    if (selected?.status === 'PENDING_SUPPLIES') {
+      setApproveGasStationId('');
+      setSuppliesComment('');
+      setRefuelDeadlineAmount('24');
+      setRefuelDeadlineUnit('HOURS');
+      setShowRejectForm(false);
+      setRejectReason('');
+    }
+  }, [selected?.id, selected?.status]);
 
   const user = userData?.data || { name: 'Usuário', role: 'EMPLOYEE' };
 
@@ -657,6 +750,7 @@ export default function SolicitacoesCombustivelPage() {
           onClose={() => {
             setSelected(null);
             setSuppliesComment('');
+            setApproveGasStationId('');
             setRejectReason('');
             setShowRejectForm(false);
           }}
@@ -698,6 +792,39 @@ export default function SolicitacoesCombustivelPage() {
                   <span className="font-medium text-gray-500 dark:text-gray-400">Rota</span>
                   <p className="text-gray-900 dark:text-gray-100">{selected.route}</p>
                 </div>
+                <div>
+                  <span className="font-medium text-gray-500 dark:text-gray-400">
+                    Região administrativa
+                  </span>
+                  <p className="text-gray-900 dark:text-gray-100">
+                    {selected.administrativeRegion?.name || '—'}
+                  </p>
+                </div>
+                {selected.gasStation ? (
+                  <div>
+                    <span className="font-medium text-gray-500 dark:text-gray-400">
+                      Posto liberado
+                    </span>
+                    <p className="text-gray-900 dark:text-gray-100">
+                      {selected.gasStation.name}
+                      {selected.gasStation.address ? ` — ${selected.gasStation.address}` : ''}
+                    </p>
+                  </div>
+                ) : null}
+                {selected.refuelDeadlineAmount ? (
+                  <div className="sm:col-span-2">
+                    <span className="font-medium text-gray-500 dark:text-gray-400">
+                      Prazo para abastecer
+                    </span>
+                    <p className="text-gray-900 dark:text-gray-100">
+                      {formatRefuelDeadline(
+                        selected.refuelDeadlineAmount,
+                        selected.refuelDeadlineUnit,
+                        selected.refuelDeadlineAt,
+                      )}
+                    </p>
+                  </div>
+                ) : null}
                 <div className="sm:col-span-2">
                   <span className="font-medium text-gray-500 dark:text-gray-400">Contrato</span>
                   <p className="text-gray-900 dark:text-gray-100">
@@ -856,11 +983,65 @@ export default function SolicitacoesCombustivelPage() {
                 <div className="space-y-3 border-t border-gray-200 pt-4 dark:border-gray-700">
                   {!showRejectForm ? (
                     <>
+                      <p className="text-sm text-gray-600 dark:text-gray-400">
+                        Libere o abastecimento informando o posto da região{' '}
+                        <span className="font-medium text-gray-900 dark:text-gray-100">
+                          {selected.administrativeRegion?.name || '—'}
+                        </span>{' '}
+                        e o prazo para o solicitante ir ao posto.
+                      </p>
+                      <div>
+                        <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                          Posto para abastecimento *
+                        </label>
+                        <SingleSelectSearchDropdown
+                          value={approveGasStationId}
+                          onChange={setApproveGasStationId}
+                          options={gasStationSelectOptions}
+                          disabled={loadingGasStations || approveMutation.isPending || !regionId}
+                          allowEmpty={false}
+                          placeholder={
+                            !regionId
+                              ? 'Solicitação sem região administrativa'
+                              : loadingGasStations
+                                ? 'Carregando postos...'
+                                : 'Selecionar posto da região...'
+                          }
+                          searchPlaceholder="Pesquisar posto..."
+                          emptyOptionsMessage="Nenhum posto cadastrado para esta região."
+                          noFocusRing
+                        />
+                      </div>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <Input
+                          label="Prazo para abastecer *"
+                          type="number"
+                          min={1}
+                          max={365}
+                          value={refuelDeadlineAmount}
+                          onChange={(e) => setRefuelDeadlineAmount(e.target.value)}
+                          placeholder="Ex.: 24"
+                        />
+                        <div>
+                          <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                            Unidade do prazo *
+                          </label>
+                          <StringSingleSelectDropdown
+                            value={refuelDeadlineUnit}
+                            onChange={(value) =>
+                              setRefuelDeadlineUnit(value as FuelRefuelDeadlineUnit)
+                            }
+                            options={DEADLINE_UNIT_OPTIONS}
+                            allowEmpty={false}
+                            className="w-full"
+                          />
+                        </div>
+                      </div>
                       <Input
                         label="Observação (opcional)"
                         value={suppliesComment}
                         onChange={(e) => setSuppliesComment(e.target.value)}
-                        placeholder="Mensagem para o colaborador na Gennecy"
+                        placeholder="Mensagem enviada ao colaborador no WhatsApp"
                       />
                       <div className="flex flex-wrap justify-end gap-2">
                         <Button
@@ -873,10 +1054,28 @@ export default function SolicitacoesCombustivelPage() {
                         </Button>
                         <Button
                           type="button"
-                          onClick={() => approveMutation.mutate(selected.id)}
-                          disabled={approveMutation.isPending}
+                          onClick={() => {
+                            const amount = Number(refuelDeadlineAmount);
+                            if (!approveGasStationId) {
+                              return toast.error('Selecione o posto para abastecimento');
+                            }
+                            if (!Number.isFinite(amount) || amount < 1) {
+                              return toast.error('Informe o prazo para abastecer');
+                            }
+                            approveMutation.mutate({
+                              id: selected.id,
+                              gasStationId: approveGasStationId,
+                              amount,
+                              unit: refuelDeadlineUnit,
+                            });
+                          }}
+                          disabled={
+                            approveMutation.isPending ||
+                            !approveGasStationId ||
+                            !refuelDeadlineAmount.trim()
+                          }
                         >
-                          {approveMutation.isPending ? 'Aprovando...' : 'Aprovar'}
+                          {approveMutation.isPending ? 'Atendendo...' : 'Atender solicitação'}
                         </Button>
                       </div>
                     </>

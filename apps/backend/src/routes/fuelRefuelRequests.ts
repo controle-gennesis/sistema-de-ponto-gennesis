@@ -7,6 +7,15 @@ const router = Router();
 
 router.use(authenticate);
 
+router.get('/administrative-regions', requireFuelSuppliesAccess, (req, res, next) =>
+  fuelRefuelRequestController.listAdministrativeRegions(req, res, next),
+);
+router.get('/administrative-regions/:regionId/gas-stations', requireFuelSuppliesAccess, (req, res, next) =>
+  fuelRefuelRequestController.listGasStationsByRegion(req, res, next),
+);
+router.get('/supplies-sla', requireFuelSuppliesAccess, (req, res, next) =>
+  fuelRefuelRequestController.getSuppliesSla(req, res, next),
+);
 router.get('/pending-count', (req, res, next) =>
   fuelRefuelRequestController.pendingCount(req, res, next),
 );

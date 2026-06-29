@@ -5,19 +5,29 @@ import {
   onlyDigits,
   resolveFuelRequestContextFromEmployee,
 } from '../lib/employeeCpfLookup';
+import { listActiveFuelAdministrativeRegions } from '../lib/fuelAdministrativeRegions';
 import {
+  buildFuelSubmissionSlaLine,
   notifyFuelRequesterWaitingManager,
   notifyFuelRequesterWaitingSupplies,
 } from '../lib/fuelRefuelChatNotify';
 import { hasStoredPhoto, isWhatsAppSavedMediaReady } from '../lib/flowMedia';
+import {
+  findActiveVehiclesByPlateSuffix,
+  formatVehiclePlateOptionLabel,
+} from '../lib/fuelVehiclePlateLookup';
+import { formatPlacaDisplay } from '../lib/brazilianVehiclePlate';
 import { fuelRefuelRequestService } from './FuelRefuelRequestService';
 import type { SendAction } from './WhatsAppBotService';
 
 export type WhatsAppFuelFlowStatus =
   | 'FUEL_ASK_REFUEL_DATE'
   | 'FUEL_ASK_ROUTE'
+  | 'FUEL_ASK_ADMIN_REGION'
   | 'FUEL_ASK_DRIVER_CPF'
-  | 'FUEL_ASK_VEHICLE'
+  | 'FUEL_ASK_PLATE_SUFFIX'
+  | 'FUEL_SELECT_VEHICLE'
+  | 'FUEL_ASK_VEHICLE_MANUAL'
   | 'FUEL_ASK_VEHICLE_TYPE'
   | 'FUEL_ASK_DASHBOARD_PHOTO'
   | 'FUEL_ASK_OBSERVATIONS'
@@ -36,6 +46,19 @@ function waButtons(body: string, extra?: Array<{ id: string; title: string }>): 
       { id: 'MENU', title: 'Menu' },
       { id: 'END', title: 'Encerrar' },
     ],
+  };
+}
+
+function waList(
+  body: string,
+  rows: Array<{ id: string; title: string }>,
+  buttonText = 'Escolher',
+): SendAction {
+  return {
+    type: 'list',
+    body,
+    buttonText,
+    sections: [{ title: 'Opções', rows: rows.slice(0, 10) }],
   };
 }
 
@@ -75,6 +98,7 @@ function buildSummary(payload: Record<string, unknown>): string {
     'Resumo da solicitação de abastecimento:',
     `• Data: ${payload.refuelDate ? formatBrDate(String(payload.refuelDate)) : '—'}`,
     `• Rota: ${payload.route || '—'}`,
+    `• Região administrativa: ${payload.administrativeRegionName || '—'}`,
     `• Contrato: ${payload.costCenterLabel || payload.costCenter || '—'}`,
     `• Condutor: ${payload.driverName || '—'}${payload.driverCpfMasked ? ` (CPF ${payload.driverCpfMasked})` : ''}`,
     `• Veículo: ${payload.vehiclePlate || '—'}`,
@@ -84,6 +108,52 @@ function buildSummary(payload: Record<string, unknown>): string {
     '',
     'Confirma o envio? (sim / não)',
   ].join('\n');
+}
+
+async function buildAdminRegionListAction(): Promise<SendAction> {
+  const regions = await listActiveFuelAdministrativeRegions();
+  if (!regions.length) {
+    return waButtons(
+      'Não há regiões administrativas cadastradas. Fale com o Suprimentos para configurar os postos.',
+    );
+  }
+  return waList(
+    'Qual a região administrativa para abastecer?\n(Escolha conforme o local de origem da rota)',
+    regions.map((region) => ({
+      id: `fuel_region_${region.id}`,
+      title: region.name.length > 24 ? `${region.name.slice(0, 21)}...` : region.name,
+    })),
+    'Ver regiões',
+  );
+}
+
+function parseRegionSelection(
+  content: string,
+  payload: Record<string, unknown>,
+): { regionId: string; regionName: string } | null {
+  const fromId = content.match(/^fuel_region_(.+)$/);
+  if (fromId) {
+    const regionId = fromId[1];
+    const options = (payload.adminRegionOptions as Array<{ id: string; name: string }> | undefined) ?? [];
+    const match = options.find((item) => item.id === regionId);
+    if (match) return { regionId: match.id, regionName: match.name };
+  }
+  return null;
+}
+
+function parseVehicleSelection(
+  content: string,
+  payload: Record<string, unknown>,
+): { plate: string; description?: string } | null {
+  const fromId = content.match(/^fuel_vehicle_(.+)$/);
+  if (!fromId) return null;
+  const vehicleId = fromId[1];
+  const options =
+    (payload.vehicleOptions as Array<{ id: string; plate: string; description?: string }> | undefined) ??
+    [];
+  const match = options.find((item) => item.id === vehicleId);
+  if (!match) return null;
+  return { plate: match.plate, description: match.description };
 }
 
 export function isWhatsAppFuelFlowStatus(status: string): boolean {
@@ -195,6 +265,29 @@ export async function processWhatsAppFuelFlow(params: {
         };
       }
       newPayload.route = textRaw.trim();
+      const regions = await listActiveFuelAdministrativeRegions();
+      newPayload.adminRegionOptions = regions.map((region) => ({
+        id: region.id,
+        name: region.name,
+      }));
+      return {
+        sendAction: await buildAdminRegionListAction(),
+        newStatus: 'FUEL_ASK_ADMIN_REGION',
+        newPayload,
+      };
+    }
+
+    case 'FUEL_ASK_ADMIN_REGION': {
+      const selected = parseRegionSelection(content, newPayload);
+      if (!selected) {
+        return {
+          sendAction: await buildAdminRegionListAction(),
+          newStatus,
+          newPayload,
+        };
+      }
+      newPayload.administrativeRegionId = selected.regionId;
+      newPayload.administrativeRegionName = selected.regionName;
       return {
         sendAction: waButtons(
           'Qual o CPF do condutor? (somente números — precisa estar cadastrado no sistema)',
@@ -246,18 +339,128 @@ export async function processWhatsAppFuelFlow(params: {
             `Identifiquei ${employee.name} (CPF ${employee.cpfMasked}).`,
             `Contrato: ${ctx.costCenterLabel}`,
             '',
-            'Qual o veículo? Informe placa ou identificação (ex.: ABC1D23 — Strada).',
+            'Informe os 2 últimos dígitos da placa do veículo.',
           ].join('\n'),
         ),
-        newStatus: 'FUEL_ASK_VEHICLE',
+        newStatus: 'FUEL_ASK_PLATE_SUFFIX',
         newPayload,
       };
     }
 
-    case 'FUEL_ASK_VEHICLE': {
-      if (textRaw.length < 2) {
+    case 'FUEL_ASK_PLATE_SUFFIX': {
+      const suffix = onlyDigits(textRaw);
+      if (suffix.length !== 2) {
         return {
-          sendAction: waButtons('Informe a placa ou identificação do veículo.'),
+          sendAction: waButtons('Informe exatamente os 2 últimos dígitos da placa (ex.: 23).'),
+          newStatus,
+          newPayload,
+        };
+      }
+
+      const matches = await findActiveVehiclesByPlateSuffix(suffix);
+      if (!matches.length) {
+        return {
+          sendAction: waButtons(
+            'Não encontrei veículo da frota com esse final de placa.\n\nInforme a placa completa do veículo (ex.: ABC1D23).',
+          ),
+          newStatus: 'FUEL_ASK_VEHICLE_MANUAL',
+          newPayload,
+        };
+      }
+
+      newPayload.vehicleOptions = matches.map((vehicle) => ({
+        id: vehicle.id,
+        plate: formatPlacaDisplay(vehicle.placaVeic),
+        description: [vehicle.marcaVeic, vehicle.modeloVeic].filter(Boolean).join(' ').trim() || undefined,
+      }));
+
+      if (matches.length === 1) {
+        const vehicle = matches[0];
+        newPayload.vehiclePlate = formatPlacaDisplay(vehicle.placaVeic);
+        newPayload.vehicleDescription =
+          [vehicle.marcaVeic, vehicle.modeloVeic].filter(Boolean).join(' ').trim() || undefined;
+        return {
+          sendAction: {
+            type: 'buttons',
+            body:
+              'É veículo particular (carro próprio do colaborador)?\n\n• Sim → passa pelo gestor\n• Não → vai direto ao Suprimentos',
+            buttons: [
+              { id: 'SIM', title: 'Sim' },
+              { id: 'NAO', title: 'Não' },
+              { id: 'MENU', title: 'Menu' },
+            ],
+          },
+          newStatus: 'FUEL_ASK_VEHICLE_TYPE',
+          newPayload,
+        };
+      }
+
+      return {
+        sendAction: waList(
+          'Encontrei estes veículos com esse final de placa. Selecione o correto:',
+          matches.map((vehicle) => ({
+            id: `fuel_vehicle_${vehicle.id}`,
+            title: formatVehiclePlateOptionLabel(
+              formatPlacaDisplay(vehicle.placaVeic),
+              [vehicle.marcaVeic, vehicle.modeloVeic].filter(Boolean).join(' ').trim(),
+            ),
+          })),
+          'Ver veículos',
+        ),
+        newStatus: 'FUEL_SELECT_VEHICLE',
+        newPayload,
+      };
+    }
+
+    case 'FUEL_SELECT_VEHICLE': {
+      const selected = parseVehicleSelection(content, newPayload);
+      if (!selected) {
+        const options =
+          (newPayload.vehicleOptions as Array<{ id: string; plate: string; description?: string }> | undefined) ??
+          [];
+        if (!options.length) {
+          return {
+            sendAction: waButtons('Selecione um veículo da lista ou informe os 2 dígitos novamente.'),
+            newStatus: 'FUEL_ASK_PLATE_SUFFIX',
+            newPayload,
+          };
+        }
+        return {
+          sendAction: waList(
+            'Selecione o veículo correto:',
+            options.map((vehicle) => ({
+              id: `fuel_vehicle_${vehicle.id}`,
+              title: formatVehiclePlateOptionLabel(vehicle.plate, vehicle.description),
+            })),
+            'Ver veículos',
+          ),
+          newStatus,
+          newPayload,
+        };
+      }
+
+      newPayload.vehiclePlate = selected.plate;
+      newPayload.vehicleDescription = selected.description;
+      return {
+        sendAction: {
+          type: 'buttons',
+          body:
+            'É veículo particular (carro próprio do colaborador)?\n\n• Sim → passa pelo gestor\n• Não → vai direto ao Suprimentos',
+          buttons: [
+            { id: 'SIM', title: 'Sim' },
+            { id: 'NAO', title: 'Não' },
+            { id: 'MENU', title: 'Menu' },
+          ],
+        },
+        newStatus: 'FUEL_ASK_VEHICLE_TYPE',
+        newPayload,
+      };
+    }
+
+    case 'FUEL_ASK_VEHICLE_MANUAL': {
+      if (textRaw.length < 5) {
+        return {
+          sendAction: waButtons('Informe a placa completa do veículo (ex.: ABC1D23).'),
           newStatus,
           newPayload,
         };
@@ -367,6 +570,7 @@ export async function processWhatsAppFuelFlow(params: {
         !requesterUserId ||
         !newPayload.refuelDate ||
         !newPayload.route ||
+        !newPayload.administrativeRegionId ||
         !(newPayload.costCenterLabel || newPayload.costCenter) ||
         !newPayload.driverName ||
         !newPayload.vehiclePlate ||
@@ -385,6 +589,7 @@ export async function processWhatsAppFuelFlow(params: {
         requesterId: requesterUserId,
         refuelDate: new Date(`${newPayload.refuelDate}T12:00:00`),
         route: String(newPayload.route),
+        administrativeRegionId: String(newPayload.administrativeRegionId),
         costCenter: String(newPayload.costCenterLabel || newPayload.costCenter),
         driverName: String(newPayload.driverName),
         vehiclePlate: String(newPayload.vehiclePlate),
@@ -403,11 +608,15 @@ export async function processWhatsAppFuelFlow(params: {
         await notifyFuelRequesterWaitingSupplies(null, created.displayNumber, phone);
       }
 
+      const slaLine = await buildFuelSubmissionSlaLine();
+
       return {
         sendAction: {
           type: 'buttons',
           body: [
             `Solicitação #${created.displayNumber} registrada com sucesso!`,
+            slaLine,
+            '',
             'Você receberá atualizações aqui no WhatsApp conforme a solicitação avançar.',
           ].join('\n'),
           buttons: [

@@ -1,10 +1,16 @@
 import {
+  FuelRefuelDeadlineUnit,
   FuelRefuelRequestStatus,
   FuelTankLevelAfter,
   FuelVehicleType,
   Prisma,
 } from '@prisma/client';
 import { resolveFuelPhotoViewUrl } from '../lib/fuelPhotoStorage';
+import { getFuelGasStationInRegion } from '../lib/fuelAdministrativeRegions';
+import {
+  computeRefuelDeadlineAt,
+  formatRefuelDeadlineLabel,
+} from '../lib/fuelSuppliesSla';
 import { prisma } from '../lib/prisma';
 import { createError } from '../middleware/errorHandler';
 import {
@@ -18,6 +24,7 @@ export type CreateFuelRefuelRequestInput = {
   requesterId: string;
   refuelDate: Date;
   route: string;
+  administrativeRegionId?: string | null;
   contractId?: string | null;
   costCenter?: string | null;
   driverName: string;
@@ -32,8 +39,17 @@ export type CreateFuelRefuelRequestInput = {
   sourceWhatsAppPhone?: string | null;
 };
 
+export type SuppliesApproveFuelRefuelInput = {
+  gasStationId: string;
+  refuelDeadlineAmount: number;
+  refuelDeadlineUnit: FuelRefuelDeadlineUnit;
+  comment?: string | null;
+};
+
 const fuelRefuelInclude = {
   requester: { select: { id: true, name: true, email: true } },
+  administrativeRegion: { select: { id: true, code: true, name: true } },
+  gasStation: { select: { id: true, name: true, address: true } },
   contract: {
     select: {
       id: true,
@@ -105,6 +121,15 @@ export class FuelRefuelRequestService {
       if (!contract) throw createError('Contrato não encontrado', 404);
     }
 
+    const administrativeRegionId = input.administrativeRegionId?.trim() || null;
+    if (administrativeRegionId) {
+      const region = await prisma.fuelAdministrativeRegion.findFirst({
+        where: { id: administrativeRegionId, isActive: true },
+        select: { id: true },
+      });
+      if (!region) throw createError('Região administrativa inválida', 400);
+    }
+
     return prisma.$transaction(async (tx) => {
       const agg = await tx.fuelRefuelRequest.aggregate({ _max: { displayNumber: true } });
       const nextDisplay = (agg._max.displayNumber ?? 0) + 1;
@@ -115,6 +140,7 @@ export class FuelRefuelRequestService {
           requesterId: input.requesterId,
           refuelDate: input.refuelDate,
           route: input.route.trim(),
+          administrativeRegionId,
           costCenter,
           contractId,
           driverName: input.driverName.trim(),
@@ -269,19 +295,48 @@ export class FuelRefuelRequestService {
     });
   }
 
-  async suppliesApprove(id: string, suppliesUserId: string, comment?: string) {
+  async suppliesApprove(
+    id: string,
+    suppliesUserId: string,
+    input: SuppliesApproveFuelRefuelInput,
+  ) {
     const row = await this.getById(id);
     if (row.status !== FuelRefuelRequestStatus.PENDING_SUPPLIES) {
       throw createError('Esta solicitação não está aguardando aprovação do Suprimentos', 400);
     }
+    if (!row.administrativeRegionId) {
+      throw createError('Solicitação sem região administrativa definida', 400);
+    }
+
+    const amount = Math.trunc(input.refuelDeadlineAmount);
+    if (!Number.isFinite(amount) || amount < 1) {
+      throw createError('Informe o prazo para abastecer (mínimo 1)', 400);
+    }
+    if (amount > 365) {
+      throw createError('Prazo para abastecer inválido', 400);
+    }
+
+    const gasStation = await getFuelGasStationInRegion(
+      input.gasStationId,
+      row.administrativeRegionId,
+    );
+    if (!gasStation) {
+      throw createError('Selecione um posto da região administrativa da solicitação', 400);
+    }
+
+    const refuelDeadlineAt = computeRefuelDeadlineAt(amount, input.refuelDeadlineUnit);
 
     const updated = await prisma.fuelRefuelRequest.update({
       where: { id },
       data: {
         status: FuelRefuelRequestStatus.AWAITING_REFUEL,
+        gasStationId: gasStation.id,
+        refuelDeadlineAt,
+        refuelDeadlineAmount: amount,
+        refuelDeadlineUnit: input.refuelDeadlineUnit,
         suppliesApprovedBy: suppliesUserId,
         suppliesApprovedAt: new Date(),
-        suppliesApprovalComment: comment?.trim() || null,
+        suppliesApprovalComment: input.comment?.trim() || null,
       },
       include: fuelRefuelInclude,
     });
@@ -289,7 +344,13 @@ export class FuelRefuelRequestService {
     await notifyFuelRequesterApprovedBySupplies(
       updated.sourceChatId,
       updated.displayNumber,
-      updated.suppliesApprovalComment,
+      {
+        gasStationName: gasStation.name,
+        gasStationAddress: gasStation.address,
+        refuelDeadlineLabel: formatRefuelDeadlineLabel(amount, input.refuelDeadlineUnit),
+        refuelDeadlineAt,
+        comment: updated.suppliesApprovalComment,
+      },
       updated.sourceWhatsAppPhone,
     );
     return updated;

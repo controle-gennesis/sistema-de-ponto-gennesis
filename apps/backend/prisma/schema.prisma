@@ -295,6 +295,8 @@ model CompanySettings {
   defaultLatitude     Float    @default(-23.5505)
   defaultLongitude    Float    @default(-46.6333)
   vacationDaysPerYear Int      @default(30)
+  /// Prazo informado ao solicitante de combustível (horas úteis até atendimento do Suprimentos)
+  fuelSuppliesSlaHours Int     @default(24)
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
@@ -2836,6 +2838,47 @@ model GennecyChatFlowSession {
   @@map("gennecy_chat_flow_sessions")
 }
 
+enum FuelRefuelDeadlineUnit {
+  HOURS
+  DAYS
+}
+
+/// Região administrativa para abastecimento (origem da rota).
+model FuelAdministrativeRegion {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  name      String
+  isActive  Boolean  @default(true)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  gasStations FuelGasStation[]
+  requests    FuelRefuelRequest[]
+
+  @@index([isActive])
+  @@map("fuel_administrative_regions")
+}
+
+/// Posto de combustível vinculado a uma região administrativa.
+model FuelGasStation {
+  id        String   @id @default(cuid())
+  regionId  String
+  name      String
+  address   String?
+  isActive  Boolean  @default(true)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  region   FuelAdministrativeRegion @relation(fields: [regionId], references: [id], onDelete: Restrict)
+  requests FuelRefuelRequest[]
+
+  @@index([regionId])
+  @@index([isActive])
+  @@map("fuel_gas_stations")
+}
+
 /// Solicitação de abastecimento de combustível (espelho do AppSheet tb solicitAbast).
 model FuelRefuelRequest {
   id            String @id @default(cuid())
@@ -2847,6 +2890,10 @@ model FuelRefuelRequest {
   requestedAt DateTime @default(now())
   refuelDate  DateTime
   route       String
+  administrativeRegionId String?
+  administrativeRegion   FuelAdministrativeRegion? @relation(fields: [administrativeRegionId], references: [id], onDelete: SetNull)
+  gasStationId           String?
+  gasStation             FuelGasStation? @relation(fields: [gasStationId], references: [id], onDelete: SetNull)
   costCenter  String?
   contractId  String?
   contract    Contract? @relation(fields: [contractId], references: [id], onDelete: Restrict)
@@ -2875,6 +2922,10 @@ model FuelRefuelRequest {
   suppliesApprovedAt      DateTime?
   suppliesApprovalComment String?
   suppliesRejectionReason String?
+  /// Prazo para o solicitante realizar o abastecimento após liberação do Suprimentos
+  refuelDeadlineAt        DateTime?
+  refuelDeadlineAmount    Int?
+  refuelDeadlineUnit      FuelRefuelDeadlineUnit?
 
   refuelReportedAt        DateTime?
   odometerKm              Int?
@@ -2894,6 +2945,8 @@ model FuelRefuelRequest {
 
   @@index([requesterId])
   @@index([contractId])
+  @@index([administrativeRegionId])
+  @@index([gasStationId])
   @@index([status])
   @@index([refuelDate])
   @@map("fuel_refuel_requests")

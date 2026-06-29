@@ -9,6 +9,11 @@ import {
   getManagerFuelApprovalContractScope,
 } from '../lib/fuelApprovalAccess';
 import { assertUserHasFuelSuppliesAccess } from '../lib/fuelSuppliesAccess';
+import {
+  listActiveFuelAdministrativeRegions,
+  listActiveFuelGasStationsByRegion,
+} from '../lib/fuelAdministrativeRegions';
+import { getFuelSuppliesSlaHours } from '../lib/fuelSuppliesSla';
 
 const listQuerySchema = z.object({
   search: z.string().optional(),
@@ -42,6 +47,13 @@ const approveSchema = z.object({
   comment: z.string().optional(),
 });
 
+const suppliesApproveSchema = z.object({
+  comment: z.string().optional(),
+  gasStationId: z.string().min(1, 'Selecione o posto para abastecimento'),
+  refuelDeadlineAmount: z.coerce.number().int().min(1).max(365),
+  refuelDeadlineUnit: z.enum(['HOURS', 'DAYS']),
+});
+
 const rejectSchema = z.object({
   reason: z.string().min(1, 'Informe o motivo da rejeição'),
   comment: z.string().optional(),
@@ -56,6 +68,48 @@ function mapManagerScopeToFuelWhere(
 }
 
 export class FuelRefuelRequestController {
+  async listAdministrativeRegions(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const user = req.user;
+      if (!user) throw createError('Usuário não autenticado', 401);
+      await assertUserHasFuelSuppliesAccess(user.id, user.isAdmin);
+
+      const rows = await listActiveFuelAdministrativeRegions();
+      res.json({ success: true, data: rows });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async listGasStationsByRegion(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const user = req.user;
+      if (!user) throw createError('Usuário não autenticado', 401);
+      await assertUserHasFuelSuppliesAccess(user.id, user.isAdmin);
+
+      const regionId = String(req.params.regionId || '').trim();
+      if (!regionId) throw createError('Região inválida', 400);
+
+      const rows = await listActiveFuelGasStationsByRegion(regionId);
+      res.json({ success: true, data: rows });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async getSuppliesSla(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const user = req.user;
+      if (!user) throw createError('Usuário não autenticado', 401);
+      await assertUserHasFuelSuppliesAccess(user.id, user.isAdmin);
+
+      const hours = await getFuelSuppliesSlaHours();
+      res.json({ success: true, data: { fuelSuppliesSlaHours: hours } });
+    } catch (error) {
+      next(error);
+    }
+  }
+
   async list(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const user = req.user;
@@ -177,13 +231,14 @@ export class FuelRefuelRequestController {
       if (!user) throw createError('Usuário não autenticado', 401);
       await assertUserHasFuelSuppliesAccess(user.id, user.isAdmin);
 
-      const body = approveSchema.parse(req.body);
-      const row = await fuelRefuelRequestService.suppliesApprove(
-        req.params.id,
-        user.id,
-        body.comment,
-      );
-      res.json({ success: true, data: row, message: 'Solicitação aprovada — colaborador pode abastecer' });
+      const body = suppliesApproveSchema.parse(req.body);
+      const row = await fuelRefuelRequestService.suppliesApprove(req.params.id, user.id, {
+        gasStationId: body.gasStationId,
+        refuelDeadlineAmount: body.refuelDeadlineAmount,
+        refuelDeadlineUnit: body.refuelDeadlineUnit,
+        comment: body.comment,
+      });
+      res.json({ success: true, data: row, message: 'Solicitação atendida — colaborador liberado para abastecer' });
     } catch (error) {
       next(error);
     }
