@@ -391,8 +391,8 @@ export default function RegioesPostosCombustivelPage() {
                       <colgroup>
                         <col className="w-[4.5rem]" />
                         <col />
-                        <col className="w-[8rem]" />
-                        <col className="w-[12rem]" />
+                        <col className="w-[18rem] sm:w-[22rem]" />
+                        <col className="w-[7rem]" />
                         <col className="w-[6rem]" />
                         <col className="w-[4.5rem]" />
                       </colgroup>
@@ -404,11 +404,11 @@ export default function RegioesPostosCombustivelPage() {
                           <th scope="col" className={`${cadastroListClasses.th} min-w-[12rem]`}>
                             Nome
                           </th>
-                          <th scope="col" className={cadastroListClasses.th}>
-                            Cidade
+                          <th scope="col" className={`${cadastroListClasses.th} min-w-[14rem]`}>
+                            Endereço
                           </th>
                           <th scope="col" className={cadastroListClasses.th}>
-                            Endereço
+                            Cidade
                           </th>
                           <th scope="col" className={cadastroListClasses.thCenter}>
                             Status
@@ -427,11 +427,13 @@ export default function RegioesPostosCombustivelPage() {
                                 {station.name}
                               </span>
                             </td>
-                            <td className={cadastroListClasses.td}>
-                              {station.city?.name ?? station.cityCode}
+                            <td className={`${cadastroListClasses.tdTruncate} min-w-[14rem]`}>
+                              <span className="block whitespace-normal break-words text-sm text-gray-900 dark:text-gray-100">
+                                {station.address || '—'}
+                              </span>
                             </td>
                             <td className={cadastroListClasses.td}>
-                              {station.address || '—'}
+                              {station.city?.name ?? station.cityCode}
                             </td>
                             <td className={cadastroListClasses.tdCenter}>
                               <span
