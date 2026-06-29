@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -176,6 +176,8 @@ interface PurchaseOrderOption {
     } | null;
   } | null;
   items?: Array<{
+    materialId?: string;
+    quantity?: number | string | null;
     totalPrice?: number | string | null;
   }>;
 }
@@ -249,6 +251,197 @@ function getAlreadyMovedQuantityForOcMaterial(
     if (!ocMatch?.[1] || ocMatch[1].trim().toLowerCase() !== ocLower) return sum;
     return sum + (Number(mov.quantity) || 0);
   }, 0);
+}
+
+function getOcMaterialMovementAvailability(
+  movements: StockMovement[],
+  ocNumber: string,
+  movementType: 'IN' | 'OUT',
+  materialId: string,
+  orderedQuantity: number
+): {
+  referenceQuantity: number;
+  remaining: number;
+} {
+  const qtyIn = getAlreadyMovedQuantityForOcMaterial(movements, ocNumber, 'IN', materialId);
+  const qtyOut = getAlreadyMovedQuantityForOcMaterial(movements, ocNumber, 'OUT', materialId);
+
+  if (movementType === 'OUT') {
+    return {
+      referenceQuantity: qtyIn,
+      remaining: Math.max(0, qtyIn - qtyOut),
+    };
+  }
+
+  return {
+    referenceQuantity: orderedQuantity,
+    remaining: Math.max(0, orderedQuantity - qtyIn),
+  };
+}
+
+type OcMovementDropdownStatus = {
+  label: string;
+  labelClassName: string;
+};
+
+function formatOcShortNumber(orderNumber: string): string {
+  const trimmed = orderNumber.trim();
+  const match = trimmed.match(/(\d+)$/);
+  if (!match) return trimmed;
+  const num = parseInt(match[1], 10);
+  return Number.isNaN(num) ? trimmed : String(num);
+}
+
+function maskOcMovementQuantityInput(raw: string): string {
+  const cleaned = raw.replace(/[^\d,]/g, '');
+  const commaPos = cleaned.indexOf(',');
+  if (commaPos < 0) return cleaned;
+
+  const intPart = cleaned.slice(0, commaPos);
+  const decPart = cleaned.slice(commaPos + 1).replace(/,/g, '').slice(0, 2);
+  if (raw.includes(',') && decPart.length === 0) {
+    return `${intPart},`;
+  }
+  return decPart.length > 0 ? `${intPart},${decPart}` : intPart;
+}
+
+function parseOcMovementQuantityInput(value: string): number | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const normalized = trimmed.includes(',')
+    ? trimmed.replace(/\./g, '').replace(',', '.')
+    : trimmed;
+  const parsed = parseFloat(normalized);
+  if (!Number.isFinite(parsed)) return null;
+  return Math.round(parsed * 100) / 100;
+}
+
+function formatOcMovementQuantityInput(value: number): string {
+  if (!Number.isFinite(value) || value < 0) return '';
+  return value.toLocaleString('pt-BR', { maximumFractionDigits: 2, useGrouping: false });
+}
+
+function clampOcMovementQuantityInput(raw: string, maxQuantity: number): string {
+  const masked = maskOcMovementQuantityInput(raw);
+  if (!Number.isFinite(maxQuantity) || maxQuantity < 0) return masked;
+
+  const parsed = parseOcMovementQuantityInput(masked);
+  if (parsed == null) return masked;
+
+  if (parsed > maxQuantity + 0.0001) {
+    return formatOcMovementQuantityInput(maxQuantity);
+  }
+  return masked;
+}
+
+function hasTotalOcMovementOfType(
+  movements: StockMovement[],
+  ocNumber: string,
+  type: 'IN' | 'OUT'
+): boolean {
+  const ocLower = ocNumber.trim().toLowerCase();
+  return movements.some((movement) => {
+    if (movement.type !== type || !movement.notes) return false;
+    const ocMatch = movement.notes.match(/Nº OC:\s*([^\n|]+)/i);
+    const splitMatch = movement.notes.match(/Tipo:\s*(TOTAL|PARCIAL)/i);
+    if (!ocMatch?.[1] || ocMatch[1].trim().toLowerCase() !== ocLower) return false;
+    return splitMatch?.[1]?.toUpperCase() === 'TOTAL';
+  });
+}
+
+function ocHasAnyMovementOfType(
+  movements: StockMovement[],
+  ocNumber: string,
+  type: 'IN' | 'OUT'
+): boolean {
+  const ocLower = ocNumber.trim().toLowerCase();
+  return movements.some((movement) => {
+    if (movement.type !== type) return false;
+    const notes = movement.notes || '';
+    const ocMatch = notes.match(/Nº OC:\s*([^\n|]+)/i);
+    return ocMatch?.[1]?.trim().toLowerCase() === ocLower;
+  });
+}
+
+function isOcInboundComplete(
+  movements: StockMovement[],
+  ocNumber: string,
+  items?: Array<{ materialId?: string; quantity?: number | string | null }>
+): boolean {
+  if (hasTotalOcMovementOfType(movements, ocNumber, 'IN')) return true;
+  if (!items?.length) return false;
+  return items.every((item) => {
+    const materialId = item.materialId || '';
+    if (!materialId) return false;
+    const orderedQuantity = Number(item.quantity) || 0;
+    if (orderedQuantity <= 0) return true;
+    const moved = getAlreadyMovedQuantityForOcMaterial(movements, ocNumber, 'IN', materialId);
+    return moved >= orderedQuantity - 0.0001;
+  });
+}
+
+function isOcOutboundComplete(
+  movements: StockMovement[],
+  ocNumber: string,
+  items?: Array<{ materialId?: string; quantity?: number | string | null }>
+): boolean {
+  if (hasTotalOcMovementOfType(movements, ocNumber, 'OUT')) return true;
+  if (!items?.length) return false;
+  return items.every((item) => {
+    const materialId = item.materialId || '';
+    if (!materialId) return false;
+    const qtyIn = getAlreadyMovedQuantityForOcMaterial(movements, ocNumber, 'IN', materialId);
+    if (qtyIn <= 0) return true;
+    const qtyOut = getAlreadyMovedQuantityForOcMaterial(movements, ocNumber, 'OUT', materialId);
+    return qtyOut >= qtyIn - 0.0001;
+  });
+}
+
+function getOcMovementDropdownStatus(
+  movements: StockMovement[],
+  ocNumber: string,
+  movementType: '' | 'IN' | 'OUT',
+  items?: Array<{ materialId?: string; quantity?: number | string | null }>
+): OcMovementDropdownStatus {
+  const hasIn = ocHasAnyMovementOfType(movements, ocNumber, 'IN');
+  const hasOut = ocHasAnyMovementOfType(movements, ocNumber, 'OUT');
+  const inboundComplete = isOcInboundComplete(movements, ocNumber, items);
+  const outboundComplete = isOcOutboundComplete(movements, ocNumber, items);
+
+  const partialStatus = {
+    labelClassName: 'text-amber-600 dark:text-amber-400',
+  };
+  const completeStatus = {
+    labelClassName: 'text-emerald-600 dark:text-emerald-400',
+  };
+  const noneStatus = {
+    labelClassName: 'text-gray-500 dark:text-gray-400',
+  };
+
+  if (movementType === 'IN') {
+    if (!hasIn) return { label: 'Não movimentada', ...noneStatus };
+    if (inboundComplete) return { label: 'Entrada concluída', ...completeStatus };
+    return { label: 'Entrada parcial', ...partialStatus };
+  }
+
+  if (movementType === 'OUT') {
+    if (!hasIn) return { label: 'Sem entrada', ...noneStatus };
+    if (outboundComplete) return { label: 'Saída concluída', ...completeStatus };
+    if (hasOut) return { label: 'Saída parcial', ...partialStatus };
+    return {
+      label: 'Disponível para saída',
+      labelClassName: 'text-sky-600 dark:text-sky-400',
+    };
+  }
+
+  if (!hasIn && !hasOut) return { label: 'Não movimentada', ...noneStatus };
+  if (inboundComplete && outboundComplete) {
+    return { label: 'Entrada e saída concluídas', ...completeStatus };
+  }
+  if (hasIn && hasOut) return { label: 'Entrada e saída parciais', ...partialStatus };
+  if (hasIn && inboundComplete) return { label: 'Entrada concluída', ...completeStatus };
+  if (hasIn) return { label: 'Entrada parcial', ...partialStatus };
+  return { label: 'Movimentada', ...partialStatus };
 }
 
 function ocMovementItemsEqual(a: OcMovementItemState[], b: OcMovementItemState[]): boolean {
@@ -683,8 +876,8 @@ export default function EstoquePage() {
     const payloads: MovementPayload[] = [];
 
     for (const item of selectedItems) {
-      const parsedQuantity = parseFloat(item.quantity.replace(',', '.'));
-      if (Number.isNaN(parsedQuantity) || parsedQuantity <= 0) {
+      const parsedQuantity = parseOcMovementQuantityInput(item.quantity);
+      if (parsedQuantity == null || parsedQuantity <= 0) {
         toast.error(`Quantidade inválida para ${item.materialName}`);
         return;
       }
@@ -693,17 +886,20 @@ export default function EstoquePage() {
         return;
       }
 
-      if (formData.movementSplit === 'PARCIAL' && formData.type) {
-        const alreadyMoved = getAlreadyMovedQuantityForOcMaterial(
+      if (formData.type) {
+        const orderedQuantity = item.originalQuantity;
+        const { remaining } = getOcMaterialMovementAvailability(
           movementsForOc,
           trimmedOcNumber,
           formData.type,
-          item.materialId
+          item.materialId,
+          orderedQuantity
         );
-        const remaining = Math.max(0, item.originalQuantity - alreadyMoved);
         if (parsedQuantity > remaining) {
+          const limitLabel =
+            formData.type === 'OUT' ? 'disponível para saída' : 'restante da OC';
           toast.error(
-            `Quantidade maior que o restante da OC (${remaining} ${item.unit}) para ${item.materialName}`
+            `Quantidade maior que o ${limitLabel} (${remaining} ${item.unit}) para ${item.materialName}`
           );
           return;
         }
@@ -1061,11 +1257,21 @@ export default function EstoquePage() {
 
   const ocDropdownOptions = useMemo(
     () =>
-      ocOptionsForSelectedContract.map((order) => ({
-        value: order.orderNumber,
-        label: order.orderNumber,
-      })),
-    [ocOptionsForSelectedContract]
+      ocOptionsForSelectedContract.map((order) => {
+        const status = getOcMovementDropdownStatus(
+          movementsForOc,
+          order.orderNumber,
+          formData.type as '' | 'IN' | 'OUT',
+          order.items
+        );
+        return {
+          value: order.orderNumber,
+          label: `${formatOcShortNumber(order.orderNumber)} · ${status.label}`,
+          searchText: `${order.orderNumber} ${formatOcShortNumber(order.orderNumber)} ${status.label}`,
+          labelClassName: status.labelClassName,
+        };
+      }),
+    [ocOptionsForSelectedContract, movementsForOc, formData.type]
   );
 
   const handleContractChange = (costCenterId: string) => {
@@ -1124,26 +1330,32 @@ export default function EstoquePage() {
       const nextItems = detail.items.map((item, index) => {
         const key = `${item.materialId}-${index}`;
         const prevRow = prev.find((row) => row.key === key);
-        const originalQuantity = Number(item.quantity || 0);
+        const orderedQuantity = Number(item.quantity || 0);
         const materialName = item.material?.name || `Material ${index + 1}`;
         const resolvedMaterialId =
           constructionMaterialIdFromSinapiCode(item.material?.sinapiCode) ||
           constructionMaterialIdByName.get(normalizeMaterialName(materialName)) ||
           '';
-        const alreadyMoved = resolvedMaterialId
-          ? getAlreadyMovedQuantityForOcMaterial(
+        const { referenceQuantity, remaining } = resolvedMaterialId
+          ? getOcMaterialMovementAvailability(
               movementsForOc,
               ocNumber,
               movementType,
-              resolvedMaterialId
+              resolvedMaterialId,
+              orderedQuantity
             )
-          : 0;
-        const remaining = Math.max(0, originalQuantity - alreadyMoved);
-        const defaultQuantity = String(remaining > 0 ? remaining : originalQuantity);
+          : { referenceQuantity: orderedQuantity, remaining: 0 };
+        const defaultQuantity = String(remaining > 0 ? remaining : movementType === 'OUT' ? 0 : referenceQuantity);
         const preservePartialEdits =
           movementSplit === 'PARCIAL' &&
           prevRow &&
           prev.length === detail.items.length;
+        const preservedQuantity =
+          preservePartialEdits && prevRow.checked ? prevRow.quantity : defaultQuantity;
+        const clampedQuantity =
+          movementSplit === 'PARCIAL' && remaining > 0
+            ? clampOcMovementQuantityInput(preservedQuantity, remaining)
+            : preservedQuantity;
 
         return {
           key,
@@ -1151,8 +1363,8 @@ export default function EstoquePage() {
           unresolvedMaterialId: !resolvedMaterialId,
           materialName,
           unit: item.unit || '-',
-          originalQuantity,
-          quantity: preservePartialEdits && prevRow.checked ? prevRow.quantity : defaultQuantity,
+          originalQuantity: referenceQuantity,
+          quantity: clampedQuantity,
           checked:
             movementSplit === 'TOTAL'
               ? remaining > 0
@@ -2266,16 +2478,16 @@ export default function EstoquePage() {
                   <div className="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-600 divide-y divide-gray-200 dark:divide-gray-700">
                     {ocMovementItems.map((item) => {
                       const itemDisabled = formData.movementSplit === 'TOTAL';
-                      const alreadyMoved =
+                      const { referenceQuantity, remaining } =
                         item.materialId && formData.type
-                          ? getAlreadyMovedQuantityForOcMaterial(
+                          ? getOcMaterialMovementAvailability(
                               movementsForOc,
                               formData.ocNumber.trim(),
                               formData.type,
-                              item.materialId
+                              item.materialId,
+                              item.originalQuantity
                             )
-                          : 0;
-                      const remaining = Math.max(0, item.originalQuantity - alreadyMoved);
+                          : { referenceQuantity: item.originalQuantity, remaining: 0 };
                       const itemFullyMoved = remaining <= 0;
                       const checkboxDisabled = itemDisabled || itemFullyMoved || item.unresolvedMaterialId;
                       return (
@@ -2314,8 +2526,12 @@ export default function EstoquePage() {
                               {!item.unresolvedMaterialId && formData.movementSplit === 'PARCIAL' && (
                                 <span className="text-xs text-gray-500 dark:text-gray-400">
                                   {itemFullyMoved
-                                    ? 'Quantidade desta OC já movimentada'
-                                    : `Restante na OC: ${remaining} ${item.unit} (de ${item.originalQuantity})`}
+                                    ? formData.type === 'OUT'
+                                      ? 'Toda a entrada desta OC já foi retirada'
+                                      : 'Quantidade desta OC já movimentada'
+                                    : formData.type === 'OUT'
+                                      ? `Disponível para saída: ${remaining} ${item.unit} (entrada na OC: ${referenceQuantity})`
+                                      : `Restante na OC: ${remaining} ${item.unit} (de ${referenceQuantity})`}
                                 </span>
                               )}
                             </span>
@@ -2326,13 +2542,33 @@ export default function EstoquePage() {
                               inputMode="decimal"
                               value={item.quantity}
                               disabled={checkboxDisabled || !item.checked}
-                              onChange={(e) =>
+                              onChange={(e) => {
+                                const nextQuantity = clampOcMovementQuantityInput(
+                                  e.target.value,
+                                  remaining
+                                );
                                 setOcMovementItems((prev) =>
                                   prev.map((row) =>
-                                    row.key === item.key ? { ...row, quantity: e.target.value } : row
+                                    row.key === item.key ? { ...row, quantity: nextQuantity } : row
                                   )
-                                )
-                              }
+                                );
+                              }}
+                              onBlur={() => {
+                                setOcMovementItems((prev) =>
+                                  prev.map((row) => {
+                                    if (row.key !== item.key) return row;
+                                    const parsed = parseOcMovementQuantityInput(row.quantity);
+                                    if (parsed == null) return row;
+                                    if (parsed > remaining + 0.0001) {
+                                      return {
+                                        ...row,
+                                        quantity: formatOcMovementQuantityInput(remaining),
+                                      };
+                                    }
+                                    return row;
+                                  })
+                                );
+                              }}
                               className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 transition-colors focus:border-red-500 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:focus:border-red-400"
                             />
                           </div>

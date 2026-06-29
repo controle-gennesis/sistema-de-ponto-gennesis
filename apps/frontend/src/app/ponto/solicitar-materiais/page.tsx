@@ -320,33 +320,69 @@ function validateNewMaterialRequestForm(formData: NewMaterialRequestFormData): s
     if (!item.materialId.trim()) {
       return `Selecione o material do item ${index + 1}.`;
     }
+    const qty = Number(item.quantity);
+    if (!Number.isFinite(qty) || qty <= 0) {
+      return `Informe a quantidade do item ${index + 1}.`;
+    }
   }
 
   return null;
 }
 
 const rmNumberInputClass =
-  'min-w-0 flex-1 bg-transparent px-3 py-2 text-sm text-gray-900 tabular-nums outline-none dark:text-gray-100 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [-moz-appearance:textfield]';
+  'min-w-0 flex-1 bg-transparent px-3 py-2 text-sm text-gray-900 tabular-nums outline-none dark:text-gray-100';
 
 const rmNumberInputClassSm =
-  'min-w-0 flex-1 bg-transparent px-2 py-1.5 text-sm text-gray-900 tabular-nums outline-none dark:text-gray-100 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [-moz-appearance:textfield]';
+  'min-w-0 flex-1 bg-transparent px-2 py-1.5 text-sm text-gray-900 tabular-nums outline-none dark:text-gray-100';
+
+function formatQuantityInputBr(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value) || value <= 0) return '';
+  return value.toLocaleString('pt-BR', { maximumFractionDigits: 2, useGrouping: false });
+}
+
+function maskQuantityInputBr(raw: string): string {
+  const cleaned = raw.replace(/[^\d,]/g, '');
+  const commaPos = cleaned.indexOf(',');
+  if (commaPos < 0) return cleaned;
+
+  const intPart = cleaned.slice(0, commaPos);
+  const decPart = cleaned.slice(commaPos + 1).replace(/,/g, '').slice(0, 2);
+  if (raw.includes(',') && decPart.length === 0) {
+    return `${intPart},`;
+  }
+  return decPart.length > 0 ? `${intPart},${decPart}` : intPart;
+}
+
+function parseQuantityInputBr(value: string): number | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const normalized = trimmed.includes(',')
+    ? trimmed.replace(/\./g, '').replace(',', '.')
+    : trimmed;
+  const parsed = parseFloat(normalized);
+  if (!Number.isFinite(parsed)) return null;
+  return Math.round(parsed * 100) / 100;
+}
 
 function RmQuantityInput({
   value,
   onChange,
   unit,
-  min = 1,
   required = false,
   size = 'md'
 }: {
   value: number;
   onChange: (value: number) => void;
   unit?: string;
-  min?: number;
   required?: boolean;
   size?: 'md' | 'sm';
 }) {
-  const normalized = Number.isFinite(Number(value)) ? Math.max(min, Math.floor(Number(value))) : min;
+  const [text, setText] = useState(() => formatQuantityInputBr(value));
+
+  useEffect(() => {
+    setText(formatQuantityInputBr(value));
+  }, [value]);
+
   const shellClass =
     size === 'sm'
       ? 'flex overflow-hidden rounded border border-gray-300 bg-white dark:border-gray-600 dark:bg-gray-800'
@@ -358,21 +394,44 @@ function RmQuantityInput({
       ? 'flex shrink-0 items-center border-l border-gray-300 px-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:border-gray-600 dark:text-gray-400'
       : 'flex shrink-0 items-center border-l border-gray-300 px-2.5 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:border-gray-600 dark:text-gray-400';
 
+  const commitValue = (parsed: number | null) => {
+    if (parsed != null && parsed > 0) {
+      onChange(parsed);
+      setText(formatQuantityInputBr(parsed));
+      return;
+    }
+    onChange(0);
+    setText('');
+  };
+
   const bump = (delta: number) => {
-    onChange(Math.max(min, normalized + delta));
+    const current = parseQuantityInputBr(text);
+    const base =
+      current != null && current > 0
+        ? current
+        : Number.isFinite(value) && value > 0
+          ? value
+          : 0;
+    const next = Math.round((base + delta) * 100) / 100;
+    if (next <= 0) {
+      onChange(0);
+      setText('');
+      return;
+    }
+    onChange(next);
+    setText(formatQuantityInputBr(next));
   };
 
   return (
     <div className={shellClass}>
       <input
-        type="number"
+        type="text"
+        inputMode="decimal"
         required={required}
-        min={min}
-        value={normalized}
-        onChange={(e) => {
-          const parsed = parseInt(e.target.value, 10);
-          onChange(Number.isFinite(parsed) && parsed >= min ? parsed : min);
-        }}
+        value={text}
+        placeholder="0"
+        onChange={(e) => setText(maskQuantityInputBr(e.target.value))}
+        onBlur={() => commitValue(parseQuantityInputBr(text))}
         className={size === 'sm' ? rmNumberInputClassSm : rmNumberInputClass}
       />
       <span className={unitClass}>{unit?.trim() || '—'}</span>
@@ -1014,7 +1073,10 @@ function SolicitarMateriaisPage() {
                 attachmentName?: string | null;
               }) => ({
                 materialId: it.materialId || it.material?.id || '',
-                quantity: Math.max(1, Math.floor(Number(it.quantity)) || 1),
+                quantity: (() => {
+                  const q = Number(it.quantity);
+                  return Number.isFinite(q) && q > 0 ? q : 1;
+                })(),
                 unit: it.unit || it.material?.unit || '',
                 observation: it.notes || '',
                 attachmentUrl: it.attachmentUrl || '',
@@ -2172,7 +2234,10 @@ function SolicitarMateriaisPage() {
                                   'Material';
                                 const qty =
                                   it.quantity !== undefined && it.quantity !== null
-                                    ? String(it.quantity)
+                                    ? Number(it.quantity).toLocaleString('pt-BR', {
+                                        maximumFractionDigits: 2,
+                                        useGrouping: false,
+                                      })
                                     : '—';
                                 const unit = it.unit ? String(it.unit) : '';
                                 return (

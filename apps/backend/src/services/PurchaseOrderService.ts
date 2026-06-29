@@ -663,6 +663,8 @@ export class PurchaseOrderService {
     supplierId?: string;
     materialRequestId?: string;
     costCenterId?: string;
+    serviceOrderId?: string;
+    serviceOrderText?: string;
     orderDateFrom?: string;
     orderDateTo?: string;
     q?: string;
@@ -675,6 +677,25 @@ export class PurchaseOrderService {
 
     if (filters.costCenterId) {
       andParts.push({ materialRequest: { costCenterId: filters.costCenterId } });
+    }
+
+    const serviceOrderParts: object[] = [];
+    if (filters.serviceOrderId?.trim()) {
+      serviceOrderParts.push({
+        materialRequest: { serviceOrderId: filters.serviceOrderId.trim() }
+      });
+    }
+    if (filters.serviceOrderText?.trim()) {
+      serviceOrderParts.push({
+        materialRequest: {
+          serviceOrder: { equals: filters.serviceOrderText.trim(), mode: 'insensitive' as const }
+        }
+      });
+    }
+    if (serviceOrderParts.length === 1) {
+      andParts.push(serviceOrderParts[0]);
+    } else if (serviceOrderParts.length > 1) {
+      andParts.push({ OR: serviceOrderParts });
     }
 
     if (filters.status) {
@@ -729,6 +750,8 @@ export class PurchaseOrderService {
     supplierId?: string;
     materialRequestId?: string;
     costCenterId?: string;
+    serviceOrderId?: string;
+    serviceOrderText?: string;
     orderDateFrom?: string;
     orderDateTo?: string;
     q?: string;

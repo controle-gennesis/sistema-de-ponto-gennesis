@@ -422,6 +422,44 @@ export function GerenciarSolicitacoesGeraisPage({
   const user = userData?.data;
   const saverName = (user?.name || '').trim();
 
+  const detailPayrollMonthYear = React.useMemo(() => {
+    const src = historyRequest?.createdAt;
+    if (!src) {
+      const n = new Date();
+      return { month: n.getMonth() + 1, year: n.getFullYear() };
+    }
+    const d = new Date(src);
+    if (Number.isNaN(d.getTime())) {
+      const n = new Date();
+      return { month: n.getMonth() + 1, year: n.getFullYear() };
+    }
+    return { month: d.getMonth() + 1, year: d.getFullYear() };
+  }, [historyRequest?.createdAt]);
+
+  const { data: payrollEmpForDetail } = useQuery({
+    queryKey: [
+      'payroll-employees-gerenciar-dp-detalhe',
+      detailPayrollMonthYear.month,
+      detailPayrollMonthYear.year,
+    ],
+    queryFn: async () => {
+      const params = new URLSearchParams({
+        month: String(detailPayrollMonthYear.month),
+        year: String(detailPayrollMonthYear.year),
+        limit: '500',
+        page: '1',
+      });
+      const res = await api.get(`/payroll/employees?${params.toString()}`);
+      return (res.data?.data?.employees ?? []) as { id: string; name: string }[];
+    },
+    enabled: !loadingUser && !!historyRequest,
+  });
+
+  const employeeNameByIdForDetail = React.useMemo(() => {
+    const list = payrollEmpForDetail ?? [];
+    return new Map(list.map((e) => [e.id, e.name]));
+  }, [payrollEmpForDetail]);
+
   const handleLogout = () => {
     localStorage.removeItem('token');
     sessionStorage.removeItem('token');
@@ -1027,6 +1065,7 @@ export function GerenciarSolicitacoesGeraisPage({
                   <DpRequestDetailsPreview
                     requestType={historyRequest.requestType}
                     details={historyRequest.details}
+                    employeeNameById={employeeNameByIdForDetail}
                   />
 
                   {scopeConfig.canSendFeedbackStatuses.includes(historyRequest.status) ? (

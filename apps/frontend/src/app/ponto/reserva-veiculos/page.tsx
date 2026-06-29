@@ -72,7 +72,8 @@ type VehicleReservation = {
   code: string;
   solicitante: string;
   motorista: string;
-  vehicleId: string;
+  vehicleId?: string | null;
+  observacaoCapacidadeVeiculo?: string | null;
   atividade: string;
   localDestino: string;
   dataUsoInicio: string;
@@ -107,7 +108,7 @@ const EMPTY_RETURN_FORM = (): ReturnFormState => ({
 type ReservationFormState = {
   solicitante: string;
   motorista: string;
-  vehicleId: string;
+  observacaoCapacidadeVeiculo: string;
   atividade: string;
   localDestino: string;
   dataUsoInicio: string;
@@ -124,7 +125,7 @@ function todayInputValue() {
 const EMPTY_FORM = (): ReservationFormState => ({
   solicitante: '',
   motorista: '',
-  vehicleId: '',
+  observacaoCapacidadeVeiculo: '',
   atividade: '',
   localDestino: '',
   dataUsoInicio: todayInputValue(),
@@ -308,18 +309,6 @@ export default function ReservaVeiculosPage() {
     staleTime: 10 * 60 * 1000
   });
 
-  const { data: vehiclesData, isLoading: loadingVehicles } = useQuery({
-    queryKey: ['vehicle-reservation-vehicles'],
-    queryFn: async () => {
-      const res = await api.get('/vehicles', {
-        params: { isActive: 'true', limit: 100, page: 1 }
-      });
-      return (res.data?.data || []) as VehicleOption[];
-    },
-    enabled: showForm,
-    staleTime: 5 * 60 * 1000
-  });
-
   const reservations = (listData?.data || []) as VehicleReservation[];
   const pagination = listData?.pagination || {
     page: 1,
@@ -355,18 +344,6 @@ export default function ReservaVeiculosPage() {
         searchText: employee.name
       })),
     [employeeOptions]
-  );
-
-  const vehicleSelectOptions = useMemo<MultiSelectSearchOption[]>(
-    () =>
-      (vehiclesData || []).map((vehicle) => ({
-        value: vehicle.id,
-        label: formatVehicleLabel(vehicle),
-        searchText: [vehicle.placaVeic, vehicle.marcaVeic, vehicle.modeloVeic, vehicle.code]
-          .filter(Boolean)
-          .join(' ')
-      })),
-    [vehiclesData]
   );
 
   const contractSelectOptions = useMemo<MultiSelectSearchOption[]>(
@@ -540,7 +517,6 @@ export default function ReservaVeiculosPage() {
     e.preventDefault();
     if (!formData.solicitante) return toast.error('Selecione o solicitante');
     if (!formData.motorista) return toast.error('Selecione o motorista');
-    if (!formData.vehicleId) return toast.error('Selecione o veículo');
     if (!formData.atividade.trim()) return toast.error('Informe a atividade');
     if (!formData.localDestino.trim()) return toast.error('Informe o local de destino');
     if (!formData.dataUsoInicio) return toast.error('Informe a data de início');
@@ -553,14 +529,14 @@ export default function ReservaVeiculosPage() {
     createMutation.mutate({
       solicitante: formData.solicitante,
       motorista: formData.motorista,
-      vehicleId: formData.vehicleId,
       atividade: formData.atividade.trim(),
       localDestino: formData.localDestino.trim(),
       dataUsoInicio: formData.dataUsoInicio,
       dataUsoFim: formData.dataUsoFim,
       periodoUso: formData.periodoUso,
       polo: formData.polo || undefined,
-      contrato: formData.contrato || undefined
+      contrato: formData.contrato || undefined,
+      observacaoCapacidadeVeiculo: formData.observacaoCapacidadeVeiculo.trim() || undefined
     });
   };
 
@@ -703,7 +679,9 @@ export default function ReservaVeiculosPage() {
                             <td className={cadastroListClasses.td}>
                               {reservation.vehicle
                                 ? formatPlacaDisplay(reservation.vehicle.placaVeic)
-                                : '—'}
+                                : reservation.status === 'PENDING_SUPPLIES'
+                                  ? 'A definir'
+                                  : '—'}
                             </td>
                             <td className={cadastroListClasses.tdCenter}>
                               {formatDateLabel(reservation.dataUsoInicio)}
@@ -810,21 +788,23 @@ export default function ReservaVeiculosPage() {
 
               <div>
                 <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Veículo *
+                  Observações sobre capacidade do veículo
                 </label>
-                <SingleSelectSearchDropdown
-                  value={formData.vehicleId}
-                  onChange={(vehicleId) => setFormData((current) => ({ ...current, vehicleId }))}
-                  options={vehicleSelectOptions}
-                  disabled={loadingVehicles}
-                  allowEmpty={false}
-                  placeholder={
-                    loadingVehicles ? 'Carregando veículos...' : 'Selecionar veículo...'
+                <textarea
+                  value={formData.observacaoCapacidadeVeiculo}
+                  onChange={(e) =>
+                    setFormData((current) => ({
+                      ...current,
+                      observacaoCapacidadeVeiculo: e.target.value
+                    }))
                   }
-                  searchPlaceholder="Pesquisar..."
-                  emptyOptionsMessage="Nenhum veículo ativo cadastrado."
-                  noFocusRing
+                  className={`${fieldClassName} min-h-[80px] resize-y`}
+                  placeholder="Ex.: necessário veículo para 5 passageiros, com caçamba, etc. (opcional)"
+                  rows={3}
                 />
+                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  O veículo será definido pelo setor de Suprimentos ao atender a solicitação.
+                </p>
               </div>
 
               <div>

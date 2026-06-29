@@ -20,6 +20,7 @@ import {
   pleitoStatusSelectBase
 } from '@/lib/pleitoStatusStyles';
 import { PleitoFormModal } from '@/components/pleito/PleitoFormModal';
+import { PleitoOsPurchaseOrdersSection } from '@/components/pleito/PleitoOsPurchaseOrdersSection';
 import { useContractTableColumnCustomizer } from '@/components/useContractTableColumnCustomizer';
 import { formatOsSePasta, formatOsSePastaOrDash } from '@/lib/formatOsSePasta';
 import toast from 'react-hot-toast';
@@ -28,6 +29,7 @@ import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 
 interface ContractPleito {
   id: string;
+  serviceOrderId?: string | null;
   divSe: string | null;
   creationMonth: string | null;
   creationYear: number | null;
@@ -1885,7 +1887,7 @@ export default function AndamentoListPage() {
           {selectedPleitoId && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-2">
               <div className="absolute inset-0" onClick={() => setSelectedPleitoId(null)} />
-              <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+              <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-3xl w-full mx-4 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
                 <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between sticky top-0 bg-white dark:bg-gray-800 z-10">
                   <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
                     <ClipboardList className="w-5 h-5" />
@@ -1967,6 +1969,10 @@ export default function AndamentoListPage() {
                             </div>
                           ) : null
                         )}
+                        <PleitoOsPurchaseOrdersSection
+                          serviceOrderId={pleito.serviceOrderId}
+                          serviceOrderText={pleito.divSe}
+                        />
                       </div>
                     );
                   })() : (

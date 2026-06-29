@@ -30,6 +30,8 @@ import {
   type VehicleReservationStatus
 } from '@/lib/vehicleReservationLabels';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
+import type { MultiSelectSearchOption } from '@/components/ui/MultiSelectSearchDropdown';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import {
   getListTableRowClassName,
@@ -59,6 +61,7 @@ type VehicleReservation = {
   contrato?: string | null;
   assinatura: string;
   status: VehicleReservationStatus;
+  observacaoCapacidadeVeiculo?: string | null;
   suppliesApprovalComment?: string | null;
   suppliesRejectionReason?: string | null;
   suppliesApprovedAt?: string | null;
@@ -198,7 +201,13 @@ function matchesDetailStatusFilter(
 }
 
 function formatVehicleLabel(vehicle?: VehicleOption | null): string {
-  if (!vehicle) return '—';
+  if (!vehicle) return 'A definir';
+  const placa = formatPlacaDisplay(vehicle.placaVeic);
+  const modelo = [vehicle.marcaVeic, vehicle.modeloVeic].filter(Boolean).join(' ').trim();
+  return modelo ? `${placa} — ${modelo}` : placa;
+}
+
+function formatVehicleSelectLabel(vehicle: VehicleOption): string {
   const placa = formatPlacaDisplay(vehicle.placaVeic);
   const modelo = [vehicle.marcaVeic, vehicle.modeloVeic].filter(Boolean).join(' ').trim();
   return modelo ? `${placa} — ${modelo}` : placa;
@@ -226,6 +235,7 @@ export default function SolicitacoesReservaVeiculosPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [selected, setSelected] = useState<VehicleReservation | null>(null);
   const [suppliesComment, setSuppliesComment] = useState('');
+  const [approveVehicleId, setApproveVehicleId] = useState('');
   const [rejectReason, setRejectReason] = useState('');
   const [showRejectForm, setShowRejectForm] = useState(false);
   const [vistoriaAt, setVistoriaAt] = useState(defaultReturnDatetimeLocalValue());
@@ -275,8 +285,9 @@ export default function SolicitacoesReservaVeiculosPage() {
   });
 
   const approveMutation = useMutation({
-    mutationFn: async (id: string) => {
+    mutationFn: async ({ id, vehicleId }: { id: string; vehicleId: string }) => {
       const res = await api.put(`/vehicle-reservations/${id}/supplies-approve`, {
+        vehicleId,
         comment: suppliesComment.trim() || undefined
       });
       return res.data;
@@ -285,6 +296,7 @@ export default function SolicitacoesReservaVeiculosPage() {
       toast.success('Reserva aprovada com sucesso.');
       setSelected(null);
       setSuppliesComment('');
+      setApproveVehicleId('');
       setShowRejectForm(false);
       void queryClient.invalidateQueries({ queryKey: ['vehicle-reservations'] });
       void queryClient.invalidateQueries({ queryKey: ['vehicle-reservations-supplies'] });
@@ -349,6 +361,30 @@ export default function SolicitacoesReservaVeiculosPage() {
     enabled: Boolean(selected?.id)
   });
 
+  const { data: vehiclesData, isLoading: loadingVehicles } = useQuery({
+    queryKey: ['vehicle-reservation-supplies-vehicles'],
+    queryFn: async () => {
+      const res = await api.get('/vehicles', {
+        params: { isActive: 'true', limit: 100, page: 1 }
+      });
+      return (res.data?.data || []) as VehicleOption[];
+    },
+    enabled: Boolean(selected?.status === 'PENDING_SUPPLIES'),
+    staleTime: 5 * 60 * 1000
+  });
+
+  const vehicleSelectOptions = useMemo<MultiSelectSearchOption[]>(
+    () =>
+      (vehiclesData || []).map((vehicle) => ({
+        value: vehicle.id,
+        label: formatVehicleSelectLabel(vehicle),
+        searchText: [vehicle.placaVeic, vehicle.marcaVeic, vehicle.modeloVeic, vehicle.code]
+          .filter(Boolean)
+          .join(' ')
+      })),
+    [vehiclesData]
+  );
+
   const selectedReservation = selectedDetail ?? selected;
   const records = useMemo(
     () =>
@@ -397,6 +433,12 @@ export default function SolicitacoesReservaVeiculosPage() {
       setVistoriaAt(defaultReturnDatetimeLocalValue());
       setVistoriaLaudo('');
       setVistoriaLaudoFileName('');
+    }
+    if (selected?.status === 'PENDING_SUPPLIES') {
+      setApproveVehicleId('');
+      setSuppliesComment('');
+      setShowRejectForm(false);
+      setRejectReason('');
     }
   }, [selected?.id, selected?.status]);
 
@@ -562,6 +604,7 @@ export default function SolicitacoesReservaVeiculosPage() {
                               setSelected(row);
                               setShowRejectForm(false);
                               setSuppliesComment('');
+                              setApproveVehicleId('');
                               setRejectReason('');
                             }}
                             className={getListTableRowClassName(true)}
@@ -602,6 +645,7 @@ export default function SolicitacoesReservaVeiculosPage() {
                                   setSelected(row);
                                   setShowRejectForm(false);
                                   setSuppliesComment('');
+                                  setApproveVehicleId('');
                                   setRejectReason('');
                                 }}
                                 className={rowActionMenuButtonClass(false)}
@@ -647,6 +691,7 @@ export default function SolicitacoesReservaVeiculosPage() {
             setSelected(null);
             setShowRejectForm(false);
             setSuppliesComment('');
+            setApproveVehicleId('');
             setRejectReason('');
           }}
           title={`Reserva #${selected?.code ?? ''}`}
@@ -732,6 +777,16 @@ export default function SolicitacoesReservaVeiculosPage() {
                     {selectedReservation.localDestino}
                   </dd>
                 </div>
+                {selectedReservation.observacaoCapacidadeVeiculo ? (
+                  <div className="sm:col-span-2">
+                    <dt className="text-gray-500 dark:text-gray-400">
+                      Observações sobre capacidade do veículo
+                    </dt>
+                    <dd className="font-medium text-gray-900 dark:text-gray-100">
+                      {selectedReservation.observacaoCapacidadeVeiculo}
+                    </dd>
+                  </div>
+                ) : null}
               </dl>
 
               {selectedReservation.assinatura ? (
@@ -912,6 +967,26 @@ export default function SolicitacoesReservaVeiculosPage() {
                 <div className="space-y-3 border-t border-gray-200 pt-4 dark:border-gray-700">
                   {!showRejectForm ? (
                     <>
+                      <div>
+                        <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                          Veículo disponibilizado *
+                        </label>
+                        <SingleSelectSearchDropdown
+                          value={approveVehicleId}
+                          onChange={setApproveVehicleId}
+                          options={vehicleSelectOptions}
+                          disabled={loadingVehicles || approveMutation.isPending}
+                          allowEmpty={false}
+                          placeholder={
+                            loadingVehicles
+                              ? 'Carregando veículos...'
+                              : 'Selecionar veículo da frota...'
+                          }
+                          searchPlaceholder="Pesquisar por placa ou modelo..."
+                          emptyOptionsMessage="Nenhum veículo ativo cadastrado."
+                          noFocusRing
+                        />
+                      </div>
                       <Input
                         label="Observação (opcional)"
                         value={suppliesComment}
@@ -929,8 +1004,16 @@ export default function SolicitacoesReservaVeiculosPage() {
                         </Button>
                         <Button
                           type="button"
-                          onClick={() => approveMutation.mutate(selectedReservation.id)}
-                          disabled={approveMutation.isPending}
+                          onClick={() => {
+                            if (!approveVehicleId) {
+                              return toast.error('Selecione o veículo disponibilizado');
+                            }
+                            approveMutation.mutate({
+                              id: selectedReservation.id,
+                              vehicleId: approveVehicleId
+                            });
+                          }}
+                          disabled={approveMutation.isPending || !approveVehicleId}
                         >
                           {approveMutation.isPending ? 'Aprovando...' : 'Aprovar'}
                         </Button>

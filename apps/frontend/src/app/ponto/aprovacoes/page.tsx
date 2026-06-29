@@ -158,6 +158,16 @@ const DETAIL_KEY_LABELS: Record<string, string> = {
   funcaoNomeQuantidadeContato: 'Função / nome / qtd. / contato',
   quantidade: 'Quantidade',
   candidatos: 'Candidatos',
+  medidas: 'Medidas disciplinares',
+  ferias: 'Férias',
+  rescisoes: 'Rescisões',
+  alteracoes: 'Alterações',
+  atestados: 'Atestados',
+  retificacoes: 'Retificações',
+  horasExtras: 'Horas extras',
+  viagensBeneficio: 'Viagens (benefício)',
+  viagens: 'Viagens',
+  itens: 'Itens',
   motivoContratacao: 'Motivo da contratação',
   funcaoSalarioAntigo: 'Função/salário (anterior)',
   funcaoSalarioNovo: 'Função/salário (novo)',
@@ -196,7 +206,8 @@ function formatDetailValue(val: unknown): string {
 function formatDetailEntryValue(
   key: string,
   v: unknown,
-  employeeNameById?: Map<string, string>
+  employeeNameById?: Map<string, string>,
+  parentDetails?: Record<string, unknown>
 ): string {
   if (employeeNameById && key === 'employeeId' && typeof v === 'string') {
     const id = v.trim();
@@ -215,6 +226,9 @@ function formatDetailEntryValue(
     return parts.join(', ');
   }
   if (key === 'candidatos' && Array.isArray(v)) {
+    const legacyMotivo = String(parentDetails?.motivoContratacao ?? '').trim();
+    const legacySetor = String(parentDetails?.setor ?? '').trim();
+    const legacyObservacao = String(parentDetails?.observacao ?? '').trim();
     return v
       .map((item, index) => {
         if (!item || typeof item !== 'object') return '';
@@ -222,7 +236,58 @@ function formatDetailEntryValue(
         const nome = String(row.nome ?? '—').trim() || '—';
         const funcao = String(row.funcao ?? '—').trim() || '—';
         const contato = String(row.contato ?? '—').trim() || '—';
-        return `${index + 1}. ${nome} — ${funcao} — ${contato}`;
+        const motivo = String(row.motivoContratacao ?? legacyMotivo).trim() || '—';
+        const setor = String(row.setor ?? legacySetor).trim() || '—';
+        const observacao = String(row.observacao ?? legacyObservacao).trim();
+        const obsPart = observacao ? ` — Obs.: ${observacao}` : '';
+        return `${index + 1}. ${nome} — ${funcao} — ${contato} — Motivo: ${motivo} — Setor: ${setor}${obsPart}`;
+      })
+      .filter(Boolean)
+      .join('\n');
+  }
+  if (key === 'medidas' && Array.isArray(v)) {
+    return v
+      .map((item, index) => {
+        if (!item || typeof item !== 'object') return '';
+        const row = item as Record<string, unknown>;
+        const employeeId = String(row.employeeId ?? '').trim();
+        const nome = employeeId
+          ? employeeNameById?.get(employeeId) ?? employeeId
+          : '—';
+        const punicaoRaw = String(row.punicao ?? '').trim();
+        const punicao =
+          punicaoRaw === 'ADVERTENCIA'
+            ? 'Advertência'
+            : punicaoRaw === 'SUSPENSAO'
+              ? 'Suspensão'
+              : punicaoRaw || '—';
+        const motivo = String(row.motivo ?? '—').trim() || '—';
+        return `${index + 1}. ${nome} — ${punicao} — ${motivo}`;
+      })
+      .filter(Boolean)
+      .join('\n');
+  }
+  const employeeArrayKeys = [
+    'ferias',
+    'rescisoes',
+    'alteracoes',
+    'atestados',
+    'retificacoes',
+    'horasExtras',
+    'viagensBeneficio',
+    'viagens',
+    'itens',
+  ];
+  if (employeeArrayKeys.includes(key) && Array.isArray(v)) {
+    return v
+      .map((item, index) => {
+        if (!item || typeof item !== 'object') return '';
+        const row = item as Record<string, unknown>;
+        const employeeId = String(row.employeeId ?? '').trim();
+        const nome = employeeId
+          ? employeeNameById?.get(employeeId) ?? employeeId
+          : '—';
+        return `${index + 1}. ${nome}`;
       })
       .filter(Boolean)
       .join('\n');
@@ -238,7 +303,14 @@ function buildDetailRows(
   const rows: { key: string; label: string; value: string }[] = [];
   for (const [k, v] of Object.entries(details)) {
     if (k === 'anexoAtestado') continue;
-    const value = formatDetailEntryValue(k, v, employeeNameById).trim();
+    if (
+      (k === 'motivoContratacao' || k === 'setor' || k === 'observacao') &&
+      Array.isArray(details.candidatos) &&
+      details.candidatos.length > 0
+    ) {
+      continue;
+    }
+    const value = formatDetailEntryValue(k, v, employeeNameById, details).trim();
     if (!value) continue;
     rows.push({ key: k, label: humanizeDetailKey(k), value });
   }
