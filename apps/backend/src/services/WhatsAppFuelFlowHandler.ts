@@ -1,16 +1,17 @@
-import { FuelRefuelRequestStatus, FuelVehicleType } from '@prisma/client';
+import { FuelRefuelRequestStatus, FuelVehicleType, VehicleUsageType } from '@prisma/client';
 import {
   findEmployeeByCpf,
   isValidCpf,
   onlyDigits,
   resolveFuelRequestContextFromEmployee,
 } from '../lib/employeeCpfLookup';
-import { listActiveFuelAdministrativeRegions } from '../lib/fuelAdministrativeRegions';
 import {
-  buildFuelSubmissionSlaLine,
-  notifyFuelRequesterWaitingManager,
-  notifyFuelRequesterWaitingSupplies,
-} from '../lib/fuelRefuelChatNotify';
+  FUEL_ABASTECIMENTO_STATE_CODES,
+  findActiveVehicleByPlate,
+  listFuelSatelliteCities,
+  mapVehicleUsageToFuelType,
+} from '../lib/fuelAdministrativeRegions';
+import { buildFuelSubmissionSlaLine } from '../lib/fuelRefuelChatNotify';
 import { hasStoredPhoto, isWhatsAppSavedMediaReady } from '../lib/flowMedia';
 import {
   findActiveVehiclesByPlateSuffix,
@@ -23,16 +24,23 @@ import type { SendAction } from './WhatsAppBotService';
 export type WhatsAppFuelFlowStatus =
   | 'FUEL_ASK_REFUEL_DATE'
   | 'FUEL_ASK_ROUTE'
+  | 'FUEL_ASK_FUEL_STATE'
   | 'FUEL_ASK_ADMIN_REGION'
   | 'FUEL_ASK_DRIVER_CPF'
   | 'FUEL_ASK_PLATE_SUFFIX'
   | 'FUEL_SELECT_VEHICLE'
   | 'FUEL_ASK_VEHICLE_MANUAL'
-  | 'FUEL_ASK_VEHICLE_TYPE'
   | 'FUEL_ASK_DASHBOARD_PHOTO'
   | 'FUEL_ASK_OBSERVATIONS'
   | 'FUEL_CONFIRM'
   | 'FUEL_COMPLETE';
+
+type VehicleOptionPayload = {
+  id: string;
+  plate: string;
+  description?: string;
+  frotaPartic: VehicleUsageType | null;
+};
 
 const YES_WORDS = /^(sim|s|confirmar|confirmo|ok|pode|yes)$/i;
 const NO_WORDS = /^(n[aã]o|nao|n|cancelar|cancela)$/i;
@@ -88,21 +96,25 @@ function todayIso(): string {
 }
 
 function vehicleTypeLabel(type?: FuelVehicleType): string {
-  if (type === FuelVehicleType.PRIVATE) return 'Particular (passa pelo gestor)';
-  if (type === FuelVehicleType.COMPANY) return 'Frota / empresa (direto ao Suprimentos)';
+  if (type === FuelVehicleType.PRIVATE) return 'Particular';
+  if (type === FuelVehicleType.COMPANY) return 'Frota / empresa';
   return '—';
 }
 
 function buildSummary(payload: Record<string, unknown>): string {
+  const stateCode = payload.fuelStateCode ? String(payload.fuelStateCode) : '';
+  const cityName = payload.administrativeRegionName || '—';
+  const regionLabel = stateCode ? `${cityName} (${stateCode})` : cityName;
+
   return [
     'Resumo da solicitação de abastecimento:',
     `• Data: ${payload.refuelDate ? formatBrDate(String(payload.refuelDate)) : '—'}`,
     `• Rota: ${payload.route || '—'}`,
-    `• Região administrativa: ${payload.administrativeRegionName || '—'}`,
+    `• Local de abastecimento: ${regionLabel}`,
     `• Contrato: ${payload.costCenterLabel || payload.costCenter || '—'}`,
     `• Condutor: ${payload.driverName || '—'}${payload.driverCpfMasked ? ` (CPF ${payload.driverCpfMasked})` : ''}`,
     `• Veículo: ${payload.vehiclePlate || '—'}`,
-    `• Tipo: ${vehicleTypeLabel(payload.vehicleType as FuelVehicleType | undefined)}`,
+    `• Tipo (cadastro): ${vehicleTypeLabel(payload.vehicleType as FuelVehicleType | undefined)}`,
     `• Foto do painel: ${hasStoredPhoto(payload.dashboardPhotoUrl, payload.dashboardPhotoKey) ? 'enviada' : '—'}`,
     `• Observações: ${String(payload.observations || '').trim() || '—'}`,
     '',
@@ -110,20 +122,29 @@ function buildSummary(payload: Record<string, unknown>): string {
   ].join('\n');
 }
 
-async function buildAdminRegionListAction(): Promise<SendAction> {
-  const regions = await listActiveFuelAdministrativeRegions();
-  if (!regions.length) {
+function parseStateSelection(content: string): string | null {
+  const fromId = content.match(/^fuel_state_(DF|GO)$/i);
+  if (fromId) return fromId[1].toUpperCase();
+  const text = content.trim().toUpperCase();
+  if (text === 'DF' || text.includes('DISTRITO')) return 'DF';
+  if (text === 'GO' || text.includes('GOI')) return 'GO';
+  return null;
+}
+
+async function buildCityListAction(stateCode: string): Promise<SendAction> {
+  const cities = listFuelSatelliteCities(stateCode);
+  if (!cities.length) {
     return waButtons(
-      'Não há regiões administrativas cadastradas. Fale com o Suprimentos para configurar os postos.',
+      `Não há cidades cadastradas para ${stateCode}. Fale com o Suprimentos.`,
     );
   }
   return waList(
-    'Qual a região administrativa para abastecer?\n(Escolha conforme o local de origem da rota)',
-    regions.map((region) => ({
-      id: `fuel_region_${region.id}`,
-      title: region.name.length > 24 ? `${region.name.slice(0, 21)}...` : region.name,
+    `Selecione a cidade satélite em ${stateCode} (conforme origem da rota):`,
+    cities.map((city) => ({
+      id: `fuel_region_${city.code}`,
+      title: city.name.length > 24 ? `${city.name.slice(0, 21)}...` : city.name,
     })),
-    'Ver regiões',
+    'Ver cidades',
   );
 }
 
@@ -134,26 +155,73 @@ function parseRegionSelection(
   const fromId = content.match(/^fuel_region_(.+)$/);
   if (fromId) {
     const regionId = fromId[1];
-    const options = (payload.adminRegionOptions as Array<{ id: string; name: string }> | undefined) ?? [];
+    const options =
+      (payload.adminRegionOptions as Array<{ id: string; name: string }> | undefined) ?? [];
     const match = options.find((item) => item.id === regionId);
     if (match) return { regionId: match.id, regionName: match.name };
   }
   return null;
 }
 
+function getVehicleOptions(payload: Record<string, unknown>): VehicleOptionPayload[] {
+  return (payload.vehicleOptions as VehicleOptionPayload[] | undefined) ?? [];
+}
+
 function parseVehicleSelection(
   content: string,
   payload: Record<string, unknown>,
-): { plate: string; description?: string } | null {
+): VehicleOptionPayload | null {
   const fromId = content.match(/^fuel_vehicle_(.+)$/);
   if (!fromId) return null;
-  const vehicleId = fromId[1];
-  const options =
-    (payload.vehicleOptions as Array<{ id: string; plate: string; description?: string }> | undefined) ??
-    [];
-  const match = options.find((item) => item.id === vehicleId);
-  if (!match) return null;
-  return { plate: match.plate, description: match.description };
+  return getVehicleOptions(payload).find((item) => item.id === fromId[1]) ?? null;
+}
+
+function applyVehicleToPayload(
+  payload: Record<string, unknown>,
+  option: VehicleOptionPayload,
+): Record<string, unknown> {
+  return {
+    ...payload,
+    vehiclePlate: option.plate,
+    vehicleDescription: option.description,
+    vehicleType: mapVehicleUsageToFuelType(option.frotaPartic),
+    vehicleId: option.id,
+  };
+}
+
+function askDashboardPhoto(payload: Record<string, unknown>) {
+  return {
+    sendAction: waButtons('Envie a foto do painel atual (odômetro) como imagem nesta conversa.'),
+    newStatus: 'FUEL_ASK_DASHBOARD_PHOTO' as const,
+    newPayload: payload,
+  };
+}
+
+function buildVehicleListAction(
+  matches: VehicleOptionPayload[],
+  suffix: string,
+): SendAction {
+  return waList(
+    matches.length === 1
+      ? 'Encontrei este veículo com esse final de placa. Confirme a seleção:'
+      : `Encontrei ${matches.length} veículos com final ${suffix}. Selecione o correto:`,
+    matches.map((vehicle) => ({
+      id: `fuel_vehicle_${vehicle.id}`,
+      title: formatVehiclePlateOptionLabel(vehicle.plate, vehicle.description),
+    })),
+    'Ver veículos',
+  );
+}
+
+function mapMatchesToOptions(
+  matches: Awaited<ReturnType<typeof findActiveVehiclesByPlateSuffix>>,
+): VehicleOptionPayload[] {
+  return matches.map((vehicle) => ({
+    id: vehicle.id,
+    plate: formatPlacaDisplay(vehicle.placaVeic),
+    description: [vehicle.marcaVeic, vehicle.modeloVeic].filter(Boolean).join(' ').trim() || undefined,
+    frotaPartic: vehicle.frotaPartic,
+  }));
 }
 
 export function isWhatsAppFuelFlowStatus(status: string): boolean {
@@ -265,13 +333,48 @@ export async function processWhatsAppFuelFlow(params: {
         };
       }
       newPayload.route = textRaw.trim();
-      const regions = await listActiveFuelAdministrativeRegions();
-      newPayload.adminRegionOptions = regions.map((region) => ({
-        id: region.id,
-        name: region.name,
-      }));
       return {
-        sendAction: await buildAdminRegionListAction(),
+        sendAction: {
+          type: 'buttons',
+          body: 'O abastecimento será em qual local?\n\nEscolha DF ou GO:',
+          buttons: [
+            { id: 'fuel_state_DF', title: 'DF' },
+            { id: 'fuel_state_GO', title: 'GO' },
+            { id: 'MENU', title: 'Menu' },
+          ],
+        },
+        newStatus: 'FUEL_ASK_FUEL_STATE',
+        newPayload,
+      };
+    }
+
+    case 'FUEL_ASK_FUEL_STATE': {
+      const stateCode = parseStateSelection(content);
+      if (!stateCode || !FUEL_ABASTECIMENTO_STATE_CODES.includes(stateCode as 'DF' | 'GO')) {
+        return {
+          sendAction: {
+            type: 'buttons',
+            body: 'Selecione DF ou GO para continuar.',
+            buttons: [
+              { id: 'fuel_state_DF', title: 'DF' },
+              { id: 'fuel_state_GO', title: 'GO' },
+              { id: 'MENU', title: 'Menu' },
+            ],
+          },
+          newStatus,
+          newPayload,
+        };
+      }
+
+      const cities = listFuelSatelliteCities(stateCode);
+      newPayload.fuelStateCode = stateCode;
+      newPayload.adminRegionOptions = cities.map((city) => ({
+        id: city.code,
+        name: city.name,
+      }));
+
+      return {
+        sendAction: await buildCityListAction(stateCode),
         newStatus: 'FUEL_ASK_ADMIN_REGION',
         newPayload,
       };
@@ -280,13 +383,14 @@ export async function processWhatsAppFuelFlow(params: {
     case 'FUEL_ASK_ADMIN_REGION': {
       const selected = parseRegionSelection(content, newPayload);
       if (!selected) {
+        const stateCode = String(newPayload.fuelStateCode || 'DF');
         return {
-          sendAction: await buildAdminRegionListAction(),
+          sendAction: await buildCityListAction(stateCode),
           newStatus,
           newPayload,
         };
       }
-      newPayload.administrativeRegionId = selected.regionId;
+      newPayload.satelliteCityCode = selected.regionId;
       newPayload.administrativeRegionName = selected.regionName;
       return {
         sendAction: waButtons(
@@ -357,7 +461,7 @@ export async function processWhatsAppFuelFlow(params: {
         };
       }
 
-      const matches = await findActiveVehiclesByPlateSuffix(suffix);
+      const matches = mapMatchesToOptions(await findActiveVehiclesByPlateSuffix(suffix));
       if (!matches.length) {
         return {
           sendAction: waButtons(
@@ -368,45 +472,10 @@ export async function processWhatsAppFuelFlow(params: {
         };
       }
 
-      newPayload.vehicleOptions = matches.map((vehicle) => ({
-        id: vehicle.id,
-        plate: formatPlacaDisplay(vehicle.placaVeic),
-        description: [vehicle.marcaVeic, vehicle.modeloVeic].filter(Boolean).join(' ').trim() || undefined,
-      }));
-
-      if (matches.length === 1) {
-        const vehicle = matches[0];
-        newPayload.vehiclePlate = formatPlacaDisplay(vehicle.placaVeic);
-        newPayload.vehicleDescription =
-          [vehicle.marcaVeic, vehicle.modeloVeic].filter(Boolean).join(' ').trim() || undefined;
-        return {
-          sendAction: {
-            type: 'buttons',
-            body:
-              'É veículo particular (carro próprio do colaborador)?\n\n• Sim → passa pelo gestor\n• Não → vai direto ao Suprimentos',
-            buttons: [
-              { id: 'SIM', title: 'Sim' },
-              { id: 'NAO', title: 'Não' },
-              { id: 'MENU', title: 'Menu' },
-            ],
-          },
-          newStatus: 'FUEL_ASK_VEHICLE_TYPE',
-          newPayload,
-        };
-      }
-
+      newPayload.vehicleOptions = matches;
+      newPayload.plateSuffix = suffix;
       return {
-        sendAction: waList(
-          'Encontrei estes veículos com esse final de placa. Selecione o correto:',
-          matches.map((vehicle) => ({
-            id: `fuel_vehicle_${vehicle.id}`,
-            title: formatVehiclePlateOptionLabel(
-              formatPlacaDisplay(vehicle.placaVeic),
-              [vehicle.marcaVeic, vehicle.modeloVeic].filter(Boolean).join(' ').trim(),
-            ),
-          })),
-          'Ver veículos',
-        ),
+        sendAction: buildVehicleListAction(matches, suffix),
         newStatus: 'FUEL_SELECT_VEHICLE',
         newPayload,
       };
@@ -415,46 +484,23 @@ export async function processWhatsAppFuelFlow(params: {
     case 'FUEL_SELECT_VEHICLE': {
       const selected = parseVehicleSelection(content, newPayload);
       if (!selected) {
-        const options =
-          (newPayload.vehicleOptions as Array<{ id: string; plate: string; description?: string }> | undefined) ??
-          [];
+        const options = getVehicleOptions(newPayload);
         if (!options.length) {
           return {
-            sendAction: waButtons('Selecione um veículo da lista ou informe os 2 dígitos novamente.'),
+            sendAction: waButtons('Informe novamente os 2 últimos dígitos da placa.'),
             newStatus: 'FUEL_ASK_PLATE_SUFFIX',
             newPayload,
           };
         }
+        const suffix = String(newPayload.plateSuffix || '');
         return {
-          sendAction: waList(
-            'Selecione o veículo correto:',
-            options.map((vehicle) => ({
-              id: `fuel_vehicle_${vehicle.id}`,
-              title: formatVehiclePlateOptionLabel(vehicle.plate, vehicle.description),
-            })),
-            'Ver veículos',
-          ),
+          sendAction: buildVehicleListAction(options, suffix),
           newStatus,
           newPayload,
         };
       }
 
-      newPayload.vehiclePlate = selected.plate;
-      newPayload.vehicleDescription = selected.description;
-      return {
-        sendAction: {
-          type: 'buttons',
-          body:
-            'É veículo particular (carro próprio do colaborador)?\n\n• Sim → passa pelo gestor\n• Não → vai direto ao Suprimentos',
-          buttons: [
-            { id: 'SIM', title: 'Sim' },
-            { id: 'NAO', title: 'Não' },
-            { id: 'MENU', title: 'Menu' },
-          ],
-        },
-        newStatus: 'FUEL_ASK_VEHICLE_TYPE',
-        newPayload,
-      };
+      return askDashboardPhoto(applyVehicleToPayload(newPayload, selected));
     }
 
     case 'FUEL_ASK_VEHICLE_MANUAL': {
@@ -466,49 +512,26 @@ export async function processWhatsAppFuelFlow(params: {
         };
       }
       const parts = textRaw.split(/[—\-–]/).map((s) => s.trim());
-      newPayload.vehiclePlate = parts[0] || textRaw;
-      newPayload.vehicleDescription = parts.slice(1).join(' — ') || undefined;
-      return {
-        sendAction: {
-          type: 'buttons',
-          body:
-            'É veículo particular (carro próprio do colaborador)?\n\n• Sim → passa pelo gestor\n• Não → vai direto ao Suprimentos',
-          buttons: [
-            { id: 'SIM', title: 'Sim' },
-            { id: 'NAO', title: 'Não' },
-            { id: 'MENU', title: 'Menu' },
-          ],
-        },
-        newStatus: 'FUEL_ASK_VEHICLE_TYPE',
-        newPayload,
-      };
-    }
+      const plateRaw = parts[0] || textRaw;
+      const description = parts.slice(1).join(' — ') || undefined;
 
-    case 'FUEL_ASK_VEHICLE_TYPE': {
-      if (content === 'sim' || content === 's') {
-        newPayload.vehicleType = FuelVehicleType.PRIVATE;
-      } else if (content === 'nao' || content === 'não' || content === 'n') {
-        newPayload.vehicleType = FuelVehicleType.COMPANY;
-      } else {
-        return {
-          sendAction: {
-            type: 'buttons',
-            body: 'Responda Sim se for veículo particular ou Não se for frota/veículo da empresa.',
-            buttons: [
-              { id: 'SIM', title: 'Sim' },
-              { id: 'NAO', title: 'Não' },
-              { id: 'MENU', title: 'Menu' },
-            ],
-          },
-          newStatus,
-          newPayload,
+      const registered = await findActiveVehicleByPlate(plateRaw);
+      if (registered) {
+        const option: VehicleOptionPayload = {
+          id: registered.id,
+          plate: formatPlacaDisplay(registered.placaVeic),
+          description:
+            [registered.marcaVeic, registered.modeloVeic].filter(Boolean).join(' ').trim() ||
+            description,
+          frotaPartic: registered.frotaPartic,
         };
+        return askDashboardPhoto(applyVehicleToPayload(newPayload, option));
       }
-      return {
-        sendAction: waButtons('Envie a foto do painel atual (odômetro) como imagem nesta conversa.'),
-        newStatus: 'FUEL_ASK_DASHBOARD_PHOTO',
-        newPayload,
-      };
+
+      newPayload.vehiclePlate = plateRaw.toUpperCase();
+      newPayload.vehicleDescription = description;
+      newPayload.vehicleType = FuelVehicleType.PRIVATE;
+      return askDashboardPhoto(newPayload);
     }
 
     case 'FUEL_ASK_DASHBOARD_PHOTO': {
@@ -570,7 +593,7 @@ export async function processWhatsAppFuelFlow(params: {
         !requesterUserId ||
         !newPayload.refuelDate ||
         !newPayload.route ||
-        !newPayload.administrativeRegionId ||
+        !newPayload.satelliteCityCode ||
         !(newPayload.costCenterLabel || newPayload.costCenter) ||
         !newPayload.driverName ||
         !newPayload.vehiclePlate ||
@@ -589,7 +612,7 @@ export async function processWhatsAppFuelFlow(params: {
         requesterId: requesterUserId,
         refuelDate: new Date(`${newPayload.refuelDate}T12:00:00`),
         route: String(newPayload.route),
-        administrativeRegionId: String(newPayload.administrativeRegionId),
+        satelliteCityCode: String(newPayload.satelliteCityCode),
         costCenter: String(newPayload.costCenterLabel || newPayload.costCenter),
         driverName: String(newPayload.driverName),
         vehiclePlate: String(newPayload.vehiclePlate),
@@ -602,22 +625,22 @@ export async function processWhatsAppFuelFlow(params: {
         sourceWhatsAppPhone: phone,
       });
 
-      if (created.status === FuelRefuelRequestStatus.PENDING_MANAGER) {
-        await notifyFuelRequesterWaitingManager(null, created.displayNumber, phone);
-      } else {
-        await notifyFuelRequesterWaitingSupplies(null, created.displayNumber, phone);
-      }
-
       const slaLine = await buildFuelSubmissionSlaLine();
+      const statusLine =
+        created.status === FuelRefuelRequestStatus.PENDING_MANAGER
+          ? 'Aguardando aprovação do gestor. Em seguida seguirá ao Suprimentos.'
+          : 'Aguardando aprovação do Suprimentos.';
 
       return {
         sendAction: {
           type: 'buttons',
           body: [
-            `Solicitação #${created.displayNumber} registrada com sucesso!`,
+            `⏳ Solicitação #${created.displayNumber} registrada com sucesso!`,
+            statusLine,
+            '',
             slaLine,
             '',
-            'Você receberá atualizações aqui no WhatsApp conforme a solicitação avançar.',
+            'Você receberá uma mensagem aqui quando for liberada para abastecer.',
           ].join('\n'),
           buttons: [
             { id: 'COMBUSTIVEL', title: 'Nova solicitação' },

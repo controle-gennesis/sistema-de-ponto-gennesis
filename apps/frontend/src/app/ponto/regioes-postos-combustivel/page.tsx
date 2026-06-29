@@ -1,0 +1,726 @@
+'use client';
+
+import React, { useEffect, useMemo, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useRouter } from 'next/navigation';
+import { Filter, Fuel, Plus, Search, X } from 'lucide-react';
+import toast from 'react-hot-toast';
+import { Card, CardContent, CardHeader } from '@/components/ui/Card';
+import { Modal } from '@/components/ui/Modal';
+import { MainLayout } from '@/components/layout/MainLayout';
+import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
+import { Loading } from '@/components/ui/Loading';
+import { Button } from '@/components/ui/Button';
+import { Input } from '@/components/ui/Input';
+import { ButtonSeg } from '@/app/ponto/solicitacoes-dp/DpSolicitacaoTypeFields';
+import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import type { MultiSelectSearchOption } from '@/components/ui/MultiSelectSearchDropdown';
+import {
+  CadastroListEmpty,
+  CadastroListLoading,
+  CadastroListSummary,
+  getCadastroListRange,
+} from '@/components/ui/CadastroListSummary';
+import api from '@/lib/api';
+import {
+  cadastroListClasses,
+  listTableRowClasses,
+  RowActionMenuCell,
+  RowActionMenuPortal,
+} from '@/components/ui/RowActionMenu';
+import { useRowActionMenu } from '@/hooks/useRowActionMenu';
+
+type FuelStateCode = 'DF' | 'GO';
+
+type SatelliteCity = {
+  code: string;
+  stateCode: FuelStateCode;
+  name: string;
+};
+
+type GasStation = {
+  id: string;
+  displayNumber: number;
+  cityCode: string;
+  name: string;
+  address?: string | null;
+  sortOrder: number;
+  isActive: boolean;
+  city?: SatelliteCity | null;
+  _count?: { requests: number };
+};
+
+type StationFormState = {
+  cityCode: string;
+  name: string;
+  address: string;
+  isActive: boolean;
+};
+
+const EMPTY_STATION_FORM = (cityCode = ''): StationFormState => ({
+  cityCode,
+  name: '',
+  address: '',
+  isActive: true,
+});
+
+const ITEMS_PER_PAGE = 20;
+
+export default function RegioesPostosCombustivelPage() {
+  const router = useRouter();
+  const queryClient = useQueryClient();
+  const [stateFilter, setStateFilter] = useState<FuelStateCode>('DF');
+  const [cityFilter, setCityFilter] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [isFiltersOpen, setIsFiltersOpen] = useState(false);
+  const [showStationForm, setShowStationForm] = useState(false);
+  const [formStateCode, setFormStateCode] = useState<FuelStateCode>('DF');
+  const [editingStation, setEditingStation] = useState<GasStation | null>(null);
+  const [deleteStationId, setDeleteStationId] = useState<string | null>(null);
+  const [stationForm, setStationForm] = useState<StationFormState>(EMPTY_STATION_FORM());
+
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    sessionStorage.removeItem('token');
+    router.push('/auth/login');
+  };
+
+  const { data: userData, isLoading: loadingUser } = useQuery({
+    queryKey: ['user'],
+    queryFn: async () => {
+      const res = await api.get('/auth/me');
+      return res.data;
+    },
+  });
+
+  const { data: cities = [] } = useQuery({
+    queryKey: ['fuel-satellite-cities', stateFilter],
+    queryFn: async () => {
+      const res = await api.get('/fuel-gas-stations/satellite-cities', {
+        params: { stateCode: stateFilter },
+      });
+      return (res.data?.data || []) as SatelliteCity[];
+    },
+    enabled: !loadingUser,
+  });
+
+  const { data: formCities = [] } = useQuery({
+    queryKey: ['fuel-satellite-cities-form', formStateCode],
+    queryFn: async () => {
+      const res = await api.get('/fuel-gas-stations/satellite-cities', {
+        params: { stateCode: formStateCode },
+      });
+      return (res.data?.data || []) as SatelliteCity[];
+    },
+    enabled: !loadingUser && showStationForm && !editingStation,
+  });
+
+  const { data: stations = [], isLoading } = useQuery({
+    queryKey: ['fuel-gas-stations', stateFilter, cityFilter],
+    queryFn: async () => {
+      const res = await api.get('/fuel-gas-stations', {
+        params: {
+          stateCode: stateFilter,
+          ...(cityFilter ? { cityCode: cityFilter } : {}),
+          includeInactive: 'true',
+        },
+      });
+      return (res.data?.data || []) as GasStation[];
+    },
+    enabled: !loadingUser,
+  });
+
+  const cityFilterOptions = useMemo((): MultiSelectSearchOption[] => {
+    return cities.map((city) => ({
+      value: city.code,
+      label: city.name,
+      searchText: city.name,
+    }));
+  }, [cities]);
+
+  const formCityOptions = useMemo((): MultiSelectSearchOption[] => {
+    return formCities.map((city) => ({
+      value: city.code,
+      label: city.name,
+      searchText: city.name,
+    }));
+  }, [formCities]);
+
+  const filteredStations = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
+    if (!term) return stations;
+    return stations.filter(
+      (station) =>
+        String(station.displayNumber).includes(term) ||
+        station.name.toLowerCase().includes(term) ||
+        (station.address ?? '').toLowerCase().includes(term) ||
+        (station.city?.name ?? '').toLowerCase().includes(term),
+    );
+  }, [stations, searchTerm]);
+
+  const totalFiltered = filteredStations.length;
+  const listRange = getCadastroListRange(currentPage, ITEMS_PER_PAGE, totalFiltered);
+  const paginatedStations = filteredStations.slice(
+    (currentPage - 1) * ITEMS_PER_PAGE,
+    currentPage * ITEMS_PER_PAGE,
+  );
+  const hasActiveFilter = Boolean(cityFilter) || stateFilter !== 'DF';
+  const isListEmpty = !isLoading && totalFiltered === 0;
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, stateFilter, cityFilter]);
+
+  useEffect(() => {
+    if (cityFilter && !cities.some((city) => city.code === cityFilter)) {
+      setCityFilter('');
+    }
+  }, [cities, cityFilter]);
+
+  useEffect(() => {
+    if (!showStationForm || editingStation) return;
+    if (!formCities.length) {
+      setStationForm((current) => ({ ...current, cityCode: '' }));
+      return;
+    }
+    if (!formCities.some((city) => city.code === stationForm.cityCode)) {
+      setStationForm((current) => ({ ...current, cityCode: formCities[0].code }));
+    }
+  }, [formStateCode, formCities, showStationForm, editingStation, stationForm.cityCode]);
+
+  const {
+    rowActionMenu,
+    rowForActionMenu,
+    toggleRowActionMenu,
+    closeRowActionMenu,
+    isRowMenuOpen,
+    setRowActionMenu,
+  } = useRowActionMenu(paginatedStations);
+
+  const invalidate = () => {
+    void queryClient.invalidateQueries({ queryKey: ['fuel-gas-stations'] });
+  };
+
+  const saveStationMutation = useMutation({
+    mutationFn: async () => {
+      if (editingStation) {
+        return api.put(`/fuel-gas-stations/${editingStation.id}`, {
+          name: stationForm.name.trim(),
+          address: stationForm.address.trim() || null,
+          isActive: stationForm.isActive,
+        });
+      }
+      return api.post('/fuel-gas-stations', {
+        cityCode: stationForm.cityCode.trim().toUpperCase(),
+        name: stationForm.name.trim(),
+        address: stationForm.address.trim() || null,
+        isActive: stationForm.isActive,
+      });
+    },
+    onSuccess: () => {
+      toast.success(editingStation ? 'Posto atualizado.' : 'Posto cadastrado.');
+      setShowStationForm(false);
+      setEditingStation(null);
+      setStationForm(EMPTY_STATION_FORM(cityFilter));
+      invalidate();
+    },
+    onError: (err: { response?: { data?: { error?: string; message?: string } } }) => {
+      toast.error(err.response?.data?.error || err.response?.data?.message || 'Erro ao salvar posto');
+    },
+  });
+
+  const deleteStationMutation = useMutation({
+    mutationFn: async (id: string) => api.delete(`/fuel-gas-stations/${id}`),
+    onSuccess: () => {
+      toast.success('Posto excluído.');
+      setDeleteStationId(null);
+      setRowActionMenu(null);
+      invalidate();
+    },
+    onError: (err: { response?: { data?: { error?: string; message?: string } } }) => {
+      toast.error(err.response?.data?.error || err.response?.data?.message || 'Erro ao excluir posto');
+    },
+  });
+
+  const stationPendingDelete = useMemo(
+    () => filteredStations.find((station) => station.id === deleteStationId) ?? null,
+    [filteredStations, deleteStationId],
+  );
+
+  const openCreateStation = () => {
+    setEditingStation(null);
+    setFormStateCode(stateFilter);
+    const defaultCity =
+      cityFilter && cities.some((city) => city.code === cityFilter)
+        ? cityFilter
+        : cities.find((city) => city.stateCode === stateFilter)?.code || '';
+    setStationForm(EMPTY_STATION_FORM(defaultCity));
+    setShowStationForm(true);
+  };
+
+  const openEditStation = (station: GasStation) => {
+    setEditingStation(station);
+    setStationForm({
+      cityCode: station.cityCode,
+      name: station.name,
+      address: station.address || '',
+      isActive: station.isActive,
+    });
+    setShowStationForm(true);
+  };
+
+  const clearFilters = () => {
+    setStateFilter('DF');
+    setCityFilter('');
+  };
+
+  const user = userData?.data || { name: 'Usuário', role: 'EMPLOYEE' };
+
+  if (loadingUser) {
+    return <Loading message="Carregando..." fullScreen size="lg" />;
+  }
+
+  return (
+    <ProtectedRoute route="/ponto/regioes-postos-combustivel">
+      <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
+        <div className="space-y-6">
+          <div className="text-center">
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
+              Postos de Combustível
+            </h1>
+            <p className="mt-2 text-sm text-gray-600 dark:text-gray-400 sm:text-base">
+              Cadastre os postos credenciados por cidade satélite (DF/GO). O código é gerado automaticamente.
+            </p>
+          </div>
+
+          <Card className={cadastroListClasses.card}>
+            <CardHeader className={cadastroListClasses.cardHeader}>
+              <div className={cadastroListClasses.cardHeaderRow}>
+                <div className={cadastroListClasses.cardHeaderIconRow}>
+                  <div className="rounded-lg bg-red-100 p-2 sm:p-3 dark:bg-red-900/30">
+                    <Fuel className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6" />
+                  </div>
+                  <div className="min-w-0">
+                    <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 sm:text-xl">
+                      Postos credenciados
+                    </h2>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                      {isLoading
+                        ? 'Carregando...'
+                        : totalFiltered === 1
+                          ? '1 posto cadastrado'
+                          : `${totalFiltered} postos cadastrados`}
+                    </p>
+                  </div>
+                </div>
+                <div className={cadastroListClasses.cardToolbar}>
+                  <div className="relative min-w-[240px] flex-1 sm:w-[280px] sm:flex-none">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
+                    <input
+                      type="search"
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      placeholder="Buscar código, posto ou cidade..."
+                      className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                    />
+                    {searchTerm ? (
+                      <button
+                        type="button"
+                        onClick={() => setSearchTerm('')}
+                        aria-label="Limpar busca"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-300"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    ) : null}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsFiltersOpen(true)}
+                    className={`relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition-colors ${
+                      hasActiveFilter
+                        ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40'
+                        : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
+                    }`}
+                    aria-label="Abrir filtro"
+                    title={hasActiveFilter ? 'Filtro (ativo)' : 'Filtro'}
+                  >
+                    <Filter className="h-4 w-4" />
+                    {hasActiveFilter ? (
+                      <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
+                    ) : null}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={openCreateStation}
+                    className="flex h-10 items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+                  >
+                    <Plus className="h-4 w-4 shrink-0" />
+                    <span>Novo posto</span>
+                  </button>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className={cadastroListClasses.cardContent}>
+              {isLoading ? (
+                <CadastroListLoading message="Carregando postos..." />
+              ) : isListEmpty ? (
+                <CadastroListEmpty
+                  icon={Fuel}
+                  title="Nenhum posto encontrado"
+                  hint={
+                    searchTerm.trim() || hasActiveFilter
+                      ? 'Tente ajustar a busca ou os filtros'
+                      : 'Cadastre um novo posto para começar'
+                  }
+                />
+              ) : (
+                <>
+                  <CadastroListSummary
+                    startItem={listRange.startItem}
+                    endItem={listRange.endItem}
+                    total={totalFiltered}
+                    itemLabel="posto"
+                    itemLabelPlural="postos"
+                    currentPage={currentPage}
+                    totalPages={listRange.totalPages}
+                  />
+                  <div className="overflow-x-auto">
+                    <table className={cadastroListClasses.table}>
+                      <colgroup>
+                        <col className="w-[4.5rem]" />
+                        <col />
+                        <col className="w-[8rem]" />
+                        <col className="w-[12rem]" />
+                        <col className="w-[6rem]" />
+                        <col className="w-[4.5rem]" />
+                      </colgroup>
+                      <thead className="border-b border-gray-200 dark:border-gray-700">
+                        <tr>
+                          <th scope="col" className={cadastroListClasses.th}>
+                            ID
+                          </th>
+                          <th scope="col" className={`${cadastroListClasses.th} min-w-[12rem]`}>
+                            Nome
+                          </th>
+                          <th scope="col" className={cadastroListClasses.th}>
+                            Cidade
+                          </th>
+                          <th scope="col" className={cadastroListClasses.th}>
+                            Endereço
+                          </th>
+                          <th scope="col" className={cadastroListClasses.thCenter}>
+                            Status
+                          </th>
+                          <th scope="col" className={cadastroListClasses.thRight}>
+                            Ação
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
+                        {paginatedStations.map((station) => (
+                          <tr key={station.id} className={listTableRowClasses.tr}>
+                            <td className={cadastroListClasses.tdMono}>{station.displayNumber}</td>
+                            <td className={`${cadastroListClasses.tdTruncate} min-w-[12rem]`}>
+                              <span className="block whitespace-normal break-words text-sm font-medium text-gray-900 dark:text-gray-100">
+                                {station.name}
+                              </span>
+                            </td>
+                            <td className={cadastroListClasses.td}>
+                              {station.city?.name ?? station.cityCode}
+                            </td>
+                            <td className={cadastroListClasses.td}>
+                              {station.address || '—'}
+                            </td>
+                            <td className={cadastroListClasses.tdCenter}>
+                              <span
+                                className={`inline-flex items-center justify-center rounded-full px-2 py-1 text-xs font-medium ${
+                                  station.isActive
+                                    ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
+                                    : 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400'
+                                }`}
+                              >
+                                {station.isActive ? 'Ativo' : 'Inativo'}
+                              </span>
+                            </td>
+                            <RowActionMenuCell
+                              isOpen={isRowMenuOpen(station.id)}
+                              onToggle={(e) =>
+                                toggleRowActionMenu(station.id, e.currentTarget)
+                              }
+                            />
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {listRange.totalPages > 1 ? (
+                    <div className={cadastroListClasses.pagination}>
+                      <button
+                        type="button"
+                        onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+                        disabled={currentPage === 1}
+                        className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-400 dark:hover:bg-gray-600"
+                      >
+                        Anterior
+                      </button>
+                      {Array.from({ length: Math.min(5, listRange.totalPages) }, (_, index) => {
+                        const pageNumber = index + 1;
+                        const isActivePage = pageNumber === currentPage;
+                        return (
+                          <button
+                            key={pageNumber}
+                            type="button"
+                            onClick={() => setCurrentPage(pageNumber)}
+                            className={`rounded-md px-3 py-2 text-sm font-medium ${
+                              isActivePage
+                                ? 'bg-red-600 text-white'
+                                : 'border border-gray-300 bg-white text-gray-500 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-400 dark:hover:bg-gray-600'
+                            }`}
+                          >
+                            {pageNumber}
+                          </button>
+                        );
+                      })}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setCurrentPage((page) => Math.min(listRange.totalPages, page + 1))
+                        }
+                        disabled={currentPage === listRange.totalPages}
+                        className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-400 dark:hover:bg-gray-600"
+                      >
+                        Próxima
+                      </button>
+                    </div>
+                  ) : null}
+
+                  {rowActionMenu && rowForActionMenu ? (
+                    <RowActionMenuPortal
+                      menu={rowActionMenu}
+                      onClose={closeRowActionMenu}
+                      onEdit={() => openEditStation(rowForActionMenu as GasStation)}
+                      onDelete={() => setDeleteStationId((rowForActionMenu as GasStation).id)}
+                      deleteDisabled={((rowForActionMenu as GasStation)._count?.requests ?? 0) > 0}
+                      deleteDisabledTitle="Posto com solicitações vinculadas"
+                    />
+                  ) : null}
+                </>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
+        <Modal
+          isOpen={!!deleteStationId}
+          onClose={() => setDeleteStationId(null)}
+          title="Excluir posto"
+          size="sm"
+        >
+          <div className="space-y-4">
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              Tem certeza que deseja excluir{' '}
+              <span className="font-semibold text-gray-900 dark:text-gray-100">
+                {stationPendingDelete
+                  ? `${stationPendingDelete.displayNumber} — ${stationPendingDelete.name}`
+                  : 'este posto'}
+              </span>
+              ? Esta ação não pode ser desfeita.
+            </p>
+            <div className="flex justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
+              <Button type="button" variant="outline" onClick={() => setDeleteStationId(null)}>
+                Cancelar
+              </Button>
+              <Button
+                type="button"
+                variant="error"
+                onClick={() => deleteStationId && deleteStationMutation.mutate(deleteStationId)}
+                disabled={deleteStationMutation.isPending}
+              >
+                {deleteStationMutation.isPending ? 'Excluindo...' : 'Excluir'}
+              </Button>
+            </div>
+          </div>
+        </Modal>
+
+        <Modal
+          isOpen={isFiltersOpen}
+          onClose={() => setIsFiltersOpen(false)}
+          title="Filtros — Postos de Combustível"
+          size="md"
+        >
+          <div className="space-y-4">
+            <div>
+              <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Estado
+              </label>
+              <div className="flex gap-2">
+                {(['DF', 'GO'] as FuelStateCode[]).map((state) => (
+                  <ButtonSeg
+                    key={state}
+                    active={stateFilter === state}
+                    onClick={() => {
+                      setStateFilter(state);
+                      setCityFilter('');
+                    }}
+                    label={state}
+                  />
+                ))}
+              </div>
+            </div>
+            <div>
+              <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Cidade satélite
+              </label>
+              <StringSingleSelectDropdown
+                value={cityFilter}
+                onChange={setCityFilter}
+                options={cityFilterOptions}
+                allowEmpty
+                emptyOptionLabel="Todas as cidades"
+                placeholder="Todas as cidades"
+                className="w-full"
+              />
+            </div>
+            <div className="flex items-center justify-between gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
+              <Button type="button" variant="outline" onClick={clearFilters}>
+                Limpar filtros
+              </Button>
+              <Button type="button" onClick={() => setIsFiltersOpen(false)}>
+                Fechar
+              </Button>
+            </div>
+          </div>
+        </Modal>
+
+        <Modal
+          isOpen={showStationForm}
+          onClose={() => {
+            setShowStationForm(false);
+            setEditingStation(null);
+          }}
+          title={editingStation ? `Editar posto ${editingStation.displayNumber}` : 'Novo posto'}
+        >
+          <form
+            className="space-y-4"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!stationForm.cityCode.trim() || !stationForm.name.trim()) {
+                return toast.error('Selecione a cidade e informe o nome do posto');
+              }
+              saveStationMutation.mutate();
+            }}
+          >
+            {editingStation ? (
+              <p className="text-sm text-gray-600 dark:text-gray-400">
+                Código: <span className="font-semibold">{editingStation.displayNumber}</span>
+              </p>
+            ) : (
+              <p className="text-sm text-gray-600 dark:text-gray-400">
+                O código numérico será gerado automaticamente ao salvar.
+              </p>
+            )}
+            {!editingStation ? (
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-800 dark:text-gray-200">
+                  Estado
+                </label>
+                <div className="flex gap-2">
+                  {(['DF', 'GO'] as FuelStateCode[]).map((state) => (
+                    <ButtonSeg
+                      key={state}
+                      active={formStateCode === state}
+                      onClick={() => setFormStateCode(state)}
+                      label={state}
+                    />
+                  ))}
+                </div>
+              </div>
+            ) : null}
+            <div>
+              <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Cidade satélite *
+              </label>
+              {editingStation ? (
+                <p className="text-sm text-gray-900 dark:text-gray-100">
+                  {editingStation.city?.name ?? editingStation.cityCode}
+                </p>
+              ) : (
+                <StringSingleSelectDropdown
+                  value={stationForm.cityCode}
+                  onChange={(cityCode) => setStationForm((current) => ({ ...current, cityCode }))}
+                  options={formCityOptions}
+                  allowEmpty={false}
+                  placeholder="Selecionar cidade..."
+                  className="w-full"
+                />
+              )}
+            </div>
+            <Input
+              label="Nome do posto *"
+              value={stationForm.name}
+              onChange={(e) => setStationForm((c) => ({ ...c, name: e.target.value }))}
+              placeholder="Ex.: Posto credenciado — Taguatinga Norte"
+              required
+            />
+            <Input
+              label="Endereço"
+              value={stationForm.address}
+              onChange={(e) => setStationForm((c) => ({ ...c, address: e.target.value }))}
+              placeholder="Opcional"
+            />
+            <label className="group flex cursor-pointer items-center space-x-3">
+              <div className="relative">
+                <input
+                  type="checkbox"
+                  checked={stationForm.isActive}
+                  onChange={(e) =>
+                    setStationForm((c) => ({ ...c, isActive: e.target.checked }))
+                  }
+                  className="sr-only"
+                />
+                <div
+                  className={`flex h-5 w-5 items-center justify-center rounded border-2 transition-all duration-200 ${
+                    stationForm.isActive
+                      ? 'border-red-600 bg-red-600 dark:border-red-500 dark:bg-red-500'
+                      : 'border-gray-300 bg-white group-hover:border-red-500 dark:border-gray-600 dark:bg-gray-800 dark:group-hover:border-red-400'
+                  }`}
+                >
+                  {stationForm.isActive ? (
+                    <svg
+                      className="h-3 w-3 text-white"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                      aria-hidden
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={3}
+                        d="M5 13l4 4L19 7"
+                      />
+                    </svg>
+                  ) : null}
+                </div>
+              </div>
+              <span className="text-sm font-medium text-gray-700 transition-colors group-hover:text-gray-900 dark:text-gray-300 dark:group-hover:text-gray-100">
+                Posto ativo
+              </span>
+            </label>
+            <div className="flex justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
+              <Button type="button" variant="outline" onClick={() => setShowStationForm(false)}>
+                Cancelar
+              </Button>
+              <Button type="submit" disabled={saveStationMutation.isPending}>
+                {saveStationMutation.isPending ? 'Salvando...' : 'Salvar'}
+              </Button>
+            </div>
+          </form>
+        </Modal>
+      </MainLayout>
+    </ProtectedRoute>
+  );
+}

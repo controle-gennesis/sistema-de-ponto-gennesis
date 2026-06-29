@@ -2843,11 +2843,13 @@ enum FuelRefuelDeadlineUnit {
   DAYS
 }
 
-/// Região administrativa para abastecimento (origem da rota).
+/// Região administrativa para abastecimento (cidade satélite / local de origem da rota).
 model FuelAdministrativeRegion {
   id        String   @id @default(cuid())
   code      String   @unique
   name      String
+  /// UF de abastecimento (ex.: DF, GO)
+  stateCode String
   isActive  Boolean  @default(true)
   sortOrder Int      @default(0)
   createdAt DateTime @default(now())
@@ -2857,23 +2859,28 @@ model FuelAdministrativeRegion {
   requests    FuelRefuelRequest[]
 
   @@index([isActive])
+  @@index([stateCode])
   @@map("fuel_administrative_regions")
 }
 
-/// Posto de combustível vinculado a uma região administrativa.
+/// Posto de combustível vinculado a uma cidade satélite (código em fuelSatelliteCities).
 model FuelGasStation {
-  id        String   @id @default(cuid())
-  regionId  String
-  name      String
-  address   String?
-  isActive  Boolean  @default(true)
-  sortOrder Int      @default(0)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id            String   @id @default(cuid())
+  displayNumber Int      @unique
+  cityCode      String
+  name          String
+  address       String?
+  isActive      Boolean  @default(true)
+  sortOrder     Int      @default(0)
+  /// Legado — regiões antigas no banco; novos postos usam apenas cityCode.
+  regionId      String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
-  region   FuelAdministrativeRegion @relation(fields: [regionId], references: [id], onDelete: Restrict)
+  region   FuelAdministrativeRegion? @relation(fields: [regionId], references: [id], onDelete: SetNull)
   requests FuelRefuelRequest[]
 
+  @@index([cityCode])
   @@index([regionId])
   @@index([isActive])
   @@map("fuel_gas_stations")
@@ -2890,6 +2897,8 @@ model FuelRefuelRequest {
   requestedAt DateTime @default(now())
   refuelDate  DateTime
   route       String
+  /// Código da cidade satélite (lista fixa em fuelSatelliteCities).
+  satelliteCityCode      String?
   administrativeRegionId String?
   administrativeRegion   FuelAdministrativeRegion? @relation(fields: [administrativeRegionId], references: [id], onDelete: SetNull)
   gasStationId           String?
@@ -2945,6 +2954,7 @@ model FuelRefuelRequest {
 
   @@index([requesterId])
   @@index([contractId])
+  @@index([satelliteCityCode])
   @@index([administrativeRegionId])
   @@index([gasStationId])
   @@index([status])

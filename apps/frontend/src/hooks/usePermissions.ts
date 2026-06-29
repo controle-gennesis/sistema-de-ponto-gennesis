@@ -496,6 +496,8 @@ export function useRoutePermission(route: string) {
       isAdministrator || isDepartmentCompras || can(pk('/ponto/solicitacoes-reserva-veiculos')),
     '/ponto/fornecedores': isAdministrator || isDepartmentCompras || can(pk('/ponto/fornecedores')),
     '/ponto/veiculos': isAdministrator || isDepartmentCompras || can(pk('/ponto/veiculos')),
+    '/ponto/regioes-postos-combustivel':
+      isAdministrator || isDepartmentCompras || can(pk('/ponto/regioes-postos-combustivel')),
     '/ponto/reserva-veiculos':
       isAdministrator || isDepartmentCompras || can(pk('/ponto/reserva-veiculos')),
     '/ponto/condicoes-pagamento':

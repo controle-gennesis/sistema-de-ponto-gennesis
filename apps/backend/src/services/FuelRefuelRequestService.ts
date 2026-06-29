@@ -6,7 +6,8 @@ import {
   Prisma,
 } from '@prisma/client';
 import { resolveFuelPhotoViewUrl } from '../lib/fuelPhotoStorage';
-import { getFuelGasStationInRegion } from '../lib/fuelAdministrativeRegions';
+import { getFuelSatelliteCityByCode } from '../constants/fuelSatelliteCities';
+import { getFuelGasStationInCity } from '../lib/fuelAdministrativeRegions';
 import {
   computeRefuelDeadlineAt,
   formatRefuelDeadlineLabel,
@@ -24,6 +25,7 @@ export type CreateFuelRefuelRequestInput = {
   requesterId: string;
   refuelDate: Date;
   route: string;
+  satelliteCityCode?: string | null;
   administrativeRegionId?: string | null;
   contractId?: string | null;
   costCenter?: string | null;
@@ -48,8 +50,8 @@ export type SuppliesApproveFuelRefuelInput = {
 
 const fuelRefuelInclude = {
   requester: { select: { id: true, name: true, email: true } },
-  administrativeRegion: { select: { id: true, code: true, name: true } },
-  gasStation: { select: { id: true, name: true, address: true } },
+  administrativeRegion: { select: { id: true, code: true, name: true, stateCode: true } },
+  gasStation: { select: { id: true, displayNumber: true, name: true, address: true, cityCode: true } },
   contract: {
     select: {
       id: true,
@@ -88,13 +90,20 @@ type FuelPhotoFields = {
   receiptPhotoKey?: string | null;
 };
 
-async function presentFuelRowPhotos<T extends FuelPhotoFields>(row: T) {
+async function presentFuelRowPhotos<T extends FuelPhotoFields & { satelliteCityCode?: string | null; administrativeRegion?: { code: string; name: string; stateCode: string } | null }>(row: T) {
   const [dashboardPhotoViewUrl, receiptPhotoViewUrl] = await Promise.all([
     resolveFuelPhotoViewUrl(row.dashboardPhotoUrl, row.dashboardPhotoKey),
     resolveFuelPhotoViewUrl(row.receiptPhotoUrl, row.receiptPhotoKey),
   ]);
+
+  const city = row.satelliteCityCode ? getFuelSatelliteCityByCode(row.satelliteCityCode) : null;
+  const administrativeRegion = city
+    ? { id: city.code, code: city.code, name: city.name, stateCode: city.stateCode }
+    : row.administrativeRegion ?? null;
+
   return {
     ...row,
+    administrativeRegion,
     dashboardPhotoViewUrl,
     receiptPhotoViewUrl,
   };
@@ -121,14 +130,15 @@ export class FuelRefuelRequestService {
       if (!contract) throw createError('Contrato não encontrado', 404);
     }
 
-    const administrativeRegionId = input.administrativeRegionId?.trim() || null;
-    if (administrativeRegionId) {
-      const region = await prisma.fuelAdministrativeRegion.findFirst({
-        where: { id: administrativeRegionId, isActive: true },
-        select: { id: true },
-      });
-      if (!region) throw createError('Região administrativa inválida', 400);
+    const satelliteCityCode = input.satelliteCityCode?.trim().toUpperCase() || null;
+    if (!satelliteCityCode) {
+      throw createError('Cidade de abastecimento é obrigatória', 400);
     }
+    if (!getFuelSatelliteCityByCode(satelliteCityCode)) {
+      throw createError('Cidade satélite inválida', 400);
+    }
+
+    const administrativeRegionId = input.administrativeRegionId?.trim() || null;
 
     return prisma.$transaction(async (tx) => {
       const agg = await tx.fuelRefuelRequest.aggregate({ _max: { displayNumber: true } });
@@ -140,6 +150,7 @@ export class FuelRefuelRequestService {
           requesterId: input.requesterId,
           refuelDate: input.refuelDate,
           route: input.route.trim(),
+          satelliteCityCode,
           administrativeRegionId,
           costCenter,
           contractId,
@@ -304,8 +315,12 @@ export class FuelRefuelRequestService {
     if (row.status !== FuelRefuelRequestStatus.PENDING_SUPPLIES) {
       throw createError('Esta solicitação não está aguardando aprovação do Suprimentos', 400);
     }
-    if (!row.administrativeRegionId) {
-      throw createError('Solicitação sem região administrativa definida', 400);
+    const cityCode =
+      row.satelliteCityCode?.trim().toUpperCase() ||
+      row.administrativeRegion?.code?.trim().toUpperCase() ||
+      null;
+    if (!cityCode) {
+      throw createError('Solicitação sem cidade de abastecimento definida', 400);
     }
 
     const amount = Math.trunc(input.refuelDeadlineAmount);
@@ -316,10 +331,7 @@ export class FuelRefuelRequestService {
       throw createError('Prazo para abastecer inválido', 400);
     }
 
-    const gasStation = await getFuelGasStationInRegion(
-      input.gasStationId,
-      row.administrativeRegionId,
-    );
+    const gasStation = await getFuelGasStationInCity(input.gasStationId, cityCode);
     if (!gasStation) {
       throw createError('Selecione um posto da região administrativa da solicitação', 400);
     }

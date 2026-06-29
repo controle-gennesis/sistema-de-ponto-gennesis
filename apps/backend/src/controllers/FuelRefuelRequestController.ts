@@ -10,8 +10,8 @@ import {
 } from '../lib/fuelApprovalAccess';
 import { assertUserHasFuelSuppliesAccess } from '../lib/fuelSuppliesAccess';
 import {
-  listActiveFuelAdministrativeRegions,
-  listActiveFuelGasStationsByRegion,
+  listActiveFuelGasStationsByCity,
+  listFuelSatelliteCities,
 } from '../lib/fuelAdministrativeRegions';
 import { getFuelSuppliesSlaHours } from '../lib/fuelSuppliesSla';
 
@@ -74,7 +74,8 @@ export class FuelRefuelRequestController {
       if (!user) throw createError('Usuário não autenticado', 401);
       await assertUserHasFuelSuppliesAccess(user.id, user.isAdmin);
 
-      const rows = await listActiveFuelAdministrativeRegions();
+      const stateCode = String(req.query.stateCode ?? '').trim().toUpperCase();
+      const rows = listFuelSatelliteCities(stateCode || undefined);
       res.json({ success: true, data: rows });
     } catch (error) {
       next(error);
@@ -87,10 +88,10 @@ export class FuelRefuelRequestController {
       if (!user) throw createError('Usuário não autenticado', 401);
       await assertUserHasFuelSuppliesAccess(user.id, user.isAdmin);
 
-      const regionId = String(req.params.regionId || '').trim();
-      if (!regionId) throw createError('Região inválida', 400);
+      const cityCode = String(req.query.cityCode || req.params.regionId || '').trim();
+      if (!cityCode) throw createError('Informe a cidade', 400);
 
-      const rows = await listActiveFuelGasStationsByRegion(regionId);
+      const rows = await listActiveFuelGasStationsByCity(cityCode);
       res.json({ success: true, data: rows });
     } catch (error) {
       next(error);

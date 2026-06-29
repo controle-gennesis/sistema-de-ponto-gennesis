@@ -7,6 +7,9 @@ const router = Router();
 
 router.use(authenticate);
 
+router.get('/gas-stations', requireFuelSuppliesAccess, (req, res, next) =>
+  fuelRefuelRequestController.listGasStationsByRegion(req, res, next),
+);
 router.get('/administrative-regions', requireFuelSuppliesAccess, (req, res, next) =>
   fuelRefuelRequestController.listAdministrativeRegions(req, res, next),
 );

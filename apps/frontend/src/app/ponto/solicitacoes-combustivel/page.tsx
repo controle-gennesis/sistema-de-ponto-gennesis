@@ -58,7 +58,7 @@ const DETAIL_STATUS_FILTER_OPTIONS = labeledToSelectOptions([
   { value: 'ALL', label: 'Todos do card selecionado' },
   { value: 'SUPPLIES_QUEUE', label: 'Aguardando e Aguardando abastecimento' },
   { value: 'PENDING_SUPPLIES', label: 'Aguardando Suprimentos' },
-  { value: 'AWAITING_REFUEL', label: 'Aprovadas — aguardando abastecimento' },
+  { value: 'AWAITING_REFUEL', label: 'Aguardando abastecimento' },
   { value: 'PENDING_MANAGER', label: 'Aguardando gestor' },
   { value: 'COMPLETED', label: 'Concluídas' },
   { value: 'REJECTED', label: 'Rejeitadas' },
@@ -172,11 +172,13 @@ type FuelAdministrativeRegion = {
   id: string;
   code: string;
   name: string;
+  stateCode?: string;
 };
 
 type FuelGasStation = {
   id: string;
-  regionId: string;
+  displayNumber: number;
+  cityCode: string;
   name: string;
   address?: string | null;
 };
@@ -244,7 +246,7 @@ const VEHICLE_TYPE_LABELS: Record<FuelVehicleType, string> = {
 const STATUS_LABELS: Record<FuelRefuelStatus, string> = {
   PENDING_MANAGER: 'Aguardando gestor',
   PENDING_SUPPLIES: 'Aguardando Suprimentos',
-  AWAITING_REFUEL: 'Aprovada — aguardando abastecimento',
+  AWAITING_REFUEL: 'Aguardando abastecimento',
   COMPLETED: 'Concluída',
   APPROVED: 'Aguardando Suprimentos',
   REJECTED: 'Rejeitada',
@@ -425,14 +427,14 @@ export default function SolicitacoesCombustivelPage() {
     },
   });
 
-  const regionId = selected?.administrativeRegion?.id;
+  const regionId = selected?.satelliteCityCode ?? selected?.administrativeRegion?.code;
 
   const { data: gasStations = [], isLoading: loadingGasStations } = useQuery({
     queryKey: ['fuel-gas-stations', regionId],
     queryFn: async () => {
-      const res = await api.get(
-        `/fuel-refuel-requests/administrative-regions/${regionId}/gas-stations`,
-      );
+      const res = await api.get('/fuel-gas-stations', {
+        params: { cityCode: regionId },
+      });
       return (res.data?.data || []) as FuelGasStation[];
     },
     enabled: Boolean(regionId && selected?.status === 'PENDING_SUPPLIES'),
@@ -443,8 +445,12 @@ export default function SolicitacoesCombustivelPage() {
     () =>
       gasStations.map((station) => ({
         value: station.id,
-        label: station.address ? `${station.name} — ${station.address}` : station.name,
-        searchText: [station.name, station.address].filter(Boolean).join(' '),
+        label: station.address
+          ? `${station.displayNumber} — ${station.name} — ${station.address}`
+          : `${station.displayNumber} — ${station.name}`,
+        searchText: [String(station.displayNumber), station.name, station.address]
+          .filter(Boolean)
+          .join(' '),
       })),
     [gasStations],
   );
@@ -797,7 +803,13 @@ export default function SolicitacoesCombustivelPage() {
                     Região administrativa
                   </span>
                   <p className="text-gray-900 dark:text-gray-100">
-                    {selected.administrativeRegion?.name || '—'}
+                    {selected.administrativeRegion
+                      ? `${selected.administrativeRegion.name}${
+                          selected.administrativeRegion.stateCode
+                            ? ` (${selected.administrativeRegion.stateCode})`
+                            : ''
+                        }`
+                      : '—'}
                   </p>
                 </div>
                 {selected.gasStation ? (
@@ -986,7 +998,13 @@ export default function SolicitacoesCombustivelPage() {
                       <p className="text-sm text-gray-600 dark:text-gray-400">
                         Libere o abastecimento informando o posto da região{' '}
                         <span className="font-medium text-gray-900 dark:text-gray-100">
-                          {selected.administrativeRegion?.name || '—'}
+                          {selected.administrativeRegion
+                      ? `${selected.administrativeRegion.name}${
+                          selected.administrativeRegion.stateCode
+                            ? ` (${selected.administrativeRegion.stateCode})`
+                            : ''
+                        }`
+                      : '—'}
                         </span>{' '}
                         e o prazo para o solicitante ir ao posto.
                       </p>

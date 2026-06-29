@@ -264,6 +264,7 @@ function inferCategoryFromHref(href: string): string {
       '/ponto/materiais-construcao',
       '/ponto/fornecedores',
       '/ponto/veiculos',
+      '/ponto/regioes-postos-combustivel',
       '/ponto/condicoes-pagamento',
       '/ponto/natureza-orcamentaria',
       '/ponto/prestadores-servico',

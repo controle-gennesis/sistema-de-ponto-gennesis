@@ -818,6 +818,16 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
             permission: isAdministrator || isDepartmentCompras || can(pk('/ponto/veiculos'))
           },
           {
+            name: 'Postos de Combustível',
+            href: '/ponto/regioes-postos-combustivel',
+            icon: Fuel,
+            description: 'Cidades satélites e postos para abastecimento',
+            permission:
+              isAdministrator ||
+              isDepartmentCompras ||
+              can(pk('/ponto/regioes-postos-combustivel'))
+          },
+          {
             name: 'Condições de Pagamento',
             href: '/ponto/condicoes-pagamento',
             icon: CreditCard,

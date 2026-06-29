@@ -81,6 +81,7 @@ import callHistoryRoutes from './routes/callHistory';
 import kanbanRoutes from './routes/kanban';
 import materialDeliveryRoutes from './routes/materialDeliveries';
 import fuelRefuelRequestRoutes from './routes/fuelRefuelRequests';
+import fuelGasStationRoutes from './routes/fuelGasStations';
 import logisticsDeliveryRequestRoutes from './routes/logisticsDeliveryRequests';
 import approvalsRoutes from './routes/approvals';
 import { removeOrphanUserPermissions } from './lib/permissionRegistrySync';
@@ -297,6 +298,7 @@ app.use('/api/call-history', callHistoryRoutes);
 app.use('/api/kanban', kanbanRoutes);
 app.use('/api/material-deliveries', materialDeliveryRoutes);
 app.use('/api/fuel-refuel-requests', fuelRefuelRequestRoutes);
+app.use('/api/fuel-gas-stations', fuelGasStationRoutes);
 app.use('/api/logistics-delivery-requests', logisticsDeliveryRequestRoutes);
 app.use('/api/approvals', approvalsRoutes);
 
