@@ -189,6 +189,7 @@ type FuelRefuelRequest = {
   requestedAt: string;
   refuelDate: string;
   route: string;
+  satelliteCityCode?: string | null;
   administrativeRegion?: FuelAdministrativeRegion | null;
   gasStation?: FuelGasStation | null;
   refuelDeadlineAt?: string | null;
