@@ -137,12 +137,15 @@ export class FuelRefuelRequestService {
   async listForSupplies(params: {
     search?: string;
     status?: FuelRefuelRequestStatus;
+    statuses?: FuelRefuelRequestStatus[];
     requesterId?: string;
     queue?: 'supplies' | 'all';
   }) {
     const where: Prisma.FuelRefuelRequestWhereInput = {};
 
-    if (params.queue === 'supplies') {
+    if (params.statuses?.length) {
+      where.status = { in: params.statuses };
+    } else if (params.queue === 'supplies') {
       where.status = FuelRefuelRequestStatus.PENDING_SUPPLIES;
     } else if (params.status) {
       where.status = params.status;

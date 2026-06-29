@@ -1692,7 +1692,9 @@ model VehicleReservation {
   code                    String                   @unique
   solicitante             String
   motorista               String
-  vehicleId               String
+  vehicleId               String?
+  /// Observações do solicitante sobre capacidade necessária do veículo
+  observacaoCapacidadeVeiculo String?
   atividade               String
   localDestino            String
   dataUsoInicio           DateTime                 @db.Date
@@ -1724,7 +1726,7 @@ model VehicleReservation {
   createdAt               DateTime                 @default(now())
   updatedAt               DateTime                 @updatedAt
 
-  vehicle            Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
+  vehicle            Vehicle? @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
   createdBy          User?   @relation("VehicleReservationCreator", fields: [createdById], references: [id], onDelete: SetNull)
   suppliesApprovedBy User?   @relation("VehicleReservationSuppliesApprover", fields: [suppliesApprovedById], references: [id], onDelete: SetNull)
   baixaReportedBy    User?   @relation("VehicleReservationBaixaReporter", fields: [baixaReportedById], references: [id], onDelete: SetNull)

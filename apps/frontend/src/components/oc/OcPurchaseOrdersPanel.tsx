@@ -28,6 +28,9 @@ import { FinancialControlEntryModal } from '@/components/financeiro/FinancialCon
 import { buildFormFromPurchaseOrder } from '@/components/financeiro/financialControlEntry';
 import Link from 'next/link';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
+import { Button } from '@/components/ui/Button';
+import { Modal } from '@/components/ui/Modal';
+import { DatePickerField } from '@/components/ui/DatePickerField';
 import {
   getListTableRowClassName,
   listTableRowClasses,
@@ -84,6 +87,7 @@ import {
   effectivePaymentBoletoName,
   visiblePaymentBoletoInstallmentIndex,
   listInstallmentIndex,
+  listInstallmentRow,
   proofValidationInstallmentIndex,
   type OcListInstallmentMode,
   returnAfterBoletoInstallmentPaidButtonLabel,
@@ -827,6 +831,14 @@ function ocListShowsInstallmentParcelColumn(tab: OcTab): boolean {
   return tab === 'APPROVED' || tab === 'PROOF_VALIDATION' || tab === 'ATTACH_BOLETO';
 }
 
+function ocListShowsInstallmentDueDateColumn(tab: OcTab): boolean {
+  return tab === 'APPROVED';
+}
+
+function ocListShowsInstallmentAmountColumn(tab: OcTab): boolean {
+  return tab === 'APPROVED';
+}
+
 function formatOcListPaymentCondition(
   order: Pick<PurchaseOrder, 'paymentType' | 'paymentCondition'>,
   labelMap: Record<string, string>
@@ -1006,6 +1018,126 @@ function OcListInstallmentParcelCellContent({
   return (
     <span className="font-medium text-gray-800 dark:text-gray-200 tabular-nums">
       {idx + 1}/{parcelCount}
+    </span>
+  );
+}
+
+function resolvePaymentListInstallmentValues(
+  order: PurchaseOrder,
+  installmentMode?: OcListInstallmentMode,
+  financialEntries?: FinancialControlEntry[],
+): { amount: number | null; dueDate: string | null } {
+  if (isOcBoletoPaymentType(order.paymentType)) {
+    const mode = installmentMode ?? 'payment';
+    const parcelCount = order.paymentParcelCount ?? 1;
+    let row = listInstallmentRow(order, mode);
+    if (!row && parcelCount <= 1 && effectivePaymentBoletoUrl(order)) {
+      const rows = parsePaymentBoletoInstallments(order.paymentBoletoInstallments);
+      row = rows[0] ?? null;
+    }
+    const amount =
+      row && Number.isFinite(row.amount) && row.amount > 0 ? row.amount : null;
+    const dueRaw = (row?.dueDate || '').trim();
+    let dueDate = dueRaw ? dueRaw.slice(0, 10) : null;
+
+    if ((amount == null || !dueDate) && financialEntries?.length) {
+      const idx = listInstallmentIndex(order, mode);
+      const parcelLabel =
+        idx != null && parcelCount > 1 ? `${idx + 1}/${parcelCount}` : '1/1';
+      const entry =
+        financialEntries.find((e) => (e.parcelNumber || '').trim() === parcelLabel) ??
+        financialEntries.find(
+          (e) => e.status !== 'PAGO' && e.status !== 'PROCESSO_COMPLETO',
+        ) ??
+        financialEntries[0];
+      if (entry) {
+        if (amount == null) {
+          const value = entry.finalValue ?? entry.originalValue;
+          const num = value != null && value !== '' ? Number(value) : NaN;
+          if (Number.isFinite(num) && num > 0) return { amount: num, dueDate: dueDate || entry.dueDate?.slice(0, 10) || null };
+        }
+        if (!dueDate && entry.dueDate) dueDate = entry.dueDate.slice(0, 10);
+      }
+    }
+
+    if (amount != null || dueDate) return { amount, dueDate };
+  }
+
+  if (financialEntries?.length) {
+    const entry =
+      financialEntries.find(
+        (e) => e.status !== 'PAGO' && e.status !== 'PROCESSO_COMPLETO',
+      ) ?? financialEntries[0];
+    const value = entry.finalValue ?? entry.originalValue;
+    const num = value != null && value !== '' ? Number(value) : NaN;
+    const amount = Number.isFinite(num) && num > 0 ? num : orderGrandTotal(order);
+    const dueDate = entry.dueDate?.slice(0, 10) || null;
+    return { amount: amount > 0 ? amount : null, dueDate };
+  }
+
+  const ocTotal = orderGrandTotal(order);
+  return { amount: ocTotal > 0 ? ocTotal : null, dueDate: null };
+}
+
+function formatInstallmentDueDateLabel(dueDate: string | null): string {
+  if (!dueDate) return '—';
+  const date = new Date(`${dueDate}T12:00:00`);
+  if (Number.isNaN(date.getTime())) return '—';
+  return date.toLocaleDateString('pt-BR');
+}
+
+function isOcDueDateInPaymentFilterRange(
+  dueDate: string | null,
+  filters: { dueDateFrom: string; dueDateTo: string },
+): boolean {
+  if (!dueDate) return false;
+  const normalized = dueDate.slice(0, 10);
+  if (filters.dueDateFrom && normalized < filters.dueDateFrom) return false;
+  if (filters.dueDateTo && normalized > filters.dueDateTo) return false;
+  return true;
+}
+
+function OcListInstallmentDueDateCellContent({
+  order,
+  installmentMode,
+  financialEntries,
+}: {
+  order: PurchaseOrder;
+  installmentMode?: OcListInstallmentMode;
+  financialEntries?: FinancialControlEntry[];
+}) {
+  const { dueDate } = resolvePaymentListInstallmentValues(
+    order,
+    installmentMode,
+    financialEntries,
+  );
+  return (
+    <span className="font-medium text-gray-800 dark:text-gray-200 tabular-nums whitespace-nowrap">
+      {formatInstallmentDueDateLabel(dueDate)}
+    </span>
+  );
+}
+
+function OcListInstallmentAmountCellContent({
+  order,
+  installmentMode,
+  financialEntries,
+}: {
+  order: PurchaseOrder;
+  installmentMode?: OcListInstallmentMode;
+  financialEntries?: FinancialControlEntry[];
+}) {
+  const { amount } = resolvePaymentListInstallmentValues(
+    order,
+    installmentMode,
+    financialEntries,
+  );
+  if (amount == null) {
+    return <span className="text-gray-400 dark:text-gray-500">—</span>;
+  }
+  return (
+    <span className="font-medium text-gray-800 dark:text-gray-200 tabular-nums whitespace-nowrap">
+      {amount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
     </span>
   );
 }
@@ -1432,9 +1564,13 @@ export function OcStyledCheckbox({
 function embeddedOcEmptyMessage(
   tab: OcTab,
   hasSearch: boolean,
-  approvalListPhase: OcApprovalListPhase
+  approvalListPhase: OcApprovalListPhase,
+  hasPaymentDueDateFilter = false,
 ): string {
   if (hasSearch) return 'Nenhuma ordem corresponde à busca nesta fase';
+  if (hasPaymentDueDateFilter && tab === 'APPROVED') {
+    return 'Nenhuma OC com vencimento no período selecionado';
+  }
   if (approvalListPhase === 'approved_by_me') {
     return 'Nenhuma ordem que você tenha aprovado nesta fase.';
   }
@@ -1515,6 +1651,7 @@ export function OcPurchaseOrdersPanel({
   const [finalizedPage, setFinalizedPage] = useState(1);
   const [internalSearchTerm, setInternalSearchTerm] = useState('');
   const [isFinalizedFiltersModalOpen, setIsFinalizedFiltersModalOpen] = useState(false);
+  const [isPaymentDueFiltersModalOpen, setIsPaymentDueFiltersModalOpen] = useState(false);
   const [exportingFinalizedCsv, setExportingFinalizedCsv] = useState(false);
   const emptyFinalizedFilters = {
     orderDateFrom: '',
@@ -1522,7 +1659,12 @@ export function OcPurchaseOrdersPanel({
     supplierId: '',
     costCenterId: ''
   };
+  const emptyPaymentDueFilters = {
+    dueDateFrom: '',
+    dueDateTo: ''
+  };
   const [finalizedFilters, setFinalizedFilters] = useState(emptyFinalizedFilters);
+  const [paymentDueFilters, setPaymentDueFilters] = useState(emptyPaymentDueFilters);
 
   const effectiveSearchTerm = onSearchChange ? searchTerm : internalSearchTerm;
   const setEffectiveSearchTerm = (value: string) => {
@@ -1537,13 +1679,24 @@ export function OcPurchaseOrdersPanel({
       finalizedFilters.costCenterId
   );
 
+  const hasActivePaymentDueFilters = Boolean(
+    paymentDueFilters.dueDateFrom || paymentDueFilters.dueDateTo
+  );
+
   const clearFinalizedFilters = () => {
     setFinalizedFilters(emptyFinalizedFilters);
     setFinalizedPage(1);
   };
 
+  const clearPaymentDueFilters = () => {
+    setPaymentDueFilters(emptyPaymentDueFilters);
+  };
+
   useEffect(() => {
-    if (activeTab !== 'APPROVED') setCnabSelectedIds(new Set());
+    if (activeTab !== 'APPROVED') {
+      setCnabSelectedIds(new Set());
+      clearPaymentDueFilters();
+    }
   }, [activeTab]);
 
   useEffect(() => {
@@ -2256,20 +2409,12 @@ export function OcPurchaseOrdersPanel({
     | { page: number; limit: number; total: number; totalPages: number }
     | undefined;
 
-  const displayedOrders = useMemo(
-    () =>
-      activeTab === 'FINALIZADAS'
-        ? sortPurchaseOrdersByMostRecent(finalizedOrders)
-        : filteredOrdersBySearch,
-    [activeTab, finalizedOrders, filteredOrdersBySearch]
-  );
-
   const paymentTabOrderNumbers = useMemo(
     () =>
       activeTab === 'APPROVED'
-        ? Array.from(new Set(displayedOrders.map((o) => o.orderNumber.trim()).filter(Boolean))).sort()
+        ? Array.from(new Set(orders.map((o) => o.orderNumber.trim()).filter(Boolean))).sort()
         : [],
-    [activeTab, displayedOrders]
+    [activeTab, orders]
   );
 
   const { data: financialEntriesForPaymentTab = [] } = useQuery({
@@ -2294,6 +2439,28 @@ export function OcPurchaseOrdersPanel({
     }
     return map;
   }, [financialEntriesForPaymentTab]);
+
+  const displayedOrders = useMemo(() => {
+    if (activeTab === 'FINALIZADAS') {
+      return sortPurchaseOrdersByMostRecent(finalizedOrders);
+    }
+    if (activeTab === 'APPROVED' && hasActivePaymentDueFilters) {
+      return filteredOrdersBySearch.filter((order) => {
+        const entries =
+          financialEntriesByOcNumber.get(order.orderNumber.trim().toLowerCase()) ?? [];
+        const { dueDate } = resolvePaymentListInstallmentValues(order, 'payment', entries);
+        return isOcDueDateInPaymentFilterRange(dueDate, paymentDueFilters);
+      });
+    }
+    return filteredOrdersBySearch;
+  }, [
+    activeTab,
+    finalizedOrders,
+    filteredOrdersBySearch,
+    hasActivePaymentDueFilters,
+    paymentDueFilters,
+    financialEntriesByOcNumber,
+  ]);
 
   const userEmployee = userData?.data?.employee as
     | { department?: string | null; position?: string | null }
@@ -2557,9 +2724,14 @@ export function OcPurchaseOrdersPanel({
   const showToolbarSearch =
     !hideSearch && (Boolean(onSearchChange) || activeTab === 'FINALIZADAS');
   const showToolbarCnab = activeTab === 'APPROVED';
+  const showToolbarPaymentDueFilter = activeTab === 'APPROVED';
   const showToolbarFinalizedExtras = activeTab === 'FINALIZADAS';
   const showHeaderToolbar =
-    showToolbarSearch || showToolbarCnab || showToolbarFinalizedExtras || showApprovalPhaseFilter;
+    showToolbarSearch ||
+    showToolbarCnab ||
+    showToolbarPaymentDueFilter ||
+    showToolbarFinalizedExtras ||
+    showApprovalPhaseFilter;
   const hasActiveApprovalPhaseFilter = approvalListPhase !== 'pending';
   const orderForActionMenu = ocActionMenu
     ? displayedOrders.find((o) => o.id === ocActionMenu.orderId)
@@ -2615,6 +2787,28 @@ export function OcPurchaseOrdersPanel({
           >
             <Filter className="h-4 w-4" />
             {hasActiveApprovalPhaseFilter ? (
+              <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
+            ) : null}
+          </button>
+        )}
+        {showToolbarPaymentDueFilter && (
+          <button
+            type="button"
+            onClick={() => setIsPaymentDueFiltersModalOpen(true)}
+            className={`relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition-colors ${
+              hasActivePaymentDueFilters
+                ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40'
+                : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
+            }`}
+            aria-label="Filtrar por vencimento"
+            title={
+              hasActivePaymentDueFilters
+                ? 'Filtro de vencimento ativo'
+                : 'Filtrar por período de vencimento'
+            }
+          >
+            <Filter className="h-4 w-4" />
+            {hasActivePaymentDueFilters ? (
               <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
             ) : null}
           </button>
@@ -2751,14 +2945,32 @@ export function OcPurchaseOrdersPanel({
                   <div className="text-center py-8">
                     <FileText className="w-12 h-12 text-gray-400 dark:text-gray-500 mx-auto mb-4" />
                     <p className="text-gray-500 dark:text-gray-400">
-                      {embeddedOcEmptyMessage(activeTab, !!searchTerm.trim(), approvalListPhase)}
+                      {embeddedOcEmptyMessage(
+                        activeTab,
+                        !!searchTerm.trim(),
+                        approvalListPhase,
+                        hasActivePaymentDueFilters,
+                      )}
                     </p>
-                    {(effectiveSearchTerm.trim() || hasActiveFinalizedFilters) && activeTab === 'FINALIZADAS' ? (
+                    {(effectiveSearchTerm.trim() || hasActiveFinalizedFilters) &&
+                    activeTab === 'FINALIZADAS' ? (
                       <button
                         type="button"
                         onClick={() => {
                           setEffectiveSearchTerm('');
                           clearFinalizedFilters();
+                        }}
+                        className="mt-2 text-sm text-blue-600 dark:text-blue-400 hover:underline"
+                      >
+                        Limpar filtros
+                      </button>
+                    ) : (effectiveSearchTerm.trim() || hasActivePaymentDueFilters) &&
+                      activeTab === 'APPROVED' ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEffectiveSearchTerm('');
+                          clearPaymentDueFilters();
                         }}
                         className="mt-2 text-sm text-blue-600 dark:text-blue-400 hover:underline"
                       >
@@ -2841,6 +3053,12 @@ export function OcPurchaseOrdersPanel({
                       {ocListShowsInstallmentParcelColumn(activeTab) && (
                         <th className={ocListDocThCls}>Parcela</th>
                       )}
+                      {ocListShowsInstallmentDueDateColumn(activeTab) && (
+                        <th className={ocListDocThCls}>Vencimento</th>
+                      )}
+                      {ocListShowsInstallmentAmountColumn(activeTab) && (
+                        <th className={ocListDocThCls}>Valor parcela</th>
+                      )}
                       {ocListShowsDocumentColumns(activeTab) && (
                         <>
                           {ocListShowsBoletoColumn(activeTab) && (
@@ -2868,6 +3086,8 @@ export function OcPurchaseOrdersPanel({
                   <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
                     {displayedOrders.map((o: PurchaseOrder) => {
                       const listInstallmentModeForTab = ocListInstallmentMode(activeTab);
+                      const paymentFinancialEntries =
+                        financialEntriesByOcNumber.get(o.orderNumber.trim().toLowerCase()) ?? [];
                       return (
                       <tr
                         key={o.id}
@@ -2987,6 +3207,28 @@ export function OcPurchaseOrdersPanel({
                               <OcListInstallmentParcelCellContent
                                 order={o}
                                 installmentMode={listInstallmentModeForTab}
+                              />
+                            </div>
+                          </td>
+                        )}
+                        {ocListShowsInstallmentDueDateColumn(activeTab) && (
+                          <td className={ocListDocTdCls}>
+                            <div className={ocListDocCellInnerCls}>
+                              <OcListInstallmentDueDateCellContent
+                                order={o}
+                                installmentMode={listInstallmentModeForTab}
+                                financialEntries={paymentFinancialEntries}
+                              />
+                            </div>
+                          </td>
+                        )}
+                        {ocListShowsInstallmentAmountColumn(activeTab) && (
+                          <td className={ocListDocTdCls}>
+                            <div className={ocListDocCellInnerCls}>
+                              <OcListInstallmentAmountCellContent
+                                order={o}
+                                installmentMode={listInstallmentModeForTab}
+                                financialEntries={paymentFinancialEntries}
                               />
                             </div>
                           </td>
@@ -4783,6 +5025,57 @@ export function OcPurchaseOrdersPanel({
           </div>
         </div>
       )}
+
+      <Modal
+        isOpen={isPaymentDueFiltersModalOpen}
+        onClose={() => setIsPaymentDueFiltersModalOpen(false)}
+        title="Filtros — Pagamento"
+        size="md"
+        contentOverflowVisible
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            Exibe OCs cuja parcela em aberto vence no período informado.
+          </p>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Vencimento (de)
+              </label>
+              <DatePickerField
+                value={paymentDueFilters.dueDateFrom}
+                onChange={(dueDateFrom) =>
+                  setPaymentDueFilters((f) => ({ ...f, dueDateFrom }))
+                }
+                placeholder="dd/mm/aaaa"
+                noFocusRing
+                aria-label="Vencimento de"
+              />
+            </div>
+            <div>
+              <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Vencimento (até)
+              </label>
+              <DatePickerField
+                value={paymentDueFilters.dueDateTo}
+                onChange={(dueDateTo) => setPaymentDueFilters((f) => ({ ...f, dueDateTo }))}
+                placeholder="dd/mm/aaaa"
+                noFocusRing
+                aria-label="Vencimento até"
+              />
+            </div>
+          </div>
+          <div className="flex items-center justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setIsPaymentDueFiltersModalOpen(false)}
+            >
+              Fechar
+            </Button>
+          </div>
+        </div>
+      </Modal>
 
       {isFinalizedFiltersModalOpen && (
         <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">

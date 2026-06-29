@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Modal } from '@/components/ui/Modal';
+import { DatePickerField } from '@/components/ui/DatePickerField';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
@@ -42,6 +43,7 @@ import {
   normalizeNaturezaLabel
 } from '@/lib/contractPaidNaturezaExclusions';
 import { PleitoFormModal } from '@/components/pleito/PleitoFormModal';
+import { PleitoOsPurchaseOrdersSection } from '@/components/pleito/PleitoOsPurchaseOrdersSection';
 import {
   STATUS_ORCAMENTO_OPCOES,
   STATUS_EXECUCAO_OPCOES,
@@ -61,6 +63,11 @@ import {
 } from '@/lib/formatOsSePasta';
 import { getOsEtiquetaAbertura, isOsConcluida, type BillingForOsCheck } from '@/lib/pleitoOsExport';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
+import {
+  formatAjusteValorInput,
+  maskAjusteValorInput,
+  parseAjusteValorInput
+} from '@/lib/extratoCaixaAjuste';
 
 interface ContractBilling {
   id: string;
@@ -1468,7 +1475,7 @@ export default function ContractDetailPage() {
     const rows = annualValuesResponse?.data ?? [];
     const row = rows.find((r) => r.year === adjFormYear);
     if (row?.budgetAdjustmentDelta != null && row.budgetAdjustmentEffectiveDate) {
-      setAdjFormDeltaStr(formatCurrencyInput(Number(row.budgetAdjustmentDelta)));
+      setAdjFormDeltaStr(formatAjusteValorInput(Number(row.budgetAdjustmentDelta)));
       setAdjFormDate(toInputDate(row.budgetAdjustmentEffectiveDate));
     } else {
       setAdjFormDeltaStr('');
@@ -4275,36 +4282,56 @@ export default function ContractDetailPage() {
                     Cada aditivo recalcula a meta ideal a partir da data informada até o fim da vigência.
                   </p>
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <input
-                      type="date"
-                      value={addendumDate}
-                      onChange={(e) => setAddendumDate(e.target.value)}
-                      className="h-10 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                    />
-                    <input
-                      type="text"
-                      placeholder="Valor (R$)"
-                      value={addendumAmount}
-                      onChange={(e) => setAddendumAmount(e.target.value)}
-                      className="h-10 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                    />
+                    <div>
+                      <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                        Data *
+                      </label>
+                      <DatePickerField
+                        value={addendumDate}
+                        onChange={setAddendumDate}
+                        placeholder="dd/mm/aaaa"
+                        aria-label="Data do aditivo"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                        Valor (R$) *
+                      </label>
+                      <div className="relative">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 font-medium">
+                          R$
+                        </span>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          placeholder="0,00"
+                          value={addendumAmount}
+                          onChange={(e) => setAddendumAmount(maskAjusteValorInput(e.target.value))}
+                          className="h-10 w-full pl-10 pr-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex items-end">
                     <button
                       type="button"
                       onClick={() => {
-                        const amount = parseCurrencyInput(addendumAmount);
+                        const amount = parseAjusteValorInput(addendumAmount);
                         if (!addendumDate) return toast.error('Informe a data do aditivo');
-                        if (Math.abs(amount) < 1e-9) return toast.error('Informe um valor diferente de zero');
+                        if (Number.isNaN(amount) || Math.abs(amount) < 1e-9) {
+                          return toast.error('Informe um valor diferente de zero');
+                        }
                         createAddendumMutation.mutate({
                           effectiveDate: addendumDate,
                           amount,
                           note: addendumNote.trim() || null
                         });
                       }}
-                      className="h-10 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium"
+                      className="h-10 w-full px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium"
                       disabled={createAddendumMutation.isPending}
                     >
                       {createAddendumMutation.isPending ? 'Salvando…' : 'Adicionar'}
                     </button>
+                    </div>
                   </div>
                   <input
                     type="text"
@@ -4393,7 +4420,7 @@ export default function ContractDetailPage() {
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
                       Ajuste (R$){' '}
                       <span className="font-normal text-gray-500">positivo soma, negativo retira</span>
                     </label>
@@ -4401,46 +4428,59 @@ export default function ContractDetailPage() {
                       <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 font-medium">R$</span>
                       <input
                         type="text"
+                        inputMode="decimal"
                         value={adjFormDeltaStr}
-                        onChange={(e) => setAdjFormDeltaStr(e.target.value)}
+                        onChange={(e) => setAdjFormDeltaStr(maskAjusteValorInput(e.target.value))}
                         placeholder="0,00"
-                        className="w-full pl-10 pr-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                        className="w-full h-10 pl-10 pr-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
                       />
                     </div>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
                       Data do aditivo *
                     </label>
-                    <input
-                      type="date"
+                    <DatePickerField
                       value={adjFormDate}
-                      onChange={(e) => setAdjFormDate(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                      onChange={setAdjFormDate}
+                      placeholder="dd/mm/aaaa"
+                      aria-label="Data do aditivo"
                     />
                   </div>
                   {valorAnualBase !== null && (
                     <p className="text-sm text-gray-600 dark:text-gray-400">
                       Referência (base + aditivo no ano):{' '}
                       <span className="font-semibold text-gray-900 dark:text-gray-100">
-                        {formatCurrency(valorAnualBase + parseCurrencyInput(adjFormDeltaStr || '0'))}
+                        {formatCurrency(
+                          valorAnualBase + (parseAjusteValorInput(adjFormDeltaStr || '0') || 0)
+                        )}
                       </span>
                       <span className="block mt-1 text-xs">
                         A meta ideal pós-aditivo não é esse valor ÷ 12; use a tabela Controle Geral para ver o rateio.
                       </span>
                     </p>
                   )}
-                  <div className="flex flex-wrap gap-2 pt-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
                     <button
                       type="button"
                       disabled={saveAnnualAdjustmentMutation.isPending || clearAnnualAdjustmentMutation.isPending}
                       onClick={() => {
-                        const delta = parseCurrencyInput(adjFormDeltaStr || '0');
+                        clearAnnualAdjustmentMutation.mutate(adjFormYear);
+                      }}
+                      className="h-10 px-4 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-800 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 text-sm font-medium"
+                    >
+                      {clearAnnualAdjustmentMutation.isPending ? 'Removendo…' : 'Remover ajuste'}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={saveAnnualAdjustmentMutation.isPending || clearAnnualAdjustmentMutation.isPending}
+                      onClick={() => {
+                        const delta = parseAjusteValorInput(adjFormDeltaStr || '0');
                         if (!adjFormDate.trim()) {
                           toast.error('Informe a data do aditivo');
                           return;
                         }
-                        if (Math.abs(delta) < 1e-9) {
+                        if (Number.isNaN(delta) || Math.abs(delta) < 1e-9) {
                           toast.error('Informe um valor de ajuste diferente de zero ou use Remover ajuste');
                           return;
                         }
@@ -4450,26 +4490,9 @@ export default function ContractDetailPage() {
                           budgetAdjustmentEffectiveDate: adjFormDate
                         });
                       }}
-                      className="flex-1 min-w-[8rem] h-10 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium"
+                      className="h-10 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium"
                     >
                       {saveAnnualAdjustmentMutation.isPending ? 'Salvando…' : 'Salvar'}
-                    </button>
-                    <button
-                      type="button"
-                      disabled={saveAnnualAdjustmentMutation.isPending || clearAnnualAdjustmentMutation.isPending}
-                      onClick={() => {
-                        clearAnnualAdjustmentMutation.mutate(adjFormYear);
-                      }}
-                      className="flex-1 min-w-[8rem] h-10 px-4 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-800 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 text-sm font-medium"
-                    >
-                      {clearAnnualAdjustmentMutation.isPending ? 'Removendo…' : 'Remover ajuste'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setShowValorAnualAdjustModal(false)}
-                      className="flex-1 min-w-[8rem] h-10 px-4 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg text-sm"
-                    >
-                      Cancelar
                     </button>
                   </div>
                 </div>
@@ -5473,7 +5496,7 @@ export default function ContractDetailPage() {
           {selectedPleitoId && (
             <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-2">
               <div className="absolute inset-0" onClick={() => setSelectedPleitoId(null)} />
-              <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+              <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-3xl w-full mx-4 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
                 <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between sticky top-0 bg-white dark:bg-gray-800 z-10">
                   <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
                     <ClipboardList className="w-5 h-5" />
@@ -5552,6 +5575,10 @@ export default function ContractDetailPage() {
                           </div>
                         ) : null
                       )}
+                      <PleitoOsPurchaseOrdersSection
+                        serviceOrderId={(pleito as { serviceOrderId?: string }).serviceOrderId}
+                        serviceOrderText={pleito.divSe}
+                      />
                     </div>
                     );
                   })() : (

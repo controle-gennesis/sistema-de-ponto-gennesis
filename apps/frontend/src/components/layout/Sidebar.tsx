@@ -375,6 +375,17 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
             permission: isAdministrator || isDepartmentFinanceiro || can(pk('/ponto/financeiro/gestao-solicitacoes'))
           },
           {
+            name: 'Aprovações Fluig',
+            href: '/ponto/fluig/aprovacoes-workflow',
+            icon: FileCheck,
+            description: 'Status de aprovação Compras, Gestor e Diretoria (G3/G5)',
+            permission:
+              isAdministrator ||
+              isDepartmentFinanceiro ||
+              isDepartmentCompras ||
+              can(pk('/ponto/fluig/aprovacoes-workflow'))
+          },
+          {
             name: 'Central de Atendimentos',
             href: '/ponto/conversas-whatsapp',
             icon: MessageSquare,

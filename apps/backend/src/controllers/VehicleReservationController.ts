@@ -115,14 +115,12 @@ function buildReservationData(body: Record<string, unknown>) {
   const assinatura = normalizeOptionalString(body.assinatura) || '';
 
   const motorista = normalizeOptionalString(body.motorista);
-  const vehicleId = normalizeOptionalString(body.vehicleId);
   const atividade = normalizeOptionalString(body.atividade);
   const localDestino = normalizeOptionalString(body.localDestino);
   const solicitante = normalizeOptionalString(body.solicitante);
 
   if (!solicitante) throw createError('Solicitante é obrigatório', 400);
   if (!motorista) throw createError('Motorista é obrigatório', 400);
-  if (!vehicleId) throw createError('Veículo é obrigatório', 400);
   if (!atividade) throw createError('Atividade é obrigatória', 400);
   if (!localDestino) throw createError('Local de destino é obrigatório', 400);
 
@@ -134,7 +132,6 @@ function buildReservationData(body: Record<string, unknown>) {
   return {
     solicitante,
     motorista,
-    vehicleId,
     atividade,
     localDestino,
     dataUsoInicio,
@@ -142,6 +139,7 @@ function buildReservationData(body: Record<string, unknown>) {
     periodoUso,
     polo: normalizeOptionalString(body.polo),
     contrato: normalizeOptionalString(body.contrato),
+    observacaoCapacidadeVeiculo: normalizeOptionalString(body.observacaoCapacidadeVeiculo),
     assinatura
   };
 }
@@ -187,6 +185,7 @@ export class VehicleReservationController {
           { atividade: { contains: term, mode: 'insensitive' } },
           { localDestino: { contains: term, mode: 'insensitive' } },
           { contrato: { contains: term, mode: 'insensitive' } },
+          { observacaoCapacidadeVeiculo: { contains: term, mode: 'insensitive' } },
           { vehicle: { placaVeic: { contains: term, mode: 'insensitive' } } },
           { vehicle: { modeloVeic: { contains: term, mode: 'insensitive' } } }
         ];
@@ -245,11 +244,6 @@ export class VehicleReservationController {
     try {
       const parsed = buildReservationData(req.body);
 
-      const vehicle = await prisma.vehicle.findFirst({
-        where: { id: parsed.vehicleId, isActive: true }
-      });
-      if (!vehicle) throw createError('Veículo não encontrado ou inativo', 400);
-
       const [code] = await reserveReservationCodes(1);
       if (!code) throw createError('Não foi possível gerar o código da reserva', 500);
 
@@ -307,6 +301,13 @@ export class VehicleReservationController {
 
       const { id } = req.params;
       const comment = normalizeOptionalString(req.body?.comment);
+      const vehicleId = normalizeOptionalString(req.body?.vehicleId);
+      if (!vehicleId) throw createError('Selecione o veículo disponibilizado', 400);
+
+      const vehicle = await prisma.vehicle.findFirst({
+        where: { id: vehicleId, isActive: true }
+      });
+      if (!vehicle) throw createError('Veículo não encontrado ou inativo', 400);
 
       const existing = await prisma.vehicleReservation.findUnique({ where: { id } });
       if (!existing) throw createError('Reserva não encontrada', 404);
@@ -318,6 +319,7 @@ export class VehicleReservationController {
         where: { id },
         data: {
           status: VehicleReservationStatus.APPROVED,
+          vehicleId,
           suppliesApprovedById: req.user.id,
           suppliesApprovedAt: new Date(),
           suppliesApprovalComment: comment,

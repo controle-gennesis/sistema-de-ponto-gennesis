@@ -12,13 +12,31 @@ import { assertUserHasFuelSuppliesAccess } from '../lib/fuelSuppliesAccess';
 
 const listQuerySchema = z.object({
   search: z.string().optional(),
-  status: z.nativeEnum(FuelRefuelRequestStatus).optional(),
+  status: z.string().optional(),
   queue: z.enum(['supplies', 'all']).optional(),
   mine: z
     .string()
     .optional()
     .transform((v) => v === 'true' || v === '1'),
 });
+
+function parseStatusFilter(value: unknown): FuelRefuelRequestStatus[] | undefined {
+  const raw = String(value ?? '').trim().toUpperCase();
+  if (!raw || raw === 'ALL') return undefined;
+
+  const parts = raw.split(',').map((part) => part.trim()).filter(Boolean);
+  const statuses: FuelRefuelRequestStatus[] = [];
+
+  for (const part of parts) {
+    if (Object.values(FuelRefuelRequestStatus).includes(part as FuelRefuelRequestStatus)) {
+      statuses.push(part as FuelRefuelRequestStatus);
+    } else {
+      throw createError('Status de filtro inválido', 400);
+    }
+  }
+
+  return statuses.length ? statuses : undefined;
+}
 
 const approveSchema = z.object({
   comment: z.string().optional(),
@@ -47,7 +65,7 @@ export class FuelRefuelRequestController {
       const parsed = listQuerySchema.parse(req.query);
       const rows = await fuelRefuelRequestService.listForSupplies({
         search: parsed.search,
-        status: parsed.status,
+        statuses: parseStatusFilter(parsed.status),
         queue: parsed.queue,
         requesterId: parsed.mine ? user.id : undefined,
       });

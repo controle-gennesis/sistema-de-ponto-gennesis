@@ -26,6 +26,7 @@ import {
   ADM_TYPE_LABELS,
   type AdmFormRequestType,
 } from './AdmTstSolicitacaoTypeFields';
+import { getInitialSolicitacaoDetails } from './dpSolicitacaoInitialDetails';
 import { usePermissions } from '@/hooks/usePermissions';
 import { buildDpRequestTimeline } from '@/lib/dpRequestTimeline';
 import { DpRequestDetailsPreview } from '@/lib/dpRequestDetailsPreview';
@@ -327,6 +328,34 @@ function mapCostCenterPoloToFormPolo(raw: string | null | undefined): string {
   return '';
 }
 
+function resolveCostCenterPoloRegion(costCenter?: {
+  polo?: string | null;
+  name?: string | null;
+  code?: string | null;
+}): 'DF' | 'GO' | null {
+  const fromPolo = mapCostCenterPoloToFormPolo(costCenter?.polo);
+  if (fromPolo === 'DF' || fromPolo === 'GO') return fromPolo;
+
+  const combined = [costCenter?.name, costCenter?.code]
+    .map((v) =>
+      (v ?? '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toUpperCase()
+    )
+    .filter(Boolean)
+    .join(' ');
+
+  if (!combined) return null;
+  if (/\bDF\b/.test(combined) || combined.includes('BRASILIA') || combined.includes('DISTRITO FEDERAL')) {
+    return 'DF';
+  }
+  if (/\bGO\b/.test(combined) || combined.includes('GOIAS')) {
+    return 'GO';
+  }
+  return null;
+}
+
 function isDpFormPolo(v: string): v is (typeof DP_POLO_OPTIONS)[number] {
   return (DP_POLO_OPTIONS as readonly string[]).includes(v);
 }
@@ -406,17 +435,18 @@ export function SolicitacoesGeraisPage() {
   });
   const payrollEmployees = payrollEmpResp ?? [];
 
+  const employeeNameByIdForDetail = React.useMemo(
+    () => new Map(payrollEmployees.map((e) => [e.id, e.name])),
+    [payrollEmployees]
+  );
+
   const [details, setDetails] = useState<Record<string, unknown>>({});
-  const [atestadoFile, setAtestadoFile] = useState<File | null>(null);
-  const [horaExtraFile, setHoraExtraFile] = useState<File | null>(null);
-  const [atestadoFileName, setAtestadoFileName] = useState('');
-  const [horaExtraFileName, setHoraExtraFileName] = useState('');
+  const [atestadoFiles, setAtestadoFiles] = useState<Record<number, File>>({});
+  const [horaExtraFiles, setHoraExtraFiles] = useState<Record<number, File>>({});
+  const [atestadoFileNames, setAtestadoFileNames] = useState<Record<number, string>>({});
+  const [horaExtraFileNames, setHoraExtraFileNames] = useState<Record<number, string>>({});
 
   const patchDetails = (p: Record<string, unknown>) => setDetails((d) => ({ ...d, ...p }));
-
-  const setSingleEmployeeId = (id: string) => {
-    setDetails((d) => ({ ...d, employeeIds: id ? [id] : [] }));
-  };
 
   const [form, setForm] = useState<{
     urgency: DpUrgency;
@@ -448,10 +478,10 @@ export function SolicitacoesGeraisPage() {
       polo: '',
     }));
     setDetails({});
-    setAtestadoFile(null);
-    setHoraExtraFile(null);
-    setAtestadoFileName('');
-    setHoraExtraFileName('');
+    setAtestadoFiles({});
+    setHoraExtraFiles({});
+    setAtestadoFileNames({});
+    setHoraExtraFileNames({});
   };
 
   const closeCreateModal = () => {
@@ -463,10 +493,10 @@ export function SolicitacoesGeraisPage() {
     setCreateTargetDepartment(null);
     setForm((p) => ({ ...p, requestType: '', prazoInicio: '', prazoFim: '' }));
     setDetails({});
-    setAtestadoFile(null);
-    setHoraExtraFile(null);
-    setAtestadoFileName('');
-    setHoraExtraFileName('');
+    setAtestadoFiles({});
+    setHoraExtraFiles({});
+    setAtestadoFileNames({});
+    setHoraExtraFileNames({});
   };
 
   const selectedContractId = form.contractId;
@@ -499,12 +529,26 @@ export function SolicitacoesGeraisPage() {
 
   useEffect(() => {
     if (form.requestType !== 'ADVERTENCIA_SUSPENSAO') return;
-    setDetails((d) => (d.punicao ? d : { ...d, punicao: 'ADVERTENCIA' }));
+    setDetails((d) => {
+      const medidas = Array.isArray(d.medidas) ? (d.medidas as Record<string, unknown>[]) : [];
+      if (!medidas.length || medidas[0]?.punicao) return d;
+      return {
+        ...d,
+        medidas: [{ ...medidas[0], punicao: 'ADVERTENCIA' }, ...medidas.slice(1)],
+      };
+    });
   }, [form.requestType]);
 
   useEffect(() => {
     if (form.requestType !== 'ADM_VIAGENS') return;
-    setDetails((d) => (d.pedagio ? d : { ...d, pedagio: 'NAO' }));
+    setDetails((d) => {
+      const viagens = Array.isArray(d.viagens) ? (d.viagens as Record<string, unknown>[]) : [];
+      if (!viagens.length || viagens[0]?.pedagio) return d;
+      return {
+        ...d,
+        viagens: [{ ...viagens[0], pedagio: 'NAO' }, ...viagens.slice(1)],
+      };
+    });
   }, [form.requestType]);
 
   const [myStatusFilter, setMyStatusFilter] = useState<'all' | DpRequestStatus>('all');
@@ -589,10 +633,22 @@ export function SolicitacoesGeraisPage() {
     return items;
   }, [form.company]);
 
-  const poloSelectOptions = React.useMemo<MultiSelectSearchOption[]>(
-    () => DP_POLO_OPTIONS.map((p) => ({ value: p, label: p })),
-    []
+  const selectedContract = React.useMemo(
+    () => eligibleContracts.find((x) => x.id === selectedContractId),
+    [eligibleContracts, selectedContractId]
   );
+
+  const costCenterPoloRegion = React.useMemo(
+    () => resolveCostCenterPoloRegion(selectedContract?.costCenter),
+    [selectedContract]
+  );
+
+  const showPoloField = costCenterPoloRegion !== null;
+
+  const poloSelectOptions = React.useMemo<MultiSelectSearchOption[]>(() => {
+    if (!costCenterPoloRegion) return [];
+    return [{ value: costCenterPoloRegion, label: costCenterPoloRegion, searchText: costCenterPoloRegion }];
+  }, [costCenterPoloRegion]);
 
   const myStatusFilterOptions = React.useMemo<MultiSelectSearchOption[]>(() => {
     if (destinationFilter === 'ADM_TST') {
@@ -657,11 +713,12 @@ export function SolicitacoesGeraisPage() {
     }
     const contract = eligibleContracts.find((x) => x.id === id);
     const meta = contract?.costCenter;
+    const poloRegion = resolveCostCenterPoloRegion(meta);
     setForm((p) => ({
       ...p,
       contractId: id,
       company: meta?.company?.trim() ?? '',
-      polo: mapCostCenterPoloToFormPolo(meta?.polo),
+      polo: poloRegion ?? '',
     }));
   };
 
@@ -704,12 +761,34 @@ export function SolicitacoesGeraisPage() {
       const d: Record<string, unknown> = { ...details };
 
       if (form.requestType === 'ATESTADO_MEDICO') {
-        if (!atestadoFile) throw new Error('Anexe o atestado médico');
-        d.anexoAtestado = await fileToDpAttachment(atestadoFile);
+        const atestados = Array.isArray(d.atestados)
+          ? ([...(d.atestados as Record<string, unknown>[])] as Record<string, unknown>[])
+          : [];
+        if (!atestados.length) throw new Error('Informe ao menos um atestado');
+        for (let i = 0; i < atestados.length; i++) {
+          const file = atestadoFiles[i];
+          if (!file) throw new Error(`Anexe o atestado do item ${i + 1}`);
+          atestados[i] = {
+            ...atestados[i],
+            anexoAtestado: await fileToDpAttachment(file),
+          };
+        }
+        d.atestados = atestados;
       }
       if (form.requestType === 'HORA_EXTRA') {
-        if (!horaExtraFile) throw new Error('Anexe a autorização de hora extra');
-        d.anexoAutorizacao = await fileToDpAttachment(horaExtraFile);
+        const horasExtras = Array.isArray(d.horasExtras)
+          ? ([...(d.horasExtras as Record<string, unknown>[])] as Record<string, unknown>[])
+          : [];
+        if (!horasExtras.length) throw new Error('Informe ao menos uma solicitação de hora extra');
+        for (let i = 0; i < horasExtras.length; i++) {
+          const file = horaExtraFiles[i];
+          if (!file) throw new Error(`Anexe a autorização de hora extra do item ${i + 1}`);
+          horasExtras[i] = {
+            ...horasExtras[i],
+            anexoAutorizacao: await fileToDpAttachment(file),
+          };
+        }
+        d.horasExtras = horasExtras;
       }
       const payload: Record<string, unknown> = {
         urgency: form.urgency,
@@ -1205,76 +1284,6 @@ export function SolicitacoesGeraisPage() {
               </div>
             </div>
 
-            <div className="md:col-span-2">
-              <label className="mb-1 block text-sm font-medium">Tipo de solicitação *</label>
-              <SingleSelectSearchDropdown
-                value={form.requestType}
-                onChange={(rt) => {
-                  setForm((p) => ({
-                    ...p,
-                    requestType: rt as DpRequestType | '',
-                    prazoInicio: '',
-                    prazoFim: '',
-                  }));
-                  setDetails({});
-                  setAtestadoFile(null);
-                  setHoraExtraFile(null);
-                  setAtestadoFileName('');
-                  setHoraExtraFileName('');
-                }}
-                options={requestTypeSelectOptions}
-                allowEmpty
-                placeholder="Selecione o tipo..."
-                searchPlaceholder="Pesquisar..."
-                noFocusRing
-              />
-            </div>
-
-            {createTargetDepartment === 'DP' ? (
-              <DpSolicitacaoTypeFields
-                requestType={form.requestType as DpFormRequestType | ''}
-                details={details}
-                patchDetails={patchDetails}
-                employees={payrollEmployees}
-                setEmployeeId={setSingleEmployeeId}
-                onAtestadoFile={(f) => {
-                  setAtestadoFile(f);
-                  setAtestadoFileName(f?.name ?? '');
-                }}
-                onHoraExtraFile={(f) => {
-                  setHoraExtraFile(f);
-                  setHoraExtraFileName(f?.name ?? '');
-                }}
-                atestadoFileName={atestadoFileName}
-                horaExtraFileName={horaExtraFileName}
-              />
-            ) : (
-              <AdmTstSolicitacaoTypeFields
-                requestType={form.requestType as AdmFormRequestType | ''}
-                details={details}
-                patchDetails={patchDetails}
-                employees={payrollEmployees}
-              />
-            )}
-
-            {createTargetDepartment === 'DP' &&
-              form.requestType &&
-              (['FERIAS', 'ATESTADO_MEDICO', 'BENEFICIOS_VIAGEM'].includes(form.requestType) ||
-                form.requestType === 'RETIFICACAO_ALOCACAO') && (
-                <div className="rounded-lg border border-dashed border-gray-200 p-3 text-xs text-gray-600 dark:border-gray-600 dark:text-gray-400 md:col-span-2">
-                  {['FERIAS', 'ATESTADO_MEDICO', 'BENEFICIOS_VIAGEM'].includes(form.requestType) ? (
-                    <span>
-                      As datas acima são o <strong>período</strong> (férias, atestado ou viagem). Abaixo, informe o{' '}
-                      <strong>prazo</strong> em que o DP deve responder — são campos diferentes.
-                    </span>
-                  ) : (
-                    <span>
-                      A data de retificação acima não substitui o prazo de retorno do DP; preencha os campos abaixo.
-                    </span>
-                  )}
-                </div>
-              )}
-
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:col-span-2">
               <div>
                 <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -1302,7 +1311,11 @@ export function SolicitacoesGeraisPage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 md:col-span-2">
+            <div
+              className={`grid grid-cols-1 gap-4 md:col-span-2 ${
+                showPoloField ? 'sm:grid-cols-3' : 'sm:grid-cols-2'
+              }`}
+            >
               <div className="min-w-0">
                 <label className="mb-1 block text-sm font-medium">Contrato *</label>
                 <SingleSelectSearchDropdown
@@ -1327,19 +1340,92 @@ export function SolicitacoesGeraisPage() {
                   noFocusRing
                 />
               </div>
-              <div className="min-w-0">
-                <label className="mb-1 block text-sm font-medium">Polo</label>
-                <SingleSelectSearchDropdown
-                  value={isDpFormPolo(form.polo) ? form.polo : ''}
-                  onChange={(polo) => setForm((p) => ({ ...p, polo }))}
-                  options={poloSelectOptions}
-                  allowEmpty
-                  placeholder="Selecione o polo..."
-                  searchPlaceholder="Pesquisar..."
-                  noFocusRing
-                />
-              </div>
+              {showPoloField ? (
+                <div className="min-w-0">
+                  <label className="mb-1 block text-sm font-medium">Polo</label>
+                  <SingleSelectSearchDropdown
+                    value={isDpFormPolo(form.polo) ? form.polo : costCenterPoloRegion ?? ''}
+                    onChange={(polo) => setForm((p) => ({ ...p, polo }))}
+                    options={poloSelectOptions}
+                    allowEmpty={false}
+                    placeholder="Selecione o polo..."
+                    searchPlaceholder="Pesquisar..."
+                    noFocusRing
+                  />
+                </div>
+              ) : null}
             </div>
+
+            <div className="md:col-span-2">
+              <label className="mb-1 block text-sm font-medium">Tipo de solicitação *</label>
+              <SingleSelectSearchDropdown
+                value={form.requestType}
+                onChange={(rt) => {
+                  setForm((p) => ({
+                    ...p,
+                    requestType: rt as DpRequestType | '',
+                  }));
+                  setDetails(
+                    getInitialSolicitacaoDetails(rt as DpFormRequestType | AdmFormRequestType)
+                  );
+                  setAtestadoFiles({});
+                  setHoraExtraFiles({});
+                  setAtestadoFileNames({});
+                  setHoraExtraFileNames({});
+                }}
+                options={requestTypeSelectOptions}
+                allowEmpty
+                placeholder="Selecione o tipo..."
+                searchPlaceholder="Pesquisar..."
+                noFocusRing
+              />
+            </div>
+
+            {createTargetDepartment === 'DP' ? (
+              <DpSolicitacaoTypeFields
+                requestType={form.requestType as DpFormRequestType | ''}
+                details={details}
+                patchDetails={patchDetails}
+                employees={payrollEmployees}
+                onAtestadoFile={(index, f) => {
+                  setAtestadoFiles((prev) => {
+                    const next = { ...prev };
+                    if (f) next[index] = f;
+                    else delete next[index];
+                    return next;
+                  });
+                  setAtestadoFileNames((prev) => {
+                    const next = { ...prev };
+                    if (f) next[index] = f.name;
+                    else delete next[index];
+                    return next;
+                  });
+                }}
+                onHoraExtraFile={(index, f) => {
+                  setHoraExtraFiles((prev) => {
+                    const next = { ...prev };
+                    if (f) next[index] = f;
+                    else delete next[index];
+                    return next;
+                  });
+                  setHoraExtraFileNames((prev) => {
+                    const next = { ...prev };
+                    if (f) next[index] = f.name;
+                    else delete next[index];
+                    return next;
+                  });
+                }}
+                atestadoFileNames={atestadoFileNames}
+                horaExtraFileNames={horaExtraFileNames}
+              />
+            ) : (
+              <AdmTstSolicitacaoTypeFields
+                requestType={form.requestType as AdmFormRequestType | ''}
+                details={details}
+                patchDetails={patchDetails}
+                employees={payrollEmployees}
+              />
+            )}
 
             <div className="flex justify-end gap-3 md:col-span-2">
               <Button type="button" variant="outline" onClick={closeCreateModal}>
@@ -1479,6 +1565,7 @@ export function SolicitacoesGeraisPage() {
                   <DpRequestDetailsPreview
                     requestType={historyRequest.requestType}
                     details={historyRequest.details}
+                    employeeNameById={employeeNameByIdForDetail}
                   />
 
                   {historyFeedbackText ? (

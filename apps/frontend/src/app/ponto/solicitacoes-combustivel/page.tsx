@@ -1,13 +1,24 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { useRouter } from 'next/navigation';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { Fuel, Search, Filter, X, FileText } from 'lucide-react';
+import {
+  CheckCircle,
+  Clock,
+  FileText,
+  Filter,
+  Search,
+  Users,
+  X,
+  XCircle,
+  type LucideIcon,
+} from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
+import { FilterStatCard } from '@/components/ui/FilterStatCard';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
@@ -37,15 +48,121 @@ type FuelRefuelStatus =
   | 'REJECTED'
   | 'CANCELLED';
 
-const STATUS_FILTER_OPTIONS = labeledToSelectOptions([
+type SuppliesCardFilter = 'all' | 'pending' | 'CONCLUDED' | 'CANCELLED';
+
+type DetailStatusFilter = 'ALL' | 'SUPPLIES_QUEUE' | FuelRefuelStatus;
+
+const DETAIL_STATUS_FILTER_OPTIONS = labeledToSelectOptions([
+  { value: 'ALL', label: 'Todos do card selecionado' },
+  { value: 'SUPPLIES_QUEUE', label: 'Aguardando e Aguardando abastecimento' },
   { value: 'PENDING_SUPPLIES', label: 'Aguardando Suprimentos' },
   { value: 'AWAITING_REFUEL', label: 'Aprovadas — aguardando abastecimento' },
-  { value: 'COMPLETED', label: 'Concluídas' },
-  { value: 'ALL', label: 'Todos' },
   { value: 'PENDING_MANAGER', label: 'Aguardando gestor' },
+  { value: 'COMPLETED', label: 'Concluídas' },
   { value: 'REJECTED', label: 'Rejeitadas' },
   { value: 'CANCELLED', label: 'Canceladas' },
 ]);
+
+const DEFAULT_CARD_FILTER: SuppliesCardFilter = 'pending';
+
+const SUPPLIES_CARD_LIST_CONFIG: Record<
+  SuppliesCardFilter,
+  {
+    title: string;
+    subtitle: string;
+    Icon: LucideIcon;
+    iconBg: string;
+    iconColor: string;
+  }
+> = {
+  all: {
+    title: 'Todas as Solicitações de Combustível',
+    subtitle: 'Todas as solicitações de abastecimento registradas no sistema.',
+    Icon: Users,
+    iconBg: 'bg-blue-100 dark:bg-blue-900/30',
+    iconColor: 'text-blue-600 dark:text-blue-400',
+  },
+  pending: {
+    title: 'Solicitações Pendentes',
+    subtitle: 'Aguardando análise do Suprimentos ou informe de abastecimento.',
+    Icon: Clock,
+    iconBg: 'bg-yellow-100 dark:bg-yellow-900/30',
+    iconColor: 'text-yellow-600 dark:text-yellow-400',
+  },
+  CONCLUDED: {
+    title: 'Solicitações Concluídas',
+    subtitle: 'Abastecimentos informados e finalizados.',
+    Icon: CheckCircle,
+    iconBg: 'bg-green-100 dark:bg-green-900/30',
+    iconColor: 'text-green-600 dark:text-green-400',
+  },
+  CANCELLED: {
+    title: 'Solicitações Canceladas',
+    subtitle: 'Solicitações canceladas ou rejeitadas.',
+    Icon: XCircle,
+    iconBg: 'bg-red-100 dark:bg-red-900/30',
+    iconColor: 'text-red-600 dark:text-red-400',
+  },
+};
+
+const SUPPLIES_STAT_CARDS: {
+  filter: SuppliesCardFilter;
+  label: string;
+  iconBg: string;
+  iconColor: string;
+  Icon: LucideIcon;
+  countKey: keyof { total: number; pending: number; concluded: number; cancelled: number };
+}[] = [
+  {
+    filter: 'all',
+    label: 'Registros',
+    iconBg: 'bg-blue-100 dark:bg-blue-900/30',
+    iconColor: 'text-blue-600 dark:text-blue-400',
+    Icon: Users,
+    countKey: 'total',
+  },
+  {
+    filter: 'pending',
+    label: 'Pendentes',
+    iconBg: 'bg-yellow-100 dark:bg-yellow-900/30',
+    iconColor: 'text-yellow-600 dark:text-yellow-400',
+    Icon: Clock,
+    countKey: 'pending',
+  },
+  {
+    filter: 'CONCLUDED',
+    label: 'Concluídas',
+    iconBg: 'bg-green-100 dark:bg-green-900/30',
+    iconColor: 'text-green-600 dark:text-green-400',
+    Icon: CheckCircle,
+    countKey: 'concluded',
+  },
+  {
+    filter: 'CANCELLED',
+    label: 'Canceladas',
+    iconBg: 'bg-red-100 dark:bg-red-900/30',
+    iconColor: 'text-red-600 dark:text-red-400',
+    Icon: XCircle,
+    countKey: 'cancelled',
+  },
+];
+
+function cardFilterToApiParam(filter: SuppliesCardFilter): string | undefined {
+  if (filter === 'all') return undefined;
+  if (filter === 'pending') return 'PENDING_SUPPLIES,AWAITING_REFUEL,APPROVED';
+  if (filter === 'CONCLUDED') return 'COMPLETED';
+  return 'CANCELLED,REJECTED';
+}
+
+function isFuelSuppliesQueueStatus(status: FuelRefuelStatus): boolean {
+  return status === 'PENDING_SUPPLIES' || status === 'AWAITING_REFUEL' || status === 'APPROVED';
+}
+
+function matchesDetailStatusFilter(status: FuelRefuelStatus, filter: DetailStatusFilter): boolean {
+  if (filter === 'ALL') return true;
+  if (filter === 'SUPPLIES_QUEUE') return isFuelSuppliesQueueStatus(status);
+  return status === filter;
+}
 
 type FuelRefuelRequest = {
   id: string;
@@ -139,11 +256,23 @@ function fuelContractLabel(row: {
   return row.contract?.number || row.contract?.name || '—';
 }
 
+function fuelRefuelTotalValue(
+  liters: string | number | null | undefined,
+  pricePerLiter: string | number | null | undefined,
+): number | null {
+  if (liters == null || pricePerLiter == null) return null;
+  const litersNum = Number(liters);
+  const priceNum = Number(pricePerLiter);
+  if (!Number.isFinite(litersNum) || !Number.isFinite(priceNum)) return null;
+  return litersNum * priceNum;
+}
+
 export default function SolicitacoesCombustivelPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'ALL' | FuelRefuelStatus>('PENDING_SUPPLIES');
+  const [cardFilter, setCardFilter] = useState<SuppliesCardFilter>(DEFAULT_CARD_FILTER);
+  const [detailStatusFilter, setDetailStatusFilter] = useState<DetailStatusFilter>('ALL');
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [selected, setSelected] = useState<FuelRefuelRequest | null>(null);
@@ -165,18 +294,35 @@ export default function SolicitacoesCombustivelPage() {
     },
   });
 
-  const { data: listData, isLoading: loadingList } = useQuery({
-    queryKey: ['fuel-refuel-requests', searchTerm, statusFilter],
+  const { data: statsData, isLoading: loadingStats } = useQuery({
+    queryKey: ['fuel-refuel-requests-supplies', 'stats'],
+    queryFn: async () => {
+      const res = await api.get('/fuel-refuel-requests');
+      return (res.data?.data || []) as FuelRefuelRequest[];
+    },
+    enabled: !loadingUser,
+    staleTime: 0,
+  });
+
+  const {
+    data: listData,
+    isLoading: loadingList,
+    isError: listError,
+    refetch: refetchList,
+  } = useQuery({
+    queryKey: ['fuel-refuel-requests-supplies', searchTerm, cardFilter],
     queryFn: async () => {
       const res = await api.get('/fuel-refuel-requests', {
         params: {
           search: searchTerm || undefined,
-          status: statusFilter !== 'ALL' ? statusFilter : undefined,
+          status: cardFilterToApiParam(cardFilter),
         },
       });
       return (res.data?.data || []) as FuelRefuelRequest[];
     },
     enabled: !loadingUser,
+    staleTime: 0,
+    refetchOnMount: 'always',
   });
 
   const approveMutation = useMutation({
@@ -192,6 +338,7 @@ export default function SolicitacoesCombustivelPage() {
       setSuppliesComment('');
       setShowRejectForm(false);
       void queryClient.invalidateQueries({ queryKey: ['fuel-refuel-requests'] });
+      void queryClient.invalidateQueries({ queryKey: ['fuel-refuel-requests-supplies'] });
       void queryClient.invalidateQueries({ queryKey: ['fuel-supplies-pending-count'] });
     },
     onError: (err: { response?: { data?: { error?: string } } }) => {
@@ -212,6 +359,7 @@ export default function SolicitacoesCombustivelPage() {
       setRejectReason('');
       setShowRejectForm(false);
       void queryClient.invalidateQueries({ queryKey: ['fuel-refuel-requests'] });
+      void queryClient.invalidateQueries({ queryKey: ['fuel-refuel-requests-supplies'] });
       void queryClient.invalidateQueries({ queryKey: ['fuel-supplies-pending-count'] });
     },
     onError: (err: { response?: { data?: { error?: string } } }) => {
@@ -219,19 +367,41 @@ export default function SolicitacoesCombustivelPage() {
     },
   });
 
-  const records = listData || [];
+  const records = useMemo(
+    () =>
+      (listData || []).filter((row) => matchesDetailStatusFilter(row.status, detailStatusFilter)),
+    [listData, detailStatusFilter],
+  );
+
+  const suppliesStats = useMemo(() => {
+    const list = statsData || [];
+    const pending = list.filter((row) => isFuelSuppliesQueueStatus(row.status)).length;
+    const concluded = list.filter((row) => row.status === 'COMPLETED').length;
+    const cancelled = list.filter(
+      (row) => row.status === 'CANCELLED' || row.status === 'REJECTED',
+    ).length;
+    return { total: list.length, pending, concluded, cancelled };
+  }, [statsData]);
+
+  const listHeader = SUPPLIES_CARD_LIST_CONFIG[cardFilter];
+  const ListHeaderIcon = listHeader.Icon;
+
+  const selectCardFilter = (filter: SuppliesCardFilter) => {
+    setCardFilter(filter);
+    setDetailStatusFilter('ALL');
+  };
   const totalFiltered = records.length;
   const totalPages = Math.max(1, Math.ceil(totalFiltered / ITEMS_PER_PAGE));
   const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
   const paginatedRows = records.slice(startIndex, startIndex + ITEMS_PER_PAGE);
   const startItem = totalFiltered === 0 ? 0 : startIndex + 1;
   const endItem = Math.min(startIndex + ITEMS_PER_PAGE, totalFiltered);
-  const isListEmpty = !loadingList && totalFiltered === 0;
-  const hasActiveFilter = statusFilter !== 'PENDING_SUPPLIES';
+  const isListEmpty = !loadingList && !listError && totalFiltered === 0;
+  const hasActiveFilter = detailStatusFilter !== 'ALL';
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, statusFilter]);
+  }, [searchTerm, cardFilter, detailStatusFilter]);
 
   useEffect(() => {
     if (currentPage > totalPages) setCurrentPage(totalPages);
@@ -257,20 +427,34 @@ export default function SolicitacoesCombustivelPage() {
             </p>
           </div>
 
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 2xl:grid-cols-4">
+            {SUPPLIES_STAT_CARDS.map((card) => (
+              <FilterStatCard
+                key={card.filter}
+                label={card.label}
+                count={suppliesStats[card.countKey]}
+                icon={card.Icon}
+                iconBg={card.iconBg}
+                iconColor={card.iconColor}
+                isActive={cardFilter === card.filter}
+                loading={loadingStats}
+                onClick={() => selectCardFilter(card.filter)}
+              />
+            ))}
+          </div>
+
           <Card className="w-full">
             <CardHeader className="border-b-0 pb-1">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center space-x-3">
-                  <div className="rounded-lg bg-red-100 p-2 dark:bg-red-900/30 sm:p-3">
-                    <Fuel className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6" />
+                  <div className={`rounded-lg p-2 sm:p-3 ${listHeader.iconBg}`}>
+                    <ListHeaderIcon className={`h-5 w-5 sm:h-6 sm:w-6 ${listHeader.iconColor}`} />
                   </div>
                   <div>
                     <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                      Solicitações de Combustível
+                      {listHeader.title}
                     </h3>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">
-                      Analise solicitações aguardando tratamento pelo Suprimentos
-                    </p>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">{listHeader.subtitle}</p>
                   </div>
                 </div>
                 <div className="flex flex-shrink-0 flex-wrap items-center gap-2 sm:justify-end">
@@ -324,15 +508,30 @@ export default function SolicitacoesCombustivelPage() {
                     </span>
                   </div>
                 </div>
+              ) : listError ? (
+                <div className="py-8 text-center">
+                  <p className="text-gray-600 dark:text-gray-400">
+                    Não foi possível carregar as solicitações.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => void refetchList()}
+                    className="mt-3 rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700"
+                  >
+                    Tentar novamente
+                  </button>
+                </div>
               ) : isListEmpty ? (
                 <div className="py-8 text-center">
-                  <Fuel className="mx-auto mb-4 h-12 w-12 text-gray-400 dark:text-gray-500" />
-                  <p className="text-gray-600 dark:text-gray-400">
-                    Nenhuma solicitação encontrada
-                  </p>
-                  <p className="mt-1 text-sm text-gray-500 dark:text-gray-500">
-                    Colaboradores podem solicitar via Conversas → Gennecy → opção 1 (combustível)
-                  </p>
+                  <ListHeaderIcon
+                    className={`mx-auto mb-4 h-12 w-12 ${listHeader.iconColor} opacity-60`}
+                  />
+                  <p className="text-gray-600 dark:text-gray-400">Nenhuma solicitação encontrada</p>
+                  {cardFilter === 'pending' ? (
+                    <p className="mt-1 text-sm text-gray-500 dark:text-gray-500">
+                      Colaboradores podem solicitar via Conversas → Gennecy → opção 1 (combustível)
+                    </p>
+                  ) : null}
                 </div>
               ) : (
                 <>
@@ -616,6 +815,20 @@ export default function SolicitacoesCombustivelPage() {
                         </p>
                       </div>
                     ) : null}
+                    {fuelRefuelTotalValue(selected.litersRefueled, selected.pricePerLiter) != null ? (
+                      <div>
+                        <span className="text-xs text-gray-500">Valor total</span>
+                        <p className="font-semibold text-gray-900 dark:text-gray-100">
+                          {fuelRefuelTotalValue(
+                            selected.litersRefueled,
+                            selected.pricePerLiter,
+                          )!.toLocaleString('pt-BR', {
+                            style: 'currency',
+                            currency: 'BRL',
+                          })}
+                        </p>
+                      </div>
+                    ) : null}
                   </div>
                   {selected.refuelReportObservations ? (
                     <p className="mt-2 text-sm">{selected.refuelReportObservations}</p>
@@ -714,29 +927,18 @@ export default function SolicitacoesCombustivelPage() {
                 Status
               </label>
               <StringSingleSelectDropdown
-                value={statusFilter}
-                onChange={(value) => setStatusFilter(value as 'ALL' | FuelRefuelStatus)}
-                options={STATUS_FILTER_OPTIONS}
+                value={detailStatusFilter}
+                onChange={(value) => setDetailStatusFilter(value as DetailStatusFilter)}
+                options={DETAIL_STATUS_FILTER_OPTIONS}
                 allowEmpty={false}
                 className="w-full"
               />
             </div>
 
             <div className="flex items-center justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
-              <button
-                type="button"
-                onClick={() => setStatusFilter('PENDING_SUPPLIES')}
-                className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
-              >
-                Limpar filtros
-              </button>
-              <button
-                type="button"
-                onClick={() => setIsFiltersOpen(false)}
-                className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
-              >
-                Aplicar
-              </button>
+              <Button type="button" variant="outline" onClick={() => setIsFiltersOpen(false)}>
+                Fechar
+              </Button>
             </div>
           </div>
         </Modal>
