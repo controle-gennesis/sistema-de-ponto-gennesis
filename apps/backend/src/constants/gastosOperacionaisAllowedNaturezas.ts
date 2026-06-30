@@ -7,9 +7,7 @@ import {
   normalizeGastosOperacionaisNaturezaKey
 } from './gastosOperacionaisDfcBlocks';
 
-const GASTOS_OPERACIONAIS_LEGACY_ALLOWED_NATUREZAS = [
-  'TAXA DE LOCALIZACAO E FUNCIONAMENTO - ALVARA'
-] as const;
+const GASTOS_OPERACIONAIS_LEGACY_ALLOWED_NATUREZAS = [] as const;
 
 const GASTOS_OPERACIONAIS_LEGACY_ALIASES = [] as const;
 

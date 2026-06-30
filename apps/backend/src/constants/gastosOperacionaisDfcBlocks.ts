@@ -28,6 +28,15 @@ export type GastosOperacionaisDfcLeafBlock = {
   naturezas: readonly GastosOperacionaisDfcNaturezaEntry[];
 };
 
+/** 1. Atividades Operacionais → 1.2 Deduções da Receita Operacional → 1.2.1 Tributo Retido */
+export const GASTOS_OPERACIONAIS_DFC_TRIBUTO_RETIDO_BLOCK: GastosOperacionaisDfcLeafBlock = {
+  id: 'tributo-retido',
+  code: '1.2.1',
+  label: 'Tributo Retido',
+  parentLabels: ['1. Atividades Operacionais', '1.2 Deduções da Receita Operacional'],
+  naturezas: [{ label: 'ISS - RETIDO' }]
+};
+
 /** 1. Atividades Operacionais → 1.2 Deduções da Receita Operacional → 1.2.4 Tributo Pago */
 export const GASTOS_OPERACIONAIS_DFC_TRIBUTO_PAGO_BLOCK: GastosOperacionaisDfcLeafBlock = {
   id: 'tributo-pago',
@@ -35,6 +44,7 @@ export const GASTOS_OPERACIONAIS_DFC_TRIBUTO_PAGO_BLOCK: GastosOperacionaisDfcLe
   label: 'Tributo Pago',
   parentLabels: ['1. Atividades Operacionais', '1.2 Deduções da Receita Operacional'],
   naturezas: [
+    { label: 'ISS' },
     { label: 'COFINS' },
     { label: 'SIMPLES NACIONAL' },
     { label: 'CSLL' },
@@ -106,6 +116,7 @@ export const GASTOS_OPERACIONAIS_DFC_PESSOAL_BLOCK: GastosOperacionaisDfcLeafBlo
     { label: 'IMPOSTO DE RENDA S/ FOLHA', aliases: ['IMPOSTO DE RENDE S/ FOLHA'] },
     { label: 'AUXILIO TRANSPORTE' },
     { label: 'ASO E EXAMES MEDICOS' },
+    { label: 'BOLSAS E OUTROS GASTOS COM ESTAGIARIOS' },
     { label: 'VIAGENS DE COLABORADORES - ALIMENTACAO' },
     { label: 'VIAGENS DE COLABORADORES - TRANSPORTE' },
     { label: 'PENSAO ALIMENTICIA' },
@@ -117,6 +128,19 @@ export const GASTOS_OPERACIONAIS_DFC_PESSOAL_BLOCK: GastosOperacionaisDfcLeafBlo
     },
     { label: 'FARDAMENTOS' },
     { label: 'VIAGENS DE COLABORADORES - HOSPEDAGEM E DIARIAS' },
+    { label: 'DIARIAS', aliases: ['DIARIAS SALARIAIS', 'DIARIAS - SV'] },
+    { label: 'CAIXA - FUNDO FIXO ADM DP' },
+    { label: 'SEGURO FUNCIONARIOS', aliases: ['SEGURO FUNCIONARIOS - SV'] },
+    { label: 'PLANO DE SAUDE' },
+    {
+      label: 'RECRUTAMENTO E SELEÇÃO DE COLABORADORES',
+      aliases: ['RECRUTAMENTO E SELECAO DE COLABORADORES']
+    },
+    { label: 'COMPRA DE MEDICAMENTOS', aliases: ['COMPRA DE MEDICAMENTOS - SV'] },
+    {
+      label: 'DESBLOQUEIO E ESTORNOS JUDICIAIS',
+      sumAsPositiveCredit: true
+    },
     { label: 'DISTRATO DE CONTRATO PRESTADOR', aliases: ['DISTRATO DE CONTRATO PRESTADOR - SV'] },
     { label: 'GRATIFICACOES/COMISSOES' },
     { label: 'FESTA E EVENTOS' },
@@ -152,7 +176,9 @@ export const GASTOS_OPERACIONAIS_DFC_MATERIAL_APLICADO_BLOCK: GastosOperacionais
     },
     { label: 'INSUMOS - FERRAMENTAS EQUIP E MAQ' },
     { label: 'INSUMOS - VIDRACARIA' },
+    { label: 'ESQUADRIAS (EXCETO FERRO)' },
     { label: 'FRETES E CARREGOS' },
+    { label: 'FRETE SOBRE COMPRAS' },
     { label: 'INSUMOS - IMPERMEABILIZACAO' },
     { label: 'INSUMOS - MATERIAL DE LIMPEZA DE OBRA' },
     { label: 'INSUMOS - MADEIRAMENTO' },
@@ -170,6 +196,10 @@ export const GASTOS_OPERACIONAIS_DFC_MATERIAL_APLICADO_BLOCK: GastosOperacionais
         'DEVOLUÇÕES E ESTORNOS DE FORNECEDORES'
       ]
     },
+    { label: 'PAVIMENTACAO' },
+    { label: 'ICMS - DIFAL' },
+    { label: 'RECARGA DE EXTINTORES' },
+    { label: 'CONFECCAO DE PERSIANAS' },
     {
       label: 'COMBUSTIVEL PARA EQUIPAMENTOS',
       aliases: ['COMBUSTIVEL OPERAÇÃO', 'COMBUSTIVEL OPERACAO']
@@ -194,7 +224,10 @@ export const GASTOS_OPERACIONAIS_DFC_SERVICOS_TERCEIRIZADOS_BLOCK: GastosOperaci
     {
       label: 'LOCACAO DE MAQUINAS E EQUPAMENTOS - MANUTENCAO',
       aliases: ['LOCACAO DE MAQUINAS E EQUIPAMENTOS - MANUTENCAO']
-    }
+    },
+    { label: 'SEGURANCA DO TRABALHO' },
+    { label: 'ESGOTAMENTO SANITARIO' },
+    { label: 'INSUMOS - CONTROLE DE PRAGAS' }
   ]
 };
 
@@ -213,7 +246,12 @@ export const GASTOS_OPERACIONAIS_DFC_CANTEIRO_OBRA_BLOCK: GastosOperacionaisDfcL
     { label: 'MATERIAL EXPEDIENTE' },
     { label: 'MOVEIS E UTENSILIOS', aliases: ['MÓVEIS E UTENSILIOS'] },
     { label: 'INTERNET' },
-    { label: 'MANUTENCAO PREDIAL' }
+    { label: 'MANUTENCAO PREDIAL' },
+    { label: 'SEGURANCA/VIGILANCIA', aliases: ['SEGURANCA / VIGILANCIA'] },
+    { label: 'SEGURO IMOVEL' },
+    { label: 'IPTU' },
+    { label: 'TELEFONE' },
+    { label: 'IMPRESSAO E PLOTAGEM' }
   ]
 };
 
@@ -233,6 +271,7 @@ export const GASTOS_OPERACIONAIS_DFC_VEICULOS_LOGISTICA_BLOCK: GastosOperacionai
     { label: 'IPVA E TAXAS DE LECENCIAMENTOS DE VEICULOS' },
     { label: 'MULTAS DE TRANSITO VEICULOS' },
     { label: 'RASTREADOR DE VEICULOS' },
+    { label: 'SEGUROS VEICULOS' },
     { label: 'CAIXA - FUNDO FIXO - LOGISTICA' }
   ]
 };
@@ -248,7 +287,14 @@ export const GASTOS_OPERACIONAIS_DFC_TAXAS_TARIFAS_BLOCK: GastosOperacionaisDfcL
     { label: 'SEGURO DE OBRA' },
     { label: 'ART' },
     { label: 'ATESTADO DE CAPACIDADE TECNICA / CAT' },
-    { label: 'TAXAS E EMOLUMENTOS' }
+    { label: 'TAXAS E EMOLUMENTOS' },
+    { label: 'ANUIDADE CREA' },
+    { label: 'ANUIDADE CAU' },
+    { label: 'ANUIDADE CRA' },
+    { label: 'RRT CAU' },
+    { label: 'SEGURO EM PROPOSTAS LICITATORIAS' },
+    { label: 'TAXA DE LOCALIZACAO E FUNCIONAMENTO - ALVARA' },
+    { label: 'CORREIOS' }
   ]
 };
 
@@ -261,7 +307,8 @@ export const GASTOS_OPERACIONAIS_DFC_DESPESAS_SERVICOS_TERCEIRIZADOS_BLOCK: Gast
   naturezas: [
     { label: 'CONTABILIDADE' },
     { label: 'ASSESSORIA GERENCIAL' },
-    { label: 'ASSESSORIA JURIDICA TRABALHISTA' }
+    { label: 'ASSESSORIA JURIDICA TRABALHISTA' },
+    { label: 'ASSESSORIA JURIDICA NAO TRABALHISTA' }
   ]
 };
 
@@ -274,6 +321,19 @@ export const GASTOS_OPERACIONAIS_DFC_INFORMATICA_SOFTWARE_BLOCK: GastosOperacion
   naturezas: [
     { label: 'LICENÇA E MENSALIDADE DE SOFTWARE' },
     { label: 'MANUTENCAO DE HARDWARE / SOFTWARE' }
+  ]
+};
+
+/** 1. Atividades Operacionais → 1.4 Despesas Operacionais → 1.4.4 Comercial e Marketing */
+export const GASTOS_OPERACIONAIS_DFC_COMERCIAL_MARKETING_BLOCK: GastosOperacionaisDfcLeafBlock = {
+  id: 'comercial-marketing',
+  code: '1.4.4',
+  label: 'Comercial e Marketing',
+  parentLabels: ['1. Atividades Operacionais', '1.4 Despesas Operacionais'],
+  naturezas: [
+    { label: 'MARKETING E PUBLICIDADE' },
+    { label: 'DESPESA COM LICITACAO' },
+    { label: 'PATROCINIO' }
   ]
 };
 
@@ -292,14 +352,18 @@ export const GASTOS_OPERACIONAIS_DFC_DIRETORIA_BLOCK: GastosOperacionaisDfcLeafB
   code: '1.4.8',
   label: 'Diretoria',
   parentLabels: ['1. Atividades Operacionais', '1.4 Despesas Operacionais'],
-  naturezas: [{ label: 'PRO-LABORE' }]
+  naturezas: [
+    { label: 'PRO-LABORE' },
+    { label: 'OUTROS BENEFICIOS DA DIRETORIA' },
+    { label: 'PLANO DE SAUDE DIRETORIA' }
+  ]
 };
 
-/** 1. Atividades Operacionais → 1.4 Despesas Operacionais → 1.4.9 Repasse ADM */
+/** 1. Atividades Operacionais → 1.4 Despesas Operacionais → 1.4.9 Rateio ADM */
 export const GASTOS_OPERACIONAIS_DFC_REPASSE_ADM_BLOCK: GastosOperacionaisDfcLeafBlock = {
   id: 'repasse-adm',
   code: '1.4.9',
-  label: 'Repasse ADM',
+  label: 'Rateio ADM',
   parentLabels: ['1. Atividades Operacionais', '1.4 Despesas Operacionais'],
   naturezas: [
     {
@@ -322,19 +386,15 @@ export const GASTOS_OPERACIONAIS_DFC_REPASSE_ADM_BLOCK: GastosOperacionaisDfcLea
   ]
 };
 
-/** 2. Atividades de Investimento → 2.1 Investimentos → 2.1.3 Máquinas e TI */
-export const GASTOS_OPERACIONAIS_DFC_INVESTIMENTOS_MAQUINAS_TI_BLOCK: GastosOperacionaisDfcLeafBlock = {
-  id: 'investimentos-maquinas-ti',
-  code: '2.1.3',
-  label: 'Máquinas e TI',
-  parentLabels: ['2. Atividades de Investimento', '2.1 Investimentos'],
-  naturezas: [
-    {
-      label: 'COMPRA DE MAQUINAS E EQUIPAMENTOS',
-      aliases: ['COMPRA DE MAQUINAS E EQUIPAMENTOS - SV']
-    }
-  ]
-};
+/** 2. Atividades de Investimento → 2.1 Investimentos → 2.1.1 Imoveis e instalacoes */
+export const GASTOS_OPERACIONAIS_DFC_INVESTIMENTOS_IMOVEIS_INSTALACOES_BLOCK: GastosOperacionaisDfcLeafBlock =
+  {
+    id: 'investimentos-imoveis-instalacoes',
+    code: '2.1.1',
+    label: 'Imoveis e instalacoes',
+    parentLabels: ['2. Atividades de Investimento', '2.1 Investimentos'],
+    naturezas: [{ label: 'COMPRAS DE MOVEIS E INSTALACOES PREDIAIS' }]
+  };
 
 /** 2. Atividades de Investimento → 2.1 Investimentos → 2.1.2 Veiculos */
 export const GASTOS_OPERACIONAIS_DFC_INVESTIMENTOS_VEICULOS_BLOCK: GastosOperacionaisDfcLeafBlock = {
@@ -347,11 +407,31 @@ export const GASTOS_OPERACIONAIS_DFC_INVESTIMENTOS_VEICULOS_BLOCK: GastosOperaci
     {
       label: 'AQUISICAO DE FROTA - VEICULOS LEVES',
       aliases: ['AQUISICAO DE FROTA - VEICULOS LEVES - SV']
+    },
+    {
+      label: 'AQUISICAO DE FROTA - VEICULOS PESADOS',
+      aliases: ['AQUISICAO DE FROTA - VEICULOS PESADOS - SV']
     }
   ]
 };
 
+/** 2. Atividades de Investimento → 2.1 Investimentos → 2.1.3 Máquinas e TI */
+export const GASTOS_OPERACIONAIS_DFC_INVESTIMENTOS_MAQUINAS_TI_BLOCK: GastosOperacionaisDfcLeafBlock = {
+  id: 'investimentos-maquinas-ti',
+  code: '2.1.3',
+  label: 'Máquinas e TI',
+  parentLabels: ['2. Atividades de Investimento', '2.1 Investimentos'],
+  naturezas: [
+    {
+      label: 'COMPRA DE MAQUINAS E EQUIPAMENTOS',
+      aliases: ['COMPRA DE MAQUINAS E EQUIPAMENTOS - SV']
+    },
+    { label: 'COMPRA DE COMPUTADORES E PERIFERICOS' }
+  ]
+};
+
 export const GASTOS_OPERACIONAIS_DFC_LEAF_BLOCKS: readonly GastosOperacionaisDfcLeafBlock[] = [
+  GASTOS_OPERACIONAIS_DFC_TRIBUTO_RETIDO_BLOCK,
   GASTOS_OPERACIONAIS_DFC_TRIBUTO_PAGO_BLOCK,
   GASTOS_OPERACIONAIS_DFC_REPASSES_TERCEIROS_BLOCK,
   GASTOS_OPERACIONAIS_DFC_PESSOAL_BLOCK,
@@ -362,9 +442,11 @@ export const GASTOS_OPERACIONAIS_DFC_LEAF_BLOCKS: readonly GastosOperacionaisDfc
   GASTOS_OPERACIONAIS_DFC_TAXAS_TARIFAS_BLOCK,
   GASTOS_OPERACIONAIS_DFC_DESPESAS_SERVICOS_TERCEIRIZADOS_BLOCK,
   GASTOS_OPERACIONAIS_DFC_INFORMATICA_SOFTWARE_BLOCK,
+  GASTOS_OPERACIONAIS_DFC_COMERCIAL_MARKETING_BLOCK,
   GASTOS_OPERACIONAIS_DFC_ESCRITORIOS_ADMINISTRATIVO_BLOCK,
   GASTOS_OPERACIONAIS_DFC_DIRETORIA_BLOCK,
   GASTOS_OPERACIONAIS_DFC_REPASSE_ADM_BLOCK,
+  GASTOS_OPERACIONAIS_DFC_INVESTIMENTOS_IMOVEIS_INSTALACOES_BLOCK,
   GASTOS_OPERACIONAIS_DFC_INVESTIMENTOS_VEICULOS_BLOCK,
   GASTOS_OPERACIONAIS_DFC_INVESTIMENTOS_MAQUINAS_TI_BLOCK
 ];
