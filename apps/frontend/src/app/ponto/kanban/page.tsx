@@ -39,6 +39,7 @@ import {
   deleteKanbanColumn,
   updateKanbanCard,
   deleteKanbanCard,
+  duplicateKanbanCard,
   patchCardInBoardCache,
   type KanbanBoardCardChecklistPatch,
   fetchKanbanCard,
@@ -76,6 +77,7 @@ import {
   Tag,
   Trash2,
   Edit3,
+  Copy,
   AlertCircle,
   ChevronDown,
   Clock,
@@ -504,6 +506,7 @@ interface KanbanCardItemProps {
   labelPresets?: readonly KanbanLabelPreset[];
   readOnly?: boolean;
   onEdit: (card: KanbanCard, columnId: string) => void;
+  onDuplicate: (cardId: string, columnId: string) => void;
   onDelete: (cardId: string, columnId: string) => void;
   onPrefetch?: (cardId: string) => void;
   onDragStart: (e: React.DragEvent, cardId: string, columnId: string) => void;
@@ -517,6 +520,7 @@ function KanbanCardItem({
   labelPresets,
   readOnly = false,
   onEdit,
+  onDuplicate,
   onDelete,
   onPrefetch,
   onDragStart,
@@ -576,7 +580,8 @@ function KanbanCardItem({
       role="button"
       tabIndex={0}
       className={clsx(
-        'group relative overflow-hidden rounded-2xl border border-transparent bg-white p-4 dark:bg-gray-800',
+        'group relative rounded-2xl border border-transparent bg-white p-4 dark:bg-gray-800',
+        menuOpen && 'z-30',
         'cursor-pointer select-none shadow-[0_1px_3px_rgba(0,0,0,0.08)]',
         'transition-[transform,box-shadow,border-color] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]',
         'motion-reduce:transition-none',
@@ -594,7 +599,7 @@ function KanbanCardItem({
       <span
         aria-hidden
         className={clsx(
-          'pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-300',
+          'pointer-events-none absolute inset-0 rounded-2xl overflow-hidden opacity-0 transition-opacity duration-300',
           'bg-gradient-to-br from-white/50 via-white/10 to-transparent',
           'dark:from-white/[0.07] dark:via-transparent',
           !isDragging && 'group-hover:opacity-100',
@@ -612,12 +617,18 @@ function KanbanCardItem({
             <MoreHorizontal className="w-4 h-4 text-gray-400" />
           </button>
           {menuOpen && (
-            <div className="absolute right-0 top-7 z-50 w-36 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg py-1">
+            <div className="absolute right-0 top-7 z-50 w-40 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg py-1">
               <button
                 onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onEdit(card, columnId); }}
                 className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
               >
                 <Edit3 className="w-4 h-4" /> Editar
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onDuplicate(card.id, columnId); }}
+                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+              >
+                <Copy className="w-4 h-4" /> Duplicar
               </button>
               <button
                 onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onDelete(card.id, columnId); }}
@@ -761,6 +772,7 @@ interface KanbanColumnProps {
   readOnly?: boolean;
   onAddCard: (columnId: string) => void;
   onEditCard: (card: KanbanCard, columnId: string) => void;
+  onDuplicateCard: (cardId: string, columnId: string) => void;
   onDeleteCard: (cardId: string, columnId: string) => void;
   onPrefetchCard?: (cardId: string) => void;
   onColumnDragStart?: (e: React.DragEvent, columnId: string) => void;
@@ -782,6 +794,7 @@ function KanbanColumnComponent({
   readOnly = false,
   onAddCard,
   onEditCard,
+  onDuplicateCard,
   onDeleteCard,
   onPrefetchCard,
   onColumnDragStart,
@@ -951,6 +964,7 @@ function KanbanColumnComponent({
                 labelPresets={labelPresets}
                 readOnly={readOnly}
                 onEdit={onEditCard}
+                onDuplicate={onDuplicateCard}
                 onDelete={onDeleteCard}
                 onPrefetch={onPrefetchCard}
                 onDragStart={onDragStart}
@@ -1906,6 +1920,16 @@ function KanbanPage() {
     setDeleteConfirm({ type: 'card', cardId, columnId });
   }
 
+  async function handleDuplicateCard(cardId: string, _columnId: string) {
+    try {
+      await duplicateKanbanCard(cardId);
+      await refreshBoard();
+      toast.success('Card duplicado!');
+    } catch {
+      toast.error('Erro ao duplicar card');
+    }
+  }
+
   async function confirmDeleteCard() {
     if (deleteConfirm?.type !== 'card') return;
     try {
@@ -2192,6 +2216,7 @@ function KanbanPage() {
                     readOnly={boardReadOnly}
                     onAddCard={openCreateCard}
                     onEditCard={openEditCard}
+                    onDuplicateCard={handleDuplicateCard}
                     onDeleteCard={handleDeleteCard}
                     onPrefetchCard={prefetchKanbanCard}
                     onColumnDragStart={boardReadOnly ? undefined : handleColumnDragStart}

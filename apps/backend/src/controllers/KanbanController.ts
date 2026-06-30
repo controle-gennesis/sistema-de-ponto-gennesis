@@ -365,6 +365,22 @@ export class KanbanController {
     }
   }
 
+  async duplicateCard(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = requireUserId(req, next);
+      if (!userId) return;
+      const { id } = req.params;
+      const card = await kanbanService.duplicateCard(userId, id);
+      res.status(201).json({ success: true, data: card });
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : '';
+      if (msg === 'Card não encontrado' || (error as { code?: string })?.code === 'P2025') {
+        return next(createError('Card não encontrado', 404));
+      }
+      handleKanbanError(error, next);
+    }
+  }
+
   async deleteCard(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const userId = requireUserId(req, next);

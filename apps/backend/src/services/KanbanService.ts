@@ -1619,6 +1619,84 @@ export class KanbanService {
     };
   }
 
+  async duplicateCard(userId: string, cardId: string) {
+    await this.assertCardAccess(userId, cardId);
+
+    const source = await prisma.kanbanCard.findUnique({
+      where: { id: cardId },
+      include: {
+        members: { select: { userId: true } },
+        checklistItems: { orderBy: { position: 'asc' } },
+      },
+    });
+    if (!source) throw new Error('Card não encontrado');
+
+    const checklistCount = source.checklistItems.length;
+
+    const duplicated = await prisma.$transaction(async (tx) => {
+      const created = await tx.kanbanCard.create({
+        data: {
+          columnId: source.columnId,
+          title: source.title,
+          description: source.description,
+          priority: source.priority,
+          startDate: source.startDate,
+          endDate: source.endDate,
+          labels: source.labels ?? [],
+          assigneeUserId: source.assigneeUserId,
+          assigneeName: source.assigneeName,
+          totalTasks: source.checklistEnabled ? checklistCount : source.totalTasks,
+          completedTasks: source.checklistEnabled ? 0 : source.completedTasks,
+          checklistEnabled: source.checklistEnabled,
+          attachmentsEnabled: source.attachmentsEnabled,
+          workHours: source.workHours,
+          completedAt: null,
+          position: source.position,
+          ...(source.members.length > 0
+            ? {
+                members: {
+                  create: source.members.map((member) => ({ userId: member.userId })),
+                },
+              }
+            : {}),
+          ...(source.checklistItems.length > 0
+            ? {
+                checklistItems: {
+                  create: source.checklistItems.map((item, index) => ({
+                    title: item.title,
+                    isDone: false,
+                    position: index,
+                    assigneeUserId: item.assigneeUserId,
+                    dueDate: item.dueDate,
+                  })),
+                },
+              }
+            : {}),
+        },
+      });
+
+      const cards = await tx.kanbanCard.findMany({
+        where: { columnId: source.columnId },
+        orderBy: kanbanCardOrderBy,
+        select: { id: true },
+      });
+      const sourceIndex = cards.findIndex((card) => card.id === cardId);
+      const orderedIds = cards
+        .filter((card) => card.id !== created.id)
+        .map((card) => card.id);
+      const insertAt = sourceIndex >= 0 ? sourceIndex + 1 : orderedIds.length;
+      orderedIds.splice(insertAt, 0, created.id);
+      await applyKanbanColumnCardOrder(tx, orderedIds);
+
+      return tx.kanbanCard.findUnique({
+        where: { id: created.id },
+        include: cardInclude,
+      });
+    });
+
+    return formatCard(duplicated!);
+  }
+
   async deleteCard(userId: string, id: string) {
     await this.assertCardAccess(userId, id);
     await prisma.kanbanCard.delete({ where: { id } });

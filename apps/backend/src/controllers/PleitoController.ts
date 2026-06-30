@@ -111,7 +111,7 @@ export class PleitoController {
       const where: Prisma.PleitoWhereInput =
         andParts.length === 0 ? {} : andParts.length === 1 ? andParts[0]! : { AND: andParts };
 
-      const limitNum = Math.min(Number(limit) || 20, 200);
+      const limitNum = Math.min(Number(limit) || 20, 500);
       const skip = (Number(page) - 1) * limitNum;
 
       const [rows, total] = await Promise.all([
