@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { useQueries } from '@tanstack/react-query';
 import { CheckCircle2, Clock, FileText, Search, X, type LucideIcon, ExternalLink } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
@@ -14,9 +14,11 @@ import api from '@/lib/api';
 import {
   aggregateWorkflowByApprover,
   buildFluigWorkflowProcessViewUrl,
+  buildWorkflowRowKeyMap,
   FLUIG_WORKFLOW_APPROVAL_DATASET_G3,
   FLUIG_WORKFLOW_APPROVAL_DATASET_G5,
   parseWorkflowApprovalRows,
+  type ParsedWorkflowRow,
   type WorkflowApproverRequestRef,
 } from '@/lib/fluigWorkflowApproval';
 import { ListPagination } from '@/components/ui/ListPagination';
@@ -119,7 +121,9 @@ export function FluigDatasetToggle({
   );
 }
 
-export function useFluigWorkflowApprovalDatasets() {
+export function useFluigWorkflowApprovalDatasets(options?: { approverNameKey?: string }) {
+  const approverNameKey = options?.approverNameKey?.trim() || undefined;
+
   const datasetQueries = useQueries({
     queries: FLUIG_WORKFLOW_DATASETS.map(({ id }) => ({
       queryKey: ['fluig-workflow-approval', id],
@@ -144,8 +148,18 @@ export function useFluigWorkflowApprovalDatasets() {
   }, [datasetQueries[0]?.data, datasetQueries[1]?.data]);
 
   const bucketsByDataset = useMemo(() => {
-    return parsedRowsByDataset.map((rows) => aggregateWorkflowByApprover(rows));
-  }, [parsedRowsByDataset]);
+    return parsedRowsByDataset.map((rows) =>
+      aggregateWorkflowByApprover(rows, {
+        summariesOnly: !approverNameKey,
+        nameKeyFilter: approverNameKey,
+      })
+    );
+  }, [parsedRowsByDataset, approverNameKey]);
+
+  const rowKeyMapsByDataset = useMemo(() => {
+    if (!approverNameKey) return [null, null] as const;
+    return parsedRowsByDataset.map((rows) => buildWorkflowRowKeyMap(rows));
+  }, [parsedRowsByDataset, approverNameKey]);
 
   const isLoading = datasetQueries.some((query) => query.isLoading);
   const isFetching = datasetQueries.some((query) => query.isFetching);
@@ -158,6 +172,7 @@ export function useFluigWorkflowApprovalDatasets() {
   return {
     datasetQueries,
     parsedRowsByDataset,
+    rowKeyMapsByDataset,
     bucketsByDataset,
     g3Buckets: bucketsByDataset[0] ?? [],
     g5Buckets: bucketsByDataset[1] ?? [],
@@ -175,20 +190,38 @@ export function buildApproverListItems(
   approvedRequests: WorkflowApproverRequestRef[],
   pendingRequests: WorkflowApproverRequestRef[]
 ): ApproverRequestListItem[] {
-  const approved: ApproverRequestListItem[] = approvedRequests.map((item) => ({
-    ...item,
-    disposition: 'approved',
-  }));
-  const pending: ApproverRequestListItem[] = pendingRequests.map((item) => ({
-    ...item,
-    disposition: 'pending',
-  }));
-  if (filter === 'approved') return approved;
-  if (filter === 'pending') return pending;
-  return [...approved, ...pending];
+  if (filter === 'approved') {
+    return approvedRequests.map((item) => ({ ...item, disposition: 'approved' as const }));
+  }
+  if (filter === 'pending') {
+    return pendingRequests.map((item) => ({ ...item, disposition: 'pending' as const }));
+  }
+  const combined = new Array<ApproverRequestListItem>(
+    approvedRequests.length + pendingRequests.length
+  );
+  let index = 0;
+  for (const item of approvedRequests) {
+    combined[index++] = { ...item, disposition: 'approved' };
+  }
+  for (const item of pendingRequests) {
+    combined[index++] = { ...item, disposition: 'pending' };
+  }
+  return combined;
 }
 
-export function FilteredApproverRequestList({
+function matchesApproverRequestSearch(item: ApproverRequestListItem, term: string): boolean {
+  if (!term) return true;
+  if (item.processId.toLowerCase().includes(term)) return true;
+  if (item.title.toLowerCase().includes(term)) return true;
+  if (item.filial?.toLowerCase().includes(term)) return true;
+  const statusWord = item.disposition === 'approved' ? 'aprovado' : 'pendente';
+  return statusWord.includes(term);
+}
+
+const EMPTY_APPROVED: WorkflowApproverRequestRef[] = [];
+const EMPTY_PENDING: WorkflowApproverRequestRef[] = [];
+
+export const FilteredApproverRequestList = React.memo(function FilteredApproverRequestList({
   filter,
   approvedRequests,
   pendingRequests,
@@ -201,31 +234,24 @@ export function FilteredApproverRequestList({
 }) {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
+  const deferredSearch = useDeferredValue(search);
 
   const listHeader = APPROVER_FILTER_LIST_CONFIG[filter];
   const ListHeaderIcon = listHeader.Icon;
 
+  const stableApproved = approvedRequests.length > 0 ? approvedRequests : EMPTY_APPROVED;
+  const stablePending = pendingRequests.length > 0 ? pendingRequests : EMPTY_PENDING;
+
   const items = useMemo(
-    () => buildApproverListItems(filter, approvedRequests, pendingRequests),
-    [filter, approvedRequests, pendingRequests]
+    () => buildApproverListItems(filter, stableApproved, stablePending),
+    [filter, stableApproved, stablePending]
   );
 
   const filteredItems = useMemo(() => {
-    const term = search.trim().toLowerCase();
+    const term = deferredSearch.trim().toLowerCase();
     if (!term) return items;
-    return items.filter((item) => {
-      const hay = [
-        item.processId,
-        item.title,
-        item.filial,
-        item.disposition === 'approved' ? 'aprovado' : 'pendente',
-      ]
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase();
-      return hay.includes(term);
-    });
-  }, [items, search]);
+    return items.filter((item) => matchesApproverRequestSearch(item, term));
+  }, [items, deferredSearch]);
 
   const totalPages = Math.max(1, Math.ceil(filteredItems.length / APPROVER_REQUESTS_PAGE_SIZE));
 
@@ -236,7 +262,7 @@ export function FilteredApproverRequestList({
 
   useEffect(() => {
     setPage(1);
-  }, [filter, search]);
+  }, [filter, deferredSearch]);
 
   useEffect(() => {
     setSearch('');
@@ -400,4 +426,4 @@ export function FilteredApproverRequestList({
       </CardContent>
     </Card>
   );
-}
+});

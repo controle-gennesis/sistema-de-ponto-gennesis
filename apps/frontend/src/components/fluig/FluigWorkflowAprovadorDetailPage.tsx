@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams, useRouter } from 'next/navigation';
@@ -16,7 +16,6 @@ import { cadastroListClasses } from '@/components/ui/RowActionMenu';
 import api from '@/lib/api';
 import {
   findWorkflowApproverBucketByKey,
-  findWorkflowRowByKey,
   formatWorkflowApproverDisplayName,
   mergeWorkflowApproverBuckets,
   resolveWorkflowApproverNameKey,
@@ -57,8 +56,8 @@ export function FluigWorkflowAprovadorDetailPage() {
 
   const user = userData?.data ?? { name: 'Usuário', role: 'EMPLOYEE' as const };
 
-  const { g3Buckets, g5Buckets, bucketsByDataset, parsedRowsByDataset, isLoading, hasError, errorMessage } =
-    useFluigWorkflowApprovalDatasets();
+  const { g3Buckets, g5Buckets, bucketsByDataset, rowKeyMapsByDataset, isLoading, hasError, errorMessage } =
+    useFluigWorkflowApprovalDatasets({ approverNameKey: nameKey });
 
   const mergedSummary = useMemo(
     () => mergeWorkflowApproverBuckets(g3Buckets, g5Buckets).find((item) => item.nameKey === nameKey),
@@ -114,11 +113,13 @@ export function FluigWorkflowAprovadorDetailPage() {
     setDetailRow(null);
   };
 
-  const handleOpenRequest = (item: ApproverRequestListItem) => {
-    const rows = parsedRowsByDataset[effectiveTab] ?? [];
-    const row = findWorkflowRowByKey(rows, item.rowKey);
-    if (row) setDetailRow(row);
-  };
+  const handleOpenRequest = useCallback(
+    (item: ApproverRequestListItem) => {
+      const row = rowKeyMapsByDataset[effectiveTab]?.get(item.rowKey);
+      if (row) setDetailRow(row);
+    },
+    [rowKeyMapsByDataset, effectiveTab]
+  );
 
   const listHeader = APPROVER_FILTER_LIST_CONFIG[cardFilter];
   const ListHeaderIcon = listHeader.Icon;

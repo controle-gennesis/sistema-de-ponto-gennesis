@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { CheckCircle2, Clock, Search, Users } from 'lucide-react';
@@ -29,6 +29,7 @@ export function FluigWorkflowAprovadoresPage() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const [listPage, setListPage] = useState(1);
+  const deferredSearch = useDeferredValue(search);
 
   const { data: userData, isLoading: loadingUser } = useQuery({
     queryKey: ['user'],
@@ -61,10 +62,10 @@ export function FluigWorkflowAprovadoresPage() {
   }, [mergedApprovers]);
 
   const filteredApprovers = useMemo(() => {
-    const term = search.trim().toLowerCase();
+    const term = deferredSearch.trim().toLowerCase();
     if (!term) return mergedApprovers;
     return mergedApprovers.filter((item) => item.name.toLowerCase().includes(term));
-  }, [mergedApprovers, search]);
+  }, [mergedApprovers, deferredSearch]);
 
   const totalPages = Math.max(1, Math.ceil(filteredApprovers.length / APPROVERS_LIST_PAGE_SIZE));
 
@@ -75,7 +76,7 @@ export function FluigWorkflowAprovadoresPage() {
 
   useEffect(() => {
     setListPage(1);
-  }, [search]);
+  }, [deferredSearch]);
 
   useEffect(() => {
     if (listPage > totalPages) setListPage(totalPages);

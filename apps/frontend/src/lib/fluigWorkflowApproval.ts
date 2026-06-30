@@ -832,24 +832,61 @@ function resolvePendingPersonFromRow(row: ParsedWorkflowRow): string | null {
   return null;
 }
 
-export function aggregateWorkflowByApprover(rows: ParsedWorkflowRow[]): WorkflowApproverBucket[] {
-  const map = new Map<string, WorkflowApproverBucket>();
+export type AggregateWorkflowByApproverOptions = {
+  /** Só contadores — não monta listas de solicitações (uso na lista de aprovadores). */
+  summariesOnly?: boolean;
+  /** Restringe listas completas a um aprovador (uso na página de detalhe). */
+  nameKeyFilter?: string;
+};
 
-  const ensureBucket = (rawName: string): WorkflowApproverBucket => {
+export function aggregateWorkflowByApprover(
+  rows: ParsedWorkflowRow[],
+  options?: AggregateWorkflowByApproverOptions
+): WorkflowApproverBucket[] {
+  const map = new Map<string, WorkflowApproverBucket>();
+  const approvedDedup = new Map<string, Set<string>>();
+  const pendingDedup = new Map<string, Set<string>>();
+  const summariesOnly = options?.summariesOnly ?? false;
+  const nameKeyFilter = options?.nameKeyFilter
+    ? resolveWorkflowApproverNameKey(options.nameKeyFilter)
+    : null;
+
+  const ensureBucket = (rawName: string): WorkflowApproverBucket | null => {
     const trimmed = rawName.trim();
     const nameKey = normalizeApproverNameKey(trimmed);
+    if (nameKeyFilter && nameKey !== nameKeyFilter) return null;
+
     const existing = map.get(nameKey);
     if (existing) return existing;
+
     const bucket: WorkflowApproverBucket = {
       nameKey,
       name: trimmed,
       approvedCount: 0,
-      approvedRequests: [],
+      approvedRequests: summariesOnly ? [] : [],
       pendingCount: 0,
-      pendingRequests: [],
+      pendingRequests: summariesOnly ? [] : [],
     };
     map.set(nameKey, bucket);
     return bucket;
+  };
+
+  const getApprovedDedup = (nameKey: string): Set<string> => {
+    let set = approvedDedup.get(nameKey);
+    if (!set) {
+      set = new Set();
+      approvedDedup.set(nameKey, set);
+    }
+    return set;
+  };
+
+  const getPendingDedup = (nameKey: string): Set<string> => {
+    let set = pendingDedup.get(nameKey);
+    if (!set) {
+      set = new Set();
+      pendingDedup.set(nameKey, set);
+    }
+    return set;
   };
 
   for (const row of rows) {
@@ -861,21 +898,25 @@ export function aggregateWorkflowByApprover(rows: ParsedWorkflowRow[]): Workflow
       if (!person) continue;
 
       const bucket = ensureBucket(person);
-      const duplicate = bucket.approvedRequests.some(
-        (item) => item.processId === row.processId && item.sector === step.sector
-      );
-      if (duplicate) continue;
+      if (!bucket) continue;
 
-      bucket.approvedRequests.push({
-        rowKey: row.rowKey,
-        processId: row.processId,
-        title: row.title,
-        filial: row.filial,
-        sector: step.sector,
-        sectorLabel: SECTOR_LABELS[step.sector],
-        approvedAt: step.approvedAt,
-      });
-      bucket.approvedCount = bucket.approvedRequests.length;
+      const dedupKey = `${row.processId}:${step.sector}`;
+      const seen = getApprovedDedup(bucket.nameKey);
+      if (seen.has(dedupKey)) continue;
+      seen.add(dedupKey);
+
+      if (!summariesOnly) {
+        bucket.approvedRequests.push({
+          rowKey: row.rowKey,
+          processId: row.processId,
+          title: row.title,
+          filial: row.filial,
+          sector: step.sector,
+          sectorLabel: SECTOR_LABELS[step.sector],
+          approvedAt: step.approvedAt,
+        });
+      }
+      bucket.approvedCount += 1;
     }
 
     if (row.fullyApproved || !row.currentPendingSector) continue;
@@ -885,19 +926,24 @@ export function aggregateWorkflowByApprover(rows: ParsedWorkflowRow[]): Workflow
     if (!person) continue;
 
     const bucket = ensureBucket(person);
-    const duplicate = bucket.pendingRequests.some((item) => item.processId === row.processId);
-    if (duplicate) continue;
+    if (!bucket) continue;
 
-    bucket.pendingRequests.push({
-      rowKey: row.rowKey,
-      processId: row.processId,
-      title: row.title,
-      filial: row.filial,
-      sector: row.currentPendingSector,
-      sectorLabel: SECTOR_LABELS[row.currentPendingSector],
-      approvedAt: null,
-    });
-    bucket.pendingCount = bucket.pendingRequests.length;
+    const seen = getPendingDedup(bucket.nameKey);
+    if (seen.has(row.processId)) continue;
+    seen.add(row.processId);
+
+    if (!summariesOnly) {
+      bucket.pendingRequests.push({
+        rowKey: row.rowKey,
+        processId: row.processId,
+        title: row.title,
+        filial: row.filial,
+        sector: row.currentPendingSector,
+        sectorLabel: SECTOR_LABELS[row.currentPendingSector],
+        approvedAt: null,
+      });
+    }
+    bucket.pendingCount += 1;
   }
 
   return Array.from(map.values()).sort((a, b) => {
@@ -984,6 +1030,14 @@ export function formatWorkflowApproverDisplayName(nameOrKey: string): string {
     .join(' ');
 }
 
+export function buildWorkflowRowKeyMap(rows: readonly ParsedWorkflowRow[]): Map<string, ParsedWorkflowRow> {
+  const map = new Map<string, ParsedWorkflowRow>();
+  for (const row of rows) {
+    map.set(row.rowKey, row);
+  }
+  return map;
+}
+
 export function findWorkflowApproverBucketByKey(
   buckets: readonly WorkflowApproverBucket[],
   nameKey: string
@@ -996,5 +1050,8 @@ export function findWorkflowRowByKey(
   rows: readonly ParsedWorkflowRow[],
   rowKey: string
 ): ParsedWorkflowRow | null {
-  return rows.find((row) => row.rowKey === rowKey) ?? null;
+  for (const row of rows) {
+    if (row.rowKey === rowKey) return row;
+  }
+  return null;
 }
