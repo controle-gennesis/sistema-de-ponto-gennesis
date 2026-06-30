@@ -657,11 +657,11 @@ export default function SolicitacoesCombustivelPage() {
                           <th className="px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
                             Data abast.
                           </th>
-                          <th className="px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                          <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
                             Contrato
                           </th>
-                          <th className="px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
-                            Veículo / Condutor
+                          <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                            Veículo
                           </th>
                           <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
                             Status
@@ -690,16 +690,13 @@ export default function SolicitacoesCombustivelPage() {
                               {format(new Date(row.refuelDate), 'dd/MM/yyyy', { locale: ptBR })}
                             </td>
                             <td
-                              className="max-w-[220px] truncate px-3 py-4 text-gray-900 dark:text-gray-100 sm:px-6"
+                              className="max-w-[220px] truncate px-3 py-4 text-center text-gray-900 dark:text-gray-100 sm:px-6"
                               title={fuelContractLabel(row)}
                             >
                               {fuelContractLabel(row)}
                             </td>
-                            <td className="px-3 py-4 text-gray-900 dark:text-gray-100 sm:px-6">
-                              <div>{row.vehiclePlate}</div>
-                              <div className="text-xs text-gray-500 dark:text-gray-400">
-                                {row.driverName}
-                              </div>
+                            <td className="whitespace-nowrap px-3 py-4 text-center text-gray-900 dark:text-gray-100 sm:px-6">
+                              {row.vehiclePlate}
                             </td>
                             <td className="px-3 py-4 text-center sm:px-6">
                               <span
