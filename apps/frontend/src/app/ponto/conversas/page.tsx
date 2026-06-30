@@ -3346,7 +3346,7 @@ function ConversasContent() {
                             >
                               <div
                                 className={clsx(
-                                  'relative inline-flex w-max min-w-0 max-w-[75vw] flex-col overflow-hidden rounded-2xl shadow-sm transition-colors duration-300 sm:max-w-[min(75%,28rem)]',
+                                  'relative inline-flex w-max min-w-0 max-w-[75vw] flex-col items-start overflow-hidden rounded-2xl shadow-sm transition-colors duration-300 sm:max-w-[min(75%,28rem)]',
                                   useTightMediaPadding ? 'p-2' : 'px-4 py-2',
                                   msg.deletedAt
                                     ? isOwn
@@ -3359,7 +3359,7 @@ function ConversasContent() {
                               >
                             {showSenderColumn && isClusterStart && (
                               isGennecyMsg ? (
-                                <p className="mb-1 block text-[11px] font-semibold text-red-600 dark:text-red-400">
+                                <p className="mb-1 block w-full text-left text-[11px] font-semibold text-red-600 dark:text-red-400">
                                   Gennecy
                                 </p>
                               ) : isGroupChat ? (
@@ -3367,7 +3367,7 @@ function ConversasContent() {
                                   type="button"
                                   onClick={() => setContactDetailsUser(msg.sender)}
                                   className={clsx(
-                                    'mb-1 block text-[11px] font-semibold underline-offset-2 hover:underline',
+                                    'mb-1 block w-full text-left text-[11px] font-semibold underline-offset-2 hover:underline',
                                     getNameColorClass(
                                       String(msg.senderId || msg.sender?.id || msg.sender?.name || 'sender'),
                                     ),
