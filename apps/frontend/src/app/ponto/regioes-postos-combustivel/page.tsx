@@ -398,7 +398,7 @@ export default function RegioesPostosCombustivelPage() {
                       </colgroup>
                       <thead className="border-b border-gray-200 dark:border-gray-700">
                         <tr>
-                          <th scope="col" className={cadastroListClasses.th}>
+                          <th scope="col" className={`${cadastroListClasses.thCenter} font-mono`}>
                             ID
                           </th>
                           <th scope="col" className={`${cadastroListClasses.th} min-w-[12rem]`}>
@@ -407,7 +407,7 @@ export default function RegioesPostosCombustivelPage() {
                           <th scope="col" className={`${cadastroListClasses.th} min-w-[14rem]`}>
                             Endereço
                           </th>
-                          <th scope="col" className={cadastroListClasses.th}>
+                          <th scope="col" className={cadastroListClasses.thCenter}>
                             Cidade
                           </th>
                           <th scope="col" className={cadastroListClasses.thCenter}>
@@ -421,7 +421,9 @@ export default function RegioesPostosCombustivelPage() {
                       <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
                         {paginatedStations.map((station) => (
                           <tr key={station.id} className={listTableRowClasses.tr}>
-                            <td className={cadastroListClasses.tdMono}>{station.displayNumber}</td>
+                            <td className={`${cadastroListClasses.tdCenter} font-mono tabular-nums`}>
+                              {station.displayNumber}
+                            </td>
                             <td className={`${cadastroListClasses.tdTruncate} min-w-[12rem]`}>
                               <span className="block whitespace-normal break-words text-sm font-medium text-gray-900 dark:text-gray-100">
                                 {station.name}
@@ -432,7 +434,7 @@ export default function RegioesPostosCombustivelPage() {
                                 {station.address || '—'}
                               </span>
                             </td>
-                            <td className={cadastroListClasses.td}>
+                            <td className={cadastroListClasses.tdCenter}>
                               {station.city?.name ?? station.cityCode}
                             </td>
                             <td className={cadastroListClasses.tdCenter}>

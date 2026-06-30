@@ -11,6 +11,7 @@ import {
   listFuelSatelliteCities,
   mapVehicleUsageToFuelType,
 } from '../lib/fuelAdministrativeRegions';
+import { getFuelSatelliteCityByCode } from '../constants/fuelSatelliteCities';
 import { buildFuelSubmissionSlaLine } from '../lib/fuelRefuelChatNotify';
 import { hasStoredPhoto, isWhatsAppSavedMediaReady } from '../lib/flowMedia';
 import {
@@ -150,16 +151,45 @@ async function buildCityListAction(stateCode: string): Promise<SendAction> {
 
 function parseRegionSelection(
   content: string,
+  textRaw: string,
   payload: Record<string, unknown>,
 ): { regionId: string; regionName: string } | null {
-  const fromId = content.match(/^fuel_region_(.+)$/);
+  const options =
+    (payload.adminRegionOptions as Array<{ id: string; name: string }> | undefined) ?? [];
+  const stateCode = String(payload.fuelStateCode || '').trim().toUpperCase();
+
+  const fromId = content.match(/^fuel_region_(.+)$/i);
   if (fromId) {
-    const regionId = fromId[1];
-    const options =
-      (payload.adminRegionOptions as Array<{ id: string; name: string }> | undefined) ?? [];
-    const match = options.find((item) => item.id === regionId);
-    if (match) return { regionId: match.id, regionName: match.name };
+    const cityCode = fromId[1].trim().toUpperCase();
+    const fromOptions = options.find((item) => item.id.toUpperCase() === cityCode);
+    if (fromOptions) {
+      return { regionId: fromOptions.id, regionName: fromOptions.name };
+    }
+    const fromConstant = getFuelSatelliteCityByCode(cityCode);
+    if (fromConstant) {
+      return { regionId: fromConstant.code, regionName: fromConstant.name };
+    }
   }
+
+  const nameCandidate = textRaw.trim();
+  if (nameCandidate) {
+    const normalizedName = nameCandidate.toLowerCase();
+    const fromOptionsByName = options.find(
+      (item) => item.name.trim().toLowerCase() === normalizedName,
+    );
+    if (fromOptionsByName) {
+      return { regionId: fromOptionsByName.id, regionName: fromOptionsByName.name };
+    }
+
+    const cities = stateCode ? listFuelSatelliteCities(stateCode) : listFuelSatelliteCities();
+    const fromListByName = cities.find(
+      (city) => city.name.trim().toLowerCase() === normalizedName,
+    );
+    if (fromListByName) {
+      return { regionId: fromListByName.code, regionName: fromListByName.name };
+    }
+  }
+
   return null;
 }
 
@@ -381,7 +411,7 @@ export async function processWhatsAppFuelFlow(params: {
     }
 
     case 'FUEL_ASK_ADMIN_REGION': {
-      const selected = parseRegionSelection(content, newPayload);
+      const selected = parseRegionSelection(content, textRaw, newPayload);
       if (!selected) {
         const stateCode = String(newPayload.fuelStateCode || 'DF');
         return {
