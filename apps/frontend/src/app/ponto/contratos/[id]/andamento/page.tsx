@@ -5,8 +5,10 @@ import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import jsPDF from 'jspdf';
-import { ArrowLeft, AlertCircle, ClipboardList, Edit2, FileDown, Percent, Plus, X } from 'lucide-react';
+import { ArrowLeft, AlertCircle, ClipboardList, Edit2, FileDown, Percent, Plus, X, Search, Filter } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
+import { Modal } from '@/components/ui/Modal';
+import { Button } from '@/components/ui/Button';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
@@ -26,6 +28,7 @@ import { formatOsSePasta, formatOsSePastaOrDash } from '@/lib/formatOsSePasta';
 import toast from 'react-hot-toast';
 import { usePermissions } from '@/hooks/usePermissions';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
+import { formatDateTimeBr } from '@/lib/dateTimeBr';
 
 interface ContractPleito {
   id: string;
@@ -229,24 +232,6 @@ function formatDate(dateStr: string) {
   return d.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
 }
 
-function formatDateTime(dateStr: string) {
-  if (!dateStr) return '-';
-  const raw = String(dateStr).trim();
-  const only = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  const d = only
-    ? new Date(Number(only[1]), Number(only[2]) - 1, Number(only[3]), 12, 0, 0, 0)
-    : new Date(raw);
-  if (Number.isNaN(d.getTime())) return '-';
-  return d.toLocaleString('pt-BR', {
-    timeZone: 'America/Sao_Paulo',
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
-
 function formatCurrency(value: number) {
   return new Intl.NumberFormat('pt-BR', {
     style: 'currency',
@@ -275,6 +260,34 @@ function sumBillingRequestSameOs(
     return sum + (Number.isFinite(br) && br > 0 ? br : 0);
   }, 0);
 }
+
+function pleitoMatchesSearchTerm(p: ContractPleito, term: string): boolean {
+  const t = term.trim().toLowerCase();
+  if (!t) return true;
+  const haystack = [
+    p.divSe,
+    p.serviceDescription,
+    p.folderNumber,
+    p.budgetStatus,
+    p.executionStatus,
+    p.lot,
+    p.location,
+    p.unit,
+    p.engineer,
+    p.supervisor,
+    p.billingStatus,
+    p.creationMonth,
+    p.creationYear != null ? String(p.creationYear) : '',
+    p.budget,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  return haystack.includes(t);
+}
+
+const LIST_SEARCH_INPUT_CLASS =
+  'h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100';
 
 export default function AndamentoListPage() {
   const params = useParams();
@@ -316,6 +329,8 @@ export default function AndamentoListPage() {
   const [filterLote, setFilterLote] = useState('');
   const [filterUnidade, setFilterUnidade] = useState('');
   const [filterEngenheiro, setFilterEngenheiro] = useState('');
+  const [searchTermPleitos, setSearchTermPleitos] = useState('');
+  const [showPleitosFilterModal, setShowPleitosFilterModal] = useState(false);
   const [savingPleitoId, setSavingPleitoId] = useState<string | null>(null);
   const [selectedPleitoId, setSelectedPleitoId] = useState<string | null>(null);
   const [selectedForPleito, setSelectedForPleito] = useState<Set<string>>(new Set());
@@ -464,6 +479,10 @@ export default function AndamentoListPage() {
       result = result.filter((p) => selectedIdsFilter.has(p.id));
     }
 
+    if (searchTermPleitos.trim()) {
+      result = result.filter((p) => pleitoMatchesSearchTerm(p, searchTermPleitos));
+    }
+
     return result;
   }, [
     pleitos,
@@ -479,8 +498,35 @@ export default function AndamentoListPage() {
     filterUnidade,
     filterEngenheiro,
     billings,
-    selectedIdsFilter
+    selectedIdsFilter,
+    searchTermPleitos,
   ]);
+
+  const hasActivePleitosFilter = Boolean(
+    filterStatusOrcamento ||
+    filterStatusExecucao ||
+    filterStatusFaturamento ||
+    filterBudgetEmpty !== 'all' ||
+    filterDescricao.trim() ||
+    filterLote.trim() ||
+    filterUnidade.trim() ||
+    filterEngenheiro.trim() ||
+    isAllYears ||
+    selectedMonth !== 0
+  );
+
+  const clearPleitosFilters = () => {
+    setSelectedYear(new Date().getFullYear());
+    setSelectedMonth(0);
+    setFilterStatusOrcamento('');
+    setFilterStatusExecucao('');
+    setFilterStatusFaturamento('');
+    setFilterBudgetEmpty('all');
+    setFilterDescricao('');
+    setFilterLote('');
+    setFilterUnidade('');
+    setFilterEngenheiro('');
+  };
 
   const contract = contractData as { name?: string; number?: string } | undefined;
 
@@ -1088,7 +1134,7 @@ export default function AndamentoListPage() {
                     >
                       <Plus className="w-4 h-4" />
                     </button>
-                    {!loadingPleitos && pleitos.length > 0 && (
+                    {!loadingPleitos && pleitos.length > 0 && selectedForPleito.size > 0 && (
                       <>
                         <button
                           type="button"
@@ -1108,7 +1154,7 @@ export default function AndamentoListPage() {
                         <button
                           type="button"
                           onClick={handlePleitar100PorcentoSelecionadas}
-                          disabled={gerarPleitoMutation.isPending || selectedForPleito.size === 0}
+                          disabled={gerarPleitoMutation.isPending}
                           className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-700 hover:bg-rose-800 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors"
                           title="Gera pleito com 100% do orçamento em cada OS marcada"
                         >
@@ -1143,115 +1189,43 @@ export default function AndamentoListPage() {
               </div>
 
               <div className="w-full">
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 items-end">
-                  <div className="flex items-center gap-2">
-                    <label className="text-xs font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">Ano:</label>
-                    <StringSingleSelectDropdown
-                      value={selectedYear ? String(selectedYear) : '0'}
-                      onChange={(v) => setSelectedYear(v === '0' ? 0 : parseInt(v, 10))}
-                      options={ANDAMENTO_YEAR_FILTER_OPTIONS}
-                      allowEmpty={false}
-                      className="w-full"
-                    />
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <label className="text-xs font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">Mês:</label>
-                    <StringSingleSelectDropdown
-                      value={String(selectedMonth)}
-                      onChange={(v) => setSelectedMonth(parseInt(v, 10))}
-                      options={MESES_FILTRO_SELECT_OPTIONS}
-                      allowEmpty={false}
-                      className="w-full"
-                    />
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <label className="text-xs font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">Status Orçamento:</label>
-                    <StringSingleSelectDropdown
-                      value={filterStatusOrcamento}
-                      onChange={setFilterStatusOrcamento}
-                      options={FILTER_STATUS_ORCAMENTO_OPTIONS}
-                      allowEmpty={false}
-                      className="w-full"
-                    />
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <label className="text-xs font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">Status Execução:</label>
-                    <StringSingleSelectDropdown
-                      value={filterStatusExecucao}
-                      onChange={setFilterStatusExecucao}
-                      options={FILTER_STATUS_EXECUCAO_OPTIONS}
-                      allowEmpty={false}
-                      className="w-full"
-                    />
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <label className="text-xs font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">Status Faturamento (%):</label>
-                    <StringSingleSelectDropdown
-                      value={filterStatusFaturamento}
-                      onChange={setFilterStatusFaturamento}
-                      options={FILTER_STATUS_FATURAMENTO_OPTIONS}
-                      allowEmpty={false}
-                      className="w-full"
-                    />
-                  </div>
-                </div>
-
-                {/* Nova fileira de filtros por colunas */}
-                <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 items-end">
-                  <div className="flex items-center gap-2">
-                    <label className="text-xs font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">Orçamento:</label>
-                      <StringSingleSelectDropdown
-                        value={filterBudgetEmpty}
-                        onChange={(v) => setFilterBudgetEmpty(v as 'all' | 'empty' | 'filled')}
-                        options={FILTER_BUDGET_EMPTY_OPTIONS}
-                        allowEmpty={false}
-                        className="w-full"
-                      />
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <label className="text-xs font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">Descrição:</label>
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="relative min-w-[240px] flex-1 sm:w-[280px] sm:flex-none">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
                     <input
-                      value={filterDescricao}
-                      onChange={(e) => setFilterDescricao(e.target.value)}
-                      placeholder="Buscar"
-                      className="px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 w-full"
+                      type="search"
+                      value={searchTermPleitos}
+                      onChange={(e) => setSearchTermPleitos(e.target.value)}
+                      placeholder="Buscar OS, descrição, lote..."
+                      className={LIST_SEARCH_INPUT_CLASS}
                     />
+                    {searchTermPleitos ? (
+                      <button
+                        type="button"
+                        onClick={() => setSearchTermPleitos('')}
+                        aria-label="Limpar busca"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-300"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    ) : null}
                   </div>
-
-                  <div className="flex items-center gap-2">
-                    <label className="text-xs font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">Lote:</label>
-                    <input
-                      value={filterLote}
-                      onChange={(e) => setFilterLote(e.target.value)}
-                      placeholder="Buscar"
-                      className="px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 w-full"
-                    />
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <label className="text-xs font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">Unidade:</label>
-                    <input
-                      value={filterUnidade}
-                      onChange={(e) => setFilterUnidade(e.target.value)}
-                      placeholder="Buscar"
-                      className="px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 w-full"
-                    />
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <label className="text-xs font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">Engenheiro:</label>
-                    <input
-                      value={filterEngenheiro}
-                      onChange={(e) => setFilterEngenheiro(e.target.value)}
-                      placeholder="Buscar"
-                      className="px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 w-full"
-                    />
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowPleitosFilterModal(true)}
+                    className={`relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition-colors ${
+                      hasActivePleitosFilter
+                        ? 'border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100 dark:border-blue-800/60 dark:bg-blue-950/30 dark:text-blue-300 dark:hover:bg-blue-900/40'
+                        : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
+                    }`}
+                    aria-label="Abrir filtro"
+                    title={hasActivePleitosFilter ? 'Filtro (ativo)' : 'Filtro'}
+                  >
+                    <Filter className="h-4 w-4" />
+                    {hasActivePleitosFilter ? (
+                      <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-blue-500 ring-2 ring-white dark:ring-gray-900" />
+                    ) : null}
+                  </button>
                 </div>
               </div>
             </div>
@@ -1444,7 +1418,7 @@ export default function AndamentoListPage() {
                             <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100 max-w-xs truncate" title={displayReportsBilling(p.reportsBilling)}>{displayReportsBilling(p.reportsBilling)}</td>
                             <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100 whitespace-nowrap">{p.engineer || '-'}</td>
                             <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100 whitespace-nowrap">{p.supervisor || '-'}</td>
-                            <td className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap">{formatDateTime(p.createdAt || '')}</td>
+                            <td className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap">{formatDateTimeBr(p.createdAt || '')}</td>
                           </tr>
                         );
                       })}
@@ -1454,6 +1428,124 @@ export default function AndamentoListPage() {
               )}
             </CardContent>
           </Card>
+
+          <Modal
+            isOpen={showPleitosFilterModal}
+            onClose={() => setShowPleitosFilterModal(false)}
+            title="Filtros — Ordem de Serviço"
+            size="md"
+          >
+            <div className="space-y-4">
+              <div>
+                <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Ano</label>
+                <StringSingleSelectDropdown
+                  value={selectedYear ? String(selectedYear) : '0'}
+                  onChange={(v) => setSelectedYear(v === '0' ? 0 : parseInt(v, 10))}
+                  options={ANDAMENTO_YEAR_FILTER_OPTIONS}
+                  allowEmpty={false}
+                  className="w-full"
+                />
+              </div>
+              <div>
+                <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Mês</label>
+                <StringSingleSelectDropdown
+                  value={String(selectedMonth)}
+                  onChange={(v) => setSelectedMonth(parseInt(v, 10))}
+                  options={MESES_FILTRO_SELECT_OPTIONS}
+                  allowEmpty={false}
+                  className="w-full"
+                />
+              </div>
+              <div>
+                <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Status Orçamento</label>
+                <StringSingleSelectDropdown
+                  value={filterStatusOrcamento}
+                  onChange={setFilterStatusOrcamento}
+                  options={FILTER_STATUS_ORCAMENTO_OPTIONS}
+                  allowEmpty={false}
+                  className="w-full"
+                />
+              </div>
+              <div>
+                <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Status Execução</label>
+                <StringSingleSelectDropdown
+                  value={filterStatusExecucao}
+                  onChange={setFilterStatusExecucao}
+                  options={FILTER_STATUS_EXECUCAO_OPTIONS}
+                  allowEmpty={false}
+                  className="w-full"
+                />
+              </div>
+              <div>
+                <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Status Faturamento (%)</label>
+                <StringSingleSelectDropdown
+                  value={filterStatusFaturamento}
+                  onChange={setFilterStatusFaturamento}
+                  options={FILTER_STATUS_FATURAMENTO_OPTIONS}
+                  allowEmpty={false}
+                  className="w-full"
+                />
+              </div>
+              <div>
+                <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Orçamento</label>
+                <StringSingleSelectDropdown
+                  value={filterBudgetEmpty}
+                  onChange={(v) => setFilterBudgetEmpty(v as 'all' | 'empty' | 'filled')}
+                  options={FILTER_BUDGET_EMPTY_OPTIONS}
+                  allowEmpty={false}
+                  className="w-full"
+                />
+              </div>
+              <div>
+                <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Descrição</label>
+                <input
+                  type="text"
+                  value={filterDescricao}
+                  onChange={(e) => setFilterDescricao(e.target.value)}
+                  placeholder="Filtrar por descrição"
+                  className="h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                />
+              </div>
+              <div>
+                <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Lote</label>
+                <input
+                  type="text"
+                  value={filterLote}
+                  onChange={(e) => setFilterLote(e.target.value)}
+                  placeholder="Filtrar por lote"
+                  className="h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                />
+              </div>
+              <div>
+                <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Unidade</label>
+                <input
+                  type="text"
+                  value={filterUnidade}
+                  onChange={(e) => setFilterUnidade(e.target.value)}
+                  placeholder="Filtrar por unidade"
+                  className="h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                />
+              </div>
+              <div>
+                <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Engenheiro</label>
+                <input
+                  type="text"
+                  value={filterEngenheiro}
+                  onChange={(e) => setFilterEngenheiro(e.target.value)}
+                  placeholder="Filtrar por engenheiro"
+                  className="h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                />
+              </div>
+              <div className="flex items-center justify-between gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
+                <Button type="button" variant="outline" onClick={clearPleitosFilters}>
+                  Limpar filtros
+                </Button>
+                <Button type="button" onClick={() => setShowPleitosFilterModal(false)}>
+                  Fechar
+                </Button>
+              </div>
+            </div>
+          </Modal>
 
           {showPleitoModal && !pleitoToEdit && (
             <PleitoFormModal
@@ -1762,7 +1854,7 @@ export default function AndamentoListPage() {
                                 <td className="px-4 py-3 text-sm text-right text-gray-900 dark:text-gray-100">{p.budget ? formatCurrency(Number(p.budget)) : '-'}</td>
                                 <td className="px-4 py-3 text-sm text-right text-gray-900 dark:text-gray-100">{formatCurrency(valorPleito)}</td>
                                 <td className="px-4 py-3 text-sm text-center text-gray-900 dark:text-gray-100">{pct != null ? `${pct.toFixed(1)}%` : '-'}</td>
-                                <td className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap">{formatDateTime(p.createdAt || '')}</td>
+                                <td className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap">{formatDateTimeBr(p.createdAt || '')}</td>
                               </tr>
                             );
                           })}
@@ -1960,7 +2052,7 @@ export default function AndamentoListPage() {
                           ['RVI', pleito.pv],
                           ['RVF', pleito.ipi],
                           ['Feedback Relatorios', displayReportsBilling(pleito.reportsBilling)],
-                          ['Preenchimento', pleito.createdAt ? formatDateTime(pleito.createdAt) : null]
+                          ['Preenchimento', pleito.createdAt ? formatDateTimeBr(pleito.createdAt) : null]
                         ] as [string, string | number | null | undefined][]).map(([label, value]) =>
                           value != null && value !== '' ? (
                             <div key={label}>

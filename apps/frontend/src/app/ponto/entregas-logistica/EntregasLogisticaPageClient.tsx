@@ -8,6 +8,7 @@ import { ptBR } from 'date-fns/locale';
 import { Plus, Search, Truck, Upload, X, Paperclip, CheckCircle, Clock, Users } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { formatDateTimeBr } from '@/lib/dateTimeBr';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { FilterStatCard } from '@/components/ui/FilterStatCard';
 import { MainLayout } from '@/components/layout/MainLayout';
@@ -157,15 +158,6 @@ function formatDateBr(iso?: string | null) {
   if (!iso) return '—';
   try {
     return format(new Date(iso), 'dd/MM/yyyy', { locale: ptBR });
-  } catch {
-    return '—';
-  }
-}
-
-function formatDateTimeBr(iso?: string | null) {
-  if (!iso) return '—';
-  try {
-    return format(new Date(iso), 'dd/MM/yyyy HH:mm', { locale: ptBR });
   } catch {
     return '—';
   }
@@ -762,7 +754,7 @@ export default function EntregasLogisticaPageClient() {
                 <dl className="divide-y divide-gray-100 text-sm dark:divide-gray-700">
                   {[
                     { label: 'ID', value: String(detailRow.displayNumber) },
-                    { label: 'Data e hora', value: formatDateTimeBr(detailRow.requestedAt) },
+                    { label: 'Data e hora', value: formatDateTimeBr(detailRow.requestedAt, '—') },
                     { label: 'Urgência', value: urgencyLabel(detailRow.urgency) },
                     { label: 'Status', value: deliveryStatusCell(detailRow) },
                     { label: 'Contrato', value: detailValue(detailRow.contract?.name) },

@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { formatDateTimeBr } from '@/lib/dateTimeBr';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { FilterStatCard } from '@/components/ui/FilterStatCard';
 import { MainLayout } from '@/components/layout/MainLayout';
@@ -156,15 +157,6 @@ function formatDateBr(iso?: string | null) {
   if (!iso) return '—';
   try {
     return format(new Date(iso), 'dd/MM/yyyy', { locale: ptBR });
-  } catch {
-    return '—';
-  }
-}
-
-function formatDateTimeBr(iso?: string | null) {
-  if (!iso) return '—';
-  try {
-    return format(new Date(iso), 'dd/MM/yyyy HH:mm', { locale: ptBR });
   } catch {
     return '—';
   }
@@ -902,7 +894,7 @@ export default function EntregaLogisticaPageClient() {
                 <DetailField label="ID">{detailRow.displayNumber}</DetailField>
                 <DetailField label="Status">{deliveryStatusCell(detailRow)}</DetailField>
                 <DetailField label="Data e hora">
-                  {formatDateTimeBr(detailRow.requestedAt)}
+                  {formatDateTimeBr(detailRow.requestedAt, '—')}
                 </DetailField>
                 <DetailField label="Urgência">{urgencyLabel(detailRow.urgency)}</DetailField>
                 <DetailField label="Registrado por" className="sm:col-span-2">
@@ -988,7 +980,7 @@ export default function EntregaLogisticaPageClient() {
                       {detailValue(detailRow.completion.receivingResponsible)}
                     </DetailField>
                     <DetailField label="Data e hora do recebimento">
-                      {formatDateTimeBr(detailRow.completion.receivedAt)}
+                      {formatDateTimeBr(detailRow.completion.receivedAt, '—')}
                     </DetailField>
                     <DetailField label="Entrega">
                       {outcomeLabel(detailRow.completion.deliveryOutcome)}

@@ -14,6 +14,7 @@ import api from '@/lib/api';
 import { formatOsSePasta, formatOsSePastaOrDash } from '@/lib/formatOsSePasta';
 import { pleitoStatusReadOnlySpanClass } from '@/lib/pleitoStatusStyles';
 import toast from 'react-hot-toast';
+import { formatDateTimeBr } from '@/lib/dateTimeBr';
 
 /** Campos alinhados ao modelo Pleito (API) para exportação completa. */
 interface ContractPleito {
@@ -78,24 +79,6 @@ function formatCurrency(value: number) {
   }).format(value);
 }
 
-function formatDateTime(dateStr: string | null | undefined) {
-  if (!dateStr) return '';
-  const raw = String(dateStr).trim();
-  const only = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  const d = only
-    ? new Date(Number(only[1]), Number(only[2]) - 1, Number(only[3]), 12, 0, 0, 0)
-    : new Date(raw);
-  if (Number.isNaN(d.getTime())) return '';
-  return d.toLocaleString('pt-BR', {
-    timeZone: 'America/Sao_Paulo',
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
-
 function numOrEmpty(v: number | null | undefined): number | string {
   if (v == null || Number.isNaN(Number(v))) return '';
   return Number(v);
@@ -130,8 +113,8 @@ function pleitoToXlsxRow(p: ContractPleito): (string | number)[] {
     p.reportsBilling ?? '',
     p.engineer ?? '',
     p.supervisor ?? '',
-    p.createdAt ? formatDateTime(p.createdAt) : '',
-    p.updatedAt ? formatDateTime(p.updatedAt) : ''
+    p.createdAt ? formatDateTimeBr(p.createdAt) : '',
+    p.updatedAt ? formatDateTimeBr(p.updatedAt) : ''
   ];
 }
 

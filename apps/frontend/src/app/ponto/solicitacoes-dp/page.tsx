@@ -18,6 +18,7 @@ import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDr
 import type { MultiSelectSearchOption } from '@/components/ui/MultiSelectSearchDropdown';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'react-hot-toast';
+import { formatDateTimeBr } from '@/lib/dateTimeBr';
 import { ArrowLeft, ChevronRight, ClipboardList, FileText, Filter, Loader2, MailPlus, MoreVertical, Plus, RotateCcw, Search, Users, X, type LucideIcon } from 'lucide-react';
 import { FilterStatCard } from '@/components/ui/FilterStatCard';
 import { ButtonSeg, DpSolicitacaoTypeFields, type DpFormRequestType } from './DpSolicitacaoTypeFields';
@@ -132,10 +133,7 @@ function getDpHistoryFeedbackText(r: DpRequest): string | null {
 }
 
 function formatDateTime(iso?: string | null) {
-  if (!iso) return '—';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '—';
-  return d.toLocaleString('pt-BR');
+  return formatDateTimeBr(iso, '—');
 }
 
 function formatDuration(ms: number) {

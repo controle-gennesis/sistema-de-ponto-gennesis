@@ -17,7 +17,8 @@ import {
   ExternalLink,
   BarChart3,
   Trash2,
-  Percent,
+  CheckCircle2,
+  CalendarDays,
   Calculator,
   FileImage,
   Loader2,
@@ -25,9 +26,13 @@ import {
   ChevronDown,
   Info,
   History,
+  Search,
+  Filter,
+  MoreVertical,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Modal } from '@/components/ui/Modal';
+import { Button } from '@/components/ui/Button';
 import { DatePickerField } from '@/components/ui/DatePickerField';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { MainLayout } from '@/components/layout/MainLayout';
@@ -44,6 +49,14 @@ import {
 } from '@/lib/contractPaidNaturezaExclusions';
 import { PleitoFormModal } from '@/components/pleito/PleitoFormModal';
 import { PleitoOsPurchaseOrdersSection } from '@/components/pleito/PleitoOsPurchaseOrdersSection';
+import { ContractCronogramaMensalPanel } from '@/components/contract/ContractCronogramaMensalPanel';
+import { ContractHistoricoOsPanel } from '@/components/contract/ContractHistoricoOsPanel';
+import { ContractOsPleitoListPanel } from '@/components/contract/ContractOsPleitoListPanel';
+import { RowActionMenuCell, RowActionMenuPortal, cadastroListClasses, rowActionMenuButtonClass } from '@/components/ui/RowActionMenu';
+import { listTableRowClasses } from '@/components/ui/listTableUi';
+import { CadastroListSummary, getCadastroListRange } from '@/components/ui/CadastroListSummary';
+import { ListPagination } from '@/components/ui/ListPagination';
+import { ROW_ACTION_MENU_WIDTH_PX, type RowActionMenuState, useRowActionMenu } from '@/hooks/useRowActionMenu';
 import {
   STATUS_ORCAMENTO_OPCOES,
   STATUS_EXECUCAO_OPCOES,
@@ -68,6 +81,7 @@ import {
   maskAjusteValorInput,
   parseAjusteValorInput
 } from '@/lib/extratoCaixaAjuste';
+import { formatDateTimeBr } from '@/lib/dateTimeBr';
 
 interface ContractBilling {
   id: string;
@@ -154,6 +168,78 @@ interface ContractWeeklyProduction {
 const MESES = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
 
 const LIST_DISPLAY_LIMIT = 10;
+const LIST_SEARCH_INPUT_CLASS =
+  'h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100';
+
+const OS_TOOLBAR_BTN_ICON = 'h-4 w-4 shrink-0 text-gray-500 dark:text-gray-400';
+
+const OS_TOOLBAR_BTN =
+  'inline-flex h-10 shrink-0 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700';
+
+const OS_TOOLBAR_BTN_DANGER =
+  'inline-flex h-10 shrink-0 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-red-600 transition-colors hover:border-red-200 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-red-400 dark:hover:border-red-900/50 dark:hover:bg-red-950/25';
+
+const OS_TOOLBAR_BTN_PRIMARY =
+  'inline-flex h-10 shrink-0 items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 text-sm font-semibold text-blue-700 transition-colors hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-blue-800/60 dark:bg-blue-950/30 dark:text-blue-300 dark:hover:bg-blue-900/40';
+
+function pleitoMatchesSearchTerm(p: ContractPleito, term: string): boolean {
+  const t = term.trim().toLowerCase();
+  if (!t) return true;
+  const haystack = [
+    p.divSe,
+    p.serviceDescription,
+    p.folderNumber,
+    p.budgetStatus,
+    p.executionStatus,
+    p.lot,
+    p.location,
+    p.unit,
+    p.engineer,
+    p.supervisor,
+    p.billingStatus,
+    p.creationMonth,
+    p.creationYear != null ? String(p.creationYear) : '',
+    p.budget,
+    p.pv,
+    p.ipi,
+    p.reportsBilling,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  return haystack.includes(t);
+}
+
+function productionMatchesSearchTerm(p: ContractWeeklyProduction, term: string): boolean {
+  const t = term.trim().toLowerCase();
+  if (!t) return true;
+  const haystack = [
+    p.divSe,
+    p.responsiblePerson,
+    p.fillingDate,
+    formatCurrencyInput(p.weeklyProductionValue),
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  return haystack.includes(t);
+}
+
+function billingMatchesSearchTerm(b: ContractBilling, term: string): boolean {
+  const t = term.trim().toLowerCase();
+  if (!t) return true;
+  const haystack = [
+    b.invoiceNumber,
+    b.serviceOrder,
+    b.issueDate,
+    formatCurrencyInput(b.grossValue),
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  return haystack.includes(t);
+}
+
 const PLEITO_HISTORY_MARKER = '__PLEITO_HISTORICO__';
 const PLEITO_HISTORY_MARKER_GERADO_100 = '__PLEITO_HISTORICO__GERADO_100__';
 const HISTORICO_ETIQUETA_GERADO_100 = 'Gerado 100%';
@@ -514,19 +600,6 @@ function formatDate(dateStr: string) {
   return d.toLocaleDateString('pt-BR', { timeZone: TIMEZONE_BRASILIA });
 }
 
-function formatDateTime(dateStr: string) {
-  const d = parseDateSafe(dateStr);
-  if (!d) return '-';
-  return d.toLocaleString('pt-BR', {
-    timeZone: TIMEZONE_BRASILIA,
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
-
 function toInputDate(dateStr: string | Date): string {
   if (typeof dateStr === 'string') {
     const t = dateStr.trim();
@@ -770,11 +843,28 @@ export default function ContractDetailPage() {
   const [filterStatusOrcamento, setFilterStatusOrcamento] = useState('');
   const [filterStatusExecucao, setFilterStatusExecucao] = useState('');
   const [filterStatusFaturamento, setFilterStatusFaturamento] = useState('');
+  const [searchTermPleitos, setSearchTermPleitos] = useState('');
+  const [showPleitosFilterModal, setShowPleitosFilterModal] = useState(false);
+  const [searchTermProduction, setSearchTermProduction] = useState('');
+  const [showProductionFilterModal, setShowProductionFilterModal] = useState(false);
+  const [filterProductionOsSe, setFilterProductionOsSe] = useState('');
+  const [filterProductionResponsible, setFilterProductionResponsible] = useState('');
+  const [searchTermBillings, setSearchTermBillings] = useState('');
+  const [showBillingFilterModal, setShowBillingFilterModal] = useState(false);
+  const [pleitosListPage, setPleitosListPage] = useState(1);
+  const [productionListPage, setProductionListPage] = useState(1);
+  const [billingsListPage, setBillingsListPage] = useState(1);
   const [selectedForPleito, setSelectedForPleito] = useState<Set<string>>(new Set());
+  const [osSelectionMenu, setOsSelectionMenu] = useState<RowActionMenuState>(null);
   const [valorPleiteado, setValorPleiteado] = useState<Record<string, string>>({});
   const [showPleitoValoresModal, setShowPleitoValoresModal] = useState(false);
   const [showPleitoResumoModal, setShowPleitoResumoModal] = useState(false);
   const [showHistoricoPleitosModal, setShowHistoricoPleitosModal] = useState(false);
+  const [showHistoricoOsModal, setShowHistoricoOsModal] = useState(false);
+  const [showVisualizarPleitoModal, setShowVisualizarPleitoModal] = useState(false);
+  const [showAndamentoTodosModal, setShowAndamentoTodosModal] = useState(false);
+  const [showCronogramaMensalModal, setShowCronogramaMensalModal] = useState(false);
+  const [showFaturamentoTodosModal, setShowFaturamentoTodosModal] = useState(false);
   const [histYearFilter, setHistYearFilter] = useState('all');
   const [histMonthFilter, setHistMonthFilter] = useState('all');
   const [histOsFilter, setHistOsFilter] = useState('');
@@ -1395,10 +1485,25 @@ export default function ContractDetailPage() {
       if (!d) return isAllYears && selectedMonth === 0;
 
       if (!isAllYears && d.getFullYear() !== selectedYear) return false;
-      if (selectedMonth === 0) return true;
-      return d.getMonth() + 1 === selectedMonth;
+      if (selectedMonth !== 0 && d.getMonth() + 1 !== selectedMonth) return false;
+
+      const osTerm = filterProductionOsSe.trim().toLowerCase();
+      if (osTerm && !(p.divSe || '').toLowerCase().includes(osTerm)) return false;
+
+      const respTerm = filterProductionResponsible.trim().toLowerCase();
+      if (respTerm && !(p.responsiblePerson || '').toLowerCase().includes(respTerm)) return false;
+
+      return productionMatchesSearchTerm(p, searchTermProduction);
     });
-  }, [productions, isAllYears, selectedYear, selectedMonth]);
+  }, [
+    productions,
+    isAllYears,
+    selectedYear,
+    selectedMonth,
+    filterProductionOsSe,
+    filterProductionResponsible,
+    searchTermProduction,
+  ]);
 
   /**
    * Meta base: Valor + Aditivos (saldo ÷ meses até o fim da vigência).
@@ -1925,6 +2030,8 @@ export default function ContractDetailPage() {
       if (!isAllYears && d.getFullYear() !== selectedYear) return false;
       if (selectedMonth !== 0 && d.getMonth() + 1 !== selectedMonth) return false; // JS month 0-11
 
+      if (!billingMatchesSearchTerm(b, searchTermBillings)) return false;
+
       const osTerm = filterBillingOsSe.trim().toLowerCase();
       if (osTerm && !(b.serviceOrder || '').toLowerCase().includes(osTerm)) return false;
 
@@ -1942,7 +2049,7 @@ export default function ContractDetailPage() {
 
       return true;
     });
-  }, [billings, isAllYears, selectedYear, selectedMonth, filterBillingOsSe, filterBillingInvoice, filterBillingGross]);
+  }, [billings, isAllYears, selectedYear, selectedMonth, searchTermBillings, filterBillingOsSe, filterBillingInvoice, filterBillingGross]);
 
   // Pleitos filtrados por ano, mês e filtros de status
   const filteredPleitos = useMemo(() => {
@@ -1989,11 +2096,107 @@ export default function ContractDetailPage() {
         return true;
       });
     }
-    return result;
-  }, [pleitos, isAllYears, selectedYear, selectedMonth, filterStatusOrcamento, filterStatusExecucao, filterStatusFaturamento, billings]);
 
-  const displayedPleitos = useMemo(() => filteredPleitos.slice(0, LIST_DISPLAY_LIMIT), [filteredPleitos]);
-  const displayedBillings = useMemo(() => filteredBillings.slice(0, LIST_DISPLAY_LIMIT), [filteredBillings]);
+    if (searchTermPleitos.trim()) {
+      result = result.filter((p) => pleitoMatchesSearchTerm(p, searchTermPleitos));
+    }
+
+    return result;
+  }, [pleitos, isAllYears, selectedYear, selectedMonth, filterStatusOrcamento, filterStatusExecucao, filterStatusFaturamento, searchTermPleitos, billings]);
+
+  const hasActivePleitosFilter = Boolean(
+    filterStatusOrcamento || filterStatusExecucao || filterStatusFaturamento
+  );
+  const hasActiveProductionFilter = Boolean(filterProductionOsSe.trim() || filterProductionResponsible.trim());
+  const hasActiveBillingFilter = Boolean(
+    filterBillingOsSe.trim() || filterBillingInvoice.trim() || filterBillingGross.trim()
+  );
+
+  const clearPleitosFilters = () => {
+    setFilterStatusOrcamento('');
+    setFilterStatusExecucao('');
+    setFilterStatusFaturamento('');
+  };
+
+  const clearProductionFilters = () => {
+    setFilterProductionOsSe('');
+    setFilterProductionResponsible('');
+  };
+
+  const clearBillingFilters = () => {
+    setFilterBillingOsSe('');
+    setFilterBillingInvoice('');
+    setFilterBillingGross('');
+  };
+
+  useEffect(() => {
+    setPleitosListPage(1);
+  }, [
+    searchTermPleitos,
+    filterStatusOrcamento,
+    filterStatusExecucao,
+    filterStatusFaturamento,
+    selectedYear,
+    selectedMonth,
+  ]);
+
+  useEffect(() => {
+    setProductionListPage(1);
+  }, [
+    searchTermProduction,
+    filterProductionOsSe,
+    filterProductionResponsible,
+    selectedYear,
+    selectedMonth,
+  ]);
+
+  useEffect(() => {
+    setBillingsListPage(1);
+  }, [
+    searchTermBillings,
+    filterBillingOsSe,
+    filterBillingInvoice,
+    filterBillingGross,
+    selectedYear,
+    selectedMonth,
+  ]);
+
+  const displayedPleitos = useMemo(() => {
+    const start = (pleitosListPage - 1) * LIST_DISPLAY_LIMIT;
+    return filteredPleitos.slice(start, start + LIST_DISPLAY_LIMIT);
+  }, [filteredPleitos, pleitosListPage]);
+
+  const pleitosListRange = useMemo(
+    () => getCadastroListRange(pleitosListPage, LIST_DISPLAY_LIMIT, filteredPleitos.length),
+    [pleitosListPage, filteredPleitos.length]
+  );
+
+  const displayedProductions = useMemo(() => {
+    const start = (productionListPage - 1) * LIST_DISPLAY_LIMIT;
+    return filteredProductions.slice(start, start + LIST_DISPLAY_LIMIT);
+  }, [filteredProductions, productionListPage]);
+
+  const productionListRange = useMemo(
+    () => getCadastroListRange(productionListPage, LIST_DISPLAY_LIMIT, filteredProductions.length),
+    [productionListPage, filteredProductions.length]
+  );
+
+  const displayedBillings = useMemo(() => {
+    const start = (billingsListPage - 1) * LIST_DISPLAY_LIMIT;
+    return filteredBillings.slice(start, start + LIST_DISPLAY_LIMIT);
+  }, [filteredBillings, billingsListPage]);
+
+  const billingsListRange = useMemo(
+    () => getCadastroListRange(billingsListPage, LIST_DISPLAY_LIMIT, filteredBillings.length),
+    [billingsListPage, filteredBillings.length]
+  );
+  const {
+    rowActionMenu: pleitoRowActionMenu,
+    rowForActionMenu: pleitoRowForActionMenu,
+    toggleRowActionMenu: togglePleitoRowActionMenu,
+    closeRowActionMenu: closePleitoRowActionMenu,
+    isRowMenuOpen: isPleitoRowMenuOpen,
+  } = useRowActionMenu(displayedPleitos);
   const visiblePleitoIds = useMemo(() => displayedPleitos.map((p) => p.id), [displayedPleitos]);
   const allVisibleSelected = visiblePleitoIds.length > 0 && visiblePleitoIds.every((id) => selectedForPleito.has(id));
   const someVisibleSelected = visiblePleitoIds.some((id) => selectedForPleito.has(id));
@@ -2004,23 +2207,6 @@ export default function ContractDetailPage() {
   );
 
   useContractTableColumnCustomizer(containerRef, 'contracts:detail', contractTablesRerenderKey);
-
-  const andamentoLinkParams = useMemo(() => {
-    const p = new URLSearchParams();
-    p.set('year', String(selectedYear));
-    if (selectedMonth > 0) p.set('month', String(selectedMonth));
-    if (filterStatusOrcamento) p.set('statusOrcamento', filterStatusOrcamento);
-    if (filterStatusExecucao) p.set('statusExecucao', filterStatusExecucao);
-    if (filterStatusFaturamento) p.set('statusFaturamento', filterStatusFaturamento);
-    return p.toString();
-  }, [isAllYears, selectedYear, selectedMonth, filterStatusOrcamento, filterStatusExecucao, filterStatusFaturamento]);
-
-  const faturamentoLinkParams = useMemo(() => {
-    const p = new URLSearchParams();
-    p.set('year', String(selectedYear));
-    if (selectedMonth > 0) p.set('month', String(selectedMonth));
-    return p.toString();
-  }, [isAllYears, selectedYear, selectedMonth]);
 
   const handleBillingSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -2235,6 +2421,29 @@ export default function ContractDetailPage() {
     deletePleitosSelecionadosMutation.mutate(ids);
   };
 
+  const toggleOsSelectionMenu = (button: HTMLButtonElement) => {
+    setOsSelectionMenu((prev) => {
+      if (prev) return null;
+      const rect = button.getBoundingClientRect();
+      let left = rect.right - ROW_ACTION_MENU_WIDTH_PX;
+      left = Math.max(8, Math.min(left, window.innerWidth - ROW_ACTION_MENU_WIDTH_PX - 8));
+      return { rowId: 'os-selection-toolbar', top: rect.bottom + 4, left };
+    });
+  };
+
+  useEffect(() => {
+    if (selectedForPleito.size === 0) setOsSelectionMenu(null);
+  }, [selectedForPleito.size]);
+
+  useEffect(() => {
+    if (!osSelectionMenu) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOsSelectionMenu(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [osSelectionMenu]);
+
   const handleGerarPleito = () => {
     if (!canCreateContrato) {
       toast.error('Você não tem permissão para criar no módulo Contratos.');
@@ -2248,20 +2457,48 @@ export default function ContractDetailPage() {
     setShowPleitoValoresModal(true);
   };
 
+  const handleGerarPleitoParaOs = (pleitoId: string) => {
+    if (!canCreateContrato) {
+      toast.error('Você não tem permissão para criar no módulo Contratos.');
+      return;
+    }
+    setSelectedForPleito(new Set([pleitoId]));
+    setShowPleitoValoresModal(true);
+  };
+
+  const handleExcluirPleitoOs = (pleito: ContractPleito) => {
+    if (!canDeleteContrato) {
+      toast.error('Você não tem permissão para excluir no módulo Contratos.');
+      return;
+    }
+    const label = formatOsSePastaOrDash(pleito.divSe, pleito.folderNumber);
+    if (
+      !window.confirm(
+        `Excluir a ordem de serviço ${label}? Esta ação não pode ser desfeita.`
+      )
+    ) {
+      return;
+    }
+    deletePleitosSelecionadosMutation.mutate([pleito.id]);
+  };
+
+  const handleEditarPleitoOs = (pleito: ContractPleito) => {
+    if (!canEditContrato) {
+      toast.error('Você não tem permissão para editar no módulo Contratos.');
+      return;
+    }
+    closePleitoRowActionMenu();
+    setPleitoToEdit({ ...(pleito as unknown as PleitoFormData), id: pleito.id });
+  };
+
   const handleVisualizarPleito = () => {
     const ids = Array.from(selectedForPleito);
     if (ids.length === 0) {
       toast.error('Selecione ao menos uma ordem de serviço para visualizar o pleito.');
       return;
     }
-    const p = new URLSearchParams();
-    p.set('year', String(selectedYear));
-    if (selectedMonth > 0) p.set('month', String(selectedMonth));
-    if (filterStatusOrcamento) p.set('statusOrcamento', filterStatusOrcamento);
-    if (filterStatusExecucao) p.set('statusExecucao', filterStatusExecucao);
-    if (filterStatusFaturamento) p.set('statusFaturamento', filterStatusFaturamento);
-    p.set('selectedIds', ids.join(','));
-    router.push(`/ponto/contratos/${contractId}/andamento?${p.toString()}`);
+    setOsSelectionMenu(null);
+    setShowVisualizarPleitoModal(true);
   };
 
   const handleGerarCronogramaMensal = () => {
@@ -2270,18 +2507,12 @@ export default function ContractDetailPage() {
       toast.error('Selecione ao menos uma ordem de serviço para gerar o cronograma.');
       return;
     }
-    const p = new URLSearchParams();
-    p.set('year', String(selectedYear));
-    if (selectedMonth > 0) p.set('month', String(selectedMonth));
-    if (filterStatusOrcamento) p.set('statusOrcamento', filterStatusOrcamento);
-    if (filterStatusExecucao) p.set('statusExecucao', filterStatusExecucao);
-    if (filterStatusFaturamento) p.set('statusFaturamento', filterStatusFaturamento);
-    p.set('selectedIds', ids.join(','));
-    window.open(`/ponto/contratos/${contractId}/cronograma-mensal?${p.toString()}`, '_blank', 'noopener,noreferrer');
+    setOsSelectionMenu(null);
+    setShowCronogramaMensalModal(true);
   };
 
   const handleAbrirHistoricoOs = () => {
-    window.open(`/ponto/contratos/${contractId}/historico-os`, '_blank', 'noopener,noreferrer');
+    setShowHistoricoOsModal(true);
   };
 
   const handleConfirmarPleito = () => {
@@ -2369,6 +2600,11 @@ export default function ContractDetailPage() {
       return next;
     });
   };
+
+  const visualizarPleitos = useMemo(
+    () => pleitos.filter((p) => selectedForPleito.has(p.id)),
+    [pleitos, selectedForPleito]
+  );
 
   const generatedPleitos = useMemo(
     () =>
@@ -3435,176 +3671,170 @@ export default function ContractDetailPage() {
           <>
           {/* Ordem de Serviço - Lista de pleitos do contrato */}
           <Card>
-            <CardHeader className="border-b border-gray-200 dark:border-gray-700">
+            <CardHeader className={cadastroListClasses.cardHeader}>
               <div className="flex flex-col gap-4">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                  <div className="flex items-start gap-3 min-w-0">
-                    <div className="p-2 sm:p-3 bg-blue-100 dark:bg-blue-900/30 rounded-lg shrink-0">
-                      <ClipboardList className="w-5 h-5 sm:w-6 sm:h-6 text-blue-600 dark:text-blue-400" />
+                <div className={cadastroListClasses.cardHeaderRow}>
+                  <div className={cadastroListClasses.cardHeaderIconRow}>
+                    <div className="rounded-lg bg-blue-100 p-2 sm:p-3 dark:bg-blue-900/30">
+                      <ClipboardList className="h-5 w-5 text-blue-600 dark:text-blue-400 sm:h-6 sm:w-6" />
                     </div>
                     <div className="min-w-0">
-                      <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                      <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 sm:text-xl">
                         Ordem de Serviço
                       </h3>
-                      <p className="text-sm text-gray-600 dark:text-gray-400">
-                        Visualizar e gerenciar ordens de serviço do contrato
+                      <p className="text-sm text-gray-500 dark:text-gray-400">
+                        {loadingPleitos
+                          ? 'Carregando...'
+                          : filteredPleitos.length === 1
+                            ? '1 ordem de serviço'
+                            : `${filteredPleitos.length} ordens de serviço`}
                       </p>
-                      {!loadingPleitos && filteredPleitos.length > 0 && (
-                        <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                          Mostrando 1 a {Math.min(LIST_DISPLAY_LIMIT, filteredPleitos.length)} de {filteredPleitos.length}{' '}
-                          {filteredPleitos.length === 1 ? 'ordem de serviço' : 'ordens de serviço'}
-                          {selectedMonth > 0 ? ` em ${MESES_FILTRO.find((m) => m.value === selectedMonth)?.label}` : ''}
-                          {isAllYears ? ' (todos os anos)' : ` (${selectedYear})`}
-                          {filteredPleitos.length > LIST_DISPLAY_LIMIT ? ` · exibindo os ${LIST_DISPLAY_LIMIT} primeiros` : ''}
-                        </p>
-                      )}
                     </div>
                   </div>
-                  <div className="flex flex-wrap items-center gap-2 shrink-0">
-                    {!loadingPleitos && pleitos.length > 0 && (
+                  <div className={cadastroListClasses.cardToolbar}>
+                    {!loadingPleitos && pleitos.length > 0 && selectedForPleito.size > 0 && (
                       <button
                         type="button"
-                        onClick={handleGerarCronogramaMensal}
-                        className="inline-flex h-9 items-center rounded-lg border border-indigo-300 bg-indigo-50 px-3 text-sm font-medium text-indigo-700 transition-colors hover:bg-indigo-100 dark:border-indigo-800/60 dark:bg-indigo-950/30 dark:text-indigo-300 dark:hover:bg-indigo-900/40"
+                        onClick={(e) => toggleOsSelectionMenu(e.currentTarget)}
+                        className={`relative ${rowActionMenuButtonClass(osSelectionMenu !== null)}`}
+                        aria-label="Ações das OS selecionadas"
+                        aria-expanded={osSelectionMenu !== null}
+                        aria-haspopup="menu"
+                        title={`Ações (${selectedForPleito.size} selecionada${selectedForPleito.size === 1 ? '' : 's'})`}
                       >
-                        Gerar cronograma mensal
+                        <MoreVertical className="h-4 w-4" />
+                        <span className="absolute -right-1.5 -top-1.5 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-blue-600 px-1 text-[10px] font-semibold leading-none text-white">
+                          {selectedForPleito.size}
+                        </span>
                       </button>
+                    )}
+                    <div className="relative min-w-[240px] flex-1 sm:w-[280px] sm:flex-none">
+                      <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
+                      <input
+                        type="search"
+                        value={searchTermPleitos}
+                        onChange={(e) => setSearchTermPleitos(e.target.value)}
+                        placeholder="Buscar OS, descrição, lote..."
+                        className={LIST_SEARCH_INPUT_CLASS}
+                      />
+                      {searchTermPleitos ? (
+                        <button
+                          type="button"
+                          onClick={() => setSearchTermPleitos('')}
+                          aria-label="Limpar busca"
+                          className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-300"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      ) : null}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowPleitosFilterModal(true)}
+                      className={`relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition-colors ${
+                        hasActivePleitosFilter
+                          ? 'border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100 dark:border-blue-800/60 dark:bg-blue-950/30 dark:text-blue-300 dark:hover:bg-blue-900/40'
+                          : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
+                      }`}
+                      aria-label="Abrir filtro"
+                      title={hasActivePleitosFilter ? 'Filtro (ativo)' : 'Filtro'}
+                    >
+                      <Filter className="h-4 w-4" />
+                      {hasActivePleitosFilter ? (
+                        <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-blue-500 ring-2 ring-white dark:ring-gray-900" />
+                      ) : null}
+                    </button>
+                    {!loadingPleitos && allPleitos.length > 0 && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={handleAbrirHistoricoOs}
+                          className={OS_TOOLBAR_BTN}
+                        >
+                          <History className={OS_TOOLBAR_BTN_ICON} />
+                          Histórico de OS
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setShowHistoricoPleitosModal(true)}
+                          className={OS_TOOLBAR_BTN}
+                        >
+                          <History className={OS_TOOLBAR_BTN_ICON} />
+                          Histórico de Pleitos
+                        </button>
+                      </>
                     )}
                     <button
                       type="button"
                       onClick={() => setShowPleitoModal(true)}
                       disabled={!canCreateContrato}
-                      className="inline-flex h-9 items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 text-sm font-semibold text-blue-700 transition-colors hover:bg-blue-100 dark:border-blue-800/60 dark:bg-blue-950/30 dark:text-blue-300 dark:hover:bg-blue-900/40 disabled:cursor-not-allowed disabled:opacity-50"
+                      className={OS_TOOLBAR_BTN_PRIMARY}
                     >
                       <Plus className="h-4 w-4 shrink-0" />
                       Nova Ordem de Serviço
                     </button>
-                    {!loadingPleitos && pleitos.length > 0 && (
-                      <button
-                        type="button"
-                        onClick={handleExcluirPleitosSelecionados}
-                        disabled={!canDeleteContrato || deletePleitosSelecionadosMutation.isPending || selectedForPleito.size === 0}
-                        className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-red-300 bg-red-50 px-3 text-sm font-medium text-red-700 transition-colors hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
-                        title="Excluir as ordens de serviço marcadas na tabela"
-                      >
-                        <Trash2 className="w-4 h-4 shrink-0" />
-                        {deletePleitosSelecionadosMutation.isPending ? 'Excluindo...' : 'Excluir selecionadas'}
-                      </button>
-                    )}
                   </div>
                 </div>
 
-                {!loadingPleitos && pleitos.length > 0 && (
-                  <div className="flex flex-col gap-3 border-t border-gray-100 pt-4 dark:border-gray-700/60 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="mr-1 hidden text-[11px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500 sm:inline">
-                        Pleitos
-                      </span>
-                      <button
-                        type="button"
-                        onClick={handleVisualizarPleito}
-                        className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-3 text-sm font-medium text-amber-800 transition-colors hover:bg-amber-100 dark:border-amber-800/60 dark:bg-amber-950/30 dark:text-amber-300 dark:hover:bg-amber-900/40"
-                      >
-                        <Eye className="h-4 w-4 shrink-0" />
-                        Visualizar Pleito
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleGerarPleito}
-                        disabled={!canCreateContrato || gerarPleitoMutation.isPending}
-                        className="inline-flex h-9 items-center rounded-lg bg-red-600 px-3 text-sm font-medium text-white transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {gerarPleitoMutation.isPending ? 'Gerando...' : 'Gerar Pleito'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handlePleitar100PorcentoSelecionadas}
-                        disabled={gerarPleitoMutation.isPending || selectedForPleito.size === 0}
-                        className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
-                        title="Gera pleito com 100% do orçamento em cada OS marcada (sem abrir o modal de %)"
-                      >
-                        <Percent className="h-4 w-4 shrink-0" />
-                        {gerarPleitoMutation.isPending ? 'Gerando...' : 'Pleitear 100%'}
-                      </button>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={handleAbrirHistoricoOs}
-                        className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
-                      >
-                        <History className="h-4 w-4 shrink-0" />
-                        Histórico de OS
-                      </button>
-                      {allPleitos.length > 0 && (
-                        <button
-                          type="button"
-                          onClick={() => setShowHistoricoPleitosModal(true)}
-                          className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
-                        >
-                          <History className="h-4 w-4 shrink-0" />
-                          Histórico de Pleitos
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {!loadingPleitos && pleitos.length === 0 && allPleitos.length > 0 && (
-                  <div className="flex flex-wrap items-center justify-end gap-2 border-t border-gray-100 pt-4 dark:border-gray-700/60">
-                    <button
-                      type="button"
-                      onClick={handleAbrirHistoricoOs}
-                      className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
-                    >
-                      <History className="h-4 w-4 shrink-0" />
-                      Histórico de OS
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setShowHistoricoPleitosModal(true)}
-                      className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
-                    >
-                      <History className="h-4 w-4 shrink-0" />
-                      Histórico de Pleitos
-                    </button>
-                  </div>
-                )}
-
-                {!loadingPleitos && pleitos.length > 0 && (
-                  <div className="grid grid-cols-1 gap-3 border-t border-gray-100 pt-4 dark:border-gray-700/60 sm:grid-cols-3">
-                    <div className="flex flex-col gap-1">
-                      <label className="text-xs font-medium text-gray-500 dark:text-gray-400">Status Orçamento</label>
-                      <StringSingleSelectDropdown
-                        value={filterStatusOrcamento}
-                        onChange={setFilterStatusOrcamento}
-                        options={FILTER_STATUS_ORCAMENTO_OPTIONS}
-                        allowEmpty={false}
-                      />
-                    </div>
-                    <div className="flex flex-col gap-1">
-                      <label className="text-xs font-medium text-gray-500 dark:text-gray-400">Status Execução</label>
-                      <StringSingleSelectDropdown
-                        value={filterStatusExecucao}
-                        onChange={setFilterStatusExecucao}
-                        options={FILTER_STATUS_EXECUCAO_OPTIONS}
-                        allowEmpty={false}
-                      />
-                    </div>
-                    <div className="flex flex-col gap-1">
-                      <label className="text-xs font-medium text-gray-500 dark:text-gray-400">Status Faturamento (%)</label>
-                      <StringSingleSelectDropdown
-                        value={filterStatusFaturamento}
-                        onChange={setFilterStatusFaturamento}
-                        options={FILTER_STATUS_FATURAMENTO_OPTIONS}
-                        allowEmpty={false}
-                      />
-                    </div>
-                  </div>
-                )}
               </div>
             </CardHeader>
-            <CardContent>
+            {osSelectionMenu ? (
+              <RowActionMenuPortal
+                menu={osSelectionMenu}
+                onClose={() => setOsSelectionMenu(null)}
+                onEdit={() => {}}
+                onDelete={() => {}}
+                hideDefaultActions
+                extraItems={[
+                  {
+                    label: 'Visualizar Pleito',
+                    onClick: handleVisualizarPleito,
+                    icon: <Eye className={OS_TOOLBAR_BTN_ICON} />,
+                  },
+                  {
+                    label: gerarPleitoMutation.isPending ? 'Gerando...' : 'Gerar Pleito',
+                    onClick: handleGerarPleito,
+                    disabled: !canCreateContrato || gerarPleitoMutation.isPending,
+                    disabledTitle: gerarPleitoMutation.isPending
+                      ? 'Gerando...'
+                      : 'Sem permissão para gerar pleito',
+                    icon: <FileDown className={OS_TOOLBAR_BTN_ICON} />,
+                  },
+                  {
+                    label: gerarPleitoMutation.isPending ? 'Gerando...' : 'Pleitear 100%',
+                    onClick: handlePleitar100PorcentoSelecionadas,
+                    disabled: gerarPleitoMutation.isPending,
+                    disabledTitle: 'Gerando...',
+                    icon: <CheckCircle2 className={OS_TOOLBAR_BTN_ICON} />,
+                  },
+                  {
+                    label: 'Gerar cronograma mensal',
+                    onClick: handleGerarCronogramaMensal,
+                    icon: <CalendarDays className={OS_TOOLBAR_BTN_ICON} />,
+                  },
+                  {
+                    label: deletePleitosSelecionadosMutation.isPending
+                      ? 'Excluindo...'
+                      : 'Excluir selecionadas',
+                    onClick: handleExcluirPleitosSelecionados,
+                    disabled: !canDeleteContrato || deletePleitosSelecionadosMutation.isPending,
+                    disabledTitle: deletePleitosSelecionadosMutation.isPending
+                      ? 'Excluindo...'
+                      : 'Sem permissão para excluir',
+                    icon: (
+                      <Trash2
+                        className={`h-4 w-4 shrink-0 ${
+                          !canDeleteContrato || deletePleitosSelecionadosMutation.isPending
+                            ? 'text-gray-400 dark:text-gray-500'
+                            : 'text-red-600 dark:text-red-400'
+                        }`}
+                      />
+                    ),
+                  },
+                ]}
+              />
+            ) : null}
+            <CardContent className={cadastroListClasses.cardContent}>
               {loadingPleitos ? (
                 <div className="p-8 text-center text-gray-500 dark:text-gray-400">
                   Carregando ordens de serviço...
@@ -3617,7 +3847,9 @@ export default function ContractDetailPage() {
                       ? 'Nenhuma ordem de serviço cadastrada para este contrato.'
                       : pleitos.length === 0
                         ? 'Todas as ordens de serviço deste contrato foram concluídas (faturamento 100%). Consulte o Histórico de OS.'
-                        : `Nenhuma ordem de serviço no período selecionado (${selectedMonth > 0 ? MESES_FILTRO.find((m) => m.value === selectedMonth)?.label + ' ' : ''}${isAllYears ? 'todos os anos' : selectedYear}).`}
+                        : searchTermPleitos.trim() || hasActivePleitosFilter
+                          ? 'Nenhuma ordem de serviço encontrada com os filtros atuais.'
+                          : `Nenhuma ordem de serviço no período selecionado (${selectedMonth > 0 ? MESES_FILTRO.find((m) => m.value === selectedMonth)?.label + ' ' : ''}${isAllYears ? 'todos os anos' : selectedYear}).`}
                   </p>
                   {allPleitos.length === 0 && (
                   <button
@@ -3630,11 +3862,21 @@ export default function ContractDetailPage() {
                   )}
                 </div>
               ) : (
+                <>
+                  <CadastroListSummary
+                    startItem={pleitosListRange.startItem}
+                    endItem={pleitosListRange.endItem}
+                    total={filteredPleitos.length}
+                    itemLabel="ordem de serviço"
+                    itemLabelPlural="ordens de serviço"
+                    currentPage={pleitosListPage}
+                    totalPages={pleitosListRange.totalPages}
+                  />
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm" data-cc-skip-column-customizer="1">
                     <thead className="border-b border-gray-200 dark:border-gray-700">
                       <tr>
-                        <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase w-12">
+                        <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase w-12 align-middle">
                           <div className="flex justify-center">
                             <TableCheckbox
                               checked={allVisibleSelected}
@@ -3645,32 +3887,15 @@ export default function ContractDetailPage() {
                             />
                           </div>
                         </th>
-                        <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase whitespace-nowrap">
-                          Etiqueta
-                        </th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">OS / SE</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Descrição</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase whitespace-nowrap">Mês/Ano criação</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase whitespace-nowrap">Data início</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase whitespace-nowrap">Data término</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Status Orçamento</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Status Execução</th>
-                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Orçamento</th>
-                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase whitespace-nowrap">Orçamento R01</th>
-                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase whitespace-nowrap">Orçamento R02</th>
-                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase whitespace-nowrap">Orçamento R03</th>
-                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase whitespace-nowrap">Orçamento R04</th>
-                        <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Status Faturamento (%)</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Período</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase whitespace-nowrap">Lote</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Local</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase whitespace-nowrap">Unidade</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase whitespace-nowrap">RVI</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase whitespace-nowrap">RVF</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Feedback Relatorios</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase whitespace-nowrap">Engenheiro</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase whitespace-nowrap">Encarregado</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Preenchimento</th>
+                        <th className={`${cadastroListClasses.th} whitespace-nowrap align-middle`}>ID</th>
+                        <th className={`${cadastroListClasses.th} align-middle`}>Descrição</th>
+                        <th className={`${cadastroListClasses.thCenter} align-middle`}>Status Orçamento</th>
+                        <th className={`${cadastroListClasses.thCenter} align-middle`}>Status Execução</th>
+                        <th className={`${cadastroListClasses.thCenter} align-middle whitespace-nowrap`}>Status Faturamento (%)</th>
+                        <th className={`${cadastroListClasses.thCenter} align-middle whitespace-nowrap`}>Data término</th>
+                        <th className={`${cadastroListClasses.thCenter} align-middle whitespace-nowrap`}>Etiqueta</th>
+                        <th className={`${cadastroListClasses.thNumeric} align-middle`}>Orçamento</th>
+                        <th className={`${listTableRowClasses.actionTh} align-middle`}>Ação</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
@@ -3682,10 +3907,6 @@ export default function ContractDetailPage() {
                         const orcamentoPleito = p.budget ? Number(p.budget) : 0;
                         const statusFaturamentoPct = orcamentoPleito > 0 ? (acumulado / orcamentoPleito) * 100 : null;
                         const osEtiqueta = getOsEtiquetaAbertura(p, billingsForOs);
-                        const mesAnoCriacao =
-                          p.creationMonth && p.creationYear
-                            ? `${String(p.creationMonth).padStart(2, '0')}/${p.creationYear}`
-                            : '-';
                         const isSelected = selectedForPleito.has(p.id);
                         return (
                         <tr
@@ -3693,7 +3914,7 @@ export default function ContractDetailPage() {
                           onClick={() => setSelectedPleitoId(p.id)}
                           className={`hover:bg-gray-50 dark:hover:bg-gray-700/30 cursor-pointer ${isSelected ? 'bg-blue-50/50 dark:bg-blue-900/10' : ''}`}
                         >
-                          <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
+                          <td className="px-3 py-3 align-middle" onClick={(e) => e.stopPropagation()}>
                             <div className="flex justify-center">
                               <TableCheckbox
                                 checked={isSelected}
@@ -3721,21 +3942,13 @@ export default function ContractDetailPage() {
                               />
                             </div>
                           </td>
-                          <td className="px-3 py-3 whitespace-nowrap">
-                            <span
-                              className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${osEtiquetaBadgeClass(osEtiqueta)}`}
-                            >
-                              {osEtiqueta}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">
+                          <td className={`${cadastroListClasses.tdMono} align-middle`}>
                             {formatOsSePastaOrDash(p.divSe, p.folderNumber)}
                           </td>
-                          <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100 max-w-xs truncate" title={p.serviceDescription}>{p.serviceDescription || '-'}</td>
-                          <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100 whitespace-nowrap">{mesAnoCriacao}</td>
-                          <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100 whitespace-nowrap">{p.startDate ? formatDate(p.startDate) : '-'}</td>
-                          <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100 whitespace-nowrap">{p.endDate ? formatDate(p.endDate) : '-'}</td>
-                          <td className="px-4 py-3 text-sm align-middle">
+                          <td className={`${cadastroListClasses.tdTruncate} align-middle`} title={p.serviceDescription}>
+                            <span className="block truncate">{p.serviceDescription || '-'}</span>
+                          </td>
+                          <td className={`${cadastroListClasses.tdCenter} align-middle`}>
                             <span
                               className={pleitoStatusReadOnlySpanClass('budget', p.budgetStatus)}
                               title={p.budgetStatus || ''}
@@ -3743,7 +3956,7 @@ export default function ContractDetailPage() {
                               {p.budgetStatus || '—'}
                             </span>
                           </td>
-                          <td className="px-4 py-3 text-sm align-middle">
+                          <td className={`${cadastroListClasses.tdCenter} align-middle`}>
                             <span
                               className={pleitoStatusReadOnlySpanClass('execution', p.executionStatus)}
                               title={p.executionStatus || ''}
@@ -3751,47 +3964,95 @@ export default function ContractDetailPage() {
                               {p.executionStatus || '—'}
                             </span>
                           </td>
-                          <td className="px-4 py-3 text-sm text-right font-medium text-gray-900 dark:text-gray-100">{p.budget ? formatCurrency(Number(p.budget)) : '-'}</td>
-                          <td className="px-4 py-3 text-sm text-right text-gray-900 dark:text-gray-100 whitespace-nowrap">{p.budgetAmount1 != null && Number(p.budgetAmount1) > 0 ? formatCurrency(Number(p.budgetAmount1)) : '-'}</td>
-                          <td className="px-4 py-3 text-sm text-right text-gray-900 dark:text-gray-100 whitespace-nowrap">{p.budgetAmount2 != null && Number(p.budgetAmount2) > 0 ? formatCurrency(Number(p.budgetAmount2)) : '-'}</td>
-                          <td className="px-4 py-3 text-sm text-right text-gray-900 dark:text-gray-100 whitespace-nowrap">{p.budgetAmount3 != null && Number(p.budgetAmount3) > 0 ? formatCurrency(Number(p.budgetAmount3)) : '-'}</td>
-                          <td className="px-4 py-3 text-sm text-right text-gray-900 dark:text-gray-100 whitespace-nowrap">{p.budgetAmount4 != null && Number(p.budgetAmount4) > 0 ? formatCurrency(Number(p.budgetAmount4)) : '-'}</td>
-                          <td className="px-4 py-3 text-sm text-center text-gray-900 dark:text-gray-100">
+                          <td className={`${cadastroListClasses.tdCenter} align-middle text-gray-900 dark:text-gray-100`}>
                             {statusFaturamentoPct != null ? `${statusFaturamentoPct.toFixed(1)}%` : '-'}
                           </td>
-                          <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100">
-                            {p.startDate && p.endDate
-                              ? `${formatDate(p.startDate)} – ${formatDate(p.endDate)}`
-                              : p.creationMonth && p.creationYear
-                                ? `${String(p.creationMonth).padStart(2, '0')}/${p.creationYear}`
-                                : '-'}
+                          <td className={`${cadastroListClasses.tdCenter} align-middle whitespace-nowrap text-gray-900 dark:text-gray-100`}>
+                            {p.endDate ? formatDate(p.endDate) : '-'}
                           </td>
-                          <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100 whitespace-nowrap">{p.lot || '-'}</td>
-                          <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100 max-w-xs truncate" title={p.location ?? undefined}>{p.location || '-'}</td>
-                          <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100 whitespace-nowrap">{p.unit || '-'}</td>
-                          <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100 whitespace-nowrap">{p.pv || '-'}</td>
-                          <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100 whitespace-nowrap">{p.ipi || '-'}</td>
-                          <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100 max-w-xs truncate" title={p.reportsBilling ?? undefined}>{p.reportsBilling || '-'}</td>
-                          <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100 whitespace-nowrap">{p.engineer || '-'}</td>
-                          <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100 whitespace-nowrap">{p.supervisor || '-'}</td>
-                          <td className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap">{formatDateTime(p.createdAt || '')}</td>
+                          <td className={`${cadastroListClasses.tdCenter} align-middle whitespace-nowrap`}>
+                            <span
+                              className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${osEtiquetaBadgeClass(osEtiqueta)}`}
+                            >
+                              {osEtiqueta}
+                            </span>
+                          </td>
+                          <td className={`${cadastroListClasses.tdNumeric} align-middle font-medium text-gray-900 dark:text-gray-100`}>
+                            {p.budget ? formatCurrency(Number(p.budget)) : '-'}
+                          </td>
+                          <RowActionMenuCell
+                            isOpen={isPleitoRowMenuOpen(p.id)}
+                            onToggle={(e) => togglePleitoRowActionMenu(p.id, e.currentTarget)}
+                          />
                         </tr>
                         );
                       })}
                     </tbody>
                   </table>
+                  {pleitoRowActionMenu && pleitoRowForActionMenu ? (
+                    <RowActionMenuPortal
+                      menu={pleitoRowActionMenu}
+                      onClose={closePleitoRowActionMenu}
+                      onEdit={() => {}}
+                      onDelete={() => {}}
+                      hideDefaultActions
+                      extraItems={[
+                        {
+                          label: 'Editar',
+                          onClick: () =>
+                            handleEditarPleitoOs(pleitoRowForActionMenu as ContractPleito),
+                          disabled: !canEditContrato,
+                          disabledTitle: 'Sem permissão para editar',
+                          icon: (
+                            <Edit2 className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
+                          ),
+                        },
+                        {
+                          label: 'Gerar pleito',
+                          onClick: () => handleGerarPleitoParaOs(pleitoRowForActionMenu.id),
+                          disabled: !canCreateContrato || gerarPleitoMutation.isPending,
+                          disabledTitle: gerarPleitoMutation.isPending
+                            ? 'Gerando...'
+                            : 'Sem permissão para gerar pleito',
+                          icon: (
+                            <FileDown className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
+                          ),
+                        },
+                        {
+                          label: 'Excluir',
+                          onClick: () =>
+                            handleExcluirPleitoOs(pleitoRowForActionMenu as ContractPleito),
+                          disabled:
+                            !canDeleteContrato || deletePleitosSelecionadosMutation.isPending,
+                          disabledTitle: deletePleitosSelecionadosMutation.isPending
+                            ? 'Excluindo...'
+                            : 'Sem permissão para excluir',
+                          icon: (
+                            <Trash2 className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
+                          ),
+                        },
+                      ]}
+                    />
+                  ) : null}
                 </div>
-              )}
-              {!loadingPleitos && filteredPleitos.length > LIST_DISPLAY_LIMIT && (
-                <div className="p-4 border-t border-gray-200 dark:border-gray-700 flex justify-center">
-                  <Link
-                    href={`/ponto/contratos/${contractId}/andamento${andamentoLinkParams ? `?${andamentoLinkParams}` : ''}`}
-                    className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-900/50 text-sm font-medium transition-colors"
-                  >
-                    <ExternalLink className="w-4 h-4" />
-                    Ver todos os lançamentos ({filteredPleitos.length})
-                  </Link>
-                </div>
+                <ListPagination
+                  currentPage={pleitosListPage}
+                  totalPages={pleitosListRange.totalPages}
+                  onPageChange={setPleitosListPage}
+                />
+                {filteredPleitos.length > LIST_DISPLAY_LIMIT && (
+                  <div className="mt-4 flex justify-center border-t border-gray-200 pt-4 dark:border-gray-700">
+                    <button
+                      type="button"
+                      onClick={() => setShowAndamentoTodosModal(true)}
+                      className="inline-flex items-center gap-2 rounded-lg bg-blue-100 px-4 py-2 text-sm font-medium text-blue-700 transition-colors hover:bg-blue-200 dark:bg-blue-900/30 dark:text-blue-300 dark:hover:bg-blue-900/50"
+                    >
+                      <ExternalLink className="h-4 w-4" />
+                      Ver todos os lançamentos ({filteredPleitos.length})
+                    </button>
+                  </div>
+                )}
+                </>
               )}
             </CardContent>
           </Card>
@@ -3802,44 +4063,78 @@ export default function ContractDetailPage() {
           <>
           {/* Produção Semanal */}
           <Card>
-            <CardHeader className="border-b-0 pb-1">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                <div className="flex items-center space-x-3">
-                  <div className="p-2 sm:p-3 bg-amber-100 dark:bg-amber-900/30 rounded-lg">
-                    <BarChart3 className="w-5 h-5 sm:w-6 sm:h-6 text-amber-600 dark:text-amber-400" />
+            <CardHeader className={cadastroListClasses.cardHeader}>
+              <div className={cadastroListClasses.cardHeaderRow}>
+                <div className={cadastroListClasses.cardHeaderIconRow}>
+                  <div className="rounded-lg bg-amber-100 p-2 sm:p-3 dark:bg-amber-900/30">
+                    <BarChart3 className="h-5 w-5 text-amber-600 dark:text-amber-400 sm:h-6 sm:w-6" />
                   </div>
-                  <div>
-                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                  <div className="min-w-0">
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 sm:text-xl">
                       Produção Semanal
                     </h3>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">
-                      Visualizar e gerenciar produções semanais do contrato
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                      {loadingProductions
+                        ? 'Carregando...'
+                        : filteredProductions.length === 1
+                          ? '1 registro'
+                          : `${filteredProductions.length} registros`}
                     </p>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setProductionForm({ fillingDate: toInputDate(new Date()), divSe: '', weeklyProductionValue: '', responsiblePerson: '' });
-                    setShowProductionModal(true);
-                  }}
-                  disabled={!canCreateContrato}
-                  className="flex h-10 items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-700 transition-colors hover:bg-amber-100 dark:border-amber-800/60 dark:bg-amber-950/30 dark:text-amber-300 dark:hover:bg-amber-900/40 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
-                >
-                  <Plus className="h-4 w-4 shrink-0" />
-                  <span>Nova Produção Semanal</span>
-                </button>
+                <div className={cadastroListClasses.cardToolbar}>
+                  <div className="relative min-w-[240px] flex-1 sm:w-[280px] sm:flex-none">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
+                    <input
+                      type="search"
+                      value={searchTermProduction}
+                      onChange={(e) => setSearchTermProduction(e.target.value)}
+                      placeholder="Buscar OS, responsável, valor..."
+                      className={`${LIST_SEARCH_INPUT_CLASS} focus:ring-amber-500`}
+                    />
+                    {searchTermProduction ? (
+                      <button
+                        type="button"
+                        onClick={() => setSearchTermProduction('')}
+                        aria-label="Limpar busca"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-300"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    ) : null}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowProductionFilterModal(true)}
+                    className={`relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition-colors ${
+                      hasActiveProductionFilter
+                        ? 'border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100 dark:border-amber-800/60 dark:bg-amber-950/30 dark:text-amber-300 dark:hover:bg-amber-900/40'
+                        : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
+                    }`}
+                    aria-label="Abrir filtro"
+                    title={hasActiveProductionFilter ? 'Filtro (ativo)' : 'Filtro'}
+                  >
+                    <Filter className="h-4 w-4" />
+                    {hasActiveProductionFilter ? (
+                      <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-amber-500 ring-2 ring-white dark:ring-gray-900" />
+                    ) : null}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setProductionForm({ fillingDate: toInputDate(new Date()), divSe: '', weeklyProductionValue: '', responsiblePerson: '' });
+                      setShowProductionModal(true);
+                    }}
+                    disabled={!canCreateContrato}
+                    className="flex h-10 items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-700 transition-colors hover:bg-amber-100 dark:border-amber-800/60 dark:bg-amber-950/30 dark:text-amber-300 dark:hover:bg-amber-900/40 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+                  >
+                    <Plus className="h-4 w-4 shrink-0" />
+                    <span>Nova Produção Semanal</span>
+                  </button>
+                </div>
               </div>
             </CardHeader>
-            <CardContent>
-              {!loadingProductions && filteredProductions.length > 0 && (
-                <div className="mb-2 flex flex-col gap-1 text-sm text-gray-600 dark:text-gray-400 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
-                  <span>
-                    Mostrando 1 a {filteredProductions.length} de {filteredProductions.length}{' '}
-                    {filteredProductions.length === 1 ? 'registro' : 'registros'}
-                  </span>
-                </div>
-              )}
+            <CardContent className={cadastroListClasses.cardContent}>
               {loadingProductions ? (
                 <div className="p-8 text-center text-gray-500 dark:text-gray-400">
                   Carregando...
@@ -3848,8 +4143,13 @@ export default function ContractDetailPage() {
                 <div className="p-8 text-center">
                   <BarChart3 className="w-12 h-12 mx-auto text-gray-300 dark:text-gray-600 mb-3" />
                   <p className="text-gray-500 dark:text-gray-400">
-                    Nenhuma produção semanal cadastrada.
+                    {productions.length === 0
+                      ? 'Nenhuma produção semanal cadastrada.'
+                      : searchTermProduction.trim() || hasActiveProductionFilter
+                        ? 'Nenhuma produção semanal encontrada com os filtros atuais.'
+                        : 'Nenhuma produção semanal no período selecionado.'}
                   </p>
+                  {productions.length === 0 && (
                   <button
                     onClick={() => {
                     setProductionForm({ fillingDate: toInputDate(new Date()), divSe: '', weeklyProductionValue: '', responsiblePerson: '' });
@@ -3859,10 +4159,21 @@ export default function ContractDetailPage() {
                   >
                     Cadastrar primeira produção semanal
                   </button>
+                  )}
                 </div>
               ) : (
+                <>
+                  <CadastroListSummary
+                    startItem={productionListRange.startItem}
+                    endItem={productionListRange.endItem}
+                    total={filteredProductions.length}
+                    itemLabel="registro"
+                    itemLabelPlural="registros"
+                    currentPage={productionListPage}
+                    totalPages={productionListRange.totalPages}
+                  />
                 <div className="overflow-x-auto">
-                  <table className="w-full">
+                  <table className="w-full" data-cc-skip-column-customizer="1">
                     <thead className="border-b border-gray-200 dark:border-gray-700">
                       <tr>
                         <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Data</th>
@@ -3874,7 +4185,7 @@ export default function ContractDetailPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                      {filteredProductions.map((p) => (
+                      {displayedProductions.map((p) => (
                         <tr
                           key={p.id}
                           className="hover:bg-gray-50 dark:hover:bg-gray-700/30"
@@ -3885,7 +4196,7 @@ export default function ContractDetailPage() {
                           </td>
                           <td className="px-4 py-3 text-sm text-right font-medium text-gray-900 dark:text-gray-100">{formatCurrency(p.weeklyProductionValue)}</td>
                           <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100">{p.responsiblePerson}</td>
-                          <td className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap">{formatDateTime(p.createdAt || '')}</td>
+                          <td className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap">{formatDateTimeBr(p.createdAt || '')}</td>
                           <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
                             <div className="flex items-center justify-end gap-1">
                               <button
@@ -3932,6 +4243,12 @@ export default function ContractDetailPage() {
                     </tbody>
                   </table>
                 </div>
+                <ListPagination
+                  currentPage={productionListPage}
+                  totalPages={productionListRange.totalPages}
+                  onPageChange={setProductionListPage}
+                />
+                </>
               )}
             </CardContent>
           </Card>
@@ -3940,46 +4257,75 @@ export default function ContractDetailPage() {
 
           {/* Faturamento - Lista de notas */}
           <Card>
-            <CardHeader className="border-b-0 pb-1">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                <div className="flex items-center space-x-3">
-                  <div className="p-2 sm:p-3 bg-green-100 dark:bg-green-900/30 rounded-lg">
-                    <Receipt className="w-5 h-5 sm:w-6 sm:h-6 text-green-600 dark:text-green-400" />
+            <CardHeader className={cadastroListClasses.cardHeader}>
+              <div className={cadastroListClasses.cardHeaderRow}>
+                <div className={cadastroListClasses.cardHeaderIconRow}>
+                  <div className="rounded-lg bg-green-100 p-2 sm:p-3 dark:bg-green-900/30">
+                    <Receipt className="h-5 w-5 text-green-600 dark:text-green-400 sm:h-6 sm:w-6" />
                   </div>
-                  <div>
-                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                  <div className="min-w-0">
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 sm:text-xl">
                       Faturamento
                     </h3>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">
-                      Visualizar e gerenciar faturamentos do contrato
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                      {loadingBillings
+                        ? 'Carregando...'
+                        : filteredBillings.length === 1
+                          ? '1 registro'
+                          : `${filteredBillings.length} registros`}
                     </p>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setShowBillingModal(true)}
-                  disabled={!canCreateContrato}
-                  className="flex h-10 items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-4 py-2 text-sm font-semibold text-green-700 transition-colors hover:bg-green-100 dark:border-green-800/60 dark:bg-green-950/30 dark:text-green-300 dark:hover:bg-green-900/40 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
-                >
-                  <Plus className="h-4 w-4 shrink-0" />
-                  <span>Novo Faturamento</span>
-                </button>
+                <div className={cadastroListClasses.cardToolbar}>
+                  <div className="relative min-w-[240px] flex-1 sm:w-[280px] sm:flex-none">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
+                    <input
+                      type="search"
+                      value={searchTermBillings}
+                      onChange={(e) => setSearchTermBillings(e.target.value)}
+                      placeholder="Buscar nota, OS, valor..."
+                      className={`${LIST_SEARCH_INPUT_CLASS} focus:ring-green-500`}
+                    />
+                    {searchTermBillings ? (
+                      <button
+                        type="button"
+                        onClick={() => setSearchTermBillings('')}
+                        aria-label="Limpar busca"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-300"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    ) : null}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowBillingFilterModal(true)}
+                    className={`relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition-colors ${
+                      hasActiveBillingFilter
+                        ? 'border-green-300 bg-green-50 text-green-700 hover:bg-green-100 dark:border-green-800/60 dark:bg-green-950/30 dark:text-green-300 dark:hover:bg-green-900/40'
+                        : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
+                    }`}
+                    aria-label="Abrir filtro"
+                    title={hasActiveBillingFilter ? 'Filtro (ativo)' : 'Filtro'}
+                  >
+                    <Filter className="h-4 w-4" />
+                    {hasActiveBillingFilter ? (
+                      <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-green-500 ring-2 ring-white dark:ring-gray-900" />
+                    ) : null}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowBillingModal(true)}
+                    disabled={!canCreateContrato}
+                    className="flex h-10 items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-4 py-2 text-sm font-semibold text-green-700 transition-colors hover:bg-green-100 dark:border-green-800/60 dark:bg-green-950/30 dark:text-green-300 dark:hover:bg-green-900/40 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+                  >
+                    <Plus className="h-4 w-4 shrink-0" />
+                    <span>Novo Faturamento</span>
+                  </button>
+                </div>
               </div>
             </CardHeader>
-            <CardContent>
-              {!loadingBillings && filteredBillings.length > 0 && (
-                <div className="mb-2 flex flex-col gap-1 text-sm text-gray-600 dark:text-gray-400 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
-                  <span>
-                    Mostrando 1 a {Math.min(LIST_DISPLAY_LIMIT, filteredBillings.length)} de {filteredBillings.length}{' '}
-                    {filteredBillings.length === 1 ? 'registro' : 'registros'}
-                    {selectedMonth > 0 ? ` em ${MESES_FILTRO.find((m) => m.value === selectedMonth)?.label}` : ''}
-                    {isAllYears ? ' (todos os anos)' : ` (${selectedYear})`}
-                  </span>
-                  {filteredBillings.length > LIST_DISPLAY_LIMIT && (
-                    <span>Exibindo os {LIST_DISPLAY_LIMIT} primeiros</span>
-                  )}
-                </div>
-              )}
+            <CardContent className={cadastroListClasses.cardContent}>
               {loadingBillings ? (
                 <div className="p-8 text-center text-gray-500 dark:text-gray-400">
                   Carregando...
@@ -3990,7 +4336,9 @@ export default function ContractDetailPage() {
                   <p className="text-gray-500 dark:text-gray-400">
                     {billings.length === 0
                       ? 'Nenhum faturamento cadastrado.'
-                      : `Nenhum faturamento no período selecionado (${selectedMonth > 0 ? MESES_FILTRO.find((m) => m.value === selectedMonth)?.label + ' ' : ''}${isAllYears ? 'todos os anos' : selectedYear}).`}
+                      : searchTermBillings.trim() || hasActiveBillingFilter
+                        ? 'Nenhum faturamento encontrado com os filtros atuais.'
+                        : `Nenhum faturamento no período selecionado (${selectedMonth > 0 ? MESES_FILTRO.find((m) => m.value === selectedMonth)?.label + ' ' : ''}${isAllYears ? 'todos os anos' : selectedYear}).`}
                   </p>
                   <button
                     onClick={() => setShowBillingModal(true)}
@@ -4001,8 +4349,18 @@ export default function ContractDetailPage() {
                   </button>
                 </div>
               ) : (
+                <>
+                  <CadastroListSummary
+                    startItem={billingsListRange.startItem}
+                    endItem={billingsListRange.endItem}
+                    total={filteredBillings.length}
+                    itemLabel="registro"
+                    itemLabelPlural="registros"
+                    currentPage={billingsListPage}
+                    totalPages={billingsListRange.totalPages}
+                  />
                 <div className="overflow-x-auto">
-                  <table className="w-full">
+                  <table className="w-full" data-cc-skip-column-customizer="1">
                     <thead className="border-b border-gray-200 dark:border-gray-700">
                       <tr>
                         <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Data Emissão</th>
@@ -4037,7 +4395,7 @@ export default function ContractDetailPage() {
                               )}
                             </div>
                           </td>
-                          <td className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap">{formatDateTime(b.createdAt || '')}</td>
+                          <td className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap">{formatDateTimeBr(b.createdAt || '')}</td>
                           {canDeleteContrato && (
                             <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
                               <button
@@ -4063,17 +4421,24 @@ export default function ContractDetailPage() {
                     </tbody>
                   </table>
                 </div>
-              )}
-              {!loadingBillings && filteredBillings.length > LIST_DISPLAY_LIMIT && (
-                <div className="p-4 border-t border-gray-200 dark:border-gray-700 flex justify-center">
-                  <Link
-                    href={`/ponto/contratos/${contractId}/faturamento${faturamentoLinkParams ? `?${faturamentoLinkParams}` : ''}`}
-                    className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 hover:bg-green-200 dark:hover:bg-green-900/50 text-sm font-medium transition-colors"
-                  >
-                    <ExternalLink className="w-4 h-4" />
-                    Ver todos os lançamentos ({filteredBillings.length})
-                  </Link>
-                </div>
+                <ListPagination
+                  currentPage={billingsListPage}
+                  totalPages={billingsListRange.totalPages}
+                  onPageChange={setBillingsListPage}
+                />
+                {filteredBillings.length > LIST_DISPLAY_LIMIT && (
+                  <div className="mt-4 flex justify-center border-t border-gray-200 pt-4 dark:border-gray-700">
+                    <button
+                      type="button"
+                      onClick={() => setShowFaturamentoTodosModal(true)}
+                      className="inline-flex items-center gap-2 rounded-lg bg-green-100 px-4 py-2 text-sm font-medium text-green-700 transition-colors hover:bg-green-200 dark:bg-green-900/30 dark:text-green-300 dark:hover:bg-green-900/50"
+                    >
+                      <ExternalLink className="h-4 w-4" />
+                      Ver todos os lançamentos ({filteredBillings.length})
+                    </button>
+                  </div>
+                )}
+                </>
               )}
             </CardContent>
           </Card>
@@ -4261,6 +4626,159 @@ export default function ContractDetailPage() {
                 </table>
               </div>
             )}
+          </Modal>
+
+          {/* Modal filtros — Ordem de Serviço */}
+          <Modal
+            isOpen={showPleitosFilterModal}
+            onClose={() => setShowPleitosFilterModal(false)}
+            title="Filtros — Ordem de Serviço"
+            size="md"
+          >
+            <div className="space-y-4">
+              <div>
+                <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Status Orçamento
+                </label>
+                <StringSingleSelectDropdown
+                  value={filterStatusOrcamento}
+                  onChange={setFilterStatusOrcamento}
+                  options={FILTER_STATUS_ORCAMENTO_OPTIONS}
+                  allowEmpty={false}
+                  className="w-full"
+                />
+              </div>
+              <div>
+                <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Status Execução
+                </label>
+                <StringSingleSelectDropdown
+                  value={filterStatusExecucao}
+                  onChange={setFilterStatusExecucao}
+                  options={FILTER_STATUS_EXECUCAO_OPTIONS}
+                  allowEmpty={false}
+                  className="w-full"
+                />
+              </div>
+              <div>
+                <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Status Faturamento (%)
+                </label>
+                <StringSingleSelectDropdown
+                  value={filterStatusFaturamento}
+                  onChange={setFilterStatusFaturamento}
+                  options={FILTER_STATUS_FATURAMENTO_OPTIONS}
+                  allowEmpty={false}
+                  className="w-full"
+                />
+              </div>
+              <div className="flex items-center justify-between gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
+                <Button type="button" variant="outline" onClick={clearPleitosFilters}>
+                  Limpar filtros
+                </Button>
+                <Button type="button" onClick={() => setShowPleitosFilterModal(false)}>
+                  Fechar
+                </Button>
+              </div>
+            </div>
+          </Modal>
+
+          {/* Modal filtros — Produção Semanal */}
+          <Modal
+            isOpen={showProductionFilterModal}
+            onClose={() => setShowProductionFilterModal(false)}
+            title="Filtros — Produção Semanal"
+            size="md"
+          >
+            <div className="space-y-4">
+              <div>
+                <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  OS / SE
+                </label>
+                <input
+                  type="text"
+                  value={filterProductionOsSe}
+                  onChange={(e) => setFilterProductionOsSe(e.target.value)}
+                  placeholder="Filtrar por OS / SE"
+                  className="h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-amber-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                />
+              </div>
+              <div>
+                <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Responsável
+                </label>
+                <input
+                  type="text"
+                  value={filterProductionResponsible}
+                  onChange={(e) => setFilterProductionResponsible(e.target.value)}
+                  placeholder="Filtrar por responsável"
+                  className="h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-amber-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                />
+              </div>
+              <div className="flex items-center justify-between gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
+                <Button type="button" variant="outline" onClick={clearProductionFilters}>
+                  Limpar filtros
+                </Button>
+                <Button type="button" onClick={() => setShowProductionFilterModal(false)}>
+                  Fechar
+                </Button>
+              </div>
+            </div>
+          </Modal>
+
+          {/* Modal filtros — Faturamento */}
+          <Modal
+            isOpen={showBillingFilterModal}
+            onClose={() => setShowBillingFilterModal(false)}
+            title="Filtros — Faturamento"
+            size="md"
+          >
+            <div className="space-y-4">
+              <div>
+                <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  OS / SE
+                </label>
+                <input
+                  type="text"
+                  value={filterBillingOsSe}
+                  onChange={(e) => setFilterBillingOsSe(e.target.value)}
+                  placeholder="Filtrar por OS / SE"
+                  className="h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                />
+              </div>
+              <div>
+                <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Nº Nota Fiscal
+                </label>
+                <input
+                  type="text"
+                  value={filterBillingInvoice}
+                  onChange={(e) => setFilterBillingInvoice(e.target.value)}
+                  placeholder="Filtrar por nota fiscal"
+                  className="h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                />
+              </div>
+              <div>
+                <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Valor bruto
+                </label>
+                <input
+                  type="text"
+                  value={filterBillingGross}
+                  onChange={(e) => setFilterBillingGross(e.target.value)}
+                  placeholder="Filtrar por valor"
+                  className="h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                />
+              </div>
+              <div className="flex items-center justify-between gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
+                <Button type="button" variant="outline" onClick={clearBillingFilters}>
+                  Limpar filtros
+                </Button>
+                <Button type="button" onClick={() => setShowBillingFilterModal(false)}>
+                  Fechar
+                </Button>
+              </div>
+            </div>
           </Modal>
 
           {/* Modal de aditivos do contrato */}
@@ -5056,7 +5574,7 @@ export default function ContractDetailPage() {
                         </button>
                       </div>
                       <div className="overflow-x-auto">
-                      <table className="w-full min-w-[1500px]">
+                      <table className="w-full min-w-[1500px]" data-cc-skip-column-customizer="1">
                         <thead className="border-b border-gray-200 dark:border-gray-700">
                           <tr>
                             <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase w-12">
@@ -5167,7 +5685,7 @@ export default function ContractDetailPage() {
                                 <td className="px-4 py-3 text-sm text-right text-gray-900 dark:text-gray-100">{p.budget ? formatCurrency(Number(p.budget)) : '-'}</td>
                                 <td className="px-4 py-3 text-sm text-right text-gray-900 dark:text-gray-100">{formatCurrency(valorPleito)}</td>
                                 <td className="px-4 py-3 text-sm text-center text-gray-900 dark:text-gray-100">{pct != null ? `${pct.toFixed(1)}%` : '-'}</td>
-                                <td className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap">{formatDateTime(p.createdAt || '')}</td>
+                                <td className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap">{formatDateTimeBr(p.createdAt || '')}</td>
                               </tr>
                             );
                           })}
@@ -5503,21 +6021,6 @@ export default function ContractDetailPage() {
                     Detalhes do Ordem de Serviço
                   </h3>
                   <div className="flex items-center gap-2">
-                    {pleitoDetailData?.data && (
-                      <button
-                        onClick={() => {
-                          setPleitoToEdit({
-                            ...(pleitoDetailData.data as PleitoFormData),
-                            id: pleitoDetailData.data.id
-                          });
-                          setSelectedPleitoId(null);
-                        }}
-                        className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20 rounded-lg"
-                      >
-                        <Edit2 className="w-4 h-4" />
-                        Editar
-                      </button>
-                    )}
                     <button onClick={() => setSelectedPleitoId(null)} className="p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400">
                       <X className="w-5 h-5" />
                     </button>
@@ -5588,6 +6091,100 @@ export default function ContractDetailPage() {
               </div>
             </div>
           )}
+
+          <Modal
+            isOpen={showHistoricoOsModal}
+            onClose={() => setShowHistoricoOsModal(false)}
+            title="Histórico de OS"
+            size="full"
+          >
+            <ContractHistoricoOsPanel contractId={contractId} />
+          </Modal>
+
+          <Modal
+            isOpen={showVisualizarPleitoModal}
+            onClose={() => setShowVisualizarPleitoModal(false)}
+            title="Visualizar Pleito"
+            size="xl"
+          >
+            <ContractOsPleitoListPanel
+              pleitos={visualizarPleitos}
+              billings={billingsForOs}
+              emptyMessage="Nenhuma ordem selecionada."
+            />
+          </Modal>
+
+          <Modal
+            isOpen={showAndamentoTodosModal}
+            onClose={() => setShowAndamentoTodosModal(false)}
+            title="Todas as ordens de serviço"
+            size="full"
+          >
+            <ContractOsPleitoListPanel pleitos={filteredPleitos} billings={billingsForOs} />
+          </Modal>
+
+          <Modal
+            isOpen={showCronogramaMensalModal}
+            onClose={() => setShowCronogramaMensalModal(false)}
+            title="Cronograma mensal"
+            size="full"
+          >
+            <ContractCronogramaMensalPanel
+              contractId={contractId}
+              selectedIds={Array.from(selectedForPleito)}
+            />
+          </Modal>
+
+          <Modal
+            isOpen={showFaturamentoTodosModal}
+            onClose={() => setShowFaturamentoTodosModal(false)}
+            title="Todos os faturamentos"
+            size="xl"
+          >
+            <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
+              <table className="w-full text-sm" data-cc-skip-column-customizer="1">
+                <thead className="border-b border-gray-200 dark:border-gray-700">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500 dark:text-gray-400">
+                      Data Emissão
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500 dark:text-gray-400">
+                      Nº Nota Fiscal
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500 dark:text-gray-400">
+                      OS / SE
+                    </th>
+                    <th className="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500 dark:text-gray-400">
+                      Valor Bruto
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500 dark:text-gray-400">
+                      Preenchimento
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                  {filteredBillings.map((b) => (
+                    <tr key={b.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/40">
+                      <td className="px-4 py-3 text-gray-900 dark:text-gray-100">{formatDate(b.issueDate)}</td>
+                      <td className="px-4 py-3 font-mono text-gray-900 dark:text-gray-100">{b.invoiceNumber}</td>
+                      <td className="px-4 py-3 text-gray-900 dark:text-gray-100">
+                        {formatOsSePastaOrDash(b.serviceOrder, folderForDivSe(pleitos, b.serviceOrder))}
+                      </td>
+                      <td className="px-4 py-3 text-right font-medium text-gray-900 dark:text-gray-100">
+                        {formatCurrency(b.grossValue)}
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3 text-gray-500 dark:text-gray-400">
+                        {formatDateTimeBr(b.createdAt || '')}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p className="border-t border-gray-200 px-4 py-2 text-xs text-gray-500 dark:border-gray-700 dark:text-gray-400">
+                {filteredBillings.length} registro(s)
+              </p>
+            </div>
+          </Modal>
 
         </div>
       </MainLayout>

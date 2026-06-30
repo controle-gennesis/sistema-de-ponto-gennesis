@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'react-hot-toast';
+import { formatDateTimeBr } from '@/lib/dateTimeBr';
 import { useRouter } from 'next/navigation';
 import { usePermissions } from '@/hooks/usePermissions';
 import { Check, Download, Eye, FileCheck, FileText, Filter, Wrench, Search, X } from 'lucide-react';
@@ -182,10 +183,7 @@ const DETAIL_KEY_LABELS: Record<string, string> = {
 };
 
 function formatDateTime(iso?: string | null) {
-  if (!iso) return '—';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '—';
-  return d.toLocaleString('pt-BR');
+  return formatDateTimeBr(iso, '—');
 }
 
 function humanizeDetailKey(key: string): string {

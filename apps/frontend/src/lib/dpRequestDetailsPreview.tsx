@@ -2,6 +2,7 @@
 'use client';
 
 import React from 'react';
+import { formatDateTimeBr } from '@/lib/dateTimeBr';
 
 function formatYmdToBr(ymd: unknown): string {
   if (typeof ymd !== 'string') return '—';
@@ -12,11 +13,8 @@ function formatYmdToBr(ymd: unknown): string {
 }
 
 function formatDateTimeLocalToBr(value: unknown): string {
-  if (typeof value !== 'string') return '—';
-  const m = value.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
-  if (!m) return '—';
-  const [, year, month, day, hh, mm] = m;
-  return `${day}/${month}/${year} ${hh}:${mm}`;
+  if (typeof value !== 'string' || !value.trim()) return '—';
+  return formatDateTimeBr(value, '—');
 }
 
 function toTrimmedString(v: unknown): string {

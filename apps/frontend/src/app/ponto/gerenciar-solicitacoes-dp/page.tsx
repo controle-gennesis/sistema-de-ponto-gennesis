@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'react-hot-toast';
+import { formatDateTimeBr } from '@/lib/dateTimeBr';
 import { useRouter } from 'next/navigation';
 import {
   CheckCircle,
@@ -131,10 +132,7 @@ type DpRequest = {
 };
 
 function formatDateTime(iso?: string | null) {
-  if (!iso) return '—';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '—';
-  return d.toLocaleString('pt-BR');
+  return formatDateTimeBr(iso, '—');
 }
 
 function formatDuration(ms: number) {
