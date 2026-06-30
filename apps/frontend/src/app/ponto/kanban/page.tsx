@@ -100,6 +100,9 @@ const PRIORITY_CONFIG = KANBAN_PRIORITY_CONFIG;
 
 const KANBAN_PRIORITY_ALL_VALUES = KANBAN_PRIORITY_ORDER;
 
+/** Quantidade inicial de cards visíveis por coluna; "Ver mais" carrega mais este lote. */
+const KANBAN_COLUMN_VISIBLE_BATCH = 10;
+
 /** Todos marcados (ou lista vazia) = sem filtro restritivo nesse campo. */
 function multiselectFilterShowsAll(selected: string[], allValues: string[]): boolean {
   if (allValues.length === 0) return true;
@@ -807,15 +810,23 @@ function KanbanColumnComponent({
   onDeleteColumn,
 }: KanbanColumnProps) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(KANBAN_COLUMN_VISIBLE_BATCH);
   const menuRef = useRef<HTMLDivElement>(null);
   const isTarget = dragState.overColumnId === column.id;
   const overIndex = isTarget ? dragState.overIndex : null;
   const cardDnDDisabled = readOnly || isColumnDragActive;
+  const visibleCards = column.cards.slice(0, visibleCount);
+  const hasMoreCards = column.cards.length > visibleCount;
+  const dropTailIndex = hasMoreCards ? visibleCount : column.cards.length;
   const isEmptyColumnDropTarget =
     column.cards.length === 0 &&
     isTarget &&
     !!dragState.draggingCardId &&
     !isColumnDragActive;
+
+  useEffect(() => {
+    setVisibleCount(KANBAN_COLUMN_VISIBLE_BATCH);
+  }, [column.id]);
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
@@ -919,7 +930,7 @@ function KanbanColumnComponent({
       </div>
 
       <div className="px-3 pb-4 flex flex-col min-h-[120px]">
-        {column.cards.map((card, index) => (
+        {visibleCards.map((card, index) => (
           <React.Fragment key={card.id}>
             <KanbanDropGutter
               readOnly={cardDnDDisabled}
@@ -974,17 +985,30 @@ function KanbanColumnComponent({
             </div>
           </React.Fragment>
         ))}
-        {column.cards.length > 0 && (
+        {visibleCards.length > 0 && (
           <KanbanDropGutter
             readOnly={cardDnDDisabled}
             active={
               !!dragState.draggingCardId &&
-              overIndex === column.cards.length &&
+              overIndex === dropTailIndex &&
               dragState.overColumnId === column.id
             }
-            onDragOver={(e) => onDragOver(e, column.id, column.cards.length)}
-            onDrop={(e) => onDrop(e, column.id, column.cards.length)}
+            onDragOver={(e) => onDragOver(e, column.id, dropTailIndex)}
+            onDrop={(e) => onDrop(e, column.id, dropTailIndex)}
           />
+        )}
+        {hasMoreCards && (
+          <button
+            type="button"
+            onClick={() =>
+              setVisibleCount((current) =>
+                Math.min(current + KANBAN_COLUMN_VISIBLE_BATCH, column.cards.length),
+              )
+            }
+            className="mt-2 w-full rounded-xl border border-gray-200/80 bg-white/70 py-2.5 text-sm font-medium text-gray-600 transition-colors hover:bg-white hover:text-gray-900 dark:border-gray-600 dark:bg-gray-800/50 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+          >
+            Ver mais
+          </button>
         )}
         {column.cards.length === 0 && (
           <div
