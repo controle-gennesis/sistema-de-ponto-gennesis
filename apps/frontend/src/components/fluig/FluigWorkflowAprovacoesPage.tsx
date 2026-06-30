@@ -3,35 +3,22 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import {
-  CheckCircle2,
-  Clock,
-  FileText,
-  HelpCircle,
-  Minus,
-  Search,
-  X,
-  XCircle,
-  type LucideIcon,
-} from 'lucide-react';
+import { CheckCircle2, Clock, FileText, HelpCircle, Search, X, type LucideIcon } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { FilterStatCard } from '@/components/ui/FilterStatCard';
 import { Button } from '@/components/ui/Button';
-import { Modal } from '@/components/ui/Modal';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
-import { CadastroListEmpty, CadastroListSummary } from '@/components/ui/CadastroListSummary';
+import { CadastroListEmpty, CadastroListLoading, CadastroListSummary } from '@/components/ui/CadastroListSummary';
 import { cadastroListClasses } from '@/components/ui/RowActionMenu';
 import {
   getListTableRowClassName,
   ListRowNavigableLabel,
 } from '@/components/ui/listTableUi';
 import api from '@/lib/api';
-import { formatFluigCellValue } from '@/lib/fluigCellValue';
 import {
   countWorkflowSummary,
-  extractPersonFromCellValue,
   FLUIG_WORKFLOW_APPROVAL_DATASET_G3,
   FLUIG_WORKFLOW_APPROVAL_DATASET_G5,
   getWorkflowSectorsForDataset,
@@ -39,8 +26,9 @@ import {
   resolvePendingWithDisplay,
   SECTOR_TABLE_HEADERS,
   type ParsedWorkflowRow,
-  type WorkflowStepStatus,
 } from '@/lib/fluigWorkflowApproval';
+import { ApprovalStepCell, StatusPersonCell } from '@/components/fluig/fluigWorkflowStepStatus';
+import { FluigWorkflowRequestDetailModal } from '@/components/fluig/FluigWorkflowRequestDetailModal';
 import { ListPagination } from '@/components/ui/ListPagination';
 
 const ITEMS_PER_PAGE = 25;
@@ -156,138 +144,6 @@ const WORKFLOW_CARD_LIST_CONFIG: Record<
   },
 };
 
-function stepStatusBadgeClass(status: WorkflowStepStatus): string {
-  switch (status) {
-    case 'approved':
-      return 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400';
-    case 'pending':
-      return 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400';
-    case 'rejected':
-      return 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400';
-    case 'waiting':
-      return 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400';
-    default:
-      return 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-500';
-  }
-}
-
-function pendingWithBadgeClass(statusClassName: string): string {
-  if (/green/.test(statusClassName)) {
-    return 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400';
-  }
-  if (/amber/.test(statusClassName)) {
-    return 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400';
-  }
-  return 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400';
-}
-
-function stepStatusBadge(status: WorkflowStepStatus) {
-  switch (status) {
-    case 'approved':
-      return {
-        Icon: CheckCircle2,
-        className: 'text-green-600 dark:text-green-400',
-        label: 'Aprovado',
-      };
-    case 'pending':
-      return {
-        Icon: Clock,
-        className: 'text-amber-600 dark:text-amber-400',
-        label: 'Pendente',
-      };
-    case 'rejected':
-      return {
-        Icon: XCircle,
-        className: 'text-red-600 dark:text-red-400',
-        label: 'Rejeitado',
-      };
-    case 'waiting':
-      return {
-        Icon: Minus,
-        className: 'text-gray-400 dark:text-gray-500',
-        label: 'Aguardando',
-      };
-    default:
-      return {
-        Icon: HelpCircle,
-        className: 'text-gray-400 dark:text-gray-500',
-        label: '—',
-      };
-  }
-}
-
-function extractPersonName(raw: string | null | undefined): string | null {
-  if (!raw?.trim()) return null;
-  const trimmed = raw.trim();
-  const match = trimmed.match(/\(([^)]+)\)/);
-  if (match?.[1]?.trim()) return match[1].trim();
-  return trimmed;
-}
-
-function StatusPersonCell({
-  status,
-  person,
-  statusClassName = 'text-gray-700 dark:text-gray-300',
-  asBadge = false,
-}: {
-  status: string;
-  person?: string | null;
-  statusClassName?: string;
-  asBadge?: boolean;
-}) {
-  return (
-    <div className="flex flex-col items-center space-y-1 text-center">
-      {asBadge ? (
-        <span
-          className={`inline-flex max-w-full whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-semibold ${pendingWithBadgeClass(statusClassName)}`}
-        >
-          {status}
-        </span>
-      ) : (
-        <span
-          className={`inline-flex max-w-full whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-semibold ${statusClassName}`}
-        >
-          {status}
-        </span>
-      )}
-      {person ? <p className="text-xs text-gray-500 dark:text-gray-400">{person}</p> : null}
-    </div>
-  );
-}
-
-function getStepPersonName(step: ParsedWorkflowRow['steps'][number]): string | null {
-  if (step.status === 'approved') {
-    return (
-      extractPersonName(step.approver) ??
-      extractPersonFromCellValue(step.detail) ??
-      extractPersonFromCellValue(step.pendingWith)
-    );
-  }
-
-  if (step.status === 'pending') {
-    return extractPersonName(step.pendingWith) ?? extractPersonFromCellValue(step.detail);
-  }
-
-  if (step.status === 'rejected') {
-    return extractPersonName(step.approver ?? step.pendingWith);
-  }
-
-  return null;
-}
-
-function ApprovalStepCell({ step }: { step: ParsedWorkflowRow['steps'][number] }) {
-  const badge = stepStatusBadge(step.status);
-  const person = getStepPersonName(step);
-
-  return (
-    <StatusPersonCell
-      status={badge.label}
-      person={person}
-      statusClassName={stepStatusBadgeClass(step.status)}
-    />
-  );
-}
-
 function PendingWithCell({ row }: { row: ParsedWorkflowRow }) {
   const display = resolvePendingWithDisplay(row);
   return (
@@ -297,38 +153,6 @@ function PendingWithCell({ row }: { row: ParsedWorkflowRow }) {
       statusClassName={display.statusClassName}
       asBadge
     />
-  );
-}
-
-function ApprovalStepCellDetail({ step }: { step: ParsedWorkflowRow['steps'][number] }) {
-  const badge = stepStatusBadge(step.status);
-  const Icon = badge.Icon;
-
-  return (
-    <div className="min-w-[140px] space-y-0.5">
-      <div className={`flex items-center gap-1.5 text-xs font-medium ${badge.className}`}>
-        <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden />
-        <span>{badge.label}</span>
-      </div>
-      {step.status === 'approved' && step.approver ? (
-        <p className="text-xs text-gray-700 dark:text-gray-300">
-          <span className="text-gray-500 dark:text-gray-400">Por: </span>
-          {step.approver}
-        </p>
-      ) : null}
-      {step.status === 'approved' && step.approvedAt ? (
-        <p className="text-[11px] text-gray-500 dark:text-gray-400">{step.approvedAt}</p>
-      ) : null}
-      {step.status === 'pending' && step.pendingWith ? (
-        <p className="text-xs text-amber-800 dark:text-amber-200">
-          <span className="text-gray-500 dark:text-gray-400">Com: </span>
-          {step.pendingWith}
-        </p>
-      ) : null}
-      {step.status === 'pending' && !step.pendingWith && step.detail ? (
-        <p className="text-[11px] text-gray-500 dark:text-gray-400 line-clamp-2">{step.detail}</p>
-      ) : null}
-    </div>
   );
 }
 
@@ -477,7 +301,7 @@ export function FluigWorkflowAprovacoesPage() {
         <div className="space-y-6">
           <div className="text-center">
             <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
-              Aprovações Fluig
+              Fluig - Aprovações
             </h1>
             <p className="mx-auto mt-2 max-w-2xl text-sm text-gray-600 dark:text-gray-400 sm:text-base">
               Status de aprovação
@@ -516,12 +340,6 @@ export function FluigWorkflowAprovacoesPage() {
                 </Button>
               </CardContent>
             </Card>
-          ) : isLoading ? (
-            <Card className="w-full">
-              <CardContent className="py-16">
-                <Loading message="Carregando solicitações do Fluig..." size="lg" />
-              </CardContent>
-            </Card>
           ) : (
             <>
               <div
@@ -542,7 +360,7 @@ export function FluigWorkflowAprovacoesPage() {
                     iconBg={card.iconBg}
                     iconColor={card.iconColor}
                     isActive={cardFilter === card.filter}
-                    loading={isFetching}
+                    loading={isLoading || isFetching}
                     onClick={() => setCardFilter(card.filter)}
                   />
                 ))}
@@ -571,7 +389,8 @@ export function FluigWorkflowAprovacoesPage() {
                           value={search}
                           onChange={(e) => setSearch(e.target.value)}
                           placeholder="Buscar código, aprovador..."
-                          className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                          disabled={isLoading}
+                          className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
                         />
                         {search ? (
                           <button
@@ -589,7 +408,9 @@ export function FluigWorkflowAprovacoesPage() {
                 </CardHeader>
 
                 <CardContent className={cadastroListClasses.cardContent}>
-                  {filteredRows.length === 0 ? (
+                  {isLoading ? (
+                    <CadastroListLoading message="Carregando solicitações do Fluig..." />
+                  ) : filteredRows.length === 0 ? (
                     <CadastroListEmpty
                       icon={ListHeaderIcon}
                       title="Nenhuma solicitação encontrada"
@@ -668,58 +489,7 @@ export function FluigWorkflowAprovacoesPage() {
           )}
         </div>
 
-        <Modal
-          isOpen={detailRow != null}
-          onClose={() => setDetailRow(null)}
-          title={detailRow ? `Processo ${detailRow.processId}` : 'Detalhes'}
-          size="xl"
-        >
-          {detailRow ? (
-            <div className="space-y-4">
-              <div>
-                <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{detailRow.title}</p>
-                {detailRow.currentStage ? (
-                  <p className="mt-1 text-xs text-gray-500">Etapa atual: {detailRow.currentStage}</p>
-                ) : null}
-              </div>
-
-              <div className={`grid gap-3 ${visibleSectors.length === 2 ? 'sm:grid-cols-2' : 'sm:grid-cols-3'}`}>
-                {detailRow.steps
-                  .filter((step) => visibleSectors.includes(step.sector))
-                  .map((step) => (
-                  <div
-                    key={step.sector}
-                    className="rounded-lg border border-gray-200 p-3 dark:border-gray-700"
-                  >
-                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                      {step.label}
-                    </p>
-                    <div className="mt-2">
-                      <ApprovalStepCellDetail step={step} />
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <div className="max-h-[40vh] overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-700">
-                <table className="w-full text-xs">
-                  <tbody>
-                    {Object.entries(detailRow.raw).map(([key, val]) => (
-                      <tr key={key} className="border-b border-gray-100 dark:border-gray-800">
-                        <td className="whitespace-nowrap bg-gray-50 px-3 py-2 font-medium text-gray-600 dark:bg-gray-900/50 dark:text-gray-400">
-                          {key}
-                        </td>
-                        <td className="px-3 py-2 text-gray-800 dark:text-gray-200">
-                          {formatFluigCellValue(val) || '—'}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          ) : null}
-        </Modal>
+        <FluigWorkflowRequestDetailModal row={detailRow} onClose={() => setDetailRow(null)} />
       </MainLayout>
     </ProtectedRoute>
   );

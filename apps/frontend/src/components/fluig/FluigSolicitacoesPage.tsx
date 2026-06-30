@@ -1198,7 +1198,7 @@ export function FluigSolicitacoesPage({
         {/* Header */}
         <div className="text-center">
           <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">
-            {config?.title ?? 'Processos do Fluig'}
+            {config?.title ?? 'Fluig - Processos'}
           </h1>
           <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400">
             {config?.subtitle ?? 'Veja em qual etapa está cada solicitação e acompanhe o andamento em tempo real'}

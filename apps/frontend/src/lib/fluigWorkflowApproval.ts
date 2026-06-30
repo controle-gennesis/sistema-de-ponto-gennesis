@@ -3,6 +3,17 @@ import { formatFluigCellValue, normalizeFluigColumnKey } from '@/lib/fluigCellVa
 export const FLUIG_WORKFLOW_APPROVAL_DATASET_G3 = 'Processos_Workflow_Aprovacao_G3';
 export const FLUIG_WORKFLOW_APPROVAL_DATASET_G5 = 'Processos_Workflow_Aprovacao_G5';
 
+export const FLUIG_PORTAL_BASE_URL =
+  (typeof process !== 'undefined' ? process.env.NEXT_PUBLIC_FLUIG_BASE_URL : undefined)?.replace(
+    /\/$/,
+    ''
+  ) || 'https://gennesisengenharia160516.fluig.cloudtotvs.com.br';
+
+export function buildFluigWorkflowProcessViewUrl(processInstanceId: string): string {
+  const id = processInstanceId.trim();
+  return `${FLUIG_PORTAL_BASE_URL}/portal/p/1/pageworkflowview?app_ecm_workflowview_detailsProcessInstanceID=${encodeURIComponent(id)}`;
+}
+
 export const FLUIG_WORKFLOW_APPROVAL_DATASETS = [
   FLUIG_WORKFLOW_APPROVAL_DATASET_G3,
   FLUIG_WORKFLOW_APPROVAL_DATASET_G5,
@@ -751,4 +762,239 @@ export function countWorkflowSummary(rows: ParsedWorkflowRow[]) {
     pendingDiretoria: rows.filter((r) => r.currentPendingSector === 'diretoria').length,
     pendingOther: rows.filter((r) => !r.fullyApproved && !r.currentPendingSector).length,
   };
+}
+
+export type WorkflowApproverRequestRef = {
+  rowKey: string;
+  processId: string;
+  title: string;
+  filial: string | null;
+  sector: WorkflowSector;
+  sectorLabel: string;
+  approvedAt: string | null;
+};
+
+export type WorkflowApproverBucket = {
+  nameKey: string;
+  name: string;
+  approvedCount: number;
+  approvedRequests: WorkflowApproverRequestRef[];
+  pendingCount: number;
+  pendingRequests: WorkflowApproverRequestRef[];
+};
+
+function normalizeApproverNameKey(name: string): string {
+  return normalizeFluigColumnKey(name);
+}
+
+function isWorkflowApproverPerson(name: string | null | undefined): boolean {
+  if (!name?.trim()) return false;
+  if (isGenericGestorPlaceholder(name)) return false;
+  const normalized = normalizeFluigColumnKey(name);
+  if (/^(compras|diretoria|gestor|dpo|verificar setor)$/.test(normalized)) return false;
+  if (/^gestor\s+(de\s+)?/.test(normalized) && name.length < 28) return false;
+  return true;
+}
+
+function resolveApprovedPersonFromStep(step: WorkflowApprovalStep): string | null {
+  if (step.status !== 'approved') return null;
+  const candidates = [
+    step.approver,
+    extractPersonFromCellValue(step.approver),
+    extractPersonFromCellValue(step.detail),
+    extractPersonFromCellValue(step.pendingWith),
+  ];
+  for (const candidate of candidates) {
+    if (candidate && isWorkflowApproverPerson(candidate)) return candidate.trim();
+  }
+  return null;
+}
+
+function resolvePendingPersonFromRow(row: ParsedWorkflowRow): string | null {
+  const display = resolvePendingWithDisplay(row);
+  if (display.person && isWorkflowApproverPerson(display.person)) {
+    return display.person.trim();
+  }
+
+  const pendingStep = row.currentPendingSector
+    ? row.steps.find((step) => step.sector === row.currentPendingSector)
+    : null;
+  if (!pendingStep) return null;
+
+  const candidates = [
+    extractPersonFromCellValue(pendingStep.pendingWith),
+    pendingStep.pendingWith,
+    extractPersonFromCellValue(pendingStep.detail),
+  ];
+  for (const candidate of candidates) {
+    if (candidate && isWorkflowApproverPerson(candidate)) return candidate.trim();
+  }
+  return null;
+}
+
+export function aggregateWorkflowByApprover(rows: ParsedWorkflowRow[]): WorkflowApproverBucket[] {
+  const map = new Map<string, WorkflowApproverBucket>();
+
+  const ensureBucket = (rawName: string): WorkflowApproverBucket => {
+    const trimmed = rawName.trim();
+    const nameKey = normalizeApproverNameKey(trimmed);
+    const existing = map.get(nameKey);
+    if (existing) return existing;
+    const bucket: WorkflowApproverBucket = {
+      nameKey,
+      name: trimmed,
+      approvedCount: 0,
+      approvedRequests: [],
+      pendingCount: 0,
+      pendingRequests: [],
+    };
+    map.set(nameKey, bucket);
+    return bucket;
+  };
+
+  for (const row of rows) {
+    const visibleSectors = getWorkflowSectorsForDataset(row.datasetId ?? '');
+
+    for (const step of row.steps) {
+      if (!visibleSectors.includes(step.sector)) continue;
+      const person = resolveApprovedPersonFromStep(step);
+      if (!person) continue;
+
+      const bucket = ensureBucket(person);
+      const duplicate = bucket.approvedRequests.some(
+        (item) => item.processId === row.processId && item.sector === step.sector
+      );
+      if (duplicate) continue;
+
+      bucket.approvedRequests.push({
+        rowKey: row.rowKey,
+        processId: row.processId,
+        title: row.title,
+        filial: row.filial,
+        sector: step.sector,
+        sectorLabel: SECTOR_LABELS[step.sector],
+        approvedAt: step.approvedAt,
+      });
+      bucket.approvedCount = bucket.approvedRequests.length;
+    }
+
+    if (row.fullyApproved || !row.currentPendingSector) continue;
+    if (!visibleSectors.includes(row.currentPendingSector)) continue;
+
+    const person = resolvePendingPersonFromRow(row);
+    if (!person) continue;
+
+    const bucket = ensureBucket(person);
+    const duplicate = bucket.pendingRequests.some((item) => item.processId === row.processId);
+    if (duplicate) continue;
+
+    bucket.pendingRequests.push({
+      rowKey: row.rowKey,
+      processId: row.processId,
+      title: row.title,
+      filial: row.filial,
+      sector: row.currentPendingSector,
+      sectorLabel: SECTOR_LABELS[row.currentPendingSector],
+      approvedAt: null,
+    });
+    bucket.pendingCount = bucket.pendingRequests.length;
+  }
+
+  return Array.from(map.values()).sort((a, b) => {
+    if (b.pendingCount !== a.pendingCount) return b.pendingCount - a.pendingCount;
+    if (b.approvedCount !== a.approvedCount) return b.approvedCount - a.approvedCount;
+    return a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' });
+  });
+}
+
+export type MergedWorkflowApproverSummary = {
+  nameKey: string;
+  name: string;
+  approvedCount: number;
+  pendingCount: number;
+  totalCount: number;
+  inG3: boolean;
+  inG5: boolean;
+};
+
+export function mergeWorkflowApproverBuckets(
+  g3Buckets: readonly WorkflowApproverBucket[],
+  g5Buckets: readonly WorkflowApproverBucket[]
+): MergedWorkflowApproverSummary[] {
+  const map = new Map<string, MergedWorkflowApproverSummary>();
+
+  const ingest = (bucket: WorkflowApproverBucket, source: 'g3' | 'g5') => {
+    const current = map.get(bucket.nameKey);
+    if (!current) {
+      map.set(bucket.nameKey, {
+        nameKey: bucket.nameKey,
+        name: bucket.name,
+        approvedCount: bucket.approvedCount,
+        pendingCount: bucket.pendingCount,
+        totalCount: bucket.approvedCount + bucket.pendingCount,
+        inG3: source === 'g3',
+        inG5: source === 'g5',
+      });
+      return;
+    }
+
+    current.approvedCount += bucket.approvedCount;
+    current.pendingCount += bucket.pendingCount;
+    current.totalCount = current.approvedCount + current.pendingCount;
+    if (source === 'g3') current.inG3 = true;
+    if (source === 'g5') current.inG5 = true;
+    if (bucket.name.length > current.name.length) current.name = bucket.name;
+  };
+
+  for (const bucket of g3Buckets) ingest(bucket, 'g3');
+  for (const bucket of g5Buckets) ingest(bucket, 'g5');
+
+  return Array.from(map.values()).sort((a, b) => {
+    if (b.pendingCount !== a.pendingCount) return b.pendingCount - a.pendingCount;
+    if (b.totalCount !== a.totalCount) return b.totalCount - a.totalCount;
+    return a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' });
+  });
+}
+
+export function resolveWorkflowApproverNameKey(nameOrKey: string): string {
+  return normalizeApproverNameKey(nameOrKey);
+}
+
+/** Nome legível a partir da URL ou nameKey (ex.: paulo%20ananias → Paulo Ananias). */
+export function formatWorkflowApproverDisplayName(nameOrKey: string): string {
+  let decoded = nameOrKey;
+  try {
+    decoded = decodeURIComponent(nameOrKey);
+  } catch {
+    decoded = nameOrKey;
+  }
+
+  const trimmed = decoded.trim();
+  if (!trimmed) return 'Aprovador';
+
+  const lowercaseParticles = new Set(['de', 'da', 'do', 'dos', 'das', 'e']);
+
+  return trimmed
+    .split(/\s+/)
+    .map((part, index) => {
+      const lower = part.toLowerCase();
+      if (index > 0 && lowercaseParticles.has(lower)) return lower;
+      return lower.charAt(0).toUpperCase() + lower.slice(1);
+    })
+    .join(' ');
+}
+
+export function findWorkflowApproverBucketByKey(
+  buckets: readonly WorkflowApproverBucket[],
+  nameKey: string
+): WorkflowApproverBucket | null {
+  const key = resolveWorkflowApproverNameKey(nameKey);
+  return buckets.find((bucket) => bucket.nameKey === key) ?? null;
+}
+
+export function findWorkflowRowByKey(
+  rows: readonly ParsedWorkflowRow[],
+  rowKey: string
+): ParsedWorkflowRow | null {
+  return rows.find((row) => row.rowKey === rowKey) ?? null;
 }

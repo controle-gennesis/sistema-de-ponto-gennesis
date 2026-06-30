@@ -368,14 +368,14 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
             permission: isAdministrator || isDepartmentPessoal || permissions.canViewDashboard
           },
           {
-            name: 'Processos do Fluig',
+            name: 'Fluig - Processos',
             href: '/ponto/financeiro/gestao-solicitacoes',
             icon: BarChart3,
             description: 'Solicitações do Fluig na visão financeira',
             permission: isAdministrator || isDepartmentFinanceiro || can(pk('/ponto/financeiro/gestao-solicitacoes'))
           },
           {
-            name: 'Aprovações Fluig',
+            name: 'Fluig - Aprovações',
             href: '/ponto/fluig/aprovacoes-workflow',
             icon: FileCheck,
             description: 'Status de aprovação Compras, Gestor e Diretoria (G3/G5)',
@@ -384,6 +384,17 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
               isDepartmentFinanceiro ||
               isDepartmentCompras ||
               can(pk('/ponto/fluig/aprovacoes-workflow'))
+          },
+          {
+            name: 'Aprovadores',
+            href: '/ponto/fluig/aprovadores',
+            icon: Users,
+            description: 'Aprovações e pendências por pessoa (G3/G5)',
+            permission:
+              isAdministrator ||
+              isDepartmentFinanceiro ||
+              isDepartmentCompras ||
+              can(pk('/ponto/fluig/aprovadores'))
           },
           {
             name: 'Central de Atendimentos',

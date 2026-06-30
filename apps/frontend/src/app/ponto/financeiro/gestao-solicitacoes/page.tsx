@@ -8,7 +8,7 @@ export default function GestaoSolicitacoesFinanceiroPage() {
   return (
     <FluigSolicitacoesPage
       config={{
-        title: 'Processos do Fluig',
+        title: 'Fluig - Processos',
         subtitle: 'Acompanhe em tempo real as solicitações do Fluig na visão financeira',
         datasets: ['DataSet_G3FollowUp', 'DataSet_G4FollowUp', 'G5-Relatorio-DF-GO-TODOS-SETORES'],
         datasetTabLabels: {

@@ -50,8 +50,9 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
   // Principal
   { key: pathToModuleKey('/ponto/dashboard'), name: 'Dashboard', href: '/ponto/dashboard', category: 'Principal' },
   { key: pathToModuleKey('/ponto/conversas-whatsapp'), name: 'Central de Atendimentos', href: '/ponto/conversas-whatsapp', category: 'Principal' },
-  { key: pathToModuleKey('/ponto/financeiro/gestao-solicitacoes'), name: 'Processos do Fluig', href: '/ponto/financeiro/gestao-solicitacoes', category: 'Principal' },
-  { key: pathToModuleKey('/ponto/fluig/aprovacoes-workflow'), name: 'Aprovações Fluig', href: '/ponto/fluig/aprovacoes-workflow', category: 'Principal' },
+  { key: pathToModuleKey('/ponto/financeiro/gestao-solicitacoes'), name: 'Fluig - Processos', href: '/ponto/financeiro/gestao-solicitacoes', category: 'Principal' },
+  { key: pathToModuleKey('/ponto/fluig/aprovacoes-workflow'), name: 'Fluig - Aprovações', href: '/ponto/fluig/aprovacoes-workflow', category: 'Principal' },
+  { key: pathToModuleKey('/ponto/fluig/aprovadores'), name: 'Aprovadores', href: '/ponto/fluig/aprovadores', category: 'Principal' },
   { key: pathToModuleKey('/ponto/solicitacoes-dp'), name: 'Solicitações Gerais', href: '/ponto/solicitacoes-dp', category: 'Principal' },
   { key: pathToModuleKey('/ponto/reserva-veiculos'), name: 'Reserva de Veículos', href: '/ponto/reserva-veiculos', category: 'Principal' },
   { key: pathToModuleKey('/ponto/entrega-logistica'), name: 'Entrega da Logística', href: '/ponto/entrega-logistica', category: 'Principal' },

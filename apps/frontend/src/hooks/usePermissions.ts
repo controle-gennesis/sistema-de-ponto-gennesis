@@ -449,6 +449,16 @@ export function useRoutePermission(route: string) {
       isAdministrator || isDepartmentFinanceiro || can(pk('/ponto/financeiro/analise-extrato')),
     '/ponto/financeiro/gestao-solicitacoes':
       isAdministrator || isDepartmentFinanceiro || can(pk('/ponto/financeiro/gestao-solicitacoes')),
+    '/ponto/fluig/aprovacoes-workflow':
+      isAdministrator ||
+      isDepartmentFinanceiro ||
+      isDepartmentCompras ||
+      can(pk('/ponto/fluig/aprovacoes-workflow')),
+    '/ponto/fluig/aprovadores':
+      isAdministrator ||
+      isDepartmentFinanceiro ||
+      isDepartmentCompras ||
+      can(pk('/ponto/fluig/aprovadores')),
     '/ponto/orcamento': canAccessOrcamentoRoutePage,
     '/ponto/contratos': isAdministrator || can(pk('/ponto/contratos')),
     '/ponto/contratos/controle-geral': isAdministrator || can(pk('/ponto/contratos/controle-geral')),
