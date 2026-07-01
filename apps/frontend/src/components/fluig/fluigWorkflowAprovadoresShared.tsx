@@ -22,6 +22,7 @@ import {
   formatWorkflowApprovalDateDisplay,
   isWorkflowApprovalDateInRange,
   compareWorkflowApprovalDateDesc,
+  formatWorkflowFilialDisplay,
   parseWorkflowApprovalRows,
   getWorkflowSectorsForDataset,
   SECTOR_TABLE_HEADERS,
@@ -230,11 +231,17 @@ export function buildApproverListItems(
   return combined;
 }
 
-function matchesApproverRequestSearch(item: ApproverRequestListItem, term: string): boolean {
+function matchesApproverRequestSearch(
+  item: ApproverRequestListItem,
+  term: string,
+  datasetId: string
+): boolean {
   if (!term) return true;
   if (item.processId.toLowerCase().includes(term)) return true;
   if (item.title.toLowerCase().includes(term)) return true;
   if (item.filial?.toLowerCase().includes(term)) return true;
+  const filialLabel = formatWorkflowFilialDisplay(item.filial, datasetId);
+  if (filialLabel?.toLowerCase().includes(term)) return true;
   const statusWord = item.disposition === 'approved' ? 'aprovado' : 'pendente';
   return statusWord.includes(term);
 }
@@ -337,12 +344,12 @@ export const FilteredApproverRequestList = React.memo(function FilteredApproverR
   const filteredItems = useMemo(() => {
     const term = deferredSearch.trim().toLowerCase();
     return items.filter((item) => {
-      if (term && !matchesApproverRequestSearch(item, term)) return false;
+      if (term && !matchesApproverRequestSearch(item, term, datasetId)) return false;
       if (!matchesApprovalStage(item, deferredStageFilter)) return false;
       if (!matchesApprovalPeriod(item, deferredPeriodFrom, deferredPeriodTo)) return false;
       return true;
     });
-  }, [items, deferredSearch, deferredStageFilter, deferredPeriodFrom, deferredPeriodTo]);
+  }, [items, deferredSearch, deferredStageFilter, deferredPeriodFrom, deferredPeriodTo, datasetId]);
 
   const totalPages = Math.max(1, Math.ceil(filteredItems.length / APPROVER_REQUESTS_PAGE_SIZE));
 
@@ -399,10 +406,12 @@ export const FilteredApproverRequestList = React.memo(function FilteredApproverR
               <div className="relative min-w-[240px] flex-1 sm:w-[280px] sm:flex-none">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
                 <input
-                  type="search"
+                  type="text"
+                  role="searchbox"
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
                   placeholder="Buscar ID, título, filial..."
+                  autoComplete="off"
                   className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
                 />
                 {search ? (
@@ -543,7 +552,12 @@ export const FilteredApproverRequestList = React.memo(function FilteredApproverR
                             {isApproved ? formatWorkflowApprovalDateDisplay(item.approvedAt) : '—'}
                           </td>
                         ) : null}
-                        <td className={cadastroListClasses.tdCenter}>{item.filial ?? '—'}</td>
+                        <td
+                          className={cadastroListClasses.tdCenter}
+                          title={item.filial ?? undefined}
+                        >
+                          {formatWorkflowFilialDisplay(item.filial, datasetId) ?? '—'}
+                        </td>
                         <td className={ACTIONS_COL_TD}>
                           <div className="flex justify-center">
                             <a

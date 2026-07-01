@@ -82,6 +82,19 @@ import {
   parseAjusteValorInput
 } from '@/lib/extratoCaixaAjuste';
 import { formatDateTimeBr } from '@/lib/dateTimeBr';
+import {
+  aggregateGastosOperacionaisMonthlyTotals,
+  aggregateGastosOperacionaisYearlyTotals,
+  filterGastosDetailRowsForSystemContract,
+  filterGastosNaturezaDetailRowsForSystemContract,
+  gastosMonthPeriodBounds,
+  gastosYearPeriodBounds
+} from '@/app/ponto/contratos/controle-geral/controleGeralGastosFluxo';
+import type { QueryGastosDetailRow, QueryGastosNaturezaDetailRow } from '@/app/ponto/contratos/controle-geral/buildQueryGastosRows';
+import { aggregateGastosNaturezaRows } from '@/app/ponto/contratos/controle-geral/buildQueryGastosRows';
+import { normalizeGastosOperacionaisContractName } from '@/app/ponto/contratos/controle-geral/gastosOperacionaisContractOrder';
+import { resolveGastosPoloFromContractName } from '@/lib/extratoCaixaPolo';
+import { ContractGastosResumoModal } from '@/components/contract/ContractGastosResumoModal';
 
 interface ContractBilling {
   id: string;
@@ -917,6 +930,9 @@ export default function ContractDetailPage() {
   const [showPaidNaturezaModal, setShowPaidNaturezaModal] = useState(false);
   const [naturezaModalMesIdx, setNaturezaModalMesIdx] = useState<number | null>(null);
   const [expandedNaturezaKey, setExpandedNaturezaKey] = useState<string | null>(null);
+  const [gastosResumoModal, setGastosResumoModal] = useState<
+    { kind: 'month'; mesIdx: number } | { kind: 'year'; year: number } | null
+  >(null);
 
   const openPaidNaturezaModal = (mesIdx: number | null) => {
     setNaturezaModalMesIdx(mesIdx);
@@ -1011,6 +1027,55 @@ export default function ContractDetailPage() {
     refetchOnMount: false,
     retry: false
   });
+
+  type GastosOperacionaisModuleApi = {
+    success: boolean;
+    message?: string;
+    data: {
+      configured: boolean;
+      detailRows?: QueryGastosDetailRow[];
+      naturezaDetailRows?: QueryGastosNaturezaDetailRow[];
+      fetchedAt?: string;
+      message?: string;
+    };
+  };
+
+  const {
+    data: gastosOperacionaisModuleData,
+    isLoading: gastosOperacionaisModuleLoading,
+    isFetching: gastosOperacionaisModuleFetching,
+    isError: gastosOperacionaisModuleIsError
+  } = useQuery({
+    queryKey: ['gastos-operacionais-module-totvs-v34-adiantamento-predial'],
+    queryFn: async () => {
+      const res = await api.get<GastosOperacionaisModuleApi>('/contracts/gastos-operacionais', {
+        timeout: 180_000
+      });
+      const payload = res.data;
+      const detailRows = (payload.data?.detailRows ?? []).map((row) => {
+        const contractLabel = normalizeGastosOperacionaisContractName(row.contract);
+        const polo = resolveGastosPoloFromContractName(contractLabel, row.polo);
+        return { ...row, contract: contractLabel, polo };
+      });
+      const naturezaDetailRows = (payload.data?.naturezaDetailRows ?? []).map((row) => ({
+        ...row,
+        contract: normalizeGastosOperacionaisContractName(row.contract)
+      }));
+      return {
+        configured: payload.data?.configured ?? false,
+        detailRows,
+        naturezaDetailRows,
+        fetchedAt: payload.data?.fetchedAt ?? new Date().toISOString(),
+        message: payload.data?.message ?? payload.message
+      };
+    },
+    enabled: !!contractId,
+    staleTime: 5 * 60 * 1000,
+    retry: 1
+  });
+
+  const gastosOperacionaisCarregando =
+    gastosOperacionaisModuleLoading || gastosOperacionaisModuleFetching;
 
   /** RM ainda sem resposta definitiva (1ª carga ou refetch). */
   const totvsRmCarregando =
@@ -1863,6 +1928,62 @@ export default function ContractDetailPage() {
     }
     return valores;
   }, [totvsTotalPagoRes, safeSelectedYear, metaSchedule]);
+
+  const contractGastosOperacionaisRows = useMemo(() => {
+    if (!contract) return [];
+    return filterGastosDetailRowsForSystemContract(
+      gastosOperacionaisModuleData?.detailRows ?? [],
+      {
+        name: contract.name,
+        costCenter: contract.costCenter
+      }
+    );
+  }, [contract, gastosOperacionaisModuleData?.detailRows]);
+
+  const gastosOperacionaisPorMes = useMemo(
+    () => aggregateGastosOperacionaisMonthlyTotals(contractGastosOperacionaisRows, safeSelectedYear),
+    [contractGastosOperacionaisRows, safeSelectedYear]
+  );
+
+  const gastosOperacionaisPorAno = useMemo(
+    () => aggregateGastosOperacionaisYearlyTotals(contractGastosOperacionaisRows, availableYears),
+    [contractGastosOperacionaisRows, availableYears]
+  );
+
+  const gastosOperacionaisTemDados = contractGastosOperacionaisRows.length > 0;
+
+  const contractGastosNaturezaRows = useMemo(() => {
+    if (!contract) return [];
+    return filterGastosNaturezaDetailRowsForSystemContract(
+      gastosOperacionaisModuleData?.naturezaDetailRows ?? [],
+      {
+        name: contract.name,
+        costCenter: contract.costCenter
+      }
+    );
+  }, [contract, gastosOperacionaisModuleData?.naturezaDetailRows]);
+
+  const gastosResumoModalNaturezaRows = useMemo(() => {
+    if (!gastosResumoModal || !contract) return [];
+    const period =
+      gastosResumoModal.kind === 'month'
+        ? gastosMonthPeriodBounds(safeSelectedYear, gastosResumoModal.mesIdx + 1)
+        : gastosYearPeriodBounds(gastosResumoModal.year);
+    return aggregateGastosNaturezaRows(
+      contractGastosNaturezaRows,
+      period.periodFrom,
+      period.periodTo
+    );
+  }, [gastosResumoModal, contract, contractGastosNaturezaRows, safeSelectedYear]);
+
+  const gastosResumoModalTitle = useMemo(() => {
+    if (!gastosResumoModal || !contract) return 'Gastos';
+    if (gastosResumoModal.kind === 'month') {
+      const mes = MESES[gastosResumoModal.mesIdx] ?? '';
+      return `Gastos — ${mes}/${String(safeSelectedYear).slice(-2)} · ${contract.name}`;
+    }
+    return `Gastos — ${gastosResumoModal.year} · ${contract.name}`;
+  }, [gastosResumoModal, contract, safeSelectedYear]);
 
   const gastosDetalhePorMes = useMemo(() => {
     const linesPerMonth: RmPaidLineRow[][] = Array.from({ length: 12 }, () => []);
@@ -3418,6 +3539,26 @@ export default function ContractDetailPage() {
                   <span className="font-mono">TOTVS_RM_SOLICITACOES_USE_STATUS_FILTER</span>).
                 </p>
               ) : null}
+              {!isAllYears &&
+              !gastosOperacionaisCarregando &&
+              gastosOperacionaisModuleData?.configured === false ? (
+                <p className="mt-3 text-xs text-amber-600 dark:text-amber-400">
+                  <span className="font-medium">Gastos Operacionais:</span> integração TOTVS RM não
+                  configurada no servidor (
+                  <span className="font-mono">TOTVS_RM_*</span>).
+                </p>
+              ) : null}
+              {!isAllYears &&
+              !gastosOperacionaisCarregando &&
+              !gastosOperacionaisModuleIsError &&
+              gastosOperacionaisModuleData?.configured === true &&
+              !gastosOperacionaisTemDados ? (
+                <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">
+                  Nenhum gasto operacional encontrado no RM para este contrato/centro de custo (
+                  {contract.name}
+                  {contract.costCenter?.code ? ` · CC ${contract.costCenter.code}` : ''}).
+                </p>
+              ) : null}
             </CardHeader>
             <CardContent>
               <div className="overflow-x-auto">
@@ -3532,6 +3673,55 @@ export default function ContractDetailPage() {
                           </td>
                         ))}
                       </tr>
+                      <tr className="bg-violet-50/40 dark:bg-violet-900/15">
+                        <td className="px-4 py-3 text-sm font-medium text-violet-800 dark:text-violet-300">
+                          <div className="flex items-center gap-2">
+                            <span>Gastos</span>
+                            {gastosOperacionaisCarregando ? (
+                              <Loader2
+                                className="h-3.5 w-3.5 shrink-0 animate-spin text-violet-600 dark:text-violet-400"
+                                aria-label="Carregando gastos"
+                              />
+                            ) : null}
+                          </div>
+                        </td>
+                        {availableYears.map((year) => {
+                          const valor = gastosOperacionaisPorAno[year] ?? 0;
+                          const celulaClicavel =
+                            !gastosOperacionaisCarregando && valor > 0;
+                          return (
+                          <td
+                            key={year}
+                            role={celulaClicavel ? 'button' : undefined}
+                            tabIndex={celulaClicavel ? 0 : undefined}
+                            onClick={() => {
+                              if (celulaClicavel) {
+                                setGastosResumoModal({ kind: 'year', year });
+                              }
+                            }}
+                            onKeyDown={(e) => {
+                              if (!celulaClicavel) return;
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                setGastosResumoModal({ kind: 'year', year });
+                              }
+                            }}
+                            title={celulaClicavel ? 'Ver resumo por categoria' : undefined}
+                            className={`px-4 py-3 text-center text-sm font-medium text-violet-800 dark:text-violet-300 ${
+                              celulaClicavel
+                                ? 'cursor-pointer transition-colors hover:bg-violet-100/70 dark:hover:bg-violet-900/35'
+                                : ''
+                            }`}
+                          >
+                            {gastosOperacionaisCarregando
+                              ? '…'
+                              : valor > 0
+                                ? formatCurrency(valor)
+                                : '-'}
+                          </td>
+                          );
+                        })}
+                      </tr>
                     </tbody>
                   </table>
                 ) : (
@@ -3645,6 +3835,55 @@ export default function ContractDetailPage() {
                           })}
                         </tr>
                       ) : null}
+                      <tr className="bg-violet-50/40 dark:bg-violet-900/15">
+                        <td className="px-4 py-3 text-sm font-medium text-violet-800 dark:text-violet-300">
+                          <div className="flex items-center gap-2">
+                            <span>Gastos</span>
+                            {gastosOperacionaisCarregando ? (
+                              <Loader2
+                                className="h-3.5 w-3.5 shrink-0 animate-spin text-violet-600 dark:text-violet-400"
+                                aria-label="Carregando gastos"
+                              />
+                            ) : null}
+                          </div>
+                        </td>
+                        {MESES.map((mes, i) => {
+                          const valor = gastosOperacionaisPorMes[i];
+                          const celulaClicavel =
+                            !gastosOperacionaisCarregando && valor > 0;
+                          return (
+                          <td
+                            key={mes}
+                            role={celulaClicavel ? 'button' : undefined}
+                            tabIndex={celulaClicavel ? 0 : undefined}
+                            onClick={() => {
+                              if (celulaClicavel) {
+                                setGastosResumoModal({ kind: 'month', mesIdx: i });
+                              }
+                            }}
+                            onKeyDown={(e) => {
+                              if (!celulaClicavel) return;
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                setGastosResumoModal({ kind: 'month', mesIdx: i });
+                              }
+                            }}
+                            title={celulaClicavel ? 'Ver resumo por categoria' : undefined}
+                            className={`px-4 py-3 text-center text-sm font-medium text-violet-800 dark:text-violet-300 ${
+                              celulaClicavel
+                                ? 'cursor-pointer transition-colors hover:bg-violet-100/70 dark:hover:bg-violet-900/35'
+                                : ''
+                            }`}
+                          >
+                            {gastosOperacionaisCarregando
+                              ? '…'
+                              : valor > 0
+                                ? formatCurrency(valor)
+                                : '-'}
+                          </td>
+                          );
+                        })}
+                      </tr>
                       <tr className="bg-amber-50/50 dark:bg-amber-900/10">
                         <td className="px-4 py-3 text-sm font-medium text-amber-700 dark:text-amber-400">
                           Produção
@@ -4507,6 +4746,13 @@ export default function ContractDetailPage() {
               )}
             </CardContent>
           </Card>
+
+          <ContractGastosResumoModal
+            isOpen={gastosResumoModal != null}
+            onClose={() => setGastosResumoModal(null)}
+            title={gastosResumoModalTitle}
+            naturezaRows={gastosResumoModalNaturezaRows}
+          />
 
           <Modal
             isOpen={showPaidNaturezaModal}

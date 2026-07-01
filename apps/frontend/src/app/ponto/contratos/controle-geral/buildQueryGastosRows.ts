@@ -252,10 +252,18 @@ export function aggregateGastosNaturezaForContract(
   periodFrom: string,
   periodTo: string
 ): GastosNaturezaAggRow[] {
+  const filtered = naturezaDetailRows.filter((row) => gastosContractsMatch(row.contract, contract));
+  return aggregateGastosNaturezaRows(filtered, periodFrom, periodTo);
+}
+
+export function aggregateGastosNaturezaRows(
+  naturezaDetailRows: readonly QueryGastosNaturezaDetailRow[],
+  periodFrom: string,
+  periodTo: string
+): GastosNaturezaAggRow[] {
   const map = new Map<string, GastosNaturezaAggRow>();
 
   for (const row of naturezaDetailRows) {
-    if (!gastosContractsMatch(row.contract, contract)) continue;
     if (!rowPaymentDateIntersectsGastosPeriod(row, periodFrom, periodTo)) continue;
     if (!shouldShowInGastosNaturezaModal(row.natureza)) continue;
 

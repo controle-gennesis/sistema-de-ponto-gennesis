@@ -3,10 +3,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { CheckCircle2, Clock, FileText, HelpCircle, Search, X, type LucideIcon } from 'lucide-react';
+import { CheckCircle2, Clock, ExternalLink, FileText, Filter, HelpCircle, RotateCcw, Search, X, type LucideIcon } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { FilterStatCard } from '@/components/ui/FilterStatCard';
 import { Button } from '@/components/ui/Button';
+import { DatePickerField } from '@/components/ui/DatePickerField';
+import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
@@ -19,26 +21,31 @@ import {
 import api from '@/lib/api';
 import {
   countWorkflowSummary,
+  buildFluigWorkflowProcessViewUrl,
   FLUIG_WORKFLOW_APPROVAL_DATASET_G3,
   FLUIG_WORKFLOW_APPROVAL_DATASET_G5,
   getWorkflowSectorsForDataset,
+  formatFluigBudgetFieldDisplay,
+  isWorkflowApprovalDateInRange,
+  listWorkflowDistinctFieldOptions,
   parseWorkflowApprovalRows,
-  resolvePendingWithDisplay,
   SECTOR_TABLE_HEADERS,
   type ParsedWorkflowRow,
 } from '@/lib/fluigWorkflowApproval';
-import { ApprovalStepCell, StatusPersonCell } from '@/components/fluig/fluigWorkflowStepStatus';
+import { ApprovalStepCell } from '@/components/fluig/fluigWorkflowStepStatus';
 import { FluigWorkflowRequestDetailModal } from '@/components/fluig/FluigWorkflowRequestDetailModal';
 import { ListPagination } from '@/components/ui/ListPagination';
 
 const ITEMS_PER_PAGE = 25;
 
+const ACTIONS_COL_TH =
+  'w-[4%] min-w-[3.5rem] whitespace-nowrap px-2 py-4 text-center align-middle text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-3';
+const ACTIONS_COL_TD =
+  'w-[4%] min-w-[3.5rem] whitespace-nowrap px-2 py-3 text-center align-middle sm:px-3';
 const ID_COL_TH =
-  'w-[1%] whitespace-nowrap py-4 pl-3 pr-4 text-left align-middle text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:pl-6';
+  'w-[1%] whitespace-nowrap px-3 py-4 text-center align-middle text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-4';
 const ID_COL_TD =
-  'w-[1%] whitespace-nowrap py-4 pl-3 pr-4 text-left align-middle text-sm text-gray-900 dark:text-gray-100 sm:pl-6';
-const ID_COL_HEADER_INNER = 'inline-block min-w-[4.75rem] text-center';
-const ID_COL_CELL_INNER = 'inline-block min-w-[4.75rem]';
+  'w-[1%] whitespace-nowrap px-3 py-4 text-center align-middle text-sm font-mono font-medium text-gray-900 dark:text-gray-100 sm:px-4';
 
 const DATASETS = [
   { id: FLUIG_WORKFLOW_APPROVAL_DATASET_G3, label: 'G3' },
@@ -144,16 +151,24 @@ const WORKFLOW_CARD_LIST_CONFIG: Record<
   },
 };
 
-function PendingWithCell({ row }: { row: ParsedWorkflowRow }) {
-  const display = resolvePendingWithDisplay(row);
-  return (
-    <StatusPersonCell
-      status={display.status}
-      person={display.person}
-      statusClassName={display.statusClassName}
-      asBadge
-    />
-  );
+function handleCreationPeriodFromChange(
+  value: string,
+  periodTo: string,
+  setPeriodFrom: (value: string) => void,
+  setPeriodTo: (value: string) => void
+) {
+  setPeriodFrom(value);
+  if (value && periodTo && value > periodTo) setPeriodTo(value);
+}
+
+function handleCreationPeriodToChange(
+  value: string,
+  periodFrom: string,
+  setPeriodFrom: (value: string) => void,
+  setPeriodTo: (value: string) => void
+) {
+  setPeriodTo(value);
+  if (value && periodFrom && periodFrom > value) setPeriodFrom(value);
 }
 
 export function FluigWorkflowAprovacoesPage() {
@@ -164,6 +179,11 @@ export function FluigWorkflowAprovacoesPage() {
   const [cardFilter, setCardFilter] = useState<CardFilter>('all');
   const [listPage, setListPage] = useState(1);
   const [detailRow, setDetailRow] = useState<ParsedWorkflowRow | null>(null);
+  const [filterNatureza, setFilterNatureza] = useState('');
+  const [filterCentroCusto, setFilterCentroCusto] = useState('');
+  const [periodFrom, setPeriodFrom] = useState('');
+  const [periodTo, setPeriodTo] = useState('');
+  const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
 
   const { data: userData, isLoading: loadingUser } = useQuery({
     queryKey: ['user'],
@@ -208,6 +228,7 @@ export function FluigWorkflowAprovacoesPage() {
   const summary = useMemo(() => countWorkflowSummary(rows), [rows]);
 
   const visibleSectors = useMemo(() => getWorkflowSectorsForDataset(datasetId), [datasetId]);
+  const showNaturezaColumn = datasetId === FLUIG_WORKFLOW_APPROVAL_DATASET_G5;
 
   const visibleFilterCards = useMemo(
     () =>
@@ -222,6 +243,20 @@ export function FluigWorkflowAprovacoesPage() {
   const listHeader = WORKFLOW_CARD_LIST_CONFIG[cardFilter];
   const ListHeaderIcon = listHeader.Icon;
 
+  const naturezaFilterOptions = useMemo(
+    () => (showNaturezaColumn ? listWorkflowDistinctFieldOptions(rows, 'naturezaOrcamentaria') : []),
+    [rows, showNaturezaColumn]
+  );
+  const centroCustoFilterOptions = useMemo(
+    () => listWorkflowDistinctFieldOptions(rows, 'centroCusto'),
+    [rows]
+  );
+
+  const hasPeriodFilter = Boolean(periodFrom || periodTo);
+  const hasNaturezaFilter = showNaturezaColumn && Boolean(filterNatureza);
+  const hasCentroCustoFilter = Boolean(filterCentroCusto);
+  const hasActiveModalFilter = hasPeriodFilter || hasNaturezaFilter || hasCentroCustoFilter;
+
   const filteredRows = useMemo(() => {
     const term = search.trim().toLowerCase();
     return rows.filter((row) => {
@@ -231,11 +266,29 @@ export function FluigWorkflowAprovacoesPage() {
       if (cardFilter === 'diretoria' && row.currentPendingSector !== 'diretoria') return false;
       if (cardFilter === 'other' && (row.fullyApproved || row.currentPendingSector)) return false;
 
+      if (
+        hasNaturezaFilter &&
+        formatFluigBudgetFieldDisplay(row.naturezaOrcamentaria) !== filterNatureza
+      ) {
+        return false;
+      }
+      if (
+        filterCentroCusto &&
+        formatFluigBudgetFieldDisplay(row.centroCusto) !== filterCentroCusto
+      ) {
+        return false;
+      }
+      if (hasPeriodFilter && !isWorkflowApprovalDateInRange(row.createdAt, periodFrom, periodTo)) {
+        return false;
+      }
+
       if (!term) return true;
       const hay = [
         row.processId,
         row.title,
         row.filial ?? '',
+        formatFluigBudgetFieldDisplay(row.naturezaOrcamentaria) ?? '',
+        formatFluigBudgetFieldDisplay(row.centroCusto) ?? '',
         row.currentStage ?? '',
         row.currentPendingWith ?? '',
         ...row.steps.flatMap((s) => [s.approver ?? '', s.pendingWith ?? '', s.detail ?? '']),
@@ -244,7 +297,17 @@ export function FluigWorkflowAprovacoesPage() {
         .toLowerCase();
       return hay.includes(term);
     });
-  }, [rows, search, cardFilter]);
+  }, [
+    rows,
+    search,
+    cardFilter,
+    filterNatureza,
+    filterCentroCusto,
+    periodFrom,
+    periodTo,
+    hasPeriodFilter,
+    hasNaturezaFilter,
+  ]);
 
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / ITEMS_PER_PAGE));
 
@@ -255,7 +318,30 @@ export function FluigWorkflowAprovacoesPage() {
 
   useEffect(() => {
     setListPage(1);
-  }, [search, cardFilter, activeTab]);
+  }, [search, cardFilter, activeTab, filterNatureza, filterCentroCusto, periodFrom, periodTo]);
+
+  useEffect(() => {
+    setFilterNatureza('');
+    setFilterCentroCusto('');
+    setPeriodFrom('');
+    setPeriodTo('');
+    setIsFiltersModalOpen(false);
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (!showNaturezaColumn) {
+      setFilterNatureza('');
+    }
+  }, [showNaturezaColumn]);
+
+  useEffect(() => {
+    if (filterNatureza && !naturezaFilterOptions.some((option) => option.value === filterNatureza)) {
+      setFilterNatureza('');
+    }
+    if (filterCentroCusto && !centroCustoFilterOptions.some((option) => option.value === filterCentroCusto)) {
+      setFilterCentroCusto('');
+    }
+  }, [filterNatureza, filterCentroCusto, naturezaFilterOptions, centroCustoFilterOptions]);
 
   useEffect(() => {
     if (!visibleSectors.includes('compras') && cardFilter === 'compras') {
@@ -385,10 +471,12 @@ export function FluigWorkflowAprovacoesPage() {
                       <div className="relative min-w-[240px] flex-1 sm:w-[320px] sm:flex-none">
                         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
                         <input
-                          type="search"
+                          type="text"
+                          role="searchbox"
                           value={search}
                           onChange={(e) => setSearch(e.target.value)}
-                          placeholder="Buscar código, aprovador..."
+                          placeholder="Buscar ID, título, aprovador..."
+                          autoComplete="off"
                           disabled={isLoading}
                           className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
                         />
@@ -403,6 +491,23 @@ export function FluigWorkflowAprovacoesPage() {
                           </button>
                         ) : null}
                       </div>
+                      <button
+                        type="button"
+                        onClick={() => setIsFiltersModalOpen(true)}
+                        disabled={isLoading}
+                        className={`relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+                          hasActiveModalFilter
+                            ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40'
+                            : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
+                        }`}
+                        aria-label="Abrir filtros"
+                        title={hasActiveModalFilter ? 'Filtro (ativo)' : 'Filtro'}
+                      >
+                        <Filter className="h-4 w-4" />
+                        {hasActiveModalFilter ? (
+                          <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
+                        ) : null}
+                      </button>
                     </div>
                   </div>
                 </CardHeader>
@@ -414,7 +519,11 @@ export function FluigWorkflowAprovacoesPage() {
                     <CadastroListEmpty
                       icon={ListHeaderIcon}
                       title="Nenhuma solicitação encontrada"
-                      hint="Ajuste os filtros ou a busca para ver outros resultados."
+                      hint={
+                        search || hasActiveModalFilter
+                          ? 'Ajuste a busca ou os filtros para ver outros resultados.'
+                          : 'Ajuste os filtros ou a busca para ver outros resultados.'
+                      }
                     />
                   ) : (
                     <>
@@ -434,30 +543,54 @@ export function FluigWorkflowAprovacoesPage() {
                           </colgroup>
                           <thead className="border-b border-gray-200 dark:border-gray-700">
                             <tr>
-                              <th className={ID_COL_TH}>
-                                <span className={ID_COL_HEADER_INNER}>ID</span>
-                              </th>
+                              <th className={ID_COL_TH}>ID</th>
+                              <th className={cadastroListClasses.th}>Título da solicitação</th>
+                              {showNaturezaColumn ? (
+                                <th className={cadastroListClasses.thCenter}>Natureza orçamentária</th>
+                              ) : null}
+                              <th className={cadastroListClasses.thCenter}>Centro de custo</th>
                               {visibleSectors.map((sector) => (
                                 <th key={sector} className={cadastroListClasses.thCenter}>
                                   {SECTOR_TABLE_HEADERS[sector]}
                                 </th>
                               ))}
-                              <th className={cadastroListClasses.thCenter}>Pendente com</th>
+                              <th className={ACTIONS_COL_TH}>Ações</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
-                            {paginatedRows.map((row) => (
+                            {paginatedRows.map((row) => {
+                              const naturezaLabel = formatFluigBudgetFieldDisplay(row.naturezaOrcamentaria);
+                              const centroCustoLabel = formatFluigBudgetFieldDisplay(row.centroCusto);
+                              return (
                               <tr
                                 key={row.rowKey}
                                 className={getListTableRowClassName(true)}
                                 onClick={() => setDetailRow(row)}
                               >
                                 <td className={ID_COL_TD}>
-                                  <span className={ID_COL_CELL_INNER}>
-                                    <ListRowNavigableLabel className="font-mono font-medium">
-                                      {row.processId}
-                                    </ListRowNavigableLabel>
-                                  </span>
+                                  <ListRowNavigableLabel className="font-mono font-medium">
+                                    {row.processId}
+                                  </ListRowNavigableLabel>
+                                </td>
+                                <td
+                                  className={`${cadastroListClasses.td} max-w-xs truncate`}
+                                  title={row.title || undefined}
+                                >
+                                  {row.title || '—'}
+                                </td>
+                                {showNaturezaColumn ? (
+                                  <td
+                                    className={`${cadastroListClasses.tdCenter} max-w-[10rem] truncate`}
+                                    title={naturezaLabel || undefined}
+                                  >
+                                    {naturezaLabel || '—'}
+                                  </td>
+                                ) : null}
+                                <td
+                                  className={`${cadastroListClasses.tdCenter} max-w-[10rem] truncate`}
+                                  title={centroCustoLabel || undefined}
+                                >
+                                  {centroCustoLabel || '—'}
                                 </td>
                                 {visibleSectors.map((sector) => {
                                   const step = row.steps.find((s) => s.sector === sector)!;
@@ -467,11 +600,24 @@ export function FluigWorkflowAprovacoesPage() {
                                     </td>
                                   );
                                 })}
-                                <td className={cadastroListClasses.tdCenter}>
-                                  <PendingWithCell row={row} />
+                                <td className={ACTIONS_COL_TD}>
+                                  <div className="flex justify-center">
+                                    <a
+                                      href={buildFluigWorkflowProcessViewUrl(row.processId)}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      onClick={(event) => event.stopPropagation()}
+                                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-100 hover:text-red-600 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-red-400"
+                                      aria-label={`Abrir processo ${row.processId} no Fluig`}
+                                      title="Abrir no Fluig"
+                                    >
+                                      <ExternalLink className="h-4 w-4" aria-hidden />
+                                    </a>
+                                  </div>
                                 </td>
                               </tr>
-                            ))}
+                            );
+                            })}
                           </tbody>
                         </table>
                       </div>
@@ -485,6 +631,120 @@ export function FluigWorkflowAprovacoesPage() {
                   )}
                 </CardContent>
               </Card>
+
+              {isFiltersModalOpen ? (
+                <div className="fixed inset-0 z-[1000] flex items-center justify-center">
+                  <div
+                    className="absolute inset-0 bg-black/40"
+                    onClick={() => setIsFiltersModalOpen(false)}
+                    aria-hidden
+                  />
+                  <div className="relative mx-4 w-full max-w-lg rounded-xl bg-white shadow-2xl dark:bg-gray-800">
+                    <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4 dark:border-gray-700">
+                      <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">Filtro</h3>
+                      <button
+                        type="button"
+                        onClick={() => setIsFiltersModalOpen(false)}
+                        className="rounded-md p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+                        aria-label="Fechar filtros"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                    <div className="px-5 py-4">
+                      <div className="space-y-4">
+                        {showNaturezaColumn ? (
+                          <div>
+                            <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                              Natureza orçamentária
+                            </label>
+                            <StringSingleSelectDropdown
+                              value={filterNatureza}
+                              onChange={setFilterNatureza}
+                              options={naturezaFilterOptions}
+                              allowEmpty
+                              emptyOptionLabel="Todas as naturezas"
+                              placeholder="Todas as naturezas"
+                              searchPlaceholder="Pesquisar..."
+                            />
+                          </div>
+                        ) : null}
+                        <div>
+                          <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                            Centro de custo
+                          </label>
+                          <StringSingleSelectDropdown
+                            value={filterCentroCusto}
+                            onChange={setFilterCentroCusto}
+                            options={centroCustoFilterOptions}
+                            allowEmpty
+                            emptyOptionLabel="Todos os centros de custo"
+                            placeholder="Todos os centros de custo"
+                            searchPlaceholder="Pesquisar..."
+                          />
+                        </div>
+                        <div>
+                          <p className="mb-3 text-sm text-gray-600 dark:text-gray-400">
+                            Período em que a solicitação foi criada.
+                          </p>
+                          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                            <div>
+                              <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                                Criação (de)
+                              </label>
+                              <DatePickerField
+                                value={periodFrom}
+                                onChange={(value) =>
+                                  handleCreationPeriodFromChange(value, periodTo, setPeriodFrom, setPeriodTo)
+                                }
+                                placeholder="dd/mm/aaaa"
+                                noFocusRing
+                                aria-label="Data inicial de criação"
+                              />
+                            </div>
+                            <div>
+                              <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                                Criação (até)
+                              </label>
+                              <DatePickerField
+                                value={periodTo}
+                                onChange={(value) =>
+                                  handleCreationPeriodToChange(value, periodFrom, setPeriodFrom, setPeriodTo)
+                                }
+                                placeholder="dd/mm/aaaa"
+                                noFocusRing
+                                aria-label="Data final de criação"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between border-t border-gray-200 px-5 py-4 dark:border-gray-700">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFilterNatureza('');
+                          setFilterCentroCusto('');
+                          setPeriodFrom('');
+                          setPeriodTo('');
+                        }}
+                        className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+                      >
+                        <RotateCcw className="h-4 w-4" />
+                        Limpar filtros
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setIsFiltersModalOpen(false)}
+                        className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-gray-800 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-gray-200"
+                      >
+                        Fechar
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
             </>
           )}
         </div>

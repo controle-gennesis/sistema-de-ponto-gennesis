@@ -192,10 +192,12 @@ export function FluigWorkflowAprovadoresPage() {
                       <div className="relative min-w-[240px] flex-1 sm:w-[320px] sm:flex-none">
                         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
                         <input
-                          type="search"
+                          type="text"
+                          role="searchbox"
                           value={search}
                           onChange={(event) => setSearch(event.target.value)}
                           placeholder="Buscar pessoa..."
+                          autoComplete="off"
                           disabled={isLoading}
                           className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
                         />

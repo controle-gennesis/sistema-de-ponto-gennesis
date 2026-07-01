@@ -1,4 +1,4 @@
-import type { QueryGastosDetailRow } from './buildQueryGastosRows';
+import type { QueryGastosDetailRow, QueryGastosNaturezaDetailRow } from './buildQueryGastosRows';
 import type { RecebidoMensalByGastosContractEntry } from './recebidoMensalTypes';
 import {
   normalizeContractOrderKey,
@@ -117,6 +117,129 @@ export function filterGastosDetailRowsForContract(
     if (yearFilter && !yearFilter.has(row.year)) return false;
     return true;
   });
+}
+
+export type SystemContractGastosLookup = {
+  name: string;
+  costCenter?: { code?: string; name?: string } | null;
+};
+
+/** Casamento por nome do contrato e/ou centro de custo (mesma regra do Controle Geral). */
+export function filterGastosDetailRowsForSystemContract(
+  detailRows: readonly QueryGastosDetailRow[],
+  contract: SystemContractGastosLookup,
+  filters?: { months?: number[]; years?: number[] }
+): QueryGastosDetailRow[] {
+  const labels = [
+    contract.name,
+    contract.costCenter?.name,
+    contract.costCenter?.code
+  ].filter((label): label is string => Boolean(label?.trim()));
+
+  if (labels.length === 0) return [];
+
+  const merged: QueryGastosDetailRow[] = [];
+  const seen = new Set<string>();
+
+  for (const label of labels) {
+    for (const row of filterGastosDetailRowsForContract(detailRows, label, filters)) {
+      const dedupeKey = `${row.contract}|${row.year}|${row.month}|${row.dateISO ?? ''}|${row.total}`;
+      if (seen.has(dedupeKey)) continue;
+      seen.add(dedupeKey);
+      merged.push(row);
+    }
+  }
+
+  return merged;
+}
+
+export function filterGastosNaturezaDetailRowsForSystemContract(
+  detailRows: readonly QueryGastosNaturezaDetailRow[],
+  contract: SystemContractGastosLookup,
+  filters?: { months?: number[]; years?: number[] }
+): QueryGastosNaturezaDetailRow[] {
+  const labels = [
+    contract.name,
+    contract.costCenter?.name,
+    contract.costCenter?.code
+  ].filter((label): label is string => Boolean(label?.trim()));
+
+  if (labels.length === 0) return [];
+
+  const merged: QueryGastosNaturezaDetailRow[] = [];
+  const seen = new Set<string>();
+
+  for (const label of labels) {
+    for (const row of filterGastosNaturezaDetailRowsForContract(detailRows, label, filters)) {
+      const dedupeKey = `${row.contract}|${row.year}|${row.month}|${row.dateISO ?? ''}|${row.natureza}|${row.total}`;
+      if (seen.has(dedupeKey)) continue;
+      seen.add(dedupeKey);
+      merged.push(row);
+    }
+  }
+
+  return merged;
+}
+
+function filterGastosNaturezaDetailRowsForContract(
+  detailRows: readonly QueryGastosNaturezaDetailRow[],
+  contract: string,
+  filters?: { months?: number[]; years?: number[] }
+): QueryGastosNaturezaDetailRow[] {
+  const monthFilter = filters?.months?.length ? new Set(filters.months) : null;
+  const yearFilter = filters?.years?.length ? new Set(filters.years) : null;
+
+  return detailRows.filter((row) => {
+    if (!contractsMatch(row.contract, contract)) return false;
+    if (monthFilter && !monthFilter.has(row.month)) return false;
+    if (yearFilter && !yearFilter.has(row.year)) return false;
+    return true;
+  });
+}
+
+export function gastosMonthPeriodBounds(
+  year: number,
+  month: number
+): { periodFrom: string; periodTo: string } {
+  const mm = String(month).padStart(2, '0');
+  const lastDay = new Date(year, month, 0).getDate();
+  const dd = String(lastDay).padStart(2, '0');
+  return {
+    periodFrom: `${year}-${mm}-01`,
+    periodTo: `${year}-${mm}-${dd}`
+  };
+}
+
+export function gastosYearPeriodBounds(year: number): { periodFrom: string; periodTo: string } {
+  return {
+    periodFrom: `${year}-01-01`,
+    periodTo: `${year}-12-31`
+  };
+}
+
+export function aggregateGastosOperacionaisMonthlyTotals(
+  rows: readonly QueryGastosDetailRow[],
+  year: number
+): number[] {
+  const porMes = new Array(12).fill(0);
+  for (const row of rows) {
+    if (row.year !== year || row.month < 1 || row.month > 12) continue;
+    porMes[row.month - 1] += Math.abs(row.total);
+  }
+  return porMes;
+}
+
+export function aggregateGastosOperacionaisYearlyTotals(
+  rows: readonly QueryGastosDetailRow[],
+  years: readonly number[]
+): Record<number, number> {
+  const allowed = new Set(years);
+  const porAno: Record<number, number> = {};
+  for (const row of rows) {
+    if (!allowed.has(row.year)) continue;
+    porAno[row.year] = (porAno[row.year] ?? 0) + Math.abs(row.total);
+  }
+  return porAno;
 }
 
 export function filterRecebidoMensalForContract(

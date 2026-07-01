@@ -38,6 +38,9 @@ export type ParsedWorkflowRow = {
   processId: string;
   title: string;
   filial: string | null;
+  naturezaOrcamentaria: string | null;
+  centroCusto: string | null;
+  createdAt: string | null;
   currentStage: string | null;
   currentPendingWith: string | null;
   currentPendingSector: WorkflowSector | null;
@@ -278,6 +281,9 @@ export type WorkflowColumnMapping = {
   idCol: string | null;
   titleCol: string | null;
   filialCol: string | null;
+  naturezaOrcamentariaCol: string | null;
+  centroCustoCol: string | null;
+  createdAtCol: string | null;
   stageCol: string | null;
   globalPendingCol: string | null;
   sectorCols: SectorColumnMap;
@@ -382,11 +388,261 @@ function readFirstNonEmpty(row: Record<string, unknown>, cols: string[]): string
   return '';
 }
 
-export function buildWorkflowColumnMapping(columns: string[]): WorkflowColumnMapping {
+function stripDiacritics(value: string): string {
+  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
+function matchNaturezaOrcamentariaColumnKey(key: string): boolean {
+  const raw = key.trim();
+  const n = stripDiacritics(raw).replace(/\s+/g, ' ').toLowerCase();
+  if (/titulo|historico|descricao|observac|mensagem|coment|anexo|link|url|email/i.test(n)) return false;
+  if (/natureza.*(juridica|fiscal)|tipo.*pessoa/i.test(n)) return false;
+  const compact = raw.toLowerCase().replace(/\s+/g, '_');
+  if (/nat_?orc|natorc|naturorc|cd_?nat|cod_?nat|codigonatureza/i.test(compact)) return true;
+  if (n.includes('natureza') && /orc|orcamento|despes|financ|orca\b|budget/i.test(n)) return true;
+  if (n.includes('natureza')) return true;
+  if ((/cod(igo)?\b|cd_/.test(n) || /^cd\s/.test(n)) && n.includes('natureza')) return true;
+  if (/tipo.*(despesa|orcamento)|classificacao.*(desp|orc)|elemento.*desp|carteira.*orc/i.test(n)) return true;
+  return false;
+}
+
+function matchNaturezaExtendedColumnKey(key: string): boolean {
+  const n = stripDiacritics(key.trim()).replace(/\s+/g, ' ').toLowerCase();
+  if (/titulo|historico|descricao|observ|mensagem|coment|anexo|link|email|telefone|celular|filial|fornecedor|pix|boleto|agencia|conta\s*corrente|chave|vencimento/i.test(n))
+    return false;
+  if (/^valor\b|\bvalor\s|quant|qtd|etapa|fase|status|idmov|num_proces|sequencia|processo\s*$/i.test(n)) return false;
+  if (/centro(\s+de)?\s*custo|^cc$|ccusto|centrocusto|custo\s*mecanismo|mecanismo.*custo|^contrato$/i.test(n))
+    return false;
+  if (/\belemento\b/.test(n) && !/elemento.*(pessoa|jurid)/i.test(n)) return true;
+  if (/classificacao.*(orc|despesa|desp)/i.test(n)) return true;
+  if (/carteira.*orc|evento.*(orc|desp)|conta.*orcament|plano.*(orc|desp)/i.test(n)) return true;
+  if (/cod(igo)?(\s+do)?\s*elemento|elemento\s*padrao|despesa.*orcament|orcamento.*despesa/i.test(n)) return true;
+  return false;
+}
+
+function isNaturezaCandidateColumnKey(key: string): boolean {
+  return matchNaturezaOrcamentariaColumnKey(key) || matchNaturezaExtendedColumnKey(key);
+}
+
+function cellLooksLikeOrcNaturezaValue(val: string): boolean {
+  const v = val.trim();
+  if (v.length < 8) return false;
+  if (/^\d{1,2}(\.\d{2,3}){2,6}\s*[-–—]/.test(v)) return true;
+  if (/^\d{1,2}(\.\d{2,3}){2,6}[A-Za-zÀ-ÿ]/.test(v)) return true;
+  return false;
+}
+
+function isWorkflowCentroCustoColumnName(name: string): boolean {
+  const t = name.trim();
+  return (
+    /^cc$/i.test(t) ||
+    /^contrato$/i.test(t) ||
+    /ccusto|cc_custo|centro[\s_-]?custo|centrocusto|cod[\s_-]?ccusto/i.test(t) ||
+    /centro\s+de\s+custo\s+mecanismo/i.test(t) ||
+    /custo\s+mecanismo|centro.*custo.*mecanismo/i.test(t)
+  );
+}
+
+function isInicioDataColumnName(name: string): boolean {
+  const n = stripDiacritics(name).replace(/\s+/g, ' ').toLowerCase().trim();
+  if (n === 'inicio data') return true;
+  return (
+    /\binicio\b/.test(n) &&
+    /\bdata\b/.test(n) &&
+    !/\bfim\b/.test(n) &&
+    !/\btermino\b/.test(n) &&
+    !/\bfinal\b/.test(n)
+  );
+}
+
+function isWorkflowCreationDateColumnName(name: string): boolean {
+  if (isInicioDataColumnName(name)) return true;
+  const n = stripDiacritics(name).replace(/\s+/g, ' ').toLowerCase().trim();
+  if (/aprov|vencimento|emiss(ao)?\s*nf|nascimento|pagamento|liquid|quitad|alterad|modific|atualiz/i.test(n))
+    return false;
+  return (
+    /data.*(criac|abert|inicio|solicit)|criacao|abertura|dh_inicio|dt_criacao|data_mov|dh_mov|dt_mov|inicio.*processo/i.test(n)
+  );
+}
+
+function resolveWorkflowCentroCustoColumn(
+  columns: string[],
+  firstRow: Record<string, unknown> | undefined
+): string | null {
+  const fromList = columns.find(isWorkflowCentroCustoColumnName) ?? null;
+  if (!firstRow) return fromList;
+  const matchesCustoMecanismo = (k: string) => {
+    const n = k.toLowerCase().replace(/\s+/g, ' ');
+    return n.includes('centro') && n.includes('custo') && n.includes('mecanismo');
+  };
+  if (fromList && firstRow[fromList] != null) return fromList;
+  return (
+    Object.keys(firstRow).find(matchesCustoMecanismo) ??
+    Object.keys(firstRow).find((k) => k.trim().toLowerCase() === 'contrato') ??
+    fromList
+  );
+}
+
+function pickBestWorkflowNaturezaColumn(
+  columns: string[],
+  firstRow: Record<string, unknown> | undefined,
+  values: Record<string, unknown>[],
+  skipKeys: Set<string>
+): string | null {
+  const keys = new Set<string>();
+  for (const col of columns) {
+    if (isNaturezaCandidateColumnKey(col)) keys.add(col);
+  }
+  if (firstRow) {
+    for (const col of Object.keys(firstRow)) {
+      if (isNaturezaCandidateColumnKey(col)) keys.add(col);
+    }
+  }
+  const candidates = Array.from(keys).filter((k) => !skipKeys.has(k));
+  if (candidates.length === 0) return null;
+  if (candidates.length === 1) return candidates[0];
+
+  const sample = values.slice(0, Math.min(600, values.length));
+  let bestK: string | null = null;
+  let bestScore = -1;
+  for (const k of candidates) {
+    let filled = 0;
+    let coded = 0;
+    for (const row of sample) {
+      const v = readCell(row, k).trim();
+      if (v.length < 4) continue;
+      filled++;
+      if (cellLooksLikeOrcNaturezaValue(v)) coded++;
+    }
+    let score = filled + coded * 4;
+    const kn = stripDiacritics(k).replace(/\s+/g, ' ').toLowerCase();
+    if (/\belemento\b|mascara|classificacao|despesa.*orc|nat_?orc|natureza\b/i.test(kn)) score += 2;
+    if (score > bestScore) {
+      bestScore = score;
+      bestK = k;
+    }
+  }
+  return bestK;
+}
+
+function pickWorkflowCreationDateColumn(
+  columns: string[],
+  values: Record<string, unknown>[],
+  skipKeys: Set<string>
+): string | null {
+  if (!values.length) return null;
+  const explicit =
+    columns.find(isInicioDataColumnName) ??
+    columns.find(isWorkflowCreationDateColumnName) ??
+    null;
+  if (explicit && !skipKeys.has(explicit)) return explicit;
+
+  const tMin = new Date('2015-01-01').getTime();
+  const tMax = Date.now() + 2 * 86400000;
+  const sampleN = Math.min(values.length, 40);
+  const minOk = Math.max(2, Math.ceil(sampleN * 0.1));
+
+  let bestK: string | null = null;
+  let bestTotal = 0;
+  for (const k of columns) {
+    if (skipKeys.has(k)) continue;
+    const kn = stripDiacritics(k).replace(/\s+/g, ' ').toLowerCase();
+    if (/titulo|historico|descricao|observ|mensagem|solicitacao|email|tel|cpf|cnpj|status|etapa|filial|fornecedor|setor|natureza|centro.*custo|^cc$|contrato|urgencia|valor|quant|preco|total|idmov|num_proces|numseq|seq|pedido|codigo|aprovador|gestor|usuario|nome|desc\b|aprov|vencimento|pagamento/i.test(kn))
+      continue;
+
+    let score = 0;
+    for (let i = 0; i < sampleN; i++) {
+      const d = parseWorkflowApprovalDate(readCell(values[i], k));
+      if (!d) continue;
+      const t = d.getTime();
+      if (t < tMin || t > tMax) continue;
+      score++;
+    }
+    if (score < minOk) continue;
+
+    let bonus = 0;
+    if (/mov|inclus|criac|abert|solicit|inicio|dh_|dt_mov|data_mov|processo|start|envio|abertura/i.test(kn)) bonus += 8;
+    if (/atualiz|alterad|modific|finaliz|conclu|aprovad|assinad|encerr/i.test(kn)) bonus -= 6;
+    if (/data|dt|hora|time|dh\b/i.test(kn)) bonus += 2;
+    const total = score + bonus;
+    if (total > bestTotal) {
+      bestTotal = total;
+      bestK = k;
+    }
+  }
+  return bestK;
+}
+
+function resolveWorkflowNaturezaValue(
+  row: Record<string, unknown>,
+  mapping: WorkflowColumnMapping,
+  columns: string[]
+): string | null {
+  if (mapping.naturezaOrcamentariaCol) {
+    const primary = readCell(row, mapping.naturezaOrcamentariaCol).trim();
+    if (primary) return primary;
+  }
+  for (const col of columns) {
+    if (col === mapping.centroCustoCol || col === mapping.naturezaOrcamentariaCol) continue;
+    if (!isNaturezaCandidateColumnKey(col)) continue;
+    const value = readCell(row, col).trim();
+    if (value) return value;
+  }
+  return null;
+}
+
+function resolveWorkflowBudgetColumns(
+  columns: string[],
+  values: Record<string, unknown>[],
+  mapping: WorkflowColumnMapping
+): void {
+  const firstRow = values[0];
+  const skipKeys = new Set<string>();
+  for (const col of [
+    mapping.idCol,
+    mapping.titleCol,
+    mapping.filialCol,
+    mapping.stageCol,
+    mapping.globalPendingCol,
+  ]) {
+    if (col) skipKeys.add(col);
+  }
+  for (const sectorMap of Object.values(mapping.sectorCols)) {
+    if (!sectorMap) continue;
+    for (const col of Object.values(sectorMap)) {
+      if (col) skipKeys.add(col);
+    }
+  }
+
+  if (!mapping.centroCustoCol) {
+    mapping.centroCustoCol = resolveWorkflowCentroCustoColumn(columns, firstRow);
+  }
+  if (mapping.centroCustoCol) skipKeys.add(mapping.centroCustoCol);
+
+  if (!mapping.naturezaOrcamentariaCol) {
+    mapping.naturezaOrcamentariaCol = pickBestWorkflowNaturezaColumn(columns, firstRow, values, skipKeys);
+  }
+  if (mapping.naturezaOrcamentariaCol) skipKeys.add(mapping.naturezaOrcamentariaCol);
+
+  if (!mapping.createdAtCol) {
+    mapping.createdAtCol =
+      columns.find((col) => !skipKeys.has(col) && isInicioDataColumnName(col)) ??
+      columns.find((col) => !skipKeys.has(col) && isWorkflowCreationDateColumnName(col)) ??
+      pickWorkflowCreationDateColumn(columns, values, skipKeys);
+  }
+}
+
+export function buildWorkflowColumnMapping(
+  columns: string[],
+  values?: Record<string, unknown>[]
+): WorkflowColumnMapping {
   const mapping: WorkflowColumnMapping = {
     idCol: null,
     titleCol: null,
     filialCol: null,
+    naturezaOrcamentariaCol: null,
+    centroCustoCol: null,
+    createdAtCol: null,
     stageCol: null,
     globalPendingCol: null,
     sectorCols: {},
@@ -411,6 +667,17 @@ export function buildWorkflowColumnMapping(columns: string[]): WorkflowColumnMap
       mapping.titleCol = col;
     }
     if (!mapping.filialCol && /^filial$/.test(norm)) mapping.filialCol = col;
+
+    if (!mapping.naturezaOrcamentariaCol && isNaturezaCandidateColumnKey(col)) {
+      mapping.naturezaOrcamentariaCol = col;
+    }
+    if (!mapping.centroCustoCol && isWorkflowCentroCustoColumnName(col)) {
+      mapping.centroCustoCol = col;
+    }
+    if (!mapping.createdAtCol && isWorkflowCreationDateColumnName(col)) {
+      mapping.createdAtCol = col;
+    }
+
     if (!mapping.stageCol && /^(etapa_atual|etapa atual|fase_atual|fase atual|status_etapa|etapa workflow)$/.test(norm.replace(/\s/g, '_'))) {
       mapping.stageCol = col;
     }
@@ -457,6 +724,10 @@ export function buildWorkflowColumnMapping(columns: string[]): WorkflowColumnMap
       columns.find((c) => /^titulo/i.test(c)) ??
       columns.find((c) => /^descricao$/i.test(c)) ??
       null;
+  }
+
+  if (values?.length) {
+    resolveWorkflowBudgetColumns(columns, values, mapping);
   }
 
   return mapping;
@@ -670,6 +941,9 @@ export function parseWorkflowApprovalRow(
 
   const title = readCell(row, mapping.titleCol) || processId;
   const filial = mapping.filialCol ? readCell(row, mapping.filialCol) || null : null;
+  const naturezaOrcamentaria = resolveWorkflowNaturezaValue(row, mapping, columns);
+  const centroCusto = mapping.centroCustoCol ? readCell(row, mapping.centroCustoCol).trim() || null : null;
+  const createdAt = mapping.createdAtCol ? readCell(row, mapping.createdAtCol).trim() || null : null;
   const currentStage = resolveCurrentStage(row, columns, mapping);
   const globalPending = readCell(row, mapping.globalPendingCol) || null;
   const pendingSector = currentStage ? sectorFromStageText(currentStage, datasetId) : null;
@@ -769,6 +1043,9 @@ export function parseWorkflowApprovalRow(
     processId,
     title,
     filial,
+    naturezaOrcamentaria,
+    centroCusto,
+    createdAt,
     currentStage,
     currentPendingWith,
     currentPendingSector: fullyApproved ? null : pendingSector,
@@ -787,7 +1064,7 @@ export function parseWorkflowApprovalRows(
   datasetId?: string
 ): { rows: ParsedWorkflowRow[]; mapping: WorkflowColumnMapping } {
   const mergedColumns = mergeWorkflowDatasetColumns(columns, values);
-  const mapping = buildWorkflowColumnMapping(mergedColumns);
+  const mapping = buildWorkflowColumnMapping(mergedColumns, values);
   const rows = values.map((row, index) =>
     parseWorkflowApprovalRow(row, mergedColumns, mapping, index, datasetId)
   );
@@ -1244,4 +1521,58 @@ export function isWorkflowApprovalDateInRange(
   }
 
   return true;
+}
+
+/** Remove código quando o Fluig envia "código - descrição" ou "código-descrição". */
+export function formatFluigBudgetFieldDisplay(raw: string | null | undefined): string | null {
+  const value = raw?.trim();
+  if (!value) return null;
+  const parts = value.split(/\s*[-–—]\s*/);
+  if (parts.length >= 2) {
+    const label = parts.slice(1).join(' - ').trim();
+    if (label) return label;
+  }
+  return value;
+}
+
+/** Exibe sigla da filial na listagem de aprovadores (G3: código 1/5; G5: Matriz / Filial GO). */
+export function formatWorkflowFilialDisplay(
+  raw: string | null | undefined,
+  datasetId?: string
+): string | null {
+  const value = raw?.trim();
+  if (!value) return null;
+
+  const normalized = value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (datasetId === FLUIG_WORKFLOW_APPROVAL_DATASET_G5) {
+    if (normalized === 'matriz') return 'DF';
+    if (normalized === 'filial go' || normalized.includes('filial go')) return 'GO';
+    return value;
+  }
+
+  const leadingCode = value.match(/^(\d+)\s*[-–—]?\s*/);
+  if (leadingCode?.[1] === '1') return 'DF';
+  if (leadingCode?.[1] === '5') return 'GO';
+
+  return value;
+}
+
+export function listWorkflowDistinctFieldOptions(
+  rows: ParsedWorkflowRow[],
+  field: 'naturezaOrcamentaria' | 'centroCusto'
+): { value: string; label: string }[] {
+  const values = new Set<string>();
+  for (const row of rows) {
+    const display = formatFluigBudgetFieldDisplay(row[field]);
+    if (display) values.add(display);
+  }
+  return Array.from(values)
+    .sort((a, b) => a.localeCompare(b, 'pt-BR', { sensitivity: 'base' }))
+    .map((value) => ({ value, label: value }));
 }
