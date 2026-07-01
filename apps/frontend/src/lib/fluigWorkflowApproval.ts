@@ -285,7 +285,7 @@ export type WorkflowColumnMapping = {
 
 type ExplicitSectorColumn = {
   sector: WorkflowSector;
-  role: 'approver' | 'pending' | 'status';
+  role: 'approver' | 'pending' | 'status' | 'date';
 };
 
 function getExplicitSectorColumn(col: string): ExplicitSectorColumn | null {
@@ -299,6 +299,42 @@ function getExplicitSectorColumn(col: string): ExplicitSectorColumn | null {
   if (compact === 'pendentegestor') return { sector: 'tecnico', role: 'pending' };
   if (compact === 'pendentecompras') return { sector: 'compras', role: 'pending' };
   if (compact === 'pendentediretoria') return { sector: 'diretoria', role: 'pending' };
+
+  if (
+    compact === 'dataaprovacaogestor' ||
+    compact === 'dataaprovgestor' ||
+    compact === 'dataaprovacaogestoreng' ||
+    compact === 'dataaprovgestoreng' ||
+    compact === 'dataaprovtecnico' ||
+    compact === 'dataaprovacaotecnico' ||
+    compact === 'dtaprovacaogestor' ||
+    compact === 'dataaprovogestor' ||
+    compact === 'dtaprovogestor' ||
+    compact === 'dtaprovgestor' ||
+    compact === 'dtaprovtecnico' ||
+    compact === 'dtaprovacaotecnico' ||
+    compact === 'dtaprovgestoreng'
+  ) {
+    return { sector: 'tecnico', role: 'date' };
+  }
+  if (
+    compact === 'dataaprovacaodiretoria' ||
+    compact === 'dataaprovdiretoria' ||
+    compact === 'dtaprovacaodiretoria' ||
+    compact === 'dataaprovodiretoria' ||
+    compact === 'dtaprovodiretoria' ||
+    compact === 'dtaprovdiretoria'
+  ) {
+    return { sector: 'diretoria', role: 'date' };
+  }
+  if (
+    compact === 'dataaprovacaocompras' ||
+    compact === 'dataaprovcompras' ||
+    compact === 'dtaprovacaocompras' ||
+    compact === 'dtaprovcompras'
+  ) {
+    return { sector: 'compras', role: 'date' };
+  }
 
   return null;
 }
@@ -709,6 +745,10 @@ export function parseWorkflowApprovalRow(
         scanSectorPersonFromRow(row, columns, sector);
     }
 
+    if (status === 'approved' && !approvedAt) {
+      approvedAt = readSectorApprovalDateFromRaw(row, columns, sector, mapping);
+    }
+
     return {
       sector,
       label: SECTOR_LABELS[sector],
@@ -746,9 +786,10 @@ export function parseWorkflowApprovalRows(
   columns: string[],
   datasetId?: string
 ): { rows: ParsedWorkflowRow[]; mapping: WorkflowColumnMapping } {
-  const mapping = buildWorkflowColumnMapping(columns);
+  const mergedColumns = mergeWorkflowDatasetColumns(columns, values);
+  const mapping = buildWorkflowColumnMapping(mergedColumns);
   const rows = values.map((row, index) =>
-    parseWorkflowApprovalRow(row, columns, mapping, index, datasetId)
+    parseWorkflowApprovalRow(row, mergedColumns, mapping, index, datasetId)
   );
   return { rows, mapping };
 }
@@ -832,6 +873,51 @@ function resolvePendingPersonFromRow(row: ParsedWorkflowRow): string | null {
   return null;
 }
 
+function readSectorApprovalDateFromRaw(
+  raw: Record<string, unknown>,
+  columns: string[],
+  sector: WorkflowSector,
+  mapping?: WorkflowColumnMapping
+): string | null {
+  const effectiveColumns = columns.length > 0 ? columns : Object.keys(raw);
+  const effectiveMapping = mapping ?? buildWorkflowColumnMapping(effectiveColumns);
+  const { dateRaw } = resolveSectorFieldValues(raw, effectiveColumns, sector, effectiveMapping);
+  if (dateRaw) return dateRaw;
+
+  for (const col of effectiveColumns) {
+    const explicit = getExplicitSectorColumn(col);
+    if (explicit?.sector === sector && explicit.role === 'date') {
+      const val = readCell(raw, col);
+      if (val) return val;
+    }
+  }
+
+  return null;
+}
+
+function readSectorApprovalDateFromRow(
+  row: ParsedWorkflowRow,
+  sector: WorkflowSector
+): string | null {
+  const columns = Object.keys(row.raw);
+  const fromRaw = readSectorApprovalDateFromRaw(row.raw, columns, sector);
+  if (fromRaw) return fromRaw;
+
+  const step = row.steps.find((item) => item.sector === sector);
+  return step?.approvedAt ?? null;
+}
+
+function mergeWorkflowDatasetColumns(
+  columns: string[],
+  values: Record<string, unknown>[]
+): string[] {
+  const merged = new Set(columns);
+  for (const row of values) {
+    for (const key of Object.keys(row)) merged.add(key);
+  }
+  return Array.from(merged);
+}
+
 export type AggregateWorkflowByApproverOptions = {
   /** Só contadores — não monta listas de solicitações (uso na lista de aprovadores). */
   summariesOnly?: boolean;
@@ -913,7 +999,7 @@ export function aggregateWorkflowByApprover(
           filial: row.filial,
           sector: step.sector,
           sectorLabel: SECTOR_LABELS[step.sector],
-          approvedAt: step.approvedAt,
+          approvedAt: readSectorApprovalDateFromRow(row, step.sector),
         });
       }
       bucket.approvedCount += 1;
@@ -1054,4 +1140,108 @@ export function findWorkflowRowByKey(
     if (row.rowKey === rowKey) return row;
   }
   return null;
+}
+
+/** Interpreta datas vindas do Fluig (BR, ISO ou timestamp). */
+export function parseWorkflowApprovalDate(raw: string | null | undefined): Date | null {
+  if (!raw?.trim()) return null;
+  const trimmed = raw.trim();
+
+  const brMatch = trimmed.match(
+    /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/
+  );
+  if (brMatch) {
+    const [, day, month, year, hour = '0', minute = '0', second = '0'] = brMatch;
+    const date = new Date(
+      Number(year),
+      Number(month) - 1,
+      Number(day),
+      Number(hour),
+      Number(minute),
+      Number(second)
+    );
+    if (!Number.isNaN(date.getTime())) return date;
+  }
+
+  const isoDateTimeMatch = trimmed.match(
+    /^(\d{4})-(\d{2})-(\d{2})\s+(\d{1,2}):(\d{2}):(\d{2})(?:\.\d+)?/
+  );
+  if (isoDateTimeMatch) {
+    const [, year, month, day, hour, minute, second] = isoDateTimeMatch;
+    const date = new Date(
+      Number(year),
+      Number(month) - 1,
+      Number(day),
+      Number(hour),
+      Number(minute),
+      Number(second)
+    );
+    if (!Number.isNaN(date.getTime())) return date;
+  }
+
+  const isoDateOnly = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (isoDateOnly) {
+    const [, year, month, day] = isoDateOnly;
+    const date = new Date(Number(year), Number(month) - 1, Number(day));
+    if (!Number.isNaN(date.getTime())) return date;
+  }
+
+  const parsed = new Date(trimmed);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+export function compareWorkflowApprovalDateDesc(
+  a: string | null | undefined,
+  b: string | null | undefined
+): number {
+  const da = parseWorkflowApprovalDate(a);
+  const db = parseWorkflowApprovalDate(b);
+  if (!da && !db) return 0;
+  if (!da) return 1;
+  if (!db) return -1;
+  return db.getTime() - da.getTime();
+}
+
+export function formatWorkflowApprovalDateDisplay(raw: string | null | undefined): string {
+  const parsed = parseWorkflowApprovalDate(raw);
+  if (parsed) {
+    return parsed.toLocaleString('pt-BR', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
+  }
+  const trimmed = raw?.trim();
+  return trimmed || '—';
+}
+
+/** `fromIso` / `toIso` no formato YYYY-MM-DD (input type="date"). */
+export function isWorkflowApprovalDateInRange(
+  raw: string | null | undefined,
+  fromIso: string,
+  toIso: string
+): boolean {
+  const date = parseWorkflowApprovalDate(raw);
+  if (!date) return false;
+
+  if (fromIso) {
+    const from = parseWorkflowApprovalDate(fromIso);
+    if (from) {
+      from.setHours(0, 0, 0, 0);
+      if (date < from) return false;
+    }
+  }
+
+  if (toIso) {
+    const to = parseWorkflowApprovalDate(toIso);
+    if (to) {
+      to.setHours(23, 59, 59, 999);
+      if (date > to) return false;
+    }
+  }
+
+  return true;
 }

@@ -4,7 +4,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, CheckCircle2, Clock, FileText, Search } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, Clock, Search } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { FilterStatCard } from '@/components/ui/FilterStatCard';
 import { Button } from '@/components/ui/Button';
@@ -27,6 +27,7 @@ import {
   type ApproverRequestListItem,
   APPROVER_FILTER_LIST_CONFIG,
   FilteredApproverRequestList,
+  FLUIG_WORKFLOW_DATASETS,
   FluigDatasetToggle,
   useFluigWorkflowApprovalDatasets,
 } from '@/components/fluig/fluigWorkflowAprovadoresShared';
@@ -43,7 +44,7 @@ export function FluigWorkflowAprovadorDetailPage() {
   const nameKey = resolveWorkflowApproverNameKey(decodeURIComponent(rawNameKey ?? ''));
 
   const [activeTab, setActiveTab] = useState(0);
-  const [cardFilter, setCardFilter] = useState<ApproverRequestFilter>('all');
+  const [cardFilter, setCardFilter] = useState<ApproverRequestFilter>('approved');
   const [detailRow, setDetailRow] = useState<ParsedWorkflowRow | null>(null);
 
   const { data: userData, isLoading: loadingUser } = useQuery({
@@ -73,6 +74,7 @@ export function FluigWorkflowAprovadorDetailPage() {
   }, [mergedSummary?.inG3, mergedSummary?.inG5, mergedSummary == null]);
 
   const effectiveTab = availableTabs.includes(activeTab) ? activeTab : availableTabs[0];
+  const datasetId = FLUIG_WORKFLOW_DATASETS[effectiveTab]?.id ?? FLUIG_WORKFLOW_DATASETS[0].id;
 
   const activeBucket = useMemo(() => {
     const buckets = bucketsByDataset[effectiveTab] ?? [];
@@ -109,7 +111,7 @@ export function FluigWorkflowAprovadorDetailPage() {
 
   const handleDatasetTabChange = (tab: number) => {
     setActiveTab(tab);
-    setCardFilter('all');
+    setCardFilter('approved');
     setDetailRow(null);
   };
 
@@ -197,17 +199,7 @@ export function FluigWorkflowAprovadorDetailPage() {
                 />
               ) : null}
 
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-3">
-                <FilterStatCard
-                  label="Total"
-                  count={stats.total}
-                  icon={FileText}
-                  iconBg="bg-blue-100 dark:bg-blue-900/30"
-                  iconColor="text-blue-600 dark:text-blue-400"
-                  isActive={cardFilter === 'all'}
-                  loading={isLoading}
-                  onClick={() => setCardFilter('all')}
-                />
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6">
                 <FilterStatCard
                   label="Aprovados"
                   count={stats.approved}
@@ -266,6 +258,7 @@ export function FluigWorkflowAprovadorDetailPage() {
               ) : (
                 <FilteredApproverRequestList
                   filter={cardFilter}
+                  datasetId={datasetId}
                   approvedRequests={approvedRequests}
                   pendingRequests={pendingRequests}
                   onRowClick={handleOpenRequest}

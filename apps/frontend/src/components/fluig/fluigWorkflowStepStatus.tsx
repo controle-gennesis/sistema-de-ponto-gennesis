@@ -3,6 +3,7 @@
 import React from 'react';
 import {
   extractPersonFromCellValue,
+  formatWorkflowApprovalDateDisplay,
   type ParsedWorkflowRow,
   type WorkflowStepStatus,
 } from '@/lib/fluigWorkflowApproval';
@@ -102,11 +103,18 @@ export function StatusPersonCell({
 
 export function ApprovalStepCell({ step }: { step: ParsedWorkflowRow['steps'][number] }) {
   return (
-    <StatusPersonCell
-      status={stepStatusLabel(step.status)}
-      person={getStepPersonName(step)}
-      statusClassName={stepStatusBadgeClass(step.status)}
-    />
+    <div className="space-y-1">
+      <StatusPersonCell
+        status={stepStatusLabel(step.status)}
+        person={getStepPersonName(step)}
+        statusClassName={stepStatusBadgeClass(step.status)}
+      />
+      {step.status === 'approved' && step.approvedAt ? (
+        <p className="text-center text-[11px] tabular-nums text-gray-500 dark:text-gray-400">
+          {formatWorkflowApprovalDateDisplay(step.approvedAt)}
+        </p>
+      ) : null}
+    </div>
   );
 }
 
@@ -124,7 +132,9 @@ export function WorkflowApprovalStepCard({ step }: { step: ParsedWorkflowRow['st
         />
       </div>
       {step.status === 'approved' && step.approvedAt ? (
-        <p className="mt-2 text-center text-[11px] text-gray-500 dark:text-gray-400">{step.approvedAt}</p>
+        <p className="mt-2 text-center text-[11px] text-gray-500 dark:text-gray-400">
+          {formatWorkflowApprovalDateDisplay(step.approvedAt)}
+        </p>
       ) : null}
     </div>
   );

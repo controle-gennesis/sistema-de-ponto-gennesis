@@ -2,8 +2,10 @@
 
 import React, { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { useQueries } from '@tanstack/react-query';
-import { CheckCircle2, Clock, FileText, Search, X, type LucideIcon, ExternalLink } from 'lucide-react';
+import { CheckCircle2, Clock, FileText, Filter, RotateCcw, Search, X, type LucideIcon, ExternalLink } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
+import { DatePickerField } from '@/components/ui/DatePickerField';
+import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { CadastroListEmpty, CadastroListSummary } from '@/components/ui/CadastroListSummary';
 import { cadastroListClasses } from '@/components/ui/RowActionMenu';
 import {
@@ -17,9 +19,14 @@ import {
   buildWorkflowRowKeyMap,
   FLUIG_WORKFLOW_APPROVAL_DATASET_G3,
   FLUIG_WORKFLOW_APPROVAL_DATASET_G5,
+  formatWorkflowApprovalDateDisplay,
+  isWorkflowApprovalDateInRange,
+  compareWorkflowApprovalDateDesc,
   parseWorkflowApprovalRows,
-  type ParsedWorkflowRow,
+  getWorkflowSectorsForDataset,
+  SECTOR_TABLE_HEADERS,
   type WorkflowApproverRequestRef,
+  type WorkflowSector,
 } from '@/lib/fluigWorkflowApproval';
 import { ListPagination } from '@/components/ui/ListPagination';
 
@@ -32,6 +39,18 @@ export const APPROVERS_LIST_PAGE_SIZE = 20;
 export const APPROVER_REQUESTS_PAGE_SIZE = 15;
 
 export type ApproverRequestFilter = 'all' | 'approved' | 'pending';
+
+export type ApproverStageFilter = 'all' | WorkflowSector;
+
+function buildApproverStageFilterOptions(datasetId: string): { value: ApproverStageFilter; label: string }[] {
+  return [
+    { value: 'all', label: 'Todas as etapas' },
+    ...getWorkflowSectorsForDataset(datasetId).map((sector) => ({
+      value: sector,
+      label: SECTOR_TABLE_HEADERS[sector],
+    })),
+  ];
+}
 
 export type ApproverRequestListItem = WorkflowApproverRequestRef & {
   disposition: 'approved' | 'pending';
@@ -191,7 +210,9 @@ export function buildApproverListItems(
   pendingRequests: WorkflowApproverRequestRef[]
 ): ApproverRequestListItem[] {
   if (filter === 'approved') {
-    return approvedRequests.map((item) => ({ ...item, disposition: 'approved' as const }));
+    return approvedRequests
+      .map((item) => ({ ...item, disposition: 'approved' as const }))
+      .sort((a, b) => compareWorkflowApprovalDateDesc(a.approvedAt, b.approvedAt));
   }
   if (filter === 'pending') {
     return pendingRequests.map((item) => ({ ...item, disposition: 'pending' as const }));
@@ -218,23 +239,89 @@ function matchesApproverRequestSearch(item: ApproverRequestListItem, term: strin
   return statusWord.includes(term);
 }
 
+function matchesApprovalPeriod(
+  item: ApproverRequestListItem,
+  fromIso: string,
+  toIso: string
+): boolean {
+  if (!fromIso && !toIso) return true;
+  if (item.disposition !== 'approved') return false;
+  return isWorkflowApprovalDateInRange(item.approvedAt, fromIso, toIso);
+}
+
+function matchesApprovalStage(item: ApproverRequestListItem, stageFilter: ApproverStageFilter): boolean {
+  if (stageFilter === 'all') return true;
+  return item.sector === stageFilter;
+}
+
 const EMPTY_APPROVED: WorkflowApproverRequestRef[] = [];
 const EMPTY_PENDING: WorkflowApproverRequestRef[] = [];
 
+function approvalSectorBadgeClass(sector: WorkflowApproverRequestRef['sector']): string {
+  switch (sector) {
+    case 'diretoria':
+      return 'bg-violet-100 text-violet-800 dark:bg-violet-900/30 dark:text-violet-300';
+    case 'tecnico':
+      return 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300';
+    case 'compras':
+      return 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300';
+    default:
+      return 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300';
+  }
+}
+
+function handleApprovalPeriodFromChange(
+  value: string,
+  periodTo: string,
+  setPeriodFrom: (value: string) => void,
+  setPeriodTo: (value: string) => void
+) {
+  setPeriodFrom(value);
+  if (value && periodTo && value > periodTo) setPeriodTo(value);
+}
+
+function handleApprovalPeriodToChange(
+  value: string,
+  periodFrom: string,
+  setPeriodFrom: (value: string) => void,
+  setPeriodTo: (value: string) => void
+) {
+  setPeriodTo(value);
+  if (value && periodFrom && periodFrom > value) setPeriodFrom(value);
+}
+
 export const FilteredApproverRequestList = React.memo(function FilteredApproverRequestList({
   filter,
+  datasetId,
   approvedRequests,
   pendingRequests,
   onRowClick,
 }: {
   filter: ApproverRequestFilter;
+  datasetId: string;
   approvedRequests: WorkflowApproverRequestRef[];
   pendingRequests: WorkflowApproverRequestRef[];
   onRowClick?: (item: ApproverRequestListItem) => void;
 }) {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
+  const [periodFrom, setPeriodFrom] = useState('');
+  const [periodTo, setPeriodTo] = useState('');
+  const [stageFilter, setStageFilter] = useState<ApproverStageFilter>('all');
+  const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
+  const stageFilterOptions = useMemo(
+    () => buildApproverStageFilterOptions(datasetId),
+    [datasetId]
+  );
   const deferredSearch = useDeferredValue(search);
+  const deferredPeriodFrom = useDeferredValue(periodFrom);
+  const deferredPeriodTo = useDeferredValue(periodTo);
+  const deferredStageFilter = useDeferredValue(stageFilter);
+  const hasPeriodFilter = Boolean(periodFrom || periodTo);
+  const hasStageFilter = stageFilter !== 'all';
+  const hasActiveModalFilter = hasPeriodFilter || hasStageFilter;
+  const showApprovalDateColumn = filter !== 'pending';
+  const showPeriodFilterFields = filter !== 'pending';
 
   const listHeader = APPROVER_FILTER_LIST_CONFIG[filter];
   const ListHeaderIcon = listHeader.Icon;
@@ -249,9 +336,13 @@ export const FilteredApproverRequestList = React.memo(function FilteredApproverR
 
   const filteredItems = useMemo(() => {
     const term = deferredSearch.trim().toLowerCase();
-    if (!term) return items;
-    return items.filter((item) => matchesApproverRequestSearch(item, term));
-  }, [items, deferredSearch]);
+    return items.filter((item) => {
+      if (term && !matchesApproverRequestSearch(item, term)) return false;
+      if (!matchesApprovalStage(item, deferredStageFilter)) return false;
+      if (!matchesApprovalPeriod(item, deferredPeriodFrom, deferredPeriodTo)) return false;
+      return true;
+    });
+  }, [items, deferredSearch, deferredStageFilter, deferredPeriodFrom, deferredPeriodTo]);
 
   const totalPages = Math.max(1, Math.ceil(filteredItems.length / APPROVER_REQUESTS_PAGE_SIZE));
 
@@ -262,11 +353,21 @@ export const FilteredApproverRequestList = React.memo(function FilteredApproverR
 
   useEffect(() => {
     setPage(1);
-  }, [filter, deferredSearch]);
+  }, [filter, deferredSearch, deferredStageFilter, deferredPeriodFrom, deferredPeriodTo]);
 
   useEffect(() => {
     setSearch('');
+    setPeriodFrom('');
+    setPeriodTo('');
+    setStageFilter('all');
+    setIsFiltersModalOpen(false);
   }, [filter]);
+
+  useEffect(() => {
+    if (stageFilter !== 'all' && !stageFilterOptions.some((option) => option.value === stageFilter)) {
+      setStageFilter('all');
+    }
+  }, [datasetId, stageFilter, stageFilterOptions]);
 
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
@@ -294,25 +395,43 @@ export const FilteredApproverRequestList = React.memo(function FilteredApproverR
             </div>
           </div>
           <div className={cadastroListClasses.cardToolbar}>
-            <div className="relative min-w-[240px] flex-1 sm:w-[320px] sm:flex-none">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
-              <input
-                type="search"
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Buscar ID, título, filial..."
-                className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-              />
-              {search ? (
-                <button
-                  type="button"
-                  onClick={() => setSearch('')}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-300"
-                  aria-label="Limpar busca"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              ) : null}
+            <div className="flex flex-shrink-0 flex-wrap items-center gap-2 sm:justify-end">
+              <div className="relative min-w-[240px] flex-1 sm:w-[280px] sm:flex-none">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
+                <input
+                  type="search"
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder="Buscar ID, título, filial..."
+                  className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                />
+                {search ? (
+                  <button
+                    type="button"
+                    onClick={() => setSearch('')}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-300"
+                    aria-label="Limpar busca"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                ) : null}
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsFiltersModalOpen(true)}
+                className={`relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition-colors ${
+                  hasActiveModalFilter
+                    ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40'
+                    : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
+                }`}
+                aria-label="Abrir filtro"
+                title={hasActiveModalFilter ? 'Filtro (ativo)' : 'Filtro'}
+              >
+                <Filter className="h-4 w-4" />
+                {hasActiveModalFilter ? (
+                  <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
+                ) : null}
+              </button>
             </div>
           </div>
         </div>
@@ -322,8 +441,16 @@ export const FilteredApproverRequestList = React.memo(function FilteredApproverR
         {filteredItems.length === 0 ? (
           <CadastroListEmpty
             icon={ListHeaderIcon}
-            title={search ? 'Nenhuma solicitação encontrada' : listHeader.emptyTitle}
-            hint={search ? 'Ajuste a busca para ver outros resultados.' : listHeader.emptyHint}
+            title={
+              search || hasActiveModalFilter
+                ? 'Nenhuma solicitação encontrada'
+                : listHeader.emptyTitle
+            }
+            hint={
+              search || hasActiveModalFilter
+                ? 'Ajuste a busca ou os filtros para ver outros resultados.'
+                : listHeader.emptyHint
+            }
           />
         ) : (
           <>
@@ -346,6 +473,10 @@ export const FilteredApproverRequestList = React.memo(function FilteredApproverR
                     <th className={ID_COL_TH}>ID</th>
                     <th className={cadastroListClasses.th}>Título</th>
                     <th className={cadastroListClasses.thCenter}>Status</th>
+                    <th className={cadastroListClasses.thCenter}>Etapa</th>
+                    {showApprovalDateColumn ? (
+                      <th className={cadastroListClasses.thCenter}>Data de aprovação</th>
+                    ) : null}
                     <th className={cadastroListClasses.thCenter}>Filial</th>
                     <th className={ACTIONS_COL_TH}>Ações</th>
                   </tr>
@@ -393,6 +524,25 @@ export const FilteredApproverRequestList = React.memo(function FilteredApproverR
                             {isApproved ? 'Aprovado' : 'Pendente'}
                           </span>
                         </td>
+                        <td className={cadastroListClasses.tdCenter}>
+                          <span
+                            className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${approvalSectorBadgeClass(item.sector)}`}
+                          >
+                            {item.sectorLabel}
+                          </span>
+                        </td>
+                        {showApprovalDateColumn ? (
+                          <td
+                            className={`${cadastroListClasses.tdCenter} whitespace-nowrap tabular-nums text-gray-700 dark:text-gray-300`}
+                            title={
+                              isApproved
+                                ? `Aprovação ${item.sectorLabel}${item.approvedAt ? `: ${item.approvedAt}` : ''}`
+                                : undefined
+                            }
+                          >
+                            {isApproved ? formatWorkflowApprovalDateDisplay(item.approvedAt) : '—'}
+                          </td>
+                        ) : null}
                         <td className={cadastroListClasses.tdCenter}>{item.filial ?? '—'}</td>
                         <td className={ACTIONS_COL_TD}>
                           <div className="flex justify-center">
@@ -424,6 +574,104 @@ export const FilteredApproverRequestList = React.memo(function FilteredApproverR
           </>
         )}
       </CardContent>
+
+      {isFiltersModalOpen ? (
+        <div className="fixed inset-0 z-[1000] flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/40"
+            onClick={() => setIsFiltersModalOpen(false)}
+            aria-hidden
+          />
+          <div className="relative mx-4 w-full max-w-lg rounded-xl bg-white shadow-2xl dark:bg-gray-800">
+            <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4 dark:border-gray-700">
+              <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">Filtro</h3>
+              <button
+                type="button"
+                onClick={() => setIsFiltersModalOpen(false)}
+                className="rounded-md p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+                aria-label="Fechar filtros"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="px-5 py-4">
+              <div className="space-y-4">
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Etapa
+                  </label>
+                  <StringSingleSelectDropdown
+                    value={stageFilter}
+                    onChange={(value) => setStageFilter(value as ApproverStageFilter)}
+                    options={stageFilterOptions}
+                    allowEmpty={false}
+                    placeholder="Todas as etapas"
+                    searchPlaceholder="Pesquisar..."
+                  />
+                </div>
+                {showPeriodFilterFields ? (
+                  <div>
+                    <p className="mb-3 text-sm text-gray-600 dark:text-gray-400">
+                      Período em que a solicitação foi aprovada por esta pessoa.
+                    </p>
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                      <div>
+                        <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                          Aprovação (de)
+                        </label>
+                        <DatePickerField
+                          value={periodFrom}
+                          onChange={(value) =>
+                            handleApprovalPeriodFromChange(value, periodTo, setPeriodFrom, setPeriodTo)
+                          }
+                          placeholder="dd/mm/aaaa"
+                          noFocusRing
+                          aria-label="Data inicial da aprovação"
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                          Aprovação (até)
+                        </label>
+                        <DatePickerField
+                          value={periodTo}
+                          onChange={(value) =>
+                            handleApprovalPeriodToChange(value, periodFrom, setPeriodFrom, setPeriodTo)
+                          }
+                          placeholder="dd/mm/aaaa"
+                          noFocusRing
+                          aria-label="Data final da aprovação"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+            <div className="flex items-center justify-between border-t border-gray-200 px-5 py-4 dark:border-gray-700">
+              <button
+                type="button"
+                onClick={() => {
+                  setPeriodFrom('');
+                  setPeriodTo('');
+                  setStageFilter('all');
+                }}
+                className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+              >
+                <RotateCcw className="h-4 w-4" />
+                Limpar filtros
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsFiltersModalOpen(false)}
+                className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-gray-800 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-gray-200"
+              >
+                Fechar
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </Card>
   );
 });
