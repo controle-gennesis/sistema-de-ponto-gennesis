@@ -30,6 +30,10 @@ export type SingleSelectSearchDropdownProps = {
   menuInline?: boolean;
   noFocusRing?: boolean;
   hideFocus?: boolean;
+  disableSearch?: boolean;
+  menuAlign?: 'start' | 'end';
+  matchTriggerWidth?: boolean;
+  menuMinWidth?: number;
 };
 
 type FloatingPos = {
@@ -48,22 +52,50 @@ function getPortalRoot(): HTMLElement | null {
   return document.getElementById('dropdown-portal-root') ?? document.body;
 }
 
-function computeFloatingPos(trigger: HTMLElement): FloatingPos {
+type FloatingPosOptions = {
+  align?: 'start' | 'end';
+  matchTriggerWidth?: boolean;
+  disableSearch?: boolean;
+  optionCount?: number;
+  minMenuWidth?: number;
+};
+
+const MENU_OPTION_CHROME_PX = 76;
+const COMPACT_MENU_MIN_WIDTH_PX = 140;
+
+function estimateCompactMenuMinWidth(labels: string[], triggerWidth = 0): number {
+  const longest = labels.length > 0 ? labels.reduce((max, label) => Math.max(max, label.length), 0) : 0;
+  const contentWidth = Math.ceil(longest * 8.5 + MENU_OPTION_CHROME_PX);
+  const widerThanTrigger = triggerWidth > 0 ? Math.ceil(triggerWidth + 48) : 0;
+  return Math.max(COMPACT_MENU_MIN_WIDTH_PX, contentWidth, widerThanTrigger);
+}
+
+function computeFloatingPos(trigger: HTMLElement, options?: FloatingPosOptions): FloatingPos {
   const rect = trigger.getBoundingClientRect();
-  const gap = 6;
+  const gap = 4;
   const margin = 12;
-  const width = Math.max(rect.width, 200);
-  const chrome = 72;
-  const preferred = LIST_MAX + chrome;
+  const baseWidth = options?.matchTriggerWidth ? rect.width : Math.max(rect.width, 200);
+  const width = options?.minMenuWidth ? Math.max(baseWidth, options.minMenuWidth) : baseWidth;
+  const disableSearch = options?.disableSearch ?? false;
+  const optionCount = options?.optionCount ?? 8;
+  const listChrome = disableSearch ? 16 : 72;
+  const estimatedList = Math.min(LIST_MAX, Math.max(44, optionCount * 44 + 8));
+  const preferred = estimatedList + listChrome;
 
   const spaceBelow = window.innerHeight - rect.bottom - gap - margin;
   const spaceAbove = rect.top - gap - margin;
   const openUp = spaceBelow < preferred && spaceAbove > spaceBelow;
 
+  let left = rect.left;
+  if (options?.align === 'end') {
+    left = rect.right - width;
+  }
+  left = Math.max(margin, Math.min(left, window.innerWidth - width - margin));
+
   if (openUp) {
-    const maxHeight = Math.max(160, Math.min(preferred, spaceAbove));
+    const maxHeight = Math.max(120, Math.min(preferred, spaceAbove));
     return {
-      left: rect.left,
+      left,
       width,
       bottom: window.innerHeight - rect.top + gap,
       maxHeight,
@@ -71,9 +103,9 @@ function computeFloatingPos(trigger: HTMLElement): FloatingPos {
     };
   }
 
-  const maxHeight = Math.max(160, Math.min(preferred, spaceBelow));
+  const maxHeight = Math.max(120, Math.min(preferred, spaceBelow));
   return {
-    left: rect.left,
+    left,
     width,
     top: rect.bottom + gap,
     maxHeight,
@@ -81,11 +113,12 @@ function computeFloatingPos(trigger: HTMLElement): FloatingPos {
   };
 }
 
-function OptionLabelContent({ opt }: { opt: MultiSelectSearchOption }) {
+function OptionLabelContent({ opt, noTruncate = false }: { opt: MultiSelectSearchOption; noTruncate?: boolean }) {
+  const labelClass = noTruncate ? 'whitespace-nowrap' : 'truncate';
   const label = opt.labelClassName ? (
-    <span className={`truncate ${opt.labelClassName}`}>{opt.label}</span>
+    <span className={`${labelClass} ${opt.labelClassName}`}>{opt.label}</span>
   ) : (
-    <span className="truncate">{opt.label}</span>
+    <span className={labelClass}>{opt.label}</span>
   );
 
   if (!opt.swatchColor) return label;
@@ -116,6 +149,10 @@ export function SingleSelectSearchDropdown({
   menuInline = false,
   noFocusRing = false,
   hideFocus = false,
+  disableSearch = false,
+  menuAlign = 'start',
+  matchTriggerWidth = false,
+  menuMinWidth,
 }: SingleSelectSearchDropdownProps) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
@@ -144,8 +181,26 @@ export function SingleSelectSearchDropdown({
 
   const syncFloatingPos = useCallback(() => {
     if (!triggerRef.current) return;
-    setFloatingPos(computeFloatingPos(triggerRef.current));
-  }, []);
+    const triggerWidth = triggerRef.current.getBoundingClientRect().width;
+    const labels = [
+      ...(allowEmpty ? [emptyOptionLabel] : []),
+      ...options.map((o) => o.label),
+    ];
+    const minWidth = disableSearch
+      ? menuMinWidth
+        ? Math.max(estimateCompactMenuMinWidth(labels, triggerWidth), menuMinWidth)
+        : estimateCompactMenuMinWidth(labels, triggerWidth)
+      : menuMinWidth;
+    setFloatingPos(
+      computeFloatingPos(triggerRef.current, {
+        align: menuAlign,
+        matchTriggerWidth,
+        disableSearch,
+        optionCount: options.length + (allowEmpty ? 1 : 0),
+        minMenuWidth: minWidth,
+      })
+    );
+  }, [menuAlign, matchTriggerWidth, disableSearch, options, allowEmpty, emptyOptionLabel, menuMinWidth]);
 
   useEffect(() => setMounted(true), []);
 
@@ -169,10 +224,10 @@ export function SingleSelectSearchDropdown({
   }, [open, menuInline, syncFloatingPos]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || disableSearch) return;
     const id = window.requestAnimationFrame(() => searchInputRef.current?.focus());
     return () => window.cancelAnimationFrame(id);
-  }, [open]);
+  }, [open, disableSearch]);
 
   useEffect(() => {
     if (disabled && open) {
@@ -211,8 +266,10 @@ export function SingleSelectSearchDropdown({
   const listMaxHeight = menuInline
     ? LIST_MAX
     : floatingPos
-      ? Math.max(80, floatingPos.maxHeight - 72)
-      : LIST_MAX;
+      ? Math.max(80, floatingPos.maxHeight - (disableSearch ? 16 : 72))
+      : disableSearch
+        ? Math.min(LIST_MAX, Math.max(44, filtered.length * 44 + 8))
+        : LIST_MAX;
 
   const optionClassName = singleSelectOptionClassName;
 
@@ -227,36 +284,38 @@ export function SingleSelectSearchDropdown({
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
-      <div className="shrink-0 border-b border-gray-100 px-3 py-2.5 dark:border-gray-700">
-        <div className="relative">
-          <Search
-            className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500"
-            aria-hidden
-          />
-          <input
-            ref={searchInputRef}
-            type="text"
-            placeholder={searchPlaceholder}
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className={`${SINGLE_SELECT_SEARCH_INPUT_CLS} ${search ? 'pr-9' : 'pr-3'}`}
-          />
-          {search ? (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                setSearch('');
-                searchInputRef.current?.focus();
-              }}
-              className="absolute right-2 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-gray-400 outline-none transition-colors hover:bg-gray-200/80 hover:text-gray-600 focus:ring-0 dark:text-gray-500 dark:hover:bg-gray-700 dark:hover:text-gray-300"
-              aria-label="Limpar pesquisa"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          ) : null}
+      {!disableSearch ? (
+        <div className="shrink-0 border-b border-gray-100 px-3 py-2.5 dark:border-gray-700">
+          <div className="relative">
+            <Search
+              className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500"
+              aria-hidden
+            />
+            <input
+              ref={searchInputRef}
+              type="text"
+              placeholder={searchPlaceholder}
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className={`${SINGLE_SELECT_SEARCH_INPUT_CLS} ${search ? 'pr-9' : 'pr-3'}`}
+            />
+            {search ? (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSearch('');
+                  searchInputRef.current?.focus();
+                }}
+                className="absolute right-2 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-gray-400 outline-none transition-colors hover:bg-gray-200/80 hover:text-gray-600 focus:ring-0 dark:text-gray-500 dark:hover:bg-gray-700 dark:hover:text-gray-300"
+                aria-label="Limpar pesquisa"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            ) : null}
+          </div>
         </div>
-      </div>
+      ) : null}
 
       <div
         ref={listRef}
@@ -278,7 +337,9 @@ export function SingleSelectSearchDropdown({
                 onClick={() => pickValue('')}
                 className={optionClassName(!value)}
               >
-                <span className="min-w-0 truncate">{emptyOptionLabel}</span>
+                <span className={`min-w-0 flex-1 ${disableSearch ? 'whitespace-nowrap' : 'truncate'}`}>
+                  {emptyOptionLabel}
+                </span>
                 {!value ? <Check className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" aria-hidden /> : null}
               </button>
             ) : null}
@@ -294,8 +355,8 @@ export function SingleSelectSearchDropdown({
                   onClick={() => pickValue(opt.value)}
                   className={optionClassName(active)}
                 >
-                  <span className="min-w-0 flex-1 truncate">
-                    <OptionLabelContent opt={opt} />
+                  <span className={`min-w-0 flex-1 ${disableSearch ? 'whitespace-nowrap' : 'truncate'}`}>
+                    <OptionLabelContent opt={opt} noTruncate={disableSearch} />
                   </span>
                   {active ? <Check className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" aria-hidden /> : null}
                 </button>

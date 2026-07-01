@@ -17,6 +17,11 @@ export type StringSingleSelectDropdownProps = {
   allowEmpty?: boolean;
   emptyOptionLabel?: string;
   className?: string;
+  menuInline?: boolean;
+  disableSearch?: boolean;
+  menuAlign?: 'start' | 'end';
+  matchTriggerWidth?: boolean;
+  menuMinWidth?: number;
 };
 
 export function StringSingleSelectDropdown({
@@ -31,6 +36,11 @@ export function StringSingleSelectDropdown({
   allowEmpty = true,
   emptyOptionLabel = 'Nenhum',
   className = '',
+  menuInline = false,
+  disableSearch = false,
+  menuAlign = 'start',
+  matchTriggerWidth = false,
+  menuMinWidth,
 }: StringSingleSelectDropdownProps) {
   const dropdownOptions = useMemo((): MultiSelectSearchOption[] => {
     if (!options.length) return [];
@@ -53,6 +63,11 @@ export function StringSingleSelectDropdown({
       allowEmpty={allowEmpty}
       emptyOptionLabel={emptyOptionLabel}
       className={className}
+      menuInline={menuInline}
+      disableSearch={disableSearch}
+      menuAlign={menuAlign}
+      matchTriggerWidth={matchTriggerWidth}
+      menuMinWidth={menuMinWidth}
     />
   );
 }

@@ -630,6 +630,33 @@ function formatCurrency(value: number) {
   }).format(value);
 }
 
+/** Anos civis com pelo menos um mês de vigência (alinhado à tabela Acumulado Anual). */
+function buildContractAvailableYears(startDate: string, endDate: string): number[] {
+  const start = parseDateSafe(startDate);
+  const end = parseDateSafe(endDate);
+  const years = new Set<number>();
+
+  if (start && end) {
+    for (const { y } of listVigenciaMonthKeys(start, end)) {
+      years.add(y);
+    }
+  }
+
+  const yStart = getDateYear(startDate);
+  const yEnd = getDateYear(endDate);
+  if (yStart != null && yEnd != null) {
+    for (let y = Math.min(yStart, yEnd); y <= Math.max(yStart, yEnd); y++) {
+      years.add(y);
+    }
+  }
+
+  if (years.size === 0) {
+    years.add(yStart ?? yEnd ?? new Date().getFullYear());
+  }
+
+  return Array.from(years).sort((a, b) => a - b);
+}
+
 function getYearsBetween(startDate: string, endDate: string): number {
   if (!startDate || !endDate) return 0;
   const start = parseDateSafe(startDate);
@@ -1405,14 +1432,18 @@ export default function ContractDetailPage() {
 
   const availableYears = useMemo(() => {
     if (!contract) return [];
-    const start = getDateYear(contract.startDate) ?? new Date().getFullYear();
-    const end = getDateYear(contract.endDate) ?? start;
-    const years: number[] = [];
-    for (let y = start; y <= end; y++) {
-      years.push(y);
-    }
-    return years.length > 0 ? years : [start];
+    return buildContractAvailableYears(contract.startDate, contract.endDate);
   }, [contract]);
+
+  useEffect(() => {
+    if (!contract || availableYears.length === 0) return;
+    setSelectedYear((prev) => {
+      if (prev === 0) return 0;
+      if (availableYears.includes(prev)) return prev;
+      if (availableYears.includes(currentYear)) return currentYear;
+      return availableYears[0];
+    });
+  }, [contract?.id, availableYears, currentYear]);
 
   const headerYearSelectOptions = useMemo(
     () =>
@@ -3006,7 +3037,7 @@ export default function ContractDetailPage() {
                 <ArrowLeft className="h-4 w-4 shrink-0" />
                 Voltar
               </Link>
-              <div className="absolute right-0 top-1/2 z-10 max-w-[50%] -translate-y-1/2 sm:max-w-none">
+              <div className="absolute right-0 top-1/2 z-10 -translate-y-1/2">
                 {EXIBIR_GASTOS_CONTRATO_NA_UI ? (
                   <div className="text-right">
                     {paidDisplay.loading || totvsRmCarregando ? (
@@ -3039,6 +3070,9 @@ export default function ContractDetailPage() {
                       onChange={(v) => setSelectedMonth(Number(v))}
                       options={MESES_FILTRO_SELECT_OPTIONS}
                       allowEmpty={false}
+                      disableSearch
+                      menuAlign="end"
+                      matchTriggerWidth
                       className="min-w-[9.5rem] max-w-[10.5rem]"
                     />
                     <StringSingleSelectDropdown
@@ -3046,7 +3080,11 @@ export default function ContractDetailPage() {
                       onChange={(v) => setSelectedYear(Number(v))}
                       options={headerYearSelectOptions}
                       allowEmpty={false}
-                      className="min-w-[4.75rem]"
+                      disableSearch
+                      menuAlign="end"
+                      matchTriggerWidth
+                      menuMinWidth={152}
+                      className="min-w-[5.25rem]"
                     />
                   </div>
                 )}
@@ -3190,45 +3228,62 @@ export default function ContractDetailPage() {
                 </div>
                 <div>
                   <div className="flex items-start justify-between gap-2">
-                    <p className="text-gray-500 dark:text-gray-400">Valor Anual ({safeSelectedYear})</p>
+                    <p className="text-gray-500 dark:text-gray-400">
+                      Valor Anual{isAllYears ? '' : ` (${safeSelectedYear})`}
+                    </p>
                     <button
                       type="button"
+                      disabled={isAllYears}
                       onClick={() => {
                         setAdjFormYear(safeSelectedYear);
                         setShowValorAnualAdjustModal(true);
                       }}
-                      className="shrink-0 p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 dark:text-gray-400"
+                      className="shrink-0 p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 dark:text-gray-400 disabled:cursor-not-allowed disabled:opacity-40"
                       title="Ajustar valor anual (orçamento do órgão)"
                     >
                       <Edit2 className="w-4 h-4" />
                     </button>
                   </div>
                   <p className="font-medium text-gray-900 dark:text-gray-100">
-                    {valorAnualAjustado !== null ? formatCurrency(valorAnualAjustado) : '-'}
+                    {isAllYears ? '—' : valorAnualAjustado !== null ? formatCurrency(valorAnualAjustado) : '-'}
                   </p>
                   <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                    Base: (Valor + aditivos) ÷ {contractYearsCount > 0 ? contractYearsCount : '—'} ano(s)
-                    {valorAnualBase !== null &&
-                      valorAnualAjustado !== null &&
-                      Math.abs(valorAnualAjustado - valorAnualBase) > 0.009 && (
-                        <span className="block mt-0.5">
-                          Ajuste orçamentário: {valorAnualAjustado >= valorAnualBase ? '+' : ''}
-                          {formatCurrency(valorAnualAjustado - valorAnualBase)}
-                        </span>
+                    {isAllYears
+                      ? 'Selecione um ano no filtro para ver o valor anual'
+                      : (
+                        <>
+                          Base: (Valor + aditivos) ÷ {contractYearsCount > 0 ? contractYearsCount : '—'} ano(s)
+                          {valorAnualBase !== null &&
+                            valorAnualAjustado !== null &&
+                            Math.abs(valorAnualAjustado - valorAnualBase) > 0.009 && (
+                              <span className="block mt-0.5">
+                                Ajuste orçamentário: {valorAnualAjustado >= valorAnualBase ? '+' : ''}
+                                {formatCurrency(valorAnualAjustado - valorAnualBase)}
+                              </span>
+                            )}
+                        </>
                       )}
                   </p>
                 </div>
                 <div>
-                  <p className="text-gray-500 dark:text-gray-400">Saldo Anual ({safeSelectedYear})</p>
-                  <p className={`font-medium ${saldoAnual !== null && saldoAnual >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                    {saldoAnual !== null ? formatCurrency(saldoAnual) : '-'}
+                  <p className="text-gray-500 dark:text-gray-400">
+                    Saldo Anual{isAllYears ? '' : ` (${safeSelectedYear})`}
+                  </p>
+                  <p className={`font-medium ${!isAllYears && saldoAnual !== null && saldoAnual >= 0 ? 'text-green-600 dark:text-green-400' : !isAllYears ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-gray-100'}`}>
+                    {isAllYears ? '—' : saldoAnual !== null ? formatCurrency(saldoAnual) : '-'}
                   </p>
                   <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                    Valor anual − Faturamento
+                    {isAllYears ? 'Disponível ao filtrar um ano' : 'Valor anual − Faturamento'}
                   </p>
                 </div>
                 <div>
-                  <p className="text-gray-500 dark:text-gray-400">Meta Ideal ({safeSelectedYear})</p>
+                  <p className="text-gray-500 dark:text-gray-400">
+                    Meta Ideal{isAllYears ? '' : ` (${safeSelectedYear})`}
+                  </p>
+                  {isAllYears ? (
+                    <p className="font-medium text-gray-900 dark:text-gray-100">—</p>
+                  ) : (
+                    <>
                   {metaMensalCardInfo.kind === 'empty' && (
                     <p className="font-medium text-green-600 dark:text-green-400">-</p>
                   )}
@@ -3247,10 +3302,18 @@ export default function ContractDetailPage() {
                       </p>
                     </div>
                   )}
+                    </>
+                  )}
                   <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                    Meta ideal = saldo ÷ meses restantes até o fim da vigência. Aditivos em &quot;Valor + Aditivos&quot; recalculam a
-                    partir da data até o fim do contrato. Ajuste no &quot;Valor Anual&quot; (lápis) só altera a meta do mês da
-                    data até dezembro daquele ano civil.
+                    {isAllYears
+                      ? 'Use a tabela Acumulado Anual abaixo'
+                      : (
+                        <>
+                          Meta ideal = saldo ÷ meses restantes até o fim da vigência. Aditivos em &quot;Valor + Aditivos&quot; recalculam a
+                          partir da data até o fim do contrato. Ajuste no &quot;Valor Anual&quot; (lápis) só altera a meta do mês da
+                          data até dezembro daquele ano civil.
+                        </>
+                      )}
                   </p>
                 </div>
               </div>
@@ -3261,12 +3324,14 @@ export default function ContractDetailPage() {
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <Card>
               <CardContent className="p-4">
-                <p className="text-sm text-gray-500 dark:text-gray-400">Valor Total Faturado do Ano</p>
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  {isAllYears ? 'Valor Total Faturado (vigência)' : 'Valor Total Faturado do Ano'}
+                </p>
                 <p className="text-xl font-bold text-green-600 dark:text-green-400 mt-1">
-                  {formatCurrency(faturamentoAnual)}
+                  {formatCurrency(isAllYears ? faturamentoTotalTodosAnos : faturamentoAnual)}
                 </p>
                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                  Ano {safeSelectedYear}
+                  {isAllYears ? 'Soma de todos os anos da vigência' : `Ano ${safeSelectedYear}`}
                 </p>
               </CardContent>
             </Card>

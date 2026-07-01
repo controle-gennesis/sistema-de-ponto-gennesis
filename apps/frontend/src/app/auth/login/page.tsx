@@ -11,11 +11,14 @@ import { toast } from 'react-hot-toast';
 import { useQueryClient } from '@tanstack/react-query';
 import { useTheme } from '@/context/ThemeContext';
 import { Loading } from '@/components/ui/Loading';
+import { useBrandingLogo } from '@/hooks/useBrandingLogo';
+import { persistUnbBranding } from '@/lib/unbBranding';
 
 export default function LoginPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { isDark, toggleTheme } = useTheme();
+  const { logoSrc, logoAlt } = useBrandingLogo();
   const [formData, setFormData] = useState({
     email: '',
     password: '',
@@ -38,6 +41,7 @@ export default function LoginPage() {
 
     try {
       const loginResponse = await authService.login(formData, rememberMe);
+      persistUnbBranding(loginResponse.user?.employee?.costCenter);
       // Limpar cache do React Query
       queryClient.clear();
       toast.success('Login realizado com sucesso!');
@@ -101,9 +105,9 @@ export default function LoginPage() {
             {/* Logo (centro) */}
             <div className="absolute left-1/2 transform -translate-x-1/2 flex items-center justify-center">
               <img 
-                src={isDark ? "/logobranca.png" : "/logopv.png"} 
-                alt="Logo Gennesis Engenharia" 
-                className="h-14 w-auto object-contain"
+                src={logoSrc}
+                alt={logoAlt}
+                className="h-14 w-auto max-w-[220px] object-contain"
               />
             </div>
 

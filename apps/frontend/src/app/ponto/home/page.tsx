@@ -9,7 +9,7 @@ import { useQuery } from '@tanstack/react-query';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Loading } from '@/components/ui/Loading';
 import api from '@/lib/api';
-import { useTheme } from '@/context/ThemeContext';
+import { useBrandingLogo } from '@/hooks/useBrandingLogo';
 
 function getGreeting(date: Date): string {
   const hour = date.getHours();
@@ -26,7 +26,7 @@ function capitalizeFirst(text: string): string {
 
 export default function HomePage() {
   const router = useRouter();
-  const { isDark } = useTheme();
+  const { logoSrc, logoAlt } = useBrandingLogo();
   const [now, setNow] = useState<Date>(() => new Date());
 
   const { data: userData, isLoading: loadingUser } = useQuery({
@@ -53,7 +53,6 @@ export default function HomePage() {
 
   const user = userData?.data || { name: 'Usuário', role: 'EMPLOYEE' };
   const firstName = (user?.name || 'Usuário').split(' ')[0] || 'Usuário';
-  const homeLogoSrc = isDark ? '/logobranca.png' : '/logopv.png';
 
   const greeting = getGreeting(now);
 
@@ -91,9 +90,9 @@ export default function HomePage() {
           {/* Logo */}
           <div className="animate-home-fade-in mb-10">
             <img
-              src={homeLogoSrc}
-              alt="Gennesis"
-              className="h-20 w-auto max-w-[200px] object-contain opacity-95 sm:h-24"
+              src={logoSrc}
+              alt={logoAlt}
+              className="h-20 w-auto max-w-[240px] object-contain opacity-95 sm:h-24"
             />
           </div>
 

@@ -83,6 +83,7 @@ import {
 } from '@/lib/sidebarStorage';
 
 const pk = pathToModuleKey;
+import { useBrandingLogo } from '@/hooks/useBrandingLogo';
 import { useTheme } from '@/context/ThemeContext';
 
 interface SidebarProps {
@@ -131,7 +132,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
     canAccessRecebimentoEntregasRoutePage,
   } = usePermissions();
   const { theme, toggleTheme, isDark } = useTheme();
-  const sidebarLogoSrc = isDark ? '/logobranca.png' : '/logopv.png';
+  const { logoSrc, logoAlt } = useBrandingLogo();
   const searchInputRef = useRef<HTMLInputElement>(null);
   const profileAvatarInputRef = useRef<HTMLInputElement>(null);
   const profileAvatarSectionRef = useRef<HTMLDivElement>(null);
@@ -1111,8 +1112,8 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
               aria-current={onHomeRoute ? 'page' : undefined}
             >
               <img
-                src={sidebarLogoSrc}
-                alt="Gennesis"
+                src={logoSrc}
+                alt={logoAlt}
                 className="h-10 w-10 object-contain"
               />
             </Link>
