@@ -566,22 +566,28 @@
   }
 }
 
-/* Login: autofill sem fundo azul do navegador */
+/* Login: autofill legível (o foco global remove box-shadow e quebrava o hack do Chrome) */
 .login-form-field:-webkit-autofill,
 .login-form-field:-webkit-autofill:hover,
-.login-form-field:-webkit-autofill:focus {
-  -webkit-text-fill-color: rgb(17 24 39);
-  -webkit-box-shadow: 0 0 0 1000px #ffffff inset;
-  box-shadow: 0 0 0 1000px #ffffff inset;
-  transition: background-color 9999s ease-out 0s;
+.login-form-field:-webkit-autofill:focus,
+.login-form-field:-webkit-autofill:active {
+  -webkit-text-fill-color: rgb(17 24 39) !important;
+  caret-color: rgb(17 24 39) !important;
+  color: rgb(17 24 39) !important;
+  -webkit-box-shadow: 0 0 0 1000px #ffffff inset !important;
+  box-shadow: 0 0 0 1000px #ffffff inset !important;
+  transition: background-color 600000s ease-in-out 0s;
 }
 
 html.dark .login-form-field:-webkit-autofill,
 html.dark .login-form-field:-webkit-autofill:hover,
-html.dark .login-form-field:-webkit-autofill:focus {
-  -webkit-text-fill-color: rgb(243 244 246);
-  -webkit-box-shadow: 0 0 0 1000px #1f2937 inset;
-  box-shadow: 0 0 0 1000px #1f2937 inset;
+html.dark .login-form-field:-webkit-autofill:focus,
+html.dark .login-form-field:-webkit-autofill:active {
+  -webkit-text-fill-color: rgb(243 244 246) !important;
+  caret-color: rgb(243 244 246) !important;
+  color: rgb(243 244 246) !important;
+  -webkit-box-shadow: 0 0 0 1000px #1f2937 inset !important;
+  box-shadow: 0 0 0 1000px #1f2937 inset !important;
 }
 
 /* === Campos de formulário: sem destaque visual ao focar (global) === */
@@ -590,7 +596,7 @@ html.dark .login-form-field:-webkit-autofill:focus {
   textarea,
   select,
   [role='combobox']
-):is(:focus, :focus-visible) {
+):not(.login-form-field):is(:focus, :focus-visible) {
   outline: none !important;
   box-shadow: none !important;
   --tw-ring-shadow: 0 0 #0000 !important;
@@ -645,13 +651,25 @@ html.dark .login-form-field:-webkit-autofill:focus {
 button[data-form-field-trigger='true'][aria-expanded='true']:not([class*='border-transparent']),
 [data-form-field-shell='true']:focus-within:not([class*='border-transparent']) {
   outline: none !important;
-  box-shadow: none !important;
   --tw-ring-shadow: 0 0 #0000 !important;
   --tw-ring-offset-shadow: 0 0 #0000 !important;
   --tw-ring-width: 0px !important;
   --tw-ring-offset-width: 0px !important;
   --tw-border-opacity: 1 !important;
   animation: form-field-focus-border 0.22s ease-out forwards;
+}
+
+:is(
+  input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):not([type='hidden']):not([type='submit']):not([type='button']):not([type='reset']),
+  textarea,
+  select,
+  [role='combobox'],
+  button[data-form-field-trigger='true'],
+  button[data-form-field-shell='true']
+):not([class*='border-transparent']):not(.login-form-field):is(:focus, :focus-visible),
+button[data-form-field-trigger='true'][aria-expanded='true']:not([class*='border-transparent']),
+[data-form-field-shell='true']:focus-within:not([class*='border-transparent']) {
+  box-shadow: none !important;
 }
 
 html:not(.dark)

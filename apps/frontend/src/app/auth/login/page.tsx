@@ -158,6 +158,7 @@ export default function LoginPage() {
                 value={formData.email}
                 onChange={handleChange}
                 required
+                autoComplete="username"
                 placeholder="Email"
                 className={`${loginInputClassName} pl-12 pr-4`}
               />
@@ -173,6 +174,7 @@ export default function LoginPage() {
                 value={formData.password}
                 onChange={handleChange}
                 required
+                autoComplete="current-password"
                 placeholder="Senha"
                 className={`${loginInputClassName} pl-12 pr-12`}
               />
