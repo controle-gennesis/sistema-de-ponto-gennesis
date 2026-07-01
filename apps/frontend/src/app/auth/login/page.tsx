@@ -60,6 +60,9 @@ export default function LoginPage() {
     }
   };
 
+  const loginInputClassName =
+    'login-form-field w-full py-4 text-base rounded-lg border border-gray-300 bg-white text-gray-900 placeholder-gray-400 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-500';
+
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData(prev => ({
       ...prev,
@@ -156,7 +159,7 @@ export default function LoginPage() {
                 onChange={handleChange}
                 required
                 placeholder="Email"
-                className="w-full pl-12 pr-4 py-4 text-base bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 dark:focus:ring-gray-100 focus:border-transparent text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
+                className={`${loginInputClassName} pl-12 pr-4`}
               />
             </div>
           </div>
@@ -171,7 +174,7 @@ export default function LoginPage() {
                 onChange={handleChange}
                 required
                 placeholder="Senha"
-                className="w-full pl-12 pr-12 py-4 text-base bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 dark:focus:ring-gray-100 focus:border-transparent text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
+                className={`${loginInputClassName} pl-12 pr-12`}
               />
               <button
                 type="button"

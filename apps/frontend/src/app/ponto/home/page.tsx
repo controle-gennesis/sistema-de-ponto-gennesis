@@ -9,6 +9,7 @@ import { useQuery } from '@tanstack/react-query';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Loading } from '@/components/ui/Loading';
 import api from '@/lib/api';
+import { useTheme } from '@/context/ThemeContext';
 
 function getGreeting(date: Date): string {
   const hour = date.getHours();
@@ -25,6 +26,7 @@ function capitalizeFirst(text: string): string {
 
 export default function HomePage() {
   const router = useRouter();
+  const { isDark } = useTheme();
   const [now, setNow] = useState<Date>(() => new Date());
 
   const { data: userData, isLoading: loadingUser } = useQuery({
@@ -51,6 +53,7 @@ export default function HomePage() {
 
   const user = userData?.data || { name: 'Usuário', role: 'EMPLOYEE' };
   const firstName = (user?.name || 'Usuário').split(' ')[0] || 'Usuário';
+  const homeLogoSrc = isDark ? '/logobranca.png' : '/logopv.png';
 
   const greeting = getGreeting(now);
 
@@ -88,9 +91,9 @@ export default function HomePage() {
           {/* Logo */}
           <div className="animate-home-fade-in mb-10">
             <img
-              src="/loogo.png"
+              src={homeLogoSrc}
               alt="Gennesis"
-              className="h-20 w-20 rounded-2xl object-cover opacity-95 shadow-sm sm:h-24 sm:w-24"
+              className="h-20 w-auto max-w-[200px] object-contain opacity-95 sm:h-24"
             />
           </div>
 

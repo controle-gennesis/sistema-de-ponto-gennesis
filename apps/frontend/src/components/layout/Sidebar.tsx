@@ -131,6 +131,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
     canAccessRecebimentoEntregasRoutePage,
   } = usePermissions();
   const { theme, toggleTheme, isDark } = useTheme();
+  const sidebarLogoSrc = isDark ? '/logobranca.png' : '/logopv.png';
   const searchInputRef = useRef<HTMLInputElement>(null);
   const profileAvatarInputRef = useRef<HTMLInputElement>(null);
   const profileAvatarSectionRef = useRef<HTMLDivElement>(null);
@@ -1104,16 +1105,16 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
           <div className="relative z-0 isolate flex flex-col items-center p-5 pb-3">
             <Link
               href="/ponto/home"
-              className={`w-10 h-10 rounded-xl flex items-center justify-center overflow-hidden transition-all hover:scale-105 ${
-                onHomeRoute
-                  ? 'bg-red-50 dark:bg-red-900/20 ring-2 ring-red-500/30'
-                  : ''
-              }`}
+              className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl transition-all hover:scale-105"
               title="Ir para a página inicial"
               aria-label="Página inicial"
               aria-current={onHomeRoute ? 'page' : undefined}
             >
-              <img src="/loogo.png" alt="Logo Gennesis" className="w-10 h-10 object-contain" />
+              <img
+                src={sidebarLogoSrc}
+                alt="Gennesis"
+                className="h-10 w-10 object-contain"
+              />
             </Link>
           </div>
 

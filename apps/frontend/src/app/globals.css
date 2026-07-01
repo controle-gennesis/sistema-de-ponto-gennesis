@@ -566,6 +566,24 @@
   }
 }
 
+/* Login: autofill sem fundo azul do navegador */
+.login-form-field:-webkit-autofill,
+.login-form-field:-webkit-autofill:hover,
+.login-form-field:-webkit-autofill:focus {
+  -webkit-text-fill-color: rgb(17 24 39);
+  -webkit-box-shadow: 0 0 0 1000px #ffffff inset;
+  box-shadow: 0 0 0 1000px #ffffff inset;
+  transition: background-color 9999s ease-out 0s;
+}
+
+html.dark .login-form-field:-webkit-autofill,
+html.dark .login-form-field:-webkit-autofill:hover,
+html.dark .login-form-field:-webkit-autofill:focus {
+  -webkit-text-fill-color: rgb(243 244 246);
+  -webkit-box-shadow: 0 0 0 1000px #1f2937 inset;
+  box-shadow: 0 0 0 1000px #1f2937 inset;
+}
+
 /* === Campos de formulário: sem destaque visual ao focar (global) === */
 :is(
   input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):not([type='hidden']):not([type='submit']):not([type='button']):not([type='reset']):not([type='image']),
