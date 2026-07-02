@@ -641,6 +641,7 @@ enum DpRequestType {
   ADM_MATERIAL_ESCRITORIO
   ADM_INFORMATICA
   ADM_TREINAMENTOS_NR
+  ADM_ASOS
 }
 
 // Modelo de Solicitação DP (específico do AppSheet “Solicitações Departamento Pessoal”)

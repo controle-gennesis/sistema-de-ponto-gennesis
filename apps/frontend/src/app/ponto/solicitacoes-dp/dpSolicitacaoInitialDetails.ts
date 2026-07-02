@@ -95,6 +95,24 @@ export function getInitialSolicitacaoDetails(
     case 'ADM_INFORMATICA':
     case 'ADM_TREINAMENTOS_NR':
       return { itens: [{ employeeId: '', detalhes: '' }] };
+    case 'ADM_ASOS':
+      return {
+        asos: [
+          {
+            asoTipo: '',
+            employeeId: '',
+            dataNascimento: '',
+            cpf: '',
+            setor: '',
+            cargo: '',
+            novoCargo: '',
+            centroCusto: '',
+            localTrabalho: '',
+            empresa: '',
+            seguirPcmso: '',
+          },
+        ],
+      };
     default:
       return {};
   }

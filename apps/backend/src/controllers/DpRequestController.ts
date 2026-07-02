@@ -14,6 +14,7 @@ import {
 import { parseDpRequestDetails } from '../lib/dpRequestDetails';
 import {
   isAdmTstDpRequestType,
+  isDepartamentoPessoalSector,
   admTstManagerApprovalExclusionWhere,
   admTstOnlyWhere,
   ADM_TST_FEEDBACK_NEXT_STATUSES,
@@ -40,6 +41,7 @@ const DP_REQUEST_TYPES = [
   'ADM_MATERIAL_ESCRITORIO',
   'ADM_INFORMATICA',
   'ADM_TREINAMENTOS_NR',
+  'ADM_ASOS',
 ] as const;
 
 const createDpRequestSchema = z.object({
@@ -320,6 +322,13 @@ export class DpRequestController {
 
       const validated = createDpRequestSchema.parse(req.body);
 
+      if (
+        validated.requestType === 'ADM_ASOS' &&
+        !isDepartamentoPessoalSector(employee.department)
+      ) {
+        throw createError("ASO's disponível apenas para o setor Departamento Pessoal", 403);
+      }
+
       let parsedDetails: Record<string, unknown>;
       try {
         parsedDetails = parseDpRequestDetails(validated.requestType, validated.details);
@@ -383,6 +392,7 @@ export class DpRequestController {
         ADM_MATERIAL_ESCRITORIO: 'Material de escritório',
         ADM_INFORMATICA: 'Informática',
         ADM_TREINAMENTOS_NR: "Treinamentos e NR's",
+        ADM_ASOS: "ASO's",
       };
       const isAdmRequest = isAdmTstDpRequestType(validated.requestType);
       const titlePrefix = isAdmRequest ? 'Solicitação ADM/TST' : 'Solicitação DP';

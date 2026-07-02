@@ -82,7 +82,8 @@ type DpRequestType =
   | 'ADM_MANUTENCAO_ESCRITORIO'
   | 'ADM_MATERIAL_ESCRITORIO'
   | 'ADM_INFORMATICA'
-  | 'ADM_TREINAMENTOS_NR';
+  | 'ADM_TREINAMENTOS_NR'
+  | 'ADM_ASOS';
 
 type DpContractSummary = { id: string; number: string; name: string };
 type EspelhoApprovalItem = {
@@ -375,6 +376,7 @@ const TYPE_LABELS: Record<DpRequestType, string> = {
   ADM_MATERIAL_ESCRITORIO: 'Material de escritório',
   ADM_INFORMATICA: 'Informática',
   ADM_TREINAMENTOS_NR: "Treinamentos e NR's",
+  ADM_ASOS: "ASO's",
 };
 const ESPELHO_BADGE_CLASS: Record<EspelhoApprovalStatus, string> = {
   PENDING_APPROVAL:

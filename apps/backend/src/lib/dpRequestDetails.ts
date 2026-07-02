@@ -128,6 +128,40 @@ const admSimpleItemSchema = z.object({
   detalhes: str,
 });
 
+const admAsosItemSchema = z
+  .object({
+    asoTipo: z.enum(['ADMISSIONAL', 'DEMISSIONAL', 'PERIODICO', 'ALTERACAO_FUNCAO']),
+    employeeId: str,
+    dataNascimento: str,
+    cpf: str,
+    setor: str,
+    cargo: str,
+    novoCargo: strOpt,
+    centroCusto: str,
+    localTrabalho: str,
+    empresa: str,
+    seguirPcmso: z.enum(['SIM', 'NAO']),
+  })
+  .superRefine((data, ctx) => {
+    if (data.asoTipo === 'ALTERACAO_FUNCAO' && !data.novoCargo?.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['novoCargo'],
+        message: 'Informe o novo cargo',
+      });
+    }
+  });
+
+function normalizeAdmAsosDetails(input: unknown): unknown {
+  if (!input || typeof input !== 'object') return input;
+  const data = input as Record<string, unknown>;
+  if (Array.isArray(data.asos)) return input;
+  if (data.asoTipo || data.employeeId) {
+    return { asos: [data] };
+  }
+  return input;
+}
+
 function uniqueEmployeeRefine<T extends { employeeId: string }>(
   arrayKey: string,
   data: Record<string, T[]>,
@@ -214,6 +248,12 @@ export const dpDetailsSchemas = {
   ADM_TREINAMENTOS_NR: z
     .object({ itens: employeeArraySchema(admSimpleItemSchema) })
     .superRefine((data, ctx) => uniqueEmployeeRefine('itens', data, ctx)),
+  ADM_ASOS: z.preprocess(
+    normalizeAdmAsosDetails,
+    z
+      .object({ asos: employeeArraySchema(admAsosItemSchema) })
+      .superRefine((data, ctx) => uniqueEmployeeRefine('asos', data, ctx))
+  ),
 } as const;
 
 export type DpRequestTypeKey = keyof typeof dpDetailsSchemas;

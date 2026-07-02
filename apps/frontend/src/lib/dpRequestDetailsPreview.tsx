@@ -3,6 +3,7 @@
 
 import React from 'react';
 import { formatDateTimeBr } from '@/lib/dateTimeBr';
+import { ASO_TIPO_LABELS } from '@/app/ponto/solicitacoes-dp/dpSolicitacaoRepeatableFields';
 
 function formatYmdToBr(ymd: unknown): string {
   if (typeof ymd !== 'string') return '—';
@@ -421,6 +422,45 @@ export function DpRequestDetailsPreview({ requestType, details, employeeNameById
     );
   }
 
+  if (requestType === 'ADM_ASOS') {
+    const asos =
+      parseObjectArray(d, 'asos').length > 0
+        ? parseObjectArray(d, 'asos')
+        : d.asoTipo || d.employeeId
+          ? [d]
+          : [];
+    return (
+      <div className={sectionBaseCls}>
+        <h3 className={titleCls}>Detalhes do ASO (ADM/TST)</h3>
+        <PreviewItemList
+          items={asos}
+          employeeNameById={employeeNameById}
+          personItemCls={personItemCls}
+          formatSubtitle={(row) => {
+            const asoTipoLabel =
+              ASO_TIPO_LABELS[String(row.asoTipo ?? '')] ?? toTrimmedString(row.asoTipo);
+            const seguirPcmso =
+              row.seguirPcmso === 'SIM' ? 'PCMSO: Sim' : row.seguirPcmso === 'NAO' ? 'PCMSO: Não' : '';
+            const parts = [
+              renderValueOrDash(asoTipoLabel),
+              toTrimmedString(row.cpf) ? `CPF ${toTrimmedString(row.cpf)}` : '',
+              toTrimmedString(row.setor),
+              toTrimmedString(row.cargo),
+              row.asoTipo === 'ALTERACAO_FUNCAO' && toTrimmedString(row.novoCargo)
+                ? `Novo cargo: ${toTrimmedString(row.novoCargo)}`
+                : '',
+              toTrimmedString(row.centroCusto),
+              toTrimmedString(row.localTrabalho),
+              toTrimmedString(row.empresa),
+              seguirPcmso,
+            ].filter(Boolean);
+            return parts.join(' — ') || '—';
+          }}
+        />
+      </div>
+    );
+  }
+
   if (requestType === 'ADM_VIAGENS') {
     const viagens =
       parseObjectArray(d, 'viagens').length > 0
@@ -459,7 +499,11 @@ export function DpRequestDetailsPreview({ requestType, details, employeeNameById
     );
   }
 
-  if (requestType.startsWith('ADM_') && ('detalhes' in d || parseObjectArray(d, 'itens').length > 0)) {
+  if (
+    requestType.startsWith('ADM_') &&
+    requestType !== 'ADM_ASOS' &&
+    ('detalhes' in d || parseObjectArray(d, 'itens').length > 0)
+  ) {
     const itens =
       parseObjectArray(d, 'itens').length > 0
         ? parseObjectArray(d, 'itens')

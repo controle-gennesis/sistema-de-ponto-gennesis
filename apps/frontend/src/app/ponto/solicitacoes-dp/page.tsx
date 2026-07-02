@@ -25,6 +25,7 @@ import { ButtonSeg, DpSolicitacaoTypeFields, type DpFormRequestType } from './Dp
 import {
   AdmTstSolicitacaoTypeFields,
   ADM_TYPE_LABELS,
+  isDepartamentoPessoalSector,
   type AdmFormRequestType,
 } from './AdmTstSolicitacaoTypeFields';
 import { getInitialSolicitacaoDetails } from './dpSolicitacaoInitialDetails';
@@ -427,7 +428,17 @@ export function SolicitacoesGeraisPage() {
         page: '1',
       });
       const res = await api.get(`/payroll/employees?${params.toString()}`);
-      return (res.data?.data?.employees ?? []) as { id: string; name: string }[];
+      return (res.data?.data?.employees ?? []) as Array<{
+        id: string;
+        name: string;
+        cpf?: string;
+        department?: string;
+        position?: string;
+        company?: string | null;
+        polo?: string | null;
+        costCenter?: string | null;
+        birthDate?: string | null;
+      }>;
     },
     enabled: !loadingUser,
   });
@@ -506,13 +517,26 @@ export function SolicitacoesGeraisPage() {
         ? (Object.entries(ADM_TYPE_LABELS) as [AdmFormRequestType, string][])
         : (Object.entries(DP_TYPE_LABELS) as [DpFormRequestType, string][]);
     return source.filter(([k]) => {
+      if (createTargetDepartment === 'ADM_TST') {
+        if (k === 'ADM_ASOS') {
+          return isDepartamentoPessoalSector(employee?.department);
+        }
+        return true;
+      }
       if (createTargetDepartment !== 'DP') return true;
       if ((SENSITIVE_DP_REQUEST_TYPES as readonly string[]).includes(k)) {
         return canCreateSensitiveDpRequestType(selectedContractId);
       }
       return true;
     });
-  }, [createTargetDepartment, selectedContractId, canCreateSensitiveDpRequestType]);
+  }, [createTargetDepartment, selectedContractId, canCreateSensitiveDpRequestType, employee?.department]);
+
+  React.useEffect(() => {
+    if (form.requestType === 'ADM_ASOS' && !isDepartamentoPessoalSector(employee?.department)) {
+      setForm((p) => ({ ...p, requestType: '' }));
+      setDetails({});
+    }
+  }, [form.requestType, employee?.department]);
 
   React.useEffect(() => {
     if (loadingPerms) return;

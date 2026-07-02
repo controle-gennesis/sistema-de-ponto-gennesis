@@ -11,6 +11,7 @@ import { QuantityStepperInput } from '@/components/ui/QuantityStepperInput';
 import { CARGOS_AVAILABLE } from '@/constants/cargos';
 import { DEPARTMENTS_LIST } from '@/constants/payrollFilters';
 import { maskCurrencyInputBrOrEmpty } from '@/lib/maskCurrencyBr';
+import { formatDateBr } from '@/lib/dateTimeBr';
 import { DP_SOLICITACOES_NO_FOCUS_CLS } from '@/lib/dpSolicitacoesUi';
 import {
   AddMoreButton,
@@ -23,7 +24,17 @@ import {
   ButtonSeg,
 } from './dpSolicitacaoRepeatableUi';
 
-type PayrollEmp = { id: string; name: string };
+type PayrollEmp = {
+  id: string;
+  name: string;
+  cpf?: string;
+  department?: string;
+  position?: string;
+  company?: string | null;
+  polo?: string | null;
+  costCenter?: string | null;
+  birthDate?: string | null;
+};
 
 const fieldBox =
   `w-full px-3 py-2.5 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 text-sm appearance-none ${DP_SOLICITACOES_NO_FOCUS_CLS}`;
@@ -207,7 +218,11 @@ type RepeatableWithEmployeesProps = RepeatableBaseProps & {
 };
 
 function getEmployeeOptions(employees: PayrollEmp[]): MultiSelectSearchOption[] {
-  return employees.map((em) => ({ value: em.id, label: em.name, searchText: em.name }));
+  return employees.map((em) => ({
+    value: em.id,
+    label: em.name,
+    searchText: [em.name, em.cpf, em.department, em.position].filter(Boolean).join(' '),
+  }));
 }
 
 function toPositiveInt(value: unknown): number {
@@ -1751,6 +1766,205 @@ export function AdmSimpleRepeatableFields({
         </RepeatableCard>
       ))}
       <AddMoreButton onClick={addItem} disabled={itens.length >= MAX_SOLICITACAO_ITENS} />
+    </div>
+  );
+}
+
+export const ASO_TIPO_OPTIONS: MultiSelectSearchOption[] = [
+  { value: 'ADMISSIONAL', label: 'Admissional', searchText: 'Admissional' },
+  { value: 'DEMISSIONAL', label: 'Demissional', searchText: 'Demissional' },
+  { value: 'PERIODICO', label: 'Periódico', searchText: 'Periódico' },
+  { value: 'ALTERACAO_FUNCAO', label: 'Alteração de função', searchText: 'Alteração de função' },
+];
+
+export const ASO_TIPO_LABELS: Record<string, string> = {
+  ADMISSIONAL: 'Admissional',
+  DEMISSIONAL: 'Demissional',
+  PERIODICO: 'Periódico',
+  ALTERACAO_FUNCAO: 'Alteração de função',
+};
+
+type AdmAsosRow = {
+  asoTipo: string;
+  employeeId: string;
+  dataNascimento: string;
+  cpf: string;
+  setor: string;
+  cargo: string;
+  novoCargo: string;
+  centroCusto: string;
+  localTrabalho: string;
+  empresa: string;
+  seguirPcmso: '' | 'SIM' | 'NAO';
+};
+
+function emptyAdmAsosRow(): AdmAsosRow {
+  return {
+    asoTipo: '',
+    employeeId: '',
+    dataNascimento: '',
+    cpf: '',
+    setor: '',
+    cargo: '',
+    novoCargo: '',
+    centroCusto: '',
+    localTrabalho: '',
+    empresa: '',
+    seguirPcmso: '',
+  };
+}
+
+function mapAdmAsosRow(row: Record<string, unknown>): AdmAsosRow {
+  const seguir = row.seguirPcmso;
+  return {
+    asoTipo: String(row.asoTipo ?? ''),
+    employeeId: String(row.employeeId ?? ''),
+    dataNascimento: String(row.dataNascimento ?? ''),
+    cpf: String(row.cpf ?? ''),
+    setor: String(row.setor ?? ''),
+    cargo: String(row.cargo ?? ''),
+    novoCargo: String(row.novoCargo ?? ''),
+    centroCusto: String(row.centroCusto ?? ''),
+    localTrabalho: String(row.localTrabalho ?? ''),
+    empresa: String(row.empresa ?? ''),
+    seguirPcmso: seguir === 'SIM' || seguir === 'NAO' ? seguir : '',
+  };
+}
+
+function employeeSnapshot(emp: PayrollEmp | undefined): Partial<AdmAsosRow> {
+  if (!emp) {
+    return {
+      dataNascimento: '',
+      cpf: '',
+      setor: '',
+      cargo: '',
+      centroCusto: '',
+      localTrabalho: '',
+      empresa: '',
+    };
+  }
+  return {
+    dataNascimento: emp.birthDate ? formatDateBr(emp.birthDate, '') : '',
+    cpf: emp.cpf ?? '',
+    setor: emp.department ?? '',
+    cargo: emp.position ?? '',
+    centroCusto: emp.costCenter ?? '',
+    localTrabalho: emp.polo ?? '',
+    empresa: emp.company ?? '',
+  };
+}
+
+const readOnlyCls = `w-full px-3 py-2.5 border border-gray-200 rounded-md bg-gray-50 text-gray-700 dark:border-gray-600 dark:bg-gray-900/40 dark:text-gray-300 text-sm ${DP_SOLICITACOES_NO_FOCUS_CLS}`;
+
+function ReadOnlyAsoField({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <label className={labelCls}>{label}</label>
+      <div className={readOnlyCls}>{value || '—'}</div>
+    </div>
+  );
+}
+
+export function AdmAsosRepeatableFields({
+  details,
+  patchDetails,
+  employees,
+}: RepeatableWithEmployeesProps) {
+  const asos = parseArrayField<AdmAsosRow>(
+    details,
+    'asos',
+    mapAdmAsosRow,
+    emptyAdmAsosRow,
+    (legacyDetails) => {
+      if (Array.isArray(legacyDetails.asos) && legacyDetails.asos.length > 0) return null;
+      if (!legacyDetails.asoTipo && !legacyDetails.employeeId) return null;
+      return [mapAdmAsosRow(legacyDetails)];
+    }
+  );
+
+  const employeeOptions = React.useMemo(() => getEmployeeOptions(employees), [employees]);
+  const employeeById = React.useMemo(
+    () => new Map(employees.map((emp) => [emp.id, emp])),
+    [employees]
+  );
+  const { updateItem, addItem, removeItem } = useRepeatableList(
+    asos,
+    emptyAdmAsosRow,
+    patchDetails,
+    'asos',
+    MAX_SOLICITACAO_ITENS
+  );
+
+  return (
+    <div className="space-y-4">
+      {asos.map((row, index) => {
+        const showNovoCargo = row.asoTipo === 'ALTERACAO_FUNCAO';
+        return (
+          <RepeatableCard
+            key={index}
+            title={`ASO ${index + 1}`}
+            index={index}
+            total={asos.length}
+            onRemove={() => removeItem(index)}
+          >
+            <SearchSelectField
+              label="Tipo de ASO *"
+              value={row.asoTipo}
+              onChange={(asoTipo) => {
+                const patch: Partial<AdmAsosRow> = { asoTipo };
+                if (asoTipo !== 'ALTERACAO_FUNCAO') patch.novoCargo = '';
+                updateItem(index, patch);
+              }}
+              options={ASO_TIPO_OPTIONS}
+              placeholder="Selecione o tipo..."
+              allowEmpty
+            />
+            <SearchSelectField
+              label="Nome *"
+              value={row.employeeId}
+              onChange={(employeeId) =>
+                updateItem(index, { employeeId, ...employeeSnapshot(employeeById.get(employeeId)) })
+              }
+              options={rowEmployeeOptions(employeeOptions, asos, index)}
+              placeholder="Selecione o funcionário..."
+            />
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <ReadOnlyAsoField label="Data de nascimento" value={row.dataNascimento} />
+              <ReadOnlyAsoField label="CPF" value={row.cpf} />
+              <ReadOnlyAsoField label="Setor" value={row.setor} />
+              <ReadOnlyAsoField label="Cargo" value={row.cargo} />
+              {showNovoCargo ? (
+                <SearchSelectField
+                  label="Novo cargo *"
+                  value={row.novoCargo}
+                  onChange={(novoCargo) => updateItem(index, { novoCargo })}
+                  options={CARGO_OPTIONS}
+                  placeholder="Selecione o novo cargo..."
+                />
+              ) : null}
+              <ReadOnlyAsoField label="Centro de custo" value={row.centroCusto} />
+              <ReadOnlyAsoField label="Local de trabalho" value={row.localTrabalho} />
+              <ReadOnlyAsoField label="Empresa" value={row.empresa} />
+            </div>
+            <div>
+              <label className={labelCls}>Seguir o PCMSO *</label>
+              <div className="flex gap-2">
+                <ButtonSeg
+                  active={row.seguirPcmso === 'SIM'}
+                  onClick={() => updateItem(index, { seguirPcmso: 'SIM' })}
+                  label="Sim"
+                />
+                <ButtonSeg
+                  active={row.seguirPcmso === 'NAO'}
+                  onClick={() => updateItem(index, { seguirPcmso: 'NAO' })}
+                  label="Não"
+                />
+              </div>
+            </div>
+          </RepeatableCard>
+        );
+      })}
+      <AddMoreButton onClick={addItem} disabled={asos.length >= MAX_SOLICITACAO_ITENS} />
     </div>
   );
 }

@@ -72,6 +72,7 @@ export interface PayrollEmployee {
   client: string | null;
   alocacaoFinal: string | null; // Centro de custo mais frequente nos pontos
   cpf: string;
+  birthDate: string | null;
   bank: string | null;
   accountType: string | null;
   agency: string | null;
@@ -1286,6 +1287,7 @@ export class PayrollService {
           client: employee.client,
           alocacaoFinal: alocacaoFinal,
           cpf: employee.user.cpf,
+          birthDate: employee.birthDate ? employee.birthDate.toISOString().slice(0, 10) : null,
           bank: employee.bank,
           accountType: employee.accountType,
           agency: employee.agency,
@@ -1847,6 +1849,7 @@ export class PayrollService {
       client: employee.client,
       alocacaoFinal: alocacaoFinal,
       cpf: employee.user.cpf,
+      birthDate: employee.birthDate ? employee.birthDate.toISOString().slice(0, 10) : null,
       bank: employee.bank,
       accountType: employee.accountType,
       agency: employee.agency,
