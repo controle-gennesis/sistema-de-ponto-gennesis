@@ -10,6 +10,7 @@ import {
   Tag,
   Clock,
   Paperclip,
+  Pencil,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import toast from 'react-hot-toast';
@@ -187,8 +188,10 @@ export function KanbanCardModal({
   const [editingDraftTaskId, setEditingDraftTaskId] = useState<string | null>(null);
   const [draftFiles, setDraftFiles] = useState<KanbanDraftAttachment[]>([]);
   const [draftLinks, setDraftLinks] = useState<KanbanDraftLink[]>([]);
+  const [isEditingDescription, setIsEditingDescription] = useState(false);
   const mainColumnRef = useRef<HTMLDivElement>(null);
   const descriptionSectionRef = useRef<HTMLDivElement>(null);
+  const descriptionBeforeEditRef = useRef('');
   const attachmentsSectionRef = useRef<HTMLDivElement>(null);
   /** Evita que um fetch antigo do card sobrescreva membros após atribuir/remover. */
   const memberMutationInFlight = useRef(0);
@@ -226,6 +229,7 @@ export function KanbanCardModal({
     setChecklistEnabled(false);
     setShowAttachmentsModal(false);
     setShowCostModal(false);
+    setIsEditingDescription(false);
     if (initialMode === 'create' && !initialCardId) {
       setDraftTasks([]);
       setDraftFiles([]);
@@ -235,7 +239,9 @@ export function KanbanCardModal({
   useEffect(() => {
     if (!card || card.id !== cardId) return;
     setTitle((prev) => (prev === card.title ? prev : card.title));
-    setDescription((prev) => (prev === card.description ? prev : card.description));
+    if (!isEditingDescription) {
+      setDescription((prev) => (prev === card.description ? prev : card.description));
+    }
     setPriority((prev) => (prev === card.priority ? prev : card.priority));
     setStartDate((prev) => {
       const next = card.startDate ?? '';
@@ -348,8 +354,8 @@ export function KanbanCardModal({
       columnId: string;
       checklistEnabled: boolean;
     }>,
-  ) {
-    if (!cardId) return;
+  ): Promise<boolean> {
+    if (!cardId) return false;
     setSaving(true);
     try {
       await updateKanbanCard(cardId, {
@@ -362,11 +368,28 @@ export function KanbanCardModal({
         columnId: partial?.columnId ?? columnId,
       });
       await refreshAll();
+      return true;
     } catch {
       toast.error('Erro ao salvar alterações');
+      return false;
     } finally {
       setSaving(false);
     }
+  }
+
+  function startDescriptionEdit() {
+    descriptionBeforeEditRef.current = description;
+    setIsEditingDescription(true);
+  }
+
+  function cancelDescriptionEdit() {
+    setDescription(descriptionBeforeEditRef.current);
+    setIsEditingDescription(false);
+  }
+
+  async function saveDescription() {
+    const ok = await saveMeta({ description });
+    if (ok) setIsEditingDescription(false);
   }
 
   const pickerCurrentUser: KanbanPickerUser | null = currentUser
@@ -989,15 +1012,64 @@ export function KanbanCardModal({
             </div>
 
             <div ref={descriptionSectionRef}>
-              <label className={kanbanLabel}>Descrição</label>
-              <textarea
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                onBlur={() => isDetail && saveMeta({ description })}
-                rows={4}
-                placeholder="Detalhes, links, observações..."
-                className={kanbanTextarea}
-              />
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <label className={clsx(kanbanLabel, 'mb-0')}>Descrição</label>
+                {isDetail && !isEditingDescription ? (
+                  <button
+                    type="button"
+                    onClick={startDescriptionEdit}
+                    className="p-1.5 rounded-md text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                    aria-label="Editar descrição"
+                  >
+                    <Pencil className="w-4 h-4" />
+                  </button>
+                ) : null}
+              </div>
+              {isDetail && !isEditingDescription ? (
+                <div
+                  className={clsx(
+                    'text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap break-words',
+                    !description.trim() && 'text-gray-400 dark:text-gray-500 italic',
+                  )}
+                >
+                  {description.trim()
+                    ? description
+                    : 'Sem descrição. Clique no lápis para adicionar.'}
+                </div>
+              ) : (
+                <>
+                  <textarea
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    rows={Math.min(20, Math.max(6, description.split('\n').length + 2))}
+                    placeholder="Detalhes, links, observações..."
+                    className={clsx(kanbanTextarea, isDetail && 'resize-y min-h-[120px]')}
+                    autoFocus={isDetail && isEditingDescription}
+                  />
+                  {isDetail && isEditingDescription ? (
+                    <div className="flex items-center justify-end gap-2 mt-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={saving}
+                        onClick={cancelDescriptionEdit}
+                      >
+                        Cancelar
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="error"
+                        loading={saving}
+                        onClick={saveDescription}
+                      >
+                        Salvar
+                      </Button>
+                    </div>
+                  ) : null}
+                </>
+              )}
             </div>
 
             {isDetail && hasAttachments ? (

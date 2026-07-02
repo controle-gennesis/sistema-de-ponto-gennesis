@@ -42,6 +42,8 @@ import {
   deleteKanbanCard,
   duplicateKanbanCard,
   insertCardIntoBoardCache,
+  removeCardFromBoardCache,
+  buildOptimisticCardCopy,
   patchCardInBoardCache,
   type KanbanBoardCardChecklistPatch,
   fetchKanbanCard,
@@ -2104,33 +2106,66 @@ function KanbanPage() {
       return;
     }
 
-    const toastId = toast.loading('Copiando card...');
+    const copyTitle = title?.trim() || action.title;
+    const tempId = `optimistic-copy-${action.cardId}-${Date.now()}`;
+    const sourceCard = previousBoard?.columns
+      .find((col) => col.id === action.columnId)
+      ?.cards.find((card) => card.id === action.cardId);
+
+    if (sourceCard) {
+      const optimistic = buildOptimisticCardCopy(sourceCard, copyTitle, tempId);
+      queryClient.setQueryData<KanbanBoard>(kanbanBoardQueryKey, (old) =>
+        insertCardIntoBoardCache(old, targetColumnId, optimistic, true),
+      );
+    }
+
+    toast.success('Card copiado!', { duration: 2000 });
+
     void (async () => {
       try {
         const created = await duplicateKanbanCard(action.cardId, {
           columnId: targetColumnId,
           title,
         });
-        queryClient.setQueryData<KanbanBoard>(kanbanBoardQueryKey, (old) =>
-          insertCardIntoBoardCache(old, targetColumnId, created, true),
-        );
-        toast.success('Card copiado!', { id: toastId, duration: 2000 });
+        queryClient.setQueryData<KanbanBoard>(kanbanBoardQueryKey, (old) => {
+          const withoutTemp = removeCardFromBoardCache(old, tempId);
+          return insertCardIntoBoardCache(withoutTemp, targetColumnId, created, true) ?? withoutTemp;
+        });
       } catch {
-        toast.error('Não foi possível copiar o card. Tente novamente.', { id: toastId });
+        if (previousBoard !== undefined) {
+          queryClient.setQueryData(kanbanBoardQueryKey, previousBoard);
+        } else {
+          queryClient.setQueryData<KanbanBoard>(kanbanBoardQueryKey, (old) =>
+            removeCardFromBoardCache(old, tempId),
+          );
+        }
+        toast.error('Não foi possível copiar o card. Tente novamente.');
       }
     })();
+    return;
   }
 
   async function confirmDeleteCard() {
     if (deleteConfirm?.type !== 'card') return;
-    try {
-      await deleteKanbanCard(deleteConfirm.cardId);
-      await refreshBoard();
-      toast.success('Card removido');
-      setDeleteConfirm(null);
-    } catch {
-      toast.error('Erro ao remover card');
-    }
+    const { cardId } = deleteConfirm;
+    const previousBoard = queryClient.getQueryData<KanbanBoard>(kanbanBoardQueryKey);
+
+    setDeleteConfirm(null);
+    queryClient.setQueryData<KanbanBoard>(kanbanBoardQueryKey, (old) =>
+      removeCardFromBoardCache(old, cardId),
+    );
+    toast.success('Card removido', { duration: 2000 });
+
+    void (async () => {
+      try {
+        await deleteKanbanCard(cardId);
+      } catch {
+        if (previousBoard !== undefined) {
+          queryClient.setQueryData(kanbanBoardQueryKey, previousBoard);
+        }
+        toast.error('Erro ao remover card');
+      }
+    })();
   }
 
   async function handleSaveColumn(title: string, color: string, limit: number | undefined, id?: string) {

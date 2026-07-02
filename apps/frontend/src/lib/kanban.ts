@@ -233,6 +233,63 @@ export function insertCardIntoBoardCache(
   };
 }
 
+/** Remove um card do cache do board (ex.: após excluir), sem refetch. */
+export function removeCardFromBoardCache(
+  board: KanbanBoard | undefined,
+  cardId: string,
+): KanbanBoard | undefined {
+  if (!board) return board;
+
+  let changed = false;
+  const columns = board.columns.map((col) => {
+    const cards = col.cards.filter((c) => c.id !== cardId);
+    if (cards.length === col.cards.length) return col;
+    changed = true;
+    return { ...col, cards };
+  });
+
+  return changed ? { ...board, columns } : board;
+}
+
+/** Substitui um card temporário (cópia otimista) pelo card real retornado da API. */
+export function replaceCardInBoardCache(
+  board: KanbanBoard | undefined,
+  tempId: string,
+  card: KanbanCard,
+): KanbanBoard | undefined {
+  if (!board) return board;
+
+  let changed = false;
+  const columns = board.columns.map((col) => {
+    const index = col.cards.findIndex((c) => c.id === tempId);
+    if (index < 0) return col;
+    changed = true;
+    const cards = [...col.cards];
+    cards[index] = card;
+    return { ...col, cards };
+  });
+
+  return changed ? { ...board, columns } : board;
+}
+
+export function buildOptimisticCardCopy(
+  source: KanbanCard,
+  title: string,
+  tempId: string,
+): KanbanCard {
+  return {
+    ...source,
+    id: tempId,
+    title,
+    progress: source.checklistEnabled ? 0 : source.progress,
+    completedTasks: source.checklistEnabled ? 0 : source.completedTasks,
+    comments: 0,
+    attachments: 0,
+    createdAt: new Date().toISOString(),
+    completedAt: null,
+  };
+}
+
 export async function createKanbanColumn(payload: {
   title: string;
   color: string;

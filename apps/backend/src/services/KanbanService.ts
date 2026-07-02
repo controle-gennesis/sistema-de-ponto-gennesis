@@ -1662,17 +1662,16 @@ export class KanbanService {
     cardId: string,
     options?: { title?: string; columnId?: string },
   ) {
-    await this.assertCardAccess(userId, cardId);
-
     const source = await prisma.kanbanCard.findUnique({
       where: { id: cardId },
       include: {
-        column: { select: { boardId: true } },
+        column: { include: { board: { select: this.boardAccessSelect } } },
         members: { select: { userId: true } },
         checklistItems: { orderBy: { position: 'asc' } },
       },
     });
     if (!source) throw new Error('Card não encontrado');
+    await this.assertBoardAccess(userId, source.column.board, 'write');
 
     const targetColumnId = options?.columnId?.trim() || source.columnId;
     const nextTitle = options?.title?.trim() || source.title;
