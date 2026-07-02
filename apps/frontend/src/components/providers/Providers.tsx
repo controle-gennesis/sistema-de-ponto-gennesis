@@ -4,6 +4,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { useState } from 'react';
 import { ThemeProvider } from '@/context/ThemeContext';
+import { PageTitleProvider } from '@/context/PageTitleContext';
+import { DocumentTitle } from '@/components/DocumentTitle';
 
 function queryRetry(failureCount: number, error: unknown): boolean {
   const status = (error as { response?: { status?: number } })?.response?.status;
@@ -28,12 +30,15 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
   return (
     <ThemeProvider>
-      <QueryClientProvider client={queryClient}>
-        {children}
-        {process.env.NODE_ENV === 'development' && (
-          <ReactQueryDevtools initialIsOpen={false} />
-        )}
-      </QueryClientProvider>
+      <PageTitleProvider>
+        <QueryClientProvider client={queryClient}>
+          <DocumentTitle />
+          {children}
+          {process.env.NODE_ENV === 'development' && (
+            <ReactQueryDevtools initialIsOpen={false} />
+          )}
+        </QueryClientProvider>
+      </PageTitleProvider>
     </ThemeProvider>
   );
 }

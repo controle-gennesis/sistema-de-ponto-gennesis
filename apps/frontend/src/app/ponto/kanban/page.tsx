@@ -23,6 +23,7 @@ import {
 } from '@/components/kanban/kanbanFormStyles';
 import api from '@/lib/api';
 import { useKanbanDragScrollAssist } from '@/hooks/useKanbanDragScrollAssist';
+import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import {
   type Priority,
   type KanbanCard,
@@ -129,7 +130,7 @@ function readKanbanCollapsedColumns(boardKey: string): Set<string> {
 
 function writeKanbanCollapsedColumns(boardKey: string, ids: Set<string>) {
   if (typeof window === 'undefined') return;
-  sessionStorage.setItem(`kanban-collapsed:${boardKey}`, JSON.stringify([...ids]));
+  sessionStorage.setItem(`kanban-collapsed:${boardKey}`, JSON.stringify(Array.from(ids)));
 }
 
 /** Todos marcados (ou lista vazia) = sem filtro restritivo nesse campo. */
@@ -1804,6 +1805,8 @@ function KanbanPage() {
   });
 
   const boardReadOnly = board?.canWrite === false;
+
+  useDocumentTitle(board?.department ? `Tasks - ${board.department}` : 'Tasks');
 
   const openBoard = useCallback(
     (departmentKey: string) => {
