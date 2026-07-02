@@ -290,6 +290,64 @@ export function buildOptimisticCardCopy(
   };
 }
 
+/** Remove uma coluna do cache do board (ex.: após excluir), sem refetch. */
+export function removeColumnFromBoardCache(
+  board: KanbanBoard | undefined,
+  columnId: string,
+): KanbanBoard | undefined {
+  if (!board) return board;
+
+  const columns = board.columns.filter((col) => col.id !== columnId);
+  return columns.length === board.columns.length ? board : { ...board, columns };
+}
+
+/** Insere uma coluna no cache do board (ex.: após criar), sem refetch. */
+export function insertColumnIntoBoardCache(
+  board: KanbanBoard | undefined,
+  column: KanbanColumn,
+  atEnd = true,
+): KanbanBoard | undefined {
+  if (!board) return board;
+
+  const withoutDup = board.columns.filter((col) => col.id !== column.id);
+  return {
+    ...board,
+    columns: atEnd ? [...withoutDup, column] : [column, ...withoutDup],
+  };
+}
+
+export function buildOptimisticKanbanColumn(
+  title: string,
+  color: string,
+  tempId: string,
+  limit?: number,
+): KanbanColumn {
+  return {
+    id: tempId,
+    title,
+    color,
+    cards: [],
+    ...(limit ? { limit } : {}),
+  };
+}
+
+export function patchColumnInBoardCache(
+  board: KanbanBoard | undefined,
+  columnId: string,
+  patch: Partial<Pick<KanbanColumn, 'title' | 'color' | 'limit'>>,
+): KanbanBoard | undefined {
+  if (!board) return board;
+
+  let changed = false;
+  const columns = board.columns.map((col) => {
+    if (col.id !== columnId) return col;
+    changed = true;
+    return { ...col, ...patch };
+  });
+
+  return changed ? { ...board, columns } : board;
+}
+
 export async function createKanbanColumn(payload: {
   title: string;
   color: string;

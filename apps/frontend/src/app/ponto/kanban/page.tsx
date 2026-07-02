@@ -43,7 +43,11 @@ import {
   duplicateKanbanCard,
   insertCardIntoBoardCache,
   removeCardFromBoardCache,
+  removeColumnFromBoardCache,
+  insertColumnIntoBoardCache,
   buildOptimisticCardCopy,
+  buildOptimisticKanbanColumn,
+  patchColumnInBoardCache,
   patchCardInBoardCache,
   type KanbanBoardCardChecklistPatch,
   fetchKanbanCard,
@@ -96,6 +100,8 @@ import {
   Eye,
   Users,
   Star,
+  Minimize2,
+  Maximize2,
 } from 'lucide-react';
 import { usePermissions } from '@/hooks/usePermissions';
 import { clsx } from 'clsx';
@@ -107,6 +113,24 @@ const KANBAN_PRIORITY_ALL_VALUES = KANBAN_PRIORITY_ORDER;
 
 /** Quantidade inicial de cards visíveis por coluna; "Ver mais" carrega mais este lote. */
 const KANBAN_COLUMN_VISIBLE_BATCH = 10;
+
+function readKanbanCollapsedColumns(boardKey: string): Set<string> {
+  if (typeof window === 'undefined') return new Set();
+  try {
+    const raw = sessionStorage.getItem(`kanban-collapsed:${boardKey}`);
+    if (!raw) return new Set();
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return new Set();
+    return new Set(parsed.filter((id): id is string => typeof id === 'string'));
+  } catch {
+    return new Set();
+  }
+}
+
+function writeKanbanCollapsedColumns(boardKey: string, ids: Set<string>) {
+  if (typeof window === 'undefined') return;
+  sessionStorage.setItem(`kanban-collapsed:${boardKey}`, JSON.stringify([...ids]));
+}
 
 /** Todos marcados (ou lista vazia) = sem filtro restritivo nesse campo. */
 function multiselectFilterShowsAll(selected: string[], allValues: string[]): boolean {
@@ -708,19 +732,23 @@ function KanbanCardItem({
 function KanbanDropGutter({
   active,
   readOnly,
+  collapseWhenIdle = false,
   onDragOver,
   onDrop,
 }: {
   active: boolean;
   readOnly?: boolean;
+  collapseWhenIdle?: boolean;
   onDragOver: (e: React.DragEvent) => void;
   onDrop: (e: React.DragEvent) => void;
 }) {
   if (readOnly) return <div className="h-0 shrink-0" aria-hidden />;
 
+  const collapsed = collapseWhenIdle && !active;
+
   return (
     <div
-      className="relative h-3 shrink-0"
+      className={clsx('relative shrink-0', collapsed ? 'h-0' : 'h-2')}
       onDragOver={(e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -800,6 +828,8 @@ interface KanbanColumnProps {
   onDrop: (e: React.DragEvent, columnId: string, index?: number) => void;
   onEditColumn: (column: KanbanColumn) => void;
   onDeleteColumn: (columnId: string) => void;
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
 }
 
 function KanbanColumnComponent({
@@ -823,6 +853,8 @@ function KanbanColumnComponent({
   onDrop,
   onEditColumn,
   onDeleteColumn,
+  collapsed = false,
+  onToggleCollapse,
 }: KanbanColumnProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [visibleCount, setVisibleCount] = useState(KANBAN_COLUMN_VISIBLE_BATCH);
@@ -833,11 +865,6 @@ function KanbanColumnComponent({
   const visibleCards = column.cards.slice(0, visibleCount);
   const hasMoreCards = column.cards.length > visibleCount;
   const dropTailIndex = hasMoreCards ? visibleCount : column.cards.length;
-  const isEmptyColumnDropTarget =
-    column.cards.length === 0 &&
-    isTarget &&
-    !!dragState.draggingCardId &&
-    !isColumnDragActive;
 
   useEffect(() => {
     setVisibleCount(KANBAN_COLUMN_VISIBLE_BATCH);
@@ -850,6 +877,83 @@ function KanbanColumnComponent({
     document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
   }, []);
+
+  if (collapsed) {
+    const isCollapsedDropTarget =
+      isTarget && !!dragState.draggingCardId && !isColumnDragActive;
+
+    return (
+      <div
+        data-kanban-column
+        draggable={!!onColumnDragStart}
+        onDragStart={
+          onColumnDragStart
+            ? (e) => {
+                if (!shouldStartColumnDrag(e.target)) {
+                  e.preventDefault();
+                  return;
+                }
+                onColumnDragStart(e, column.id);
+              }
+            : undefined
+        }
+        onDragEnd={onColumnDragEnd}
+        className={clsx(
+          'group/collapsed relative flex flex-col items-center w-[52px] flex-shrink-0 self-start h-auto',
+          'rounded-2xl bg-[#F9FAFB] dark:bg-gray-800/70',
+          'hover:bg-white/90 dark:hover:bg-gray-800/90',
+          'transition-[opacity,background-color] duration-200 ease-out motion-reduce:transition-none',
+          onColumnDragStart && 'cursor-grab active:cursor-grabbing',
+          isColumnDragging && 'kanban-column-dragging',
+          isCollapsedDropTarget &&
+            'ring-2 ring-red-500/90 dark:ring-red-400/80 ring-inset',
+        )}
+        onDragOver={
+          readOnly || isColumnDragActive
+            ? undefined
+            : (e) => onDragOver(e, column.id, 0)
+        }
+        onDrop={
+          readOnly || isColumnDragActive
+            ? undefined
+            : (e) => onDrop(e, column.id, 0)
+        }
+      >
+        <div className="flex flex-col items-center w-full pt-3 pb-2 select-none">
+          <button
+            type="button"
+            onClick={onToggleCollapse}
+            className="p-1.5 rounded-lg text-gray-400"
+            title="Expandir lista"
+            aria-label="Expandir lista"
+          >
+            <Maximize2 className="w-[18px] h-[18px] rotate-45" strokeWidth={2} />
+          </button>
+        </div>
+
+        <button
+          type="button"
+          onClick={onToggleCollapse}
+          title={`Expandir ${column.title}`}
+          className="flex items-start justify-center w-full px-2 py-2 select-none"
+        >
+          <span className="[writing-mode:vertical-lr] [text-orientation:mixed] text-[15px] font-semibold leading-relaxed text-gray-900 dark:text-gray-100 whitespace-normal break-normal">
+            {column.title}
+            <span className="inline-block ps-3 font-medium tabular-nums text-gray-400 dark:text-gray-500">
+              {column.cards.length}
+            </span>
+          </span>
+        </button>
+
+        <div className="flex flex-col items-center pb-4 pt-2 select-none">
+          <span
+            className="w-2 h-2 rounded-full ring-2 ring-white/80 dark:ring-gray-900/40"
+            style={{ backgroundColor: column.color }}
+          />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -885,7 +989,7 @@ function KanbanColumnComponent({
           : (e) => onDrop(e, column.id, column.cards.length)
       }
     >
-      <div className="flex items-center justify-between px-4 py-4 select-none">
+      <div className="flex items-center justify-between px-4 pt-4 pb-2 select-none">
         <div className="flex items-center gap-2.5 min-w-0">
           <span
             className="w-2 h-2 rounded-full flex-shrink-0"
@@ -899,15 +1003,17 @@ function KanbanColumnComponent({
           </span>
         </div>
         <div className="flex items-center gap-0.5 flex-shrink-0">
-          {!readOnly && (
+          {onToggleCollapse ? (
             <button
-              onClick={() => onAddCard(column.id)}
+              type="button"
+              onClick={onToggleCollapse}
               className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-white/80 dark:hover:bg-gray-700 transition-colors"
-              title="Adicionar card"
+              title="Recolher lista"
+              aria-label="Recolher lista"
             >
-              <Plus className="w-[18px] h-[18px]" strokeWidth={2} />
+              <Minimize2 className="w-[18px] h-[18px] rotate-45" strokeWidth={2} />
             </button>
-          )}
+          ) : null}
           {!readOnly && (
           <div className="relative" ref={menuRef}>
             <button
@@ -919,16 +1025,16 @@ function KanbanColumnComponent({
             {menuOpen && (
               <div className="absolute right-0 top-9 z-50 w-44 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg py-1">
                 <button
-                  onClick={() => { setMenuOpen(false); onEditColumn(column); }}
-                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
-                >
-                  <Edit3 className="w-4 h-4" /> Editar coluna
-                </button>
-                <button
                   onClick={() => { setMenuOpen(false); onAddCard(column.id); }}
                   className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
                 >
                   <Plus className="w-4 h-4" /> Adicionar card
+                </button>
+                <button
+                  onClick={() => { setMenuOpen(false); onEditColumn(column); }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+                >
+                  <Edit3 className="w-4 h-4" /> Editar coluna
                 </button>
                 <hr className="my-1 border-gray-200 dark:border-gray-700" />
                 <button
@@ -944,7 +1050,11 @@ function KanbanColumnComponent({
         </div>
       </div>
 
-      <div className="px-3 pb-4 flex flex-col min-h-[120px]">
+      <div
+        className={clsx(
+          'px-3 pt-0 pb-3 flex flex-col',
+        )}
+      >
         {visibleCards.map((card, index) => (
           <React.Fragment key={card.id}>
             <KanbanDropGutter
@@ -1027,25 +1137,32 @@ function KanbanColumnComponent({
           </button>
         )}
         {column.cards.length === 0 && (
-          <div
+          <KanbanDropGutter
+            readOnly={cardDnDDisabled}
+            collapseWhenIdle
+            active={
+              !!dragState.draggingCardId &&
+              dragState.overColumnId === column.id &&
+              overIndex === 0
+            }
+            onDragOver={(e) => onDragOver(e, column.id, 0)}
+            onDrop={(e) => onDrop(e, column.id, 0)}
+          />
+        )}
+        {!readOnly && (
+          <button
+            type="button"
+            onClick={() => onAddCard(column.id)}
             className={clsx(
-              'flex flex-col items-center justify-center py-10 rounded-2xl border-2 border-dashed transition-colors',
-              isEmptyColumnDropTarget
-                ? 'border-red-500/90 dark:border-red-400/80'
-                : 'border-gray-200/80 dark:border-gray-600',
+              'flex w-full items-center gap-2 rounded-xl px-2 py-2.5 text-left text-sm font-medium transition-colors',
+              'text-gray-500 hover:bg-white/80 hover:text-gray-800',
+              'dark:text-gray-400 dark:hover:bg-gray-700/50 dark:hover:text-gray-200',
+              column.cards.length === 0 ? 'shrink-0' : 'mt-2',
             )}
           >
-            <p
-              className={clsx(
-                'text-xs transition-colors',
-                isEmptyColumnDropTarget
-                  ? 'text-red-500 dark:text-red-400'
-                  : 'text-gray-400',
-              )}
-            >
-              Solte o card aqui
-            </p>
-          </div>
+            <Plus className="w-[18px] h-[18px] flex-shrink-0" strokeWidth={2} />
+            Adicionar card
+          </button>
         )}
       </div>
     </div>
@@ -1822,6 +1939,24 @@ function KanbanPage() {
   const columnDragIdRef = useRef<string | null>(null);
   const columnDragOverIndexRef = useRef<number | null>(null);
   const columnDragGhostRef = useRef<HTMLElement | null>(null);
+  const [collapsedColumnIds, setCollapsedColumnIds] = useState<Set<string>>(() => new Set());
+
+  useEffect(() => {
+    setCollapsedColumnIds(readKanbanCollapsedColumns(boardScopeKey));
+  }, [boardScopeKey]);
+
+  const toggleColumnCollapsed = useCallback(
+    (columnId: string) => {
+      setCollapsedColumnIds((prev) => {
+        const next = new Set(prev);
+        if (next.has(columnId)) next.delete(columnId);
+        else next.add(columnId);
+        writeKanbanCollapsedColumns(boardScopeKey, next);
+        return next;
+      });
+    },
+    [boardScopeKey],
+  );
   const boardCardsRef = useRef<HTMLDivElement>(null);
   const boardScrollRef = useRef<HTMLDivElement>(null);
   const isKanbanDragging = Boolean(dragState.draggingCardId || columnDrag.draggingColumnId);
@@ -2168,39 +2303,108 @@ function KanbanPage() {
     })();
   }
 
-  async function handleSaveColumn(title: string, color: string, limit: number | undefined, id?: string) {
-    setSavingColumn(true);
-    try {
-      if (colModal?.mode === 'create') {
-        await createKanbanColumn({ title, color, cardLimit: limit, boardId: board?.id });
-        toast.success('Coluna criada!');
-      } else if (id) {
-        await updateKanbanColumn(id, { title, color, cardLimit: limit ?? null });
-        toast.success('Coluna atualizada!');
-      }
-      await refreshBoard();
+  function handleSaveColumn(title: string, color: string, limit: number | undefined, id?: string) {
+    if (colModal?.mode === 'create') {
+      const tempId = `optimistic-column-${Date.now()}`;
+      const optimistic = buildOptimisticKanbanColumn(title, color, tempId, limit);
+      const previousBoard = queryClient.getQueryData<KanbanBoard>(kanbanBoardQueryKey);
+
       setColModal(null);
-    } catch {
-      toast.error('Erro ao salvar coluna');
-    } finally {
-      setSavingColumn(false);
+      queryClient.setQueryData<KanbanBoard>(kanbanBoardQueryKey, (old) =>
+        insertColumnIntoBoardCache(old, optimistic, true),
+      );
+      toast.success('Coluna criada!', { duration: 2000 });
+
+      void (async () => {
+        try {
+          const created = await createKanbanColumn({
+            title,
+            color,
+            cardLimit: limit,
+            boardId: board?.id,
+          });
+          queryClient.setQueryData<KanbanBoard>(kanbanBoardQueryKey, (old) => {
+            const withoutTemp = removeColumnFromBoardCache(old, tempId);
+            return insertColumnIntoBoardCache(withoutTemp, created, true) ?? withoutTemp;
+          });
+        } catch {
+          if (previousBoard !== undefined) {
+            queryClient.setQueryData(kanbanBoardQueryKey, previousBoard);
+          } else {
+            queryClient.setQueryData<KanbanBoard>(kanbanBoardQueryKey, (old) =>
+              removeColumnFromBoardCache(old, tempId),
+            );
+          }
+          toast.error('Erro ao salvar coluna');
+        }
+      })();
+      return;
     }
+
+    if (!id) return;
+
+    const previousBoard = queryClient.getQueryData<KanbanBoard>(kanbanBoardQueryKey);
+    setColModal(null);
+    queryClient.setQueryData<KanbanBoard>(kanbanBoardQueryKey, (old) =>
+      patchColumnInBoardCache(old, id, { title, color, limit }),
+    );
+    toast.success('Coluna atualizada!', { duration: 2000 });
+
+    void (async () => {
+      try {
+        const updated = await updateKanbanColumn(id, {
+          title,
+          color,
+          cardLimit: limit ?? null,
+        });
+        queryClient.setQueryData<KanbanBoard>(kanbanBoardQueryKey, (old) =>
+          patchColumnInBoardCache(old, id, {
+            title: updated.title,
+            color: updated.color,
+            limit: updated.limit,
+          }),
+        );
+      } catch {
+        if (previousBoard !== undefined) {
+          queryClient.setQueryData(kanbanBoardQueryKey, previousBoard);
+        }
+        toast.error('Erro ao salvar coluna');
+      }
+    })();
   }
 
   function handleDeleteColumn(columnId: string) {
     setDeleteConfirm({ type: 'column', columnId });
   }
 
-  async function confirmDeleteColumn() {
+  function confirmDeleteColumn() {
     if (deleteConfirm?.type !== 'column') return;
-    try {
-      await deleteKanbanColumn(deleteConfirm.columnId);
-      await refreshBoard();
-      toast.success('Coluna removida');
-      setDeleteConfirm(null);
-    } catch {
-      toast.error('Erro ao remover coluna');
-    }
+    const { columnId } = deleteConfirm;
+    const previousBoard = queryClient.getQueryData<KanbanBoard>(kanbanBoardQueryKey);
+
+    setDeleteConfirm(null);
+    setCollapsedColumnIds((prev) => {
+      if (!prev.has(columnId)) return prev;
+      const next = new Set(prev);
+      next.delete(columnId);
+      writeKanbanCollapsedColumns(boardScopeKey, next);
+      return next;
+    });
+    queryClient.setQueryData<KanbanBoard>(kanbanBoardQueryKey, (old) =>
+      removeColumnFromBoardCache(old, columnId),
+    );
+    toast.success('Coluna removida', { duration: 2000 });
+
+    void (async () => {
+      try {
+        await deleteKanbanColumn(columnId);
+      } catch {
+        if (previousBoard !== undefined) {
+          queryClient.setQueryData(kanbanBoardQueryKey, previousBoard);
+        }
+        toast.error('Erro ao remover coluna');
+      }
+    })();
   }
 
   const priorityFilterOptions = KANBAN_PRIORITY_ALL_VALUES.map((p) => ({
@@ -2454,6 +2658,8 @@ function KanbanPage() {
                     onDrop={handleDrop}
                     onEditColumn={(col) => setColModal({ mode: 'edit', column: col })}
                     onDeleteColumn={handleDeleteColumn}
+                    collapsed={collapsedColumnIds.has(column.id)}
+                    onToggleCollapse={() => toggleColumnCollapsed(column.id)}
                   />
                 </div>
               </React.Fragment>
@@ -2470,12 +2676,13 @@ function KanbanPage() {
 
             {!boardReadOnly && (
               <button
+                type="button"
                 onClick={() => setColModal({ mode: 'create' })}
-                className="flex-shrink-0 w-[340px] flex flex-col items-center justify-center gap-2 py-8 rounded-2xl border-2 border-dashed border-gray-300/80 dark:border-gray-600 text-gray-400 dark:text-gray-500 hover:border-gray-400 hover:text-gray-600 transition-all group"
+                className="flex-shrink-0 self-start flex w-[340px] flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-gray-300/80 dark:border-gray-600 py-8 text-gray-400 dark:text-gray-500 transition-all hover:border-gray-400 hover:bg-white/50 hover:text-gray-600 dark:hover:bg-gray-800/40 dark:hover:text-gray-300 group"
               >
-                <div className="w-10 h-10 rounded-full bg-gray-100 dark:bg-gray-800 group-hover:bg-red-50 dark:group-hover:bg-red-900/20 flex items-center justify-center transition-colors">
-                  <Plus className="w-5 h-5" />
-                </div>
+                <span className="flex h-10 w-10 items-center justify-center rounded-full bg-gray-100 dark:bg-gray-800 transition-colors group-hover:bg-red-50 dark:group-hover:bg-red-900/20">
+                  <Plus className="h-5 w-5" />
+                </span>
                 <span className="text-sm font-medium">Nova Coluna</span>
               </button>
             )}
