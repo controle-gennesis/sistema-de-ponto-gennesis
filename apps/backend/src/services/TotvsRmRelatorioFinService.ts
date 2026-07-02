@@ -992,6 +992,45 @@ export class TotvsRmRelatorioFinService {
     return this.fetchRowsForPath(this.defaultRelatorioPath());
   }
 
+  defaultProdutosAtivosPath(): string {
+    return (
+      (process.env.TOTVS_RM_PRODUTOSATIVOS_PATH || '').trim() ||
+      '/api/framework/v1/consultaSQLServer/RealizaConsulta/PRODUTOSATIVOS/1/T'
+    );
+  }
+
+  private produtosAtivosFallbackPaths(): string[] {
+    const custom = (process.env.TOTVS_RM_PRODUTOSATIVOS_PATH || '').trim();
+    if (custom) return [custom];
+    return [
+      '/api/framework/v1/consultaSQLServer/RealizaConsulta/PRODUTOSATIVOS/1/T',
+      '/api/framework/v1/consultaSQLServer/RealizaConsulta/PRODUTOSATIVOS/1/G',
+      '/api/framework/v1/consultaSQLServer/RealizaConsulta/PRODUTOSATIVOS/0/F',
+    ];
+  }
+
+  async fetchProdutosAtivosRows(): Promise<Record<string, unknown>[]> {
+    const paths = this.produtosAtivosFallbackPaths();
+    let lastError: Error | null = null;
+
+    for (const pathRel of paths) {
+      try {
+        const rows = await this.fetchRowsForPath(pathRel);
+        this.pathRowsCache.set(normPathRel(pathRel), { rows, at: Date.now() });
+        return rows;
+      } catch (err) {
+        lastError = err instanceof Error ? err : new Error(String(err));
+        const retryable =
+          lastError.message.includes('HTTP 401') ||
+          lastError.message.includes('HTTP 403') ||
+          lastError.message.includes('HTTP 404');
+        if (!retryable) throw lastError;
+      }
+    }
+
+    throw lastError ?? new Error('Falha ao buscar PRODUTOSATIVOS no TOTVS RM');
+  }
+
   private static readonly EXTRATO_CAIXA_DEFAULT_CONSULTA = 'EXTRATOCX2026';
 
   /** Ano configurado para o extrato (env ou extraído do path EXTRATOCX{ano}). */

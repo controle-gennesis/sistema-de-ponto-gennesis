@@ -3,6 +3,7 @@ import { Response, NextFunction } from 'express';
 import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
+import { getTotvsRmRelatorioFinService } from '../services/TotvsRmRelatorioFinService';
 
 const materialInclude = {
   budgetNature: {
@@ -636,6 +637,42 @@ export class ConstructionMaterialController {
         },
         message: `Importação concluída: ${created} criado(s), ${errors.length} erro(s)`
       });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async getTotvsProdutosAtivos(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const svc = getTotvsRmRelatorioFinService();
+      if (!svc.isConfigured()) {
+        res.json({
+          success: false,
+          message:
+            'Integração TOTVS RM não configurada. Defina TOTVS_RM_BASE_URL e TOTVS_RM_USER + TOTVS_RM_PASSWORD (Basic) ou TOTVS_RM_BEARER_TOKEN no backend.',
+          data: [],
+          total: 0
+        });
+        return;
+      }
+
+      try {
+        const rows = await svc.fetchProdutosAtivosRows();
+        res.json({
+          success: true,
+          data: rows,
+          total: rows.length
+        });
+      } catch (err) {
+        const message = svc.formatAxiosError(err);
+        console.warn(`[TOTVS RM PRODUTOSATIVOS]: ${message}`);
+        res.json({
+          success: false,
+          message,
+          data: [],
+          total: 0
+        });
+      }
     } catch (error) {
       next(error);
     }

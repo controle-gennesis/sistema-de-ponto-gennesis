@@ -417,6 +417,7 @@ export default function MateriaisConstrucaoPage() {
   const [isImportDragging, setIsImportDragging] = useState(false);
   const [showImportJson, setShowImportJson] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [isDownloadingTotvs, setIsDownloadingTotvs] = useState(false);
   const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
   /** 'all' | 'true' | 'false' — alinhado à API de listagem. */
   const [materialActiveFilter, setMaterialActiveFilter] = useState<string>('all');
@@ -827,6 +828,76 @@ export default function MateriaisConstrucaoPage() {
     }
   };
 
+  const handleDownloadTotvsProdutos = async () => {
+    try {
+      setIsDownloadingTotvs(true);
+
+      const res = await api.get('/construction-materials/totvs/produtos-ativos', {
+        timeout: 180_000
+      });
+
+      if (res.data?.success === false) {
+        const msg = String(res.data?.message || 'Erro ao consultar TOTVS RM');
+        toast.error(
+          msg.includes('401') || /n[aã]o autorizado/i.test(msg)
+            ? 'TOTVS RM recusou a autenticação. Verifique TOTVS_RM_USER/TOTVS_RM_PASSWORD no backend ou o caminho TOTVS_RM_PRODUTOSATIVOS_PATH.'
+            : msg
+        );
+        return;
+      }
+
+      const rows: Record<string, unknown>[] = res.data?.data ?? [];
+
+      if (rows.length === 0) {
+        toast.error('Nenhum produto retornado pelo TOTVS.');
+        return;
+      }
+
+      const headers: string[] = [];
+      const seen = new Set<string>();
+      for (const row of rows) {
+        for (const key of Object.keys(row)) {
+          if (seen.has(key)) continue;
+          seen.add(key);
+          headers.push(key);
+        }
+      }
+
+      const sheetRows = rows.map((row) =>
+        headers.map((header) => {
+          const value = row[header];
+          if (value == null) return '';
+          if (typeof value === 'object') return JSON.stringify(value);
+          return String(value);
+        })
+      );
+
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.aoa_to_sheet([headers, ...sheetRows]);
+      XLSX.utils.book_append_sheet(wb, ws, 'PRODUTOSATIVOS');
+      XLSX.writeFile(
+        wb,
+        `totvs-produtos-ativos-${new Date().toISOString().split('T')[0]}.xlsx`
+      );
+      toast.success(`${rows.length} produto(s) baixado(s) do TOTVS em Excel`);
+    } catch (error: unknown) {
+      console.error('Erro ao baixar PRODUTOSATIVOS:', error);
+      const err = error as { response?: { status?: number; data?: { error?: string; message?: string } }; message?: string };
+      if (err?.response?.status === 401) {
+        toast.error('Sessão expirada. Faça login novamente e tente de novo.');
+        return;
+      }
+      toast.error(
+        err?.response?.data?.error ||
+          err?.response?.data?.message ||
+          err?.message ||
+          'Erro ao baixar planilha do TOTVS'
+      );
+    } finally {
+      setIsDownloadingTotvs(false);
+    }
+  };
+
   const handleExport = async () => {
     try {
       setIsExporting(true);
@@ -948,13 +1019,33 @@ export default function MateriaisConstrucaoPage() {
       >
         <div className="space-y-6">
           {/* Header */}
-          <div className="text-center">
-            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">
-              Materiais e Serviços
-            </h1>
-            <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400">
-              Gerencie o cadastro de materiais e serviços
-            </p>
+          <div className="relative flex min-h-[3.25rem] items-center justify-center py-1">
+            <div className="absolute right-0 top-1/2 z-10 -translate-y-1/2">
+              <button
+                type="button"
+                onClick={() => void handleDownloadTotvsProdutos()}
+                disabled={isDownloadingTotvs}
+                aria-label={
+                  isDownloadingTotvs
+                    ? 'Baixando planilha TOTVS...'
+                    : 'Baixar planilha PRODUTOSATIVOS do TOTVS RM'
+                }
+                title="Baixar planilha PRODUTOSATIVOS do TOTVS RM"
+                className="inline-flex h-10 w-10 items-center justify-center rounded-lg text-gray-700 transition-colors hover:bg-gray-100 hover:text-gray-900 disabled:cursor-not-allowed disabled:opacity-50 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-gray-100"
+              >
+                <Download
+                  className={`h-5 w-5 shrink-0 ${isDownloadingTotvs ? 'animate-pulse' : ''}`}
+                />
+              </button>
+            </div>
+            <div className="w-full max-w-3xl px-24 text-center sm:px-32">
+              <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
+                Materiais e Serviços
+              </h1>
+              <p className="mt-2 text-sm text-gray-600 dark:text-gray-400 sm:text-base">
+                Gerencie o cadastro de materiais e serviços
+              </p>
+            </div>
           </div>
 
           <MaterialFormModal
