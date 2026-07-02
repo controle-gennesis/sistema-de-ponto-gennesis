@@ -282,8 +282,11 @@ export async function updateKanbanCard(
     position?: number;
     workHours?: number | null;
   },
+  options?: { timeout?: number },
 ) {
-  const res = await api.patch(`/kanban/cards/${id}`, payload);
+  const res = await api.patch(`/kanban/cards/${id}`, payload, {
+    timeout: options?.timeout ?? 120_000,
+  });
   return res.data.data as KanbanCard;
 }
 
@@ -299,8 +302,11 @@ export async function deleteKanbanCard(id: string) {
 export async function duplicateKanbanCard(
   id: string,
   payload?: { title?: string; columnId?: string },
+  options?: { timeout?: number },
 ) {
-  const res = await api.post(`/kanban/cards/${id}/duplicate`, payload ?? {});
+  const res = await api.post(`/kanban/cards/${id}/duplicate`, payload ?? {}, {
+    timeout: options?.timeout ?? 120_000,
+  });
   return res.data.data as KanbanCard;
 }
 

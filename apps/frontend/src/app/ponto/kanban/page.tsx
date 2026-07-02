@@ -2021,7 +2021,7 @@ function KanbanPage() {
         await new Promise((resolve) => {
           window.setTimeout(resolve, KANBAN_REORDER_MS + 60);
         });
-        await refreshBoard();
+        void refreshBoard();
         toast.success('Card movido!', { duration: 1500 });
       } catch {
         if (previousBoard !== undefined) {
@@ -2077,27 +2077,44 @@ function KanbanPage() {
 
   async function confirmCardColumnAction(targetColumnId: string, title?: string) {
     if (!cardColumnAction) return;
+    const action = cardColumnAction;
     setCardColumnActionSaving(true);
+
+    const previousBoard =
+      action.mode === 'move'
+        ? queryClient.getQueryData<KanbanBoard>(kanbanBoardQueryKey)
+        : undefined;
+
+    if (action.mode === 'move') {
+      queryClient.setQueryData<KanbanBoard>(kanbanBoardQueryKey, (old) =>
+        moveCardInBoardCache(old, action.cardId, action.columnId, targetColumnId, 0),
+      );
+    }
+
     try {
-      if (cardColumnAction.mode === 'move') {
-        await updateKanbanCard(cardColumnAction.cardId, {
+      if (action.mode === 'move') {
+        await updateKanbanCard(action.cardId, {
           columnId: targetColumnId,
           position: 0,
         });
-        await refreshBoard();
         toast.success('Card movido!');
       } else {
-        await duplicateKanbanCard(cardColumnAction.cardId, {
+        await duplicateKanbanCard(action.cardId, {
           columnId: targetColumnId,
           title,
         });
-        await refreshBoard();
         toast.success('Card copiado!');
       }
       setCardColumnAction(null);
+      void refreshBoard();
     } catch {
+      if (previousBoard !== undefined) {
+        queryClient.setQueryData(kanbanBoardQueryKey, previousBoard);
+      }
       toast.error(
-        cardColumnAction.mode === 'move' ? 'Erro ao mover card' : 'Erro ao copiar card',
+        action.mode === 'move'
+          ? 'Não foi possível mover o card. Tente novamente.'
+          : 'Não foi possível copiar o card. Tente novamente.',
       );
     } finally {
       setCardColumnActionSaving(false);

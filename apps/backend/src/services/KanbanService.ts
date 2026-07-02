@@ -337,15 +337,23 @@ const boardListInclude = {
   },
 } as const;
 
+let legacyKanbanMembersMigrationDone = false;
+
 async function migrateLegacyCardMembers() {
+  if (legacyKanbanMembersMigrationDone) return;
+
   const cards = await prisma.kanbanCard.findMany({
     where: {
       assigneeUserId: { not: null },
       members: { none: {} },
     },
     select: { id: true, assigneeUserId: true },
+    take: 500,
   });
-  if (cards.length === 0) return;
+  if (cards.length === 0) {
+    legacyKanbanMembersMigrationDone = true;
+    return;
+  }
   await prisma.kanbanCardMember.createMany({
     data: cards.map((c) => ({ cardId: c.id, userId: c.assigneeUserId! })),
     skipDuplicates: true,
@@ -510,18 +518,41 @@ async function reorderKanbanCardInColumn(
   columnId: string,
   insertAt: number,
 ) {
-  const cards = await tx.kanbanCard.findMany({
-    where: { columnId },
-    orderBy: kanbanCardOrderBy,
-    select: { id: true },
+  const card = await tx.kanbanCard.findUnique({
+    where: { id: cardId },
+    select: { position: true },
   });
-  const fromIndex = cards.findIndex((card) => card.id === cardId);
-  if (fromIndex < 0) return;
+  if (!card) return;
 
-  const next = cards.filter((card) => card.id !== cardId);
-  const clamped = Math.max(0, Math.min(insertAt, next.length));
-  next.splice(clamped, 0, cards[fromIndex]);
-  await applyKanbanColumnCardOrder(tx, next.map((card) => card.id));
+  const fromPos = card.position;
+  const count = await tx.kanbanCard.count({ where: { columnId } });
+  const clamped = Math.max(0, Math.min(insertAt, Math.max(0, count - 1)));
+  if (fromPos === clamped) return;
+
+  if (fromPos < clamped) {
+    await tx.kanbanCard.updateMany({
+      where: {
+        columnId,
+        position: { gt: fromPos, lte: clamped },
+        id: { not: cardId },
+      },
+      data: { position: { decrement: 1 } },
+    });
+  } else {
+    await tx.kanbanCard.updateMany({
+      where: {
+        columnId,
+        position: { gte: clamped, lt: fromPos },
+        id: { not: cardId },
+      },
+      data: { position: { increment: 1 } },
+    });
+  }
+
+  await tx.kanbanCard.update({
+    where: { id: cardId },
+    data: { position: clamped },
+  });
 }
 
 async function moveKanbanCardToColumn(
@@ -531,30 +562,33 @@ async function moveKanbanCardToColumn(
   toColumnId: string,
   insertAt: number,
 ) {
-  const sourceCards = await tx.kanbanCard.findMany({
-    where: { columnId: fromColumnId },
-    orderBy: kanbanCardOrderBy,
-    select: { id: true },
+  const card = await tx.kanbanCard.findUnique({
+    where: { id: cardId },
+    select: { position: true },
   });
-  await applyKanbanColumnCardOrder(
-    tx,
-    sourceCards.filter((card) => card.id !== cardId).map((card) => card.id),
-  );
+  if (!card) return;
+
+  const fromPos = card.position;
+
+  await tx.kanbanCard.updateMany({
+    where: { columnId: fromColumnId, position: { gt: fromPos } },
+    data: { position: { decrement: 1 } },
+  });
+
+  const targetCount = await tx.kanbanCard.count({
+    where: { columnId: toColumnId, id: { not: cardId } },
+  });
+  const clamped = Math.max(0, Math.min(insertAt, targetCount));
+
+  await tx.kanbanCard.updateMany({
+    where: { columnId: toColumnId, position: { gte: clamped } },
+    data: { position: { increment: 1 } },
+  });
 
   await tx.kanbanCard.update({
     where: { id: cardId },
-    data: { columnId: toColumnId },
+    data: { columnId: toColumnId, position: clamped },
   });
-
-  const targetCards = await tx.kanbanCard.findMany({
-    where: { columnId: toColumnId, id: { not: cardId } },
-    orderBy: kanbanCardOrderBy,
-    select: { id: true },
-  });
-  const targetIds = targetCards.map((card) => card.id);
-  const clamped = Math.max(0, Math.min(insertAt, targetIds.length));
-  targetIds.splice(clamped, 0, cardId);
-  await applyKanbanColumnCardOrder(tx, targetIds);
 }
 
 export class KanbanService {
@@ -1694,14 +1728,10 @@ export class KanbanService {
         },
       });
 
-      const cards = await tx.kanbanCard.findMany({
+      await tx.kanbanCard.updateMany({
         where: { columnId: targetColumnId, id: { not: created.id } },
-        orderBy: kanbanCardOrderBy,
-        select: { id: true },
+        data: { position: { increment: 1 } },
       });
-      const orderedIds = cards.map((card) => card.id);
-      orderedIds.unshift(created.id);
-      await applyKanbanColumnCardOrder(tx, orderedIds);
 
       return tx.kanbanCard.findUnique({
         where: { id: created.id },
