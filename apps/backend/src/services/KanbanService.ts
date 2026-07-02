@@ -1619,25 +1619,44 @@ export class KanbanService {
     };
   }
 
-  async duplicateCard(userId: string, cardId: string) {
+  async duplicateCard(
+    userId: string,
+    cardId: string,
+    options?: { title?: string; columnId?: string },
+  ) {
     await this.assertCardAccess(userId, cardId);
 
     const source = await prisma.kanbanCard.findUnique({
       where: { id: cardId },
       include: {
+        column: { select: { boardId: true } },
         members: { select: { userId: true } },
         checklistItems: { orderBy: { position: 'asc' } },
       },
     });
     if (!source) throw new Error('Card não encontrado');
 
+    const targetColumnId = options?.columnId?.trim() || source.columnId;
+    const nextTitle = options?.title?.trim() || source.title;
+
+    if (targetColumnId !== source.columnId) {
+      await this.assertColumnAccess(userId, targetColumnId);
+      const targetColumn = await prisma.kanbanColumn.findUnique({
+        where: { id: targetColumnId },
+        select: { boardId: true },
+      });
+      if (!targetColumn || targetColumn.boardId !== source.column.boardId) {
+        throw new Error('Coluna inválida');
+      }
+    }
+
     const checklistCount = source.checklistItems.length;
 
     const duplicated = await prisma.$transaction(async (tx) => {
       const created = await tx.kanbanCard.create({
         data: {
-          columnId: source.columnId,
-          title: source.title,
+          columnId: targetColumnId,
+          title: nextTitle,
           description: source.description,
           priority: source.priority,
           startDate: source.startDate,
@@ -1651,7 +1670,7 @@ export class KanbanService {
           attachmentsEnabled: source.attachmentsEnabled,
           workHours: source.workHours,
           completedAt: null,
-          position: source.position,
+          position: 0,
           ...(source.members.length > 0
             ? {
                 members: {
@@ -1676,16 +1695,12 @@ export class KanbanService {
       });
 
       const cards = await tx.kanbanCard.findMany({
-        where: { columnId: source.columnId },
+        where: { columnId: targetColumnId, id: { not: created.id } },
         orderBy: kanbanCardOrderBy,
         select: { id: true },
       });
-      const sourceIndex = cards.findIndex((card) => card.id === cardId);
-      const orderedIds = cards
-        .filter((card) => card.id !== created.id)
-        .map((card) => card.id);
-      const insertAt = sourceIndex >= 0 ? sourceIndex + 1 : orderedIds.length;
-      orderedIds.splice(insertAt, 0, created.id);
+      const orderedIds = cards.map((card) => card.id);
+      orderedIds.unshift(created.id);
       await applyKanbanColumnCardOrder(tx, orderedIds);
 
       return tx.kanbanCard.findUnique({

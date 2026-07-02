@@ -15,6 +15,7 @@ import { KanbanBoardShareModal } from '@/components/kanban/KanbanBoardShareModal
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { MultiSelectSearchDropdown } from '@/components/ui/MultiSelectSearchDropdown';
+import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import {
   kanbanLabel,
   kanbanInput,
@@ -78,6 +79,7 @@ import {
   Trash2,
   Edit3,
   Copy,
+  ArrowRightLeft,
   AlertCircle,
   ChevronDown,
   Clock,
@@ -509,7 +511,8 @@ interface KanbanCardItemProps {
   labelPresets?: readonly KanbanLabelPreset[];
   readOnly?: boolean;
   onEdit: (card: KanbanCard, columnId: string) => void;
-  onDuplicate: (cardId: string, columnId: string) => void;
+  onMove: (card: KanbanCard, columnId: string) => void;
+  onCopy: (card: KanbanCard, columnId: string) => void;
   onDelete: (cardId: string, columnId: string) => void;
   onPrefetch?: (cardId: string) => void;
   onDragStart: (e: React.DragEvent, cardId: string, columnId: string) => void;
@@ -523,7 +526,8 @@ function KanbanCardItem({
   labelPresets,
   readOnly = false,
   onEdit,
-  onDuplicate,
+  onMove,
+  onCopy,
   onDelete,
   onPrefetch,
   onDragStart,
@@ -620,7 +624,7 @@ function KanbanCardItem({
             <MoreHorizontal className="w-4 h-4 text-gray-400" />
           </button>
           {menuOpen && (
-            <div className="absolute right-0 top-7 z-50 w-40 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg py-1">
+            <div className="absolute right-0 top-7 z-50 w-44 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg py-1">
               <button
                 onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onEdit(card, columnId); }}
                 className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
@@ -628,10 +632,16 @@ function KanbanCardItem({
                 <Edit3 className="w-4 h-4" /> Editar
               </button>
               <button
-                onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onDuplicate(card.id, columnId); }}
+                onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onMove(card, columnId); }}
                 className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
               >
-                <Copy className="w-4 h-4" /> Duplicar
+                <ArrowRightLeft className="w-4 h-4" /> Mover
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onCopy(card, columnId); }}
+                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+              >
+                <Copy className="w-4 h-4" /> Copiar
               </button>
               <button
                 onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onDelete(card.id, columnId); }}
@@ -775,7 +785,8 @@ interface KanbanColumnProps {
   readOnly?: boolean;
   onAddCard: (columnId: string) => void;
   onEditCard: (card: KanbanCard, columnId: string) => void;
-  onDuplicateCard: (cardId: string, columnId: string) => void;
+  onMoveCard: (card: KanbanCard, columnId: string) => void;
+  onCopyCard: (card: KanbanCard, columnId: string) => void;
   onDeleteCard: (cardId: string, columnId: string) => void;
   onPrefetchCard?: (cardId: string) => void;
   onColumnDragStart?: (e: React.DragEvent, columnId: string) => void;
@@ -797,7 +808,8 @@ function KanbanColumnComponent({
   readOnly = false,
   onAddCard,
   onEditCard,
-  onDuplicateCard,
+  onMoveCard,
+  onCopyCard,
   onDeleteCard,
   onPrefetchCard,
   onColumnDragStart,
@@ -975,7 +987,8 @@ function KanbanColumnComponent({
                 labelPresets={labelPresets}
                 readOnly={readOnly}
                 onEdit={onEditCard}
-                onDuplicate={onDuplicateCard}
+                onMove={onMoveCard}
+                onCopy={onCopyCard}
                 onDelete={onDeleteCard}
                 onPrefetch={onPrefetchCard}
                 onDragStart={onDragStart}
@@ -1141,6 +1154,100 @@ function ColumnModal({ mode, initial, onClose, onSave, saving }: ColumnModalProp
             }}
           >
             {mode === 'create' ? 'Criar coluna' : 'Salvar'}
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ─── Mover / Copiar cartão ────────────────────────────────────────────────────
+
+interface CardColumnActionModalProps {
+  mode: 'move' | 'copy';
+  cardTitle: string;
+  currentColumnId: string;
+  columns: KanbanColumn[];
+  onClose: () => void;
+  onConfirm: (columnId: string, title?: string) => void | Promise<void>;
+  saving?: boolean;
+}
+
+function CardColumnActionModal({
+  mode,
+  cardTitle,
+  currentColumnId,
+  columns,
+  onClose,
+  onConfirm,
+  saving,
+}: CardColumnActionModalProps) {
+  const [columnId, setColumnId] = useState(currentColumnId);
+  const [title, setTitle] = useState(cardTitle);
+
+  const columnOptions = useMemo(
+    () =>
+      columns.map((column) => ({
+        value: column.id,
+        label: column.title,
+        searchText: column.title,
+      })),
+    [columns],
+  );
+
+  return (
+    <Modal
+      isOpen
+      onClose={onClose}
+      size="sm"
+      title={mode === 'move' ? 'Mover cartão' : 'Copiar cartão'}
+      closeOnOverlayClick={!saving}
+    >
+      <div className="space-y-4">
+        {mode === 'copy' ? (
+          <div>
+            <label className={kanbanLabel}>Nome</label>
+            <input
+              type="text"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="Nome do cartão..."
+              className={kanbanInput}
+            />
+          </div>
+        ) : null}
+        <div>
+          <label className={kanbanLabel}>Lista</label>
+          <StringSingleSelectDropdown
+            value={columnId}
+            onChange={setColumnId}
+            options={columnOptions}
+            allowEmpty={false}
+            placeholder="Selecione a coluna..."
+          />
+        </div>
+        <div className="flex justify-end gap-3 border-t border-gray-200 pt-2 dark:border-gray-700">
+          <Button type="button" variant="outline" onClick={onClose} disabled={saving}>
+            Cancelar
+          </Button>
+          <Button
+            type="button"
+            variant="primary"
+            loading={saving}
+            className="!bg-red-600 hover:!bg-red-700 !text-white border-transparent focus-visible:ring-red-500"
+            onClick={async () => {
+              if (!columnId) {
+                toast.error('Selecione uma coluna');
+                return;
+              }
+              if (mode === 'copy' && !title.trim()) {
+                toast.error('Nome é obrigatório');
+                return;
+              }
+              await onConfirm(columnId, mode === 'copy' ? title.trim() : undefined);
+            }}
+          >
+            {mode === 'move' ? 'Mover' : 'Copiar'}
           </Button>
         </div>
       </div>
@@ -1689,6 +1796,12 @@ function KanbanPage() {
   const [labelSettingsOpen, setLabelSettingsOpen] = useState(false);
   const [savingLabelPresets, setSavingLabelPresets] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<{ type: 'card'; cardId: string; columnId: string } | { type: 'column'; columnId: string } | null>(null);
+  const [cardColumnAction, setCardColumnAction] = useState<
+    | { mode: 'move'; cardId: string; columnId: string; title: string }
+    | { mode: 'copy'; cardId: string; columnId: string; title: string }
+    | null
+  >(null);
+  const [cardColumnActionSaving, setCardColumnActionSaving] = useState(false);
 
   const [dragState, setDragState] = useState<DragState>({
     draggingCardId: null,
@@ -1944,13 +2057,50 @@ function KanbanPage() {
     setDeleteConfirm({ type: 'card', cardId, columnId });
   }
 
-  async function handleDuplicateCard(cardId: string, _columnId: string) {
+  function openMoveCard(card: KanbanCard, columnId: string) {
+    setCardColumnAction({
+      mode: 'move',
+      cardId: card.id,
+      columnId,
+      title: card.title,
+    });
+  }
+
+  function openCopyCard(card: KanbanCard, columnId: string) {
+    setCardColumnAction({
+      mode: 'copy',
+      cardId: card.id,
+      columnId,
+      title: card.title,
+    });
+  }
+
+  async function confirmCardColumnAction(targetColumnId: string, title?: string) {
+    if (!cardColumnAction) return;
+    setCardColumnActionSaving(true);
     try {
-      await duplicateKanbanCard(cardId);
-      await refreshBoard();
-      toast.success('Card duplicado!');
+      if (cardColumnAction.mode === 'move') {
+        await updateKanbanCard(cardColumnAction.cardId, {
+          columnId: targetColumnId,
+          position: 0,
+        });
+        await refreshBoard();
+        toast.success('Card movido!');
+      } else {
+        await duplicateKanbanCard(cardColumnAction.cardId, {
+          columnId: targetColumnId,
+          title,
+        });
+        await refreshBoard();
+        toast.success('Card copiado!');
+      }
+      setCardColumnAction(null);
     } catch {
-      toast.error('Erro ao duplicar card');
+      toast.error(
+        cardColumnAction.mode === 'move' ? 'Erro ao mover card' : 'Erro ao copiar card',
+      );
+    } finally {
+      setCardColumnActionSaving(false);
     }
   }
 
@@ -2240,7 +2390,8 @@ function KanbanPage() {
                     readOnly={boardReadOnly}
                     onAddCard={openCreateCard}
                     onEditCard={openEditCard}
-                    onDuplicateCard={handleDuplicateCard}
+                    onMoveCard={openMoveCard}
+                    onCopyCard={openCopyCard}
                     onDeleteCard={handleDeleteCard}
                     onPrefetchCard={prefetchKanbanCard}
                     onColumnDragStart={boardReadOnly ? undefined : handleColumnDragStart}
@@ -2409,6 +2560,19 @@ function KanbanPage() {
           onClose={() => setColModal(null)}
           onSave={handleSaveColumn}
           saving={savingColumn}
+        />
+      )}
+
+      {cardColumnAction && (
+        <CardColumnActionModal
+          key={`${cardColumnAction.mode}-${cardColumnAction.cardId}`}
+          mode={cardColumnAction.mode}
+          cardTitle={cardColumnAction.title}
+          currentColumnId={cardColumnAction.columnId}
+          columns={columns}
+          onClose={() => !cardColumnActionSaving && setCardColumnAction(null)}
+          onConfirm={confirmCardColumnAction}
+          saving={cardColumnActionSaving}
         />
       )}
 

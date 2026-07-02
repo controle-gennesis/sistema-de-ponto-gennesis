@@ -370,12 +370,19 @@ export class KanbanController {
       const userId = requireUserId(req, next);
       if (!userId) return;
       const { id } = req.params;
-      const card = await kanbanService.duplicateCard(userId, id);
+      const body = req.body as { title?: string; columnId?: string } | undefined;
+      const card = await kanbanService.duplicateCard(userId, id, {
+        title: body?.title,
+        columnId: body?.columnId,
+      });
       res.status(201).json({ success: true, data: card });
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : '';
       if (msg === 'Card não encontrado' || (error as { code?: string })?.code === 'P2025') {
         return next(createError('Card não encontrado', 404));
+      }
+      if (msg === 'Coluna inválida') {
+        return next(createError('Coluna inválida', 400));
       }
       handleKanbanError(error, next);
     }

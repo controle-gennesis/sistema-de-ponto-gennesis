@@ -296,8 +296,11 @@ export async function deleteKanbanCard(id: string) {
   await api.delete(`/kanban/cards/${id}`);
 }
 
-export async function duplicateKanbanCard(id: string) {
-  const res = await api.post(`/kanban/cards/${id}/duplicate`);
+export async function duplicateKanbanCard(
+  id: string,
+  payload?: { title?: string; columnId?: string },
+) {
+  const res = await api.post(`/kanban/cards/${id}/duplicate`, payload ?? {});
   return res.data.data as KanbanCard;
 }
 
