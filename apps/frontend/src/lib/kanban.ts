@@ -213,6 +213,26 @@ export function patchCardInBoardCache(
   return changed ? { ...board, columns } : board;
 }
 
+/** Insere um card no cache do board (ex.: após copiar), sem refetch do quadro inteiro. */
+export function insertCardIntoBoardCache(
+  board: KanbanBoard | undefined,
+  columnId: string,
+  card: KanbanCard,
+  atTop = true,
+): KanbanBoard | undefined {
+  if (!board) return board;
+
+  return {
+    ...board,
+    columns: board.columns.map((col) => {
+      if (col.id !== columnId) return col;
+      const withoutDup = col.cards.filter((c) => c.id !== card.id);
+      const cards = atTop ? [card, ...withoutDup] : [...withoutDup, card];
+      return { ...col, cards };
+    }),
+  };
+}
+
 export async function createKanbanColumn(payload: {
   title: string;
   color: string;

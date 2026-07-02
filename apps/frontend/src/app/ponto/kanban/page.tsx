@@ -41,6 +41,7 @@ import {
   updateKanbanCard,
   deleteKanbanCard,
   duplicateKanbanCard,
+  insertCardIntoBoardCache,
   patchCardInBoardCache,
   type KanbanBoardCardChecklistPatch,
   fetchKanbanCard,
@@ -1169,8 +1170,7 @@ interface CardColumnActionModalProps {
   currentColumnId: string;
   columns: KanbanColumn[];
   onClose: () => void;
-  onConfirm: (columnId: string, title?: string) => void | Promise<void>;
-  saving?: boolean;
+  onConfirm: (columnId: string, title?: string) => void;
 }
 
 function CardColumnActionModal({
@@ -1180,10 +1180,10 @@ function CardColumnActionModal({
   columns,
   onClose,
   onConfirm,
-  saving,
 }: CardColumnActionModalProps) {
   const [columnId, setColumnId] = useState(currentColumnId);
   const [title, setTitle] = useState(cardTitle);
+  const [submitting, setSubmitting] = useState(false);
 
   const columnOptions = useMemo(
     () =>
@@ -1201,7 +1201,7 @@ function CardColumnActionModal({
       onClose={onClose}
       size="sm"
       title={mode === 'move' ? 'Mover cartão' : 'Copiar cartão'}
-      closeOnOverlayClick={!saving}
+      closeOnOverlayClick={!submitting}
     >
       <div className="space-y-4">
         {mode === 'copy' ? (
@@ -1227,15 +1227,16 @@ function CardColumnActionModal({
           />
         </div>
         <div className="flex justify-end gap-3 border-t border-gray-200 pt-2 dark:border-gray-700">
-          <Button type="button" variant="outline" onClick={onClose} disabled={saving}>
+          <Button type="button" variant="outline" onClick={onClose} disabled={submitting}>
             Cancelar
           </Button>
           <Button
             type="button"
             variant="primary"
-            loading={saving}
+            loading={submitting}
             className="!bg-red-600 hover:!bg-red-700 !text-white border-transparent focus-visible:ring-red-500"
-            onClick={async () => {
+            onClick={() => {
+              if (submitting) return;
               if (!columnId) {
                 toast.error('Selecione uma coluna');
                 return;
@@ -1244,7 +1245,8 @@ function CardColumnActionModal({
                 toast.error('Nome é obrigatório');
                 return;
               }
-              await onConfirm(columnId, mode === 'copy' ? title.trim() : undefined);
+              setSubmitting(true);
+              onConfirm(columnId, mode === 'copy' ? title.trim() : undefined);
             }}
           >
             {mode === 'move' ? 'Mover' : 'Copiar'}
@@ -1801,7 +1803,6 @@ function KanbanPage() {
     | { mode: 'copy'; cardId: string; columnId: string; title: string }
     | null
   >(null);
-  const [cardColumnActionSaving, setCardColumnActionSaving] = useState(false);
 
   const [dragState, setDragState] = useState<DragState>({
     draggingCardId: null,
@@ -2013,24 +2014,23 @@ function KanbanPage() {
         'kanban-card-reordering',
       );
 
-      try {
-        await updateKanbanCard(draggingCardId, {
-          ...(fromColumnId !== targetColumnId ? { columnId: targetColumnId } : {}),
-          position: desiredPosition,
-        });
-        await new Promise((resolve) => {
-          window.setTimeout(resolve, KANBAN_REORDER_MS + 60);
-        });
-        void refreshBoard();
-        toast.success('Card movido!', { duration: 1500 });
-      } catch {
-        if (previousBoard !== undefined) {
-          queryClient.setQueryData(kanbanBoardQueryKey, previousBoard);
-        } else {
-          await refreshBoard();
+      toast.success('Card movido!', { duration: 1500 });
+
+      void (async () => {
+        try {
+          await updateKanbanCard(draggingCardId, {
+            ...(fromColumnId !== targetColumnId ? { columnId: targetColumnId } : {}),
+            position: desiredPosition,
+          });
+        } catch {
+          if (previousBoard !== undefined) {
+            queryClient.setQueryData(kanbanBoardQueryKey, previousBoard);
+          } else {
+            void refreshBoard();
+          }
+          toast.error('Não foi possível salvar a posição do card');
         }
-        toast.error('Não foi possível mover o card');
-      }
+      })();
     },
     [columns, queryClient, kanbanBoardQueryKey, refreshBoard],
   );
@@ -2075,50 +2075,50 @@ function KanbanPage() {
     });
   }
 
-  async function confirmCardColumnAction(targetColumnId: string, title?: string) {
+  function confirmCardColumnAction(targetColumnId: string, title?: string) {
     if (!cardColumnAction) return;
     const action = cardColumnAction;
-    setCardColumnActionSaving(true);
+    setCardColumnAction(null);
 
-    const previousBoard =
-      action.mode === 'move'
-        ? queryClient.getQueryData<KanbanBoard>(kanbanBoardQueryKey)
-        : undefined;
+    const previousBoard = queryClient.getQueryData<KanbanBoard>(kanbanBoardQueryKey);
 
     if (action.mode === 'move') {
       queryClient.setQueryData<KanbanBoard>(kanbanBoardQueryKey, (old) =>
         moveCardInBoardCache(old, action.cardId, action.columnId, targetColumnId, 0),
       );
+      toast.success('Card movido!', { duration: 2000 });
+
+      void (async () => {
+        try {
+          await updateKanbanCard(action.cardId, {
+            columnId: targetColumnId,
+            position: 0,
+          });
+        } catch {
+          if (previousBoard !== undefined) {
+            queryClient.setQueryData(kanbanBoardQueryKey, previousBoard);
+          }
+          toast.error('Não foi possível mover o card. A posição foi restaurada.');
+        }
+      })();
+      return;
     }
 
-    try {
-      if (action.mode === 'move') {
-        await updateKanbanCard(action.cardId, {
-          columnId: targetColumnId,
-          position: 0,
-        });
-        toast.success('Card movido!');
-      } else {
-        await duplicateKanbanCard(action.cardId, {
+    const toastId = toast.loading('Copiando card...');
+    void (async () => {
+      try {
+        const created = await duplicateKanbanCard(action.cardId, {
           columnId: targetColumnId,
           title,
         });
-        toast.success('Card copiado!');
+        queryClient.setQueryData<KanbanBoard>(kanbanBoardQueryKey, (old) =>
+          insertCardIntoBoardCache(old, targetColumnId, created, true),
+        );
+        toast.success('Card copiado!', { id: toastId, duration: 2000 });
+      } catch {
+        toast.error('Não foi possível copiar o card. Tente novamente.', { id: toastId });
       }
-      setCardColumnAction(null);
-      void refreshBoard();
-    } catch {
-      if (previousBoard !== undefined) {
-        queryClient.setQueryData(kanbanBoardQueryKey, previousBoard);
-      }
-      toast.error(
-        action.mode === 'move'
-          ? 'Não foi possível mover o card. Tente novamente.'
-          : 'Não foi possível copiar o card. Tente novamente.',
-      );
-    } finally {
-      setCardColumnActionSaving(false);
-    }
+    })();
   }
 
   async function confirmDeleteCard() {
@@ -2587,9 +2587,8 @@ function KanbanPage() {
           cardTitle={cardColumnAction.title}
           currentColumnId={cardColumnAction.columnId}
           columns={columns}
-          onClose={() => !cardColumnActionSaving && setCardColumnAction(null)}
+          onClose={() => setCardColumnAction(null)}
           onConfirm={confirmCardColumnAction}
-          saving={cardColumnActionSaving}
         />
       )}
 

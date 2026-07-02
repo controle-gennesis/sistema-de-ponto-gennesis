@@ -1486,19 +1486,23 @@ export class KanbanService {
     }
 
     const baseUpdateData = {
-      columnId: data.columnId,
-      title: data.title?.trim(),
-      description: data.description?.trim(),
-      priority: data.priority ? priorityFromClient(data.priority) : undefined,
-      startDate: parseDateInput(data.startDate),
-      endDate: parseDateInput(data.endDate),
-      labels: labelsJson,
-      assigneeUserId: data.assigneeUserId,
-      assigneeName: assigneeName !== undefined ? assigneeName : undefined,
-      totalTasks,
-      completedTasks,
-      checklistEnabled: data.checklistEnabled,
-      attachmentsEnabled: data.attachmentsEnabled,
+      ...(data.columnId !== undefined ? { columnId: data.columnId } : {}),
+      ...(data.title !== undefined ? { title: data.title.trim() } : {}),
+      ...(data.description !== undefined ? { description: data.description.trim() } : {}),
+      ...(data.priority !== undefined
+        ? { priority: priorityFromClient(data.priority) }
+        : {}),
+      ...(data.startDate !== undefined ? { startDate: parseDateInput(data.startDate) } : {}),
+      ...(data.endDate !== undefined ? { endDate: parseDateInput(data.endDate) } : {}),
+      ...(data.labels !== undefined ? { labels: labelsJson } : {}),
+      ...(data.assigneeUserId !== undefined ? { assigneeUserId: data.assigneeUserId } : {}),
+      ...(assigneeName !== undefined ? { assigneeName } : {}),
+      ...(data.totalTasks !== undefined ? { totalTasks } : {}),
+      ...(data.completedTasks !== undefined ? { completedTasks } : {}),
+      ...(data.checklistEnabled !== undefined ? { checklistEnabled: data.checklistEnabled } : {}),
+      ...(data.attachmentsEnabled !== undefined
+        ? { attachmentsEnabled: data.attachmentsEnabled }
+        : {}),
       ...(completedAt !== undefined ? { completedAt } : {}),
       ...(data.workHours !== undefined
         ? { workHours: data.workHours == null ? null : data.workHours }
@@ -1687,6 +1691,11 @@ export class KanbanService {
     const checklistCount = source.checklistItems.length;
 
     const duplicated = await prisma.$transaction(async (tx) => {
+      await tx.kanbanCard.updateMany({
+        where: { columnId: targetColumnId },
+        data: { position: { increment: 1 } },
+      });
+
       const created = await tx.kanbanCard.create({
         data: {
           columnId: targetColumnId,
@@ -1726,20 +1735,13 @@ export class KanbanService {
               }
             : {}),
         },
-      });
-
-      await tx.kanbanCard.updateMany({
-        where: { columnId: targetColumnId, id: { not: created.id } },
-        data: { position: { increment: 1 } },
-      });
-
-      return tx.kanbanCard.findUnique({
-        where: { id: created.id },
         include: cardInclude,
       });
+
+      return created;
     });
 
-    return formatCard(duplicated!);
+    return formatCard(duplicated);
   }
 
   async deleteCard(userId: string, id: string) {
