@@ -13,6 +13,7 @@ import {
   type PermissionsTargetPreview,
 } from '@/components/permissions/UserPermissionsEditor';
 import { MainLayout } from '@/components/layout/MainLayout';
+import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import { usePermissions } from '@/hooks/usePermissions';
 import api from '@/lib/api';
@@ -144,7 +145,8 @@ export default function FuncionariosPage() {
 
   if (permissionsTarget) {
     return (
-      <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
+      <ProtectedRoute route="/ponto/funcionarios">
+        <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
         <div className="w-full space-y-6">
           <div className="relative flex min-h-[3.25rem] items-center justify-center py-1">
             <button
@@ -181,10 +183,12 @@ export default function FuncionariosPage() {
           />
         </div>
       </MainLayout>
+      </ProtectedRoute>
     );
   }
 
   return (
+    <ProtectedRoute route="/ponto/funcionarios">
     <MainLayout 
       userRole={user.role} 
       userName={user.name} 
@@ -240,6 +244,7 @@ export default function FuncionariosPage() {
 
       </div>
     </MainLayout>
+    </ProtectedRoute>
   );
 }
 

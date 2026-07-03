@@ -281,6 +281,7 @@ export class KanbanController {
         memberUserIds,
         totalTasks,
         completedTasks,
+        insertAt,
       } = req.body;
 
       if (!columnId) return next(createError('columnId é obrigatório', 400));
@@ -299,6 +300,7 @@ export class KanbanController {
         memberUserIds: Array.isArray(memberUserIds) ? memberUserIds : undefined,
         totalTasks: totalTasks != null ? Number(totalTasks) : 0,
         completedTasks: completedTasks != null ? Number(completedTasks) : 0,
+        insertAt: insertAt === 'bottom' ? 'bottom' : 'top',
       });
 
       res.status(201).json({ success: true, data: card });

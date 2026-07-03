@@ -43,6 +43,7 @@ import {
   deleteKanbanCard,
   duplicateKanbanCard,
   insertCardIntoBoardCache,
+  replaceCardInBoardCache,
   removeCardFromBoardCache,
   removeColumnFromBoardCache,
   insertColumnIntoBoardCache,
@@ -815,7 +816,7 @@ interface KanbanColumnProps {
   isColumnDragging?: boolean;
   isColumnDragActive?: boolean;
   readOnly?: boolean;
-  onAddCard: (columnId: string) => void;
+  onAddCard: (columnId: string, insertAt: 'top' | 'bottom') => void;
   onEditCard: (card: KanbanCard, columnId: string) => void;
   onMoveCard: (card: KanbanCard, columnId: string) => void;
   onCopyCard: (card: KanbanCard, columnId: string) => void;
@@ -1026,7 +1027,7 @@ function KanbanColumnComponent({
             {menuOpen && (
               <div className="absolute right-0 top-9 z-50 w-44 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg py-1">
                 <button
-                  onClick={() => { setMenuOpen(false); onAddCard(column.id); }}
+                  onClick={() => { setMenuOpen(false); onAddCard(column.id, 'top'); }}
                   className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
                 >
                   <Plus className="w-4 h-4" /> Adicionar card
@@ -1153,7 +1154,7 @@ function KanbanColumnComponent({
         {!readOnly && (
           <button
             type="button"
-            onClick={() => onAddCard(column.id)}
+            onClick={() => onAddCard(column.id, 'bottom')}
             className={clsx(
               'flex w-full items-center gap-2 rounded-xl px-2 py-2.5 text-left text-sm font-medium transition-colors',
               'text-gray-500 hover:bg-white/80 hover:text-gray-800',
@@ -1906,7 +1907,7 @@ function KanbanPage() {
   const [savingColumn, setSavingColumn] = useState(false);
 
   const [cardModal, setCardModal] = useState<
-    | { mode: 'create'; columnId: string }
+    | { mode: 'create'; columnId: string; insertAt: 'top' | 'bottom' }
     | {
         mode: 'detail';
         cardId: string;
@@ -1981,6 +1982,30 @@ function KanbanPage() {
       queryClient.setQueryData<KanbanBoard>(kanbanBoardQueryKey, (old) =>
         patchCardInBoardCache(old, targetCardId, patch),
       );
+    },
+    [queryClient, kanbanBoardQueryKey],
+  );
+
+  const handleBoardCardCreated = useCallback(
+    (
+      card: KanbanCard,
+      options: {
+        columnId: string;
+        insertAt: 'top' | 'bottom';
+        replaceTempId?: string;
+        removeTempId?: string;
+      },
+    ) => {
+      queryClient.setQueryData<KanbanBoard>(kanbanBoardQueryKey, (old) => {
+        if (options.removeTempId) {
+          return removeCardFromBoardCache(old, options.removeTempId);
+        }
+        if (options.replaceTempId) {
+          const replaced = replaceCardInBoardCache(old, options.replaceTempId, card);
+          if (replaced) return replaced;
+        }
+        return insertCardIntoBoardCache(old, options.columnId, card, options.insertAt === 'top');
+      });
     },
     [queryClient, kanbanBoardQueryKey],
   );
@@ -2175,8 +2200,8 @@ function KanbanPage() {
     [columns, queryClient, kanbanBoardQueryKey, refreshBoard],
   );
 
-  function openCreateCard(columnId: string) {
-    setCardModal({ mode: 'create', columnId });
+  function openCreateCard(columnId: string, insertAt: 'top' | 'bottom') {
+    setCardModal({ mode: 'create', columnId, insertAt });
   }
 
   function openEditCard(card: KanbanCard, columnId: string) {
@@ -2809,8 +2834,10 @@ function KanbanPage() {
               : null
           }
           canViewKanbanValues={canViewKanbanValues}
+          createInsertAt={cardModal.mode === 'create' ? cardModal.insertAt : undefined}
           onClose={() => setCardModal(null)}
           onBoardRefresh={refreshBoard}
+          onBoardCardCreated={handleBoardCardCreated}
           onBoardCardPatch={patchBoardCard}
         />
       )}

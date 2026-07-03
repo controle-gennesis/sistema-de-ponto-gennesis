@@ -29,6 +29,7 @@ import {
   kanbanCardQueryKey,
   normalizeKanbanCardDetail,
   createKanbanCard,
+  buildOptimisticNewCard,
   updateKanbanCard,
   addKanbanCardMember,
   removeKanbanCardMember,
@@ -138,8 +139,19 @@ export interface KanbanCardModalProps {
   currentUser?: KanbanCardModalCurrentUser | null;
   canViewKanbanValues?: boolean;
   labelPresets?: KanbanLabelPreset[];
+  createInsertAt?: 'top' | 'bottom';
   onClose: () => void;
   onBoardRefresh: () => void;
+  /** Atualiza o cache do quadro sem refetch completo. */
+  onBoardCardCreated?: (
+    card: KanbanCard,
+    options: {
+      columnId: string;
+      insertAt: 'top' | 'bottom';
+      replaceTempId?: string;
+      removeTempId?: string;
+    },
+  ) => void;
   /** Atualiza só o card no board (contadores de checklist) sem refetch da página. */
   onBoardCardPatch?: (cardId: string, patch: KanbanBoardCardChecklistPatch) => void;
 }
@@ -154,8 +166,10 @@ export function KanbanCardModal({
   currentUser,
   canViewKanbanValues = false,
   labelPresets,
+  createInsertAt = 'top',
   onClose,
   onBoardRefresh,
+  onBoardCardCreated,
   onBoardCardPatch,
 }: KanbanCardModalProps) {
   const queryClient = useQueryClient();
@@ -452,42 +466,72 @@ export function KanbanCardModal({
       toast.error('Título é obrigatório');
       return;
     }
+    const trimmedTitle = title.trim();
+    const tempId = `optimistic-create-${Date.now()}`;
+    const pendingFiles = [...draftFiles];
+    const pendingLinks = [...draftLinks];
+
+    onBoardCardCreated?.(buildOptimisticNewCard(trimmedTitle, tempId), {
+      columnId,
+      insertAt: createInsertAt,
+    });
+
     setSaving(true);
     try {
       const created = await createKanbanCard({
         columnId,
-        title: title.trim(),
+        title: trimmedTitle,
+        insertAt: createInsertAt,
       });
 
       const newCardId = created.id;
-      if (draftFiles.length > 0) {
-        await uploadKanbanAttachments(
-          newCardId,
-          draftFiles.map((d) => d.file),
-        );
-        setDraftFiles([]);
-      }
-      if (draftLinks.length > 0) {
-        for (const link of draftLinks) {
-          await addKanbanLinkAttachment(newCardId, {
-            url: link.url,
-            displayName:
-              link.displayName.trim() && link.displayName !== link.url
-                ? link.displayName
-                : undefined,
-          });
-        }
-        setDraftLinks([]);
-      }
+      onBoardCardCreated?.(created, {
+        columnId,
+        insertAt: createInsertAt,
+        replaceTempId: tempId,
+      });
 
       toast.success('Card criado');
       setCardId(newCardId);
       setMode('detail');
       queryClient.invalidateQueries({ queryKey: kanbanCardQueryKey(newCardId) });
-      await onBoardRefresh();
+      setSaving(false);
+
+      if (pendingFiles.length > 0 || pendingLinks.length > 0) {
+        void (async () => {
+          try {
+            if (pendingFiles.length > 0) {
+              await uploadKanbanAttachments(
+                newCardId,
+                pendingFiles.map((d) => d.file),
+              );
+              setDraftFiles([]);
+            }
+            if (pendingLinks.length > 0) {
+              for (const link of pendingLinks) {
+                await addKanbanLinkAttachment(newCardId, {
+                  url: link.url,
+                  displayName:
+                    link.displayName.trim() && link.displayName !== link.url
+                      ? link.displayName
+                      : undefined,
+                });
+              }
+              setDraftLinks([]);
+            }
+            void onBoardRefresh();
+          } catch {
+            toast.error('Card criado, mas falhou ao enviar anexos');
+          }
+        })();
+      }
     } catch {
+      onBoardCardCreated?.(buildOptimisticNewCard(trimmedTitle, tempId), {
+        columnId,
+        insertAt: createInsertAt,
+        removeTempId: tempId,
+      });
       toast.error('Erro ao criar card');
-    } finally {
       setSaving(false);
     }
   }

@@ -1285,6 +1285,7 @@ export class KanbanService {
     memberUserIds?: string[];
     totalTasks?: number;
     completedTasks?: number;
+    insertAt?: 'top' | 'bottom';
   },
   ) {
     await this.assertColumnAccess(userId, data.columnId);
@@ -1306,15 +1307,33 @@ export class KanbanService {
       ),
     ];
 
-    const labelPresets = await this.getLabelPresetsForColumn(data.columnId);
+    const labelPresets =
+      data.labels && data.labels.length > 0
+        ? await this.getLabelPresetsForColumn(data.columnId)
+        : [];
     const validatedLabels =
-      validateCardLabelsForBoard(data.labels ?? [], labelPresets) ?? [];
+      data.labels && data.labels.length > 0
+        ? validateCardLabelsForBoard(data.labels, labelPresets) ?? []
+        : [];
+
+    const insertAt = data.insertAt === 'bottom' ? 'bottom' : 'top';
 
     const card = await prisma.$transaction(async (tx) => {
-      await tx.kanbanCard.updateMany({
-        where: { columnId: data.columnId },
-        data: { position: { increment: 1 } },
-      });
+      let position: number;
+
+      if (insertAt === 'bottom') {
+        const maxPos = await tx.kanbanCard.aggregate({
+          where: { columnId: data.columnId },
+          _max: { position: true },
+        });
+        position = (maxPos._max.position ?? -1) + 1;
+      } else {
+        const minPos = await tx.kanbanCard.aggregate({
+          where: { columnId: data.columnId },
+          _min: { position: true },
+        });
+        position = (minPos._min.position ?? 0) - 1;
+      }
 
       return tx.kanbanCard.create({
         data: {
@@ -1329,7 +1348,7 @@ export class KanbanService {
           assigneeName,
           totalTasks: data.totalTasks ?? 0,
           completedTasks: Math.min(data.completedTasks ?? 0, data.totalTasks ?? 0),
-          position: 0,
+          position,
           ...(memberIds.length > 0
             ? {
                 members: {
@@ -1342,24 +1361,7 @@ export class KanbanService {
       });
     });
 
-    if (memberIds.length > 0) {
-      const firstUser = await prisma.user.findUnique({
-        where: { id: memberIds[0] },
-        select: { name: true },
-      });
-      if (firstUser) {
-        await prisma.kanbanCard.update({
-          where: { id: card.id },
-          data: { assigneeUserId: memberIds[0], assigneeName: firstUser.name },
-        });
-      }
-    }
-
-    const full = await prisma.kanbanCard.findUnique({
-      where: { id: card.id },
-      include: cardInclude,
-    });
-    return formatCard(full!);
+    return formatCard(card);
   }
 
   /** Card no quadro do setor do usuário (coluna Planned), usado pela Gennecy no chat. */

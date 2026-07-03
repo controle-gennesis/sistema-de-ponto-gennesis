@@ -233,6 +233,33 @@ export function insertCardIntoBoardCache(
   };
 }
 
+export function buildOptimisticNewCard(title: string, tempId: string): KanbanCard {
+  return {
+    id: tempId,
+    title,
+    description: '',
+    priority: 'medium',
+    startDate: null,
+    endDate: null,
+    assignee: 'Sem responsável',
+    assigneeUserId: null,
+    assigneeProfilePhotoUrl: null,
+    assigneeColor: '#9CA3AF',
+    members: [],
+    progress: 0,
+    totalTasks: 0,
+    completedTasks: 0,
+    checklistEnabled: false,
+    attachmentsEnabled: false,
+    labels: [],
+    attachments: 0,
+    comments: 0,
+    createdAt: new Date().toISOString(),
+    completedAt: null,
+    workHours: null,
+  };
+}
+
 /** Remove um card do cache do board (ex.: após excluir), sem refetch. */
 export function removeCardFromBoardCache(
   board: KanbanBoard | undefined,
@@ -383,6 +410,7 @@ export async function createKanbanCard(payload: {
   memberUserIds?: string[];
   totalTasks?: number;
   completedTasks?: number;
+  insertAt?: 'top' | 'bottom';
 }) {
   const res = await api.post('/kanban/cards', payload);
   return res.data.data as KanbanCard;

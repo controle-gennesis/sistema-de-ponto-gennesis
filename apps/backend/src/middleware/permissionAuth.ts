@@ -12,6 +12,7 @@ import {
 } from '../lib/logisticsDeliveryCompletionAccess';
 import { AuthRequest } from './auth';
 import { createError } from './errorHandler';
+import { userHasEmployeesModuleAccess } from '../lib/employeesModuleAccess';
 
 /** Acesso total ao submenu (módulo) — ação persistida como `acesso`. */
 export const requireModuleAccess = (moduleKey: string) => {
@@ -44,6 +45,26 @@ export const requireModuleAccess = (moduleKey: string) => {
       return next(error);
     }
   };
+};
+
+/** Módulo Funcionários — admin, DP ou permissão na matriz (acesso ou CRUD). */
+export const requireEmployeesModuleAccess = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    if (!req.user) {
+      return next(createError('Usuário não autenticado', 401));
+    }
+    const ok = await userHasEmployeesModuleAccess(req.user.id, req.user.isAdmin);
+    if (!ok) {
+      return next(createError('Você não tem permissão para acessar o módulo de Funcionários', 403));
+    }
+    return next();
+  } catch (error) {
+    return next(error);
+  }
 };
 
 /** Gestor DP por contrato (aba Contratos) ou permissão legada; admin sempre. */
