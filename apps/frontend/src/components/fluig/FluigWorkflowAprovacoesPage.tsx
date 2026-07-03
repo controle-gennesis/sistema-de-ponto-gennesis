@@ -11,7 +11,6 @@ import { DatePickerField } from '@/components/ui/DatePickerField';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
-import { Loading } from '@/components/ui/Loading';
 import { CadastroListEmpty, CadastroListLoading, CadastroListSummary } from '@/components/ui/CadastroListSummary';
 import { cadastroListClasses } from '@/components/ui/RowActionMenu';
 import {
@@ -185,12 +184,13 @@ export function FluigWorkflowAprovacoesPage() {
   const [periodTo, setPeriodTo] = useState('');
   const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
 
-  const { data: userData, isLoading: loadingUser } = useQuery({
+  const { data: userData } = useQuery({
     queryKey: ['user'],
     queryFn: async () => {
       const res = await api.get('/auth/me');
       return res.data;
     },
+    staleTime: 5 * 60 * 1000,
   });
 
   const user = userData?.data ?? { name: 'Usuário', role: 'EMPLOYEE' as const };
@@ -370,16 +370,6 @@ export function FluigWorkflowAprovacoesPage() {
   const refetch = () => {
     queryClient.invalidateQueries({ queryKey: ['fluig-workflow-approval'] });
   };
-
-  if (loadingUser) {
-    return (
-      <ProtectedRoute route="/ponto/fluig/aprovacoes-workflow">
-        <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
-          <Loading message="Carregando..." fullScreen size="lg" />
-        </MainLayout>
-      </ProtectedRoute>
-    );
-  }
 
   return (
     <ProtectedRoute route="/ponto/fluig/aprovacoes-workflow">

@@ -169,6 +169,17 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
       });
     }
   }, [queryClient, router]);
+
+  // Prefetch automático: pré-carrega rotas e dados Fluig assim que o usuário faz login,
+  // sem precisar de hover. Evita freeze na primeira navegação.
+  useEffect(() => {
+    if (!user) return;
+    const timer = setTimeout(() => {
+      router.prefetch('/ponto/fluig/aprovacoes-workflow');
+      router.prefetch('/ponto/fluig/aprovadores');
+    }, 2000);
+    return () => clearTimeout(timer);
+  }, [user, router]);
   const [profileAvatarMenu, setProfileAvatarMenu] = useState(false);
   const [profileCropSrc, setProfileCropSrc] = useState<string | null>(null);
 

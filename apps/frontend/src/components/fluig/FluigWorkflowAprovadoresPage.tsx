@@ -9,7 +9,6 @@ import { FilterStatCard } from '@/components/ui/FilterStatCard';
 import { Button } from '@/components/ui/Button';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
-import { Loading } from '@/components/ui/Loading';
 import { CadastroListEmpty, CadastroListLoading, CadastroListSummary } from '@/components/ui/CadastroListSummary';
 import { cadastroListClasses } from '@/components/ui/RowActionMenu';
 import {
@@ -31,12 +30,13 @@ export function FluigWorkflowAprovadoresPage() {
   const [listPage, setListPage] = useState(1);
   const deferredSearch = useDeferredValue(search);
 
-  const { data: userData, isLoading: loadingUser } = useQuery({
+  const { data: userData } = useQuery({
     queryKey: ['user'],
     queryFn: async () => {
       const res = await api.get('/auth/me');
       return res.data;
     },
+    staleTime: 5 * 60 * 1000,
   });
 
   const user = userData?.data ?? { name: 'Usuário', role: 'EMPLOYEE' as const };
@@ -98,16 +98,6 @@ export function FluigWorkflowAprovadoresPage() {
   const refetch = () => {
     queryClient.invalidateQueries({ queryKey: ['fluig-workflow-approval'] });
   };
-
-  if (loadingUser) {
-    return (
-      <ProtectedRoute route="/ponto/fluig/aprovadores">
-        <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
-          <Loading message="Carregando..." fullScreen size="lg" />
-        </MainLayout>
-      </ProtectedRoute>
-    );
-  }
 
   return (
     <ProtectedRoute route="/ponto/fluig/aprovadores">
