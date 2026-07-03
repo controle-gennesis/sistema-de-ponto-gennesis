@@ -16,6 +16,16 @@ export interface FluigDatasetValues {
   message?: string | null;
 }
 
+interface DatasetCacheEntry {
+  data: FluigDatasetValues;
+  fetchedAt: number;
+  refreshing: boolean;
+}
+
+// Cache: dados frescos por 8 min, utilizáveis por 25 min (stale-while-revalidate)
+const CACHE_FRESH_TTL_MS = 8 * 60 * 1000;
+const CACHE_STALE_TTL_MS = 25 * 60 * 1000;
+
 export interface FluigDatasetStructure {
   content?: {
     datasetId: string;
@@ -57,6 +67,7 @@ export class FluigService {
   private workingDatasetBase: string | null = null;
   private oauth: OAuth;
   private token: { key: string; secret: string };
+  private datasetCache = new Map<string, DatasetCacheEntry>();
 
   constructor() {
     const domain = (process.env.FLUIG_BASE_URL || 'https://gennesisengenharia160516.fluig.cloudtotvs.com.br').replace(/\/$/, '');
@@ -167,7 +178,17 @@ export class FluigService {
     );
   }
 
-  async getDatasetData(
+  private datasetCacheKey(
+    datasetId: string,
+    options?: { fields?: string[]; constraints?: unknown[]; order?: string[] }
+  ): string {
+    if (!options?.fields?.length && !options?.constraints?.length && !options?.order?.length) {
+      return `dataset:${datasetId}`;
+    }
+    return `dataset:${datasetId}:${JSON.stringify(options)}`;
+  }
+
+  private async fetchDatasetDirect(
     datasetId: string,
     options?: {
       fields?: string[];
@@ -187,10 +208,97 @@ export class FluigService {
       constraints: options?.constraints || [],
       order: options?.order || [],
     };
-    const dataTimeout = Number(process.env.FLUIG_DATASET_TIMEOUT_MS) || 120000; // 2 min default
+    const dataTimeout = Number(process.env.FLUIG_DATASET_TIMEOUT_MS) || 120000;
     return this.request<FluigDatasetValues>('POST', '/ecm/dataset/datasets', body, {
       timeout: dataTimeout,
     });
+  }
+
+  async getDatasetData(
+    datasetId: string,
+    options?: {
+      fields?: string[];
+      constraints?: Array<{
+        _field: string;
+        _initialValue?: string;
+        _finalValue?: string;
+        _type?: number;
+        _likeSearch?: boolean;
+      }>;
+      order?: string[];
+    }
+  ): Promise<FluigDatasetValues> {
+    const cacheKey = this.datasetCacheKey(datasetId, options);
+    const cached = this.datasetCache.get(cacheKey);
+
+    if (cached) {
+      const age = Date.now() - cached.fetchedAt;
+
+      if (age <= CACHE_STALE_TTL_MS) {
+        // Retorna do cache imediatamente
+        if (age > CACHE_FRESH_TTL_MS && !cached.refreshing) {
+          // Cache ficou stale: dispara refresh em background sem bloquear a resposta
+          cached.refreshing = true;
+          this.fetchDatasetDirect(datasetId, options)
+            .then((data) => {
+              this.datasetCache.set(cacheKey, { data, fetchedAt: Date.now(), refreshing: false });
+              console.log(`✅ Fluig cache atualizado em BG: ${datasetId}`);
+            })
+            .catch((err) => {
+              cached.refreshing = false;
+              console.warn(`⚠️  Fluig cache BG refresh falhou (${datasetId}):`, (err as Error).message);
+            });
+        }
+        return cached.data;
+      }
+    }
+
+    // Cache vazio ou expirado: busca síncrona
+    const data = await this.fetchDatasetDirect(datasetId, options);
+    this.datasetCache.set(cacheKey, { data, fetchedAt: Date.now(), refreshing: false });
+    return data;
+  }
+
+  /** Pré-aquece o cache dos datasets informados (executar após subir o servidor). */
+  async warmupDatasets(datasetIds: string[]): Promise<void> {
+    console.log(`🔥 Fluig: pré-carregando ${datasetIds.length} dataset(s) em background...`);
+    await Promise.allSettled(
+      datasetIds.map((id) =>
+        this.getDatasetData(id)
+          .then(() => console.log(`✅ Fluig cache warm: ${id}`))
+          .catch((err) =>
+            console.warn(`⚠️  Fluig warmup ${id} falhou:`, (err as Error).message)
+          )
+      )
+    );
+  }
+
+  /**
+   * Inicia refresh periódico dos datasets para manter o cache sempre quente.
+   * Retorna o NodeJS.Timeout para que o chamador possa cancelar se necessário.
+   */
+  startPeriodicRefresh(
+    datasetIds: string[],
+    intervalMs = 8 * 60 * 1000
+  ): ReturnType<typeof setInterval> {
+    return setInterval(() => {
+      for (const id of datasetIds) {
+        const cacheKey = this.datasetCacheKey(id);
+        const entry = this.datasetCache.get(cacheKey);
+        if (entry?.refreshing) continue;
+
+        if (entry) entry.refreshing = true;
+        this.fetchDatasetDirect(id)
+          .then((data) => {
+            this.datasetCache.set(cacheKey, { data, fetchedAt: Date.now(), refreshing: false });
+            console.log(`✅ Fluig refresh periódico: ${id}`);
+          })
+          .catch((err) => {
+            if (entry) entry.refreshing = false;
+            console.warn(`⚠️  Fluig refresh periódico ${id} falhou:`, (err as Error).message);
+          });
+      }
+    }, intervalMs);
   }
 
   async searchDataset(

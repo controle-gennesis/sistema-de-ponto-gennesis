@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { FluigService } from '../services/FluigService';
 
-const fluigService = new FluigService();
+export const fluigService = new FluigService();
 
 export async function getAvailableDatasets(req: Request, res: Response) {
   try {
@@ -40,11 +40,15 @@ export async function getDatasetData(req: Request, res: Response) {
       return res.status(400).json({ success: false, message: 'datasetId é obrigatório' });
     }
     const { fields, constraints, order } = req.body || {};
+    const startedAt = Date.now();
     const data = await fluigService.getDatasetData(datasetId, {
       fields: Array.isArray(fields) ? fields : undefined,
       constraints: Array.isArray(constraints) ? constraints : undefined,
       order: Array.isArray(order) ? order : undefined,
     });
+    const elapsed = Date.now() - startedAt;
+    res.setHeader('X-Fluig-Cache', elapsed < 200 ? 'HIT' : 'MISS');
+    res.setHeader('X-Fluig-Elapsed-Ms', String(elapsed));
     return res.json({ success: true, data });
   } catch (error: unknown) {
     const err = error as { response?: { data?: unknown; status?: number }; message?: string };

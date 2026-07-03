@@ -1,7 +1,6 @@
 'use client';
 
 // Desabilitar prerendering
-export const dynamic = 'force-dynamic';
 
 import React, { useState, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';

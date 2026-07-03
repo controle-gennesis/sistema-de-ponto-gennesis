@@ -204,7 +204,7 @@ export function FluigWorkflowAprovacoesPage() {
         });
         return res.data;
       },
-      staleTime: 5 * 60 * 1000,
+      staleTime: 7 * 60 * 1000,
     })),
   });
 

@@ -69,6 +69,7 @@ import orcamentoRoutes from './routes/orcamento';
 import pleitoRoutes from './routes/pleitos';
 import demandSheetApprovalRoutes from './routes/demandSheetApprovals';
 import fluigRoutes from './routes/fluig';
+import { fluigService } from './controllers/FluigController';
 import whatsappRoutes from './routes/whatsapp';
 import quoteMapRoutes from './routes/quoteMaps';
 import permissionRoutes from './routes/permissions';
@@ -338,6 +339,19 @@ try {
     console.log(`🌐 API Base: http://0.0.0.0:${PORT}/api`);
     console.log('═══════════════════════════════════════');
     console.log('');
+
+    // Pré-aquecer os datasets Fluig em background para carregamento instantâneo
+    if (process.env.FLUIG_CONSUMER_KEY && process.env.FLUIG_ACCESS_TOKEN) {
+      const FLUIG_APPROVAL_DATASETS = [
+        'Processos_Workflow_Aprovacao_G3',
+        'Processos_Workflow_Aprovacao_G5',
+      ];
+      // Aguarda 10s para o servidor estabilizar antes de chamar o Fluig
+      setTimeout(() => {
+        void fluigService.warmupDatasets(FLUIG_APPROVAL_DATASETS);
+        fluigService.startPeriodicRefresh(FLUIG_APPROVAL_DATASETS, 8 * 60 * 1000);
+      }, 10_000);
+    }
   });
 } catch (error) {
   console.error('❌ Erro ao iniciar servidor:', error);

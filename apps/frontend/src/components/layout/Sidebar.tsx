@@ -8,6 +8,15 @@ import { createPortal } from 'react-dom';
 import { toast } from 'react-hot-toast';
 import api from '@/lib/api';
 import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
+
+const FLUIG_APPROVAL_DATASET_IDS = [
+  'Processos_Workflow_Aprovacao_G3',
+  'Processos_Workflow_Aprovacao_G5',
+];
+const FLUIG_PREFETCH_HREFS = new Set([
+  '/ponto/fluig/aprovacoes-workflow',
+  '/ponto/fluig/aprovadores',
+]);
 import { CircularPhotoCropModal } from '@/components/conversas/CircularPhotoCropModal';
 import { 
   Home, 
@@ -139,6 +148,23 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
   const profileAvatarSectionRef = useRef<HTMLDivElement>(null);
   const sidebarRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
+
+  const prefetchFluigDatasets = useCallback(() => {
+    for (const id of FLUIG_APPROVAL_DATASET_IDS) {
+      void queryClient.prefetchQuery({
+        queryKey: ['fluig-workflow-approval', id],
+        queryFn: async () => {
+          const res = await api.post(
+            `/fluig/datasets/${encodeURIComponent(id)}/data`,
+            {},
+            { timeout: 130000 }
+          );
+          return res.data;
+        },
+        staleTime: 7 * 60 * 1000,
+      });
+    }
+  }, [queryClient]);
   const [profileAvatarMenu, setProfileAvatarMenu] = useState(false);
   const [profileCropSrc, setProfileCropSrc] = useState<string | null>(null);
 
@@ -1411,6 +1437,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
                           <Link
                             key={item.href}
                             href={item.href}
+                            onMouseEnter={FLUIG_PREFETCH_HREFS.has(item.href) ? prefetchFluigDatasets : undefined}
                             className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 ${
                               active
                                 ? 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-500'
@@ -1442,6 +1469,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
                     <Link
                       key={item.href}
                       href={item.href}
+                      onMouseEnter={FLUIG_PREFETCH_HREFS.has(item.href) ? prefetchFluigDatasets : undefined}
                       className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 ${
                         active
                           ? 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-500'

@@ -1,7 +1,5 @@
 'use client';
 
-export const dynamic = 'force-dynamic';
-
 import { FluigSolicitacoesPage } from '@/components/fluig/FluigSolicitacoesPage';
 
 export default function GestaoSolicitacoesPage() {
