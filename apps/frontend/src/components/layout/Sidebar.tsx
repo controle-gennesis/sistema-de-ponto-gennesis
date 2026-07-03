@@ -150,6 +150,10 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
   const queryClient = useQueryClient();
 
   const prefetchFluigDatasets = useCallback(() => {
+    // Pré-baixa os bundles JS das rotas
+    router.prefetch('/ponto/fluig/aprovacoes-workflow');
+    router.prefetch('/ponto/fluig/aprovadores');
+    // Pré-carrega os dados no React Query
     for (const id of FLUIG_APPROVAL_DATASET_IDS) {
       void queryClient.prefetchQuery({
         queryKey: ['fluig-workflow-approval', id],
@@ -164,7 +168,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
         staleTime: 7 * 60 * 1000,
       });
     }
-  }, [queryClient]);
+  }, [queryClient, router]);
   const [profileAvatarMenu, setProfileAvatarMenu] = useState(false);
   const [profileCropSrc, setProfileCropSrc] = useState<string | null>(null);
 
