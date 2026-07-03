@@ -29,7 +29,7 @@ export const selectGradeCls =
  * Cabeçalho memória de cálculo (C/L/H/N): lista suspensa sem seta — parece texto até abrir.
  */
 export const selectGradeHeaderMemorialCls =
-  'box-border min-h-[2.75rem] w-full min-w-0 cursor-pointer appearance-none border-0 rounded-none bg-transparent px-1 py-2 text-center text-[11px] font-bold tracking-wide text-gray-700 shadow-none [-moz-appearance:none] [-webkit-appearance:none] outline-none ring-0 dark:text-gray-200 [&::-ms-expand]:hidden focus:z-[1] focus:outline-none focus:ring-0';
+  'box-border flex h-full min-h-[2.75rem] w-full min-w-0 cursor-pointer items-center justify-center border-0 rounded-none bg-transparent px-1 py-2 text-center text-[11px] font-bold tracking-wide text-gray-700 shadow-none outline-none ring-0 dark:text-gray-200 focus:z-[1] focus:outline-none focus:ring-0 disabled:cursor-not-allowed disabled:opacity-60';
 
 /**
  * Tipo MO/MA/LO (planilha analítica / ficha de demanda): mesmo padrão, sem seta visível.

@@ -280,7 +280,9 @@ export function OrcamentoMedicaoPainel({
             Coluna {col === 'pct' ? '%' : col}, rótulo {valorAtual}
           </span>
           <StringSingleSelectDropdown
-            className={selectGradeHeaderMemorialCls}
+            className="h-full w-full"
+            triggerClassName={selectGradeHeaderMemorialCls}
+            hideChevron
             value={valorAtual}
             disabled={!updateRotuloColunaMedicao}
             onChange={(value) => updateRotuloColunaMedicao?.(col, value)}

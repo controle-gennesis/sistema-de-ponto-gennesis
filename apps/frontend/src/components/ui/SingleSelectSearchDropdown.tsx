@@ -27,6 +27,8 @@ export type SingleSelectSearchDropdownProps = {
   allowEmpty?: boolean;
   emptyOptionLabel?: string;
   className?: string;
+  triggerClassName?: string;
+  hideChevron?: boolean;
   menuInline?: boolean;
   noFocusRing?: boolean;
   hideFocus?: boolean;
@@ -146,6 +148,8 @@ export function SingleSelectSearchDropdown({
   allowEmpty = true,
   emptyOptionLabel = 'Nenhum',
   className = '',
+  triggerClassName,
+  hideChevron = false,
   menuInline = false,
   noFocusRing = false,
   hideFocus = false,
@@ -262,6 +266,12 @@ export function SingleSelectSearchDropdown({
   const triggerLabel =
     selectedLabel ||
     (options.length === 0 ? emptyOptionsMessage : placeholder);
+
+  const triggerButtonClassName = triggerClassName
+    ? triggerClassName
+    : `${SINGLE_SELECT_TRIGGER_BASE_CLS} ${singleSelectTriggerBorderClass(open, hideFocus)} ${singleSelectTriggerTextClass(Boolean(selectedLabel))}`;
+
+  const triggerLabelClassName = hideChevron ? 'text-center' : 'block truncate';
 
   const listMaxHeight = menuInline
     ? LIST_MAX
@@ -406,13 +416,13 @@ export function SingleSelectSearchDropdown({
             return !v;
           });
         }}
-        className={`${SINGLE_SELECT_TRIGGER_BASE_CLS} ${singleSelectTriggerBorderClass(open, hideFocus)} ${singleSelectTriggerTextClass(Boolean(selectedLabel))}`}
-        data-form-field-trigger="true"
+        className={triggerButtonClassName}
+        data-form-field-trigger={triggerClassName ? undefined : 'true'}
         aria-expanded={open}
         aria-haspopup="listbox"
       >
-        <span className="block truncate">{triggerLabel}</span>
-        <SingleSelectTriggerChevron open={open} />
+        <span className={triggerLabelClassName}>{triggerLabel}</span>
+        {!hideChevron ? <SingleSelectTriggerChevron open={open} /> : null}
       </button>
 
       {inlineMenu}

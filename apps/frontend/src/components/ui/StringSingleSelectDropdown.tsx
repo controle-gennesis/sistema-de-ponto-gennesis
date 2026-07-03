@@ -17,6 +17,8 @@ export type StringSingleSelectDropdownProps = {
   allowEmpty?: boolean;
   emptyOptionLabel?: string;
   className?: string;
+  triggerClassName?: string;
+  hideChevron?: boolean;
   menuInline?: boolean;
   disableSearch?: boolean;
   menuAlign?: 'start' | 'end';
@@ -36,6 +38,8 @@ export function StringSingleSelectDropdown({
   allowEmpty = true,
   emptyOptionLabel = 'Nenhum',
   className = '',
+  triggerClassName,
+  hideChevron = false,
   menuInline = false,
   disableSearch = false,
   menuAlign = 'start',
@@ -63,6 +67,8 @@ export function StringSingleSelectDropdown({
       allowEmpty={allowEmpty}
       emptyOptionLabel={emptyOptionLabel}
       className={className}
+      triggerClassName={triggerClassName}
+      hideChevron={hideChevron}
       menuInline={menuInline}
       disableSearch={disableSearch}
       menuAlign={menuAlign}
