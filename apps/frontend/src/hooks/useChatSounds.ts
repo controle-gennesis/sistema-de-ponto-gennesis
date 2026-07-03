@@ -12,6 +12,7 @@ import {
   stopOutgoingCallRingback,
   unlockChatAudio,
 } from '@/lib/chatSounds';
+import { visibleTabRefetchInterval } from '@/hooks/useVisibleTabRefetchInterval';
 
 const ACTIVE_CHAT_STORAGE_KEY = 'conversas-active-chat-id';
 
@@ -84,11 +85,13 @@ export function useChatSounds(opts: {
     }
   }, [callPhase]);
 
+  /** Mesmo cache da página Conversas — evita polling duplicado do endpoint pesado. */
   const { data: chats = [] } = useQuery({
-    queryKey: ['directChats-sounds', userId],
+    queryKey: ['directChats'],
     queryFn: fetchDirectChatsForSounds,
     enabled: !!userId,
-    refetchInterval: 3000,
+    staleTime: 5_000,
+    refetchInterval: () => visibleTabRefetchInterval(8_000),
   });
 
   useEffect(() => {

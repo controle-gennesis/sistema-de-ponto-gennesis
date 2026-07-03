@@ -103,7 +103,7 @@ export function ChatTopicsSidebar({
     queryKey: ['chatTopics', chatId],
     queryFn: () => fetchChatTopics(chatId),
     enabled: !!chatId,
-    refetchInterval: 5000
+    staleTime: 10_000,
   });
 
   useEffect(() => {

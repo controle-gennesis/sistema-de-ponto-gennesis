@@ -66,15 +66,15 @@ export function getWorkflowSectorsForDataset(datasetId: string): WorkflowSector[
 }
 
 export const SECTOR_TABLE_HEADERS: Record<WorkflowSector, string> = {
-  compras: 'Compras',
-  tecnico: 'Gestor',
-  diretoria: 'Diretoria',
+  compras: 'Aprovação Compras',
+  tecnico: 'Aprovação Gestor',
+  diretoria: 'Aprovação Diretoria',
 };
 
 const SECTOR_LABELS: Record<WorkflowSector, string> = {
-  compras: 'Compras',
-  tecnico: 'Gestor',
-  diretoria: 'Diretoria',
+  compras: 'Aprovação Compras',
+  tecnico: 'Aprovação Gestor',
+  diretoria: 'Aprovação Diretoria',
 };
 
 export function formatPendingWithSectorLabel(

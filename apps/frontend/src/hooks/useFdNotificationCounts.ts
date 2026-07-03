@@ -3,6 +3,7 @@
 import { useQuery } from '@tanstack/react-query';
 import api from '@/lib/api';
 import { usePermissions } from '@/hooks/usePermissions';
+import { visibleTabRefetchInterval } from '@/hooks/useVisibleTabRefetchInterval';
 import { pathToModuleKey } from '@sistema-ponto/permission-modules';
 
 export type FdNotificationCounts = {
@@ -37,7 +38,7 @@ export function useFdNotificationCounts() {
       };
     },
     enabled,
-    refetchInterval: 30_000,
+    refetchInterval: () => visibleTabRefetchInterval(30_000),
     refetchOnWindowFocus: true,
     staleTime: 15_000,
   });

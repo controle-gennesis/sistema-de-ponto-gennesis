@@ -7,6 +7,7 @@ import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import api from '@/lib/api';
+import { usePermissions } from '@/hooks/usePermissions';
 import {
   OcPurchaseOrdersPanel,
   type OcTab,
@@ -21,26 +22,22 @@ export default function OrdemDeCompraPage() {
   const [ocTab, setOcTab] = useState<OcTab>(OC_FLUX_DEFAULT_TAB);
   const [searchTerm, setSearchTerm] = useState('');
 
+  const { user, isLoading: loadingUser } = usePermissions();
+
   const handleLogout = () => {
     localStorage.removeItem('token');
     sessionStorage.removeItem('token');
     router.push('/auth/login');
   };
 
-  const { data: userData, isLoading: loadingUser } = useQuery({
-    queryKey: ['user'],
-    queryFn: async () => {
-      const res = await api.get('/auth/me');
-      return res.data;
-    }
-  });
-
   const { data: ordersData, isLoading: loadingOrders } = useQuery({
     queryKey: ['purchase-orders', 'list-full'],
     queryFn: async () => {
       const res = await api.get('/purchase-orders', { params: { limit: 500 } });
       return res.data;
-    }
+    },
+    enabled: !!user,
+    staleTime: 30_000,
   });
 
   const { data: finalizedTotal = 0 } = useQuery({
@@ -51,21 +48,22 @@ export default function OrdemDeCompraPage() {
       });
       return Number(res.data?.pagination?.total ?? 0);
     },
+    enabled: !!user,
     staleTime: 30_000
   });
 
   const allOrders: PurchaseOrder[] = ordersData?.data || [];
   const tabCounts = useMemo(() => computeOcTabCounts(allOrders), [allOrders]);
 
-  if (loadingUser || loadingOrders) {
+  if (loadingUser) {
     return <Loading message="Carregando ordens de compra..." fullScreen size="lg" />;
   }
 
-  const user = userData?.data || { name: 'Usuário', role: 'EMPLOYEE' };
+  const displayUser = user || { name: 'Usuário', role: 'EMPLOYEE' as const };
 
   return (
     <ProtectedRoute route="/ponto/ordem-de-compra">
-      <MainLayout userRole={user.role || 'EMPLOYEE'} userName={user.name} onLogout={handleLogout}>
+      <MainLayout userRole={displayUser.role || 'EMPLOYEE'} userName={displayUser.name} onLogout={handleLogout}>
         <div className="space-y-6">
           <div className="text-center">
             <h1 className="text-2xl font-bold text-gray-900 sm:text-3xl dark:text-gray-100">

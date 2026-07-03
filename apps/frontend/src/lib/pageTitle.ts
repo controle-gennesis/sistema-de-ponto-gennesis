@@ -38,6 +38,15 @@ function humanizeSegment(segment: string): string {
     .join(' ');
 }
 
+/** Decodifica segmentos dinâmicos da URL (ex.: `Paulo%20anania` → `Paulo anania`). */
+function decodePathSegment(segment: string): string {
+  try {
+    return decodeURIComponent(segment.replace(/\+/g, ' '));
+  } catch {
+    return segment;
+  }
+}
+
 /** Resolve o nome da página a partir da rota (ex.: `/ponto/kanban` → `Tasks`). */
 export function resolvePageTitle(pathname: string): string | null {
   const path = normalizePath(pathname);
@@ -54,7 +63,7 @@ export function resolvePageTitle(pathname: string): string | null {
     if (path.startsWith(`${module.href}/`)) {
       const suffix = path.slice(module.href.length + 1);
       const segments = suffix.split('/').filter(Boolean);
-      const lastSegment = segments[segments.length - 1];
+      const lastSegment = decodePathSegment(segments[segments.length - 1] ?? '');
 
       if (!lastSegment || /^[0-9a-f-]{8,}$/i.test(lastSegment)) {
         return module.name;

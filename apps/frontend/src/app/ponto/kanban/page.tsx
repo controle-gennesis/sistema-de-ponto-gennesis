@@ -1800,8 +1800,8 @@ function KanbanPage() {
 
   const { data: board, isLoading: loadingBoard, isError: boardError } = useQuery({
     queryKey: kanbanBoardQueryKey,
-    queryFn: () => fetchKanbanBoard(departmentKeyParam ?? undefined),
-    enabled: !!meUser && !!departmentKeyParam,
+    queryFn: () => fetchKanbanBoard(boardScopeKey || undefined),
+    enabled: !!meUser && !!boardScopeKey,
     staleTime: 30 * 1000,
   });
 
@@ -2467,25 +2467,14 @@ function KanbanPage() {
     return <Loading message="Carregando Tasks..." fullScreen size="lg" />;
   }
 
-  const waitingForBoards = loadingBoardsList || boardsList === undefined;
-  const waitingForEntryRoute = isResolvingEntry && waitingForBoards;
-  const waitingForBoard = !!departmentKeyParam && loadingBoard;
-
-  if (waitingForEntryRoute || waitingForBoard) {
-    return <Loading message="Carregando Tasks..." fullScreen size="lg" />;
-  }
-
-  if (isResolvingEntry && !departmentKeyParam) {
-    return <Loading message="Carregando Tasks..." fullScreen size="lg" />;
-  }
-
   if (!meUser) {
     return <Loading message="Verificando sessão..." fullScreen size="lg" />;
   }
 
   const user = meUser;
+  const showBoardSkeleton = loadingBoard && !board;
 
-  if (boardError) {
+  if (boardError && !board) {
     return (
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
         <div className="px-4 py-12 text-center text-gray-600 dark:text-gray-400">
@@ -2610,7 +2599,7 @@ function KanbanPage() {
             className="flex gap-5 items-start"
             style={{ minWidth: 'max-content' }}
             onDragOverCapture={
-              boardReadOnly
+              boardReadOnly || showBoardSkeleton
                 ? undefined
                 : (e) => {
                     if (!columnDragIdRef.current) return;
@@ -2619,7 +2608,24 @@ function KanbanPage() {
                   }
             }
           >
-            {filteredColumns.map((column, columnIndex) => (
+            {showBoardSkeleton ? (
+              <>
+                {[0, 1, 2].map((i) => (
+                  <div
+                    key={i}
+                    className="w-72 shrink-0 animate-pulse rounded-xl border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800"
+                  >
+                    <div className="mb-3 h-5 w-24 rounded bg-gray-200 dark:bg-gray-700" />
+                    <div className="space-y-2">
+                      <div className="h-20 rounded-lg bg-gray-100 dark:bg-gray-700/80" />
+                      <div className="h-20 rounded-lg bg-gray-100 dark:bg-gray-700/80" />
+                      <div className="h-14 rounded-lg bg-gray-100 dark:bg-gray-700/60" />
+                    </div>
+                  </div>
+                ))}
+              </>
+            ) : (
+              filteredColumns.map((column, columnIndex) => (
               <React.Fragment key={column.id}>
                 {!boardReadOnly &&
                   columnDrag.draggingColumnId &&
@@ -2691,8 +2697,9 @@ function KanbanPage() {
                   />
                 </div>
               </React.Fragment>
-            ))}
-            {!boardReadOnly &&
+            ))
+            )}
+            {!showBoardSkeleton && !boardReadOnly &&
               columnDrag.draggingColumnId &&
               columnDrag.overIndex === filteredColumns.length && (
               <KanbanColumnDropGutter
@@ -2702,7 +2709,7 @@ function KanbanPage() {
               />
             )}
 
-            {!boardReadOnly && (
+            {!showBoardSkeleton && !boardReadOnly && (
               <button
                 type="button"
                 onClick={() => setColModal({ mode: 'create' })}

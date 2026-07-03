@@ -69,6 +69,7 @@ import {
 } from 'lucide-react';
 import { pathToModuleKey } from '@sistema-ponto/permission-modules';
 import { usePermissions } from '@/hooks/usePermissions';
+import { visibleTabRefetchInterval } from '@/hooks/useVisibleTabRefetchInterval';
 import { useFdNotificationCounts } from '@/hooks/useFdNotificationCounts';
 import { useApprovalNotificationCounts } from '@/hooks/useApprovalNotificationCounts';
 import { NotificationCountBadge } from '@/components/ui/NotificationCountBadge';
@@ -144,17 +145,16 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
   const { data: chatUnreadCount = 0 } = useQuery({
     queryKey: ['chat-unread-count', user?.id],
     queryFn: async () => {
-      const res = await api.get('/chats/direct');
-      const chats = (res.data?.data ?? []) as Array<{ messages?: Array<{ isRead: boolean; senderId: string }> }>;
-      return chats.reduce((acc, chat) => {
-        const unread = (chat.messages ?? []).filter(
-          (m) => !m.isRead && m.senderId !== user?.id
-        ).length;
-        return acc + unread;
-      }, 0);
+      const res = await api.get('/chats/direct/unread/count');
+      const n = Number(res.data?.data?.count ?? res.data?.count);
+      return Number.isFinite(n) && n > 0 ? n : 0;
     },
     enabled: !!user?.id,
-    refetchInterval: 5000,
+    staleTime: 15_000,
+    refetchInterval: () => {
+      if (typeof document === 'undefined') return 30_000;
+      return document.hidden ? false : 30_000;
+    },
   });
   
   // Verificar se é administrador
@@ -177,7 +177,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
       return Number.isFinite(n) && n > 0 ? n : 0;
     },
     enabled: canSeeFuroEstoque && !isLoading,
-    refetchInterval: 60_000,
+    refetchInterval: () => visibleTabRefetchInterval(60_000),
     refetchOnWindowFocus: true,
     staleTime: 20_000
   });
@@ -192,7 +192,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
       return Number.isFinite(n) && n > 0 ? n : 0;
     },
     enabled: canAccessRecebimentoEntregasRoutePage && !isLoading,
-    refetchInterval: 60_000,
+    refetchInterval: () => visibleTabRefetchInterval(60_000),
     refetchOnWindowFocus: true,
     staleTime: 20_000,
   });
@@ -205,7 +205,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
       return Number.isFinite(n) && n > 0 ? n : 0;
     },
     enabled: canSeeFuelSupplies && !isLoading,
-    refetchInterval: 60_000,
+    refetchInterval: () => visibleTabRefetchInterval(60_000),
     refetchOnWindowFocus: true,
     staleTime: 20_000,
   });
@@ -218,7 +218,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
       return Number.isFinite(n) && n > 0 ? n : 0;
     },
     enabled: canSeeVehicleReservationSupplies && !isLoading,
-    refetchInterval: 60_000,
+    refetchInterval: () => visibleTabRefetchInterval(60_000),
     refetchOnWindowFocus: true,
     staleTime: 20_000,
   });
@@ -231,7 +231,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
       return Number.isFinite(n) && n > 0 ? n : 0;
     },
     enabled: canSeeEntregaLogistica && !isLoading,
-    refetchInterval: 60_000,
+    refetchInterval: () => visibleTabRefetchInterval(60_000),
     refetchOnWindowFocus: true,
     staleTime: 20_000,
   });

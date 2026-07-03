@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import api from '@/lib/api';
 import { usePermissions } from '@/hooks/usePermissions';
 import { resolveEspelhoApprovalStatus } from '@/lib/espelhoNfApproval';
+import { visibleTabRefetchInterval } from '@/hooks/useVisibleTabRefetchInterval';
 
 export type ApprovalNotificationCounts = {
   dp: number;
@@ -61,7 +62,7 @@ export function useApprovalNotificationCounts() {
       };
     },
     enabled,
-    refetchInterval: 30_000,
+    refetchInterval: () => visibleTabRefetchInterval(30_000),
     refetchOnWindowFocus: true,
     staleTime: 15_000,
   });
@@ -78,7 +79,7 @@ export function useApprovalNotificationCounts() {
           'PENDING_APPROVAL',
       ).length;
     },
-    refetchInterval: 30_000,
+    refetchInterval: () => visibleTabRefetchInterval(30_000),
     refetchOnWindowFocus: true,
     staleTime: 15_000,
   });

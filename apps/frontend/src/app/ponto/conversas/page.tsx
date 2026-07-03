@@ -98,6 +98,7 @@ import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
 import { useNativeCallContext } from '@/contexts/NativeCallContext';
 import { syncConversasActiveChatId } from '@/hooks/useChatSounds';
 import { AUTH_TOKEN_REFRESHED_EVENT, hasStoredAuthToken } from '@/lib/authSession';
+import { visibleTabRefetchInterval } from '@/hooks/useVisibleTabRefetchInterval';
 
 const SELECTED_CHAT_STORAGE_KEY = 'conversas-selected-chat-id';
 
@@ -192,10 +193,30 @@ const fetchDirectChats = async (): Promise<DirectChat[]> => {
   return res.data.data;
 };
 
-const fetchDirectChatById = async (id: string): Promise<DirectChat> => {
-  const res = await api.get(`/chats/direct/${id}`);
+const fetchDirectChatById = async (
+  id: string,
+  options?: { since?: string },
+): Promise<DirectChat> => {
+  const res = await api.get(`/chats/direct/${id}`, {
+    params: options?.since ? { since: options.since } : undefined,
+  });
   return res.data.data;
 };
+
+/** Mescla mensagens por id (sync incremental no polling). */
+function mergeDirectChatMessages(existing: DirectChat, incoming: DirectChat): DirectChat {
+  if (!incoming.messages?.length) {
+    return { ...existing, ...incoming, messages: existing.messages ?? [] };
+  }
+  const byId = new Map((existing.messages ?? []).map((m) => [m.id, m]));
+  for (const m of incoming.messages) {
+    byId.set(m.id, m);
+  }
+  const merged = Array.from(byId.values()).sort(
+    (a, b) => +new Date(a.createdAt) - +new Date(b.createdAt),
+  );
+  return { ...existing, ...incoming, messages: merged };
+}
 
 type ActiveNativeGroupCallInfo = {
   active: boolean;
@@ -1151,7 +1172,8 @@ function ConversasContent() {
     queryKey: ['directChats'],
     queryFn: fetchDirectChats,
     enabled: authReady,
-    refetchInterval: authReady ? 3000 : false,
+    staleTime: 5_000,
+    refetchInterval: () => (authReady ? visibleTabRefetchInterval(8_000) : false),
   });
 
   const chatsListLoading =
@@ -1185,17 +1207,42 @@ function ConversasContent() {
     }
   }, [chats, chatsLoading, selectedChatId]);
 
-  const { data: users = [] } = useQuery({
+  useEffect(() => {
+    if (!authReady) return;
+    void queryClient.prefetchQuery({
+      queryKey: ['chatUsers'],
+      queryFn: fetchUsers,
+      staleTime: 5 * 60 * 1000,
+    });
+  }, [authReady, queryClient]);
+
+  const { data: users = [], isLoading: usersLoading } = useQuery({
     queryKey: ['chatUsers'],
     queryFn: fetchUsers,
-    enabled: showUsers || showAddGroupMembers,
+    enabled: authReady,
+    staleTime: 5 * 60 * 1000,
   });
 
   const { data: activeChat, isLoading: chatLoading } = useQuery({
     queryKey: ['directChat', selectedChatId],
-    queryFn: () => fetchDirectChatById(selectedChatId!),
+    queryFn: async () => {
+      const chatId = selectedChatId!;
+      const cached = queryClient.getQueryData<DirectChat>(['directChat', chatId]);
+      const lastMsg = cached?.messages?.length
+        ? cached.messages[cached.messages.length - 1]
+        : undefined;
+      if (cached && lastMsg?.createdAt) {
+        const delta = await fetchDirectChatById(chatId, { since: lastMsg.createdAt });
+        if (!delta.messages?.length) {
+          return { ...cached, ...delta, messages: cached.messages };
+        }
+        return mergeDirectChatMessages(cached, delta);
+      }
+      return fetchDirectChatById(chatId);
+    },
     enabled: !!selectedChatId,
-    refetchInterval: 2000,
+    staleTime: 3_000,
+    refetchInterval: () => visibleTabRefetchInterval(6_000),
   });
 
   const rejoinContextGroupId =
@@ -1209,7 +1256,7 @@ function ConversasContent() {
     queryKey: ['activeNativeGroupCall', rejoinContextGroupId ?? ''],
     queryFn: () => fetchActiveNativeGroupCall(rejoinContextGroupId!),
     enabled: Boolean(rejoinContextGroupId),
-    refetchInterval: 2500,
+    refetchInterval: () => visibleTabRefetchInterval(8_000),
   });
 
   const viewingGroupOrCallSideForActiveCall =
@@ -2353,7 +2400,7 @@ function ConversasContent() {
     queryKey: ['chatTopics', selectedChatId],
     queryFn: () => fetchChatTopics(selectedChatId!),
     enabled: !!selectedChatId && topicsEnabled,
-    refetchInterval: 5000
+    refetchInterval: () => visibleTabRefetchInterval(15_000),
   });
 
   const topicFilteredMessages = useMemo(() => {
@@ -2582,7 +2629,12 @@ function ConversasContent() {
                   </button>
                 </div>
 
-                {usersByLetter.length === 0 ? (
+                {usersLoading ? (
+                  <div className="flex flex-col items-center justify-center h-40 text-gray-500 dark:text-gray-400 text-sm">
+                    <Loader2 size={28} className="mb-2 animate-spin opacity-60" />
+                    Carregando pessoas...
+                  </div>
+                ) : usersByLetter.length === 0 ? (
                   <div className="flex flex-col items-center justify-center h-40 text-gray-500 dark:text-gray-400 text-sm">
                     <Users size={32} className="mb-2 opacity-40" />
                     Nenhum usuário encontrado

@@ -31,6 +31,7 @@ import {
   FluigDatasetToggle,
   useFluigWorkflowApprovalDatasets,
 } from '@/components/fluig/fluigWorkflowAprovadoresShared';
+import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 
 export function FluigWorkflowAprovadorDetailPage() {
   const router = useRouter();
@@ -88,6 +89,8 @@ export function FluigWorkflowAprovadorDetailPage() {
 
   const displayName =
     mergedSummary?.name ?? activeBucket?.name ?? provisionalDisplayName;
+
+  useDocumentTitle(`Aprovadores - ${displayName}`);
 
   const approvedRequests = activeBucket?.approvedRequests ?? [];
   const pendingRequests = activeBucket?.pendingRequests ?? [];

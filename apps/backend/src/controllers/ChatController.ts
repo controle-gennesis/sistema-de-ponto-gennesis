@@ -596,7 +596,10 @@ export class ChatController {
       if (!userId) throw createError('Usuário não autenticado', 401);
 
       const { id } = req.params;
-      const chat = await chatService.getDirectChatById(id, userId);
+      const sinceRaw = req.query.since as string | undefined;
+      const since =
+        sinceRaw && !Number.isNaN(Date.parse(sinceRaw)) ? new Date(sinceRaw) : undefined;
+      const chat = await chatService.getDirectChatById(id, userId, since ? { since } : undefined);
       res.json({ success: true, data: chat });
     } catch (error: any) {
       next(error);

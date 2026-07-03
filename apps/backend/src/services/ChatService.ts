@@ -1624,6 +1624,25 @@ export class ChatService {
     await this.addUsersToGroupCallChat(sideChatId, [userId]);
   }
 
+  /** Monta filtro de mensagens visíveis (limpar/apagar só pra mim) sem round-trip ao banco. */
+  private buildPersonalMessagesWhereFromMaps(
+    chatId: string,
+    clearedByChat: Map<string, Date>,
+    hiddenIdsByChat: Map<string, string[]>,
+  ): Prisma.MessageWhereInput {
+    const parts: Prisma.MessageWhereInput[] = [];
+    const clearedAt = clearedByChat.get(chatId);
+    if (clearedAt) {
+      parts.push({ createdAt: { gt: clearedAt } });
+    }
+    const hiddenIds = hiddenIdsByChat.get(chatId)?.filter(Boolean) ?? [];
+    if (hiddenIds.length > 0) {
+      parts.push({ id: { notIn: hiddenIds } });
+    }
+    if (parts.length === 0) return {};
+    return parts.length === 1 ? parts[0]! : { AND: parts };
+  }
+
   /**
    * Lista todos os chats diretos/grupo de um usuário (com a última mensagem)
    */
@@ -1645,21 +1664,54 @@ export class ChatService {
       orderBy: { lastMessageAt: 'desc' }
     });
 
+    if (chats.length === 0) return chats;
+
+    const chatIds = chats.map((c) => c.id);
+    const [privacies, hiddenRows] = await Promise.all([
+      prisma.chatUserPrivacy.findMany({
+        where: { userId, chatId: { in: chatIds } },
+        select: { chatId: true, clearedAt: true },
+      }),
+      prisma.messageHiddenForUser.findMany({
+        where: { userId, message: { chatId: { in: chatIds } } },
+        select: { messageId: true, message: { select: { chatId: true } } },
+      }),
+    ]);
+
+    const clearedByChat = new Map<string, Date>();
+    for (const p of privacies) {
+      if (p.clearedAt) clearedByChat.set(p.chatId, p.clearedAt);
+    }
+    const hiddenIdsByChat = new Map<string, string[]>();
+    for (const h of hiddenRows) {
+      const cid = h.message.chatId;
+      if (!hiddenIdsByChat.has(cid)) hiddenIdsByChat.set(cid, []);
+      hiddenIdsByChat.get(cid)!.push(h.messageId);
+    }
+
     const fav = this.buildMessageFavoriteInclude(userId);
+    const lastByChatId = await Promise.all(
+      chats.map(async (c) => {
+        const mw = this.buildPersonalMessagesWhereFromMaps(c.id, clearedByChat, hiddenIdsByChat);
+        const last = await prisma.message.findMany({
+          where: { chatId: c.id, ...mw },
+          take: 1,
+          orderBy: { createdAt: 'desc' },
+          include: {
+            sender: { select: this.directChatUserInclude },
+            attachments: true,
+            replyTo: this.buildReplyToInclude(),
+            ...fav,
+          },
+        });
+        return { chatId: c.id, last };
+      }),
+    );
+    const lastMap = new Map(lastByChatId.map((row) => [row.chatId, row.last]));
+
     for (const c of chats) {
-      const mw = await this.getPersonalMessagesWhere(userId, c.id);
-      const last = await prisma.message.findMany({
-        where: { chatId: c.id, ...mw },
-        take: 1,
-        orderBy: { createdAt: 'desc' },
-        include: {
-          sender: { select: this.directChatUserInclude },
-          attachments: true,
-          replyTo: this.buildReplyToInclude(),
-          ...fav
-        }
-      });
-      (c as unknown as { messages: typeof last }).messages = last;
+      (c as unknown as { messages: typeof lastByChatId[0]['last'] }).messages =
+        lastMap.get(c.id) ?? [];
     }
 
     return chats;
@@ -1667,12 +1719,19 @@ export class ChatService {
 
   /**
    * Retorna um chat direto/grupo específico com todas as mensagens
+   * (ou só mensagens novas quando `since` é informado — sync incremental).
    */
-  async getDirectChatById(chatId: string, userId: string) {
-    const mw = await this.getPersonalMessagesWhere(userId, chatId);
+  async getDirectChatById(chatId: string, userId: string, options?: { since?: Date }) {
+    const baseMw = await this.getPersonalMessagesWhere(userId, chatId);
+    const mw: Prisma.MessageWhereInput =
+      options?.since != null
+        ? Object.keys(baseMw).length > 0
+          ? { AND: [baseMw, { createdAt: { gt: options.since } }] }
+          : { createdAt: { gt: options.since } }
+        : baseMw;
     const chat = await prisma.chat.findUnique({
       where: { id: chatId },
-      include: this.buildChatInclude(true, userId, mw)
+      include: this.buildChatInclude(true, userId, mw),
     });
 
     if (!chat) throw new Error('Chat não encontrado');

@@ -1093,7 +1093,7 @@ export class KanbanService {
   }
 
   async getBoardForUser(userId: string, departmentKeyParam?: string) {
-    await migrateLegacyCardMembers();
+    void migrateLegacyCardMembers();
     const { key: ownKey } = await this.getUserDepartment(userId);
     const targetKey = departmentKeyParam
       ? resolveKanbanBoardKeyParam(departmentKeyParam)
