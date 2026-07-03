@@ -362,6 +362,32 @@ function resolveColumnDropIndex(
   return before ? columnIndex : columnIndex + 1;
 }
 
+/** Índice de inserção a partir da posição X no board (cobre gaps entre colunas). */
+function resolveColumnDropIndexFromBoard(
+  clientX: number,
+  boardEl: HTMLElement,
+  draggingColumnId?: string | null,
+): number {
+  const slots = Array.from(
+    boardEl.querySelectorAll<HTMLElement>('[data-kanban-column-id]'),
+  );
+  if (slots.length === 0) return 0;
+
+  for (let i = 0; i < slots.length; i++) {
+    const slotId = slots[i].getAttribute('data-kanban-column-id');
+    const rect = slots[i].getBoundingClientRect();
+    const mid = rect.left + rect.width / 2;
+
+    if (slotId === draggingColumnId) {
+      if (clientX < mid) return i;
+      continue;
+    }
+
+    if (clientX < mid) return i;
+  }
+  return slots.length;
+}
+
 function moveColumnInBoardCache(
   board: KanbanBoard | undefined,
   columnId: string,
@@ -784,7 +810,7 @@ function KanbanColumnDropGutter({
 }) {
   return (
     <div
-      className="relative w-2 shrink-0 self-stretch min-h-[200px] -mx-2.5 z-[2]"
+      className="relative z-[3] w-8 shrink-0 self-stretch min-h-[200px] -mx-4"
       onDragOver={(e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -947,12 +973,18 @@ function KanbanColumnComponent({
           </span>
         </button>
 
-        <div className="flex flex-col items-center pb-4 pt-2 select-none">
+        <button
+          type="button"
+          onClick={onToggleCollapse}
+          title={`Expandir ${column.title}`}
+          aria-label={`Expandir ${column.title}`}
+          className="flex w-full flex-col items-center justify-center pb-4 pt-2 select-none"
+        >
           <span
             className="w-2 h-2 rounded-full ring-2 ring-white/80 dark:ring-gray-900/40"
             style={{ backgroundColor: column.color }}
           />
-        </div>
+        </button>
       </div>
     );
   }
@@ -2071,6 +2103,21 @@ function KanbanPage() {
     );
   }, []);
 
+  const handleBoardColumnDragOver = useCallback((e: React.DragEvent) => {
+    if (!columnDragIdRef.current || !boardCardsRef.current) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    const index = resolveColumnDropIndexFromBoard(
+      e.clientX,
+      boardCardsRef.current,
+      columnDragIdRef.current,
+    );
+    columnDragOverIndexRef.current = index;
+    setColumnDrag((prev) =>
+      prev.overIndex === index ? prev : { ...prev, overIndex: index },
+    );
+  }, []);
+
   const handleColumnDrop = useCallback(
     async (e: React.DragEvent, targetIndex: number) => {
       e.preventDefault();
@@ -2120,6 +2167,22 @@ function KanbanPage() {
       }
     },
     [columns, queryClient, kanbanBoardQueryKey, refreshBoard],
+  );
+
+  const handleBoardColumnDrop = useCallback(
+    (e: React.DragEvent) => {
+      if (!columnDragIdRef.current || !boardCardsRef.current) return;
+      if (columnDropHandledRef.current) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const index = resolveColumnDropIndexFromBoard(
+        e.clientX,
+        boardCardsRef.current,
+        columnDragIdRef.current,
+      );
+      void handleColumnDrop(e, index);
+    },
+    [handleColumnDrop],
   );
 
   const handleDragOver = useCallback((e: React.DragEvent, columnId: string, index?: number) => {
@@ -2598,15 +2661,10 @@ function KanbanPage() {
             ref={boardCardsRef}
             className="flex gap-5 items-start"
             style={{ minWidth: 'max-content' }}
-            onDragOverCapture={
-              boardReadOnly || showBoardSkeleton
-                ? undefined
-                : (e) => {
-                    if (!columnDragIdRef.current) return;
-                    e.preventDefault();
-                    e.dataTransfer.dropEffect = 'move';
-                  }
+            onDragOver={
+              boardReadOnly || showBoardSkeleton ? undefined : handleBoardColumnDragOver
             }
+            onDrop={boardReadOnly || showBoardSkeleton ? undefined : handleBoardColumnDrop}
           >
             {showBoardSkeleton ? (
               <>
@@ -2639,19 +2697,23 @@ function KanbanPage() {
                 <div
                   data-kanban-column-id={column.id}
                   className="kanban-column-slot flex shrink-0"
+                  onDragOver={
+                    boardReadOnly || !columnDrag.draggingColumnId
+                      ? undefined
+                      : handleBoardColumnDragOver
+                  }
+                  onDrop={
+                    boardReadOnly || !columnDrag.draggingColumnId
+                      ? undefined
+                      : handleBoardColumnDrop
+                  }
                   onDragOverCapture={
                     boardReadOnly
                       ? undefined
                       : (e) => {
                           if (!columnDragIdRef.current) return;
-                          const target = e.target;
-                          if (!(target instanceof Node) || !e.currentTarget.contains(target)) return;
                           e.preventDefault();
-                          const rect = e.currentTarget.getBoundingClientRect();
-                          handleColumnDragOver(
-                            e,
-                            resolveColumnDropIndex(columnIndex, e.clientX, rect),
-                          );
+                          handleBoardColumnDragOver(e);
                         }
                   }
                   onDropCapture={
@@ -2659,15 +2721,9 @@ function KanbanPage() {
                       ? undefined
                       : (e) => {
                           if (!columnDragIdRef.current) return;
-                          const target = e.target;
-                          if (!(target instanceof Node) || !e.currentTarget.contains(target)) return;
                           e.preventDefault();
                           e.stopPropagation();
-                          const rect = e.currentTarget.getBoundingClientRect();
-                          void handleColumnDrop(
-                            e,
-                            resolveColumnDropIndex(columnIndex, e.clientX, rect),
-                          );
+                          void handleBoardColumnDrop(e);
                         }
                   }
                 >
