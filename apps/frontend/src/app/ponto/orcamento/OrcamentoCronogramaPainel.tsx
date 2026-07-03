@@ -726,20 +726,7 @@ export function OrcamentoCronogramaPainel({
   }, [linhas, centroCustoId, orcamentoId, cronograma.subServicosPorServico]);
 
   if (linhas.length === 0) {
-    return (
-      <div
-        role="status"
-        className="flex flex-col items-center justify-center rounded-xl border border-dashed border-gray-300 bg-gray-50/90 px-6 py-14 text-center dark:border-gray-600 dark:bg-gray-900/50"
-      >
-        <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-red-50 dark:bg-red-950/40">
-          <Calendar className="h-7 w-7 shrink-0 text-red-600 dark:text-red-400" aria-hidden />
-        </div>
-        <h3 className="text-base font-semibold tracking-tight text-gray-900 dark:text-gray-50">Cronograma vazio</h3>
-        <p className="mt-2 max-w-md text-sm leading-relaxed text-gray-600 dark:text-gray-400">
-          Adicione serviços na aba Orçamento para planejar prazos e acompanhar o andamento da obra.
-        </p>
-      </div>
-    );
+    return null;
   }
 
   return (

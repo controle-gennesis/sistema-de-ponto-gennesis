@@ -41,7 +41,10 @@ import jsPDF from 'jspdf';
 import * as XLSX from 'xlsx';
 import { useCostCenters } from '@/hooks/useCostCenters';
 import api from '@/lib/api';
+import { FORM_FIELD_INPUT_CLS } from '@/lib/formFieldUi';
 import { Modal } from '@/components/ui/Modal';
+import { DatePickerField } from '@/components/ui/DatePickerField';
+import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
 import { formatCadastroListId } from '@/components/ui/CadastroListSummary';
 import { TableCheckbox } from '@/components/ui/Checkbox';
 import {
@@ -3519,6 +3522,16 @@ export function OrcamentoPageView({
       cancelled = true;
     };
   }, []);
+
+  const employeeSelectOptions = useMemo(
+    () =>
+      employeeOptions.map((employee) => ({
+        value: employee.name,
+        label: employee.name,
+        searchText: employee.name,
+      })),
+    [employeeOptions],
+  );
 
   /**
    * Catálogo global (S3): depende do contrato e re-roda ao trocar orçamento.
@@ -9849,15 +9862,24 @@ export function OrcamentoPageView({
 
 
                 {!loadingFromApi && orcamentoViewTab === 'cronograma' && (
-                  <OrcamentoCronogramaPainel
-                    linhas={linhasCronograma}
-                    cronograma={cronograma}
-                    onChange={setCronograma}
-                    centroCustoId={centroCustoId}
-                    orcamentoId={orcamentoAtivoId}
-                    dataInicioObra={meta.dataAbertura}
-                    dataFimObra={dataFimOrcamento}
-                  />
+                  linhasCronograma.length === 0 ? (
+                    <OrcamentoSecaoVazia
+                      titulo="Cronograma vazio"
+                      texto="Adicione serviços na aba Orçamento para planejar prazos e acompanhar o andamento da obra."
+                      Icon={Calendar}
+                      onIrOrcamento={() => setOrcamentoViewTab('montagem')}
+                    />
+                  ) : (
+                    <OrcamentoCronogramaPainel
+                      linhas={linhasCronograma}
+                      cronograma={cronograma}
+                      onChange={setCronograma}
+                      centroCustoId={centroCustoId}
+                      orcamentoId={orcamentoAtivoId}
+                      dataInicioObra={meta.dataAbertura}
+                      dataFimObra={dataFimOrcamento}
+                    />
+                  )
                 )}
 
                 {!loadingFromApi && orcamentoViewTab === 'memorial' && meta.importadoPlanilha && (
@@ -12043,28 +12065,36 @@ export function OrcamentoPageView({
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Data de início</label>
-              <input
-                type="date"
+              <DatePickerField
                 value={editarDadosDraft.dataAbertura}
-                onChange={(e) => setEditarDadosDraft((p) => ({ ...p, dataAbertura: e.target.value }))}
-                className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100"
+                onChange={(dataAbertura) => setEditarDadosDraft((p) => ({ ...p, dataAbertura }))}
+                placeholder="dd/mm/aaaa"
+                noFocusRing
+                aria-label="Data de início"
               />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Data de fim</label>
-              <input
-                type="date"
+              <DatePickerField
                 value={editarDadosDraft.dataEnvio}
-                onChange={(e) => setEditarDadosDraft((p) => ({ ...p, dataEnvio: e.target.value }))}
-                className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100"
+                onChange={(dataEnvio) => setEditarDadosDraft((p) => ({ ...p, dataEnvio }))}
+                placeholder="dd/mm/aaaa"
+                noFocusRing
+                aria-label="Data de fim"
               />
             </div>
             <div className="sm:col-span-2">
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Responsável pelo orçamento</label>
-              <input
+              <SingleSelectSearchDropdown
                 value={editarDadosDraft.responsavelOrcamento}
-                onChange={(e) => setEditarDadosDraft((p) => ({ ...p, responsavelOrcamento: e.target.value }))}
-                className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100"
+                onChange={(responsavelOrcamento) => setEditarDadosDraft((p) => ({ ...p, responsavelOrcamento }))}
+                options={employeeSelectOptions}
+                allowEmpty
+                disabled={loadingEmployeeOptions}
+                placeholder={loadingEmployeeOptions ? 'Carregando funcionários...' : 'Selecione o responsável'}
+                searchPlaceholder="Pesquisar..."
+                emptyOptionsMessage="Nenhum funcionário encontrado"
+                noFocusRing
               />
             </div>
             <div className="sm:col-span-2">
@@ -12258,7 +12288,7 @@ export function OrcamentoPageView({
                 <input
                   value={novoOrcamentoMetaDraft.nomeOrcamento}
                   onChange={(e) => setNovoOrcamentoMetaDraft((p) => ({ ...p, nomeOrcamento: e.target.value }))}
-                  className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-900 shadow-sm transition placeholder:text-gray-400 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-500/20 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                  className={FORM_FIELD_INPUT_CLS}
                   placeholder="Ex: Orçamento reforma bloco A"
                   disabled={isCreatingOrcamento}
                 />
@@ -12268,7 +12298,7 @@ export function OrcamentoPageView({
                 <input
                   value={novoOrcamentoMetaDraft.osNumeroPasta}
                   onChange={(e) => setNovoOrcamentoMetaDraft((p) => ({ ...p, osNumeroPasta: e.target.value }))}
-                  className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-900 shadow-sm transition placeholder:text-gray-400 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-500/20 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                  className={FORM_FIELD_INPUT_CLS}
                   placeholder="Ex: XX/2025 - Nº241"
                   disabled={isCreatingOrcamento}
                 />
@@ -12278,7 +12308,7 @@ export function OrcamentoPageView({
                 <input
                   value={novoOrcamentoMetaDraft.prazoExecucaoDias}
                   onChange={(e) => setNovoOrcamentoMetaDraft((p) => ({ ...p, prazoExecucaoDias: e.target.value }))}
-                  className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-900 shadow-sm transition placeholder:text-gray-400 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-500/20 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                  className={FORM_FIELD_INPUT_CLS}
                   placeholder="Ex: 150"
                   inputMode="numeric"
                   disabled={isCreatingOrcamento}
@@ -12286,22 +12316,24 @@ export function OrcamentoPageView({
               </div>
               <div>
                 <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Data de início *</label>
-                <input
-                  type="date"
+                <DatePickerField
                   value={novoOrcamentoMetaDraft.dataAbertura}
-                  onChange={(e) => setNovoOrcamentoMetaDraft((p) => ({ ...p, dataAbertura: e.target.value }))}
-                  className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-900 shadow-sm transition focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-500/20 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                  onChange={(dataAbertura) => setNovoOrcamentoMetaDraft((p) => ({ ...p, dataAbertura }))}
+                  placeholder="dd/mm/aaaa"
                   disabled={isCreatingOrcamento}
+                  noFocusRing
+                  aria-label="Data de início"
                 />
               </div>
               <div>
                 <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Data de fim</label>
-                <input
-                  type="date"
+                <DatePickerField
                   value={novoOrcamentoMetaDraft.dataEnvio}
-                  onChange={(e) => setNovoOrcamentoMetaDraft((p) => ({ ...p, dataEnvio: e.target.value }))}
-                  className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-900 shadow-sm transition focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-500/20 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                  onChange={(dataEnvio) => setNovoOrcamentoMetaDraft((p) => ({ ...p, dataEnvio }))}
+                  placeholder="dd/mm/aaaa"
                   disabled={isCreatingOrcamento}
+                  noFocusRing
+                  aria-label="Data de fim"
                 />
               </div>
             </div>
@@ -12317,28 +12349,26 @@ export function OrcamentoPageView({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="sm:col-span-2">
                   <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Responsável pelo orçamento</label>
-                  <select
+                  <SingleSelectSearchDropdown
                     value={novoOrcamentoMetaDraft.responsavelOrcamento}
-                    onChange={(e) => setNovoOrcamentoMetaDraft((p) => ({ ...p, responsavelOrcamento: e.target.value }))}
-                    className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-900 shadow-sm transition focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-500/20 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                    onChange={(responsavelOrcamento) =>
+                      setNovoOrcamentoMetaDraft((p) => ({ ...p, responsavelOrcamento }))
+                    }
+                    options={employeeSelectOptions}
+                    allowEmpty
                     disabled={loadingEmployeeOptions || isCreatingOrcamento}
-                  >
-                    <option value="">
-                      {loadingEmployeeOptions ? 'Carregando funcionários...' : 'Selecione o responsável'}
-                    </option>
-                    {employeeOptions.map((employee) => (
-                      <option key={employee.id} value={employee.name}>
-                        {employee.name}
-                      </option>
-                    ))}
-                  </select>
+                    placeholder={loadingEmployeeOptions ? 'Carregando funcionários...' : 'Selecione o responsável'}
+                    searchPlaceholder="Pesquisar..."
+                    emptyOptionsMessage="Nenhum funcionário encontrado"
+                    noFocusRing
+                  />
                 </div>
                 <div>
                   <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Desconto (%)</label>
                   <input
                     value={novoOrcamentoMetaDraft.descontoPercentual}
                     onChange={(e) => setNovoOrcamentoMetaDraft((p) => ({ ...p, descontoPercentual: e.target.value }))}
-                    className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-900 shadow-sm transition placeholder:text-gray-400 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-500/20 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                    className={FORM_FIELD_INPUT_CLS}
                     placeholder="Ex: 25,01"
                     disabled={isCreatingOrcamento}
                   />
@@ -12348,7 +12378,7 @@ export function OrcamentoPageView({
                   <input
                     value={novoOrcamentoMetaDraft.bdiPercentual}
                     onChange={(e) => setNovoOrcamentoMetaDraft((p) => ({ ...p, bdiPercentual: e.target.value }))}
-                    className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-900 shadow-sm transition placeholder:text-gray-400 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-500/20 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                    className={FORM_FIELD_INPUT_CLS}
                     placeholder="Ex: 28,35"
                     disabled={isCreatingOrcamento}
                   />
@@ -12383,7 +12413,7 @@ export function OrcamentoPageView({
                             reajustes: (p.reajustes ?? []).map((rr, i) => (i === idx ? { ...rr, nome: e.target.value } : rr))
                           }))
                         }
-                        className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-900 shadow-sm transition placeholder:text-gray-400 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-500/20 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                        className={FORM_FIELD_INPUT_CLS}
                         placeholder={`Reajuste ${idx + 1}`}
                         disabled={isCreatingOrcamento}
                       />
@@ -12395,7 +12425,7 @@ export function OrcamentoPageView({
                             reajustes: (p.reajustes ?? []).map((rr, i) => (i === idx ? { ...rr, percentual: e.target.value } : rr))
                           }))
                         }
-                        className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-900 shadow-sm transition placeholder:text-gray-400 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-500/20 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                        className={FORM_FIELD_INPUT_CLS}
                         placeholder="%"
                         disabled={isCreatingOrcamento}
                       />
@@ -12430,7 +12460,7 @@ export function OrcamentoPageView({
                 <input
                   value={novoOrcamentoMetaDraft.descricao}
                   onChange={(e) => setNovoOrcamentoMetaDraft((p) => ({ ...p, descricao: e.target.value }))}
-                  className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-900 shadow-sm transition placeholder:text-gray-400 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-500/20 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                  className={FORM_FIELD_INPUT_CLS}
                   placeholder="Ex: Manutenção geral da unidade"
                   disabled={isCreatingOrcamento}
                 />
