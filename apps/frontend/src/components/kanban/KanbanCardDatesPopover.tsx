@@ -5,8 +5,9 @@ import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-r
 import { clsx } from 'clsx';
 import toast from 'react-hot-toast';
 import { Button } from '@/components/ui/Button';
-import { kanbanInput } from './kanbanFormStyles';
-import { combineDateTime, splitDateTime, toYmd } from './kanbanDateTime';
+import { DateTimePickerField } from '@/components/ui/DateTimePickerField';
+import { kanbanLabel } from './kanbanFormStyles';
+import { splitDateTime, toYmd } from './kanbanDateTime';
 
 function parseYmd(s: string): Date | null {
   if (!s) return null;
@@ -18,12 +19,36 @@ function compareYmd(a: string, b: string): number {
   return a.localeCompare(b);
 }
 
+/** Converte valor do Kanban (`yyyy-MM-ddTHH:mm:ss`) para o picker (`yyyy-MM-ddTHH:mm`). */
+function kanbanToPickerValue(value: string): string {
+  if (!value) return '';
+  const { date, time } = splitDateTime(value);
+  if (!date) return '';
+  return `${date}T${time}`;
+}
+
+/** Converte valor do picker para o formato persistido no Kanban. */
+function pickerToKanban(value: string): string {
+  if (!value) return '';
+  const match = value.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/);
+  if (!match) return '';
+  return `${match[1]}T${match[2]}:00`;
+}
+
+function pickerDatePart(value: string): string {
+  return value.split('T')[0] ?? '';
+}
+
+function setPickerDate(value: string, ymd: string): string {
+  const time = value.includes('T') ? (value.split('T')[1] ?? '09:00') : '09:00';
+  return `${ymd}T${time}`;
+}
+
 export interface KanbanCardDatesPanelProps {
   startDate: string;
   endDate: string;
   onClose: () => void;
   onSave: (start: string | null, end: string | null) => void | Promise<void>;
-  saving?: boolean;
 }
 
 /** Conteúdo do painel de datas (usar dentro de Modal). */
@@ -32,28 +57,26 @@ export function KanbanCardDatesPanel({
   endDate: initialEnd,
   onClose,
   onSave,
-  saving,
 }: KanbanCardDatesPanelProps) {
-  const initialStartParts = splitDateTime(initialStart);
-  const initialEndParts = splitDateTime(initialEnd);
-
-  const [startDate, setStartDate] = useState(initialStartParts.date);
-  const [startTime, setStartTime] = useState(initialStartParts.time);
-  const [endDate, setEndDate] = useState(initialEndParts.date);
-  const [endTime, setEndTime] = useState(initialEndParts.time);
-  const [viewDate, setViewDate] = useState(
-    () => parseYmd(initialEndParts.date || initialStartParts.date) ?? new Date(),
-  );
+  const [startValue, setStartValue] = useState(() => kanbanToPickerValue(initialStart));
+  const [endValue, setEndValue] = useState(() => kanbanToPickerValue(initialEnd));
+  const [viewDate, setViewDate] = useState(() => {
+    const anchor =
+      parseYmd(pickerDatePart(kanbanToPickerValue(initialEnd))) ??
+      parseYmd(pickerDatePart(kanbanToPickerValue(initialStart)));
+    return anchor ?? new Date();
+  });
   const [pickPhase, setPickPhase] = useState<'start' | 'end'>('start');
 
+  const startDate = pickerDatePart(startValue);
+  const endDate = pickerDatePart(endValue);
+
   useEffect(() => {
-    const s = splitDateTime(initialStart);
-    const e = splitDateTime(initialEnd);
-    setStartDate(s.date);
-    setStartTime(s.time);
-    setEndDate(e.date);
-    setEndTime(e.time);
-    const anchor = parseYmd(e.date || s.date);
+    const nextStart = kanbanToPickerValue(initialStart);
+    const nextEnd = kanbanToPickerValue(initialEnd);
+    setStartValue(nextStart);
+    setEndValue(nextEnd);
+    const anchor = parseYmd(pickerDatePart(nextEnd)) ?? parseYmd(pickerDatePart(nextStart));
     if (anchor) setViewDate(anchor);
     if (initialStart && initialEnd) setPickPhase('start');
     else if (initialStart && !initialEnd) setPickPhase('end');
@@ -96,8 +119,8 @@ export function KanbanCardDatesPanel({
     const ymd = dayYmd(day);
 
     if (activePickPhase === 'start') {
-      setStartDate(ymd);
-      setEndDate('');
+      setStartValue(setPickerDate(startValue, ymd));
+      setEndValue('');
       setPickPhase('end');
       return;
     }
@@ -107,30 +130,22 @@ export function KanbanCardDatesPanel({
     if (s && compareYmd(e, s) < 0) {
       [s, e] = [e, s];
     }
-    setStartDate(s);
-    setEndDate(e);
+    setStartValue(setPickerDate(startValue, s));
+    setEndValue(setPickerDate(endValue, e));
     setPickPhase('start');
   }
 
   function validateDates(): { start: string; end: string } | null {
-    if (!startDate.trim()) {
+    if (!startValue.trim()) {
       toast.error('Informe a data de início');
       return null;
     }
-    if (!startTime.trim()) {
-      toast.error('Informe a hora de início');
-      return null;
-    }
-    if (!endDate.trim()) {
+    if (!endValue.trim()) {
       toast.error('Informe a data de término');
       return null;
     }
-    if (!endTime.trim()) {
-      toast.error('Informe a hora de término');
-      return null;
-    }
-    const start = combineDateTime(startDate, startTime);
-    const end = combineDateTime(endDate, endTime);
+    const start = pickerToKanban(startValue);
+    const end = pickerToKanban(endValue);
     if (new Date(end).getTime() <= new Date(start).getTime()) {
       toast.error('A data e hora de término devem ser posteriores à de início');
       return null;
@@ -141,15 +156,13 @@ export function KanbanCardDatesPanel({
   async function handleSave() {
     const validated = validateDates();
     if (!validated) return;
-    await onSave(validated.start, validated.end);
+    void onSave(validated.start, validated.end);
     onClose();
   }
 
   async function handleRemove() {
-    setStartDate('');
-    setStartTime('09:00');
-    setEndDate('');
-    setEndTime('09:00');
+    setStartValue('');
+    setEndValue('');
     setPickPhase('start');
     await Promise.resolve(onSave(null, null));
     onClose();
@@ -260,67 +273,27 @@ export function KanbanCardDatesPanel({
         </div>
       </div>
 
-      <div className="mt-5 pt-5 border-t border-gray-200 dark:border-gray-700 space-y-5">
-        <div className="space-y-3">
-          <p className="text-sm font-medium text-gray-800 dark:text-gray-200">Data de início *</p>
-          <div className="kanban-datetime-field grid w-full grid-cols-1 gap-3 sm:grid-cols-2">
-            <div className="flex min-w-0 flex-col">
-              <span className="mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400">
-                Data *
-              </span>
-              <input
-                type="date"
-                required
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-                className={clsx(kanbanInput, 'w-full')}
-              />
-            </div>
-            <div className="flex min-w-0 flex-col">
-              <span className="mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400">
-                Hora *
-              </span>
-              <input
-                type="time"
-                required
-                value={startTime}
-                onChange={(e) => setStartTime(e.target.value)}
-                className={clsx(kanbanInput, 'w-full')}
-                title="Hora de início"
-              />
-            </div>
-          </div>
+      <div className="mt-5 pt-5 border-t border-gray-200 dark:border-gray-700 space-y-4">
+        <div>
+          <label className={kanbanLabel}>Data de início *</label>
+          <DateTimePickerField
+            value={startValue}
+            onChange={setStartValue}
+            placeholder="dd/mm/aaaa hh:mm"
+            noFocusRing
+            aria-label="Data de início"
+          />
         </div>
 
-        <div className="space-y-3">
-          <p className="text-sm font-medium text-gray-800 dark:text-gray-200">Data de término *</p>
-          <div className="kanban-datetime-field grid w-full grid-cols-1 gap-3 sm:grid-cols-2">
-            <div className="flex min-w-0 flex-col">
-              <span className="mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400">
-                Data *
-              </span>
-              <input
-                type="date"
-                required
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-                className={clsx(kanbanInput, 'w-full')}
-              />
-            </div>
-            <div className="flex min-w-0 flex-col">
-              <span className="mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400">
-                Hora *
-              </span>
-              <input
-                type="time"
-                required
-                value={endTime}
-                onChange={(e) => setEndTime(e.target.value)}
-                className={clsx(kanbanInput, 'w-full')}
-                title="Hora de término"
-              />
-            </div>
-          </div>
+        <div>
+          <label className={kanbanLabel}>Data de término *</label>
+          <DateTimePickerField
+            value={endValue}
+            onChange={setEndValue}
+            placeholder="dd/mm/aaaa hh:mm"
+            noFocusRing
+            aria-label="Data de término"
+          />
         </div>
       </div>
 
@@ -329,7 +302,6 @@ export function KanbanCardDatesPanel({
           type="button"
           className="w-full !bg-red-600 hover:!bg-red-700 !text-white border-transparent focus:outline-none focus:ring-0 focus-visible:ring-0"
           onClick={handleSave}
-          loading={saving}
         >
           Salvar
         </Button>
@@ -338,7 +310,6 @@ export function KanbanCardDatesPanel({
           variant="outline"
           className="w-full border-gray-300 dark:border-gray-600"
           onClick={handleRemove}
-          disabled={saving}
         >
           Remover
         </Button>

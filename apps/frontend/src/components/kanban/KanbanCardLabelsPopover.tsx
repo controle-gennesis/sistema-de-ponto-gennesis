@@ -16,7 +16,6 @@ export interface KanbanCardLabelsPanelProps {
   labelPresets?: readonly KanbanLabelPreset[];
   onClose: () => void;
   onSave: (labels: KanbanCardLabel[]) => void | Promise<void>;
-  saving?: boolean;
 }
 
 /** Conteúdo do painel de etiquetas (usar dentro de Modal). */
@@ -25,7 +24,6 @@ export function KanbanCardLabelsPanel({
   labelPresets,
   onClose,
   onSave,
-  saving,
 }: KanbanCardLabelsPanelProps) {
   const palette = getKanbanLabelPalette(labelPresets);
   const [labels, setLabels] = useState<KanbanCardLabel[]>(() =>
@@ -41,9 +39,9 @@ export function KanbanCardLabelsPanel({
     }
   }
 
-  async function handleSave() {
+  function handleSave() {
     const normalized = normalizeKanbanLabels(labels, palette);
-    await Promise.resolve(onSave(normalized));
+    void onSave(normalized);
     onClose();
   }
 
@@ -91,11 +89,10 @@ export function KanbanCardLabelsPanel({
         </button>
         <button
           type="button"
-          disabled={saving}
-          onClick={() => void handleSave()}
-          className="flex-1 px-3 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg disabled:opacity-50"
+          onClick={handleSave}
+          className="flex-1 px-3 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg"
         >
-          {saving ? 'Salvando…' : 'Salvar'}
+          Salvar
         </button>
       </div>
     </div>

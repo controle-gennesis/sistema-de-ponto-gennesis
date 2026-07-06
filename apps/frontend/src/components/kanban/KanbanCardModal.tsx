@@ -213,6 +213,12 @@ export function KanbanCardModal({
   const attachmentsSectionRef = useRef<HTMLDivElement>(null);
   /** Evita que um fetch antigo do card sobrescreva membros após atribuir/remover. */
   const memberMutationInFlight = useRef(0);
+  /** Snapshot para reverter save otimista de metadados se a API falhar. */
+  const metaSaveSnapshotRef = useRef<{
+    board: KanbanCard;
+    detail?: KanbanCardDetail;
+    columnId: string;
+  } | null>(null);
   const [commentsPanelHeight, setCommentsPanelHeight] = useState<number | undefined>(undefined);
   const isCreate = mode === 'create';
   const isDetail = mode === 'detail' && !!cardId;
@@ -382,42 +388,113 @@ export function KanbanCardModal({
     };
   }
 
-  async function saveMeta(
-    partial?: Partial<{
-      title: string;
-      description: string;
-      priority: Priority;
-      startDate: string | null;
-      endDate: string | null;
-      labels: KanbanCardLabel[];
-      columnId: string;
-      checklistEnabled: boolean;
-    }>,
-  ): Promise<boolean> {
-    if (!cardId) return false;
-    setSaving(true);
-    try {
-      const targetColumnId = partial?.columnId ?? columnId;
-      const updated = await updateKanbanCard(cardId, {
-        title: partial?.title ?? title,
-        description: partial?.description ?? description,
-        priority: partial?.priority ?? priority,
-        startDate: partial?.startDate !== undefined ? partial.startDate : startDate || null,
-        endDate: partial?.endDate !== undefined ? partial.endDate : endDate || null,
-        labels: partial?.labels ?? labels,
-        columnId: targetColumnId,
-        ...(partial?.checklistEnabled !== undefined
-          ? { checklistEnabled: partial.checklistEnabled }
-          : {}),
+  function buildLocalBoardCard(): KanbanCard | null {
+    if (!cardId) return null;
+    if (card) {
+      return kanbanDetailToBoardCard({
+        ...card,
+        title,
+        description,
+        priority,
+        labels,
+        startDate: startDate || null,
+        endDate: endDate || null,
+        checklistEnabled,
+        members,
       });
-      syncCardFromApi(updated, targetColumnId);
-      return true;
-    } catch {
-      toast.error('Erro ao salvar alterações');
-      return false;
-    } finally {
-      setSaving(false);
     }
+    if (initialCard && initialCard.id === cardId) {
+      return {
+        ...initialCard,
+        title,
+        description,
+        priority,
+        labels,
+        startDate: startDate || null,
+        endDate: endDate || null,
+        checklistEnabled,
+        members,
+      };
+    }
+    return null;
+  }
+
+  type MetaPartial = Partial<{
+    title: string;
+    description: string;
+    priority: Priority;
+    startDate: string | null;
+    endDate: string | null;
+    labels: KanbanCardLabel[];
+    columnId: string;
+    checklistEnabled: boolean;
+  }>;
+
+  function applyMetaPartial(base: KanbanCard, partial: MetaPartial): KanbanCard {
+    return {
+      ...base,
+      ...(partial.title !== undefined ? { title: partial.title } : {}),
+      ...(partial.description !== undefined ? { description: partial.description } : {}),
+      ...(partial.priority !== undefined ? { priority: partial.priority } : {}),
+      ...(partial.startDate !== undefined ? { startDate: partial.startDate } : {}),
+      ...(partial.endDate !== undefined ? { endDate: partial.endDate } : {}),
+      ...(partial.labels !== undefined ? { labels: partial.labels } : {}),
+      ...(partial.checklistEnabled !== undefined
+        ? { checklistEnabled: partial.checklistEnabled }
+        : {}),
+    };
+  }
+
+  function buildMetaApiPayload(partial: MetaPartial) {
+    const payload: Parameters<typeof updateKanbanCard>[1] = {};
+    if (partial.title !== undefined) payload.title = partial.title;
+    if (partial.description !== undefined) payload.description = partial.description;
+    if (partial.priority !== undefined) payload.priority = partial.priority;
+    if (partial.startDate !== undefined) payload.startDate = partial.startDate;
+    if (partial.endDate !== undefined) payload.endDate = partial.endDate;
+    if (partial.labels !== undefined) payload.labels = partial.labels;
+    if (partial.columnId !== undefined) payload.columnId = partial.columnId;
+    if (partial.checklistEnabled !== undefined) {
+      payload.checklistEnabled = partial.checklistEnabled;
+    }
+    return payload;
+  }
+
+  function saveMeta(partial?: MetaPartial): boolean {
+    if (!cardId || !partial || Object.keys(partial).length === 0) return false;
+
+    const base = buildLocalBoardCard();
+    if (!base) return false;
+
+    const targetColumnId = partial.columnId ?? columnId;
+    const optimistic = applyMetaPartial(base, partial);
+
+    metaSaveSnapshotRef.current = {
+      board: base,
+      detail: card,
+      columnId: targetColumnId,
+    };
+    syncCardFromApi(optimistic, targetColumnId);
+
+    void (async () => {
+      try {
+        const updated = await updateKanbanCard(cardId, buildMetaApiPayload(partial), {
+          timeout: 20_000,
+        });
+        syncCardFromApi(updated, targetColumnId);
+      } catch {
+        const snapshot = metaSaveSnapshotRef.current;
+        if (snapshot?.board) {
+          syncCardFromApi(snapshot.board, snapshot.columnId);
+        }
+        if (snapshot?.detail) {
+          applyCardDetail(snapshot.detail);
+        }
+        toast.error('Erro ao salvar alterações');
+      }
+    })();
+
+    return true;
   }
 
   function startDescriptionEdit() {
@@ -431,7 +508,7 @@ export function KanbanCardModal({
   }
 
   async function saveDescription() {
-    const ok = await saveMeta({ description });
+    const ok = saveMeta({ description });
     if (ok) setIsEditingDescription(false);
   }
 
@@ -451,7 +528,6 @@ export function KanbanCardModal({
     if (!isDetail || !cardId) return;
 
     memberMutationInFlight.current += 1;
-    setSaving(true);
     try {
       const updated = await addKanbanCardMember(cardId, user.id);
       const normalized = normalizeKanbanCardDetail(updated);
@@ -463,7 +539,6 @@ export function KanbanCardModal({
       toast.error('Erro ao adicionar membro');
     } finally {
       memberMutationInFlight.current -= 1;
-      setSaving(false);
     }
   }
 
@@ -474,7 +549,6 @@ export function KanbanCardModal({
     if (!isDetail || !cardId) return;
 
     memberMutationInFlight.current += 1;
-    setSaving(true);
     try {
       const updated = await removeKanbanCardMember(cardId, userId);
       const normalized = normalizeKanbanCardDetail(updated);
@@ -486,7 +560,6 @@ export function KanbanCardModal({
       toast.error('Erro ao remover membro');
     } finally {
       memberMutationInFlight.current -= 1;
-      setSaving(false);
     }
   }
 
@@ -789,10 +862,9 @@ export function KanbanCardModal({
             labels={labels}
             labelPresets={labelPresets}
             onClose={() => setOpenMenu(null)}
-            saving={saving}
-            onSave={async (next) => {
+            onSave={(next) => {
               setLabels(next);
-              if (isDetail) await saveMeta({ labels: next });
+              if (isDetail) saveMeta({ labels: next });
             }}
           />
         </Modal>
@@ -810,12 +882,11 @@ export function KanbanCardModal({
           <KanbanCardDatesPanel
             startDate={startDate}
             endDate={endDate}
-            saving={saving}
             onClose={() => setOpenMenu(null)}
-            onSave={async (start, end) => {
+            onSave={(start, end) => {
               setStartDate(start ?? '');
               setEndDate(end ?? '');
-              if (isDetail) await saveMeta({ startDate: start, endDate: end });
+              if (isDetail) saveMeta({ startDate: start, endDate: end });
             }}
           />
         </Modal>
@@ -872,12 +943,12 @@ export function KanbanCardModal({
             <KanbanPriorityPicker
               value={priority}
               disabled={saving}
-              onChange={async (p) => {
+              onChange={(p) => {
                 setPriority(p);
-                await saveMeta({ priority: p });
+                saveMeta({ priority: p });
               }}
             />
-            {(saving) && (
+            {saving && (
               <Loader2 className="w-4 h-4 animate-spin text-red-600 shrink-0" />
             )}
           </div>
@@ -967,19 +1038,11 @@ export function KanbanCardModal({
                   icon={<ListChecks className="w-4 h-4" />}
                   active={checklistEnabled}
                   className="shrink-0"
-                  onClick={async () => {
+                  onClick={() => {
                     const next = !checklistEnabled;
                     setChecklistEnabled(next);
                     if (!isDetail || !cardId) return;
-                    setSaving(true);
-                    try {
-                      await saveMeta({ checklistEnabled: next });
-                    } catch {
-                      setChecklistEnabled(!next);
-                      toast.error('Erro ao atualizar checklist');
-                    } finally {
-                      setSaving(false);
-                    }
+                    saveMeta({ checklistEnabled: next });
                   }}
                 >
                   Checklist

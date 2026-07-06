@@ -14,9 +14,9 @@ import {
   updateChecklistItem,
 } from '@/lib/kanban';
 import { CheckboxIndicator } from '@/components/ui/Checkbox';
+import { DatePickerField } from '@/components/ui/DatePickerField';
 import { KanbanUserAvatar } from './KanbanUserAvatar';
 import { splitDateTime } from './kanbanDateTime';
-import { kanbanInput } from './kanbanFormStyles';
 
 function formatTaskDueDate(value: string): string {
   const { date } = splitDateTime(value);
@@ -388,11 +388,12 @@ function KanbanChecklistTaskRowInner({
             <p className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">
               Data de conclusão
             </p>
-            <input
-              type="date"
+            <DatePickerField
               value={draftDate}
-              onChange={(e) => setDraftDate(e.target.value)}
-              className={clsx(kanbanInput, 'text-sm')}
+              onChange={setDraftDate}
+              placeholder="dd/mm/aaaa"
+              noFocusRing
+              aria-label="Data de conclusão"
             />
             <div className="flex gap-2 mt-2">
               <button

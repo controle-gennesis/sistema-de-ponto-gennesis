@@ -1439,9 +1439,18 @@ export class KanbanService {
       workHours?: number | null;
     },
   ) {
-    await this.assertCardAccess(userId, id);
-    const existing = await prisma.kanbanCard.findUnique({ where: { id } });
+    const existing = await prisma.kanbanCard.findUnique({
+      where: { id },
+      include: {
+        column: {
+          include: {
+            board: { select: { ...this.boardAccessSelect, labelPresets: true } },
+          },
+        },
+      },
+    });
     if (!existing) throw new Error('Card não encontrado');
+    await this.assertBoardAccess(userId, existing.column.board, 'write');
 
     if (data.columnId && data.columnId !== existing.columnId) {
       await this.assertColumnAccess(userId, data.columnId);
@@ -1491,8 +1500,7 @@ export class KanbanService {
 
     let labelsJson = labelsToJson(data.labels);
     if (data.labels !== undefined) {
-      const labelColumnId = data.columnId ?? existing.columnId;
-      const labelPresets = await this.getLabelPresetsForColumn(labelColumnId);
+      const labelPresets = resolveKanbanLabelPresets(existing.column.board.labelPresets);
       const validated = validateCardLabelsForBoard(data.labels, labelPresets);
       labelsJson = labelsToJson(validated);
     }
