@@ -19,6 +19,7 @@ const admissaoCandidatoSchema = z.object({
   motivoContratacao: str,
   setor: str,
   observacao: strOpt,
+  anexoDocumento: dpAttachmentSchema.optional(),
 });
 
 function normalizeAdmissaoDetails(input: unknown): unknown {
@@ -62,6 +63,7 @@ const rescisaoItemSchema = z.object({
   tipoRescisao: str,
   motivo: str,
   observacoes: strOpt,
+  anexoDocumento: dpAttachmentSchema.optional(),
 });
 
 const alteracaoItemSchema = z.object({

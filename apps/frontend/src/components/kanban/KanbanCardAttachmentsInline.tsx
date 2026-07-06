@@ -17,6 +17,7 @@ import api from '@/lib/api';
 import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
 import {
   type KanbanCardAttachment,
+  type KanbanCardDetail,
   deleteKanbanAttachment,
   isKanbanLinkAttachment,
 } from '@/lib/kanban';
@@ -55,7 +56,7 @@ export interface KanbanCardAttachmentsInlineProps {
   onAddClick: () => void;
   onDraftFilesChange?: (files: KanbanDraftAttachment[]) => void;
   onDraftLinksChange?: (links: KanbanDraftLink[]) => void;
-  onUpdated?: () => void | Promise<void>;
+  onUpdated?: (detail: KanbanCardDetail) => void | Promise<void>;
   className?: string;
 }
 
@@ -183,9 +184,9 @@ export function KanbanCardAttachmentsInline({
 
     setDeletingId(item.id);
     try {
-      await deleteKanbanAttachment(item.id);
+      const updated = await deleteKanbanAttachment(item.id);
       toast.success('Anexo removido');
-      await onUpdated?.();
+      await onUpdated?.(updated);
     } catch {
       toast.error('Erro ao remover anexo');
     } finally {

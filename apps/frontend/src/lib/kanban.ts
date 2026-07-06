@@ -299,6 +299,78 @@ export function replaceCardInBoardCache(
   return changed ? { ...board, columns } : board;
 }
 
+/** Converte detalhe do card (modal) para o formato exibido no quadro. */
+export function kanbanDetailToBoardCard(detail: KanbanCardDetail): KanbanCard {
+  const {
+    columnId: _columnId,
+    columnTitle: _columnTitle,
+    columnColor: _columnColor,
+    checklistItems: _checklistItems,
+    commentsList: _commentsList,
+    attachmentsList: _attachmentsList,
+    updatedAt: _updatedAt,
+    ...card
+  } = detail;
+  return card;
+}
+
+/**
+ * Atualiza um card no cache do quadro (campos + movimento entre colunas) sem refetch.
+ */
+export function syncCardOnBoardCache(
+  board: KanbanBoard | undefined,
+  card: KanbanCard,
+  columnId: string,
+): KanbanBoard | undefined {
+  if (!board) return board;
+
+  let sourceColumnId: string | null = null;
+  let sourceIndex = -1;
+  for (const col of board.columns) {
+    const idx = col.cards.findIndex((c) => c.id === card.id);
+    if (idx >= 0) {
+      sourceColumnId = col.id;
+      sourceIndex = idx;
+      break;
+    }
+  }
+
+  if (!sourceColumnId) {
+    return insertCardIntoBoardCache(board, columnId, card, false);
+  }
+
+  if (sourceColumnId === columnId) {
+    let changed = false;
+    const columns = board.columns.map((col) => {
+      if (col.id !== columnId) return col;
+      const cards = col.cards.map((c) => {
+        if (c.id !== card.id) return c;
+        changed = true;
+        return { ...c, ...card };
+      });
+      return changed ? { ...col, cards } : col;
+    });
+    return changed ? { ...board, columns } : board;
+  }
+
+  const columns = board.columns
+    .map((col) => {
+      if (col.id === sourceColumnId) {
+        return { ...col, cards: col.cards.filter((c) => c.id !== card.id) };
+      }
+      return col;
+    })
+    .map((col) => {
+      if (col.id !== columnId) return col;
+      const cards = [...col.cards];
+      const insertAt = Math.min(sourceIndex, cards.length);
+      cards.splice(insertAt, 0, card);
+      return { ...col, cards };
+    });
+
+  return { ...board, columns };
+}
+
 export function buildOptimisticCardCopy(
   source: KanbanCard,
   title: string,

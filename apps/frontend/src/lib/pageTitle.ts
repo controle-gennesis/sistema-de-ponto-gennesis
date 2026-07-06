@@ -6,7 +6,7 @@ export const APP_TITLE = 'Gennesis Attendance';
 const EXTRA_PAGE_TITLES: Record<string, string> = {
   '/ponto/home': 'Início',
   '/ponto/aprovacoes': 'Aprovações',
-  '/ponto/solicitacoes-gerais': 'Solicitações Gerais',
+  '/ponto/solicitacoes-gerais': 'Solicitações DP/ADM/TST',
   '/ponto/gerenciar-solicitacoes-gerais': 'Gerenciar Solicitações',
   '/ponto/conversas': 'Conversas',
   '/ponto/gestao-solicitacoes': 'Gestão de Solicitações',

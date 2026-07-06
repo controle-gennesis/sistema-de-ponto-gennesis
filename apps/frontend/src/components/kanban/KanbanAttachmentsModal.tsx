@@ -16,6 +16,7 @@ import api from '@/lib/api';
 import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
 import {
   type KanbanCardAttachment,
+  type KanbanCardDetail,
   addKanbanLinkAttachment,
   isKanbanLinkAttachment,
   uploadKanbanAttachments,
@@ -65,7 +66,7 @@ export interface KanbanAttachmentsModalProps {
   draftLinks?: KanbanDraftLink[];
   onDraftLinksChange?: (links: KanbanDraftLink[]) => void;
   currentUserId?: string;
-  onUpdated?: () => void | Promise<void>;
+  onUpdated?: (detail: KanbanCardDetail) => void | Promise<void>;
   elevated?: boolean;
 }
 
@@ -113,9 +114,9 @@ export function KanbanAttachmentsModal({
     }
     setUploading(true);
     try {
-      await uploadKanbanAttachments(cardId!, Array.from(fileList));
+      const updated = await uploadKanbanAttachments(cardId!, Array.from(fileList));
       toast.success('Anexo(s) enviado(s)');
-      await onUpdated?.();
+      await onUpdated?.(updated);
     } catch {
       toast.error('Erro ao enviar anexo');
     } finally {
@@ -149,14 +150,14 @@ export function KanbanAttachmentsModal({
 
     setAddingLink(true);
     try {
-      await addKanbanLinkAttachment(cardId!, {
+      const updated = await addKanbanLinkAttachment(cardId!, {
         url: normalized,
         displayName: linkDisplayName.trim() || undefined,
       });
       setLinkUrl('');
       setLinkDisplayName('');
       toast.success('Link adicionado');
-      await onUpdated?.();
+      await onUpdated?.(updated);
     } catch {
       toast.error('Erro ao adicionar link');
     } finally {
@@ -175,9 +176,9 @@ export function KanbanAttachmentsModal({
     }
     setDeletingId(id);
     try {
-      await deleteKanbanAttachment(id);
+      const updated = await deleteKanbanAttachment(id);
       toast.success('Anexo removido');
-      await onUpdated?.();
+      await onUpdated?.(updated);
     } catch {
       toast.error('Erro ao remover anexo');
     } finally {

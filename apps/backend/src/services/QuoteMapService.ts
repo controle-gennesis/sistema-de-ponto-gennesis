@@ -5,6 +5,7 @@ import fs from 'fs';
 import path from 'path';
 import PDFDocument from 'pdfkit';
 import { backendUploadsRoot } from '../lib/uploads';
+import { shouldUseUnbBranding, resolvePdfLogoPathFromPublic } from '../lib/unbBranding';
 
 export class QuoteMapService {
   private purchaseOrderService = new PurchaseOrderService();
@@ -22,17 +23,9 @@ export class QuoteMapService {
     return Number(value);
   }
 
-  private findCompanyLogoPath(): string | null {
-    const candidates = [
-      path.resolve(__dirname, '..', '..', '..', 'frontend', 'public', 'logopv.png'),
-      path.resolve(__dirname, '..', '..', '..', 'frontend', 'public', 'logo.png'),
-      path.resolve(__dirname, '..', '..', '..', 'frontend', 'public', 'logonome.jpg'),
-      path.resolve(__dirname, '..', '..', '..', 'frontend', 'public', 'logogrande.png')
-    ];
-    for (const candidate of candidates) {
-      if (fs.existsSync(candidate)) return candidate;
-    }
-    return null;
+  private findCompanyLogoPath(...contextLabels: (string | null | undefined)[]): string | null {
+    const useUnb = shouldUseUnbBranding(...contextLabels);
+    return resolvePdfLogoPathFromPublic(useUnb);
   }
 
   private async saveQuoteMapSnapshotPdf(quoteMapId: string): Promise<string> {
@@ -43,11 +36,11 @@ export class QuoteMapService {
           select: {
             id: true,
             requestNumber: true,
+            serviceOrder: true,
+            costCenter: { select: { name: true, code: true } },
             items: {
               include: { material: true }
             },
-            // Mantém suporte ao fallback textual sem depender de colunas em drift no banco
-            serviceOrder: true
           },
         },
         suppliers: {
@@ -90,7 +83,12 @@ export class QuoteMapService {
 
       // Header card
       doc.roundedRect(left, 30, contentWidth, 96, 8).fill('#F5F7FB');
-      const logoPath = this.findCompanyLogoPath();
+      const logoContext = [
+        map.materialRequest?.costCenter?.name,
+        map.materialRequest?.costCenter?.code,
+        map.materialRequest?.serviceOrder,
+      ];
+      const logoPath = this.findCompanyLogoPath(...logoContext);
       if (logoPath) {
         doc.image(logoPath, left + 12, 44, { fit: [120, 56], valign: 'center' });
       }

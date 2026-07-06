@@ -10,6 +10,7 @@ import {
 import { prisma } from '../lib/prisma';
 import { createError } from '../middleware/errorHandler';
 import { getContractGestorCostCenterIds } from '../lib/contractGestorApprovalAccess';
+import { getFluigApproverAccessForUser, userCanManageFluigApproverViewers } from '../lib/fluigApproverAccess';
 import { filterValidPermissionPayload, removeOrphanUserPermissions } from '../lib/permissionRegistrySync';
 import { CONTRACTS_MODULE_KEY } from '../lib/contractAccess';
 
@@ -72,6 +73,9 @@ router.get('/me', async (req: AuthRequest, res, next) => {
           dpApprovalContractIds: [],
           gestorCostCenterIds: [],
           contractModuleFlags: {},
+          fluigApproverFullAccess: true,
+          fluigApproverNameKeys: [],
+          canManageFluigApproverViewers: true,
         },
       });
     }
@@ -101,6 +105,8 @@ router.get('/me', async (req: AuthRequest, res, next) => {
     });
 
     const gestorCostCenterIds = await getContractGestorCostCenterIds(req.user.id);
+    const fluigApproverAccess = await getFluigApproverAccessForUser(req.user.id, false);
+    const canManageFluigApproverViewers = await userCanManageFluigApproverViewers(req.user.id, false);
 
     const contractModuleFlags: Record<
       string,
@@ -129,6 +135,9 @@ router.get('/me', async (req: AuthRequest, res, next) => {
         dpApprovalContractIds: dpApprovalContractIds.map((r) => r.contractId),
         gestorCostCenterIds,
         contractModuleFlags,
+        fluigApproverFullAccess: fluigApproverAccess.fullAccess,
+        fluigApproverNameKeys: fluigApproverAccess.nameKeys,
+        canManageFluigApproverViewers,
       },
     });
   } catch (error) {

@@ -1,5 +1,4 @@
-import { Loading } from '@/components/ui/Loading';
-
+/** Lista de aprovadores: usuário com um único aprovador é redirecionado antes de renderizar conteúdo. */
 export default function FluigAprovadoresLoading() {
-  return <Loading message="Carregando aprovadores..." fullScreen size="lg" />;
+  return null;
 }

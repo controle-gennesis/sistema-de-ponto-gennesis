@@ -96,6 +96,8 @@ model User {
   logisticsDeliveryCompletionsReported    LogisticsDeliveryCompletion[] @relation("LogisticsDeliveryCompleter")
   vehicleReservationsBaixaReported        VehicleReservation[] @relation("VehicleReservationBaixaReporter")
   vehicleReservationsVistoriaReported     VehicleReservation[] @relation("VehicleReservationVistoriaReporter")
+  fluigWorkflowApproverViewers            FluigWorkflowApproverViewer[] @relation("FluigApproverViewerUser")
+  updatedFluigWorkflowApproverViewers     FluigWorkflowApproverViewer[] @relation("FluigApproverViewerUpdatedBy")
 
   @@map("users")
 }
@@ -2275,6 +2277,25 @@ model UserDpApprovalContract {
   @@index([userId])
   @@index([contractId])
   @@map("user_dp_approval_contracts")
+}
+
+/// Usuários autorizados a ver a página de um aprovador específico no Fluig (fluxos G3/G5).
+model FluigWorkflowApproverViewer {
+  id              String   @id @default(cuid())
+  approverNameKey String
+  approverName    String
+  userId          String
+  updatedBy       String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user    User  @relation("FluigApproverViewerUser", fields: [userId], references: [id], onDelete: Cascade)
+  updater User? @relation("FluigApproverViewerUpdatedBy", fields: [updatedBy], references: [id], onDelete: SetNull)
+
+  @@unique([approverNameKey, userId])
+  @@index([approverNameKey])
+  @@index([userId])
+  @@map("fluig_workflow_approver_viewers")
 }
 
 /// Template de permissões por cargo (nome do campo `Employee.position`). Usado como padrão na tela Permissões.

@@ -28,6 +28,7 @@ import { formatOsSePasta, formatOsSePastaOrDash } from '@/lib/formatOsSePasta';
 import toast from 'react-hot-toast';
 import { usePermissions } from '@/hooks/usePermissions';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
+import { loadPdfBrandingLogoDataUrl } from '@/lib/loadPdfBrandingLogo';
 import { formatDateTimeBr } from '@/lib/dateTimeBr';
 
 interface ContractPleito {
@@ -891,32 +892,14 @@ export default function AndamentoListPage() {
     toast.success(`${idsSelecionados.length} OS(s) marcada(s) como faturada(s) com a NF ${invoice}.`);
   };
 
-  const loadLogoBase64 = (): Promise<string | null> => {
-    return new Promise((resolve) => {
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.onload = () => {
-        const c = document.createElement('canvas');
-        c.width = img.width;
-        c.height = img.height;
-        const ctx = c.getContext('2d');
-        if (!ctx) { resolve(null); return; }
-        ctx.drawImage(img, 0, 0);
-        try {
-          resolve(c.toDataURL('image/png'));
-        } catch {
-          resolve(null);
-        }
-      };
-      img.onerror = () => resolve(null);
-      img.src = '/logobranca.png';
-    });
-  };
-
   const handleExportPleitoPDF = async () => {
     if (pleitoGeradoData.length === 0) return;
     try {
-      const logoBase64 = await loadLogoBase64();
+      const logoBase64 = await loadPdfBrandingLogoDataUrl({
+        contextLabels: [contract?.name, contract?.number],
+        maxW: 22,
+        maxH: 20,
+      });
       const pdf = new jsPDF('p', 'mm', 'a4');
       const pageWidth = pdf.internal.pageSize.getWidth();
       const pageHeight = pdf.internal.pageSize.getHeight();

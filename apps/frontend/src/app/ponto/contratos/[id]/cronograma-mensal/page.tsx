@@ -13,6 +13,7 @@ import { Loading } from '@/components/ui/Loading';
 import api from '@/lib/api';
 import { formatOsSePasta, formatOsSePastaOrDash } from '@/lib/formatOsSePasta';
 import { pleitoStatusReadOnlySpanClass } from '@/lib/pleitoStatusStyles';
+import { loadPdfBrandingLogoDataUrl } from '@/lib/loadPdfBrandingLogo';
 import toast from 'react-hot-toast';
 import { formatDateTimeBr } from '@/lib/dateTimeBr';
 
@@ -217,38 +218,17 @@ export default function CronogramaMensalPage() {
     toast.success('Arquivo XLSX gerado.');
   };
 
-  const loadLogoBase64 = (): Promise<string | null> => {
-    return new Promise((resolve) => {
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.onload = () => {
-        const c = document.createElement('canvas');
-        c.width = img.width;
-        c.height = img.height;
-        const ctx = c.getContext('2d');
-        if (!ctx) {
-          resolve(null);
-          return;
-        }
-        ctx.drawImage(img, 0, 0);
-        try {
-          resolve(c.toDataURL('image/png'));
-        } catch {
-          resolve(null);
-        }
-      };
-      img.onerror = () => resolve(null);
-      img.src = '/logobranca.png';
-    });
-  };
-
   const exportPdf = async () => {
     if (rows.length === 0) {
       toast.error('Não há ordens para exportar.');
       return;
     }
     try {
-      const logoBase64 = await loadLogoBase64();
+      const logoBase64 = await loadPdfBrandingLogoDataUrl({
+        contextLabels: [contract?.name, contract?.number],
+        maxW: 16,
+        maxH: 14,
+      });
       const pdf = new jsPDF('l', 'mm', 'a4');
       const pageWidth = pdf.internal.pageSize.getWidth();
       const pageHeight = pdf.internal.pageSize.getHeight();

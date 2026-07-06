@@ -1,9 +1,9 @@
 'use client';
 
-import React, { useDeferredValue, useEffect, useMemo, useState } from 'react';
+import React, { useDeferredValue, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { CheckCircle2, Clock, Search, Users } from 'lucide-react';
+import { CheckCircle2, Clock, Search, UserCog, Users } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { FilterStatCard } from '@/components/ui/FilterStatCard';
 import { Button } from '@/components/ui/Button';
@@ -16,19 +16,31 @@ import {
   ListRowNavigableLabel,
 } from '@/components/ui/listTableUi';
 import api from '@/lib/api';
-import { mergeWorkflowApproverBuckets } from '@/lib/fluigWorkflowApproval';
+import { mergeWorkflowApproverBuckets, buildFluigApproversNavHref } from '@/lib/fluigWorkflowApproval';
+import { fetchAllFluigApproverViewerKeys } from '@/lib/fluigApproverViewers';
 import { ListPagination } from '@/components/ui/ListPagination';
 import {
   APPROVERS_LIST_PAGE_SIZE,
   useFluigWorkflowApprovalDatasets,
 } from '@/components/fluig/fluigWorkflowAprovadoresShared';
+import { FluigApproverViewersModal } from '@/components/fluig/FluigApproverViewersModal';
+import { usePermissions } from '@/hooks/usePermissions';
 
 export function FluigWorkflowAprovadoresPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const [listPage, setListPage] = useState(1);
+  const [viewerModal, setViewerModal] = useState<{ nameKey: string; name: string } | null>(null);
   const deferredSearch = useDeferredValue(search);
+
+  const {
+    filterFluigApprovers,
+    fluigApproverFullAccess,
+    fluigApproverNameKeys,
+    canManageFluigApproverViewers,
+    isLoading: permissionsLoading,
+  } = usePermissions();
 
   const { data: userData } = useQuery({
     queryKey: ['user'],
@@ -41,31 +53,66 @@ export function FluigWorkflowAprovadoresPage() {
 
   const user = userData?.data ?? { name: 'Usuário', role: 'EMPLOYEE' as const };
 
+  const isSingleApproverUser =
+    !permissionsLoading && !fluigApproverFullAccess && fluigApproverNameKeys.length === 1;
+
+  const shouldShowChooser =
+    !permissionsLoading && (fluigApproverFullAccess || fluigApproverNameKeys.length !== 1);
+
+  const singleApproverHref = useMemo(() => {
+    if (!isSingleApproverUser) return null;
+    return buildFluigApproversNavHref({
+      fullAccess: fluigApproverFullAccess,
+      nameKeys: fluigApproverNameKeys,
+    });
+  }, [isSingleApproverUser, fluigApproverFullAccess, fluigApproverNameKeys]);
+
+  useLayoutEffect(() => {
+    if (singleApproverHref) {
+      router.replace(singleApproverHref);
+    }
+  }, [singleApproverHref, router]);
+
   const { g3Buckets, g5Buckets, isLoading, hasError, errorMessage } =
-    useFluigWorkflowApprovalDatasets();
+    useFluigWorkflowApprovalDatasets({ enabled: shouldShowChooser });
 
   const mergedApprovers = useMemo(
     () => mergeWorkflowApproverBuckets(g3Buckets, g5Buckets),
     [g3Buckets, g5Buckets]
   );
 
+  const accessibleApprovers = useMemo(
+    () => filterFluigApprovers(mergedApprovers),
+    [mergedApprovers, filterFluigApprovers]
+  );
+
+  const { data: viewersData } = useQuery({
+    queryKey: ['fluig-approver-viewers-all'],
+    queryFn: fetchAllFluigApproverViewerKeys,
+    enabled: canManageFluigApproverViewers,
+    staleTime: 60 * 1000,
+  });
+
+  const viewersByApprover = viewersData?.byApprover ?? {};
+  const fullAccessUserIds = viewersData?.fullAccessUserIds ?? [];
+
   const summary = useMemo(() => {
-    const withPending = mergedApprovers.filter((item) => item.pendingCount > 0).length;
-    const totalApprovedActions = mergedApprovers.reduce((sum, item) => sum + item.approvedCount, 0);
-    const totalPendingActions = mergedApprovers.reduce((sum, item) => sum + item.pendingCount, 0);
+    const withPending = accessibleApprovers.filter((item) => item.pendingCount > 0).length;
+    const totalApprovedActions = accessibleApprovers.reduce((sum, item) => sum + item.approvedCount, 0);
+    const totalPendingActions = accessibleApprovers.reduce((sum, item) => sum + item.pendingCount, 0);
     return {
-      approvers: mergedApprovers.length,
+      approvers: accessibleApprovers.length,
       withPending,
       totalApprovedActions,
       totalPendingActions,
     };
-  }, [mergedApprovers]);
+  }, [accessibleApprovers]);
 
   const filteredApprovers = useMemo(() => {
     const term = deferredSearch.trim().toLowerCase();
-    if (!term) return mergedApprovers;
-    return mergedApprovers.filter((item) => item.name.toLowerCase().includes(term));
-  }, [mergedApprovers, deferredSearch]);
+    if (!term) return accessibleApprovers;
+    return accessibleApprovers.filter((item) => item.name.toLowerCase().includes(term));
+  }, [accessibleApprovers, deferredSearch]);
 
   const totalPages = Math.max(1, Math.ceil(filteredApprovers.length / APPROVERS_LIST_PAGE_SIZE));
 
@@ -98,6 +145,10 @@ export function FluigWorkflowAprovadoresPage() {
   const refetch = () => {
     queryClient.invalidateQueries({ queryKey: ['fluig-workflow-approval'] });
   };
+
+  if (permissionsLoading || isSingleApproverUser) {
+    return null;
+  }
 
   return (
     <ProtectedRoute route="/ponto/fluig/aprovadores">
@@ -174,7 +225,9 @@ export function FluigWorkflowAprovadoresPage() {
                           Lista de aprovadores
                         </h3>
                         <p className="text-sm text-gray-500 dark:text-gray-400">
-                          Selecione um aprovador para ver suas solicitações
+                          {fluigApproverFullAccess
+                            ? 'Selecione um aprovador para ver suas solicitações'
+                            : 'Escolha um dos aprovadores que você pode acessar'}
                         </p>
                       </div>
                     </div>
@@ -224,6 +277,9 @@ export function FluigWorkflowAprovadoresPage() {
                               <th className={cadastroListClasses.thCenter}>Aprovadas</th>
                               <th className={cadastroListClasses.thCenter}>Pendentes</th>
                               <th className={cadastroListClasses.thCenter}>Total</th>
+                              {canManageFluigApproverViewers ? (
+                                <th className={cadastroListClasses.thCenter}>Acesso</th>
+                              ) : null}
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
@@ -277,6 +333,26 @@ export function FluigWorkflowAprovadoresPage() {
                                 <td className={`${cadastroListClasses.tdCenter} tabular-nums`}>
                                   {item.totalCount}
                                 </td>
+                                {canManageFluigApproverViewers ? (
+                                  <td
+                                    className={cadastroListClasses.tdCenter}
+                                    onClick={(event) => event.stopPropagation()}
+                                  >
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setViewerModal({ nameKey: item.nameKey, name: item.name })
+                                      }
+                                      className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 px-2.5 py-1.5 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
+                                      title="Designar quem pode ver esta página"
+                                    >
+                                      <UserCog className="h-3.5 w-3.5" />
+                                      {(viewersByApprover[item.nameKey]?.length ?? 0) > 0
+                                        ? `${viewersByApprover[item.nameKey]?.length}`
+                                        : 'Designar'}
+                                    </button>
+                                  </td>
+                                ) : null}
                               </tr>
                             ))}
                           </tbody>
@@ -295,6 +371,16 @@ export function FluigWorkflowAprovadoresPage() {
             </>
           )}
         </div>
+
+        {viewerModal ? (
+          <FluigApproverViewersModal
+            isOpen
+            onClose={() => setViewerModal(null)}
+            approverNameKey={viewerModal.nameKey}
+            approverName={viewerModal.name}
+            excludeUserIds={fullAccessUserIds}
+          />
+        ) : null}
       </MainLayout>
     </ProtectedRoute>
   );

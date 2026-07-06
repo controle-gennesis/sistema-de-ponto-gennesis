@@ -1,4 +1,5 @@
 import jsPDF from 'jspdf';
+import { loadPdfBrandingLogo } from '@/lib/loadPdfBrandingLogo';
 
 export type ExtratoCaixaResumoRow = {
   key: string;
@@ -77,6 +78,8 @@ export type ExportExtratoCaixaPdfInput = {
   includeStatsCards?: boolean;
   /** Layout das colunas nas seções de resumo. Padrão: default */
   resumoColumnLayout?: 'default' | 'saida-only';
+  /** Rótulos de contrato/CC/polo para escolher logo Predial (UNB). */
+  brandingContextLabels?: (string | null | undefined)[];
 };
 
 const BRAND_RED: [number, number, number] = [185, 28, 28];
@@ -214,60 +217,14 @@ function computeSectionTotals(rows: ExtratoCaixaResumoRow[]) {
   return { totalEntrada, totalSaida, totalValor };
 }
 
-async function loadCompanyLogo(): Promise<{
+async function loadCompanyLogo(
+  contextLabels: (string | null | undefined)[] = []
+): Promise<{
   dataUrl: string;
   wMm: number;
   hMm: number;
 } | null> {
-  const candidates = ['/logopv.png', '/logo.png', '/logobranca.png'];
-  for (const src of candidates) {
-    const loaded = await tryLoadImage(src);
-    if (loaded) return loaded;
-  }
-  return null;
-}
-
-function tryLoadImage(src: string): Promise<{
-  dataUrl: string;
-  wMm: number;
-  hMm: number;
-} | null> {
-  return new Promise((resolve) => {
-    if (typeof window === 'undefined') {
-      resolve(null);
-      return;
-    }
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => {
-      const c = document.createElement('canvas');
-      c.width = img.naturalWidth;
-      c.height = img.naturalHeight;
-      const ctx = c.getContext('2d');
-      if (!ctx) {
-        resolve(null);
-        return;
-      }
-      ctx.drawImage(img, 0, 0);
-      try {
-        const dataUrl = c.toDataURL('image/png');
-        const maxW = 36;
-        const maxH = 22;
-        const mmPerPx = 25.4 / 96;
-        const iw = img.naturalWidth * mmPerPx;
-        const ih = img.naturalHeight * mmPerPx;
-        const s = Math.min(maxW / iw, maxH / ih, 1);
-        resolve({ dataUrl, wMm: iw * s, hMm: ih * s });
-      } catch {
-        resolve(null);
-      }
-    };
-    img.onerror = () => resolve(null);
-    const url = src.startsWith('http')
-      ? src
-      : `${window.location.origin}${src.startsWith('/') ? src : `/${src}`}`;
-    img.src = url;
-  });
+  return loadPdfBrandingLogo({ contextLabels, maxW: 36, maxH: 22 });
 }
 
 function ensureSpace(doc: jsPDF, y: number, need: number, margin: number): number {
@@ -729,7 +686,11 @@ function drawFooter(doc: jsPDF, margin: number, documentLabel = 'Balanço Financ
 }
 
 export async function exportExtratoCaixaPdf(input: ExportExtratoCaixaPdfInput): Promise<void> {
-  const logo = await loadCompanyLogo();
+  const brandingContext = [
+    ...(input.brandingContextLabels ?? []),
+    ...input.filterLines,
+  ];
+  const logo = await loadCompanyLogo(brandingContext);
   const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
   const pageWidth = doc.internal.pageSize.getWidth();
   const margin = 16;

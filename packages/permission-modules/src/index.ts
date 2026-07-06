@@ -40,6 +40,8 @@ export function pathToModuleKey(href: string): string {
 export const PERMISSION_MODULE_KEYS_MANAGED_ONLY_ON_CONTRACT_MATRIX: readonly string[] = [
   pathToModuleKey('/ponto/orcamento'),
   pathToModuleKey('/ponto/contratos/relatorios'),
+  /** Legado: acesso migrado para Controle «Gerenciar página de aprovadores». */
+  pathToModuleKey('/ponto/fluig/aprovadores'),
 ];
 
 /**
@@ -52,8 +54,7 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
   { key: pathToModuleKey('/ponto/conversas-whatsapp'), name: 'Central de Atendimentos', href: '/ponto/conversas-whatsapp', category: 'Principal' },
   { key: pathToModuleKey('/ponto/financeiro/gestao-solicitacoes'), name: 'Fluig - Processos', href: '/ponto/financeiro/gestao-solicitacoes', category: 'Principal' },
   { key: pathToModuleKey('/ponto/fluig/aprovacoes-workflow'), name: 'Fluig - Aprovações', href: '/ponto/fluig/aprovacoes-workflow', category: 'Principal' },
-  { key: pathToModuleKey('/ponto/fluig/aprovadores'), name: 'Aprovadores', href: '/ponto/fluig/aprovadores', category: 'Principal' },
-  { key: pathToModuleKey('/ponto/solicitacoes-dp'), name: 'Solicitações Gerais', href: '/ponto/solicitacoes-dp', category: 'Principal' },
+  { key: pathToModuleKey('/ponto/solicitacoes-dp'), name: 'Solicitações DP/ADM/TST', href: '/ponto/solicitacoes-dp', category: 'Principal' },
   { key: pathToModuleKey('/ponto/reserva-veiculos'), name: 'Reserva de Veículos', href: '/ponto/reserva-veiculos', category: 'Principal' },
   { key: pathToModuleKey('/ponto/entrega-logistica'), name: 'Entrega da Logística', href: '/ponto/entrega-logistica', category: 'Principal' },
   { key: pathToModuleKey('/ponto/drive'), name: 'Meu Drive', href: '/ponto/drive', category: 'Principal' },
@@ -184,6 +185,16 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
   // Registros de Ponto
   { key: pathToModuleKey('/ponto'), name: 'Registros de Ponto', href: '/ponto', category: 'Registros de Ponto' },
   /**
+   * Legado — permanece no registro para orfãos no banco; oculto na matriz «Acesso».
+   * Acesso atual: Controle «Dar permissão na página de aprovadores» ou designação por aprovador.
+   */
+  {
+    key: pathToModuleKey('/ponto/fluig/aprovadores'),
+    name: 'Aprovadores (legado)',
+    href: '/ponto/fluig/aprovadores',
+    category: 'Principal',
+  },
+  /**
    * Controle — permissões administrativas que não correspondem a uma página do menu lateral
    * (chaves estáveis para checagem em `can()` / API).
    */
@@ -245,6 +256,12 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
     key: pathToModuleKey('/ponto/controle/ver-valores-kanban'),
     name: 'Ver valores do Kanban',
     href: '/ponto/controle/ver-valores-kanban',
+    category: 'Controle',
+  },
+  {
+    key: pathToModuleKey('/ponto/controle/gerenciar-aprovadores-fluig'),
+    name: 'Dar permissão na página de aprovadores',
+    href: '/ponto/controle/gerenciar-aprovadores-fluig',
     category: 'Controle',
   },
 ] as const;

@@ -6,7 +6,7 @@ import toast from 'react-hot-toast';
 import { useRouter } from 'next/navigation';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { CheckCircle, Clock, FileText, Filter, Search, Users, X, XCircle, type LucideIcon } from 'lucide-react';
+import { Car, CheckCircle, Clock, FileText, Filter, Search, Users, X, XCircle, type LucideIcon } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { FilterStatCard } from '@/components/ui/FilterStatCard';
 import { Button } from '@/components/ui/Button';
@@ -83,7 +83,7 @@ type VehicleReservation = {
 
 const ITEMS_PER_PAGE = 20;
 
-type SuppliesCardFilter = 'all' | 'pending' | 'CONCLUDED' | 'CANCELLED';
+type SuppliesCardFilter = 'all' | 'pending' | 'IN_USE' | 'CONCLUDED' | 'CANCELLED';
 
 type DetailStatusFilter = 'ALL' | 'SUPPLIES_QUEUE' | VehicleReservationStatus;
 
@@ -124,8 +124,15 @@ const SUPPLIES_CARD_LIST_CONFIG: Record<
     iconBg: 'bg-yellow-100 dark:bg-yellow-900/30',
     iconColor: 'text-yellow-600 dark:text-yellow-400'
   },
+  IN_USE: {
+    title: 'Reservas Em Uso',
+    subtitle: 'Veículos aprovados e em utilização.',
+    Icon: Car,
+    iconBg: 'bg-purple-100 dark:bg-purple-900/30',
+    iconColor: 'text-purple-600 dark:text-purple-400'
+  },
   CONCLUDED: {
-    title: 'Solicitações Concluídas',
+    title: 'Solicitações Vistoriadas',
     subtitle: 'Reservas vistoriadas e finalizadas.',
     Icon: CheckCircle,
     iconBg: 'bg-green-100 dark:bg-green-900/30',
@@ -146,7 +153,7 @@ const SUPPLIES_STAT_CARDS: {
   iconBg: string;
   iconColor: string;
   Icon: LucideIcon;
-  countKey: keyof { total: number; pending: number; concluded: number; cancelled: number };
+  countKey: keyof { total: number; pending: number; inUse: number; concluded: number; cancelled: number };
 }[] = [
   {
     filter: 'all',
@@ -165,8 +172,16 @@ const SUPPLIES_STAT_CARDS: {
     countKey: 'pending'
   },
   {
+    filter: 'IN_USE',
+    label: 'Em Uso',
+    iconBg: 'bg-purple-100 dark:bg-purple-900/30',
+    iconColor: 'text-purple-600 dark:text-purple-400',
+    Icon: Car,
+    countKey: 'inUse'
+  },
+  {
     filter: 'CONCLUDED',
-    label: 'Concluídas',
+    label: 'Vistoriadas',
     iconBg: 'bg-green-100 dark:bg-green-900/30',
     iconColor: 'text-green-600 dark:text-green-400',
     Icon: CheckCircle,
@@ -185,6 +200,7 @@ const SUPPLIES_STAT_CARDS: {
 function cardFilterToApiParam(filter: SuppliesCardFilter): string | undefined {
   if (filter === 'all') return undefined;
   if (filter === 'pending') return 'PENDING_SUPPLIES,COMPLETED';
+  if (filter === 'IN_USE') return 'APPROVED';
   if (filter === 'CONCLUDED') return 'INSPECTED';
   return 'CANCELLED,REJECTED';
 }
@@ -397,11 +413,12 @@ export default function SolicitacoesReservaVeiculosPage() {
     const pending = list.filter(
       (r) => r.status === 'PENDING_SUPPLIES' || r.status === 'COMPLETED'
     ).length;
+    const inUse = list.filter((r) => r.status === 'APPROVED').length;
     const concluded = list.filter((r) => r.status === 'INSPECTED').length;
     const cancelled = list.filter(
       (r) => r.status === 'CANCELLED' || r.status === 'REJECTED'
     ).length;
-    return { total: list.length, pending, concluded, cancelled };
+    return { total: list.length, pending, inUse, concluded, cancelled };
   }, [statsData]);
 
   const listHeader = SUPPLIES_CARD_LIST_CONFIG[cardFilter];
@@ -461,7 +478,7 @@ export default function SolicitacoesReservaVeiculosPage() {
             </p>
           </div>
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 2xl:grid-cols-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-3 2xl:grid-cols-5">
             {SUPPLIES_STAT_CARDS.map((card) => (
               <FilterStatCard
                 key={card.filter}

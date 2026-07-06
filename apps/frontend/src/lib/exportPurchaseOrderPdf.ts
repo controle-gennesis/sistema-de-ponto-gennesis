@@ -1,5 +1,6 @@
 import jsPDF from 'jspdf';
 import api from '@/lib/api';
+import { loadPdfBrandingLogo } from '@/lib/loadPdfBrandingLogo';
 import { formatPaymentConditionDisplay, type PaymentConditionRow } from '@/components/oc/PaymentConditionSelect';
 
 const PAYMENT_TYPE: Record<string, string> = {
@@ -52,69 +53,6 @@ const FOOTER_NOTES = [
   'Por favor, informar o número da Ordem de Compra na NF.',
   'Horário de recebimento de material: Segunda a Sexta: 08:00 às 12:00 e 13:00 às 16:40.'
 ];
-
-/** Tenta carregar logo: env → /oc-pdf-logo.png → /logo.png → /logobranca.png (padrão usado em outros PDFs do sistema) */
-async function loadOcLogoForPdf(): Promise<{
-  dataUrl: string;
-  wMm: number;
-  hMm: number;
-} | null> {
-  const candidates = [
-    process.env.NEXT_PUBLIC_OC_PDF_LOGO_URL,
-    '/oc-pdf-logo.png',
-    '/logo.png',
-    '/logobranca.png'
-  ].filter(Boolean) as string[];
-
-  for (const src of candidates) {
-    const loaded = await tryLoadImageAsDataUrl(src);
-    if (loaded) return loaded;
-  }
-  return null;
-}
-
-function tryLoadImageAsDataUrl(src: string): Promise<{
-  dataUrl: string;
-  wMm: number;
-  hMm: number;
-} | null> {
-  return new Promise((resolve) => {
-    if (typeof window === 'undefined') {
-      resolve(null);
-      return;
-    }
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => {
-      const c = document.createElement('canvas');
-      c.width = img.naturalWidth;
-      c.height = img.naturalHeight;
-      const ctx = c.getContext('2d');
-      if (!ctx) {
-        resolve(null);
-        return;
-      }
-      ctx.drawImage(img, 0, 0);
-      try {
-        const dataUrl = c.toDataURL('image/png');
-        const maxW = 32;
-        const maxH = 20;
-        const mmPerPx = 25.4 / 96;
-        const iw = img.naturalWidth * mmPerPx;
-        const ih = img.naturalHeight * mmPerPx;
-        const s = Math.min(maxW / iw, maxH / ih, 1);
-        resolve({ dataUrl, wMm: iw * s, hMm: ih * s });
-      } catch {
-        resolve(null);
-      }
-    };
-    img.onerror = () => resolve(null);
-    const url = src.startsWith('http')
-      ? src
-      : `${window.location.origin}${src.startsWith('/') ? src : `/${src}`}`;
-    img.src = url;
-  });
-}
 
 function formatCurrency(n: number): string {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(n);
@@ -199,7 +137,14 @@ export async function exportPurchaseOrderPdf(orderId: string): Promise<void> {
   let y = margin;
 
   const co = companyHeader();
-  const logo = await loadOcLogoForPdf();
+  const logo = await loadPdfBrandingLogo({
+    contextLabels: [
+      order.materialRequest?.costCenter?.name,
+      order.materialRequest?.serviceOrder,
+    ],
+    maxW: 32,
+    maxH: 20,
+  });
 
   if (logo) {
     pdf.addImage(logo.dataUrl, 'PNG', margin, margin, logo.wMm, logo.hMm);

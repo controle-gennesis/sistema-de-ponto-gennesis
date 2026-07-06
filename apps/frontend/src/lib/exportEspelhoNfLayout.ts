@@ -961,36 +961,93 @@ function pdfKeyRow(
   contentW: number,
   pairs: { k: string; v: string }[]
 ): number {
-  const minLineH = 5.4;
   const topPad = 1.4;
   const bottomPad = 1.6;
   const rowGap = 1.6;
+  const lineH = 4.1;
   const n = pairs.length;
   const colW = contentW / Math.max(n, 1);
-  const prepared: Array<{ p: { k: string; v: string }; vxOffset: number; lines: string[] }> = [];
-  let maxLines = 1;
+  const gap = 1.5;
+  const valueMinW = colW * 0.24;
+
+  type PreparedCell = {
+    p: { k: string; v: string };
+    mode: 'inline' | 'stacked';
+    vxOffset: number;
+    labelLines: string[];
+    valueLines: string[];
+    lineCount: number;
+  };
+
+  const prepared: PreparedCell[] = [];
+  let maxLineCount = 1;
   doc.setFontSize(7);
+
   pairs.forEach((p) => {
     doc.setFont('helvetica', 'bold');
-    const kw = doc.getTextWidth(p.k + ' ');
-    const vxOffset = Math.min(kw, colW * 0.42);
-    const lines = doc.splitTextToSize(p.v, colW - vxOffset - 1);
-    const normalizedLines = Array.isArray(lines) ? lines : [String(lines)];
-    prepared.push({ p, vxOffset, lines: normalizedLines });
-    maxLines = Math.max(maxLines, Array.isArray(lines) ? lines.length : 1);
+    const kw = doc.getTextWidth(p.k);
+
+    if (kw + gap + valueMinW > colW) {
+      const labelLines = doc.splitTextToSize(p.k, colW - 1);
+      const normalizedLabel = Array.isArray(labelLines) ? labelLines : [String(labelLines)];
+      doc.setFont('helvetica', 'normal');
+      const valueLines = doc.splitTextToSize(p.v, colW - 1);
+      const normalizedValue = Array.isArray(valueLines) ? valueLines : [String(valueLines)];
+      const lineCount = normalizedLabel.length + normalizedValue.length;
+      prepared.push({
+        p,
+        mode: 'stacked',
+        vxOffset: 0,
+        labelLines: normalizedLabel,
+        valueLines: normalizedValue,
+        lineCount,
+      });
+      maxLineCount = Math.max(maxLineCount, lineCount);
+      return;
+    }
+
+    const vxOffset = kw + gap;
+    doc.setFont('helvetica', 'normal');
+    const valueLines = doc.splitTextToSize(p.v, colW - vxOffset - 1);
+    const normalizedValue = Array.isArray(valueLines) ? valueLines : [String(valueLines)];
+    prepared.push({
+      p,
+      mode: 'inline',
+      vxOffset,
+      labelLines: [p.k],
+      valueLines: normalizedValue,
+      lineCount: normalizedValue.length,
+    });
+    maxLineCount = Math.max(maxLineCount, normalizedValue.length);
   });
-  const textBlockH = Math.max(minLineH, maxLines * 4.1);
-  const dynamicRowH = topPad + textBlockH + bottomPad;
+
+  const dynamicRowH = topPad + maxLineCount * lineH + bottomPad;
   y = pdfCheckPage(doc, y, dynamicRowH + rowGap, margin);
   const textY = y + topPad + 2.2;
   let x = margin;
-  prepared.forEach(({ p, vxOffset, lines }) => {
-    doc.setFont('helvetica', 'bold');
-    doc.text(p.k, x, textY);
-    doc.setFont('helvetica', 'normal');
-    doc.text(lines, x + vxOffset, textY);
+
+  prepared.forEach((cell) => {
+    if (cell.mode === 'stacked') {
+      let cy = textY;
+      doc.setFont('helvetica', 'bold');
+      cell.labelLines.forEach((line) => {
+        doc.text(line, x, cy);
+        cy += lineH;
+      });
+      doc.setFont('helvetica', 'normal');
+      cell.valueLines.forEach((line) => {
+        doc.text(line, x, cy);
+        cy += lineH;
+      });
+    } else {
+      doc.setFont('helvetica', 'bold');
+      doc.text(cell.labelLines[0], x, textY);
+      doc.setFont('helvetica', 'normal');
+      doc.text(cell.valueLines, x + cell.vxOffset, textY);
+    }
     x += colW;
   });
+
   return y + dynamicRowH + rowGap;
 }
 
@@ -1069,7 +1126,7 @@ function buildPdf(b: EspelhoExportBundle): jsPDF {
   y = pdfKeyRow(doc, y, margin, contentW, [
     { k: 'CNPJ:', v: dash(taker?.cnpj) },
     { k: 'Insc. Mun.:', v: dash(taker?.municipalRegistration) },
-    { k: 'Insc. Est. (ÓRGÃO PÚBLICO):', v: dash(taker?.stateRegistration) }
+    { k: 'Insc. Est.:', v: dash(taker?.stateRegistration) }
   ]);
   y = pdfWrappedBlock(doc, y, margin, contentW, 'Nome/Razão Social:', dash(taker?.corporateName || draft.takerName));
   y = pdfWrappedBlock(doc, y, margin, contentW, 'Endereço:', dash(taker?.address));

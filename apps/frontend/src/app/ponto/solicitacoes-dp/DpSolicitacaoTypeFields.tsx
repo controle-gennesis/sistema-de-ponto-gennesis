@@ -35,8 +35,12 @@ type Props = {
   employees: PayrollEmp[];
   onAtestadoFile: (index: number, file: File | null) => void;
   onHoraExtraFile: (index: number, file: File | null) => void;
+  onAdmissaoDocumentoFile: (index: number, file: File | null) => void;
+  onRescisaoDocumentoFile: (index: number, file: File | null) => void;
   atestadoFileNames: Record<number, string>;
   horaExtraFileNames: Record<number, string>;
+  admissaoDocumentoFileNames: Record<number, string>;
+  rescisaoDocumentoFileNames: Record<number, string>;
 };
 
 export function DpSolicitacaoTypeFields({
@@ -46,8 +50,12 @@ export function DpSolicitacaoTypeFields({
   employees,
   onAtestadoFile,
   onHoraExtraFile,
+  onAdmissaoDocumentoFile,
+  onRescisaoDocumentoFile,
   atestadoFileNames,
   horaExtraFileNames,
+  admissaoDocumentoFileNames,
+  rescisaoDocumentoFileNames,
 }: Props) {
   switch (requestType) {
     case '':
@@ -55,7 +63,12 @@ export function DpSolicitacaoTypeFields({
     case 'ADMISSAO':
       return (
         <div className="md:col-span-2">
-          <AdmissaoCandidatosRepeatableFields details={details} patchDetails={patchDetails} />
+          <AdmissaoCandidatosRepeatableFields
+            details={details}
+            patchDetails={patchDetails}
+            documentoFileNames={admissaoDocumentoFileNames}
+            onDocumentoFile={onAdmissaoDocumentoFile}
+          />
         </div>
       );
     case 'FERIAS':
@@ -67,7 +80,13 @@ export function DpSolicitacaoTypeFields({
     case 'RESCISAO':
       return (
         <div className="md:col-span-2">
-          <RescisaoRepeatableFields details={details} patchDetails={patchDetails} employees={employees} />
+          <RescisaoRepeatableFields
+            details={details}
+            patchDetails={patchDetails}
+            employees={employees}
+            documentoFileNames={rescisaoDocumentoFileNames}
+            onDocumentoFile={onRescisaoDocumentoFile}
+          />
         </div>
       );
     case 'ALTERACAO_FUNCAO_SALARIO':

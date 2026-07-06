@@ -20,6 +20,7 @@ import {
   Search,
   Trash2,
   Upload,
+  Download,
   Wallet,
   X,
 } from 'lucide-react';
@@ -31,6 +32,7 @@ import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { FinancialControlEntryModal } from '@/components/financeiro/FinancialControlEntryModal';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import api from '@/lib/api';
+import { exportFinancialControlEntries } from '@/lib/exportFinancialControl';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 
 type FinancialControlStatus =
@@ -487,6 +489,25 @@ export default function ControleFinanceiroPage() {
     deleteMutation.mutate(id);
   };
 
+  const handleExport = () => {
+    if (entries.length === 0) {
+      toast.error('Nenhum lançamento para exportar com os filtros atuais.');
+      return;
+    }
+    try {
+      const monthPart =
+        filters.month > 0
+          ? `-${String(filters.month).padStart(2, '0')}`
+          : '';
+      const statusPart = filters.status ? `-${filters.status.toLowerCase()}` : '';
+      const suffix = `${filters.year}${monthPart}${statusPart}_${new Date().toISOString().slice(0, 10)}`;
+      exportFinancialControlEntries(entries, suffix);
+      toast.success(`${entries.length} lançamento(s) exportado(s).`);
+    } catch {
+      toast.error('Erro ao exportar planilha.');
+    }
+  };
+
   return (
     <ProtectedRoute route="/ponto/financeiro/controle-financeiro">
       <MainLayout userRole="EMPLOYEE" userName="">
@@ -539,6 +560,15 @@ export default function ControleFinanceiroPage() {
               {filters.overdueOnly && (
                 <span className="absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
               )}
+            </button>
+            <button
+              type="button"
+              onClick={handleExport}
+              disabled={isLoading || entries.length === 0}
+              className="flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-800 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
+            >
+              <Download className="h-4 w-4 shrink-0" />
+              <span>Exportar</span>
             </button>
             <button
               type="button"

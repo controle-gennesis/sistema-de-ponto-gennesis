@@ -3,7 +3,7 @@
 import React, { useState, useRef, useCallback, useEffect, useMemo, Suspense } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Loading } from '@/components/ui/Loading';
 import { KanbanCardModal } from '@/components/kanban/KanbanCardModal';
@@ -49,6 +49,7 @@ import {
   buildOptimisticKanbanColumn,
   patchColumnInBoardCache,
   patchCardInBoardCache,
+  syncCardOnBoardCache,
   type KanbanBoardCardChecklistPatch,
   fetchKanbanCard,
   kanbanCardQueryKey,
@@ -558,6 +559,24 @@ function CardMemberAvatars({ card }: { card: KanbanCard }) {
 
 // ─── Card Component ───────────────────────────────────────────────────────────
 
+function kanbanCardBoardSnapshot(card: KanbanCard): string {
+  return [
+    card.id,
+    card.title,
+    card.priority,
+    card.progress,
+    card.completedTasks,
+    card.totalTasks,
+    card.comments,
+    card.attachments,
+    card.endDate ?? '',
+    card.startDate ?? '',
+    card.labels.map((l) => `${l.color}:${l.text}`).join(','),
+    (card.members ?? []).map((m) => m.userId).join(','),
+    card.assignee,
+  ].join('|');
+}
+
 interface KanbanCardItemProps {
   card: KanbanCard;
   columnId: string;
@@ -754,6 +773,16 @@ function KanbanCardItem({
     </div>
   );
 }
+
+const KanbanCardItemMemo = React.memo(
+  KanbanCardItem,
+  (prev, next) =>
+    prev.columnId === next.columnId &&
+    prev.isDragging === next.isDragging &&
+    prev.readOnly === next.readOnly &&
+    prev.labelPresets === next.labelPresets &&
+    kanbanCardBoardSnapshot(prev.card) === kanbanCardBoardSnapshot(next.card),
+);
 
 function KanbanDropGutter({
   active,
@@ -1126,7 +1155,7 @@ function KanbanColumnComponent({
                     }
               }
             >
-              <KanbanCardItem
+              <KanbanCardItemMemo
                 card={card}
                 columnId={column.id}
                 labelPresets={labelPresets}
@@ -1181,7 +1210,7 @@ function KanbanColumnComponent({
             onDrop={(e) => onDrop(e, column.id, 0)}
           />
         )}
-        {!readOnly && (
+        {!readOnly && !hasMoreCards && (
           <button
             type="button"
             onClick={() => onAddCard(column.id, 'bottom')}
@@ -1832,7 +1861,8 @@ function KanbanPage() {
     queryKey: kanbanBoardQueryKey,
     queryFn: () => fetchKanbanBoard(boardScopeKey || undefined),
     enabled: !!meUser && !!boardScopeKey,
-    staleTime: 30 * 1000,
+    staleTime: 3 * 60 * 1000,
+    placeholderData: keepPreviousData,
   });
 
   const boardReadOnly = board?.canWrite === false;
@@ -2016,6 +2046,15 @@ function KanbanPage() {
     [queryClient, kanbanBoardQueryKey],
   );
 
+  const handleBoardCardSync = useCallback(
+    (card: KanbanCard, columnId: string) => {
+      queryClient.setQueryData<KanbanBoard>(kanbanBoardQueryKey, (old) =>
+        syncCardOnBoardCache(old, card, columnId),
+      );
+    },
+    [queryClient, kanbanBoardQueryKey],
+  );
+
   const handleBoardCardCreated = useCallback(
     (
       card: KanbanCard,
@@ -2045,7 +2084,7 @@ function KanbanPage() {
       void queryClient.prefetchQuery({
         queryKey: kanbanCardQueryKey(cardId),
         queryFn: () => fetchKanbanCard(cardId),
-        staleTime: 60_000,
+        staleTime: 3 * 60 * 1000,
       });
     },
     [queryClient],
@@ -2150,10 +2189,6 @@ function KanbanPage() {
 
       try {
         await updateKanbanColumn(draggingColumnId, { position: desiredPosition });
-        await new Promise((resolve) => {
-          window.setTimeout(resolve, KANBAN_REORDER_MS + 60);
-        });
-        await refreshBoard();
         toast.success('Coluna movida!', { duration: 1500 });
       } catch {
         if (previousBoard !== undefined) {
@@ -2506,23 +2541,38 @@ function KanbanPage() {
     swatchColor: preset.color,
   }));
 
-  const filteredColumns = columns.map((col) => ({
-    ...col,
-    cards: col.cards.filter(card => {
-      const matchSearch = !search || card.title.toLowerCase().includes(search.toLowerCase()) || card.description.toLowerCase().includes(search.toLowerCase()) || card.assignee.toLowerCase().includes(search.toLowerCase());
-      const matchPriority =
-        multiselectFilterShowsAll(filterPriorities, KANBAN_PRIORITY_ALL_VALUES) ||
-        filterPriorities.includes(card.priority);
-      const matchLabel =
-        multiselectFilterShowsAll(filterLabelColors, labelFilterAllValues) ||
-        normalizeKanbanLabels(card.labels, boardLabelPresets).some((l) =>
-          filterLabelColors.some(
-            (c) => l.color.trim().toLowerCase() === c.trim().toLowerCase(),
-          ),
-        );
-      return matchSearch && matchPriority && matchLabel;
-    })
-  }));
+  const filteredColumns = useMemo(
+    () =>
+      columns.map((col) => ({
+        ...col,
+        cards: col.cards.filter((card) => {
+          const matchSearch =
+            !search ||
+            card.title.toLowerCase().includes(search.toLowerCase()) ||
+            card.description.toLowerCase().includes(search.toLowerCase()) ||
+            card.assignee.toLowerCase().includes(search.toLowerCase());
+          const matchPriority =
+            multiselectFilterShowsAll(filterPriorities, KANBAN_PRIORITY_ALL_VALUES) ||
+            filterPriorities.includes(card.priority);
+          const matchLabel =
+            multiselectFilterShowsAll(filterLabelColors, labelFilterAllValues) ||
+            normalizeKanbanLabels(card.labels, boardLabelPresets).some((l) =>
+              filterLabelColors.some(
+                (c) => l.color.trim().toLowerCase() === c.trim().toLowerCase(),
+              ),
+            );
+          return matchSearch && matchPriority && matchLabel;
+        }),
+      })),
+    [
+      columns,
+      search,
+      filterPriorities,
+      filterLabelColors,
+      labelFilterAllValues,
+      boardLabelPresets,
+    ],
+  );
 
   if (loadingUser || loadingPerms) {
     return <Loading message="Carregando Tasks..." fullScreen size="lg" />;
@@ -2900,6 +2950,7 @@ function KanbanPage() {
           onBoardRefresh={refreshBoard}
           onBoardCardCreated={handleBoardCardCreated}
           onBoardCardPatch={patchBoardCard}
+          onBoardCardSync={handleBoardCardSync}
         />
       )}
 

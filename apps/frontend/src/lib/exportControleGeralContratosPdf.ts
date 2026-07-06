@@ -1,4 +1,5 @@
 import jsPDF from 'jspdf';
+import { loadPdfBrandingLogo } from '@/lib/loadPdfBrandingLogo';
 
 export type ControleGeralPdfContractRow = {
   contract: string;
@@ -161,60 +162,14 @@ function truncateText(doc: jsPDF, text: string, maxWidth: number): string {
   return `${t}…`;
 }
 
-async function loadCompanyLogo(): Promise<{
+async function loadCompanyLogo(
+  contextLabels: (string | null | undefined)[] = []
+): Promise<{
   dataUrl: string;
   wMm: number;
   hMm: number;
 } | null> {
-  const candidates = ['/logopv.png', '/logo.png', '/logobranca.png'];
-  for (const src of candidates) {
-    const loaded = await tryLoadImage(src);
-    if (loaded) return loaded;
-  }
-  return null;
-}
-
-function tryLoadImage(src: string): Promise<{
-  dataUrl: string;
-  wMm: number;
-  hMm: number;
-} | null> {
-  return new Promise((resolve) => {
-    if (typeof window === 'undefined') {
-      resolve(null);
-      return;
-    }
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => {
-      const c = document.createElement('canvas');
-      c.width = img.naturalWidth;
-      c.height = img.naturalHeight;
-      const ctx = c.getContext('2d');
-      if (!ctx) {
-        resolve(null);
-        return;
-      }
-      ctx.drawImage(img, 0, 0);
-      try {
-        const dataUrl = c.toDataURL('image/png');
-        const maxW = 36;
-        const maxH = 22;
-        const mmPerPx = 25.4 / 96;
-        const iw = img.naturalWidth * mmPerPx;
-        const ih = img.naturalHeight * mmPerPx;
-        const s = Math.min(maxW / iw, maxH / ih, 1);
-        resolve({ dataUrl, wMm: iw * s, hMm: ih * s });
-      } catch {
-        resolve(null);
-      }
-    };
-    img.onerror = () => resolve(null);
-    const url = src.startsWith('http')
-      ? src
-      : `${window.location.origin}${src.startsWith('/') ? src : `/${src}`}`;
-    img.src = url;
-  });
+  return loadPdfBrandingLogo({ contextLabels, maxW: 36, maxH: 22 });
 }
 
 function drawPageHeader(
@@ -575,7 +530,14 @@ export async function exportControleGeralContratosPdf(
   const margin = 10;
   const contentW = pageWidth - margin * 2;
 
-  const logo = await loadCompanyLogo();
+  const brandingContext = [
+    ...input.filterLines,
+    ...input.groups.flatMap((group) => [
+      group.localityLabel,
+      ...group.rows.map((row) => row.contract),
+    ]),
+  ];
+  const logo = await loadCompanyLogo(brandingContext);
   let y = drawPageHeader(doc, margin, pageWidth, logo, generatedAt, input.sheetUpdatedAt);
   y = drawFilterBox(doc, y, margin, contentW, input.filterLines);
 

@@ -27,6 +27,11 @@ function renderValueOrDash(value: string | null | undefined) {
   return value && value.trim() ? value : '—';
 }
 
+function dpAttachmentFileName(raw: unknown): string {
+  if (!raw || typeof raw !== 'object') return '';
+  return String((raw as Record<string, unknown>).fileName ?? '').trim();
+}
+
 function parseRangeRaw(raw: string): [string, string] {
   const parts = raw.split(' - ').map((s) => s.trim());
   if (parts.length >= 2) return [parts[0] ?? '', parts[1] ?? ''];
@@ -171,6 +176,11 @@ export function DpRequestDetailsPreview({ requestType, details, employeeNameById
                       Obs.: {c.observacao}
                     </div>
                   ) : null}
+                  {dpAttachmentFileName(c.anexoDocumento) ? (
+                    <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                      Anexo: {dpAttachmentFileName(c.anexoDocumento)}
+                    </div>
+                  ) : null}
                 </li>
               ))}
             </ul>
@@ -232,7 +242,10 @@ export function DpRequestDetailsPreview({ requestType, details, employeeNameById
               toTrimmedString(row.motivo),
             ].filter(Boolean);
             const obs = toTrimmedString(row.observacoes);
-            return obs ? `${parts.join(' — ')} — ${obs}` : parts.join(' — ') || '—';
+            const doc = dpAttachmentFileName(row.anexoDocumento);
+            let text = obs ? `${parts.join(' — ')} — ${obs}` : parts.join(' — ') || '—';
+            if (doc) text = `${text} — Anexo: ${doc}`;
+            return text;
           }}
         />
       </div>

@@ -141,8 +141,12 @@ export function FluigDatasetToggle({
   );
 }
 
-export function useFluigWorkflowApprovalDatasets(options?: { approverNameKey?: string }) {
+export function useFluigWorkflowApprovalDatasets(options?: {
+  approverNameKey?: string;
+  enabled?: boolean;
+}) {
   const approverNameKey = options?.approverNameKey?.trim() || undefined;
+  const enabled = options?.enabled !== false;
 
   const datasetQueries = useQueries({
     queries: FLUIG_WORKFLOW_DATASETS.map(({ id }) => ({
@@ -154,6 +158,7 @@ export function useFluigWorkflowApprovalDatasets(options?: { approverNameKey?: s
         return res.data;
       },
       staleTime: 7 * 60 * 1000,
+      enabled,
     })),
   });
 
@@ -181,8 +186,8 @@ export function useFluigWorkflowApprovalDatasets(options?: { approverNameKey?: s
     return parsedRowsByDataset.map((rows) => buildWorkflowRowKeyMap(rows));
   }, [parsedRowsByDataset, approverNameKey]);
 
-  const isLoading = datasetQueries.some((query) => query.isLoading);
-  const isFetching = datasetQueries.some((query) => query.isFetching);
+  const isLoading = enabled && datasetQueries.some((query) => query.isLoading);
+  const isFetching = enabled && datasetQueries.some((query) => query.isFetching);
   const hasError = datasetQueries.some((query) => query.isError);
   const errorMessage =
     (datasetQueries.find((query) => query.error)?.error as {

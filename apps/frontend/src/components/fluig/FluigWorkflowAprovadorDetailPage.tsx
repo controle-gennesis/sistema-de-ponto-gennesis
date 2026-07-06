@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams, useRouter } from 'next/navigation';
@@ -31,6 +31,7 @@ import {
   useFluigWorkflowApprovalDatasets,
 } from '@/components/fluig/fluigWorkflowAprovadoresShared';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
+import { usePermissions } from '@/hooks/usePermissions';
 
 export function FluigWorkflowAprovadorDetailPage() {
   const router = useRouter();
@@ -46,6 +47,12 @@ export function FluigWorkflowAprovadorDetailPage() {
   const [activeTab, setActiveTab] = useState(0);
   const [cardFilter, setCardFilter] = useState<ApproverRequestFilter>('approved');
   const [detailRow, setDetailRow] = useState<ParsedWorkflowRow | null>(null);
+
+  const {
+    canAccessFluigApprover,
+    fluigApproverFullAccess,
+    isLoading: permissionsLoading,
+  } = usePermissions();
 
   const { data: userData } = useQuery({
     queryKey: ['user'],
@@ -139,19 +146,32 @@ export function FluigWorkflowAprovadorDetailPage() {
     queryClient.invalidateQueries({ queryKey: ['fluig-workflow-approval'] });
   };
 
+  useLayoutEffect(() => {
+    if (permissionsLoading) return;
+    if (!canAccessFluigApprover(nameKey)) {
+      router.replace('/ponto/fluig/aprovadores');
+    }
+  }, [permissionsLoading, canAccessFluigApprover, nameKey, router]);
+
+  if (permissionsLoading || (!permissionsLoading && !canAccessFluigApprover(nameKey))) {
+    return null;
+  }
+
   return (
     <ProtectedRoute route="/ponto/fluig/aprovadores">
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
         <div className="space-y-6">
           <div className="relative flex min-h-[3.25rem] items-center justify-center py-1">
-            <Link
-              href="/ponto/fluig/aprovadores"
-              aria-label="Voltar para aprovadores"
-              className="absolute left-0 top-1/2 z-10 inline-flex -translate-y-1/2 items-center gap-2 rounded-lg px-1 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-400 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100"
-            >
-              <ArrowLeft className="h-4 w-4 shrink-0" aria-hidden />
-              Voltar
-            </Link>
+            {fluigApproverFullAccess ? (
+              <Link
+                href="/ponto/fluig/aprovadores"
+                aria-label="Voltar para aprovadores"
+                className="absolute left-0 top-1/2 z-10 inline-flex -translate-y-1/2 items-center gap-2 rounded-lg px-1 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-400 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100"
+              >
+                <ArrowLeft className="h-4 w-4 shrink-0" aria-hidden />
+                Voltar
+              </Link>
+            ) : null}
             <div className="w-full max-w-3xl px-14 text-center sm:px-20">
               <h1 className="break-words text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
                 {displayName}

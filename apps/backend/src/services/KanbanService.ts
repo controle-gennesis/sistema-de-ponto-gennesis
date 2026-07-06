@@ -338,26 +338,36 @@ const boardListInclude = {
 } as const;
 
 let legacyKanbanMembersMigrationDone = false;
+let legacyKanbanMembersMigrationPromise: Promise<void> | null = null;
 
 async function migrateLegacyCardMembers() {
   if (legacyKanbanMembersMigrationDone) return;
-
-  const cards = await prisma.kanbanCard.findMany({
-    where: {
-      assigneeUserId: { not: null },
-      members: { none: {} },
-    },
-    select: { id: true, assigneeUserId: true },
-    take: 500,
-  });
-  if (cards.length === 0) {
-    legacyKanbanMembersMigrationDone = true;
+  if (legacyKanbanMembersMigrationPromise) {
+    await legacyKanbanMembersMigrationPromise;
     return;
   }
-  await prisma.kanbanCardMember.createMany({
-    data: cards.map((c) => ({ cardId: c.id, userId: c.assigneeUserId! })),
-    skipDuplicates: true,
-  });
+
+  legacyKanbanMembersMigrationPromise = (async () => {
+    const cards = await prisma.kanbanCard.findMany({
+      where: {
+        assigneeUserId: { not: null },
+        members: { none: {} },
+      },
+      select: { id: true, assigneeUserId: true },
+      take: 500,
+    });
+    if (cards.length === 0) {
+      legacyKanbanMembersMigrationDone = true;
+      return;
+    }
+    await prisma.kanbanCardMember.createMany({
+      data: cards.map((c) => ({ cardId: c.id, userId: c.assigneeUserId! })),
+      skipDuplicates: true,
+    });
+    legacyKanbanMembersMigrationDone = true;
+  })();
+
+  await legacyKanbanMembersMigrationPromise;
 }
 
 async function syncLegacyAssignee(cardId: string) {
@@ -1093,7 +1103,7 @@ export class KanbanService {
   }
 
   async getBoardForUser(userId: string, departmentKeyParam?: string) {
-    void migrateLegacyCardMembers();
+    await migrateLegacyCardMembers();
     const { key: ownKey } = await this.getUserDepartment(userId);
     const targetKey = departmentKeyParam
       ? resolveKanbanBoardKeyParam(departmentKeyParam)

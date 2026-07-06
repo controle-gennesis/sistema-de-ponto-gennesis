@@ -10,10 +10,12 @@ import {
   forceAuthRedirect,
   hasStoredAuthToken,
 } from '@/lib/authSession';
+import { resolveWorkflowApproverNameKey } from '@/lib/fluigWorkflowApproval';
 
 type PermissionItem = { module: string; action: string };
 
 const pk = pathToModuleKey;
+const FLUIG_APROVADORES_CONTROLE_KEY = pk('/ponto/controle/gerenciar-aprovadores-fluig');
 
 export function usePermissions() {
   const queryClient = useQueryClient();
@@ -105,6 +107,32 @@ export function usePermissions() {
   };
   const contractModuleFlags: Record<string, ContractModuleFlagRow> =
     (permissionData?.contractModuleFlags as Record<string, ContractModuleFlagRow> | undefined) ?? {};
+
+  const fluigApproverFullAccess =
+    isAdministrator ||
+    !!permissionData?.isAdmin ||
+    !!permissionData?.fluigApproverFullAccess;
+  const fluigApproverNameKeys: string[] = permissionData?.fluigApproverNameKeys ?? [];
+  const fluigApproverNameKeySet = new Set(fluigApproverNameKeys);
+  const canManageFluigApproverViewers =
+    isAdministrator ||
+    !!permissionData?.isAdmin ||
+    !!permissionData?.canManageFluigApproverViewers;
+  const canAccessFluigApproversRoute =
+    isAdministrator ||
+    !!permissionData?.isAdmin ||
+    allowedSet.has(FLUIG_APROVADORES_CONTROLE_KEY) ||
+    fluigApproverNameKeys.length > 0;
+
+  const canAccessFluigApprover = (nameKey: string) => {
+    if (permissionsPending || fluigApproverFullAccess) return true;
+    return fluigApproverNameKeySet.has(resolveWorkflowApproverNameKey(nameKey));
+  };
+
+  const filterFluigApprovers = <T extends { nameKey: string }>(items: readonly T[]): T[] => {
+    if (permissionsPending || fluigApproverFullAccess) return [...items];
+    return items.filter((item) => fluigApproverNameKeySet.has(item.nameKey));
+  };
 
   const hasOrcamentoViaAnyAllowedContract =
     Object.values(contractModuleFlags).some((f) => f?.orcamento === true);
@@ -355,6 +383,12 @@ export function usePermissions() {
     canAccessContractRelatoriosTab,
     canAccessContractOrdemServicoTab,
     canAccessContractProducaoSemanalTab,
+    fluigApproverFullAccess,
+    fluigApproverNameKeys,
+    canManageFluigApproverViewers,
+    canAccessFluigApproversRoute,
+    canAccessFluigApprover,
+    filterFluigApprovers,
     isLoading,
     canAccessPayroll: finalPermissions.canAccessPayroll,
     canManageEmployees: finalPermissions.canManageEmployees,
@@ -391,6 +425,8 @@ export function useRoutePermission(route: string) {
     canAccessOrcamentoRoutePage,
     canAccessOsRoutePage,
     canAccessRecebimentoEntregasRoutePage,
+    fluigApproverNameKeys,
+    canAccessFluigApproversRoute,
   } = usePermissions();
 
   if (isLoading) {
@@ -454,11 +490,7 @@ export function useRoutePermission(route: string) {
       isDepartmentFinanceiro ||
       isDepartmentCompras ||
       can(pk('/ponto/fluig/aprovacoes-workflow')),
-    '/ponto/fluig/aprovadores':
-      isAdministrator ||
-      isDepartmentFinanceiro ||
-      isDepartmentCompras ||
-      can(pk('/ponto/fluig/aprovadores')),
+    '/ponto/fluig/aprovadores': canAccessFluigApproversRoute,
     '/ponto/orcamento': canAccessOrcamentoRoutePage,
     '/ponto/contratos': isAdministrator || can(pk('/ponto/contratos')),
     '/ponto/contratos/controle-geral': isAdministrator || can(pk('/ponto/contratos/controle-geral')),

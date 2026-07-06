@@ -1,12 +1,14 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import api from '@/lib/api';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { getListTableRowClassName, listTableRowClasses, ListRowNavigableLabel, rowActionMenuButtonClass } from '@/components/ui/listTableUi';
+import { cadastroListClasses } from '@/components/ui/RowActionMenu';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -14,7 +16,7 @@ import { toast } from 'react-hot-toast';
 import { formatDateTimeBr } from '@/lib/dateTimeBr';
 import { useRouter } from 'next/navigation';
 import { usePermissions } from '@/hooks/usePermissions';
-import { Check, Download, Eye, FileCheck, FileText, Filter, Wrench, Search, X } from 'lucide-react';
+import { Check, Download, Eye, FileCheck, FileText, Filter, MoreVertical, Wrench, Search, X } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import {
   exportEspelhoNfPdf,
@@ -239,7 +241,13 @@ function formatDetailEntryValue(
         const setor = String(row.setor ?? legacySetor).trim() || '—';
         const observacao = String(row.observacao ?? legacyObservacao).trim();
         const obsPart = observacao ? ` — Obs.: ${observacao}` : '';
-        return `${index + 1}. ${nome} — ${funcao} — ${contato} — Motivo: ${motivo} — Setor: ${setor}${obsPart}`;
+        const docRaw = row.anexoDocumento;
+        const docName =
+          docRaw && typeof docRaw === 'object'
+            ? String((docRaw as Record<string, unknown>).fileName ?? '').trim()
+            : '';
+        const docPart = docName ? ` — Anexo: ${docName}` : '';
+        return `${index + 1}. ${nome} — ${funcao} — ${contato} — Motivo: ${motivo} — Setor: ${setor}${obsPart}${docPart}`;
       })
       .filter(Boolean)
       .join('\n');
@@ -266,9 +274,36 @@ function formatDetailEntryValue(
       .filter(Boolean)
       .join('\n');
   }
+  if (key === 'rescisoes' && Array.isArray(v)) {
+    return v
+      .map((item, index) => {
+        if (!item || typeof item !== 'object') return '';
+        const row = item as Record<string, unknown>;
+        const employeeId = String(row.employeeId ?? '').trim();
+        const nome = employeeId
+          ? employeeNameById?.get(employeeId) ?? employeeId
+          : '—';
+        const tipoAviso = String(row.tipoAviso ?? '').trim();
+        const tipoRescisao = String(row.tipoRescisao ?? '').trim();
+        const motivo = String(row.motivo ?? '').trim();
+        const observacoes = String(row.observacoes ?? '').trim();
+        const parts = [tipoAviso, tipoRescisao, motivo].filter(Boolean);
+        const docRaw = row.anexoDocumento;
+        const docName =
+          docRaw && typeof docRaw === 'object'
+            ? String((docRaw as Record<string, unknown>).fileName ?? '').trim()
+            : '';
+        let text = `${index + 1}. ${nome}`;
+        if (parts.length) text += ` — ${parts.join(' — ')}`;
+        if (observacoes) text += ` — ${observacoes}`;
+        if (docName) text += ` — Anexo: ${docName}`;
+        return text;
+      })
+      .filter(Boolean)
+      .join('\n');
+  }
   const employeeArrayKeys = [
     'ferias',
-    'rescisoes',
     'alteracoes',
     'atestados',
     'retificacoes',
@@ -389,6 +424,22 @@ const ESPELHO_BADGE_CLASS: Record<EspelhoApprovalStatus, string> = {
     'bg-red-100 text-red-800 border-red-200 dark:bg-red-900/30 dark:text-red-200 dark:border-red-800'
 };
 
+const ESPELHO_ACTION_MENU_WIDTH_PX = 224;
+const ESPELHO_MENU_ITEM_CLASS =
+  'w-full flex items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700';
+const ESPELHO_MENU_ITEM_BORDER_CLASS = `${ESPELHO_MENU_ITEM_CLASS} border-t border-gray-200 dark:border-gray-700`;
+const espelhoCellPad = 'px-2 sm:px-3 py-3';
+const espelhoCellPadTh = 'px-2 sm:px-3 py-4';
+const espelhoActionColCls = 'w-[4%] min-w-[3rem] max-w-[4.5rem]';
+const espelhoThTextCls = `${espelhoCellPadTh} text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400`;
+const espelhoThLeftCls = `${espelhoCellPadTh} text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 !pl-2 sm:!pl-3`;
+const espelhoThCenterCls = `${espelhoThTextCls} whitespace-nowrap`;
+const espelhoTdTextCls = `${espelhoCellPad} text-center text-sm text-gray-700 dark:text-gray-300 min-w-0`;
+const espelhoTdRefCls = `${espelhoCellPad} text-left text-sm text-gray-600 dark:text-gray-400 min-w-0 !pl-2 sm:!pl-3`;
+const espelhoTdCenterCls = `${espelhoCellPad} text-center text-sm min-w-0`;
+const espelhoActionThCls = `${cadastroListClasses.thRight} ${espelhoActionColCls} !pl-1 !pr-2 sm:!pr-3`;
+const espelhoActionTdCls = `${espelhoActionColCls} !pl-1 !pr-2 sm:!pr-3 py-3 align-middle`;
+
 export default function AprovacoesPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -406,6 +457,11 @@ export default function AprovacoesPage() {
   const [managerRejectingId, setManagerRejectingId] = useState<string | null>(null);
   const [detailRequest, setDetailRequest] = useState<DpRequest | null>(null);
   const [espelhoPhase, setEspelhoPhase] = useState<EspelhoPhaseFilter>('PENDING_APPROVAL');
+  const [espelhoActionMenu, setEspelhoActionMenu] = useState<{
+    mirrorId: string;
+    top: number;
+    left: number;
+  } | null>(null);
   const [attachmentPreview, setAttachmentPreview] = useState<{
     fileName: string;
     mimeType: string;
@@ -634,6 +690,15 @@ export default function AprovacoesPage() {
       return title.includes(q);
     });
   }, [espelhoApprovals, espelhoPhase, searchEspelho]);
+
+  const espelhoForActionMenu = useMemo(
+    () => espelhoFiltered.find((m) => m.id === espelhoActionMenu?.mirrorId) ?? null,
+    [espelhoFiltered, espelhoActionMenu?.mirrorId]
+  );
+
+  useEffect(() => {
+    setEspelhoActionMenu(null);
+  }, [activeTab, espelhoPhase, searchEspelho]);
 
   const approvalTabs = useMemo(() => {
     const tabs: { id: AprovacaoTabId; label: string; count: number }[] = [];
@@ -1047,91 +1112,85 @@ export default function AprovacoesPage() {
                     <span>Página 1 de 1</span>
                   </div>
                   <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
+                    <table className={`${cadastroListClasses.table} text-sm`}>
+                      <colgroup>
+                        <col className="w-[34%]" />
+                        <col className="w-[20%]" />
+                        <col className="w-[12%]" />
+                        <col className="w-[14%]" />
+                        <col className="w-[12%]" />
+                        <col className="w-[4%]" />
+                      </colgroup>
                       <thead className="border-b border-gray-200 dark:border-gray-700">
                         <tr>
-                          <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                            Tomador | Medição | Referência
-                          </th>
-                          <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                            Status
-                          </th>
-                          <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                            Vencimento
-                          </th>
-                          <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                            Ações
+                          <th className={espelhoThLeftCls}>Referência</th>
+                          <th className={espelhoThTextCls}>Tomador</th>
+                          <th className={espelhoThCenterCls}>Medição</th>
+                          <th className={espelhoThCenterCls}>Status</th>
+                          <th className={espelhoThCenterCls}>Vencimento</th>
+                          <th scope="col" className={espelhoActionThCls}>
+                            Ação
                           </th>
                         </tr>
                       </thead>
-                      <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                      <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
                         {espelhoFiltered.map((m) => {
                           const med = parseEspelhoBrCurrencyToNumber(m.measurementAmount);
-                          const medTxt = med !== null ? fmtEspelhoBrl(med) : 'Medição não informada';
-                          const title = `${m.takerName || 'Tomador não informado'} | ${medTxt} | ${m.measurementRef || 'Sem referência'}`;
+                          const medTxt = med !== null ? fmtEspelhoBrl(med) : '—';
+                          const takerName = m.takerName || 'Tomador não informado';
+                          const measurementRef = m.measurementRef?.trim() || '—';
                           return (
-                            <tr key={m.id} className={listTableRowClasses.tr}>
-                              <td className="px-3 sm:px-6 py-3 align-middle text-sm">
-                                <div className="space-y-0.5">
-                                  <span className="text-sm text-gray-900 dark:text-gray-100 font-medium">{title}</span>
-                                  <div className="text-xs text-gray-500 dark:text-gray-400">ID: {m.id}</div>
-                                </div>
+                            <tr key={m.id} className={listTableRowClasses.tr} title={m.id}>
+                              <td className={espelhoTdRefCls}>
+                                <span className="line-clamp-2" title={measurementRef}>
+                                  {measurementRef}
+                                </span>
                               </td>
-                              <td className="px-3 sm:px-6 py-3 align-middle">
+                              <td className={espelhoTdTextCls} title={takerName}>
+                                <span className="line-clamp-2 font-medium text-gray-900 dark:text-gray-100">
+                                  {takerName}
+                                </span>
+                              </td>
+                              <td className={espelhoTdCenterCls}>
+                                <span className="font-medium tabular-nums text-gray-800 dark:text-gray-200 whitespace-nowrap">
+                                  {medTxt}
+                                </span>
+                              </td>
+                              <td className={espelhoTdCenterCls}>
                                 <span
-                                  className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
+                                  className={`inline-flex items-center justify-center rounded-full border px-2.5 py-0.5 text-[11px] font-semibold whitespace-nowrap ${
                                     ESPELHO_BADGE_CLASS[m.status]
                                   }`}
                                 >
                                   {ESPELHO_APPROVAL_STATUS_LABELS[m.status]}
                                 </span>
                               </td>
-                              <td className="px-3 sm:px-6 py-3 align-middle text-sm text-gray-700 dark:text-gray-300">
-                                {m.dueDate || '—'}
+                              <td className={`${espelhoTdCenterCls} tabular-nums text-gray-700 dark:text-gray-300`}>
+                                {m.dueDate ? formatYmd(m.dueDate) : '—'}
                               </td>
-                              <td className="px-3 sm:px-6 py-3 align-middle">
-                                <div className="flex justify-center gap-2">
+                              <td className={espelhoActionTdCls}>
+                                <div className="flex justify-end">
                                   <button
                                     type="button"
-                                    onClick={() => void applyEspelhoDecision(m.id, 'APPROVED', 'Espelho aprovado.')}
-                                    className={`${rowActionMenuButtonClass(false)} text-emerald-600 dark:text-emerald-400`}
-                                    title="Aprovar"
-                                    aria-label="Aprovar espelho"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      const rect = e.currentTarget.getBoundingClientRect();
+                                      setEspelhoActionMenu((prev) => {
+                                        if (prev?.mirrorId === m.id) return null;
+                                        let left = rect.right - ESPELHO_ACTION_MENU_WIDTH_PX;
+                                        left = Math.max(
+                                          8,
+                                          Math.min(left, window.innerWidth - ESPELHO_ACTION_MENU_WIDTH_PX - 8)
+                                        );
+                                        return { mirrorId: m.id, top: rect.bottom + 4, left };
+                                      });
+                                    }}
+                                    className={rowActionMenuButtonClass(espelhoActionMenu?.mirrorId === m.id)}
+                                    aria-label="Menu de ações do espelho"
+                                    aria-expanded={espelhoActionMenu?.mirrorId === m.id}
+                                    aria-haspopup="menu"
                                   >
-                                    <Check className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      void applyEspelhoDecision(
-                                        m.id,
-                                        'SENT_FOR_CORRECTION',
-                                        'Espelho enviado para correção.'
-                                      )
-                                    }
-                                    className={`${rowActionMenuButtonClass(false)} text-amber-500 dark:text-amber-400`}
-                                    title="Enviar para correção"
-                                    aria-label="Enviar espelho para correção"
-                                  >
-                                    <Wrench className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => void applyEspelhoDecision(m.id, 'CANCELLED', 'Espelho cancelado.')}
-                                    className={`${rowActionMenuButtonClass(false)} text-red-600 dark:text-red-400`}
-                                    title="Cancelar"
-                                    aria-label="Cancelar espelho"
-                                  >
-                                    <X className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleDownloadEspelhoPdf(m)}
-                                    className={rowActionMenuButtonClass(false)}
-                                    title="Baixar PDF do espelho"
-                                    aria-label="Baixar PDF do espelho"
-                                  >
-                                    <Download className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden />
+                                    <MoreVertical className="h-4 w-4" />
                                   </button>
                                 </div>
                               </td>
@@ -1146,6 +1205,86 @@ export default function AprovacoesPage() {
             </CardContent>
           </Card>
           )}
+
+          {espelhoActionMenu &&
+            espelhoForActionMenu &&
+            typeof document !== 'undefined' &&
+            createPortal(
+              <>
+                <div className="fixed inset-0 z-[200]" aria-hidden onClick={() => setEspelhoActionMenu(null)} />
+                <div
+                  role="menu"
+                  className="fixed z-[201] w-56 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800"
+                  style={{ top: espelhoActionMenu.top, left: espelhoActionMenu.left }}
+                >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setEspelhoActionMenu(null);
+                      void applyEspelhoDecision(
+                        espelhoForActionMenu.id,
+                        'APPROVED',
+                        'Espelho aprovado.'
+                      );
+                    }}
+                    className={ESPELHO_MENU_ITEM_CLASS}
+                  >
+                    <Check className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                    <span>Aprovar espelho</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setEspelhoActionMenu(null);
+                      void applyEspelhoDecision(
+                        espelhoForActionMenu.id,
+                        'SENT_FOR_CORRECTION',
+                        'Espelho enviado para correção.'
+                      );
+                    }}
+                    className={ESPELHO_MENU_ITEM_BORDER_CLASS}
+                  >
+                    <Wrench className="h-4 w-4 shrink-0 text-amber-500 dark:text-amber-400" />
+                    <span>Enviar para correção</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setEspelhoActionMenu(null);
+                      void applyEspelhoDecision(
+                        espelhoForActionMenu.id,
+                        'CANCELLED',
+                        'Espelho cancelado.'
+                      );
+                    }}
+                    className={ESPELHO_MENU_ITEM_BORDER_CLASS}
+                  >
+                    <X className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
+                    <span>Cancelar espelho</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setEspelhoActionMenu(null);
+                      handleDownloadEspelhoPdf(espelhoForActionMenu);
+                    }}
+                    className={ESPELHO_MENU_ITEM_BORDER_CLASS}
+                  >
+                    <Download className="h-4 w-4 shrink-0 text-gray-600 dark:text-gray-300" />
+                    <span>Baixar PDF</span>
+                  </button>
+                </div>
+              </>,
+              document.body
+            )}
 
           {canApproveDp && activeTab === 'fd' && <FdApprovalsSection />}
 

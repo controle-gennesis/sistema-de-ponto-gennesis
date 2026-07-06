@@ -74,6 +74,7 @@ import {
   enrichDivSeOptionsWithPleitos,
   type DivSeOptionRow
 } from '@/lib/formatOsSePasta';
+import { loadPdfBrandingLogoDataUrl } from '@/lib/loadPdfBrandingLogo';
 import { getOsEtiquetaAbertura, isOsConcluida, type BillingForOsCheck } from '@/lib/pleitoOsExport';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import {
@@ -2979,32 +2980,19 @@ export default function ContractDetailPage() {
     }
   };
 
-  const loadLogoBase64 = (): Promise<string | null> => {
-    return new Promise((resolve) => {
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.onload = () => {
-        const c = document.createElement('canvas');
-        c.width = img.width;
-        c.height = img.height;
-        const ctx = c.getContext('2d');
-        if (!ctx) { resolve(null); return; }
-        ctx.drawImage(img, 0, 0);
-        try {
-          resolve(c.toDataURL('image/png'));
-        } catch {
-          resolve(null);
-        }
-      };
-      img.onerror = () => resolve(null);
-      img.src = '/logobranca.png';
-    });
-  };
-
   const handleExportPleitoPDF = async () => {
     if (pleitoGeradoData.length === 0) return;
     try {
-      const logoBase64 = await loadLogoBase64();
+      const logoBase64 = await loadPdfBrandingLogoDataUrl({
+        contextLabels: [
+          contract?.name,
+          contract?.number,
+          contract?.costCenter?.name,
+          contract?.costCenter?.code,
+        ],
+        maxW: 22,
+        maxH: 20,
+      });
       const pdf = new jsPDF('p', 'mm', 'a4');
       const pageWidth = pdf.internal.pageSize.getWidth();
       const pageHeight = pdf.internal.pageSize.getHeight();

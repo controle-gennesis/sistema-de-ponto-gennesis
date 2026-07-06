@@ -19,9 +19,7 @@ import { DatePickerField } from '@/components/ui/DatePickerField';
 import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { ConstructionMaterialSearchDropdown } from '@/components/suprimentos/ConstructionMaterialSearchDropdown';
-import { ServiceOrderSearchSelect } from '@/components/suprimentos/ServiceOrderSearchSelect';
 import { ButtonSeg } from '@/app/ponto/solicitacoes-dp/DpSolicitacaoTypeFields';
-import { useServiceOrdersByContract } from '@/hooks/useServiceOrdersByCostCenter';
 import { fetchEmployeeSelectOptions } from '@/lib/employeeSelectOptions';
 import { FORM_FIELD_INPUT_CLS, FORM_FIELD_TEXTAREA_CLS } from '@/lib/formFieldUi';
 import {
@@ -71,7 +69,6 @@ type LogisticsRow = {
 type FormState = {
   urgency: UrgencyValue;
   contractId: string;
-  serviceOrderId: string;
   serviceOrderNumber: string;
   purchaseOrderNumber: string;
   movementId: string;
@@ -121,7 +118,6 @@ function emptyForm(): FormState {
   return {
     urgency: 'NORMAL',
     contractId: '',
-    serviceOrderId: '',
     serviceOrderNumber: '',
     purchaseOrderNumber: '',
     movementId: '',
@@ -281,10 +277,6 @@ export default function EntregasLogisticaPageClient() {
   const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
 
-  const { serviceOrders, isLoading: loadingServiceOrders } = useServiceOrdersByContract(
-    form.contractId || ''
-  );
-
   const { data: userRes, isLoading: loadingUser } = useQuery({
     queryKey: ['auth-me'],
     queryFn: async () => (await api.get('/auth/me')).data,
@@ -418,7 +410,6 @@ export default function EntregasLogisticaPageClient() {
     setForm({
       urgency: row.urgency,
       contractId: row.contract?.id ?? '',
-      serviceOrderId: '',
       serviceOrderNumber: row.serviceOrderNumber ?? '',
       purchaseOrderNumber: row.purchaseOrderNumber ?? row.purchaseOrder?.orderNumber ?? '',
       movementId: row.movementId,
@@ -471,8 +462,8 @@ export default function EntregasLogisticaPageClient() {
       const payload: Record<string, unknown> = {
         urgency: form.urgency,
         contractId: form.contractId || null,
-        serviceOrderId: form.serviceOrderId || null,
-        serviceOrderNumber: form.serviceOrderNumber || null,
+        serviceOrderId: null,
+        serviceOrderNumber: form.serviceOrderNumber.trim() || null,
         purchaseOrderNumber: form.purchaseOrderNumber.trim(),
         movementId: form.movementId.trim(),
         supplierId: form.supplierId || null,
@@ -885,8 +876,6 @@ export default function EntregasLogisticaPageClient() {
                     setForm((p) => ({
                       ...p,
                       contractId,
-                      serviceOrderId: '',
-                      serviceOrderNumber: '',
                     }))
                   }
                   options={contractOptions}
@@ -897,18 +886,14 @@ export default function EntregasLogisticaPageClient() {
 
               <div>
                 <label className={labelCls}>Número da OS</label>
-                <ServiceOrderSearchSelect
-                  contractId={form.contractId}
-                  serviceOrders={serviceOrders}
-                  loading={loadingServiceOrders}
-                  serviceOrderId={form.serviceOrderId}
-                  serviceOrderLabel={form.serviceOrderNumber}
-                  onSelect={(id, label) =>
-                    setForm((p) => ({ ...p, serviceOrderId: id, serviceOrderNumber: label }))
+                <input
+                  type="text"
+                  value={form.serviceOrderNumber}
+                  onChange={(e) =>
+                    setForm((p) => ({ ...p, serviceOrderNumber: e.target.value }))
                   }
-                  onClear={() =>
-                    setForm((p) => ({ ...p, serviceOrderId: '', serviceOrderNumber: '' }))
-                  }
+                  className={FORM_FIELD_INPUT_CLS}
+                  placeholder="Digite o número ou nome da OS"
                 />
               </div>
               <div>

@@ -1369,6 +1369,17 @@ export function resolveWorkflowApproverNameKey(nameOrKey: string): string {
   return normalizeApproverNameKey(nameOrKey);
 }
 
+/** Link do menu: usuário com um único aprovador vai direto à página dele. */
+export function buildFluigApproversNavHref(options: {
+  fullAccess: boolean;
+  nameKeys: string[];
+}): string {
+  if (!options.fullAccess && options.nameKeys.length === 1) {
+    return `/ponto/fluig/aprovadores/${encodeURIComponent(options.nameKeys[0])}`;
+  }
+  return '/ponto/fluig/aprovadores';
+}
+
 /** Nome legível a partir da URL ou nameKey (ex.: paulo%20ananias → Paulo Ananias). */
 export function formatWorkflowApproverDisplayName(nameOrKey: string): string {
   let decoded = nameOrKey;

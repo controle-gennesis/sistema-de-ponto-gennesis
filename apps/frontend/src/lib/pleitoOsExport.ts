@@ -1,6 +1,7 @@
 import * as XLSX from 'xlsx';
 import { formatOsSePasta } from '@/lib/formatOsSePasta';
 import { formatDateTimeBr } from '@/lib/dateTimeBr';
+import { loadPdfBrandingLogoDataUrl } from '@/lib/loadPdfBrandingLogo';
 
 export const PLEITO_HISTORY_MARKER = '__PLEITO_HISTORICO__';
 export const PLEITO_HISTORY_MARKER_GERADO_100 = '__PLEITO_HISTORICO__GERADO_100__';
@@ -277,31 +278,6 @@ function formatCurrencyBr(value: number): string {
   }).format(value);
 }
 
-async function loadLogoBase64(): Promise<string | null> {
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => {
-      const c = document.createElement('canvas');
-      c.width = img.width;
-      c.height = img.height;
-      const ctx = c.getContext('2d');
-      if (!ctx) {
-        resolve(null);
-        return;
-      }
-      ctx.drawImage(img, 0, 0);
-      try {
-        resolve(c.toDataURL('image/png'));
-      } catch {
-        resolve(null);
-      }
-    };
-    img.onerror = () => resolve(null);
-    img.src = '/logobranca.png';
-  });
-}
-
 export async function exportHistoricoOsPdf(
   rows: PleitoOsExportRow[],
   billings: BillingForOsCheck[],
@@ -313,7 +289,11 @@ export async function exportHistoricoOsPdf(
 ): Promise<void> {
   const { jsPDF } = await import('jspdf');
   const totals = computeHistoricoOsTotals(rows, billings);
-  const logoBase64 = await loadLogoBase64();
+  const logoBase64 = await loadPdfBrandingLogoDataUrl({
+    contextLabels: [options.contractName, options.contractNumber],
+    maxW: 22,
+    maxH: 20,
+  });
   const pdf = new jsPDF('l', 'mm', 'a4');
   const pageWidth = pdf.internal.pageSize.getWidth();
   const pageHeight = pdf.internal.pageSize.getHeight();

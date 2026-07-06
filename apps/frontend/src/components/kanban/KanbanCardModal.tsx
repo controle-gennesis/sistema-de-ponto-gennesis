@@ -27,6 +27,7 @@ import {
   boardCardToDetailPlaceholder,
   fetchKanbanCard,
   kanbanCardQueryKey,
+  kanbanDetailToBoardCard,
   normalizeKanbanCardDetail,
   createKanbanCard,
   buildOptimisticNewCard,
@@ -154,6 +155,8 @@ export interface KanbanCardModalProps {
   ) => void;
   /** Atualiza só o card no board (contadores de checklist) sem refetch da página. */
   onBoardCardPatch?: (cardId: string, patch: KanbanBoardCardChecklistPatch) => void;
+  /** Sincroniza card completo no cache do quadro sem refetch. */
+  onBoardCardSync?: (card: KanbanCard, columnId: string) => void;
 }
 
 export function KanbanCardModal({
@@ -171,6 +174,7 @@ export function KanbanCardModal({
   onBoardRefresh,
   onBoardCardCreated,
   onBoardCardPatch,
+  onBoardCardSync,
 }: KanbanCardModalProps) {
   const queryClient = useQueryClient();
   const [mode, setMode] = useState<'create' | 'detail'>(initialMode);
@@ -218,12 +222,12 @@ export function KanbanCardModal({
       ? boardCardToDetailPlaceholder(initialCard, initialColumnId, initialColumn)
       : undefined;
 
-  const { data: card, isLoading, isFetching, refetch } = useQuery({
+  const { data: card, isLoading } = useQuery({
     queryKey: kanbanCardQueryKey(cardId!),
     queryFn: () => fetchKanbanCard(cardId!),
     enabled: isDetail,
     placeholderData: cardPlaceholder,
-    staleTime: 60_000,
+    staleTime: 3 * 60 * 1000,
   });
 
   useLayoutEffect(() => {
@@ -299,20 +303,41 @@ export function KanbanCardModal({
     });
   }, [card, cardId]);
 
-  const refreshAll = useCallback(async () => {
-    if (cardId) {
-      await refetch();
-      queryClient.invalidateQueries({ queryKey: kanbanCardQueryKey(cardId) });
-    }
-    onBoardRefresh();
-  }, [cardId, onBoardRefresh, queryClient, refetch]);
-
   const applyCardDetail = useCallback(
     (detail: KanbanCardDetail) => {
       if (!cardId) return;
       queryClient.setQueryData(kanbanCardQueryKey(cardId), normalizeKanbanCardDetail(detail));
     },
     [cardId, queryClient],
+  );
+
+  const syncCardFromApi = useCallback(
+    (updated: KanbanCard, targetColumnId: string) => {
+      onBoardCardSync?.(updated, targetColumnId);
+      if (!cardId) return;
+      queryClient.setQueryData<KanbanCardDetail>(kanbanCardQueryKey(cardId), (old) => {
+        if (!old) return old;
+        return normalizeKanbanCardDetail({
+          ...old,
+          ...updated,
+          columnId: targetColumnId,
+        });
+      });
+      setColumnId((prev) => (prev === targetColumnId ? prev : targetColumnId));
+    },
+    [cardId, onBoardCardSync, queryClient],
+  );
+
+  const syncDetailFromApi = useCallback(
+    (detail: KanbanCardDetail) => {
+      const normalized = normalizeKanbanCardDetail(detail);
+      applyCardDetail(normalized);
+      onBoardCardSync?.(
+        kanbanDetailToBoardCard(normalized),
+        normalized.columnId ?? columnId,
+      );
+    },
+    [applyCardDetail, columnId, onBoardCardSync],
   );
 
   const patchBoardCard = useCallback(
@@ -372,16 +397,20 @@ export function KanbanCardModal({
     if (!cardId) return false;
     setSaving(true);
     try {
-      await updateKanbanCard(cardId, {
+      const targetColumnId = partial?.columnId ?? columnId;
+      const updated = await updateKanbanCard(cardId, {
         title: partial?.title ?? title,
         description: partial?.description ?? description,
         priority: partial?.priority ?? priority,
         startDate: partial?.startDate !== undefined ? partial.startDate : startDate || null,
         endDate: partial?.endDate !== undefined ? partial.endDate : endDate || null,
         labels: partial?.labels ?? labels,
-        columnId: partial?.columnId ?? columnId,
+        columnId: targetColumnId,
+        ...(partial?.checklistEnabled !== undefined
+          ? { checklistEnabled: partial.checklistEnabled }
+          : {}),
       });
-      await refreshAll();
+      syncCardFromApi(updated, targetColumnId);
       return true;
     } catch {
       toast.error('Erro ao salvar alterações');
@@ -428,7 +457,7 @@ export function KanbanCardModal({
       const normalized = normalizeKanbanCardDetail(updated);
       applyCardDetail(normalized);
       setMembers(Array.isArray(normalized.members) ? normalized.members : []);
-      onBoardRefresh();
+      onBoardCardSync?.(kanbanDetailToBoardCard(normalized), normalized.columnId ?? columnId);
     } catch {
       setMembers((prev) => prev.filter((m) => m.userId !== user.id));
       toast.error('Erro ao adicionar membro');
@@ -451,7 +480,7 @@ export function KanbanCardModal({
       const normalized = normalizeKanbanCardDetail(updated);
       applyCardDetail(normalized);
       setMembers(Array.isArray(normalized.members) ? normalized.members : []);
-      onBoardRefresh();
+      onBoardCardSync?.(kanbanDetailToBoardCard(normalized), normalized.columnId ?? columnId);
     } catch {
       setMembers(prev);
       toast.error('Erro ao remover membro');
@@ -500,8 +529,9 @@ export function KanbanCardModal({
       if (pendingFiles.length > 0 || pendingLinks.length > 0) {
         void (async () => {
           try {
+            let latestDetail: KanbanCardDetail | undefined;
             if (pendingFiles.length > 0) {
-              await uploadKanbanAttachments(
+              latestDetail = await uploadKanbanAttachments(
                 newCardId,
                 pendingFiles.map((d) => d.file),
               );
@@ -509,7 +539,7 @@ export function KanbanCardModal({
             }
             if (pendingLinks.length > 0) {
               for (const link of pendingLinks) {
-                await addKanbanLinkAttachment(newCardId, {
+                latestDetail = await addKanbanLinkAttachment(newCardId, {
                   url: link.url,
                   displayName:
                     link.displayName.trim() && link.displayName !== link.url
@@ -519,7 +549,9 @@ export function KanbanCardModal({
               }
               setDraftLinks([]);
             }
-            void onBoardRefresh();
+            if (latestDetail) {
+              syncDetailFromApi(latestDetail);
+            }
           } catch {
             toast.error('Card criado, mas falhou ao enviar anexos');
           }
@@ -620,7 +652,6 @@ export function KanbanCardModal({
 
     try {
       await deleteChecklistItem(itemId);
-      syncChecklistFromApi(await fetchKanbanCard(cardId));
     } catch (err: unknown) {
       const status = (err as { response?: { status?: number } })?.response?.status;
       if (status === 404) {
@@ -635,12 +666,18 @@ export function KanbanCardModal({
   }
 
   async function handlePostComment() {
-    if (!cardId || !commentText.trim()) return;
+    if (!cardId || !commentText.trim() || !card) return;
     setPostingComment(true);
     try {
-      await createKanbanComment(cardId, commentText.trim());
+      const comment = await createKanbanComment(cardId, commentText.trim());
       setCommentText('');
-      await refreshAll();
+      const next = normalizeKanbanCardDetail({
+        ...card,
+        comments: card.comments + 1,
+        commentsList: [...card.commentsList, comment],
+      });
+      applyCardDetail(next);
+      onBoardCardSync?.(kanbanDetailToBoardCard(next), columnId);
     } catch {
       toast.error('Erro ao publicar comentário');
     } finally {
@@ -806,7 +843,7 @@ export function KanbanCardModal({
           draftLinks={draftLinks}
           onDraftLinksChange={setDraftLinks}
           currentUserId={currentUserId}
-          onUpdated={refreshAll}
+          onUpdated={syncDetailFromApi}
         />
       )}
 
@@ -840,7 +877,7 @@ export function KanbanCardModal({
                 await saveMeta({ priority: p });
               }}
             />
-            {(saving || isFetching) && (
+            {(saving) && (
               <Loader2 className="w-4 h-4 animate-spin text-red-600 shrink-0" />
             )}
           </div>
@@ -933,10 +970,10 @@ export function KanbanCardModal({
                   onClick={async () => {
                     const next = !checklistEnabled;
                     setChecklistEnabled(next);
+                    if (!isDetail || !cardId) return;
                     setSaving(true);
                     try {
-                      await updateKanbanCard(cardId!, { checklistEnabled: next });
-                      await refreshAll();
+                      await saveMeta({ checklistEnabled: next });
                     } catch {
                       setChecklistEnabled(!next);
                       toast.error('Erro ao atualizar checklist');
@@ -1125,7 +1162,7 @@ export function KanbanCardModal({
                   currentUserId={currentUserId}
                   onDraftFilesChange={setDraftFiles}
                   onDraftLinksChange={setDraftLinks}
-                  onUpdated={refreshAll}
+                  onUpdated={syncDetailFromApi}
                   onAddClick={() => setShowAttachmentsModal(true)}
                 />
               </div>
@@ -1347,9 +1384,21 @@ export function KanbanCardModal({
                                 <button
                                   type="button"
                                   onClick={async () => {
+                                    if (!card) return;
                                     try {
                                       await deleteKanbanComment(comment.id);
-                                      await refreshAll();
+                                      const next = normalizeKanbanCardDetail({
+                                        ...card,
+                                        comments: Math.max(0, card.comments - 1),
+                                        commentsList: card.commentsList.filter(
+                                          (c) => c.id !== comment.id,
+                                        ),
+                                      });
+                                      applyCardDetail(next);
+                                      onBoardCardSync?.(
+                                        kanbanDetailToBoardCard(next),
+                                        columnId,
+                                      );
                                     } catch {
                                       toast.error('Erro ao excluir comentário');
                                     }

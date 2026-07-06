@@ -319,7 +319,17 @@ function parseAdmissaoCandidatos(details: Record<string, unknown>): AdmissaoCand
   return [emptyAdmissaoCandidato()];
 }
 
-export function AdmissaoCandidatosRepeatableFields({ details, patchDetails }: RepeatableBaseProps) {
+type RepeatableWithDocumentoFileProps = RepeatableBaseProps & {
+  documentoFileNames: Record<number, string>;
+  onDocumentoFile: (index: number, file: File | null) => void;
+};
+
+export function AdmissaoCandidatosRepeatableFields({
+  details,
+  patchDetails,
+  documentoFileNames,
+  onDocumentoFile,
+}: RepeatableWithDocumentoFileProps) {
   const candidatos = parseAdmissaoCandidatos(details);
 
   const { updateItem, addItem, removeItem } = useRepeatableList(
@@ -338,7 +348,10 @@ export function AdmissaoCandidatosRepeatableFields({ details, patchDetails }: Re
           title={`Pessoa ${index + 1}`}
           index={index}
           total={candidatos.length}
-          onRemove={() => removeItem(index)}
+          onRemove={() => {
+            removeItem(index);
+            onDocumentoFile(index, null);
+          }}
         >
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div>
@@ -396,6 +409,12 @@ export function AdmissaoCandidatosRepeatableFields({ details, patchDetails }: Re
               placeholder="Informações complementares sobre a admissão (opcional)"
             />
           </div>
+          <DpFileAttachmentField
+            label="Anexar documento"
+            fileName={documentoFileNames[index] ?? ''}
+            accept=".pdf,image/*,.doc,.docx"
+            onFileSelect={(file) => onDocumentoFile(index, file)}
+          />
         </RepeatableCard>
       ))}
       <AddMoreButton
@@ -609,7 +628,9 @@ export function RescisaoRepeatableFields({
   details,
   patchDetails,
   employees,
-}: RepeatableWithEmployeesProps) {
+  documentoFileNames,
+  onDocumentoFile,
+}: RepeatableWithEmployeesProps & RepeatableWithDocumentoFileProps) {
   const rescisoes = parseArrayField<RescisaoRow>(
     details,
     'rescisoes',
@@ -655,7 +676,10 @@ export function RescisaoRepeatableFields({
           title={`Rescisão ${index + 1}`}
           index={index}
           total={rescisoes.length}
-          onRemove={() => removeItem(index)}
+          onRemove={() => {
+            removeItem(index);
+            onDocumentoFile(index, null);
+          }}
         >
           <SearchSelectField
             label="Colaborador *"
@@ -696,6 +720,12 @@ export function RescisaoRepeatableFields({
               placeholder="Informações complementares sobre a rescisão (opcional)"
             />
           </div>
+          <DpFileAttachmentField
+            label="Anexar documento"
+            fileName={documentoFileNames[index] ?? ''}
+            accept=".pdf,image/*,.doc,.docx"
+            onFileSelect={(file) => onDocumentoFile(index, file)}
+          />
         </RepeatableCard>
       ))}
       <AddMoreButton onClick={addItem} disabled={rescisoes.length >= MAX_SOLICITACAO_ITENS} />

@@ -277,6 +277,39 @@ async function fileToDpAttachment(file: File) {
   return { fileName: file.name, mimeType: file.type || 'application/octet-stream', dataBase64 };
 }
 
+async function attachOptionalDocumentosToItems(
+  items: Record<string, unknown>[],
+  files: Record<number, File>
+) {
+  const out = [...items];
+  for (let i = 0; i < out.length; i++) {
+    const file = files[i];
+    if (!file) continue;
+    out[i] = { ...out[i], anexoDocumento: await fileToDpAttachment(file) };
+  }
+  return out;
+}
+
+function setIndexedFileState(
+  setFiles: React.Dispatch<React.SetStateAction<Record<number, File>>>,
+  setNames: React.Dispatch<React.SetStateAction<Record<number, string>>>,
+  index: number,
+  file: File | null
+) {
+  setFiles((prev) => {
+    const next = { ...prev };
+    if (file) next[index] = file;
+    else delete next[index];
+    return next;
+  });
+  setNames((prev) => {
+    const next = { ...prev };
+    if (file) next[index] = file.name;
+    else delete next[index];
+    return next;
+  });
+}
+
 const STATUS_LABELS: Record<DpRequestStatus, string> = {
   WAITING_MANAGER: 'Aguardando aprovação',
   IN_REVIEW_DP: 'Em análise',
@@ -452,8 +485,16 @@ export function SolicitacoesGeraisPage() {
   const [details, setDetails] = useState<Record<string, unknown>>({});
   const [atestadoFiles, setAtestadoFiles] = useState<Record<number, File>>({});
   const [horaExtraFiles, setHoraExtraFiles] = useState<Record<number, File>>({});
+  const [admissaoDocumentoFiles, setAdmissaoDocumentoFiles] = useState<Record<number, File>>({});
+  const [rescisaoDocumentoFiles, setRescisaoDocumentoFiles] = useState<Record<number, File>>({});
   const [atestadoFileNames, setAtestadoFileNames] = useState<Record<number, string>>({});
   const [horaExtraFileNames, setHoraExtraFileNames] = useState<Record<number, string>>({});
+  const [admissaoDocumentoFileNames, setAdmissaoDocumentoFileNames] = useState<Record<number, string>>(
+    {}
+  );
+  const [rescisaoDocumentoFileNames, setRescisaoDocumentoFileNames] = useState<Record<number, string>>(
+    {}
+  );
 
   const patchDetails = (p: Record<string, unknown>) => setDetails((d) => ({ ...d, ...p }));
 
@@ -489,8 +530,12 @@ export function SolicitacoesGeraisPage() {
     setDetails({});
     setAtestadoFiles({});
     setHoraExtraFiles({});
+    setAdmissaoDocumentoFiles({});
+    setRescisaoDocumentoFiles({});
     setAtestadoFileNames({});
     setHoraExtraFileNames({});
+    setAdmissaoDocumentoFileNames({});
+    setRescisaoDocumentoFileNames({});
   };
 
   const closeCreateModal = () => {
@@ -504,8 +549,12 @@ export function SolicitacoesGeraisPage() {
     setDetails({});
     setAtestadoFiles({});
     setHoraExtraFiles({});
+    setAdmissaoDocumentoFiles({});
+    setRescisaoDocumentoFiles({});
     setAtestadoFileNames({});
     setHoraExtraFileNames({});
+    setAdmissaoDocumentoFileNames({});
+    setRescisaoDocumentoFileNames({});
   };
 
   const selectedContractId = form.contractId;
@@ -812,6 +861,20 @@ export function SolicitacoesGeraisPage() {
         }
         d.horasExtras = horasExtras;
       }
+      if (form.requestType === 'ADMISSAO') {
+        const candidatos = Array.isArray(d.candidatos)
+          ? ([...(d.candidatos as Record<string, unknown>[])] as Record<string, unknown>[])
+          : [];
+        if (!candidatos.length) throw new Error('Informe ao menos um candidato');
+        d.candidatos = await attachOptionalDocumentosToItems(candidatos, admissaoDocumentoFiles);
+      }
+      if (form.requestType === 'RESCISAO') {
+        const rescisoes = Array.isArray(d.rescisoes)
+          ? ([...(d.rescisoes as Record<string, unknown>[])] as Record<string, unknown>[])
+          : [];
+        if (!rescisoes.length) throw new Error('Informe ao menos uma rescisão');
+        d.rescisoes = await attachOptionalDocumentosToItems(rescisoes, rescisaoDocumentoFiles);
+      }
       const payload: Record<string, unknown> = {
         urgency: form.urgency,
         requestType: form.requestType,
@@ -924,10 +987,10 @@ export function SolicitacoesGeraisPage() {
         <div className="space-y-6">
           <div className="text-center">
             <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">
-              Solicitações Gerais
+              Solicitações DP/ADM/TST
             </h1>
             <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400">
-              Crie e acompanhe solicitações gerais
+              Crie e acompanhe solicitações ao DP e ADM/TST
             </p>
           </div>
 
@@ -1392,8 +1455,12 @@ export function SolicitacoesGeraisPage() {
                   );
                   setAtestadoFiles({});
                   setHoraExtraFiles({});
+                  setAdmissaoDocumentoFiles({});
+                  setRescisaoDocumentoFiles({});
                   setAtestadoFileNames({});
                   setHoraExtraFileNames({});
+                  setAdmissaoDocumentoFileNames({});
+                  setRescisaoDocumentoFileNames({});
                 }}
                 options={requestTypeSelectOptions}
                 allowEmpty
@@ -1410,35 +1477,31 @@ export function SolicitacoesGeraisPage() {
                 patchDetails={patchDetails}
                 employees={payrollEmployees}
                 onAtestadoFile={(index, f) => {
-                  setAtestadoFiles((prev) => {
-                    const next = { ...prev };
-                    if (f) next[index] = f;
-                    else delete next[index];
-                    return next;
-                  });
-                  setAtestadoFileNames((prev) => {
-                    const next = { ...prev };
-                    if (f) next[index] = f.name;
-                    else delete next[index];
-                    return next;
-                  });
+                  setIndexedFileState(setAtestadoFiles, setAtestadoFileNames, index, f);
                 }}
                 onHoraExtraFile={(index, f) => {
-                  setHoraExtraFiles((prev) => {
-                    const next = { ...prev };
-                    if (f) next[index] = f;
-                    else delete next[index];
-                    return next;
-                  });
-                  setHoraExtraFileNames((prev) => {
-                    const next = { ...prev };
-                    if (f) next[index] = f.name;
-                    else delete next[index];
-                    return next;
-                  });
+                  setIndexedFileState(setHoraExtraFiles, setHoraExtraFileNames, index, f);
+                }}
+                onAdmissaoDocumentoFile={(index, f) => {
+                  setIndexedFileState(
+                    setAdmissaoDocumentoFiles,
+                    setAdmissaoDocumentoFileNames,
+                    index,
+                    f
+                  );
+                }}
+                onRescisaoDocumentoFile={(index, f) => {
+                  setIndexedFileState(
+                    setRescisaoDocumentoFiles,
+                    setRescisaoDocumentoFileNames,
+                    index,
+                    f
+                  );
                 }}
                 atestadoFileNames={atestadoFileNames}
                 horaExtraFileNames={horaExtraFileNames}
+                admissaoDocumentoFileNames={admissaoDocumentoFileNames}
+                rescisaoDocumentoFileNames={rescisaoDocumentoFileNames}
               />
             ) : (
               <AdmTstSolicitacaoTypeFields

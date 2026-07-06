@@ -282,6 +282,33 @@ export type { SendAction };
 
 export type MediaInfo = { mediaId: string; mimeType?: string; filename?: string };
 
+/** `false` = oculta "Enviar atestado" no menu da Gennecy (WhatsApp); fluxo e código permanecem. Para reativar, use `true`. */
+const SHOW_GENNECY_ATESTADO_BUTTON = false;
+
+const GENNECY_MAIN_MENU_ROWS: Array<{ id: string; title: string }> = [
+  { id: 'ATESTADO', title: 'Enviar atestado' },
+  { id: 'COMBUSTIVEL', title: 'Solicitar combustível' },
+  { id: 'INFORMAR_ABASTECIMENTO', title: 'Informar abastecimento' },
+  { id: 'ATENDENTE', title: 'Falar com atendente' },
+  { id: 'DUVIDAS', title: 'Dúvidas' },
+  { id: 'END', title: 'Encerrar' },
+];
+
+function gennecyMainMenuRows(): Array<{ id: string; title: string }> {
+  if (SHOW_GENNECY_ATESTADO_BUTTON) return GENNECY_MAIN_MENU_ROWS;
+  return GENNECY_MAIN_MENU_ROWS.filter((row) => row.id !== 'ATESTADO');
+}
+
+const GENNECY_ATESTADO_COMPLETE_BUTTONS: Array<{ id: string; title: string }> = [
+  { id: 'ATESTADO', title: 'Enviar outro' },
+  { id: 'FINALIZE', title: 'Finalizar' },
+];
+
+function gennecyAtestadoCompleteButtons(): Array<{ id: string; title: string }> {
+  if (SHOW_GENNECY_ATESTADO_BUTTON) return GENNECY_ATESTADO_COMPLETE_BUTTONS;
+  return GENNECY_ATESTADO_COMPLETE_BUTTONS.filter((btn) => btn.id !== 'ATESTADO');
+}
+
 export class WhatsAppBotService {
   /**
    * Timer em memória para encerrar conversas por inatividade.
@@ -758,14 +785,7 @@ export class WhatsAppBotService {
       sections: [
         {
           title: 'Atendimento',
-          rows: [
-            { id: 'ATESTADO', title: 'Enviar atestado' },
-            { id: 'COMBUSTIVEL', title: 'Solicitar combustível' },
-            { id: 'INFORMAR_ABASTECIMENTO', title: 'Informar abastecimento' },
-            { id: 'ATENDENTE', title: 'Falar com atendente' },
-            { id: 'DUVIDAS', title: 'Dúvidas' },
-            { id: 'END', title: 'Encerrar' }
-          ]
+          rows: gennecyMainMenuRows(),
         }
       ]
     });
@@ -1481,10 +1501,7 @@ export class WhatsAppBotService {
           sendAction = {
             type: 'buttons',
             body: '✅ Atestado recebido! Já registramos suas informações. O DP vai analisar e te dar retorno.',
-            buttons: [
-              { id: 'ATESTADO', title: 'Enviar outro' },
-              { id: 'FINALIZE', title: 'Finalizar' }
-            ]
+            buttons: gennecyAtestadoCompleteButtons(),
           };
           clearPayload();
         } else {

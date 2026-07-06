@@ -7,6 +7,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createPortal } from 'react-dom';
 import { toast } from 'react-hot-toast';
 import api from '@/lib/api';
+import { buildFluigApproversNavHref } from '@/lib/fluigWorkflowApproval';
 import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
 
 const FLUIG_APPROVAL_DATASET_IDS = [
@@ -140,6 +141,9 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
     canApproveMaterialRequests,
     canAccessOsRoutePage,
     canAccessRecebimentoEntregasRoutePage,
+    fluigApproverNameKeys,
+    fluigApproverFullAccess,
+    canAccessFluigApproversRoute,
   } = usePermissions();
   const { theme, toggleTheme, isDark } = useTheme();
   const { logoSrc, logoAlt } = useBrandingLogo();
@@ -150,10 +154,13 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
   const queryClient = useQueryClient();
 
   const prefetchFluigDatasets = useCallback(() => {
-    // Pré-baixa os bundles JS das rotas
     router.prefetch('/ponto/fluig/aprovacoes-workflow');
-    router.prefetch('/ponto/fluig/aprovadores');
-    // Pré-carrega os dados no React Query
+    router.prefetch(
+      buildFluigApproversNavHref({
+        fullAccess: fluigApproverFullAccess,
+        nameKeys: fluigApproverNameKeys,
+      })
+    );
     for (const id of FLUIG_APPROVAL_DATASET_IDS) {
       void queryClient.prefetchQuery({
         queryKey: ['fluig-workflow-approval', id],
@@ -168,18 +175,49 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
         staleTime: 7 * 60 * 1000,
       });
     }
-  }, [queryClient, router]);
+  }, [queryClient, router, fluigApproverFullAccess, fluigApproverNameKeys]);
 
-  // Prefetch automático: pré-carrega rotas e dados Fluig assim que o usuário faz login,
-  // sem precisar de hover. Evita freeze na primeira navegação.
+  // Prefetch automático: pré-carrega rotas e dados Fluig assim que o usuário faz login.
   useEffect(() => {
-    if (!user) return;
+    if (!user || isLoading) return;
+
+    const fluigApproversHref = buildFluigApproversNavHref({
+      fullAccess: fluigApproverFullAccess,
+      nameKeys: fluigApproverNameKeys,
+    });
+
     const timer = setTimeout(() => {
       router.prefetch('/ponto/fluig/aprovacoes-workflow');
-      router.prefetch('/ponto/fluig/aprovadores');
+      router.prefetch(fluigApproversHref);
+
+      if (canAccessFluigApproversRoute) {
+        for (const id of FLUIG_APPROVAL_DATASET_IDS) {
+          void queryClient.prefetchQuery({
+            queryKey: ['fluig-workflow-approval', id],
+            queryFn: async () => {
+              const res = await api.post(
+                `/fluig/datasets/${encodeURIComponent(id)}/data`,
+                {},
+                { timeout: 130000 }
+              );
+              return res.data;
+            },
+            staleTime: 7 * 60 * 1000,
+          });
+        }
+      }
     }, 2000);
+
     return () => clearTimeout(timer);
-  }, [user, router]);
+  }, [
+    user,
+    isLoading,
+    router,
+    queryClient,
+    fluigApproverFullAccess,
+    fluigApproverNameKeys,
+    canAccessFluigApproversRoute,
+  ]);
   const [profileAvatarMenu, setProfileAvatarMenu] = useState(false);
   const [profileCropSrc, setProfileCropSrc] = useState<string | null>(null);
 
@@ -435,9 +473,8 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
             description: 'Aprovações e pendências por pessoa (G3/G5)',
             permission:
               isAdministrator ||
-              isDepartmentFinanceiro ||
-              isDepartmentCompras ||
-              can(pk('/ponto/fluig/aprovadores'))
+              can(pk('/ponto/controle/gerenciar-aprovadores-fluig')) ||
+              fluigApproverNameKeys.length > 0
           },
           {
             name: 'Central de Atendimentos',
@@ -461,7 +498,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
               canApproveMaterialRequests,
           },
           {
-            name: 'Solicitações Gerais',
+            name: 'Solicitações DP/ADM/TST',
             href: '/ponto/solicitacoes-gerais',
             icon: MailPlus,
             description: 'Minhas solicitações ao DP',
@@ -987,8 +1024,21 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
     return pathname === href || pathname.startsWith(`${href}/`);
   };
 
+  const resolveNavHref = (href: string) => {
+    if (href === '/ponto/fluig/aprovadores' && !isLoading) {
+      return buildFluigApproversNavHref({
+        fullAccess: fluigApproverFullAccess,
+        nameKeys: fluigApproverNameKeys,
+      });
+    }
+    return href;
+  };
+
   const isActive = (href: string) => {
     if (pathname == null) return false;
+    if (href === '/ponto/fluig/aprovadores') {
+      return pathname === href || pathname.startsWith(`${href}/`);
+    }
     if (href === '/ponto/contratos') {
       if (pathname === '/ponto/contratos') return true;
       // Rotas fixas sob /ponto/contratos (ex.: controle geral) — não marcam "Contratos", só o item próprio.
@@ -1451,7 +1501,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
                         return (
                           <Link
                             key={item.href}
-                            href={item.href}
+                            href={resolveNavHref(item.href)}
                             onMouseEnter={FLUIG_PREFETCH_HREFS.has(item.href) ? prefetchFluigDatasets : undefined}
                             className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 ${
                               active
@@ -1483,7 +1533,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
                   return (
                     <Link
                       key={item.href}
-                      href={item.href}
+                      href={resolveNavHref(item.href)}
                       onMouseEnter={FLUIG_PREFETCH_HREFS.has(item.href) ? prefetchFluigDatasets : undefined}
                       className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 ${
                         active
