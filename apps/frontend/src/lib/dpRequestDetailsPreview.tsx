@@ -131,6 +131,7 @@ export function DpRequestDetailsPreview({ requestType, details, employeeNameById
       motivoContratacao: toTrimmedString(row.motivoContratacao) || legacyMotivo,
       setor: toTrimmedString(row.setor) || legacySetor,
       observacao: toTrimmedString(row.observacao) || legacyObservacao,
+      anexoDocumento: row.anexoDocumento,
     }));
     const shown = candidatos.slice(0, 6);
     const remaining = candidatos.length - shown.length;
