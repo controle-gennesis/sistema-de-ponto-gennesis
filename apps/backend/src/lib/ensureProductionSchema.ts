@@ -272,6 +272,32 @@ async function ensurePurchaseOrderStageApprovals(prisma: PrismaClient): Promise<
   }
 }
 
+async function ensureFinancialControlAguardarPagamentoStatus(prisma: PrismaClient): Promise<void> {
+  const rows = await prisma.$queryRaw<{ exists: boolean }[]>`
+    SELECT EXISTS (
+      SELECT 1
+      FROM pg_enum e
+      INNER JOIN pg_type t ON e.enumtypid = t.oid
+      WHERE t.typname = 'FinancialControlStatus'
+        AND e.enumlabel = 'AGUARDAR_PAGAMENTO'
+    ) AS "exists"
+  `;
+  if (rows[0]?.exists) return;
+
+  console.warn(
+    '[Schema] Enum FinancialControlStatus sem AGUARDAR_PAGAMENTO — adicionando. ' +
+      'Prefira: cd apps/backend && npx prisma migrate deploy.',
+  );
+  await prisma.$executeRawUnsafe(`
+    DO $$
+    BEGIN
+      ALTER TYPE "FinancialControlStatus" ADD VALUE 'AGUARDAR_PAGAMENTO';
+    EXCEPTION
+      WHEN duplicate_object THEN NULL;
+    END $$;
+  `);
+}
+
 async function ensurePurchaseOrderPixFields(prisma: PrismaClient): Promise<void> {
   if (!(await tableExists(prisma, 'purchase_orders'))) return;
 
@@ -296,6 +322,7 @@ export async function ensureProductionSchema(prisma: PrismaClient): Promise<void
     await ensureMaterialRequestItemColumns(prisma);
     await ensureDemandSheetApprovals(prisma);
     await ensurePurchaseOrderStageApprovals(prisma);
+    await ensureFinancialControlAguardarPagamentoStatus(prisma);
     console.log('[Schema] Verificação de tabelas/colunas críticas concluída.');
   } catch (e) {
     console.error('[Schema] Falha ao garantir esquema de produção:', e);

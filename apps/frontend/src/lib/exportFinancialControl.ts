@@ -1,4 +1,8 @@
 import * as XLSX from 'xlsx';
+import {
+  FINANCIAL_CONTROL_STATUS_EXPORT_LABELS,
+  type FinancialControlStatus,
+} from '@/lib/financialControlStatus';
 
 const MONTHS_PT = [
   'Janeiro',
@@ -14,13 +18,6 @@ const MONTHS_PT = [
   'Novembro',
   'Dezembro',
 ];
-
-const STATUS_LABELS: Record<string, string> = {
-  PROCESSO_COMPLETO: 'PAGO',
-  PAGO: 'PAGO',
-  AGUARDAR_NOTA: 'PENDENTE',
-  CANCELADO: 'CANCELADO',
-};
 
 export type FinancialControlExportEntry = {
   paymentMonth: number;
@@ -79,7 +76,9 @@ export function exportFinancialControlEntries(
     return {
       Mês: monthLabel,
       Ano: entry.paymentYear,
-      Status: STATUS_LABELS[entry.status] ?? entry.status,
+      Status:
+        FINANCIAL_CONTROL_STATUS_EXPORT_LABELS[entry.status as FinancialControlStatus] ??
+        entry.status,
       'O.S.': entry.osCode ?? '',
       'Nome do Fornecedor': entry.supplierName ?? '',
       'Número da Parcela': entry.parcelNumber ?? '',

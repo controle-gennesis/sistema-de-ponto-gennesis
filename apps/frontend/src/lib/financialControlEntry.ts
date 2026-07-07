@@ -1,8 +1,7 @@
-export type FinancialControlStatus =
-  | 'PROCESSO_COMPLETO'
-  | 'PAGO'
-  | 'AGUARDAR_NOTA'
-  | 'CANCELADO';
+export type { FinancialControlStatus } from '@/lib/financialControlStatus';
+export { FINANCIAL_CONTROL_STATUS_OPTIONS as STATUS_OPTIONS } from '@/lib/financialControlStatus';
+
+import type { FinancialControlStatus } from '@/lib/financialControlStatus';
 
 export interface FinancialControlEntry {
   id: string;
@@ -39,12 +38,6 @@ export const MONTHS_PT = [
   'Outubro',
   'Novembro',
   'Dezembro',
-];
-
-export const STATUS_OPTIONS: { value: FinancialControlStatus; label: string }[] = [
-  { value: 'PAGO', label: 'PAGO' },
-  { value: 'AGUARDAR_NOTA', label: 'PENDENTE' },
-  { value: 'CANCELADO', label: 'CANCELADO' },
 ];
 
 export interface EntryFormState {
@@ -117,7 +110,7 @@ export function buildInitialForm(month: number, year: number): EntryFormState {
   return {
     paymentMonth: month,
     paymentYear: year,
-    status: 'AGUARDAR_NOTA',
+    status: 'AGUARDAR_PAGAMENTO',
     osCode: '',
     supplierName: '',
     parcelNumber: '',

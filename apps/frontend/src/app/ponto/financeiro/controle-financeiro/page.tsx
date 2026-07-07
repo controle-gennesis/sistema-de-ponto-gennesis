@@ -10,8 +10,10 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronUp,
-  CircleDollarSign,
+  ClipboardCheck,
   ClipboardList,
+  Clock,
+  FileText,
   Filter,
   Loader2,
   MoreVertical,
@@ -23,6 +25,7 @@ import {
   Download,
   Wallet,
   X,
+  type LucideIcon,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { listTableRowClasses, rowActionMenuButtonClass } from '@/components/ui/listTableUi';
@@ -34,17 +37,17 @@ import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDr
 import api from '@/lib/api';
 import { exportFinancialControlEntries } from '@/lib/exportFinancialControl';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
+import {
+  FINANCIAL_CONTROL_STATUS_OPTIONS,
+  FINANCIAL_CONTROL_STATUS_STYLES,
+  type FinancialControlStatus,
+  isFinancialControlPaidStatus,
+} from '@/lib/financialControlStatus';
 import { ListPagination } from '@/components/ui/ListPagination';
 
 const MONTH_GROUP_PAGE_SIZE = 25;
 
-type FinancialControlStatus =
-  | 'PROCESSO_COMPLETO'
-  | 'PAGO'
-  | 'AGUARDAR_NOTA'
-  | 'CANCELADO';
-
-interface FinancialControlEntry {
+type FinancialControlEntry = {
   id: string;
   paymentMonth: number;
   paymentYear: number;
@@ -64,7 +67,40 @@ interface FinancialControlEntry {
   notes: string | null;
   createdAt: string;
   updatedAt: string;
-}
+};
+
+const STATUS_STYLES = FINANCIAL_CONTROL_STATUS_STYLES;
+const STATUS_OPTIONS = FINANCIAL_CONTROL_STATUS_OPTIONS;
+
+const DASHBOARD_STATUS_CARDS: {
+  key: 'PROCESSO_COMPLETO' | 'PAGO_AGUARDAR_NOTA' | 'AGUARDAR_PAGAMENTO';
+  title: string;
+  Icon: LucideIcon;
+  cardIcon: string;
+  iconColor: string;
+}[] = [
+  {
+    key: 'PROCESSO_COMPLETO',
+    title: 'Processo Completo',
+    Icon: ClipboardCheck,
+    cardIcon: 'bg-yellow-100 dark:bg-yellow-900/30',
+    iconColor: 'text-yellow-600 dark:text-yellow-400',
+  },
+  {
+    key: 'PAGO_AGUARDAR_NOTA',
+    title: 'Aguardando Nota',
+    Icon: FileText,
+    cardIcon: 'bg-green-100 dark:bg-green-900/30',
+    iconColor: 'text-green-600 dark:text-green-400',
+  },
+  {
+    key: 'AGUARDAR_PAGAMENTO',
+    title: 'Aguardando Pagamento',
+    Icon: Clock,
+    cardIcon: 'bg-sky-100 dark:bg-sky-900/30',
+    iconColor: 'text-sky-600 dark:text-sky-400',
+  },
+];
 
 const MONTHS_PT = [
   'Janeiro',
@@ -80,35 +116,6 @@ const MONTHS_PT = [
   'Novembro',
   'Dezembro',
 ];
-
-const STATUS_OPTIONS: { value: FinancialControlStatus; label: string }[] = [
-  { value: 'PAGO', label: 'PAGO' },
-  { value: 'AGUARDAR_NOTA', label: 'PENDENTE' },
-  { value: 'CANCELADO', label: 'CANCELADO' },
-];
-
-const STATUS_STYLES: Record<FinancialControlStatus, { bg: string; text: string; label: string }> = {
-  PROCESSO_COMPLETO: {
-    bg: 'bg-green-100 dark:bg-green-900/30',
-    text: 'text-green-800 dark:text-green-200',
-    label: 'PAGO',
-  },
-  PAGO: {
-    bg: 'bg-green-100 dark:bg-green-900/30',
-    text: 'text-green-800 dark:text-green-200',
-    label: 'PAGO',
-  },
-  AGUARDAR_NOTA: {
-    bg: 'bg-yellow-200 dark:bg-yellow-900/40',
-    text: 'text-yellow-900 dark:text-yellow-200',
-    label: 'PENDENTE',
-  },
-  CANCELADO: {
-    bg: 'bg-red-200 dark:bg-red-900/40',
-    text: 'text-red-900 dark:text-red-200',
-    label: 'CANCELADO',
-  },
-};
 
 function formatCurrency(value: string | number | null | undefined): string {
   if (value === null || value === undefined || value === '') return '-';
@@ -203,7 +210,7 @@ function buildInitialForm(month: number, year: number): EntryFormState {
   return {
     paymentMonth: month,
     paymentYear: year,
-    status: 'AGUARDAR_NOTA',
+    status: 'AGUARDAR_PAGAMENTO',
     osCode: '',
     supplierName: '',
     parcelNumber: '',
@@ -307,7 +314,7 @@ export default function ControleFinanceiroPage() {
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
     return rawEntries.filter((entry) => {
-      const isPago = entry.status === 'PAGO' || entry.status === 'PROCESSO_COMPLETO';
+      const isPago = isFinancialControlPaidStatus(entry.status);
       const isCancelado = entry.status === 'CANCELADO';
       if (isPago || isCancelado || !entry.dueDate) return false;
       const due = new Date(entry.dueDate);
@@ -339,28 +346,32 @@ export default function ControleFinanceiroPage() {
   const stats = useMemo(() => {
     let totalFinalSum = 0;
     let totalPagoSum = 0;
-    let totalPendenteSum = 0;
-    let qtdPago = 0;
-    let qtdPendente = 0;
+    const byStatus: Record<
+      FinancialControlStatus,
+      { count: number; sum: number }
+    > = {
+      PROCESSO_COMPLETO: { count: 0, sum: 0 },
+      PAGO: { count: 0, sum: 0 },
+      AGUARDAR_NOTA: { count: 0, sum: 0 },
+      AGUARDAR_PAGAMENTO: { count: 0, sum: 0 },
+      CANCELADO: { count: 0, sum: 0 },
+    };
 
     for (const entry of entries) {
       const final = Number(entry.finalValue ?? 0) || 0;
-
-      const isPago = entry.status === 'PAGO' || entry.status === 'PROCESSO_COMPLETO';
-      const isPendente = entry.status === 'AGUARDAR_NOTA';
       const isCancelado = entry.status === 'CANCELADO';
 
-      // Cancelados não somam no total final (valor "vai a zero").
       if (!isCancelado) {
         totalFinalSum += final;
       }
 
-      if (isPago) {
+      byStatus[entry.status].count += 1;
+      if (!isCancelado) {
+        byStatus[entry.status].sum += final;
+      }
+
+      if (isFinancialControlPaidStatus(entry.status)) {
         totalPagoSum += final;
-        qtdPago += 1;
-      } else if (isPendente) {
-        totalPendenteSum += final;
-        qtdPendente += 1;
       }
     }
 
@@ -368,11 +379,20 @@ export default function ControleFinanceiroPage() {
       total: entries.length,
       totalFinalSum,
       totalPagoSum,
-      totalPendenteSum,
-      qtdPago,
-      qtdPendente,
+      byStatus,
+      pagoAguardarNota: {
+        count: byStatus.PAGO.count + byStatus.AGUARDAR_NOTA.count,
+        sum: byStatus.PAGO.sum + byStatus.AGUARDAR_NOTA.sum,
+      },
     };
   }, [entries]);
+
+  function dashboardCardStats(
+    key: 'PROCESSO_COMPLETO' | 'PAGO_AGUARDAR_NOTA' | 'AGUARDAR_PAGAMENTO',
+  ) {
+    if (key === 'PAGO_AGUARDAR_NOTA') return stats.pagoAguardarNota;
+    return stats.byStatus[key];
+  }
 
   const availableYears = useMemo(() => {
     const setYears = new Set<number>();
@@ -596,26 +616,8 @@ export default function ControleFinanceiroPage() {
             </button>
           </div>
 
-          {/* Dashboards — métricas do recorte filtrado */}
+          {/* Dashboards — valor total (sem cancelados) + status da planilha */}
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 sm:gap-6">
-            <Card>
-              <CardContent className="p-4 sm:p-6">
-                <div className="flex items-center">
-                  <div className="p-2 sm:p-3 bg-blue-100 dark:bg-blue-900/30 rounded-lg flex-shrink-0">
-                    <ClipboardList className="w-5 h-5 sm:w-6 sm:h-6 text-blue-600 dark:text-blue-400" />
-                  </div>
-                  <div className="ml-3 sm:ml-4 min-w-0 flex-1">
-                    <p className="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400 whitespace-normal">
-                      Total de Lançamentos
-                    </p>
-                    <p className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100 mt-1">
-                      {stats.total}
-                    </p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
             <Card>
               <CardContent className="p-4 sm:p-6">
                 <div className="flex items-center">
@@ -624,7 +626,7 @@ export default function ControleFinanceiroPage() {
                   </div>
                   <div className="ml-3 sm:ml-4 min-w-0 flex-1">
                     <p className="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400 whitespace-normal">
-                      Valor Final
+                      Valor Total
                     </p>
                     <p className="text-lg sm:text-2xl font-bold text-gray-900 dark:text-gray-100 mt-1 truncate">
                       {formatCurrency(stats.totalFinalSum)}
@@ -634,47 +636,33 @@ export default function ControleFinanceiroPage() {
               </CardContent>
             </Card>
 
-            <Card>
-              <CardContent className="p-4 sm:p-6">
-                <div className="flex items-center">
-                  <div className="p-2 sm:p-3 bg-green-100 dark:bg-green-900/30 rounded-lg flex-shrink-0">
-                    <CheckCircle2 className="w-5 h-5 sm:w-6 sm:h-6 text-green-600 dark:text-green-400" />
-                  </div>
-                  <div className="ml-3 sm:ml-4 min-w-0 flex-1">
-                    <p className="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400 whitespace-normal">
-                      Pago{' '}
-                      <span className="text-gray-400 dark:text-gray-500">
-                        ({stats.qtdPago})
-                      </span>
-                    </p>
-                    <p className="text-lg sm:text-2xl font-bold text-gray-900 dark:text-gray-100 mt-1 truncate">
-                      {formatCurrency(stats.totalPagoSum)}
-                    </p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardContent className="p-4 sm:p-6">
-                <div className="flex items-center">
-                  <div className="p-2 sm:p-3 bg-yellow-100 dark:bg-yellow-900/30 rounded-lg flex-shrink-0">
-                    <CircleDollarSign className="w-5 h-5 sm:w-6 sm:h-6 text-yellow-600 dark:text-yellow-400" />
-                  </div>
-                  <div className="ml-3 sm:ml-4 min-w-0 flex-1">
-                    <p className="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400 whitespace-normal">
-                      Pendente{' '}
-                      <span className="text-gray-400 dark:text-gray-500">
-                        ({stats.qtdPendente})
-                      </span>
-                    </p>
-                    <p className="text-lg sm:text-2xl font-bold text-gray-900 dark:text-gray-100 mt-1 truncate">
-                      {formatCurrency(stats.totalPendenteSum)}
-                    </p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+            {DASHBOARD_STATUS_CARDS.map((card) => {
+              const bucket = dashboardCardStats(card.key);
+              const StatusIcon = card.Icon;
+              return (
+                <Card key={card.key}>
+                  <CardContent className="p-4 sm:p-6">
+                    <div className="flex items-center">
+                      <div className={`p-2 sm:p-3 rounded-lg flex-shrink-0 ${card.cardIcon}`}>
+                        <StatusIcon
+                          className={`w-5 h-5 sm:w-6 sm:h-6 ${card.iconColor}`}
+                          aria-hidden
+                        />
+                      </div>
+                      <div className="ml-3 sm:ml-4 min-w-0 flex-1">
+                        <p className="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400 whitespace-normal leading-snug">
+                          {card.title}{' '}
+                          <span className="text-gray-400 dark:text-gray-500">({bucket.count})</span>
+                        </p>
+                        <p className="text-lg sm:text-2xl font-bold text-gray-900 dark:text-gray-100 mt-1 truncate">
+                          {formatCurrency(bucket.sum)}
+                        </p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
           </div>
 
           {/* Taxa de pagamento — barra de progresso */}
@@ -945,45 +933,31 @@ export default function ControleFinanceiroPage() {
                 Modo de importação
               </p>
               <div className="space-y-2">
-                <label className="flex items-start gap-3 p-3 border border-gray-200 dark:border-gray-700 rounded-lg cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
-                  <input
-                    type="radio"
-                    name="importMode"
-                    value="append"
-                    checked={importMode === 'append'}
-                    onChange={() => setImportMode('append')}
-                    className="mt-1"
-                  />
-                  <div>
-                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                      Adicionar lançamentos
-                    </p>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                <ImportModeRadio
+                  value="append"
+                  checked={importMode === 'append'}
+                  onChange={() => setImportMode('append')}
+                  title="Adicionar lançamentos"
+                  description={
+                    <>
                       Os lançamentos da planilha serão adicionados aos existentes. Pode gerar duplicatas se já existirem
                       dados para o mesmo mês.
-                    </p>
-                  </div>
-                </label>
-                <label className="flex items-start gap-3 p-3 border border-gray-200 dark:border-gray-700 rounded-lg cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
-                  <input
-                    type="radio"
-                    name="importMode"
-                    value="replace"
-                    checked={importMode === 'replace'}
-                    onChange={() => setImportMode('replace')}
-                    className="mt-1"
-                  />
-                  <div>
-                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                      Substituir meses importados
-                    </p>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                    </>
+                  }
+                />
+                <ImportModeRadio
+                  value="replace"
+                  checked={importMode === 'replace'}
+                  onChange={() => setImportMode('replace')}
+                  title="Substituir meses importados"
+                  description={
+                    <>
                       Para cada mês/ano detectado na planilha, todos os lançamentos existentes serão
                       <span className="font-semibold"> apagados </span>e substituídos pelos da planilha. Recomendado para
                       reimportações.
-                    </p>
-                  </div>
-                </label>
+                    </>
+                  }
+                />
               </div>
             </div>
 
@@ -1063,6 +1037,56 @@ export default function ControleFinanceiroPage() {
         </Modal>
       </MainLayout>
     </ProtectedRoute>
+  );
+}
+
+interface ImportModeRadioProps {
+  value: 'append' | 'replace';
+  checked: boolean;
+  onChange: () => void;
+  title: string;
+  description: React.ReactNode;
+}
+
+function ImportModeRadio({
+  value,
+  checked,
+  onChange,
+  title,
+  description,
+}: ImportModeRadioProps) {
+  return (
+    <label
+      className={`group flex cursor-pointer items-start gap-3 rounded-lg border bg-white p-3 transition-colors hover:bg-gray-50 dark:bg-gray-800 dark:hover:bg-gray-700/60 ${
+        checked
+          ? 'border-red-500 ring-1 ring-red-500 dark:border-red-500'
+          : 'border-gray-200 dark:border-gray-600'
+      }`}
+    >
+      <div className="relative shrink-0 pt-0.5">
+        <input
+          type="radio"
+          name="importMode"
+          value={value}
+          checked={checked}
+          onChange={onChange}
+          className="sr-only"
+        />
+        <div
+          className={`flex h-5 w-5 items-center justify-center rounded-full border-2 transition-all duration-200 ${
+            checked
+              ? 'border-red-600 dark:border-red-500'
+              : 'border-gray-300 bg-white group-hover:border-red-400 dark:border-gray-600 dark:bg-gray-800 dark:group-hover:border-red-400'
+          }`}
+        >
+          {checked && <div className="h-2.5 w-2.5 rounded-full bg-red-600 dark:bg-red-500" />}
+        </div>
+      </div>
+      <div>
+        <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{title}</p>
+        <p className="text-xs text-gray-500 dark:text-gray-400">{description}</p>
+      </div>
+    </label>
   );
 }
 
@@ -1243,7 +1267,8 @@ function MonthGroup({ year, month, items, onEdit, onDelete, deletingId }: MonthG
             </thead>
             <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
               {paginatedItems.map((entry) => {
-                const statusStyle = STATUS_STYLES[entry.status];
+                const statusStyle =
+                  STATUS_STYLES[entry.status] ?? STATUS_STYLES.AGUARDAR_PAGAMENTO;
                 const isDeleting = deletingId === entry.id;
                 const isOverdue =
                   entry.remainingDays !== null &&
@@ -1257,8 +1282,12 @@ function MonthGroup({ year, month, items, onEdit, onDelete, deletingId }: MonthG
                   >
                     <td className="px-3 sm:px-6 py-3 text-center">
                       <span
-                        className={`inline-flex items-center justify-center rounded-full px-2.5 py-1 text-xs font-medium whitespace-nowrap ${statusStyle.bg} ${statusStyle.text}`}
+                        className={`inline-flex items-center justify-center gap-2 rounded-full px-2.5 py-1 text-xs font-medium whitespace-nowrap ${statusStyle.bg} ${statusStyle.text}`}
                       >
+                        <span
+                          className={`h-2.5 w-2.5 shrink-0 rounded-sm ${statusStyle.dot}`}
+                          aria-hidden
+                        />
                         {statusStyle.label}
                       </span>
                     </td>

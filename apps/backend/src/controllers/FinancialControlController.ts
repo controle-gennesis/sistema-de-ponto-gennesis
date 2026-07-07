@@ -9,6 +9,7 @@ const ALLOWED_STATUSES: FinancialControlStatus[] = [
   'PROCESSO_COMPLETO',
   'PAGO',
   'AGUARDAR_NOTA',
+  'AGUARDAR_PAGAMENTO',
   'CANCELADO',
 ];
 
@@ -280,38 +281,43 @@ export class FinancialControlController {
         throw createError('Nenhum lançamento válido encontrado na planilha', 400);
       }
 
-      const result = await prisma.$transaction(async (tx) => {
-        let removed = 0;
-        if (mode === 'replace') {
-          const monthYearPairs = Array.from(
-            new Set(parsed.entries.map((e) => `${e.paymentYear}-${e.paymentMonth}`))
-          ).map((s) => {
-            const [y, m] = s.split('-').map(Number);
-            return { paymentYear: y, paymentMonth: m };
-          });
-
-          if (monthYearPairs.length) {
-            const del = await tx.financialControlEntry.deleteMany({
-              where: { OR: monthYearPairs },
+      const IMPORT_BATCH_SIZE = 250;
+      const result = await prisma.$transaction(
+        async (tx) => {
+          let removed = 0;
+          if (mode === 'replace') {
+            const monthYearPairs = Array.from(
+              new Set(parsed.entries.map((e) => `${e.paymentYear}-${e.paymentMonth}`)),
+            ).map((s) => {
+              const [y, m] = s.split('-').map(Number);
+              return { paymentYear: y, paymentMonth: m };
             });
-            removed = del.count;
+
+            if (monthYearPairs.length) {
+              const del = await tx.financialControlEntry.deleteMany({
+                where: { OR: monthYearPairs },
+              });
+              removed = del.count;
+            }
           }
-        }
 
-        let created = 0;
-        for (const entry of parsed.entries) {
-          await tx.financialControlEntry.create({
-            data: {
-              ...entry,
-              createdBy: userId,
-              updatedBy: userId,
-            },
-          });
-          created += 1;
-        }
+          let created = 0;
+          for (let i = 0; i < parsed.entries.length; i += IMPORT_BATCH_SIZE) {
+            const batch = parsed.entries.slice(i, i + IMPORT_BATCH_SIZE);
+            const insert = await tx.financialControlEntry.createMany({
+              data: batch.map((entry) => ({
+                ...entry,
+                createdBy: userId,
+                updatedBy: userId,
+              })),
+            });
+            created += insert.count;
+          }
 
-        return { created, removed };
-      });
+          return { created, removed };
+        },
+        { maxWait: 30_000, timeout: 120_000 },
+      );
 
       res.json({
         success: true,
@@ -390,8 +396,13 @@ function parseMonthValue(value: any): number | null {
 function parseStatusFromExportLabel(value: any): FinancialControlStatus | null {
   const t = normalizeText(value);
   if (!t) return null;
-  if (t === 'PAGO' || t === 'PROCESSO COMPLETO') return 'PAGO';
-  if (t === 'PENDENTE' || t.includes('AGUARD')) return 'AGUARDAR_NOTA';
+  if (t === 'PROCESSO COMPLETO' || t.includes('PROCESSO COMPLETO')) return 'PROCESSO_COMPLETO';
+  if (t === 'PAGO') return 'PAGO';
+  if (t.includes('AGUARDAR NOTA') || t.includes('AGUARDAR A NOTA')) return 'AGUARDAR_NOTA';
+  if (t.includes('AGUARDAR PAGAMENTO') || t === 'AGENDADO' || t.includes('AGENDADO')) {
+    return 'AGUARDAR_PAGAMENTO';
+  }
+  if (t === 'PENDENTE') return 'AGUARDAR_PAGAMENTO';
   if (t === 'CANCELADO' || t.includes('CANCEL')) return 'CANCELADO';
   return null;
 }
@@ -489,12 +500,12 @@ function inferStatus(opts: {
     return 'CANCELADO';
   }
   if (receivedNorm.startsWith('PAGO') || opts.paidDate) {
-    if (receivedNorm.includes('ENFASE') || receivedNorm.includes('AGUARD')) {
+    if (receivedNorm.includes('ENFASE') || receivedNorm.includes('AGUARDAR NOTA') || receivedNorm.includes('AGUARDAR A NOTA')) {
       return 'AGUARDAR_NOTA';
     }
     return 'PAGO';
   }
-  return 'AGUARDAR_NOTA';
+  return 'AGUARDAR_PAGAMENTO';
 }
 
 /**
@@ -521,10 +532,12 @@ function inferStatusFromColor(argbOrRgb: string | null | undefined): FinancialCo
 
   // Vermelho dominante
   if (r > 150 && r > g + 30 && r > b + 30) return 'CANCELADO';
-  // Verde dominante
+  // Amarelo: processo completo
+  if (r > 180 && g > 150 && b < 130) return 'PROCESSO_COMPLETO';
+  // Azul claro: aguardar pagamento
+  if (b > 130 && b > r + 25 && b >= g - 30) return 'AGUARDAR_PAGAMENTO';
+  // Verde: pago / aguardar nota (refinado pelo conteúdo da linha)
   if (g > 120 && g > r + 20 && g > b + 20) return 'PAGO';
-  // Amarelo: vermelho + verde altos, azul baixo
-  if (r > 180 && g > 150 && b < 130) return 'AGUARDAR_NOTA';
 
   return null;
 }
@@ -862,6 +875,9 @@ async function parseControleFinanceiroSpreadsheet(buffer: Buffer): Promise<Parse
     }
     if (!status) {
       status = inferStatus({ boleto, receivedNote, paidDate, finalValue });
+    } else if (status === 'PAGO') {
+      const refined = inferStatus({ boleto, receivedNote, paidDate, finalValue });
+      if (refined === 'AGUARDAR_NOTA') status = refined;
     }
 
     const monthYearKey = `${paymentYear}-${paymentMonth}`;

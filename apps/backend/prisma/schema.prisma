@@ -2450,10 +2450,11 @@ model WhatsAppSubmission {
 
 /// Status da OS no Controle Financeiro (planilha "CONTROLE FINANCEIRO - MATERIAL/SERVIÇO APLICADO")
 enum FinancialControlStatus {
-  PROCESSO_COMPLETO // CONCLUÍDO (verde)
-  PAGO              // PAGO (verde claro)
-  AGUARDAR_NOTA     // PENDENTE (amarelo)
-  CANCELADO         // CANCELADO (vermelho)
+  PROCESSO_COMPLETO // amarelo
+  PAGO              // verde
+  AGUARDAR_NOTA     // verde (pago, aguardar nota)
+  AGUARDAR_PAGAMENTO // azul claro (agendado, aguardar pagamento)
+  CANCELADO         // vermelho
 }
 
 /// Lançamentos da página "Controle Financeiro" (Material/Serviço Aplicado).
