@@ -117,8 +117,8 @@ const KANBAN_PRIORITY_ALL_VALUES = KANBAN_PRIORITY_ORDER;
 /** Quantidade inicial de cards visíveis por coluna; "Ver mais" carrega mais este lote. */
 const KANBAN_COLUMN_VISIBLE_BATCH = 10;
 
-function readKanbanCollapsedColumns(boardKey: string): Set<string> {
-  if (typeof window === 'undefined') return new Set();
+function readKanbanCollapsedColumns(boardKey: string | null): Set<string> {
+  if (!boardKey || typeof window === 'undefined') return new Set();
   try {
     const raw = sessionStorage.getItem(`kanban-collapsed:${boardKey}`);
     if (!raw) return new Set();
@@ -130,8 +130,8 @@ function readKanbanCollapsedColumns(boardKey: string): Set<string> {
   }
 }
 
-function writeKanbanCollapsedColumns(boardKey: string, ids: Set<string>) {
-  if (typeof window === 'undefined') return;
+function writeKanbanCollapsedColumns(boardKey: string | null, ids: Set<string>) {
+  if (!boardKey || typeof window === 'undefined') return;
   sessionStorage.setItem(`kanban-collapsed:${boardKey}`, JSON.stringify(Array.from(ids)));
 }
 
