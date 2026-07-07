@@ -39,7 +39,7 @@ import { formatDateBr, parseDateSafe } from '@/lib/dateTimeBr';
 import { exportFinancialControlEntries } from '@/lib/exportFinancialControl';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import {
-  FINANCIAL_CONTROL_STATUS_OPTIONS,
+  FINANCIAL_CONTROL_STATUS_FILTER_OPTIONS,
   FINANCIAL_CONTROL_STATUS_STYLES,
   type FinancialControlStatus,
   isFinancialControlPaidStatus,
@@ -71,7 +71,7 @@ type FinancialControlEntry = {
 };
 
 const STATUS_STYLES = FINANCIAL_CONTROL_STATUS_STYLES;
-const STATUS_OPTIONS = FINANCIAL_CONTROL_STATUS_OPTIONS;
+const STATUS_FILTER_OPTIONS = FINANCIAL_CONTROL_STATUS_FILTER_OPTIONS;
 
 const DASHBOARD_STATUS_CARDS: {
   key: 'PROCESSO_COMPLETO' | 'PAGO_AGUARDAR_NOTA' | 'AGUARDAR_PAGAMENTO';
@@ -294,7 +294,10 @@ export default function ControleFinanceiroPage() {
     const params = new URLSearchParams();
     if (filters.year > 0) params.append('year', String(filters.year));
     if (filters.month) params.append('month', String(filters.month));
-    if (filters.status) params.append('status', filters.status);
+    // "Aguardar nota" inclui PAGO no cliente; não filtra só AGUARDAR_NOTA na API.
+    if (filters.status && filters.status !== 'AGUARDAR_NOTA') {
+      params.append('status', filters.status);
+    }
     if (filters.search.trim()) params.append('search', filters.search.trim());
     return params.toString();
   }, [filters]);
@@ -309,12 +312,18 @@ export default function ControleFinanceiroPage() {
 
   const rawEntries = data || [];
 
-  // Aplica o filtro "apenas em atraso" no cliente (o backend não conhece esse filtro).
+  // Filtros de status (aguardar nota) e "apenas em atraso" no cliente.
   const entries = useMemo(() => {
-    if (!filters.overdueOnly) return rawEntries;
+    let result = rawEntries;
+    if (filters.status === 'AGUARDAR_NOTA') {
+      result = result.filter(
+        (entry) => entry.status === 'AGUARDAR_NOTA' || entry.status === 'PAGO',
+      );
+    }
+    if (!filters.overdueOnly) return result;
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
-    return rawEntries.filter((entry) => {
+    return result.filter((entry) => {
       const isPago = isFinancialControlPaidStatus(entry.status);
       const isCancelado = entry.status === 'CANCELADO';
       if (isPago || isCancelado || !entry.dueDate) return false;
@@ -322,7 +331,7 @@ export default function ControleFinanceiroPage() {
       if (!due || due.getFullYear() < 1990) return false;
       return due < todayStart;
     });
-  }, [rawEntries, filters.overdueOnly]);
+  }, [rawEntries, filters.status, filters.overdueOnly]);
 
   const groupedByMonth = useMemo(() => {
     const groups = new Map<string, { year: number; month: number; items: FinancialControlEntry[] }>();
@@ -333,15 +342,16 @@ export default function ControleFinanceiroPage() {
       }
       groups.get(key)!.items.push(entry);
     }
-    for (const group of groups.values()) {
+    const grouped = Array.from(groups.values());
+    grouped.forEach((group) => {
       group.items.sort((a, b) => {
         const dueA = a.dueDate ? (parseDateSafe(a.dueDate)?.getTime() ?? Number.POSITIVE_INFINITY) : Number.POSITIVE_INFINITY;
         const dueB = b.dueDate ? (parseDateSafe(b.dueDate)?.getTime() ?? Number.POSITIVE_INFINITY) : Number.POSITIVE_INFINITY;
         if (dueA !== dueB) return dueA - dueB;
         return (a.supplierName || '').localeCompare(b.supplierName || '', 'pt-BR');
       });
-    }
-    return Array.from(groups.values()).sort((a, b) => {
+    });
+    return grouped.sort((a, b) => {
       if (a.year !== b.year) return a.year - b.year;
       return a.month - b.month;
     });
@@ -433,14 +443,18 @@ export default function ControleFinanceiroPage() {
     []
   );
 
-  const statusFilterOptions = useMemo(
-    () =>
-      labeledToSelectOptions([
-        { value: '', label: 'Todos' },
-        ...STATUS_OPTIONS.map((opt) => ({ value: opt.value, label: opt.label })),
-      ]),
-    []
-  );
+  const statusFilterOptions = useMemo(() => {
+    const present = new Set(rawEntries.map((entry) => entry.status));
+    const hasAguardarNota = present.has('AGUARDAR_NOTA') || present.has('PAGO');
+    const options = STATUS_FILTER_OPTIONS.filter((opt) => {
+      if (opt.value === 'AGUARDAR_NOTA') return hasAguardarNota;
+      return present.has(opt.value);
+    });
+    return labeledToSelectOptions([
+      { value: '', label: 'Todos' },
+      ...options.map((opt) => ({ value: opt.value, label: opt.label })),
+    ]);
+  }, [rawEntries]);
 
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {

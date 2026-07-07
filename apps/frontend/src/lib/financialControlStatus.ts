@@ -62,6 +62,17 @@ export const FINANCIAL_CONTROL_STATUS_OPTIONS: {
   { value: 'CANCELADO', label: 'Cancelado' },
 ];
 
+/** Opções do filtro da listagem (sem "Pago" isolado — verde entra em Aguardar nota). */
+export const FINANCIAL_CONTROL_STATUS_FILTER_OPTIONS: {
+  value: FinancialControlStatus;
+  label: string;
+}[] = [
+  { value: 'PROCESSO_COMPLETO', label: 'Processo completo' },
+  { value: 'AGUARDAR_NOTA', label: 'Aguardar nota' },
+  { value: 'AGUARDAR_PAGAMENTO', label: 'Aguardar pagamento' },
+  { value: 'CANCELADO', label: 'Cancelado' },
+];
+
 export const FINANCIAL_CONTROL_STATUS_EXPORT_LABELS: Record<FinancialControlStatus, string> = {
   PROCESSO_COMPLETO: 'PROCESSO COMPLETO',
   PAGO: 'PAGO',
