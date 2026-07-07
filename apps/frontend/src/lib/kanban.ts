@@ -233,6 +233,12 @@ export function insertCardIntoBoardCache(
   };
 }
 
+/** IDs temporários gerados no cliente antes da API confirmar (criação/cópia). */
+export function isOptimisticKanbanCardId(cardId: string | undefined | null): boolean {
+  if (!cardId) return false;
+  return cardId.startsWith('optimistic-');
+}
+
 export function buildOptimisticNewCard(title: string, tempId: string): KanbanCard {
   return {
     id: tempId,

@@ -52,6 +52,7 @@ import {
   syncCardOnBoardCache,
   type KanbanBoardCardChecklistPatch,
   fetchKanbanCard,
+  isOptimisticKanbanCardId,
   kanbanCardQueryKey,
 } from '@/lib/kanban';
 import {
@@ -1784,12 +1785,9 @@ function KanbanPage() {
     isLoading: loadingPerms,
     user: meUser,
   } = usePermissions();
-  const isResolvingEntry = !departmentKeyParam && !!meUser && !loadingPerms;
-  const loadingUser = loadingPerms;
 
-  const userDepartment = meUser?.employee?.department ?? '';
-  const boardScopeKey = departmentKeyParam ?? userDepartment;
-  const kanbanBoardQueryKey = ['kanban-board', boardScopeKey] as const;
+  const quickDefaultBoardKey =
+    meUser?.id && !departmentKeyParam ? getKanbanDefaultBoard(meUser.id) : null;
 
   const { data: boardsList, isLoading: loadingBoardsList } = useQuery({
     queryKey: ['kanban-boards'],
@@ -1805,6 +1803,11 @@ function KanbanPage() {
     void defaultBoardRev;
     return resolveKanbanDefaultBoard(meUser.id, boardsList);
   }, [meUser?.id, boardsList, defaultBoardRev]);
+
+  /** Chave estável do quadro — evita buscar pelo setor do usuário antes do redirect. */
+  const boardScopeKey =
+    departmentKeyParam ?? defaultDepartmentKey ?? quickDefaultBoardKey ?? null;
+  const kanbanBoardQueryKey = ['kanban-board', boardScopeKey] as const;
 
   const setAsDefaultBoard = useCallback(
     (departmentKey: string) => {
@@ -2088,6 +2091,18 @@ function KanbanPage() {
     [queryClient, kanbanBoardQueryKey, boardScopeKey],
   );
 
+  const prefetchKanbanCard = useCallback(
+    (cardId: string) => {
+      if (isOptimisticKanbanCardId(cardId)) return;
+      void queryClient.prefetchQuery({
+        queryKey: kanbanCardQueryKey(cardId),
+        queryFn: () => fetchKanbanCard(cardId),
+        staleTime: 3 * 60 * 1000,
+      });
+    },
+    [queryClient],
+  );
+
   const handleBoardCardCreated = useCallback(
     (
       card: KanbanCard,
@@ -2111,20 +2126,38 @@ function KanbanPage() {
         if (next && boardScopeKey) writeKanbanBoardCache(boardScopeKey, next);
         return next;
       });
+
+      if (options.replaceTempId) {
+        setCardModal((prev) =>
+          prev?.mode === 'detail' && prev.cardId === options.replaceTempId
+            ? { ...prev, cardId: card.id, initialCard: card }
+            : prev,
+        );
+        prefetchKanbanCard(card.id);
+      }
+
+      if (options.removeTempId) {
+        setCardModal((prev) =>
+          prev?.mode === 'detail' && prev.cardId === options.removeTempId ? null : prev,
+        );
+      }
     },
-    [queryClient, kanbanBoardQueryKey, boardScopeKey],
+    [queryClient, kanbanBoardQueryKey, boardScopeKey, prefetchKanbanCard],
   );
 
-  const prefetchKanbanCard = useCallback(
-    (cardId: string) => {
-      void queryClient.prefetchQuery({
-        queryKey: kanbanCardQueryKey(cardId),
-        queryFn: () => fetchKanbanCard(cardId),
-        staleTime: 3 * 60 * 1000,
-      });
-    },
-    [queryClient],
-  );
+  function openCreateCardDetail(card: KanbanCard, columnId: string) {
+    const column = columns.find((col) => col.id === columnId);
+    setCardModal({
+      mode: 'detail',
+      cardId: card.id,
+      columnId,
+      initialCard: card,
+      initialColumn: column
+        ? { title: column.title, color: column.color }
+        : undefined,
+    });
+    prefetchKanbanCard(card.id);
+  }
 
   const handleDragStart = useCallback((e: React.DragEvent, cardId: string, columnId: string) => {
     e.dataTransfer.effectAllowed = 'move';
@@ -2451,6 +2484,10 @@ function KanbanPage() {
     );
     toast.success('Card removido', { duration: 2000 });
 
+    if (isOptimisticKanbanCardId(cardId)) {
+      return;
+    }
+
     void (async () => {
       try {
         await deleteKanbanCard(cardId);
@@ -2610,7 +2647,7 @@ function KanbanPage() {
     ],
   );
 
-  if (loadingUser || loadingPerms) {
+  if (!meUser && loadingPerms) {
     return <Loading message="Carregando Tasks..." fullScreen size="lg" />;
   }
 
@@ -2619,7 +2656,7 @@ function KanbanPage() {
   }
 
   const user = meUser;
-  const showBoardSkeleton = loadingBoard && !board;
+  const showBoardSkeleton = !board && !boardError;
 
   if (boardError && !board) {
     return (
@@ -2963,6 +3000,11 @@ function KanbanPage() {
 
       {cardModal && (
         <KanbanCardModal
+          key={
+            cardModal.mode === 'detail'
+              ? cardModal.cardId
+              : `create-${cardModal.columnId}-${cardModal.insertAt}`
+          }
           mode={cardModal.mode}
           cardId={cardModal.mode === 'detail' ? cardModal.cardId : undefined}
           columnId={cardModal.columnId}
@@ -2987,6 +3029,7 @@ function KanbanPage() {
           onBoardCardCreated={handleBoardCardCreated}
           onBoardCardPatch={patchBoardCard}
           onBoardCardSync={handleBoardCardSync}
+          onCreateOpenDetail={openCreateCardDetail}
         />
       )}
 

@@ -26,6 +26,7 @@ import {
   type KanbanBoardCardChecklistPatch,
   boardCardToDetailPlaceholder,
   fetchKanbanCard,
+  isOptimisticKanbanCardId,
   kanbanCardQueryKey,
   kanbanDetailToBoardCard,
   normalizeKanbanCardDetail,
@@ -157,6 +158,8 @@ export interface KanbanCardModalProps {
   onBoardCardPatch?: (cardId: string, patch: KanbanBoardCardChecklistPatch) => void;
   /** Sincroniza card completo no cache do quadro sem refetch. */
   onBoardCardSync?: (card: KanbanCard, columnId: string) => void;
+  /** Abre o card em modo detalhe logo após criar (otimista). */
+  onCreateOpenDetail?: (card: KanbanCard, columnId: string) => void;
 }
 
 export function KanbanCardModal({
@@ -175,6 +178,7 @@ export function KanbanCardModal({
   onBoardCardCreated,
   onBoardCardPatch,
   onBoardCardSync,
+  onCreateOpenDetail,
 }: KanbanCardModalProps) {
   const queryClient = useQueryClient();
   const [mode, setMode] = useState<'create' | 'detail'>(initialMode);
@@ -231,7 +235,7 @@ export function KanbanCardModal({
   const { data: card, isLoading } = useQuery({
     queryKey: kanbanCardQueryKey(cardId!),
     queryFn: () => fetchKanbanCard(cardId!),
-    enabled: isDetail,
+    enabled: isDetail && !!cardId && !isOptimisticKanbanCardId(cardId),
     placeholderData: cardPlaceholder,
     staleTime: 3 * 60 * 1000,
   });
@@ -469,6 +473,11 @@ export function KanbanCardModal({
     const targetColumnId = partial.columnId ?? columnId;
     const optimistic = applyMetaPartial(base, partial);
 
+    if (isOptimisticKanbanCardId(cardId)) {
+      syncCardFromApi(optimistic, targetColumnId);
+      return true;
+    }
+
     metaSaveSnapshotRef.current = {
       board: base,
       detail: card,
@@ -526,6 +535,7 @@ export function KanbanCardModal({
     const next = pickerUserToMember(user);
     setMembers((prev) => [...prev, next]);
     if (!isDetail || !cardId) return;
+    if (isOptimisticKanbanCardId(cardId)) return;
 
     memberMutationInFlight.current += 1;
     try {
@@ -547,6 +557,7 @@ export function KanbanCardModal({
     setMembers((m) => m.filter((x) => x.userId !== userId));
     setHoveringMemberId(null);
     if (!isDetail || !cardId) return;
+    if (isOptimisticKanbanCardId(cardId)) return;
 
     memberMutationInFlight.current += 1;
     try {
@@ -575,13 +586,15 @@ export function KanbanCardModal({
     const targetColumnId = columnId;
     const targetInsertAt = createInsertAt;
 
-    onBoardCardCreated?.(buildOptimisticNewCard(trimmedTitle, tempId), {
+    const optimisticCard = buildOptimisticNewCard(trimmedTitle, tempId);
+
+    onBoardCardCreated?.(optimisticCard, {
       columnId: targetColumnId,
       insertAt: targetInsertAt,
     });
 
+    onCreateOpenDetail?.(optimisticCard, targetColumnId);
     toast.success('Card criado');
-    onClose();
 
     void (async () => {
       try {
@@ -652,6 +665,10 @@ export function KanbanCardModal({
       return;
     }
     if (!cardId) return;
+    if (isOptimisticKanbanCardId(cardId)) {
+      toast.error('Aguarde o card ser salvo');
+      return;
+    }
     setAddingTask(true);
     createChecklistItem(cardId, newTask.trim())
       .then(({ card: updated }) => {
@@ -683,7 +700,7 @@ export function KanbanCardModal({
   }
 
   async function toggleTask(itemId: string, isDone: boolean) {
-    if (!card || !cardId) return;
+    if (!card || !cardId || isOptimisticKanbanCardId(cardId)) return;
     const nextDone = !isDone;
     const previous = card;
     const optimistic = buildOptimisticChecklistToggle(card, itemId, nextDone);
@@ -700,7 +717,7 @@ export function KanbanCardModal({
   }
 
   async function handleDeleteTask(itemId: string) {
-    if (deletingTaskId || !card || !cardId) return;
+    if (deletingTaskId || !card || !cardId || isOptimisticKanbanCardId(cardId)) return;
     const removed = card.checklistItems.find((i) => i.id === itemId);
     if (!removed) return;
 
@@ -740,6 +757,10 @@ export function KanbanCardModal({
 
   async function handlePostComment() {
     if (!cardId || !commentText.trim() || !card) return;
+    if (isOptimisticKanbanCardId(cardId)) {
+      toast.error('Aguarde o card ser salvo');
+      return;
+    }
     setPostingComment(true);
     try {
       const comment = await createKanbanComment(cardId, commentText.trim());
@@ -763,7 +784,8 @@ export function KanbanCardModal({
   const visibleDraftTasks = hideDone ? draftTasks.filter((t) => !t.isDone) : draftTasks;
   const hasLabels = labels.length > 0;
   const hasDates = !!(startDate || endDate);
-  const showCostButton = isDetail && !!cardId && canViewKanbanValues;
+  const showCostButton =
+    isDetail && !!cardId && !isOptimisticKanbanCardId(cardId) && canViewKanbanValues;
   const attachmentsList = card?.attachmentsList ?? [];
   const hasAttachments =
     attachmentsList.length > 0 || draftFiles.length > 0 || draftLinks.length > 0;

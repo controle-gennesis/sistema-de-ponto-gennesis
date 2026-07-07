@@ -19,6 +19,7 @@ import {
   type KanbanCardDetail,
   addKanbanLinkAttachment,
   isKanbanLinkAttachment,
+  isOptimisticKanbanCardId,
   uploadKanbanAttachments,
   deleteKanbanAttachment,
 } from '@/lib/kanban';
@@ -83,7 +84,7 @@ export function KanbanAttachmentsModal({
   onUpdated,
   elevated = true,
 }: KanbanAttachmentsModalProps) {
-  const isPersisted = !!cardId;
+  const isPersisted = !!cardId && !isOptimisticKanbanCardId(cardId);
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [addingLink, setAddingLink] = useState(false);
