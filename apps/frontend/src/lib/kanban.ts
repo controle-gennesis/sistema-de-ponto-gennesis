@@ -483,8 +483,10 @@ export async function createKanbanCard(payload: {
   totalTasks?: number;
   completedTasks?: number;
   insertAt?: 'top' | 'bottom';
-}) {
-  const res = await api.post('/kanban/cards', payload);
+}, options?: { timeout?: number }) {
+  const res = await api.post('/kanban/cards', payload, {
+    timeout: options?.timeout ?? 30_000,
+  });
   return res.data.data as KanbanCard;
 }
 

@@ -563,7 +563,7 @@ export function KanbanCardModal({
     }
   }
 
-  async function handleCreate() {
+  function handleCreate() {
     if (!title.trim()) {
       toast.error('Título é obrigatório');
       return;
@@ -572,47 +572,46 @@ export function KanbanCardModal({
     const tempId = `optimistic-create-${Date.now()}`;
     const pendingFiles = [...draftFiles];
     const pendingLinks = [...draftLinks];
+    const targetColumnId = columnId;
+    const targetInsertAt = createInsertAt;
 
     onBoardCardCreated?.(buildOptimisticNewCard(trimmedTitle, tempId), {
-      columnId,
-      insertAt: createInsertAt,
+      columnId: targetColumnId,
+      insertAt: targetInsertAt,
     });
 
-    setSaving(true);
-    try {
-      const created = await createKanbanCard({
-        columnId,
-        title: trimmedTitle,
-        insertAt: createInsertAt,
-      });
+    toast.success('Card criado');
+    onClose();
 
-      const newCardId = created.id;
-      onBoardCardCreated?.(created, {
-        columnId,
-        insertAt: createInsertAt,
-        replaceTempId: tempId,
-      });
+    void (async () => {
+      try {
+        const created = await createKanbanCard(
+          {
+            columnId: targetColumnId,
+            title: trimmedTitle,
+            insertAt: targetInsertAt,
+          },
+          { timeout: 20_000 },
+        );
 
-      toast.success('Card criado');
-      setCardId(newCardId);
-      setMode('detail');
-      queryClient.invalidateQueries({ queryKey: kanbanCardQueryKey(newCardId) });
-      setSaving(false);
+        onBoardCardCreated?.(created, {
+          columnId: targetColumnId,
+          insertAt: targetInsertAt,
+          replaceTempId: tempId,
+        });
 
-      if (pendingFiles.length > 0 || pendingLinks.length > 0) {
-        void (async () => {
+        if (pendingFiles.length > 0 || pendingLinks.length > 0) {
           try {
             let latestDetail: KanbanCardDetail | undefined;
             if (pendingFiles.length > 0) {
               latestDetail = await uploadKanbanAttachments(
-                newCardId,
+                created.id,
                 pendingFiles.map((d) => d.file),
               );
-              setDraftFiles([]);
             }
             if (pendingLinks.length > 0) {
               for (const link of pendingLinks) {
-                latestDetail = await addKanbanLinkAttachment(newCardId, {
+                latestDetail = await addKanbanLinkAttachment(created.id, {
                   url: link.url,
                   displayName:
                     link.displayName.trim() && link.displayName !== link.url
@@ -620,25 +619,26 @@ export function KanbanCardModal({
                       : undefined,
                 });
               }
-              setDraftLinks([]);
             }
             if (latestDetail) {
-              syncDetailFromApi(latestDetail);
+              onBoardCardSync?.(
+                kanbanDetailToBoardCard(latestDetail),
+                latestDetail.columnId ?? targetColumnId,
+              );
             }
           } catch {
             toast.error('Card criado, mas falhou ao enviar anexos');
           }
-        })();
+        }
+      } catch {
+        onBoardCardCreated?.(buildOptimisticNewCard(trimmedTitle, tempId), {
+          columnId: targetColumnId,
+          insertAt: targetInsertAt,
+          removeTempId: tempId,
+        });
+        toast.error('Erro ao criar card');
       }
-    } catch {
-      onBoardCardCreated?.(buildOptimisticNewCard(trimmedTitle, tempId), {
-        columnId,
-        insertAt: createInsertAt,
-        removeTempId: tempId,
-      });
-      toast.error('Erro ao criar card');
-      setSaving(false);
-    }
+    })();
   }
 
   function handleAddTask() {

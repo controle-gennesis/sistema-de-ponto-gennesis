@@ -319,6 +319,12 @@ function formatChecklistItem(item: {
 
 const memberUserSelect = { id: true, name: true, profilePhotoUrl: true } as const;
 
+/** Include leve para listagem no quadro (sem join de todos os membros). */
+const boardListCardInclude = {
+  assignee: { select: memberUserSelect },
+  _count: { select: { comments: true, attachments: true } },
+} as const;
+
 const cardInclude = {
   assignee: { select: memberUserSelect },
   members: {
@@ -332,7 +338,7 @@ const boardListInclude = {
   columns: {
     orderBy: { position: 'asc' as const },
     include: {
-      cards: { orderBy: { position: 'asc' as const }, include: cardInclude },
+      cards: { orderBy: { position: 'asc' as const }, include: boardListCardInclude },
     },
   },
 } as const;
@@ -643,8 +649,9 @@ export class KanbanService {
       isCustom: boolean;
       createdById: string | null;
     },
+    ownKey?: string,
   ): Promise<{ canRead: boolean; canWrite: boolean; isOwner: boolean }> {
-    const { key: ownKey } = await this.getUserDepartment(userId);
+    const key = ownKey ?? (await this.getUserDepartment(userId)).key;
 
     if (board.isCustom) {
       const isOwner = board.createdById === userId;
@@ -663,7 +670,7 @@ export class KanbanService {
       return { canRead: false, canWrite: false, isOwner: false };
     }
 
-    if (board.departmentKey === ownKey) {
+    if (board.departmentKey === key) {
       return { canRead: true, canWrite: true, isOwner: false };
     }
     if (await userIsAdministrator(userId)) {
@@ -1104,28 +1111,48 @@ export class KanbanService {
 
   async getBoardForUser(userId: string, departmentKeyParam?: string) {
     await migrateLegacyCardMembers();
-    const { key: ownKey } = await this.getUserDepartment(userId);
-    const targetKey = departmentKeyParam
+
+    const resolvedParam = departmentKeyParam
       ? resolveKanbanBoardKeyParam(departmentKeyParam)
-      : ownKey;
+      : null;
+
+    const boardByKeyPromise =
+      resolvedParam && resolvedParam !== KANBAN_LEGACY_DEPARTMENT_KEY
+        ? prisma.kanbanBoard.findUnique({
+            where: { departmentKey: resolvedParam },
+            include: boardListInclude,
+          })
+        : Promise.resolve(null);
+
+    const [{ key: ownKey }, boardFromParam] = await Promise.all([
+      this.getUserDepartment(userId),
+      boardByKeyPromise,
+    ]);
+
+    const targetKey = resolvedParam ?? ownKey;
 
     if (targetKey === KANBAN_LEGACY_DEPARTMENT_KEY) {
       throw new Error('Quadro não encontrado para este setor');
     }
 
     let board =
-      !isCustomKanbanBoardKey(targetKey) && targetKey === ownKey
+      boardFromParam ??
+      (!isCustomKanbanBoardKey(targetKey) && targetKey === ownKey
         ? await this.getOrCreateBoardForDepartment(userId)
-        : await prisma.kanbanBoard.findUnique({
-            where: { departmentKey: targetKey },
-            include: boardListInclude,
-          });
+        : null);
+
+    if (!board) {
+      board = await prisma.kanbanBoard.findUnique({
+        where: { departmentKey: targetKey },
+        include: boardListInclude,
+      });
+    }
 
     if (!board) {
       throw new Error('Quadro não encontrado para este setor');
     }
 
-    const access = await this.resolveBoardAccessForUser(userId, board);
+    const access = await this.resolveBoardAccessForUser(userId, board, ownKey);
     if (!access.canRead) throw new Error(KANBAN_FORBIDDEN);
 
     return formatBoardResponse(board, {
@@ -1367,7 +1394,7 @@ export class KanbanService {
               }
             : {}),
         },
-        include: cardInclude,
+        include: boardListCardInclude,
       });
     });
 

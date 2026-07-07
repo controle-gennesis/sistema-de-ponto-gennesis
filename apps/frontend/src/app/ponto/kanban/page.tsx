@@ -3,7 +3,7 @@
 import React, { useState, useRef, useCallback, useEffect, useMemo, Suspense } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Loading } from '@/components/ui/Loading';
 import { KanbanCardModal } from '@/components/kanban/KanbanCardModal';
@@ -60,6 +60,7 @@ import {
   clearKanbanDefaultBoard,
   getKanbanDefaultBoard,
 } from '@/lib/kanbanDefaultBoard';
+import { readKanbanBoardCache, writeKanbanBoardCache } from '@/lib/kanbanBoardCache';
 import { KanbanUserAvatar } from '@/components/kanban/KanbanUserAvatar';
 import { KANBAN_PRIORITY_CONFIG, KANBAN_PRIORITY_ORDER } from '@/components/kanban/kanbanPriority';
 import { KanbanPriorityBars } from '@/components/kanban/KanbanPriorityBars';
@@ -1794,7 +1795,7 @@ function KanbanPage() {
     queryKey: ['kanban-boards'],
     queryFn: fetchKanbanBoards,
     enabled: !!meUser,
-    staleTime: 30 * 1000,
+    staleTime: 3 * 60 * 1000,
   });
 
   const [defaultBoardRev, setDefaultBoardRev] = useState(0);
@@ -1843,6 +1844,21 @@ function KanbanPage() {
     router,
   ]);
 
+  useEffect(() => {
+    if (!meUser || !boardsList || departmentKeyParam) return;
+    const targetKey = resolveKanbanDefaultBoard(meUser.id, boardsList);
+    if (!targetKey) return;
+    void queryClient.prefetchQuery({
+      queryKey: ['kanban-board', targetKey] as const,
+      queryFn: async () => {
+        const data = await fetchKanbanBoard(targetKey);
+        writeKanbanBoardCache(targetKey, data);
+        return data;
+      },
+      staleTime: 3 * 60 * 1000,
+    });
+  }, [meUser, boardsList, departmentKeyParam, queryClient]);
+
   const [createBoardOpen, setCreateBoardOpen] = useState(false);
   const [creatingBoard, setCreatingBoard] = useState(false);
   const [renameBoardTarget, setRenameBoardTarget] = useState<{
@@ -1859,10 +1875,25 @@ function KanbanPage() {
 
   const { data: board, isLoading: loadingBoard, isError: boardError } = useQuery({
     queryKey: kanbanBoardQueryKey,
-    queryFn: () => fetchKanbanBoard(boardScopeKey || undefined),
+    queryFn: async () => {
+      const data = await fetchKanbanBoard(boardScopeKey || undefined);
+      if (boardScopeKey) writeKanbanBoardCache(boardScopeKey, data);
+      return data;
+    },
     enabled: !!meUser && !!boardScopeKey,
     staleTime: 3 * 60 * 1000,
-    placeholderData: keepPreviousData,
+    gcTime: 10 * 60 * 1000,
+    placeholderData: (previousData, previousQuery) => {
+      if (
+        previousQuery &&
+        Array.isArray(previousQuery.queryKey) &&
+        previousQuery.queryKey[1] === boardScopeKey &&
+        previousData
+      ) {
+        return previousData;
+      }
+      return boardScopeKey ? readKanbanBoardCache(boardScopeKey) : undefined;
+    },
   });
 
   const boardReadOnly = board?.canWrite === false;
@@ -2048,11 +2079,13 @@ function KanbanPage() {
 
   const handleBoardCardSync = useCallback(
     (card: KanbanCard, columnId: string) => {
-      queryClient.setQueryData<KanbanBoard>(kanbanBoardQueryKey, (old) =>
-        syncCardOnBoardCache(old, card, columnId),
-      );
+      queryClient.setQueryData<KanbanBoard>(kanbanBoardQueryKey, (old) => {
+        const next = syncCardOnBoardCache(old, card, columnId);
+        if (next && boardScopeKey) writeKanbanBoardCache(boardScopeKey, next);
+        return next;
+      });
     },
-    [queryClient, kanbanBoardQueryKey],
+    [queryClient, kanbanBoardQueryKey, boardScopeKey],
   );
 
   const handleBoardCardCreated = useCallback(
@@ -2066,17 +2099,20 @@ function KanbanPage() {
       },
     ) => {
       queryClient.setQueryData<KanbanBoard>(kanbanBoardQueryKey, (old) => {
+        let next = old;
         if (options.removeTempId) {
-          return removeCardFromBoardCache(old, options.removeTempId);
-        }
-        if (options.replaceTempId) {
+          next = removeCardFromBoardCache(old, options.removeTempId);
+        } else if (options.replaceTempId) {
           const replaced = replaceCardInBoardCache(old, options.replaceTempId, card);
-          if (replaced) return replaced;
+          if (replaced) next = replaced;
+        } else {
+          next = insertCardIntoBoardCache(old, options.columnId, card, options.insertAt === 'top');
         }
-        return insertCardIntoBoardCache(old, options.columnId, card, options.insertAt === 'top');
+        if (next && boardScopeKey) writeKanbanBoardCache(boardScopeKey, next);
+        return next;
       });
     },
-    [queryClient, kanbanBoardQueryKey],
+    [queryClient, kanbanBoardQueryKey, boardScopeKey],
   );
 
   const prefetchKanbanCard = useCallback(
