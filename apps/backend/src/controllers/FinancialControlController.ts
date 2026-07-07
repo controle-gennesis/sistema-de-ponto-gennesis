@@ -3,6 +3,7 @@ import ExcelJS from 'exceljs';
 import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
+import { parseDateOnlyValue } from '../utils/dateInput';
 import { FinancialControlStatus, Prisma } from '@prisma/client';
 
 const ALLOWED_STATUSES: FinancialControlStatus[] = [
@@ -23,13 +24,7 @@ function parseStatus(value: unknown): FinancialControlStatus | null {
 }
 
 function parseDate(value: unknown): Date | null {
-  if (!value) return null;
-  if (value instanceof Date) return value;
-  if (typeof value !== 'string') return null;
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  const date = new Date(trimmed);
-  return isNaN(date.getTime()) ? null : date;
+  return parseDateOnlyValue(value);
 }
 
 function parseDecimal(value: unknown): Prisma.Decimal | null {
@@ -126,6 +121,7 @@ export class FinancialControlController {
         orderBy: [
           { paymentYear: 'asc' },
           { paymentMonth: 'asc' },
+          { dueDate: 'asc' },
           { createdAt: 'asc' },
         ],
       });
@@ -435,49 +431,11 @@ function parseNumber(value: any): number | null {
 }
 
 function parseCellDate(value: any): Date | null {
-  if (value === null || value === undefined || value === '') return null;
-  if (value instanceof Date) {
-    if (isNaN(value.getTime())) return null;
-    // Rejeita datas claramente inválidas (antes de 1990 ou depois de 2100)
-    const year = value.getFullYear();
-    if (year < 1990 || year > 2100) return null;
-    return value;
-  }
-  if (typeof value === 'number') {
-    // Excel armazena datas como número serial de dias desde 30/12/1899.
-    // Para evitar interpretar valores numéricos pequenos (como dia do mês, valores monetários, etc.)
-    // como datas absurdas (ex: 100 -> 09/04/1900), só aceitamos números no range que corresponde
-    // a datas a partir de ~1990 (>= 32874) até ~2100 (<= 73415).
-    if (value >= 32874 && value <= 73415) {
-      const epoch = new Date(1899, 11, 30);
-      const date = new Date(epoch.getTime() + value * 24 * 60 * 60 * 1000);
-      if (!isNaN(date.getTime())) return date;
-    }
-    return null;
-  }
-  if (typeof value === 'string') {
-    const trimmed = value.trim();
-    if (!trimmed) return null;
-    const seps = ['/', '-', '.'];
-    for (const sep of seps) {
-      const parts = trimmed.split(sep);
-      if (parts.length === 3) {
-        const day = parseInt(parts[0], 10);
-        const month = parseInt(parts[1], 10) - 1;
-        const year = parseInt(parts[2], 10);
-        if (day >= 1 && day <= 31 && month >= 0 && month <= 11 && year >= 1990 && year <= 2100) {
-          const d = new Date(year, month, day);
-          if (!isNaN(d.getTime())) return d;
-        }
-      }
-    }
-    const iso = new Date(trimmed);
-    if (!isNaN(iso.getTime())) {
-      const year = iso.getFullYear();
-      if (year >= 1990 && year <= 2100) return iso;
-    }
-  }
-  return null;
+  const date = parseDateOnlyValue(value);
+  if (!date) return null;
+  const year = date.getUTCFullYear();
+  if (year < 1990 || year > 2100) return null;
+  return date;
 }
 
 function inferStatus(opts: {
@@ -509,14 +467,49 @@ function inferStatus(opts: {
 }
 
 /**
- * Mapeia uma cor hex (ARGB ou RGB) para um status. Cores próximas são tratadas
- * pela componente dominante (Verde / Vermelho / Amarelo). Retorna null se a
- * cor for branca/cinza/preta (sem destaque) ou não identificada.
+ * Cores base do tema Office padrão do Excel (índice → RGB hex).
+ * Usado quando a célula só traz `theme` + `tint` em vez de ARGB.
  */
+const EXCEL_THEME_BASE_HEX = [
+  '000000', 'FFFFFF', '44546A', 'E7E6E6', '4472C4', 'ED7D31',
+  'A5A5A5', 'FFC000', '5B9BD5', '70AD47', '0563C1', '954F72',
+];
+
+function applyExcelTint(rgbHex: string, tint: number): string {
+  let r = parseInt(rgbHex.slice(0, 2), 16);
+  let g = parseInt(rgbHex.slice(2, 4), 16);
+  let b = parseInt(rgbHex.slice(4, 6), 16);
+  if (tint > 0) {
+    r = Math.round(r + (255 - r) * tint);
+    g = Math.round(g + (255 - g) * tint);
+    b = Math.round(b + (255 - b) * tint);
+  } else if (tint < 0) {
+    r = Math.round(r * (1 + tint));
+    g = Math.round(g * (1 + tint));
+    b = Math.round(b * (1 + tint));
+  }
+  return [r, g, b].map((x) => Math.max(0, Math.min(255, x)).toString(16).padStart(2, '0')).join('');
+}
+
+function colorObjectToHex(color: any): string | null {
+  if (!color) return null;
+  if (typeof color.argb === 'string') {
+    let hex = color.argb.toUpperCase().replace('#', '');
+    if (hex.length === 8) hex = hex.slice(2);
+    return hex.length === 6 ? hex : null;
+  }
+  if (typeof color.theme === 'number') {
+    const base = EXCEL_THEME_BASE_HEX[color.theme];
+    if (!base) return null;
+    const tint = typeof color.tint === 'number' ? color.tint : 0;
+    return applyExcelTint(base, tint);
+  }
+  return null;
+}
+
 function inferStatusFromColor(argbOrRgb: string | null | undefined): FinancialControlStatus | null {
   if (!argbOrRgb) return null;
   let hex = argbOrRgb.toUpperCase().replace('#', '');
-  // ExcelJS retorna ARGB (8 chars: AA RR GG BB). Remove alpha se presente.
   if (hex.length === 8) hex = hex.slice(2);
   if (hex.length !== 6) return null;
 
@@ -525,34 +518,57 @@ function inferStatusFromColor(argbOrRgb: string | null | undefined): FinancialCo
   const b = parseInt(hex.slice(4, 6), 16);
   if (isNaN(r) || isNaN(g) || isNaN(b)) return null;
 
-  // Branco / preto / cinza: sem destaque
   const max = Math.max(r, g, b);
   const min = Math.min(r, g, b);
-  if (max - min < 30) return null; // cinza/preto/branco
+  const spread = max - min;
 
   // Vermelho dominante
   if (r > 150 && r > g + 30 && r > b + 30) return 'CANCELADO';
-  // Amarelo: processo completo
-  if (r > 180 && g > 150 && b < 130) return 'PROCESSO_COMPLETO';
-  // Azul claro: aguardar pagamento
-  if (b > 130 && b > r + 25 && b >= g - 30) return 'AGUARDAR_PAGAMENTO';
-  // Verde: pago / aguardar nota (refinado pelo conteúdo da linha)
-  if (g > 120 && g > r + 20 && g > b + 20) return 'PAGO';
+
+  // Amarelo / dourado (processo completo) — inclui #FFF2CC
+  if (r > 160 && g > 120 && b < 170 && r >= g - 45) return 'PROCESSO_COMPLETO';
+
+  // Azul claro / ciano — inclui pastéis (#DDEBF7, #B4C6E7) e tema Excel com tint
+  const blueLead = b - Math.max(r, g);
+  if (b >= r && b >= g - 20 && blueLead >= 6 && b > 90) {
+    return 'AGUARDAR_PAGAMENTO';
+  }
+
+  // Branco / preto / cinza sem destaque
+  if (spread < 28) return null;
+
+  // Verde dominante
+  if (g > 110 && g > r + 15 && g > b + 15) return 'PAGO';
 
   return null;
 }
 
+/** Lê a cor de status na coluna de status e nas primeiras colunas da linha (legado). */
+function resolveStatusFromRowColors(
+  rowColors: (string | null)[],
+  statusColumnIdx: number,
+): FinancialControlStatus | null {
+  const indices: number[] = [];
+  if (statusColumnIdx >= 0) indices.push(statusColumnIdx);
+  for (let i = 0; i < Math.min(rowColors.length, 5); i++) {
+    if (!indices.includes(i)) indices.push(i);
+  }
+
+  for (const idx of indices) {
+    const status = inferStatusFromColor(rowColors[idx]);
+    if (status) return status;
+  }
+  return null;
+}
+
 /**
- * Extrai a cor de preenchimento de uma célula ExcelJS (formato ARGB).
- * Lida tanto com fill.fgColor quanto com cores indexadas / themed (não convertemos).
+ * Extrai a cor de preenchimento de uma célula ExcelJS (ARGB ou tema Office).
  */
 function getCellFillArgb(cell: ExcelJS.Cell): string | null {
   const fill: any = (cell as any).fill;
   if (!fill || fill.type !== 'pattern') return null;
   const fg = fill.fgColor || fill.bgColor;
-  if (!fg) return null;
-  if (typeof fg.argb === 'string') return fg.argb;
-  return null;
+  return colorObjectToHex(fg);
 }
 
 /**
@@ -858,26 +874,23 @@ async function parseControleFinanceiroSpreadsheet(buffer: Buffer): Promise<Parse
         ? null
         : String(receivedNoteRaw).trim() || null;
 
-    // Status: coluna de texto (exportação), cor da célula ou inferência pelo conteúdo
-    let status: FinancialControlStatus | null = null;
-    if (colIdx.statusText >= 0) {
-      status = parseStatusFromExportLabel(row[colIdx.statusText]);
-    }
-    if (!status && colIdx.statusColumn >= 0 && rowColors && rowColors[colIdx.statusColumn]) {
-      status = inferStatusFromColor(rowColors[colIdx.statusColumn]);
-    }
-    // Se não detectou pela coluna B, tenta pela cor da própria célula do boleto ou data de pagamento
-    if (!status && colIdx.boleto >= 0 && rowColors && rowColors[colIdx.boleto]) {
-      status = inferStatusFromColor(rowColors[colIdx.boleto]);
-    }
-    if (!status && colIdx.paidDate >= 0 && rowColors && rowColors[colIdx.paidDate]) {
-      status = inferStatusFromColor(rowColors[colIdx.paidDate]);
-    }
-    if (!status) {
+    // Status: exportação (texto) → cor da linha (legado) → conteúdo (sem sobrescrever cor)
+    let status: FinancialControlStatus;
+    const statusFromExport =
+      colIdx.statusText >= 0 ? parseStatusFromExportLabel(row[colIdx.statusText]) : null;
+    const statusFromColor = resolveStatusFromRowColors(rowColors, colIdx.statusColumn);
+
+    if (statusFromExport) {
+      status = statusFromExport;
+    } else if (statusFromColor) {
+      status = statusFromColor;
+      // Verde na planilha pode ser PAGO ou AGUARDAR NOTA — só refinamos nesse caso.
+      if (status === 'PAGO') {
+        const refined = inferStatus({ boleto, receivedNote, paidDate, finalValue });
+        if (refined === 'AGUARDAR_NOTA') status = refined;
+      }
+    } else {
       status = inferStatus({ boleto, receivedNote, paidDate, finalValue });
-    } else if (status === 'PAGO') {
-      const refined = inferStatus({ boleto, receivedNote, paidDate, finalValue });
-      if (refined === 'AGUARDAR_NOTA') status = refined;
     }
 
     const monthYearKey = `${paymentYear}-${paymentMonth}`;

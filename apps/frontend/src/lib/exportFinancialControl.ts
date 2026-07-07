@@ -3,6 +3,7 @@ import {
   FINANCIAL_CONTROL_STATUS_EXPORT_LABELS,
   type FinancialControlStatus,
 } from '@/lib/financialControlStatus';
+import { formatDateBr, parseDateSafe } from '@/lib/dateTimeBr';
 
 const MONTHS_PT = [
   'Janeiro',
@@ -37,26 +38,26 @@ export type FinancialControlExportEntry = {
   receivedNote: string | null;
 };
 
-function formatDateBr(value: string | null | undefined): string {
+function formatDateBrExport(value: string | null | undefined): string {
   if (!value) return '';
-  const d = new Date(value);
-  if (isNaN(d.getTime()) || d.getFullYear() < 1990) return '';
-  return d.toLocaleDateString('pt-BR');
+  const d = parseDateSafe(value);
+  if (!d || d.getFullYear() < 1990) return '';
+  return formatDateBr(value, '');
+}
+
+function calcRemainingDays(dueDate: string, paidDate: string): number | '' {
+  const due = parseDateSafe(dueDate);
+  const paid = parseDateSafe(paidDate);
+  if (!due || !paid) return '';
+  const a = Date.UTC(due.getFullYear(), due.getMonth(), due.getDate());
+  const b = Date.UTC(paid.getFullYear(), paid.getMonth(), paid.getDate());
+  return Math.floor((a - b) / (1000 * 60 * 60 * 24));
 }
 
 function toNumber(value: string | number | null | undefined): number | '' {
   if (value === null || value === undefined || value === '') return '';
   const n = typeof value === 'number' ? value : parseFloat(String(value));
   return isNaN(n) ? '' : n;
-}
-
-function calcRemainingDays(dueDate: string, paidDate: string): number | '' {
-  const due = new Date(dueDate);
-  const paid = new Date(paidDate);
-  if (isNaN(due.getTime()) || isNaN(paid.getTime())) return '';
-  const a = Date.UTC(due.getFullYear(), due.getMonth(), due.getDate());
-  const b = Date.UTC(paid.getFullYear(), paid.getMonth(), paid.getDate());
-  return Math.floor((a - b) / (1000 * 60 * 60 * 24));
 }
 
 function resolveRemainingDays(entry: FinancialControlExportEntry): number | '' {
@@ -82,13 +83,13 @@ export function exportFinancialControlEntries(
       'O.S.': entry.osCode ?? '',
       'Nome do Fornecedor': entry.supplierName ?? '',
       'Número da Parcela': entry.parcelNumber ?? '',
-      'Data Emissão': formatDateBr(entry.emissionDate),
+      'Data Emissão': formatDateBrExport(entry.emissionDate),
       Boleto: entry.boleto ?? '',
-      'Data de Vencimento': formatDateBr(entry.dueDate),
+      'Data de Vencimento': formatDateBrExport(entry.dueDate),
       'Valor Original': toNumber(entry.originalValue),
       'O.C.': entry.ocNumber ?? '',
       'Valor Final': toNumber(entry.finalValue),
-      'Data de Pagamento': formatDateBr(entry.paidDate),
+      'Data de Pagamento': formatDateBrExport(entry.paidDate),
       'Diferença de Dias': resolveRemainingDays(entry),
       Observação: entry.receivedNote ?? '',
     };

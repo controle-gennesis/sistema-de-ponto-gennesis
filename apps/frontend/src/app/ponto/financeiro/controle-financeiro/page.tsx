@@ -35,6 +35,7 @@ import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { FinancialControlEntryModal } from '@/components/financeiro/FinancialControlEntryModal';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import api from '@/lib/api';
+import { formatDateBr, parseDateSafe } from '@/lib/dateTimeBr';
 import { exportFinancialControlEntries } from '@/lib/exportFinancialControl';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import {
@@ -126,11 +127,9 @@ function formatCurrency(value: string | number | null | undefined): string {
 
 function formatDate(value: string | null | undefined): string {
   if (!value) return '—';
-  const d = new Date(value);
-  if (isNaN(d.getTime())) return '—';
-  // Considera datas antes de 1990 como inválidas (provavelmente lixo da importação)
-  if (d.getFullYear() < 1990) return '—';
-  return d.toLocaleDateString('pt-BR');
+  const d = parseDateSafe(value);
+  if (!d || d.getFullYear() < 1990) return '—';
+  return formatDateBr(value, '—');
 }
 
 /**
@@ -165,21 +164,23 @@ function formatCurrencyValue(value: string | number | null | undefined): string 
  * Retorna número (pode ser negativo se o vencimento já passou) ou null.
  */
 function calcRemainingDays(dueDate: string, paidDate: string): number | null {
-  if (!dueDate) return null;
-  const due = new Date(dueDate);
-  if (isNaN(due.getTime())) return null;
-  const ref = paidDate ? new Date(paidDate) : new Date();
-  if (isNaN(ref.getTime())) return null;
-  // Normalizar para meia-noite para diferença em dias inteiros
+  const due = parseDateSafe(dueDate);
+  if (!due) return null;
+  const ref = paidDate
+    ? parseDateSafe(paidDate)
+    : (() => {
+        const today = new Date();
+        return new Date(today.getFullYear(), today.getMonth(), today.getDate(), 12, 0, 0, 0);
+      })();
+  if (!ref) return null;
   const a = Date.UTC(due.getFullYear(), due.getMonth(), due.getDate());
   const b = Date.UTC(ref.getFullYear(), ref.getMonth(), ref.getDate());
   return Math.floor((a - b) / (1000 * 60 * 60 * 24));
 }
 
 function dateInputValue(value: string | null | undefined): string {
-  if (!value) return '';
-  const d = new Date(value);
-  if (isNaN(d.getTime())) return '';
+  const d = parseDateSafe(value);
+  if (!d) return '';
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
@@ -317,8 +318,8 @@ export default function ControleFinanceiroPage() {
       const isPago = isFinancialControlPaidStatus(entry.status);
       const isCancelado = entry.status === 'CANCELADO';
       if (isPago || isCancelado || !entry.dueDate) return false;
-      const due = new Date(entry.dueDate);
-      if (isNaN(due.getTime()) || due.getFullYear() < 1990) return false;
+      const due = parseDateSafe(entry.dueDate);
+      if (!due || due.getFullYear() < 1990) return false;
       return due < todayStart;
     });
   }, [rawEntries, filters.overdueOnly]);
@@ -331,6 +332,14 @@ export default function ControleFinanceiroPage() {
         groups.set(key, { year: entry.paymentYear, month: entry.paymentMonth, items: [] });
       }
       groups.get(key)!.items.push(entry);
+    }
+    for (const group of groups.values()) {
+      group.items.sort((a, b) => {
+        const dueA = a.dueDate ? (parseDateSafe(a.dueDate)?.getTime() ?? Number.POSITIVE_INFINITY) : Number.POSITIVE_INFINITY;
+        const dueB = b.dueDate ? (parseDateSafe(b.dueDate)?.getTime() ?? Number.POSITIVE_INFINITY) : Number.POSITIVE_INFINITY;
+        if (dueA !== dueB) return dueA - dueB;
+        return (a.supplierName || '').localeCompare(b.supplierName || '', 'pt-BR');
+      });
     }
     return Array.from(groups.values()).sort((a, b) => {
       if (a.year !== b.year) return a.year - b.year;
@@ -1057,11 +1066,7 @@ function ImportModeRadio({
 }: ImportModeRadioProps) {
   return (
     <label
-      className={`group flex cursor-pointer items-start gap-3 rounded-lg border bg-white p-3 transition-colors hover:bg-gray-50 dark:bg-gray-800 dark:hover:bg-gray-700/60 ${
-        checked
-          ? 'border-red-500 ring-1 ring-red-500 dark:border-red-500'
-          : 'border-gray-200 dark:border-gray-600'
-      }`}
+      className="group flex cursor-pointer items-start gap-3 rounded-lg border border-gray-200 bg-white p-3 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:hover:bg-gray-700/60"
     >
       <div className="relative shrink-0 pt-0.5">
         <input
@@ -1282,12 +1287,8 @@ function MonthGroup({ year, month, items, onEdit, onDelete, deletingId }: MonthG
                   >
                     <td className="px-3 sm:px-6 py-3 text-center">
                       <span
-                        className={`inline-flex items-center justify-center gap-2 rounded-full px-2.5 py-1 text-xs font-medium whitespace-nowrap ${statusStyle.bg} ${statusStyle.text}`}
+                        className={`inline-flex items-center justify-center rounded-full px-2.5 py-1 text-xs font-medium whitespace-nowrap ${statusStyle.bg} ${statusStyle.text}`}
                       >
-                        <span
-                          className={`h-2.5 w-2.5 shrink-0 rounded-sm ${statusStyle.dot}`}
-                          aria-hidden
-                        />
                         {statusStyle.label}
                       </span>
                     </td>
