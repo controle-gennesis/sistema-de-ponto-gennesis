@@ -637,6 +637,7 @@ export function boardCardToDetailPlaceholder(
     columnId,
     columnTitle: column?.title ?? '',
     columnColor: column?.color ?? '',
+    updatedAt: card.createdAt,
     checklistItems: [],
     commentsList: [],
     attachmentsList: [],

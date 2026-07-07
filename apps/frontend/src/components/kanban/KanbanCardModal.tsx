@@ -232,13 +232,15 @@ export function KanbanCardModal({
       ? boardCardToDetailPlaceholder(initialCard, initialColumnId, initialColumn)
       : undefined;
 
-  const { data: card, isLoading } = useQuery({
+  const { data: fetchedCard, isLoading } = useQuery({
     queryKey: kanbanCardQueryKey(cardId!),
     queryFn: () => fetchKanbanCard(cardId!),
     enabled: isDetail && !!cardId && !isOptimisticKanbanCardId(cardId),
     placeholderData: cardPlaceholder,
     staleTime: 3 * 60 * 1000,
   });
+
+  const card = fetchedCard ?? cardPlaceholder;
 
   useLayoutEffect(() => {
     if (!initialCard || initialCard.id !== cardId) return;
