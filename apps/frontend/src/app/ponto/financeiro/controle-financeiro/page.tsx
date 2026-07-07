@@ -34,6 +34,9 @@ import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDr
 import api from '@/lib/api';
 import { exportFinancialControlEntries } from '@/lib/exportFinancialControl';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
+import { ListPagination } from '@/components/ui/ListPagination';
+
+const MONTH_GROUP_PAGE_SIZE = 25;
 
 type FinancialControlStatus =
   | 'PROCESSO_COMPLETO'
@@ -281,7 +284,7 @@ export default function ControleFinanceiroPage() {
 
   const queryParams = useMemo(() => {
     const params = new URLSearchParams();
-    if (filters.year) params.append('year', String(filters.year));
+    if (filters.year > 0) params.append('year', String(filters.year));
     if (filters.month) params.append('month', String(filters.month));
     if (filters.status) params.append('status', filters.status);
     if (filters.search.trim()) params.append('search', filters.search.trim());
@@ -384,8 +387,12 @@ export default function ControleFinanceiroPage() {
   }, [entries, currentYear]);
 
   const yearFilterOptions = useMemo(
-    () => labeledToSelectOptions(availableYears.map((year) => ({ value: String(year), label: String(year) }))),
-    [availableYears]
+    () =>
+      labeledToSelectOptions([
+        { value: '0', label: 'Todos os anos' },
+        ...availableYears.map((year) => ({ value: String(year), label: String(year) })),
+      ]),
+    [availableYears],
   );
 
   const monthFilterOptions = useMemo(
@@ -495,12 +502,13 @@ export default function ControleFinanceiroPage() {
       return;
     }
     try {
+      const yearPart = filters.year > 0 ? String(filters.year) : 'todos-anos';
       const monthPart =
         filters.month > 0
           ? `-${String(filters.month).padStart(2, '0')}`
           : '';
       const statusPart = filters.status ? `-${filters.status.toLowerCase()}` : '';
-      const suffix = `${filters.year}${monthPart}${statusPart}_${new Date().toISOString().slice(0, 10)}`;
+      const suffix = `${yearPart}${monthPart}${statusPart}_${new Date().toISOString().slice(0, 10)}`;
       exportFinancialControlEntries(entries, suffix);
       toast.success(`${entries.length} lançamento(s) exportado(s).`);
     } catch {
@@ -1084,17 +1092,31 @@ function MonthGroup({ year, month, items, onEdit, onDelete, deletingId }: MonthG
   const titleMonth = monthLabel.charAt(0) + monthLabel.slice(1).toLowerCase();
 
   const [listExpanded, setListExpanded] = useState(false);
-
+  const [page, setPage] = useState(1);
   const [actionMenu, setActionMenu] = useState<{
     entryId: string;
     top: number;
     left: number;
   } | null>(null);
 
+  const totalPages = Math.max(1, Math.ceil(items.length / MONTH_GROUP_PAGE_SIZE));
+  const startIndex = (page - 1) * MONTH_GROUP_PAGE_SIZE;
+  const paginatedItems = items.slice(startIndex, startIndex + MONTH_GROUP_PAGE_SIZE);
+  const rangeStart = items.length === 0 ? 0 : startIndex + 1;
+  const rangeEnd = Math.min(startIndex + MONTH_GROUP_PAGE_SIZE, items.length);
+
+  useEffect(() => {
+    setPage(1);
+  }, [items.length, year, month]);
+
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
+
   const entryForMenu = useMemo(() => {
     if (!actionMenu) return null;
-    return items.find((it) => it.id === actionMenu.entryId) ?? null;
-  }, [actionMenu, items]);
+    return paginatedItems.find((it) => it.id === actionMenu.entryId) ?? null;
+  }, [actionMenu, paginatedItems]);
 
   useEffect(() => {
     if (!actionMenu) return;
@@ -1109,10 +1131,10 @@ function MonthGroup({ year, month, items, onEdit, onDelete, deletingId }: MonthG
   }, [actionMenu]);
 
   useEffect(() => {
-    if (actionMenu && !items.some((it) => it.id === actionMenu.entryId)) {
+    if (actionMenu && !paginatedItems.some((it) => it.id === actionMenu.entryId)) {
       setActionMenu(null);
     }
-  }, [actionMenu, items]);
+  }, [actionMenu, paginatedItems]);
 
   useEffect(() => {
     if (!listExpanded) setActionMenu(null);
@@ -1220,7 +1242,7 @@ function MonthGroup({ year, month, items, onEdit, onDelete, deletingId }: MonthG
               </tr>
             </thead>
             <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-              {items.map((entry) => {
+              {paginatedItems.map((entry) => {
                 const statusStyle = STATUS_STYLES[entry.status];
                 const isDeleting = deletingId === entry.id;
                 const isOverdue =
@@ -1334,6 +1356,18 @@ function MonthGroup({ year, month, items, onEdit, onDelete, deletingId }: MonthG
             </tbody>
           </table>
         </div>
+        {items.length > MONTH_GROUP_PAGE_SIZE && (
+          <div className="border-t border-gray-200 px-4 py-4 dark:border-gray-700 sm:px-6">
+            <p className="mb-3 text-center text-sm text-gray-600 dark:text-gray-400">
+              Exibindo {rangeStart}–{rangeEnd} de {items.length} lançamentos
+            </p>
+            <ListPagination
+              currentPage={page}
+              totalPages={totalPages}
+              onPageChange={setPage}
+            />
+          </div>
+        )}
         </CardContent>
       </div>
 

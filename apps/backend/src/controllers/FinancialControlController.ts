@@ -376,6 +376,26 @@ const MONTHS_PT_TO_NUM: Record<string, number> = {
   DEZEMBRO: 12,
 };
 
+function parseMonthValue(value: any): number | null {
+  if (value === null || value === undefined || value === '') return null;
+  if (typeof value === 'number' && value >= 1 && value <= 12) return Math.trunc(value);
+  const normalized = normalizeText(value);
+  const fromName = MONTHS_PT_TO_NUM[normalized];
+  if (fromName) return fromName;
+  const n = parseInt(normalized, 10);
+  if (n >= 1 && n <= 12) return n;
+  return null;
+}
+
+function parseStatusFromExportLabel(value: any): FinancialControlStatus | null {
+  const t = normalizeText(value);
+  if (!t) return null;
+  if (t === 'PAGO' || t === 'PROCESSO COMPLETO') return 'PAGO';
+  if (t === 'PENDENTE' || t.includes('AGUARD')) return 'AGUARDAR_NOTA';
+  if (t === 'CANCELADO' || t.includes('CANCEL')) return 'CANCELADO';
+  return null;
+}
+
 function normalizeText(value: any): string {
   if (value === null || value === undefined) return '';
   return String(value)
@@ -568,7 +588,7 @@ async function parseControleFinanceiroSpreadsheet(buffer: Buffer): Promise<Parse
   }
 
   // Procurar a aba mais relevante: "MATERIAL APLICADO" tem prioridade, senão a primeira
-  const preferredNames = ['MATERIAL APLICADO', 'CONTROLE FINANCEIRO', 'PAGAMENTOS'];
+  const preferredNames = ['MATERIAL APLICADO', 'CONTROLE FINANCEIRO', 'PAGAMENTOS', 'LANCAMENTOS'];
   let worksheet = workbook.worksheets[0];
   for (const candidate of workbook.worksheets) {
     const norm = normalizeText(candidate.name);
@@ -601,6 +621,9 @@ async function parseControleFinanceiroSpreadsheet(buffer: Buffer): Promise<Parse
   // Mapeamento default das colunas conforme a planilha do usuário
   // (compatível com cabeçalho da imagem fornecida)
   let colIdx = {
+    month: -1,
+    year: -1,
+    statusText: -1,
     osCode: 0,
     statusColumn: 1, // coluna B: célula com cor representando status (geralmente vazia)
     supplierName: 2,
@@ -618,6 +641,7 @@ async function parseControleFinanceiroSpreadsheet(buffer: Buffer): Promise<Parse
 
   let currentMonth: number | null = null;
   let currentYear: number | null = null;
+  let usePerRowMonthYear = false;
 
   const tryDetectMonthYearFromRow = (row: any[]): { month: number; year: number } | null => {
     const joined = row
@@ -646,6 +670,9 @@ async function parseControleFinanceiroSpreadsheet(buffer: Buffer): Promise<Parse
     };
 
     const m = {
+      month: findCol('MES'),
+      year: findCol('ANO'),
+      statusText: findCol('STATUS'),
       osCode: findCol('O.S.', 'OS'),
       supplierName: findCol('CODIGO-NOME DO FORNECEDOR', 'NOME DO FORNECEDOR', 'FORNECEDOR'),
       parcelNumber: findCol('PRF-NUMERO PARCELA', 'NUMERO DA PARCELA', 'NUMERO PARCELA', 'PARCELA'),
@@ -659,6 +686,10 @@ async function parseControleFinanceiroSpreadsheet(buffer: Buffer): Promise<Parse
       remainingDays: findCol('DIFERENCA DE DIAS', 'DIFERENCA DIAS', 'FALTA DIAS', 'DIAS'),
       receivedNote: findCol('OBSERVACAO', 'OBSERVACOES', 'OBS', 'RECEBIDO'),
     };
+
+    if (m.month >= 0 && m.year >= 0) {
+      usePerRowMonthYear = true;
+    }
 
     // Se O.S. está em coluna X e Fornecedor está em X+2 (gap de 1), a coluna do meio
     // costuma ser a célula de "Status" (coloridinha). Detectamos esse padrão automaticamente.
@@ -685,6 +716,9 @@ async function parseControleFinanceiroSpreadsheet(buffer: Buffer): Promise<Parse
         return fallback;
       };
       colIdx = {
+        month: safeFallback(m.month, -1),
+        year: safeFallback(m.year, -1),
+        statusText: safeFallback(m.statusText, -1),
         osCode: safeFallback(m.osCode, colIdx.osCode),
         statusColumn,
         supplierName: safeFallback(m.supplierName, colIdx.supplierName),
@@ -704,6 +738,9 @@ async function parseControleFinanceiroSpreadsheet(buffer: Buffer): Promise<Parse
 
   const isHeaderRow = (row: any[]): boolean => {
     const joined = normalizeText(row.map((c) => (c ?? '')).join(' '));
+    if (joined.includes('MES') && joined.includes('ANO') && joined.includes('O.S.')) {
+      return true;
+    }
     return (
       joined.includes('O.S.') &&
       joined.includes('FORNECEDOR') &&
@@ -750,9 +787,22 @@ async function parseControleFinanceiroSpreadsheet(buffer: Buffer): Promise<Parse
       continue;
     }
 
-    // 4) Linha de dados — precisamos do mês/ano correntes
-    if (currentMonth === null || currentYear === null) {
-      // Sem mês definido ainda, pula
+    // 4) Linha de dados — precisamos do mês/ano (por seção ou por coluna na exportação)
+    let paymentMonth = currentMonth;
+    let paymentYear = currentYear;
+
+    if (usePerRowMonthYear) {
+      paymentMonth = colIdx.month >= 0 ? parseMonthValue(row[colIdx.month]) : null;
+      const yearRaw = colIdx.year >= 0 ? row[colIdx.year] : null;
+      if (yearRaw !== null && yearRaw !== undefined && yearRaw !== '') {
+        const parsedYear = typeof yearRaw === 'number' ? yearRaw : parseInt(String(yearRaw), 10);
+        paymentYear = isNaN(parsedYear) ? null : parsedYear;
+      } else {
+        paymentYear = null;
+      }
+    }
+
+    if (paymentMonth === null || paymentYear === null) {
       continue;
     }
 
@@ -795,9 +845,12 @@ async function parseControleFinanceiroSpreadsheet(buffer: Buffer): Promise<Parse
         ? null
         : String(receivedNoteRaw).trim() || null;
 
-    // Status: primeiro tenta pela cor da célula de status; se não, infere pelo conteúdo
+    // Status: coluna de texto (exportação), cor da célula ou inferência pelo conteúdo
     let status: FinancialControlStatus | null = null;
-    if (colIdx.statusColumn >= 0 && rowColors && rowColors[colIdx.statusColumn]) {
+    if (colIdx.statusText >= 0) {
+      status = parseStatusFromExportLabel(row[colIdx.statusText]);
+    }
+    if (!status && colIdx.statusColumn >= 0 && rowColors && rowColors[colIdx.statusColumn]) {
       status = inferStatusFromColor(rowColors[colIdx.statusColumn]);
     }
     // Se não detectou pela coluna B, tenta pela cor da própria célula do boleto ou data de pagamento
@@ -811,9 +864,19 @@ async function parseControleFinanceiroSpreadsheet(buffer: Buffer): Promise<Parse
       status = inferStatus({ boleto, receivedNote, paidDate, finalValue });
     }
 
+    const monthYearKey = `${paymentYear}-${paymentMonth}`;
+    if (!monthsSet.has(monthYearKey)) {
+      monthsSet.add(monthYearKey);
+      monthsDetected.push({
+        year: paymentYear,
+        month: paymentMonth,
+        label: `${Object.keys(MONTHS_PT_TO_NUM).find((k) => MONTHS_PT_TO_NUM[k] === paymentMonth) ?? paymentMonth} ${paymentYear}`,
+      });
+    }
+
     entries.push({
-      paymentMonth: currentMonth,
-      paymentYear: currentYear,
+      paymentMonth,
+      paymentYear,
       status,
       osCode,
       supplierName,
@@ -833,7 +896,7 @@ async function parseControleFinanceiroSpreadsheet(buffer: Buffer): Promise<Parse
 
   if (!entries.length) {
     warnings.push(
-      'Nenhuma linha válida encontrada. Verifique se a planilha contém cabeçalhos "PAGAMENTOS DE [MÊS] [ANO]" antes das linhas de pagamento.'
+      'Nenhuma linha válida encontrada. Verifique se a planilha contém cabeçalhos "PAGAMENTOS DE [MÊS] [ANO]" (formato legado) ou as colunas Mês/Ano (formato exportado pelo sistema).',
     );
   }
 
