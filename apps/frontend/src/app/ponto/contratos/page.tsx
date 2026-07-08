@@ -778,19 +778,19 @@ export default function ContratosPage() {
                       <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[26%] min-w-[180px]">
                         Nome
                       </th>
-                      <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[11%]">
+                      <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[11%]">
                         Nº Contrato
                       </th>
-                      <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[18%]">
+                      <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[18%]">
                         Vigência
                       </th>
-                      <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[15%]">
+                      <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[15%]">
                         Centro de Custo
                       </th>
-                      <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[14%]">
+                      <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[14%]">
                         Valor + Aditivos
                       </th>
-                      <th className={`px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider ${showActionsColumn ? 'w-[12%]' : 'w-[16%]'}`}>
+                      <th className={`px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider ${showActionsColumn ? 'w-[12%]' : 'w-[16%]'}`}>
                         Valor + Aditivos Anual
                       </th>
                       {showActionsColumn && (
@@ -836,21 +836,21 @@ export default function ContratosPage() {
                               {c.name}
                             </ListRowNavigableLabel>
                           </td>
-                          <td className="px-3 sm:px-6 py-3 whitespace-nowrap text-sm text-left text-gray-700 dark:text-gray-300">
+                          <td className="px-3 sm:px-6 py-3 whitespace-nowrap text-sm text-center text-gray-700 dark:text-gray-300">
                             <span className="text-sm font-mono text-gray-900 dark:text-gray-100">
                               {c.number}
                             </span>
                           </td>
-                          <td className="px-3 sm:px-6 py-3 whitespace-nowrap text-sm text-left text-gray-700 dark:text-gray-300">
+                          <td className="px-3 sm:px-6 py-3 whitespace-nowrap text-sm text-center text-gray-700 dark:text-gray-300">
                             {formatDate(c.startDate)} até {formatDate(c.endDate)}
                           </td>
-                          <td className="px-3 sm:px-6 py-3 whitespace-nowrap text-sm text-left text-gray-700 dark:text-gray-300">
+                          <td className="px-3 sm:px-6 py-3 whitespace-nowrap text-sm text-center text-gray-700 dark:text-gray-300">
                             {c.costCenter?.name || c.costCenter?.code || '-'}
                           </td>
-                          <td className="px-3 sm:px-6 py-3 whitespace-nowrap text-sm text-left text-gray-700 dark:text-gray-300">
+                          <td className="px-3 sm:px-6 py-3 whitespace-nowrap text-sm text-center text-gray-700 dark:text-gray-300">
                             {formatCurrency(c.valuePlusAddenda)}
                           </td>
-                          <td className="px-3 sm:px-6 py-3 whitespace-nowrap text-sm text-left text-gray-700 dark:text-gray-300">
+                          <td className="px-3 sm:px-6 py-3 whitespace-nowrap text-sm text-center text-gray-700 dark:text-gray-300">
                             {(() => {
                               const anual = getValorMaisAditivosAnual(c.valuePlusAddenda, c.startDate, c.endDate);
                               return anual !== null ? formatCurrency(anual) : '-';

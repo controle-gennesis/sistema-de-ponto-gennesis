@@ -364,7 +364,7 @@ const BILLING_STATUS_ROW_OPTIONS = labeledToSelectOptions([
 ]);
 
 const CONTROLE_GERAL_META_AJUDA =
-  'Meta ideal = saldo ÷ meses restantes até o fim da vigência. Aditivos em "Valor + Aditivos" recalculam da data do evento até o fim do contrato; ajuste do valor anual recalcula só entre o mês da data e dezembro do mesmo ano civil. Apenas meses cobertos pela vigência. Meta real recalcula como saldo ÷ meses restantes na vigência inteira: sem faturamento ainda, igual à meta ideal; depois do primeiro faturamento, usa (soma das metas ideais na vigência completa − faturamento já acumulado no contrato até o mês anterior) ÷ meses de vigência restantes.';
+  'Meta ideal = saldo ÷ meses restantes até o fim da vigência e permanece fixa até aditivo ou ajuste. Aditivos contratuais entram na data e vão até o fim da vigência. Ajuste do valor anual entra na data e só até dezembro daquele ano. Meta real = saldo no mês (base + aditivos vigentes + ajuste anual vigente no ano − faturamento) ÷ meses restantes da vigência; o ajuste anual não carrega para o ano seguinte nem altera o pendente contratual.';
 
 /** Oculta gasto total e linha Gastos na UI; dados RM continuam sendo carregados. */
 const EXIBIR_GASTOS_CONTRATO_NA_UI = false;
@@ -1790,33 +1790,69 @@ export default function ContractDetailPage() {
   }, [contractVigenciaDates]);
 
   /**
-   * Meta real na linha do tempo da vigência: mesma ideia de saldo ÷ meses restantes, usando o faturado acumulado.
-   * Enquanto ainda não houve faturamento no contrato, coincide com a meta ideal; após o primeiro faturamento,
-   * (soma das metas ideais em toda a vigência − faturamento já acumulado antes do mês) ÷ meses de vigência restantes.
+   * Meta real: saldo pendente ÷ meses restantes, recalculada a cada mês.
+   * - Aditivos contratuais: entram na data efetiva e seguem até o fim da vigência.
+   * - Ajuste anual: entra na data efetiva e só permanece até dezembro do ano civil;
+   *   em janeiro do ano seguinte o ajuste sai do saldo (não altera o pendente contratual).
+   * - Saldo diminui só com faturamento.
    */
   const metaRealByScheduleKey = useMemo(() => {
     const out = new Map<string, number>();
-    if (!vigenciaMonthList.length) return out;
-    let totalIdealVigencia = 0;
-    for (const { key } of vigenciaMonthList) {
-      totalIdealVigencia += metaSchedule.get(key) ?? 0;
+    if (!vigenciaMonthList.length || !contract) return out;
+
+    const addSumByMonth = new Map<string, number>();
+    for (const a of contractAddendaForMeta) {
+      const y = a.effectiveDate.getFullYear();
+      const m = a.effectiveDate.getMonth() + 1;
+      const k = toYearMonthKey(y, m);
+      addSumByMonth.set(k, (addSumByMonth.get(k) || 0) + a.amount);
     }
-    let cumFat = 0;
-    for (let i = 0; i < vigenciaMonthList.length; i++) {
-      const { key } = vigenciaMonthList[i];
-      const ideal = metaSchedule.get(key) ?? 0;
-      const monthsLeft = vigenciaMonthList.length - i;
-      let metaR: number;
-      if (cumFat < 1e-6) {
-        metaR = ideal;
-      } else {
-        metaR = monthsLeft > 0 ? Math.max(0, (totalIdealVigencia - cumFat) / monthsLeft) : 0;
+
+    /** Início do ajuste anual no calendário (mês civil da data / ano da linha). */
+    const annualAddByMonth = new Map<string, number>();
+    /** Ao terminar dezembro do ano do ajuste, remove do saldo (não carrega p/ ano seguinte). */
+    const annualExpireAfterMonth = new Map<string, number>();
+    for (const r of annualBudgetAdjustments) {
+      const effM = annualAdjustmentEffectiveCivilMonth(r.year, r.effectiveDate);
+      if (effM === null) continue;
+      const startKey = toYearMonthKey(r.year, effM);
+      annualAddByMonth.set(startKey, (annualAddByMonth.get(startKey) || 0) + r.amount);
+      const endKey = toYearMonthKey(r.year, 12);
+      annualExpireAfterMonth.set(endKey, (annualExpireAfterMonth.get(endKey) || 0) + r.amount);
+    }
+
+    const firstKey = vigenciaMonthList[0].key;
+    let remaining = Number(contract.valuePlusAddenda) || 0;
+    addSumByMonth.forEach((v, k) => {
+      if (k < firstKey) remaining += v;
+    });
+    annualAddByMonth.forEach((v, k) => {
+      if (k < firstKey) remaining += v;
+    });
+
+    const n = vigenciaMonthList.length;
+    for (let i = 0; i < n; i++) {
+      const { key, m } = vigenciaMonthList[i];
+      remaining += addSumByMonth.get(key) || 0;
+      remaining += annualAddByMonth.get(key) || 0;
+
+      const monthsLeft = n - i;
+      out.set(key, monthsLeft > 0 ? Math.max(0, remaining) / monthsLeft : 0);
+
+      remaining -= faturamentoPorYmKey.get(key) || 0;
+      // Em dezembro do ano do ajuste: tira o ajuste do saldo para o ano seguinte.
+      if (m === 12) {
+        remaining -= annualExpireAfterMonth.get(key) || 0;
       }
-      out.set(key, metaR);
-      cumFat += faturamentoPorYmKey.get(key) || 0;
     }
     return out;
-  }, [vigenciaMonthList, metaSchedule, faturamentoPorYmKey]);
+  }, [
+    vigenciaMonthList,
+    contract,
+    contractAddendaForMeta,
+    annualBudgetAdjustments,
+    faturamentoPorYmKey,
+  ]);
 
   const metaRealPorMes = useMemo(() => {
     const year = safeSelectedYear;
@@ -2098,11 +2134,26 @@ export default function ContractDetailPage() {
     return billings.reduce((acc, b) => acc + b.grossValue, 0);
   }, [billings]);
 
-  // Valor total pendente para faturar (todos os anos)
+  // Pendente total a faturar:
+  // - Vigência em um único ano: inclui ajuste orçamentário do ano (ex.: 110k + 10k = 120k).
+  // - Vigência multi-ano: só Valor + aditivos contratuais (ajuste anual não altera o total do contrato).
   const pendenteParaFaturarTodosAnos = useMemo(() => {
     if (!contract) return null;
+    if (contractYearsCount <= 1) {
+      let ajustesAnuais = 0;
+      annualAdjustByYear.forEach((adj) => {
+        ajustesAnuais += Number(adj.delta) || 0;
+      });
+      return valorMaisAditivosTotal + ajustesAnuais - faturamentoTotalTodosAnos;
+    }
     return valorMaisAditivosTotal - faturamentoTotalTodosAnos;
-  }, [contract, valorMaisAditivosTotal, faturamentoTotalTodosAnos]);
+  }, [
+    contract,
+    contractYearsCount,
+    valorMaisAditivosTotal,
+    annualAdjustByYear,
+    faturamentoTotalTodosAnos,
+  ]);
 
   // Saldo anual = Valor anual (com ajuste de orçamento, se houver) − Faturamento cadastrado
   const saldoAnual = useMemo(() => {
@@ -3470,7 +3521,9 @@ export default function ContractDetailPage() {
                   {pendenteParaFaturarTodosAnos !== null ? formatCurrency(pendenteParaFaturarTodosAnos) : '-'}
                 </p>
                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                  Valor + aditivos − faturado total
+                  {contractYearsCount <= 1
+                    ? 'Valor anual (com ajuste) − faturado total'
+                    : 'Valor + aditivos − faturado total (ajuste anual não entra)'}
                 </p>
               </CardContent>
             </Card>
