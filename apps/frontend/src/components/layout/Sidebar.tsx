@@ -105,6 +105,60 @@ interface SidebarProps {
   onOpenChangePassword?: () => void;
 }
 
+function SidebarRailTooltip({ label, children }: { label: string; children: React.ReactNode }) {
+  const [visible, setVisible] = useState(false);
+  const [coords, setCoords] = useState({ top: 0, left: 0 });
+  const triggerRef = useRef<HTMLDivElement>(null);
+
+  const showTooltip = useCallback(() => {
+    const el = triggerRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    setCoords({
+      top: rect.top + rect.height / 2,
+      left: rect.right + 8,
+    });
+    setVisible(true);
+  }, []);
+
+  const hideTooltip = useCallback(() => {
+    setVisible(false);
+  }, []);
+
+  return (
+    <>
+      <div
+        ref={triggerRef}
+        className="relative flex justify-center"
+        onMouseEnter={showTooltip}
+        onMouseLeave={hideTooltip}
+        onFocusCapture={showTooltip}
+        onBlurCapture={hideTooltip}
+      >
+        {children}
+      </div>
+      {visible &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            role="tooltip"
+            style={{
+              position: 'fixed',
+              top: coords.top,
+              left: coords.left,
+              transform: 'translateY(-50%)',
+              zIndex: 9999,
+            }}
+            className="pointer-events-none max-w-[14rem] whitespace-nowrap rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700 shadow-lg dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200"
+          >
+            {label}
+          </div>,
+          document.body
+        )}
+    </>
+  );
+}
+
 export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChangePassword }: SidebarProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [isCollapsed, setIsCollapsedState] = useState(false);
@@ -1210,7 +1264,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
             </Link>
           </div>
 
-          <nav className="relative z-30 flex-1 overflow-x-visible overflow-y-auto px-2 pb-4 pt-3 space-y-3">
+          <nav className="relative z-30 flex-1 overflow-x-hidden overflow-y-auto px-2 pb-4 pt-3 space-y-3">
             {sidebarHydrated && !isLoading ? menuItems.map((category) => {
               const CategoryIcon = category.icon;
               const isRailActive = category.id === railModuleActiveId;
@@ -1224,7 +1278,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
                 const SingleItemIcon = singleItem.icon || CategoryIcon;
                 const singleBadge = navBadgeCountForHref(singleItem.href);
                 return (
-                  <div key={category.id} className="relative flex justify-center overflow-visible">
+                  <SidebarRailTooltip key={category.id} label={singleItem.name}>
                     <Link
                       href={singleItem.href}
                       className={`relative z-10 w-10 h-10 overflow-visible rounded-xl transition-all duration-200 flex items-center justify-center ${
@@ -1232,18 +1286,18 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
                           ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-500'
                           : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
                       }`}
-                      title={singleItem.name}
+                      aria-label={singleItem.name}
                     >
                       <SingleItemIcon className="w-5 h-5" />
                       <NotificationCountBadge count={singleBadge} rail />
                     </Link>
-                  </div>
+                  </SidebarRailTooltip>
                 );
               }
 
               const moduleBadge = moduleBadgeCountForId(category.id);
               return (
-                <div key={category.id} className="relative flex justify-center overflow-visible">
+                <SidebarRailTooltip key={category.id} label={category.name}>
                   <button
                     type="button"
                     onClick={() => handleSelectModule(category.id)}
@@ -1252,14 +1306,13 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
                         ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-500'
                         : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
                     }`}
-                    title={category.name}
                     aria-label={category.name}
                     aria-current={isRailActive ? 'true' : undefined}
                   >
                     <CategoryIcon className="w-5 h-5" />
                     <NotificationCountBadge count={moduleBadge} rail />
                   </button>
-                </div>
+                </SidebarRailTooltip>
               );
             }) : (
               Array.from({ length: 6 }, (_, i) => (
@@ -1273,43 +1326,46 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
           {/* Rodapé: atalhos, divisor e perfil */}
           <div className="flex-shrink-0 relative z-20 overflow-visible px-2 pb-4 flex flex-col items-center">
             <div className="flex flex-col items-center gap-2">
-              <Link
-                href="/ponto/conversas"
-                title="Chat"
-                aria-label={`Chat${chatUnreadCount > 0 ? `, ${chatUnreadCount} não lidas` : ''}`}
-                className={`relative z-10 w-10 h-10 overflow-visible rounded-xl transition-all duration-200 flex items-center justify-center ${
-                  isFooterShortcutActive('/ponto/conversas')
-                    ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-500'
-                    : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
-                }`}
-              >
-                <MessagesSquare className="w-5 h-5" strokeWidth={2} />
-                <NotificationCountBadge count={chatUnreadCount} rail />
-              </Link>
-              <Link
-                href="/ponto/kanban"
-                title="Tasks"
-                aria-label="Tasks"
-                className={`w-10 h-10 rounded-xl transition-all duration-200 flex items-center justify-center ${
-                  isFooterShortcutActive('/ponto/kanban')
-                    ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-500'
-                    : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
-                }`}
-              >
-                <SquareKanban className="w-5 h-5" />
-              </Link>
-              <Link
-                href="/ponto/drive"
-                title="Drive"
-                aria-label="Drive"
-                className={`w-10 h-10 rounded-xl transition-all duration-200 flex items-center justify-center ${
-                  isFooterShortcutActive('/ponto/drive')
-                    ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-500'
-                    : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
-                }`}
-              >
-                <HardDrive className="w-5 h-5" />
-              </Link>
+              <SidebarRailTooltip label="Chat">
+                <Link
+                  href="/ponto/conversas"
+                  aria-label={`Chat${chatUnreadCount > 0 ? `, ${chatUnreadCount} não lidas` : ''}`}
+                  className={`relative z-10 w-10 h-10 overflow-visible rounded-xl transition-all duration-200 flex items-center justify-center ${
+                    isFooterShortcutActive('/ponto/conversas')
+                      ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-500'
+                      : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
+                  }`}
+                >
+                  <MessagesSquare className="w-5 h-5" strokeWidth={2} />
+                  <NotificationCountBadge count={chatUnreadCount} rail />
+                </Link>
+              </SidebarRailTooltip>
+              <SidebarRailTooltip label="Tasks">
+                <Link
+                  href="/ponto/kanban"
+                  aria-label="Tasks"
+                  className={`w-10 h-10 rounded-xl transition-all duration-200 flex items-center justify-center ${
+                    isFooterShortcutActive('/ponto/kanban')
+                      ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-500'
+                      : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
+                  }`}
+                >
+                  <SquareKanban className="w-5 h-5" />
+                </Link>
+              </SidebarRailTooltip>
+              <SidebarRailTooltip label="Drive">
+                <Link
+                  href="/ponto/drive"
+                  aria-label="Drive"
+                  className={`w-10 h-10 rounded-xl transition-all duration-200 flex items-center justify-center ${
+                    isFooterShortcutActive('/ponto/drive')
+                      ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-500'
+                      : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
+                  }`}
+                >
+                  <HardDrive className="w-5 h-5" />
+                </Link>
+              </SidebarRailTooltip>
             </div>
             <div className="mt-2 flex flex-col items-center gap-2">
               <div className="h-px w-12 shrink-0 bg-gray-200 dark:bg-gray-700" />
