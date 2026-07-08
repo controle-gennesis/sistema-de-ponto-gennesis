@@ -29,6 +29,7 @@ import {
   Search,
   Filter,
   MoreVertical,
+  Clock,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Modal } from '@/components/ui/Modal';
@@ -66,6 +67,7 @@ import {
 import { pleitoStatusReadOnlySpanClass } from '@/lib/pleitoStatusStyles';
 import { useContractTableColumnCustomizer } from '@/components/useContractTableColumnCustomizer';
 import { usePermissions } from '@/hooks/usePermissions';
+import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import { pathToModuleKey } from '@sistema-ponto/permission-modules';
 import {
   formatOsSePasta,
@@ -1308,6 +1310,31 @@ export default function ContractDetailPage() {
 
   const contract = contractData?.data as Contract | undefined;
 
+  useDocumentTitle(contract?.name ? `Contratos - ${contract.name}` : null);
+
+  const { data: orcamentosListaData, isLoading: loadingOrcamentosCount } = useQuery({
+    queryKey: ['contract-orcamentos-count', contract?.costCenterId],
+    queryFn: async () => {
+      const res = await api.get(`/orcamento/${contract!.costCenterId}`);
+      return res.data as { orcamentos?: { id: string }[] };
+    },
+    enabled: !!contract?.costCenterId && canAccessOrcamento,
+  });
+
+  const { data: relatoriosListaData, isLoading: loadingRelatoriosCount } = useQuery({
+    queryKey: ['relatorios-fotograficos', contractId],
+    queryFn: async () => (await api.get(`/relatorios-fotograficos/${contractId}`)).data,
+    enabled: !!contractId && canAccessRelatorios,
+  });
+
+  const orcamentosCount = Array.isArray(orcamentosListaData?.orcamentos)
+    ? orcamentosListaData.orcamentos.length
+    : 0;
+  const relatoriosCount = Array.isArray(relatoriosListaData?.data)
+    ? relatoriosListaData.data.length
+    : 0;
+
+
   const paidDisplay = useMemo(() => {
     const c = contract;
     if (!c) {
@@ -1654,23 +1681,6 @@ export default function ContractDetailPage() {
 
     return out;
   }, [globalMetaSchedule, annualBudgetAdjustments, contractVigenciaDates, contract, valorAnualBase]);
-
-  const metaMensalCardInfo = useMemo(() => {
-    const meses = Array.from({ length: 12 }, (_, i) => i + 1)
-      .map((m) => ({ m, key: toYearMonthKey(safeSelectedYear, m), v: metaSchedule.get(toYearMonthKey(safeSelectedYear, m)) ?? null }))
-      .filter((x) => x.v !== null);
-    if (!meses.length) return { kind: 'empty' as const };
-    const firstVal = meses[0].v as number;
-    const change = meses.find((x) => Math.abs((x.v as number) - firstVal) > 0.009);
-    if (!change) return { kind: 'single' as const, value: firstVal };
-    return {
-      kind: 'split' as const,
-      baseMeta: firstVal,
-      metaAfter: change.v as number,
-      ateMesLabel: MESES[Math.max(0, change.m - 2)],
-      deMesLabel: MESES[change.m - 1],
-    };
-  }, [metaSchedule, safeSelectedYear]);
 
   useEffect(() => {
     if (!showValorAnualAdjustModal) return;
@@ -2134,28 +2144,13 @@ export default function ContractDetailPage() {
     return billings.reduce((acc, b) => acc + b.grossValue, 0);
   }, [billings]);
 
-  // Pendente total a faturar:
-  // - Vigência em um único ano: inclui ajuste orçamentário do ano (ex.: 110k + 10k = 120k).
-  // - Vigência multi-ano: só Valor + aditivos contratuais (ajuste anual não altera o total do contrato).
+  // Pendente contratual = Valor + aditivos − faturamento total (ajuste anual não entra)
   const pendenteParaFaturarTodosAnos = useMemo(() => {
     if (!contract) return null;
-    if (contractYearsCount <= 1) {
-      let ajustesAnuais = 0;
-      annualAdjustByYear.forEach((adj) => {
-        ajustesAnuais += Number(adj.delta) || 0;
-      });
-      return valorMaisAditivosTotal + ajustesAnuais - faturamentoTotalTodosAnos;
-    }
     return valorMaisAditivosTotal - faturamentoTotalTodosAnos;
-  }, [
-    contract,
-    contractYearsCount,
-    valorMaisAditivosTotal,
-    annualAdjustByYear,
-    faturamentoTotalTodosAnos,
-  ]);
+  }, [contract, valorMaisAditivosTotal, faturamentoTotalTodosAnos]);
 
-  // Saldo anual = Valor anual (com ajuste de orçamento, se houver) − Faturamento cadastrado
+  // Pendente anual = Valor anual ajustado − faturamento do ano
   const saldoAnual = useMemo(() => {
     if (valorAnualAjustado === null) return null;
     return valorAnualAjustado - faturamentoAnual;
@@ -3279,254 +3274,303 @@ export default function ContractDetailPage() {
               </p>
             ) : null}
 
-            {(canAccessOrdemServicoModulo ||
-              canAccessProducaoSemanalModulo ||
-              canAccessOrcamento ||
-              canAccessRelatorios) && (
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                {canAccessOrdemServicoModulo ? (
-                  <button
-                    type="button"
-                    onClick={() => setShowPleitoModal(true)}
-                    disabled={!canCreateContrato}
-                    className="group flex w-full items-center gap-3 rounded-xl border border-gray-200 bg-white p-4 text-left transition-all hover:border-blue-300 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:bg-gray-800/60 dark:hover:border-blue-600"
-                  >
-                    <div className="rounded-lg bg-blue-100 p-2.5 dark:bg-blue-900/30">
-                      <ClipboardList className="h-5 w-5 text-blue-600 dark:text-blue-400" />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="font-semibold text-gray-900 dark:text-gray-100">Ordem de Serviço</p>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">Cadastrar e consultar OS</p>
-                    </div>
-                  </button>
-                ) : null}
-                {canAccessProducaoSemanalModulo ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setProductionForm({
-                        fillingDate: toInputDate(new Date()),
-                        divSe: '',
-                        weeklyProductionValue: '',
-                        responsiblePerson: ''
-                      });
-                      setShowProductionModal(true);
-                    }}
-                    disabled={!canCreateContrato}
-                    className="group flex w-full items-center gap-3 rounded-xl border border-gray-200 bg-white p-4 text-left transition-all hover:border-amber-300 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:bg-gray-800/60 dark:hover:border-amber-600"
-                  >
-                    <div className="rounded-lg bg-amber-100 p-2.5 dark:bg-amber-900/30">
-                      <BarChart3 className="h-5 w-5 text-amber-600 dark:text-amber-400" />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="font-semibold text-gray-900 dark:text-gray-100">Produção Semanal</p>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">Registrar produção</p>
-                    </div>
-                  </button>
-                ) : null}
-                {canAccessOrcamento ? (
-                  <Link
-                    href={`/ponto/contratos/${contractId}/orcamento`}
-                    className="group flex w-full items-center gap-3 rounded-xl border border-gray-200 bg-white p-4 text-left transition-all hover:border-emerald-300 hover:shadow-md dark:border-gray-700 dark:bg-gray-800/60 dark:hover:border-emerald-600"
-                  >
-                    <div className="rounded-lg bg-emerald-100 p-2.5 dark:bg-emerald-900/30">
-                      <Calculator className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="font-semibold text-gray-900 dark:text-gray-100">Orçamento</p>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">Planilhas e valores</p>
-                    </div>
-                  </Link>
-                ) : null}
-                {canAccessRelatorios ? (
-                  <Link
-                    href={`/ponto/contratos/${contractId}/relatorios`}
-                    className="group flex w-full items-center gap-3 rounded-xl border border-gray-200 bg-white p-4 text-left transition-all hover:border-rose-300 hover:shadow-md dark:border-gray-700 dark:bg-gray-800/60 dark:hover:border-rose-600"
-                  >
-                    <div className="rounded-lg bg-rose-100 p-2.5 dark:bg-rose-900/30">
-                      <FileImage className="h-5 w-5 text-rose-600 dark:text-rose-400" />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="font-semibold text-gray-900 dark:text-gray-100">Relatórios</p>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">Relatórios fotográficos</p>
-                    </div>
-                  </Link>
-                ) : null}
-              </div>
-            )}
-
           </div>
 
-          {/* Card com resumo do contrato */}
-          <Card>
-            <CardContent className="p-4">
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 text-sm">
-                <div>
-                  <p className="text-gray-500 dark:text-gray-400">Vigência</p>
-                  <p className="font-medium text-gray-900 dark:text-gray-100">
-                    {formatDate(contract.startDate)} até {formatDate(contract.endDate)}
-                  </p>
-                </div>
-                <div>
-                  <div className="flex items-start justify-between gap-2">
-                    <p className="text-gray-500 dark:text-gray-400">Valor + Aditivos</p>
-                    <button
-                      type="button"
-                      onClick={() => setShowAddendumModal(true)}
-                      className="shrink-0 p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 dark:text-gray-400"
-                      title="Cadastrar aditivo"
-                    >
-                      <Plus className="w-4 h-4" />
-                    </button>
+          <div className="space-y-8">
+          <div className="space-y-4">
+            <p className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">Contrato</p>
+          {/* Resumo do contrato */}
+          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 xl:grid-cols-3">
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex items-center">
+                  <div className="flex-shrink-0 rounded-lg bg-indigo-100 p-2 dark:bg-indigo-900/30 sm:p-3">
+                    <CalendarDays className="h-5 w-5 text-indigo-600 dark:text-indigo-400 sm:h-6 sm:w-6" />
                   </div>
-                  <p className="font-medium text-gray-900 dark:text-gray-100">
-                    {formatCurrency(valorMaisAditivosTotal)}
-                  </p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                    Base: {formatCurrency(contract.valuePlusAddenda)} {totalAddenda !== 0 ? `• Aditivos: ${totalAddenda >= 0 ? '+' : ''}${formatCurrency(totalAddenda)}` : ''}
-                  </p>
-                </div>
-                <div>
-                  <div className="flex items-start justify-between gap-2">
-                    <p className="text-gray-500 dark:text-gray-400">
-                      Valor Anual{isAllYears ? '' : ` (${safeSelectedYear})`}
-                    </p>
-                    <button
-                      type="button"
-                      disabled={isAllYears}
-                      onClick={() => {
-                        setAdjFormYear(safeSelectedYear);
-                        setShowValorAnualAdjustModal(true);
-                      }}
-                      className="shrink-0 p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 dark:text-gray-400 disabled:cursor-not-allowed disabled:opacity-40"
-                      title="Ajustar valor anual (orçamento do órgão)"
-                    >
-                      <Edit2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                  <p className="font-medium text-gray-900 dark:text-gray-100">
-                    {isAllYears ? '—' : valorAnualAjustado !== null ? formatCurrency(valorAnualAjustado) : '-'}
-                  </p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                    {isAllYears
-                      ? 'Selecione um ano no filtro para ver o valor anual'
-                      : (
-                        <>
-                          Base: (Valor + aditivos) ÷ {contractYearsCount > 0 ? contractYearsCount : '—'} ano(s)
-                          {valorAnualBase !== null &&
-                            valorAnualAjustado !== null &&
-                            Math.abs(valorAnualAjustado - valorAnualBase) > 0.009 && (
-                              <span className="block mt-0.5">
-                                Ajuste orçamentário: {valorAnualAjustado >= valorAnualBase ? '+' : ''}
-                                {formatCurrency(valorAnualAjustado - valorAnualBase)}
-                              </span>
-                            )}
-                        </>
-                      )}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-gray-500 dark:text-gray-400">
-                    Saldo Anual{isAllYears ? '' : ` (${safeSelectedYear})`}
-                  </p>
-                  <p className={`font-medium ${!isAllYears && saldoAnual !== null && saldoAnual >= 0 ? 'text-green-600 dark:text-green-400' : !isAllYears ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-gray-100'}`}>
-                    {isAllYears ? '—' : saldoAnual !== null ? formatCurrency(saldoAnual) : '-'}
-                  </p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                    {isAllYears ? 'Disponível ao filtrar um ano' : 'Valor anual − Faturamento'}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-gray-500 dark:text-gray-400">
-                    Meta Ideal{isAllYears ? '' : ` (${safeSelectedYear})`}
-                  </p>
-                  {isAllYears ? (
-                    <p className="font-medium text-gray-900 dark:text-gray-100">—</p>
-                  ) : (
-                    <>
-                  {metaMensalCardInfo.kind === 'empty' && (
-                    <p className="font-medium text-green-600 dark:text-green-400">-</p>
-                  )}
-                  {metaMensalCardInfo.kind === 'single' && (
-                    <p className="font-medium text-green-600 dark:text-green-400">
-                      {formatCurrency(metaMensalCardInfo.value)}
-                    </p>
-                  )}
-                  {metaMensalCardInfo.kind === 'split' && (
-                    <div className="space-y-1">
-                      <p className="text-xs font-medium text-green-600 dark:text-green-400">
-                        Até {metaMensalCardInfo.ateMesLabel}: {formatCurrency(metaMensalCardInfo.baseMeta)}/mês
+                  <div className="ml-3 min-w-0 sm:ml-4">
+                    <p className="text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">Vigência</p>
+                    <div className="group relative mt-1 w-fit max-w-full">
+                      <p className="cursor-default text-base font-bold leading-snug text-gray-900 dark:text-gray-100 sm:text-xl">
+                        {formatDate(contract.startDate)} até {formatDate(contract.endDate)}
                       </p>
-                      <p className="text-xs font-medium text-emerald-500 dark:text-emerald-400">
-                        De {metaMensalCardInfo.deMesLabel}: {formatCurrency(metaMensalCardInfo.metaAfter)}/mês
-                      </p>
+                      <div
+                        role="tooltip"
+                        className="pointer-events-none absolute left-0 top-full z-50 mt-2 w-max max-w-[min(22rem,calc(100vw-2rem))] space-y-1 rounded-lg border border-gray-200 bg-white p-2.5 text-left text-xs leading-relaxed text-gray-600 opacity-0 shadow-lg transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300"
+                      >
+                        <p>Início: {formatDate(contract.startDate)}</p>
+                        <p>Término: {formatDate(contract.endDate)}</p>
+                        <p className="font-medium text-gray-900 dark:text-gray-100">
+                          Duração: {contractYearsCount > 0 ? contractYearsCount : '—'} ano(s) de vigência
+                        </p>
+                      </div>
                     </div>
-                  )}
-                    </>
-                  )}
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                    {isAllYears
-                      ? 'Use a tabela Acumulado Anual abaixo'
-                      : (
-                        <>
-                          Meta ideal = saldo ÷ meses restantes até o fim da vigência. Aditivos em &quot;Valor + Aditivos&quot; recalculam a
-                          partir da data até o fim do contrato. Ajuste no &quot;Valor Anual&quot; (lápis) só altera a meta do mês da
-                          data até dezembro daquele ano civil.
-                        </>
-                      )}
-                  </p>
+                  </div>
                 </div>
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
 
-          {/* Quadros de faturamento total */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <Card>
               <CardContent className="p-4">
-                <p className="text-sm text-gray-500 dark:text-gray-400">
-                  {isAllYears ? 'Valor Total Faturado (vigência)' : 'Valor Total Faturado do Ano'}
-                </p>
-                <p className="text-xl font-bold text-green-600 dark:text-green-400 mt-1">
-                  {formatCurrency(isAllYears ? faturamentoTotalTodosAnos : faturamentoAnual)}
-                </p>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                  {isAllYears ? 'Soma de todos os anos da vigência' : `Ano ${safeSelectedYear}`}
-                </p>
+                <div className="flex items-start justify-between gap-2 sm:items-center">
+                  <div className="flex min-w-0 flex-1 items-center">
+                    <div className="flex-shrink-0 rounded-lg bg-blue-100 p-2 dark:bg-blue-900/30 sm:p-3">
+                      <Receipt className="h-5 w-5 text-blue-600 dark:text-blue-400 sm:h-6 sm:w-6" />
+                    </div>
+                    <div className="ml-3 min-w-0 sm:ml-4">
+                      <p className="text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">Valor + Aditivos</p>
+                      <div className="group relative mt-1 w-fit max-w-full">
+                        <p className="cursor-default truncate text-lg font-bold text-gray-900 dark:text-gray-100 sm:text-2xl">
+                          {formatCurrency(valorMaisAditivosTotal)}
+                        </p>
+                        <div
+                          role="tooltip"
+                          className="pointer-events-none absolute left-0 top-full z-50 mt-2 w-max max-w-[min(22rem,calc(100vw-2rem))] space-y-1 rounded-lg border border-gray-200 bg-white p-2.5 text-left text-xs leading-relaxed text-gray-600 opacity-0 shadow-lg transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300"
+                        >
+                          <p>Valor contratual: {formatCurrency(contract.valuePlusAddenda)}</p>
+                          {totalAddenda !== 0 ? (
+                            <p>
+                              Aditivos: {totalAddenda >= 0 ? '+' : ''}
+                              {formatCurrency(totalAddenda)}
+                            </p>
+                          ) : (
+                            <p className="text-gray-500 dark:text-gray-400">Sem aditivos</p>
+                          )}
+                          <p className="font-medium text-gray-900 dark:text-gray-100">
+                            Total: {formatCurrency(valorMaisAditivosTotal)}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowAddendumModal(true)}
+                    className="mt-1 flex-shrink-0 rounded-lg p-2 text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-100 sm:mt-0 sm:p-2.5"
+                    title="Cadastrar aditivo"
+                    aria-label="Cadastrar aditivo"
+                  >
+                    <Plus className="h-4 w-4 sm:h-5 sm:w-5" />
+                  </button>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex items-start justify-between gap-2 sm:items-center">
+                  <div className="flex min-w-0 flex-1 items-center">
+                    <div className="flex-shrink-0 rounded-lg bg-sky-100 p-2 dark:bg-sky-900/30 sm:p-3">
+                      <FileText className="h-5 w-5 text-sky-600 dark:text-sky-400 sm:h-6 sm:w-6" />
+                    </div>
+                    <div className="ml-3 min-w-0 sm:ml-4">
+                      <p className="text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">
+                        Valor anual{!isAllYears ? ` (${safeSelectedYear})` : ''}
+                      </p>
+                      {isAllYears ? (
+                        <p className="mt-1 text-lg font-bold text-gray-900 dark:text-gray-100 sm:text-2xl">—</p>
+                      ) : (
+                        <div className="group relative mt-1 w-fit max-w-full">
+                          <p className="cursor-default truncate text-lg font-bold text-gray-900 dark:text-gray-100 sm:text-2xl">
+                            {valorAnualAjustado !== null ? formatCurrency(valorAnualAjustado) : '-'}
+                          </p>
+                          <div
+                            role="tooltip"
+                            className="pointer-events-none absolute left-0 top-full z-50 mt-2 w-max max-w-[min(22rem,calc(100vw-2rem))] space-y-1 rounded-lg border border-gray-200 bg-white p-2.5 text-left text-xs leading-relaxed text-gray-600 opacity-0 shadow-lg transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300"
+                          >
+                            <p>Valor + aditivos: {formatCurrency(valorMaisAditivosTotal)}</p>
+                            <p>
+                              ÷ {contractYearsCount > 0 ? contractYearsCount : '—'} ano(s)
+                              {valorAnualBase !== null
+                                ? ` = ${formatCurrency(valorAnualBase)}`
+                                : ''}
+                            </p>
+                            {valorAnualBase !== null &&
+                              valorAnualAjustado !== null &&
+                              Math.abs(valorAnualAjustado - valorAnualBase) > 0.009 && (
+                                <>
+                                  <p>
+                                    Ajuste orçamentário ({safeSelectedYear}):{' '}
+                                    {valorAnualAjustado >= valorAnualBase ? '+' : ''}
+                                    {formatCurrency(valorAnualAjustado - valorAnualBase)}
+                                  </p>
+                                  <p className="font-medium text-gray-900 dark:text-gray-100">
+                                    Valor anual: {formatCurrency(valorAnualAjustado)}
+                                  </p>
+                                </>
+                              )}
+                            {valorAnualBase !== null &&
+                              valorAnualAjustado !== null &&
+                              Math.abs(valorAnualAjustado - valorAnualBase) <= 0.009 && (
+                                <p className="font-medium text-gray-900 dark:text-gray-100">
+                                  Valor anual: {formatCurrency(valorAnualBase)}
+                                </p>
+                              )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={isAllYears}
+                    onClick={() => {
+                      setAdjFormYear(safeSelectedYear);
+                      setShowValorAnualAdjustModal(true);
+                    }}
+                    className="mt-1 flex-shrink-0 rounded-lg p-2 text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 disabled:cursor-not-allowed disabled:opacity-40 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-100 sm:mt-0 sm:p-2.5"
+                    title="Ajustar valor anual"
+                    aria-label="Ajustar valor anual"
+                  >
+                    <Edit2 className="h-4 w-4 sm:h-5 sm:w-5" />
+                  </button>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+          </div>
+
+          <div className="space-y-4">
+            <p className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">Faturamento</p>
+          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 xl:grid-cols-4">
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex items-center">
+                  <div className="p-2 sm:p-3 bg-green-100 dark:bg-green-900/30 rounded-lg flex-shrink-0">
+                    <CheckCircle2 className="w-5 h-5 sm:w-6 sm:h-6 text-green-600 dark:text-green-400" />
+                  </div>
+                  <div className="ml-3 sm:ml-4 min-w-0 flex-1">
+                    <p className="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400 whitespace-normal">
+                      Anual faturado{!isAllYears ? ` (${safeSelectedYear})` : ''}
+                    </p>
+                    <p className="text-lg sm:text-2xl font-bold text-gray-900 dark:text-gray-100 mt-1 truncate">
+                      {formatCurrency(isAllYears ? faturamentoTotalTodosAnos : faturamentoAnual)}
+                    </p>
+                  </div>
+                </div>
               </CardContent>
             </Card>
             <Card>
               <CardContent className="p-4">
-                <p className="text-sm text-gray-500 dark:text-gray-400">Valor Total Faturado do Contrato</p>
-                <p className="text-xl font-bold text-green-600 dark:text-green-400 mt-1">
-                  {formatCurrency(faturamentoTotalTodosAnos)}
-                </p>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                  Soma de todos os anos
-                </p>
+                <div className="flex items-center">
+                  <div className="p-2 sm:p-3 bg-amber-100 dark:bg-amber-900/30 rounded-lg flex-shrink-0">
+                    <Clock className="w-5 h-5 sm:w-6 sm:h-6 text-amber-600 dark:text-amber-400" />
+                  </div>
+                  <div className="ml-3 sm:ml-4 min-w-0 flex-1">
+                    <p className="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400 whitespace-normal">
+                      Anual pendente{!isAllYears ? ` (${safeSelectedYear})` : ''}
+                    </p>
+                    <p className="text-lg sm:text-2xl font-bold text-gray-900 dark:text-gray-100 mt-1 truncate">
+                      {isAllYears ? '—' : saldoAnual !== null ? formatCurrency(saldoAnual) : '-'}
+                    </p>
+                  </div>
+                </div>
               </CardContent>
             </Card>
             <Card>
               <CardContent className="p-4">
-                <p className="text-sm text-gray-500 dark:text-gray-400">
-                  Valor Total Pendente para Faturar
-                </p>
-                <p
-                  className={`text-xl font-bold mt-1 ${
-                    pendenteParaFaturarTodosAnos !== null && pendenteParaFaturarTodosAnos >= 0
-                      ? 'text-green-600 dark:text-green-400'
-                      : 'text-red-600 dark:text-red-400'
-                  }`}
-                >
-                  {pendenteParaFaturarTodosAnos !== null ? formatCurrency(pendenteParaFaturarTodosAnos) : '-'}
-                </p>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                  {contractYearsCount <= 1
-                    ? 'Valor anual (com ajuste) − faturado total'
-                    : 'Valor + aditivos − faturado total (ajuste anual não entra)'}
-                </p>
+                <div className="flex items-center">
+                  <div className="p-2 sm:p-3 bg-green-100 dark:bg-green-900/30 rounded-lg flex-shrink-0">
+                    <CheckCircle2 className="w-5 h-5 sm:w-6 sm:h-6 text-green-600 dark:text-green-400" />
+                  </div>
+                  <div className="ml-3 sm:ml-4 min-w-0 flex-1">
+                    <p className="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400 whitespace-normal">
+                      Contratual faturado
+                    </p>
+                    <p className="text-lg sm:text-2xl font-bold text-gray-900 dark:text-gray-100 mt-1 truncate">
+                      {formatCurrency(faturamentoTotalTodosAnos)}
+                    </p>
+                  </div>
+                </div>
               </CardContent>
             </Card>
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex items-center">
+                  <div className="p-2 sm:p-3 bg-amber-100 dark:bg-amber-900/30 rounded-lg flex-shrink-0">
+                    <Clock className="w-5 h-5 sm:w-6 sm:h-6 text-amber-600 dark:text-amber-400" />
+                  </div>
+                  <div className="ml-3 sm:ml-4 min-w-0 flex-1">
+                    <p className="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400 whitespace-normal">
+                      Contratual pendente
+                    </p>
+                    <p className="text-lg sm:text-2xl font-bold text-gray-900 dark:text-gray-100 mt-1 truncate">
+                      {pendenteParaFaturarTodosAnos !== null
+                        ? formatCurrency(pendenteParaFaturarTodosAnos)
+                        : '-'}
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+          </div>
+
+          {(canAccessOrcamento || canAccessRelatorios) && (
+            <div className="space-y-4">
+              <p className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">Documentos</p>
+              <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+                {canAccessOrcamento ? (
+                  <Card>
+                    <CardContent className="p-4">
+                      <div className="flex items-center gap-3">
+                        <div className="flex min-w-0 flex-1 items-center">
+                          <div className="flex-shrink-0 rounded-lg bg-emerald-100 p-2 dark:bg-emerald-900/30 sm:p-3">
+                            <Calculator className="h-5 w-5 text-emerald-600 dark:text-emerald-400 sm:h-6 sm:w-6" />
+                          </div>
+                          <div className="ml-3 min-w-0 sm:ml-4">
+                            <p className="whitespace-normal text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">
+                              Orçamentos
+                            </p>
+                            <p className="mt-1 truncate text-lg font-bold text-gray-900 dark:text-gray-100 sm:text-2xl">
+                              {loadingOrcamentosCount ? '…' : orcamentosCount}
+                            </p>
+                          </div>
+                        </div>
+                        <Link
+                          href={`/ponto/contratos/${contractId}/orcamento`}
+                          className="flex-shrink-0 rounded-lg p-2 text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-100 sm:p-2.5"
+                          aria-label="Abrir orçamentos"
+                          title="Abrir orçamentos"
+                        >
+                          <Eye className="h-4 w-4 sm:h-5 sm:w-5" />
+                        </Link>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ) : null}
+                {canAccessRelatorios ? (
+                  <Card>
+                    <CardContent className="p-4">
+                      <div className="flex items-center gap-3">
+                        <div className="flex min-w-0 flex-1 items-center">
+                          <div className="flex-shrink-0 rounded-lg bg-rose-100 p-2 dark:bg-rose-900/30 sm:p-3">
+                            <FileImage className="h-5 w-5 text-rose-600 dark:text-rose-400 sm:h-6 sm:w-6" />
+                          </div>
+                          <div className="ml-3 min-w-0 sm:ml-4">
+                            <p className="whitespace-normal text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">
+                              Relatórios
+                            </p>
+                            <p className="mt-1 truncate text-lg font-bold text-gray-900 dark:text-gray-100 sm:text-2xl">
+                              {loadingRelatoriosCount ? '…' : relatoriosCount}
+                            </p>
+                          </div>
+                        </div>
+                        <Link
+                          href={`/ponto/contratos/${contractId}/relatorios`}
+                          className="flex-shrink-0 rounded-lg p-2 text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-100 sm:p-2.5"
+                          aria-label="Abrir relatórios"
+                          title="Abrir relatórios"
+                        >
+                          <Eye className="h-4 w-4 sm:h-5 sm:w-5" />
+                        </Link>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ) : null}
+              </div>
+            </div>
+          )}
+
           </div>
 
           {/* Controle Geral - Metas Mensais ou Metas Anuais conforme filtro */}

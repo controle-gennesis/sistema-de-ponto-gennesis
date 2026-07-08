@@ -38,6 +38,13 @@ function humanizeSegment(segment: string): string {
     .join(' ');
 }
 
+/** IDs opacos na URL (UUID, CUID, etc.) — não viram subtítulo legível. */
+function looksLikeOpaqueId(segment: string): boolean {
+  if (/^[0-9a-f-]{8,}$/i.test(segment)) return true;
+  if (/^[a-z0-9]{20,}$/i.test(segment)) return true;
+  return false;
+}
+
 /** Decodifica segmentos dinâmicos da URL (ex.: `Paulo%20anania` → `Paulo anania`). */
 function decodePathSegment(segment: string): string {
   try {
@@ -65,7 +72,7 @@ export function resolvePageTitle(pathname: string): string | null {
       const segments = suffix.split('/').filter(Boolean);
       const lastSegment = decodePathSegment(segments[segments.length - 1] ?? '');
 
-      if (!lastSegment || /^[0-9a-f-]{8,}$/i.test(lastSegment)) {
+      if (!lastSegment || looksLikeOpaqueId(lastSegment)) {
         return module.name;
       }
 
