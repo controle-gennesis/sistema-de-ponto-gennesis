@@ -38,6 +38,34 @@ export type ExportControleGeralContratosPdfInput = {
   contractCount: number;
   sheetUpdatedAt?: string;
   generatedAt?: Date;
+  overviewSection?: ControleGeralPdfOverviewSection;
+};
+
+export type ControleGeralPdfOverviewRow = {
+  name: string;
+  number: string;
+  costCenter: string;
+  faturamentoAcumulado: number;
+  faturamentoAnual: number | null;
+  totalProducaoSemanal: number;
+  valorOrcado: number;
+  pendenteFaturamento: number;
+};
+
+export type ControleGeralPdfOverviewTotals = {
+  contractCount: number;
+  faturamentoAcumulado: number;
+  faturamentoAnual: number | null;
+  totalProducaoSemanal: number;
+  valorOrcado: number;
+  pendenteFaturamento: number;
+};
+
+export type ControleGeralPdfOverviewSection = {
+  searchTerm?: string;
+  filterYear?: number | null;
+  rows: ControleGeralPdfOverviewRow[];
+  totals: ControleGeralPdfOverviewTotals;
 };
 
 const BRAND_RED: [number, number, number] = [185, 28, 28];
@@ -507,6 +535,168 @@ function drawLocalitySection(
   return y;
 }
 
+function buildOverviewColumns(contentW: number): PdfColumn[] {
+  const fixed = [
+    { key: 'cc', label: 'Centro de Custo', width: 38, align: 'left' as const },
+    { key: 'fatAc', label: 'Fat. acumulado', width: 28, align: 'right' as const },
+    { key: 'fatAn', label: 'Fat. anual', width: 28, align: 'right' as const },
+    { key: 'prod', label: 'Produção', width: 24, align: 'right' as const },
+    { key: 'orc', label: 'Valor orçado', width: 26, align: 'right' as const },
+    { key: 'pend', label: 'Pend. fat.', width: 26, align: 'right' as const }
+  ];
+  const fixedWidth = fixed.reduce((sum, col) => sum + col.width, 0);
+  const contractWidth = Math.max(50, contentW - fixedWidth);
+  return [{ key: 'contract', label: 'Contrato', width: contractWidth, align: 'left' }, ...fixed];
+}
+
+function formatOverviewContractLabel(name: string, number: string): string {
+  const trimmedName = name.trim();
+  const trimmedNumber = number.trim();
+  if (trimmedName && trimmedNumber) return `${trimmedName} (nº ${trimmedNumber})`;
+  return trimmedName || trimmedNumber || '—';
+}
+
+function drawOverviewDataRow(
+  doc: jsPDF,
+  y: number,
+  margin: number,
+  contentW: number,
+  columns: PdfColumn[],
+  colX: number[],
+  row: ControleGeralPdfOverviewRow,
+  rowIndex: number
+): number {
+  const rowH = 7;
+
+  if (rowIndex % 2 === 0) {
+    doc.setFillColor(...ROW_ALT);
+    doc.rect(margin, y, contentW, rowH, 'F');
+  }
+  doc.setDrawColor(...BORDER);
+  doc.line(margin, y + rowH, margin + contentW, y + rowH);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(6.2);
+
+  const values: Record<string, string> = {
+    contract: truncateText(doc, formatOverviewContractLabel(row.name, row.number), columns[0].width - 4),
+    cc: truncateText(doc, row.costCenter || '—', columns[1].width - 4),
+    fatAc: formatCurrency(row.faturamentoAcumulado),
+    fatAn: row.faturamentoAnual == null ? '—' : formatCurrency(row.faturamentoAnual),
+    prod: formatCurrency(row.totalProducaoSemanal),
+    orc: formatCurrency(row.valorOrcado),
+    pend: formatCurrency(row.pendenteFaturamento)
+  };
+
+  const colors: Record<string, [number, number, number]> = {
+    contract: TEXT_BLACK,
+    cc: TEXT_MUTED,
+    fatAc: TEXT_GREEN,
+    fatAn: TEXT_GREEN,
+    prod: TEXT_BLACK,
+    orc: TEXT_BLACK,
+    pend: [180, 83, 9]
+  };
+
+  for (let i = 0; i < columns.length; i++) {
+    const col = columns[i];
+    doc.setTextColor(...colors[col.key]);
+    const x = col.align === 'right' ? colX[i] + col.width - 2 : colX[i] + 2;
+    doc.text(values[col.key] ?? '—', x, y + 5, col.align === 'right' ? { align: 'right' } : undefined);
+  }
+
+  return y + rowH;
+}
+
+function drawOverviewTotalsRow(
+  doc: jsPDF,
+  y: number,
+  margin: number,
+  contentW: number,
+  columns: PdfColumn[],
+  colX: number[],
+  totals: ControleGeralPdfOverviewTotals
+): number {
+  const rowH = 7;
+  y = ensureSpace(doc, y, rowH + 2, margin);
+
+  doc.setFillColor(...TOTAL_ROW_BG);
+  doc.rect(margin, y, contentW, rowH, 'F');
+  doc.setDrawColor(...BORDER);
+  doc.line(margin, y, margin + contentW, y);
+  doc.line(margin, y + rowH, margin + contentW, y + rowH);
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(6.5);
+  doc.setTextColor(...TEXT_BLACK);
+  const label = `Total (${totals.contractCount} ${totals.contractCount === 1 ? 'contrato' : 'contratos'})`;
+  doc.text(truncateText(doc, label, columns[0].width + columns[1].width - 4), colX[0] + 2, y + 5);
+
+  const summaryValues: Record<string, { text: string; color: [number, number, number] }> = {
+    fatAc: { text: formatCurrency(totals.faturamentoAcumulado), color: TEXT_GREEN },
+    fatAn: {
+      text: totals.faturamentoAnual == null ? '—' : formatCurrency(totals.faturamentoAnual),
+      color: TEXT_GREEN
+    },
+    prod: { text: formatCurrency(totals.totalProducaoSemanal), color: TEXT_BLACK },
+    orc: { text: formatCurrency(totals.valorOrcado), color: TEXT_BLACK },
+    pend: { text: formatCurrency(totals.pendenteFaturamento), color: [180, 83, 9] }
+  };
+
+  for (let i = 2; i < columns.length; i++) {
+    const col = columns[i];
+    const entry = summaryValues[col.key];
+    if (!entry) continue;
+    doc.setTextColor(...entry.color);
+    const x = colX[i] + col.width - 2;
+    doc.text(entry.text, x, y + 5, { align: 'right' });
+  }
+
+  return y + rowH + 4;
+}
+
+function drawOverviewSection(
+  doc: jsPDF,
+  y: number,
+  margin: number,
+  contentW: number,
+  section: ControleGeralPdfOverviewSection
+): number {
+  if (section.rows.length === 0) return y;
+
+  const footnotes: string[] = [];
+  if (section.filterYear != null) footnotes.push(`Ano: ${section.filterYear}`);
+  if (section.searchTerm?.trim()) footnotes.push(`Busca: "${section.searchTerm.trim()}"`);
+  const footnote = footnotes.length ? footnotes.join(' · ') : undefined;
+
+  y = ensureSpace(doc, y, SECTION_TITLE_BLOCK + TABLE_HEADER_HEIGHT + DATA_ROW_HEIGHT + 16, margin);
+  y += 6;
+  y = drawSectionTitle(
+    doc,
+    y,
+    margin,
+    contentW,
+    'Controle geral — faturamento e produção',
+    footnote
+  );
+
+  const columns = buildOverviewColumns(contentW);
+  const colX = getColumnXs(margin, columns);
+  y = drawTableHeader(doc, y, margin, contentW, columns, colX);
+
+  for (let i = 0; i < section.rows.length; i++) {
+    if (y + DATA_ROW_HEIGHT > getPageContentBottom(doc, margin)) {
+      doc.addPage();
+      y = margin;
+      y = drawSectionTitle(doc, y, margin, contentW, 'Controle geral (continuação)');
+      y = drawTableHeader(doc, y, margin, contentW, columns, colX);
+    }
+    y = drawOverviewDataRow(doc, y, margin, contentW, columns, colX, section.rows[i], i);
+  }
+
+  return drawOverviewTotalsRow(doc, y, margin, contentW, columns, colX, section.totals);
+}
+
 function drawFooter(doc: jsPDF, margin: number) {
   const pageCount = doc.getNumberOfPages();
   for (let p = 1; p <= pageCount; p++) {
@@ -565,6 +755,10 @@ export async function exportControleGeralContratosPdf(
       input.grandSummary,
       'grand'
     );
+  }
+
+  if (input.overviewSection) {
+    y = drawOverviewSection(doc, y, margin, contentW, input.overviewSection);
   }
 
   drawFooter(doc, margin);

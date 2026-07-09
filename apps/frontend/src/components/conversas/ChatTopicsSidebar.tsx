@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { GripVertical, Hash, Loader2, Pin, PinOff, Plus, Search, X } from 'lucide-react';
+import { GripVertical, Hash, Loader2, Pencil, Pin, PinOff, Plus, Search, Trash2, X } from 'lucide-react';
 import clsx from 'clsx';
 import toast from 'react-hot-toast';
 import api from '@/lib/api';
@@ -23,9 +23,17 @@ export type ChatTopicItem = {
   };
 };
 
-export async function fetchChatTopics(chatId: string): Promise<ChatTopicItem[]> {
+export type ChatTopicsResponse = {
+  topics: ChatTopicItem[];
+  canDeleteTopics: boolean;
+};
+
+export async function fetchChatTopics(chatId: string): Promise<ChatTopicsResponse> {
   const res = await api.get(`/chats/direct/${chatId}/topics`);
-  return res.data?.data ?? [];
+  return {
+    topics: res.data?.data ?? [],
+    canDeleteTopics: Boolean(res.data?.canDeleteTopics)
+  };
 }
 
 async function createChatTopicApi(
@@ -51,6 +59,19 @@ async function reorderChatTopicsApi(
 ): Promise<ChatTopicItem[]> {
   const res = await api.patch(`/chats/direct/${chatId}/topics/reorder`, payload);
   return res.data?.data ?? [];
+}
+
+async function renameChatTopicApi(
+  chatId: string,
+  topicId: string,
+  title: string
+): Promise<ChatTopicItem> {
+  const res = await api.patch(`/chats/direct/${chatId}/topics/${topicId}`, { title });
+  return res.data.data;
+}
+
+async function deleteChatTopicApi(chatId: string, topicId: string): Promise<void> {
+  await api.delete(`/chats/direct/${chatId}/topics/${topicId}`);
 }
 
 function formatTopicDate(iso: string | null): string {
@@ -93,23 +114,31 @@ export function ChatTopicsSidebar({
 }: ChatTopicsSidebarProps) {
   const queryClient = useQueryClient();
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [renameTopic, setRenameTopic] = useState<ChatTopicItem | null>(null);
+  const [renameTitle, setRenameTitle] = useState('');
+  const [deleteTopic, setDeleteTopic] = useState<ChatTopicItem | null>(null);
   const [topicSearch, setTopicSearch] = useState('');
   const [newTopicTitle, setNewTopicTitle] = useState('');
   const [newTopicMessage, setNewTopicMessage] = useState('');
   const [dragTopicId, setDragTopicId] = useState<string | null>(null);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
 
-  const { data: topics = [], isLoading } = useQuery({
+  const { data: topicsData, isLoading } = useQuery({
     queryKey: ['chatTopics', chatId],
     queryFn: () => fetchChatTopics(chatId),
     enabled: !!chatId,
     staleTime: 10_000,
   });
 
+  const topics = topicsData?.topics ?? [];
+  const canDeleteTopics = topicsData?.canDeleteTopics ?? false;
+
   useEffect(() => {
     setTopicSearch('');
     setDragTopicId(null);
     setDropTargetId(null);
+    setRenameTopic(null);
+    setDeleteTopic(null);
   }, [chatId]);
 
   const createMutation = useMutation({
@@ -144,13 +173,44 @@ export function ChatTopicsSidebar({
     mutationFn: (payload: { pinnedIds?: string[]; unpinnedIds?: string[] }) =>
       reorderChatTopicsApi(chatId, payload),
     onSuccess: (data) => {
-      queryClient.setQueryData(['chatTopics', chatId], data);
+      queryClient.setQueryData(['chatTopics', chatId], (prev: ChatTopicsResponse | undefined) => ({
+        topics: data,
+        canDeleteTopics: prev?.canDeleteTopics ?? canDeleteTopics
+      }));
       setDragTopicId(null);
       setDropTargetId(null);
     },
     onError: (err: { response?: { data?: { error?: string; message?: string } } }) => {
       toast.error(err?.response?.data?.error || err?.response?.data?.message || 'Erro ao reordenar');
       queryClient.invalidateQueries({ queryKey: ['chatTopics', chatId] });
+    }
+  });
+
+  const renameMutation = useMutation({
+    mutationFn: ({ topicId, title }: { topicId: string; title: string }) =>
+      renameChatTopicApi(chatId, topicId, title),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['chatTopics', chatId] });
+      setRenameTopic(null);
+      setRenameTitle('');
+      toast.success('Tópico renomeado');
+    },
+    onError: (err: { response?: { data?: { error?: string; message?: string } } }) => {
+      toast.error(err?.response?.data?.error || err?.response?.data?.message || 'Erro ao renomear tópico');
+    }
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (topicId: string) => deleteChatTopicApi(chatId, topicId),
+    onSuccess: (_, topicId) => {
+      queryClient.invalidateQueries({ queryKey: ['chatTopics', chatId] });
+      queryClient.invalidateQueries({ queryKey: ['directChat', chatId] });
+      if (selectedTopicId === topicId) onSelectTopic(null);
+      setDeleteTopic(null);
+      toast.success('Tópico excluído');
+    },
+    onError: (err: { response?: { data?: { error?: string; message?: string } } }) => {
+      toast.error(err?.response?.data?.error || err?.response?.data?.message || 'Erro ao excluir tópico');
     }
   });
 
@@ -281,6 +341,20 @@ export function ChatTopicsSidebar({
           type="button"
           onClick={(e) => {
             e.stopPropagation();
+            setRenameTopic(topic);
+            setRenameTitle(topic.title);
+          }}
+          className="flex w-7 shrink-0 items-center justify-center rounded-lg text-gray-400 opacity-0 transition-opacity group-hover:opacity-100 hover:bg-gray-100 dark:hover:bg-gray-800"
+          title="Renomear tópico"
+          aria-label="Renomear tópico"
+        >
+          <Pencil size={14} />
+        </button>
+
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
             pinMutation.mutate({ topicId: topic.id, isPinned: !topic.isPinned });
           }}
           disabled={pinMutation.isPending}
@@ -295,6 +369,21 @@ export function ChatTopicsSidebar({
         >
           {topic.isPinned ? <Pin size={14} className="rotate-45" /> : <PinOff size={14} />}
         </button>
+
+        {canDeleteTopics ? (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setDeleteTopic(topic);
+            }}
+            className="flex w-7 shrink-0 items-center justify-center rounded-lg text-red-500 opacity-0 transition-opacity group-hover:opacity-100 hover:bg-red-50 dark:hover:bg-red-950/30"
+            title="Excluir tópico"
+            aria-label="Excluir tópico"
+          >
+            <Trash2 size={14} />
+          </button>
+        ) : null}
       </div>
     );
   };
@@ -329,7 +418,7 @@ export function ChatTopicsSidebar({
               Tópicos
             </p>
             <p className="text-[11px] text-gray-400 dark:text-gray-500">
-              Arraste para ordenar · fixe no topo
+              Arraste · fixe · renomeie
             </p>
           </div>
           <button
@@ -494,6 +583,126 @@ export function ChatTopicsSidebar({
                 >
                   {createMutation.isPending ? <Loader2 size={16} className="animate-spin" /> : null}
                   Criar tópico
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
+      {renameTopic && (
+        <>
+          <button
+            type="button"
+            aria-label="Fechar"
+            className="fixed inset-0 z-[1200] bg-black/50"
+            onClick={() => !renameMutation.isPending && setRenameTopic(null)}
+          />
+          <div className="fixed inset-0 z-[1201] flex items-center justify-center p-4 pointer-events-none">
+            <div
+              role="dialog"
+              aria-modal="true"
+              className="pointer-events-auto w-full max-w-md rounded-2xl border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-900"
+            >
+              <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3 dark:border-gray-800">
+                <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">Renomear tópico</h2>
+                <button
+                  type="button"
+                  disabled={renameMutation.isPending}
+                  onClick={() => setRenameTopic(null)}
+                  className="rounded-lg p-1.5 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+              <div className="px-4 py-4">
+                <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
+                  Título do tópico
+                </label>
+                <input
+                  type="text"
+                  value={renameTitle}
+                  onChange={(e) => setRenameTitle(e.target.value)}
+                  maxLength={200}
+                  className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-900 outline-none focus:border-red-500/50 focus:ring-2 focus:ring-red-500/20 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && renameTitle.trim().length >= 2) {
+                      renameMutation.mutate({ topicId: renameTopic.id, title: renameTitle.trim() });
+                    }
+                  }}
+                />
+              </div>
+              <div className="flex justify-end gap-2 border-t border-gray-200 px-4 py-3 dark:border-gray-800">
+                <button
+                  type="button"
+                  disabled={renameMutation.isPending}
+                  onClick={() => setRenameTopic(null)}
+                  className="rounded-lg px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  disabled={
+                    renameMutation.isPending ||
+                    renameTitle.trim().length < 2 ||
+                    renameTitle.trim() === renameTopic.title
+                  }
+                  onClick={() =>
+                    renameMutation.mutate({ topicId: renameTopic.id, title: renameTitle.trim() })
+                  }
+                  className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+                >
+                  {renameMutation.isPending ? <Loader2 size={16} className="animate-spin" /> : null}
+                  Salvar
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
+      {deleteTopic && (
+        <>
+          <button
+            type="button"
+            aria-label="Fechar"
+            className="fixed inset-0 z-[1200] bg-black/50"
+            onClick={() => !deleteMutation.isPending && setDeleteTopic(null)}
+          />
+          <div className="fixed inset-0 z-[1201] flex items-center justify-center p-4 pointer-events-none">
+            <div
+              role="dialog"
+              aria-modal="true"
+              className="pointer-events-auto w-full max-w-md rounded-2xl border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-900"
+            >
+              <div className="border-b border-gray-200 px-4 py-3 dark:border-gray-800">
+                <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">Excluir tópico</h2>
+              </div>
+              <div className="px-4 py-4">
+                <p className="text-sm text-gray-600 dark:text-gray-300">
+                  Excluir o tópico <span className="font-semibold">&quot;{deleteTopic.title}&quot;</span>?
+                  As mensagens permanecerão na conversa geral.
+                </p>
+              </div>
+              <div className="flex justify-end gap-2 border-t border-gray-200 px-4 py-3 dark:border-gray-800">
+                <button
+                  type="button"
+                  disabled={deleteMutation.isPending}
+                  onClick={() => setDeleteTopic(null)}
+                  className="rounded-lg px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  disabled={deleteMutation.isPending}
+                  onClick={() => deleteMutation.mutate(deleteTopic.id)}
+                  className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+                >
+                  {deleteMutation.isPending ? <Loader2 size={16} className="animate-spin" /> : null}
+                  Excluir
                 </button>
               </div>
             </div>

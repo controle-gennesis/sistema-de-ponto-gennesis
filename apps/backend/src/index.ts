@@ -86,10 +86,15 @@ import fuelRefuelRequestRoutes from './routes/fuelRefuelRequests';
 import fuelGasStationRoutes from './routes/fuelGasStations';
 import logisticsDeliveryRequestRoutes from './routes/logisticsDeliveryRequests';
 import approvalsRoutes from './routes/approvals';
+import licitacoesRoutes from './routes/licitacoes';
+import { LicitacaoController } from './controllers/LicitacaoController';
+import { authenticate, AuthRequest } from './middleware/auth';
 import { removeOrphanUserPermissions } from './lib/permissionRegistrySync';
 import { prisma } from './lib/prisma';
 import { ensureProductionSchema } from './lib/ensureProductionSchema';
 import { attachCallSignaling } from './realtime/wsCallSignaling';
+
+const licitacaoExtraCtrl = new LicitacaoController();
 
 console.log('🚀 Iniciando aplicação...');
 
@@ -304,6 +309,38 @@ app.use('/api/fuel-refuel-requests', fuelRefuelRequestRoutes);
 app.use('/api/fuel-gas-stations', fuelGasStationRoutes);
 app.use('/api/logistics-delivery-requests', logisticsDeliveryRequestRoutes);
 app.use('/api/approvals', approvalsRoutes);
+// Rotas explícitas de licitações (garantem checklist mesmo se o router interno estiver desatualizado)
+app.get('/api/licitacoes/checklist-template', authenticate, (req, res, next) =>
+  licitacaoExtraCtrl.getChecklistTemplate(req as AuthRequest, res, next)
+);
+app.put('/api/licitacoes/checklist-template', authenticate, (req, res, next) =>
+  licitacaoExtraCtrl.updateChecklistTemplate(req as AuthRequest, res, next)
+);
+app.patch('/api/licitacoes/:id/analise-manual', authenticate, (req, res, next) =>
+  licitacaoExtraCtrl.updateAnaliseManual(req as AuthRequest, res, next)
+);
+app.patch('/api/licitacoes/:id/finalizar-analise', authenticate, (req, res, next) =>
+  licitacaoExtraCtrl.finalizarAnaliseManual(req as AuthRequest, res, next)
+);
+app.patch('/api/licitacoes/:id/arquivar', authenticate, (req, res, next) =>
+  licitacaoExtraCtrl.arquivarAnalise(req as AuthRequest, res, next)
+);
+app.patch('/api/licitacoes/:id/desarquivar', authenticate, (req, res, next) =>
+  licitacaoExtraCtrl.desarquivarAnalise(req as AuthRequest, res, next)
+);
+app.get('/api/licitacoes/planilha-regioes', authenticate, (req, res, next) =>
+  licitacaoExtraCtrl.listRegiaoTabs(req as AuthRequest, res, next)
+);
+app.get('/api/licitacoes/planilha-regioes/:regiaoKey', authenticate, (req, res, next) =>
+  licitacaoExtraCtrl.getRegiaoSheet(req as AuthRequest, res, next)
+);
+app.post('/api/licitacoes/planilha-regioes/aceites', authenticate, (req, res, next) =>
+  licitacaoExtraCtrl.registrarAceiteRegiao(req as AuthRequest, res, next)
+);
+app.delete('/api/licitacoes/planilha-regioes/aceites', authenticate, (req, res, next) =>
+  licitacaoExtraCtrl.desfazerAceiteRegiao(req as AuthRequest, res, next)
+);
+app.use('/api/licitacoes', licitacoesRoutes);
 
 // Middleware de erro 404
 app.use(notFound);
@@ -339,6 +376,7 @@ try {
     console.log(`🌍 Timezone: ${process.env.TZ}`);
     console.log(`🔗 Health check: http://0.0.0.0:${PORT}/health`);
     console.log(`🌐 API Base: http://0.0.0.0:${PORT}/api`);
+    console.log('📋 Licitações: checklist-template + PATCH /:id/analise-manual + /:id/finalizar-analise ativos');
     console.log('═══════════════════════════════════════');
     console.log('');
 

@@ -944,7 +944,8 @@ export class ChatController {
       if (!userId) throw createError('Usuário não autenticado', 401);
       const { chatId } = req.params;
       const topics = await chatService.listChatTopics(chatId, userId);
-      res.json({ success: true, data: topics });
+      const canDeleteTopics = chatService.canDeleteChatTopics(req.user?.email ?? '');
+      res.json({ success: true, data: topics, canDeleteTopics });
     } catch (error: any) {
       next(error);
     }
@@ -997,6 +998,34 @@ export class ChatController {
         unpinnedIds
       });
       res.json({ success: true, data: topics });
+    } catch (error: any) {
+      next(error);
+    }
+  }
+
+  /** Renomeia um tópico */
+  async renameChatTopic(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = req.user?.id;
+      if (!userId) throw createError('Usuário não autenticado', 401);
+      const { chatId, topicId } = req.params;
+      const title = typeof req.body.title === 'string' ? req.body.title : '';
+      const topic = await chatService.renameChatTopic(chatId, topicId, userId, title);
+      res.json({ success: true, data: topic });
+    } catch (error: any) {
+      next(error);
+    }
+  }
+
+  /** Exclui um tópico (apenas usuários autorizados) */
+  async deleteChatTopic(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = req.user?.id;
+      const userEmail = req.user?.email;
+      if (!userId || !userEmail) throw createError('Usuário não autenticado', 401);
+      const { chatId, topicId } = req.params;
+      await chatService.deleteChatTopic(chatId, topicId, userId, userEmail);
+      res.json({ success: true, message: 'Tópico excluído' });
     } catch (error: any) {
       next(error);
     }

@@ -3033,16 +3033,12 @@ export default function AnaliseExtratoPage() {
     ]
   );
 
-  const demonstrativoStats = useMemo(
-    () => computeExtratoStats(demonstrativoItems),
-    [demonstrativoItems]
-  );
-
   const demonstrativoRoi = useMemo(() => {
-    const { totalEntrada, totalSaida } = demonstrativoStats;
+    // Mesma base dos cards Entradas / Saídas / Saldo líquido (filtros aplicados).
+    const { totalEntrada, totalSaida } = extratoStats;
     if (totalSaida === 0) return null;
     return ((totalEntrada - totalSaida) / totalSaida) * 100;
-  }, [demonstrativoStats]);
+  }, [extratoStats]);
 
   const receitaLiquidaNatureCodes = useMemo(
     () => buildReceitaLiquidaNatureCodes(items, natureFilterOptions),

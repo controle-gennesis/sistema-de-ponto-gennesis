@@ -42,6 +42,12 @@ router.patch('/direct/:chatId/topics/reorder', (req, res, next) =>
 router.patch('/direct/:chatId/topics/:topicId/pin', (req, res, next) =>
   chatController.setChatTopicPinned(req, res, next)
 );
+router.patch('/direct/:chatId/topics/:topicId', (req, res, next) =>
+  chatController.renameChatTopic(req, res, next)
+);
+router.delete('/direct/:chatId/topics/:topicId', (req, res, next) =>
+  chatController.deleteChatTopic(req, res, next)
+);
 
 // Abrir (ou criar) chat direto com um usuário
 router.post('/direct', (req, res, next) =>

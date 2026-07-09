@@ -2,6 +2,7 @@ export const GASTOS_OPERACIONAIS_LOCALITIES = [
   { key: 'CENTRAL', label: 'Central' },
   { key: 'GOIAS', label: 'Goiás' },
   { key: 'DISTRITO_FEDERAL', label: 'Distrito Federal' },
+  { key: 'PARAIBA', label: 'Paraíba' },
   { key: 'SUL', label: 'Região Sul' },
   { key: 'NORDESTE', label: 'Região Nordeste' }
 ] as const;
@@ -12,7 +13,8 @@ export type GastosOperacionaisLocality =
 /** Localidades exibidas no painel de gastos do Controle Geral de Contratos. */
 export const CONTROLE_GERAL_GASTOS_VISIBLE_LOCALITIES = [
   'GOIAS',
-  'DISTRITO_FEDERAL'
+  'DISTRITO_FEDERAL',
+  'PARAIBA'
 ] as const satisfies readonly GastosOperacionaisLocality[];
 
 export function resolveVisibleLocalityItems(
@@ -39,6 +41,15 @@ export function listContractsForLocalities(
     }
   }
   return contracts;
+}
+
+/** Chaves normalizadas de todos os contratos do catálogo embutido. */
+export function getAllCatalogContractKeys(): Set<string> {
+  const keys = new Set<string>();
+  for (const contract of listContractsForLocalities()) {
+    keys.add(normalizeContractOrderKey(contract));
+  }
+  return keys;
 }
 
 /** Contratos agrupados por localidade (conforme planilha de referência). */
@@ -88,6 +99,18 @@ const CONTRACTS_BY_LOCALITY: Record<GastosOperacionaisLocality, readonly string[
     'UNB - CMI',
     'EMBRAPA BSB'
   ],
+  PARAIBA: [
+    'JP - ADM LOCAL',
+    'SEECT PB GENNESIS - ITEM 1',
+    'SEECT PB GENNESIS - ITEM 3',
+    'SEECT PB ITEM 4',
+    'SEFAZ PB - LOTE 01',
+    'SEFAZ PB - LOTE 02',
+    'SEFAZ PB - LOTE 03',
+    'SEFAZ PB - LOTE 04',
+    'SEFAZ PB - LOTE 05',
+    'ALPB - MANUTENÇÃO PREDIAL'
+  ],
   SUL: [
     'BANRISUL - LOTE 1',
     'BANRISUL - LOTE 2',
@@ -115,17 +138,11 @@ const CONTRACTS_BY_LOCALITY: Record<GastosOperacionaisLocality, readonly string[
     'PARQUE TRES RUAS - JOAO PESSOA',
     'RECEITA FEDERAL - MÃO DE OBRA',
     'RN - ADM LOCAL',
-    'SEFAZ PB - LOTE 01',
-    'SEFAZ PB - LOTE 02',
-    'SEFAZ PB - LOTE 03',
-    'SEFAZ PB - LOTE 04',
-    'SEFAZ PB - LOTE 05',
     'SME REFORMA ESCOLAS MACAIBA',
     'SME NATAL 062 - EMERGENCIAL',
     'SEINFRA - PAVIMENTAÇÃO',
     'SEINFRA NATAL TAPA BURACOS ZONA LESTE',
     'SEINFRA NATAL TAPA BURACOS ZONA SUL',
-    'SEECT PB ITEM 4',
     'SEMTAS NATAL - ZONA OESTE',
     'SME - ZONA NORTE LOTE I - MANUTENÇÃO',
     'SMS NATAL',
@@ -135,8 +152,7 @@ const CONTRACTS_BY_LOCALITY: Record<GastosOperacionaisLocality, readonly string[
     'UFPE IMPERMEABILIZAÇÃO',
     'UFPE PINTURA',
     'UFRN - IMPERMEABILIZAÇÃO',
-    'UFRN - PINTURA',
-    'ALPB - MANUTENÇÃO PREDIAL'
+    'UFRN - PINTURA'
   ]
 };
 
@@ -241,6 +257,16 @@ export const GASTOS_OPERACIONAIS_CONTRACT_ORDER = [
   'UNB - CAR',
   'UNB - CMI',
   'EMBRAPA BSB',
+  'JP - ADM LOCAL',
+  'SEECT PB GENNESIS - ITEM 1',
+  'SEECT PB GENNESIS - ITEM 3',
+  'SEECT PB ITEM 4',
+  'SEFAZ PB - LOTE 01',
+  'SEFAZ PB - LOTE 02',
+  'SEFAZ PB - LOTE 03',
+  'SEFAZ PB - LOTE 04',
+  'SEFAZ PB - LOTE 05',
+  'ALPB - MANUTENÇÃO PREDIAL',
   'BANRISUL - LOTE 1',
   'BANRISUL - LOTE 2',
   'BANRISUL CENTRO',
@@ -264,17 +290,11 @@ export const GASTOS_OPERACIONAIS_CONTRACT_ORDER = [
   'PARQUE TRES RUAS - JOAO PESSOA',
   'RECEITA FEDERAL - MÃO DE OBRA',
   'RN - ADM LOCAL',
-  'SEFAZ PB - LOTE 01',
-  'SEFAZ PB - LOTE 02',
-  'SEFAZ PB - LOTE 03',
-  'SEFAZ PB - LOTE 04',
-  'SEFAZ PB - LOTE 05',
   'SME REFORMA ESCOLAS MACAIBA',
   'SME NATAL 062 - EMERGENCIAL',
   'SEINFRA - PAVIMENTAÇÃO',
   'SEINFRA NATAL TAPA BURACOS ZONA LESTE',
   'SEINFRA NATAL TAPA BURACOS ZONA SUL',
-  'SEECT PB ITEM 4',
   'SEMTAS NATAL - ZONA OESTE',
   'SME - ZONA NORTE LOTE I - MANUTENÇÃO',
   'SMS NATAL',
@@ -284,8 +304,7 @@ export const GASTOS_OPERACIONAIS_CONTRACT_ORDER = [
   'UFPE IMPERMEABILIZAÇÃO',
   'UFPE PINTURA',
   'UFRN - IMPERMEABILIZAÇÃO',
-  'UFRN - PINTURA',
-  'ALPB - MANUTENÇÃO PREDIAL'
+  'UFRN - PINTURA'
 ] as const;
 
 const orderIndexByKey = new Map<string, number>(
@@ -316,6 +335,38 @@ export function sortContractNamesByCustomOrder(names: string[]): string[] {
 
 export function getContractLocality(contract: string): GastosOperacionaisLocality | undefined {
   return localityByContractKey.get(normalizeContractOrderKey(contract));
+}
+
+/** Infere localidade para contratos novos do cadastro que ainda não estão no catálogo embutido. */
+export function inferContractLocalityFromHints(
+  contract: string,
+  costCenter?: { code?: string; name?: string } | null
+): GastosOperacionaisLocality | undefined {
+  const fromCatalog = getContractLocality(contract);
+  if (fromCatalog) return fromCatalog;
+
+  const key = normalizeContractOrderKey(contract);
+  for (const [catalogKey, locality] of Array.from(localityByContractKey)) {
+    if (key === catalogKey) return locality;
+    if (key.length >= 8 && catalogKey.length >= 8 && (key.includes(catalogKey) || catalogKey.includes(key))) {
+      return locality;
+    }
+  }
+
+  const haystack = normalizeContractOrderKey(
+    [contract, costCenter?.name, costCenter?.code].filter(Boolean).join(' ')
+  );
+  if (/\bDF\b|BRASILIA|DISTRITO FEDERAL/.test(haystack)) return 'DISTRITO_FEDERAL';
+  if (
+    /\bPB\b|PARAIBA|JOAO PESSOA|CAMPINA GRANDE|\bJP\b|SEECT|SEFAZ PB|ALPB/.test(haystack)
+  ) {
+    return 'PARAIBA';
+  }
+  if (/\bGO\b|GOIAS|GOIANIA|APARECIDA|ANAPOLIS|RIO VERDE|CALDAS NOVAS|UFG|TJGO/.test(haystack)) {
+    return 'GOIAS';
+  }
+
+  return undefined;
 }
 
 export function contractMatchesLocality(

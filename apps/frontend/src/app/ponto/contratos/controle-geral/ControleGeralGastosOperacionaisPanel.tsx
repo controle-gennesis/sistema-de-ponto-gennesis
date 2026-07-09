@@ -59,11 +59,21 @@ import {
   type GastosNaturezaSolicitacaoRow
 } from './gastosNaturezaSolicitacoesBreakdown';
 import {
+  getAllCatalogContractKeys,
+  getContractLocality,
   getLocalityLabel,
   GASTOS_OPERACIONAIS_CONTRACT_ORDER,
+  inferContractLocalityFromHints,
+  normalizeContractOrderKey,
   resolveVisibleLocalityItems,
   type GastosOperacionaisLocality
 } from './gastosOperacionaisContractOrder';
+import {
+  findNewSpreadsheetContracts,
+  loadKnownSpreadsheetContracts,
+  markSpreadsheetContractsAsKnown,
+  saveKnownSpreadsheetContracts
+} from './controleGeralKnownSpreadsheetContracts';
 import {
   applyContractLocalityOverride,
   contractMatchesLocalitiesWithOverrides,
@@ -96,7 +106,6 @@ import {
 import { ControleGeralFluxoDetalheModal } from './ControleGeralFluxoDetalheModal';
 import { filterGastosDetailRowsForContract, filterRecebidoMensalForContract } from './controleGeralGastosFluxo';
 import type { RecebidoMensalByGastosContractEntry } from './recebidoMensalTypes';
-import { normalizeContractOrderKey } from './gastosOperacionaisContractOrder';
 
 export type GastosOperacionaisRow = {
   rowKey: string;
@@ -163,6 +172,22 @@ type ControleGeralGastosOperacionaisPanelProps = {
   primaryExportButton?: boolean;
   /** Habilita modal de detalhes/gráficos ao clicar no contrato (Controle Geral). */
   enableContractFluxoModal?: boolean;
+  /** Dados da seção "Controle geral" para incluir no PDF completo. */
+  overviewForExport?: {
+    contracts: Array<{
+      name: string;
+      number: string;
+      costCenter?: { code?: string; name?: string } | null;
+      faturamentoAcumulado: number;
+      faturamentoAnual: number;
+      faturamentoAnualAplica?: boolean;
+      totalProducaoSemanal: number;
+      valorOrcado: number;
+      pendenteFaturamento: number;
+    }>;
+    filterYear?: number | null;
+    searchTerm?: string;
+  };
 };
 
 function formatCurrency(value: number) {
@@ -512,7 +537,8 @@ export function ControleGeralGastosOperacionaisPanel({
   hideDataRefreshControls = false,
   inlineFilters = false,
   primaryExportButton = false,
-  enableContractFluxoModal = false
+  enableContractFluxoModal = false,
+  overviewForExport
 }: ControleGeralGastosOperacionaisPanelProps) {
   const nfsMetricColumnCount = showFaturamentoColumn ? 3 : 0;
   const lucroLiquidoColumnCount = showFaturamentoColumn ? 1 : 0;
@@ -534,9 +560,73 @@ export function ControleGeralGastosOperacionaisPanel({
   const [localityOverrides, setLocalityOverrides] = useState<GastosOperacionaisLocalityOverrideMap>(
     () => loadGastosLocalityOverridesWithCatalogSeed()
   );
+  const inferredLocalityOverrides = useMemo(() => {
+    const merged: GastosOperacionaisLocalityOverrideMap = { ...localityOverrides };
+    const sources = [
+      ...contractsForDetailLookup.map((contract) => ({
+        name: contract.name,
+        costCenter: contract.costCenter
+      })),
+      ...detailRows.map((row) => ({ name: row.contract, costCenter: null }))
+    ];
+
+    for (const source of sources) {
+      const name = source.name?.trim();
+      if (!name) continue;
+      const key = normalizeContractOrderKey(name);
+      if (Object.prototype.hasOwnProperty.call(merged, key)) continue;
+      if (getContractLocality(name)) continue;
+      const inferred = inferContractLocalityFromHints(name, source.costCenter ?? undefined);
+      if (inferred) merged[key] = inferred;
+    }
+    return merged;
+  }, [contractsForDetailLookup, detailRows, localityOverrides]);
   const [excludedContracts, setExcludedContracts] = useState<Set<string>>(() =>
     enableRowExclusion ? loadControleGeralExcludedContracts() : new Set()
   );
+
+  const allSpreadsheetContracts = useMemo(
+    () => Array.from(new Set(detailRows.map((row) => row.contract.trim()).filter(Boolean))),
+    [detailRows]
+  );
+
+  const catalogContractKeys = useMemo(() => getAllCatalogContractKeys(), []);
+
+  useEffect(() => {
+    if (!enableRowExclusion || allSpreadsheetContracts.length === 0) return;
+
+    const known = loadKnownSpreadsheetContracts();
+    const newcomers = findNewSpreadsheetContracts(allSpreadsheetContracts, known).filter(
+      (contract) => !catalogContractKeys.has(normalizeContractOrderKey(contract))
+    );
+
+    if (newcomers.length > 0) {
+      const nextKnown = markSpreadsheetContractsAsKnown(allSpreadsheetContracts, known);
+      saveKnownSpreadsheetContracts(nextKnown);
+      setExcludedContracts((prev) => addControleGeralExcludedContracts(newcomers, prev));
+    }
+  }, [allSpreadsheetContracts, catalogContractKeys, enableRowExclusion]);
+
+  useEffect(() => {
+    if (!enableRowExclusion || allSpreadsheetContracts.length === 0) return;
+    if (typeof window === 'undefined') return;
+    if (window.localStorage.getItem('controle-geral-pb-hidden-seeded-v1')) return;
+
+    const pbKeys = new Set(
+      ['JP - ADM LOCAL', 'SEECT PB GENNESIS - ITEM 1', 'SEECT PB GENNESIS - ITEM 3'].map((name) =>
+        normalizeContractOrderKey(name)
+      )
+    );
+    const toHide = allSpreadsheetContracts.filter((contract) =>
+      pbKeys.has(normalizeContractOrderKey(contract))
+    );
+
+    if (toHide.length > 0) {
+      setExcludedContracts((prev) => addControleGeralExcludedContracts(toHide, prev));
+    }
+    window.localStorage.setItem('controle-geral-pb-hidden-seeded-v1', '1');
+  }, [allSpreadsheetContracts, enableRowExclusion]);
+
   const [selectedRowKeys, setSelectedRowKeys] = useState<Set<string>>(() => new Set());
   const [hiddenContractsListMinimized, setHiddenContractsListMinimized] = useState(false);
   const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
@@ -655,14 +745,14 @@ export function ControleGeralGastosOperacionaisPanel({
         : getGastosFilterOptions(
             detailRows,
             { localities: filters.localities },
-            localityOverrides,
+            inferredLocalityOverrides,
             visibleLocalities
           ),
     [
       detailRows,
       filters.localities,
       filters.polos,
-      localityOverrides,
+      inferredLocalityOverrides,
       readOnlyPoloColumn,
       visibleLocalities
     ]
@@ -712,13 +802,58 @@ export function ControleGeralGastosOperacionaisPanel({
     Boolean(filters.periodFrom || filters.periodTo) ||
     filters.contracts.length > 0;
 
+  const contractLabelByKey = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const row of aggregateGastosDetailRows(detailRows)) {
+      map.set(normalizeContractOrderKey(row.contract), row.contract);
+    }
+    for (const name of GASTOS_OPERACIONAIS_CONTRACT_ORDER) {
+      map.set(normalizeContractOrderKey(name), name);
+    }
+    for (const entry of faturamentoByContract) {
+      map.set(normalizeContractOrderKey(entry.contract), entry.contract);
+    }
+    for (const contract of contractsForDetailLookup) {
+      const name = contract.name?.trim();
+      if (!name) continue;
+      map.set(normalizeContractOrderKey(name), name);
+      const costCenterName = contract.costCenter?.name?.trim();
+      if (costCenterName) {
+        map.set(normalizeContractOrderKey(costCenterName), name);
+      }
+      const costCenterCode = contract.costCenter?.code?.trim();
+      if (costCenterCode) {
+        map.set(normalizeContractOrderKey(costCenterCode), name);
+      }
+    }
+    return map;
+  }, [detailRows, faturamentoByContract, contractsForDetailLookup]);
+
   const displayRows = useMemo(() => {
     const filtered = readOnlyPoloColumn
       ? filterGastosDetailRowsByPolo(detailRows, filters)
-      : filterGastosDetailRows(detailRows, filters, localityOverrides, visibleLocalities);
+      : filterGastosDetailRows(detailRows, filters, inferredLocalityOverrides, visibleLocalities);
     const aggregated = aggregateGastosDetailRows(filtered);
-    return mergeCatalogContractsIntoGastosRows(aggregated, visibleLocalities);
-  }, [detailRows, filters, localityOverrides, readOnlyPoloColumn, visibleLocalities]);
+    return mergeCatalogContractsIntoGastosRows(aggregated, visibleLocalities, {
+      databaseContracts: contractsForDetailLookup,
+      spreadsheetContracts: allSpreadsheetContracts,
+      excludedContractKeys: enableRowExclusion ? Array.from(excludedContracts) : [],
+      resolveExcludedLabel: (key) =>
+        contractLabelByKey.get(key) ?? contractLabelByKey.get(normalizeContractOrderKey(key)) ?? key,
+      localityOverrides: inferredLocalityOverrides
+    });
+  }, [
+    detailRows,
+    filters,
+    inferredLocalityOverrides,
+    readOnlyPoloColumn,
+    visibleLocalities,
+    contractsForDetailLookup,
+    allSpreadsheetContracts,
+    enableRowExclusion,
+    excludedContracts,
+    contractLabelByKey
+  ]);
 
   const visibleRows = useMemo(() => {
     if (!enableRowExclusion) return displayRows;
@@ -766,13 +901,13 @@ export function ControleGeralGastosOperacionaisPanel({
     if (!fluxoModalContract) return [];
     const filtered = readOnlyPoloColumn
       ? filterGastosDetailRowsByPolo(detailRows, filters)
-      : filterGastosDetailRows(detailRows, filters, localityOverrides, visibleLocalities);
+      : filterGastosDetailRows(detailRows, filters, inferredLocalityOverrides, visibleLocalities);
     return filterGastosDetailRowsForContract(filtered, fluxoModalContract);
   }, [
     detailRows,
     filters,
     fluxoModalContract,
-    localityOverrides,
+    inferredLocalityOverrides,
     readOnlyPoloColumn,
     visibleLocalities
   ]);
@@ -787,24 +922,15 @@ export function ControleGeralGastosOperacionaisPanel({
     return filterRecebidoMensalForContract(recebidoMensalByContract, fluxoModalContract);
   }, [recebidoMensalByContract, fluxoModalContract]);
 
-  const contractLabelByKey = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const row of aggregateGastosDetailRows(detailRows)) {
-      map.set(normalizeContractOrderKey(row.contract), row.contract);
-    }
-    for (const name of GASTOS_OPERACIONAIS_CONTRACT_ORDER) {
-      map.set(normalizeContractOrderKey(name), name);
-    }
-    for (const entry of faturamentoByContract) {
-      map.set(normalizeContractOrderKey(entry.contract), entry.contract);
-    }
-    return map;
-  }, [detailRows, faturamentoByContract]);
-
   const excludedContractLabels = useMemo(() => {
     if (!enableRowExclusion || excludedContracts.size === 0) return [];
     return Array.from(excludedContracts)
-      .map((key) => contractLabelByKey.get(key) ?? contractLabelByKey.get(normalizeContractOrderKey(key)) ?? key)
+      .map(
+        (key) =>
+          contractLabelByKey.get(key) ??
+          contractLabelByKey.get(normalizeContractOrderKey(key)) ??
+          key
+      )
       .sort((a, b) => a.localeCompare(b, 'pt-BR'));
   }, [contractLabelByKey, excludedContracts, enableRowExclusion]);
 
@@ -817,8 +943,12 @@ export function ControleGeralGastosOperacionaisPanel({
         subtotal: group.subtotal
       }));
     }
-    return groupGastosRowsByLocality(visibleRowsWithFaturamento, localityOverrides, visibleLocalities);
-  }, [visibleRowsWithFaturamento, localityOverrides, readOnlyPoloColumn, visibleLocalities]);
+    return groupGastosRowsByLocality(
+      visibleRowsWithFaturamento,
+      inferredLocalityOverrides,
+      visibleLocalities
+    );
+  }, [visibleRowsWithFaturamento, inferredLocalityOverrides, readOnlyPoloColumn, visibleLocalities]);
 
   const grandSummary = useMemo(
     () => summarizeGastosPanelRows(visibleRowsWithFaturamento),
@@ -1205,8 +1335,14 @@ export function ControleGeralGastosOperacionaisPanel({
     return lines;
   }, [filters, hasActiveFilters, totalGastos, excludedContractLabels, readOnlyPoloColumn]);
 
+  const canExportPdf =
+    visibleRows.length > 0 || (overviewForExport?.contracts.length ?? 0) > 0;
+
   const handleExportPdf = useCallback(async () => {
-    if (visibleRows.length === 0) {
+    const hasGastosData = visibleRows.length > 0;
+    const hasOverviewData = (overviewForExport?.contracts.length ?? 0) > 0;
+
+    if (!hasGastosData && !hasOverviewData) {
       toast.error('Nenhum dado para exportar com os filtros atuais.');
       return;
     }
@@ -1223,6 +1359,58 @@ export function ControleGeralGastosOperacionaisPanel({
           })
         : undefined;
 
+      const buildOverviewSection = () => {
+        if (!overviewForExport?.contracts.length) return undefined;
+
+        const rows = overviewForExport.contracts.map((contract) => ({
+          name: contract.name,
+          number: contract.number,
+          costCenter: contract.costCenter?.name || contract.costCenter?.code || '—',
+          faturamentoAcumulado: contract.faturamentoAcumulado,
+          faturamentoAnual:
+            contract.faturamentoAnualAplica === false ? null : contract.faturamentoAnual,
+          totalProducaoSemanal: contract.totalProducaoSemanal,
+          valorOrcado: contract.valorOrcado,
+          pendenteFaturamento: contract.pendenteFaturamento
+        }));
+
+        const totals = rows.reduce(
+          (acc, row) => ({
+            faturamentoAcumulado: acc.faturamentoAcumulado + row.faturamentoAcumulado,
+            faturamentoAnual:
+              row.faturamentoAnual == null
+                ? acc.faturamentoAnual
+                : acc.faturamentoAnual + row.faturamentoAnual,
+            totalProducaoSemanal: acc.totalProducaoSemanal + row.totalProducaoSemanal,
+            valorOrcado: acc.valorOrcado + row.valorOrcado,
+            pendenteFaturamento: acc.pendenteFaturamento + row.pendenteFaturamento
+          }),
+          {
+            faturamentoAcumulado: 0,
+            faturamentoAnual: 0,
+            totalProducaoSemanal: 0,
+            valorOrcado: 0,
+            pendenteFaturamento: 0
+          }
+        );
+
+        const hasAnnualFilter = overviewForExport.filterYear != null;
+
+        return {
+          searchTerm: overviewForExport.searchTerm,
+          filterYear: overviewForExport.filterYear,
+          rows,
+          totals: {
+            contractCount: rows.length,
+            faturamentoAcumulado: totals.faturamentoAcumulado,
+            faturamentoAnual: hasAnnualFilter ? totals.faturamentoAnual : null,
+            totalProducaoSemanal: totals.totalProducaoSemanal,
+            valorOrcado: totals.valorOrcado,
+            pendenteFaturamento: totals.pendenteFaturamento
+          }
+        };
+      };
+
       if (showFaturamentoColumn) {
         const buildPdfSummary = (rows: readonly GastosOperacionaisRow[]) => {
           const summary = summarizeGastosPanelRows(rows);
@@ -1237,6 +1425,7 @@ export function ControleGeralGastosOperacionaisPanel({
           filterLines: buildPdfFilterLines(),
           contractCount: visibleRowsWithFaturamento.length,
           sheetUpdatedAt,
+          overviewSection: buildOverviewSection(),
           groups: localityGroups.map((group) => ({
             localityLabel: group.localityLabel,
             contractCount: group.rows.length,
@@ -1294,6 +1483,7 @@ export function ControleGeralGastosOperacionaisPanel({
     buildPdfFilterLines,
     fetchedAt,
     localityGroups,
+    overviewForExport,
     showFaturamentoColumn,
     totalGastos,
     visibleRows.length,
@@ -1338,7 +1528,7 @@ export function ControleGeralGastosOperacionaisPanel({
               <button
                 type="button"
                 onClick={() => void handleExportPdf()}
-                disabled={isPanelLoading || exportingPdf || visibleRows.length === 0}
+                disabled={isPanelLoading || exportingPdf || !canExportPdf}
                 className="flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-800 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
               >
                 {exportingPdf ? (
@@ -1346,7 +1536,7 @@ export function ControleGeralGastosOperacionaisPanel({
                 ) : (
                   <Download className="h-4 w-4 shrink-0" aria-hidden />
                 )}
-                <span>{exportingPdf ? 'Gerando PDF…' : 'Exportar'}</span>
+                <span>{exportingPdf ? 'Gerando PDF…' : 'Exportar PDF completo'}</span>
               </button>
             </div>
           ) : (showPdfExport || showFaturamentoColumn) && !hideDataRefreshControls ? (
@@ -1367,7 +1557,7 @@ export function ControleGeralGastosOperacionaisPanel({
                 <button
                   type="button"
                   onClick={() => void handleExportPdf()}
-                  disabled={isPanelLoading || exportingPdf || visibleRows.length === 0}
+                  disabled={isPanelLoading || exportingPdf || !canExportPdf}
                   className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
                 >
                   {exportingPdf ? (
@@ -1375,7 +1565,7 @@ export function ControleGeralGastosOperacionaisPanel({
                   ) : (
                     <Download className="h-3.5 w-3.5" aria-hidden />
                   )}
-                  {exportingPdf ? 'Gerando PDF…' : 'Exportar PDF'}
+                  {exportingPdf ? 'Gerando PDF…' : 'Exportar PDF completo'}
                 </button>
                 {onRetry ? (
                   <button
@@ -1397,7 +1587,7 @@ export function ControleGeralGastosOperacionaisPanel({
             <button
               type="button"
               onClick={() => void handleExportPdf()}
-              disabled={isPanelLoading || exportingPdf || visibleRows.length === 0}
+              disabled={isPanelLoading || exportingPdf || !canExportPdf}
               className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {exportingPdf ? (
@@ -1405,7 +1595,7 @@ export function ControleGeralGastosOperacionaisPanel({
               ) : (
                 <Download className="h-4 w-4" aria-hidden />
               )}
-              {exportingPdf ? 'Gerando PDF…' : 'Exportar PDF'}
+              {exportingPdf ? 'Gerando PDF…' : 'Exportar PDF completo'}
             </button>
           ) : null}
         </div>
@@ -1694,7 +1884,7 @@ export function ControleGeralGastosOperacionaisPanel({
                                     row.polo?.trim() || '—'
                                   ) : (
                                     <StringSingleSelectDropdown
-                                      value={getEffectiveContractLocality(row.contract, localityOverrides)}
+                                      value={getEffectiveContractLocality(row.contract, inferredLocalityOverrides)}
                                       onChange={(value) =>
                                         handleContractLocalityChange(row.contract, value)
                                       }

@@ -99,6 +99,7 @@ model User {
   fluigWorkflowApproverViewers            FluigWorkflowApproverViewer[] @relation("FluigApproverViewerUser")
   updatedFluigWorkflowApproverViewers     FluigWorkflowApproverViewer[] @relation("FluigApproverViewerUpdatedBy")
   flowDiagrams                            FlowDiagram[]        @relation("FlowDiagramOwner")
+  licitacoesCreated                       Licitacao[]          @relation("LicitacaoCreator")
 
   @@map("users")
 }
@@ -3122,4 +3123,47 @@ model FlowDiagram {
 
   @@index([userId])
   @@map("flow_diagrams")
+}
+
+/// Processo de licitação com documentos e análise por IA.
+model Licitacao {
+  id              String   @id @default(cuid())
+  titulo          String
+  numeroProcesso  String?
+  orgao           String?
+  modalidade      String?
+  status          String   @default("RASCUNHO")
+  /// Objeto da licitação (extraído ou informado manualmente)
+  objeto          String?  @db.Text
+  /// Valor estimado em texto (ex.: "R$ 1.500.000,00")
+  valorEstimado   String?
+  /// Vigência do contrato em texto
+  vigenciaContrato String? @db.Text
+  /// Resultado estruturado da extração IA (JSON)
+  analiseJson     Json?
+  createdBy       String
+  creator         User     @relation("LicitacaoCreator", fields: [createdBy], references: [id], onDelete: Restrict)
+  documentos      LicitacaoDocumento[]
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([createdBy])
+  @@index([status])
+  @@index([createdAt])
+  @@map("licitacoes")
+}
+
+/// Documento anexado a um processo de licitação.
+model LicitacaoDocumento {
+  id           String    @id @default(cuid())
+  licitacaoId  String
+  licitacao    Licitacao @relation(fields: [licitacaoId], references: [id], onDelete: Cascade)
+  originalName String
+  storagePath  String
+  mimeType     String
+  size         Int
+  createdAt    DateTime  @default(now())
+
+  @@index([licitacaoId])
+  @@map("licitacao_documentos")
 }

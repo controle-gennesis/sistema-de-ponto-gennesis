@@ -2394,12 +2394,14 @@ function ConversasContent() {
   const topicsEnabled =
     activeChat?.chatType === 'DIRECT' || activeChat?.chatType === 'GROUP';
 
-  const { data: chatTopics = [] } = useQuery({
+  const { data: chatTopicsData } = useQuery({
     queryKey: ['chatTopics', selectedChatId],
     queryFn: () => fetchChatTopics(selectedChatId!),
     enabled: !!selectedChatId && topicsEnabled,
     refetchInterval: () => visibleTabRefetchInterval(15_000),
   });
+
+  const chatTopics = chatTopicsData?.topics ?? [];
 
   const topicFilteredMessages = useMemo(() => {
     if (!activeChat) return [];
