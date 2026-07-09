@@ -75,7 +75,8 @@ import {
   Loader2,
   Fuel,
   Car,
-  CalendarRange
+  CalendarRange,
+  Workflow
 } from 'lucide-react';
 import { pathToModuleKey } from '@sistema-ponto/permission-modules';
 import { usePermissions } from '@/hooks/usePermissions';
@@ -572,6 +573,13 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
             icon: Truck,
             description: 'Finalizar solicitações de entrega logística',
             permission: isAdministrator || can(pk('/ponto/entrega-logistica'))
+          },
+          {
+            name: 'Flow',
+            href: '/ponto/flow',
+            icon: Workflow,
+            description: 'Processos e fluxogramas de trabalho',
+            permission: isAdministrator || can(pk('/ponto/flow'))
           },
         ]
       },

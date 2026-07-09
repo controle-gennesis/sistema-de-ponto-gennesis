@@ -56,7 +56,12 @@ export function MainLayout({ children, userRole, userName, onLogout }: MainLayou
     setIsChangePasswordOpen(true);
   }, []);
 
-  const isFullBleedRoute = pathname != null && (pathname === '/ponto/conversas' || pathname.startsWith('/ponto/conversas/'));
+  const isFullBleedRoute = pathname != null && (
+    pathname === '/ponto/conversas' ||
+    pathname.startsWith('/ponto/conversas/') ||
+    pathname === '/ponto/flow' ||
+    pathname.startsWith('/ponto/flow')
+  );
 
   return (
     <NativeCallProvider value={nativeCall}>

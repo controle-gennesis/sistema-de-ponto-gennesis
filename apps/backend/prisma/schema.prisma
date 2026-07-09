@@ -98,6 +98,7 @@ model User {
   vehicleReservationsVistoriaReported     VehicleReservation[] @relation("VehicleReservationVistoriaReporter")
   fluigWorkflowApproverViewers            FluigWorkflowApproverViewer[] @relation("FluigApproverViewerUser")
   updatedFluigWorkflowApproverViewers     FluigWorkflowApproverViewer[] @relation("FluigApproverViewerUpdatedBy")
+  flowDiagrams                            FlowDiagram[]        @relation("FlowDiagramOwner")
 
   @@map("users")
 }
@@ -3104,4 +3105,21 @@ model LogisticsDeliveryInvoiceAttachment {
 
   @@index([completionId])
   @@map("logistics_delivery_invoice_attachments")
+}
+
+model FlowDiagram {
+  id          String   @id @default(cuid())
+  userId      String   @map("user_id")
+  name        String   @default("Fluxo sem título")
+  description String?
+  nodes       Json     @default("[]")
+  edges       Json     @default("[]")
+  viewport    Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user User @relation("FlowDiagramOwner", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("flow_diagrams")
 }

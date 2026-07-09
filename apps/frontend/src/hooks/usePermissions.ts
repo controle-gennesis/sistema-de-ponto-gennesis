@@ -527,6 +527,7 @@ export function useRoutePermission(route: string) {
       isAdministrator || isDepartmentCompras || can(pk('/ponto/entregas-logistica')),
     '/ponto/entrega-logistica':
       isAdministrator || can(pk('/ponto/entrega-logistica')),
+    '/ponto/flow': isAdministrator || can(pk('/ponto/flow')),
     '/ponto/estoque': isAdministrator || isDepartmentCompras || can(pk('/ponto/estoque')),
     '/ponto/ajuste-estoque': isAdministrator || isDepartmentCompras || can(pk('/ponto/ajuste-estoque')),
     '/ponto/furo-estoque': isAdministrator || isDepartmentCompras || can(pk('/ponto/furo-estoque')),

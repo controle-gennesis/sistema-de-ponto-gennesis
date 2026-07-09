@@ -9,6 +9,10 @@ import {
   extractOcNumberFromMovementNotes,
   type StockPaymentSlipParsed
 } from '../utils/stockMovementNotes';
+
+/** Lock distinto do requestNumber de RM (91827365) — serializa só a sequência de OC. */
+const PURCHASE_ORDER_NUMBER_ADVISORY_LOCK = 91827366;
+
 function labelForOcCorrectionSource(previousStatus: string): string {
   if (previousStatus === 'PENDING') return 'Gestor';
   if (previousStatus === 'PENDING_DIRETORIA') return 'Diretoria';
@@ -438,10 +442,14 @@ export interface UpdatePurchaseOrderDetailsData {
   }[];
 }
 
-async function generateOrderNumber(): Promise<string> {
+/**
+ * Gera número único de OC (formato: OC-YYYY-NNNN).
+ * Deve ser chamado dentro de uma transação que já obteve o advisory lock.
+ */
+async function generateOrderNumber(tx: Prisma.TransactionClient): Promise<string> {
   const year = new Date().getFullYear();
   const prefix = `OC-${year}-`;
-  const last = await prisma.purchaseOrder.findFirst({
+  const last = await tx.purchaseOrder.findFirst({
     where: { orderNumber: { startsWith: prefix } },
     orderBy: { orderNumber: 'desc' }
   });
@@ -523,7 +531,6 @@ export class PurchaseOrderService {
       }
     }
 
-    const orderNumber = await generateOrderNumber();
     const items = data.items.map((i) => {
       const qty = new Decimal(i.quantity);
       if (maxQtyByRmItem && i.materialRequestItemId) {
@@ -607,55 +614,62 @@ export class PurchaseOrderService {
       }
     }
 
-    const createDataBase = {
-      orderNumber,
-      materialRequestId: data.materialRequestId || null,
-      quoteMapId: data.quoteMapId || null,
-      supplierId: data.supplierId,
-      expectedDelivery: data.expectedDelivery || null,
-      deliveryAddress: data.deliveryAddress || null,
-      paymentType: data.paymentType || null,
-      paymentCondition: data.paymentCondition || null,
-      paymentDetails: data.paymentDetails || null,
-      pixKeyType: data.pixKeyType?.trim() || null,
-      pixKey: data.pixKey?.trim() || null,
-      boletoAttachmentUrl,
-      boletoAttachmentName,
-      ...(paymentBoletoInstallments ? { paymentBoletoInstallments } : {}),
-      freightAmount: freight,
-      amountToPay,
-      notes: data.notes || null,
-      createdBy: userId,
-      items: { create: items }
-    } as const;
+    // Serializa geração de orderNumber + create (evita race em UNIQUE)
+    return prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe(
+        `SELECT pg_advisory_xact_lock(${PURCHASE_ORDER_NUMBER_ADVISORY_LOCK})`,
+      );
+      const orderNumber = await generateOrderNumber(tx);
 
-    try {
-      const created = await prisma.purchaseOrder.create({
-        data: { ...createDataBase, status: 'PENDING_COMPRAS' as any },
-        include: purchaseOrderIncludeDetail
-      });
-      return created;
-    } catch (error: any) {
-      const msg = typeof error?.message === 'string' ? error.message : '';
-      const isPrismaValidation = error?.name === 'PrismaClientValidationError' && msg;
-      // Compatibilidade temporária: Prisma Client antigo sem enum / campo.
-      if (isPrismaValidation && msg.includes('PENDING_COMPRAS')) {
-        const created = await prisma.purchaseOrder.create({
-          data: { ...createDataBase, status: 'PENDING' as any },
+      const createDataBase = {
+        orderNumber,
+        materialRequestId: data.materialRequestId || null,
+        quoteMapId: data.quoteMapId || null,
+        supplierId: data.supplierId,
+        expectedDelivery: data.expectedDelivery || null,
+        deliveryAddress: data.deliveryAddress || null,
+        paymentType: data.paymentType || null,
+        paymentCondition: data.paymentCondition || null,
+        paymentDetails: data.paymentDetails || null,
+        pixKeyType: data.pixKeyType?.trim() || null,
+        pixKey: data.pixKey?.trim() || null,
+        boletoAttachmentUrl,
+        boletoAttachmentName,
+        ...(paymentBoletoInstallments ? { paymentBoletoInstallments } : {}),
+        freightAmount: freight,
+        amountToPay,
+        notes: data.notes || null,
+        createdBy: userId,
+        items: { create: items }
+      } as const;
+
+      try {
+        return await tx.purchaseOrder.create({
+          data: { ...createDataBase, status: 'PENDING_COMPRAS' as any },
           include: purchaseOrderIncludeDetail
         });
-        return created;
+      } catch (error: any) {
+        const msg = typeof error?.message === 'string' ? error.message : '';
+        const isPrismaValidation = error?.name === 'PrismaClientValidationError' && msg;
+        // Compatibilidade temporária: Prisma Client antigo sem enum / campo.
+        if (isPrismaValidation && msg.includes('PENDING_COMPRAS')) {
+          return await tx.purchaseOrder.create({
+            data: { ...createDataBase, status: 'PENDING' as any },
+            include: purchaseOrderIncludeDetail
+          });
+        }
+        if (isPrismaValidation && msg.includes('quoteMapId') && createDataBase.quoteMapId) {
+          const { quoteMapId: _omit, ...withoutQuote } = createDataBase as typeof createDataBase & {
+            quoteMapId?: string | null;
+          };
+          return await tx.purchaseOrder.create({
+            data: { ...withoutQuote, status: 'PENDING_COMPRAS' as any },
+            include: purchaseOrderIncludeDetail
+          });
+        }
+        throw error;
       }
-      if (isPrismaValidation && msg.includes('quoteMapId') && createDataBase.quoteMapId) {
-        const { quoteMapId: _omit, ...withoutQuote } = createDataBase as typeof createDataBase & { quoteMapId?: string | null };
-        const created = await prisma.purchaseOrder.create({
-          data: { ...withoutQuote, status: 'PENDING_COMPRAS' as any },
-          include: purchaseOrderIncludeDetail
-        });
-        return created;
-      }
-      throw error;
-    }
+    });
   }
 
   private buildPurchaseOrderListWhere(filters: {
@@ -1024,16 +1038,23 @@ export class PurchaseOrderService {
               );
             }
           } else {
-            const proofIdx = firstNonPaidInstallmentWithProof(inst, meta.paymentParcelCount);
-            if (proofIdx < 0) {
-              throw new Error(
-                'Anexe o comprovante de pagamento da parcela atual antes de enviar para validação'
-              );
+            if (allMultiInstallmentsPaid(inst, meta.paymentParcelCount)) {
+              if (!proofUrl && !allInstallmentsHavePaymentProof(inst, meta.paymentParcelCount)) {
+                throw new Error(
+                  'Anexe o comprovante de pagamento antes de enviar para validação'
+                );
+              }
+            } else {
+              const proofIdx = firstNonPaidInstallmentWithProof(inst, meta.paymentParcelCount);
+              if (proofIdx < 0) {
+                throw new Error(
+                  'Anexe o comprovante de pagamento da parcela atual antes de enviar para validação'
+                );
+              }
             }
           }
           if (!proofUrl) {
             for (let i = 0; i < meta.paymentParcelCount; i++) {
-              if (rowStatus(inst[i]) === 'PAID') continue;
               const fromInst = (inst[i]?.installmentProofUrl || '').trim();
               if (fromInst) {
                 proofUrl = fromInst;
