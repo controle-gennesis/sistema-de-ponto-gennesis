@@ -31,7 +31,7 @@
 
  *   PAYMENT_CONDITION — filtra OCs por paymentCondition (opcional)
 
- *   USER_EMAIL, USER_PASSWORD
+ *   USER.email, USER_PASSWORD
 
  */
 
@@ -45,7 +45,7 @@ import exec from 'k6/execution';
 
 import { Counter } from 'k6/metrics';
 
-
+import { getUserCredentials, loginJsonBody } from './carga-auth.js';
 
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:5000/api';
 
@@ -57,9 +57,7 @@ const PARCEL_COUNT = Math.max(2, Number(__ENV.PARCEL_COUNT || 2));
 
 const PAYMENT_CONDITION_FILTER = (__ENV.PAYMENT_CONDITION || '').trim();
 
-const USER_EMAIL = __ENV.USER_EMAIL || 'teste1@loadtest.com';
-
-const USER_PASSWORD = __ENV.USER_PASSWORD || 'Teste123!';
+const USER = getUserCredentials();
 
 
 
@@ -147,7 +145,7 @@ function login() {
 
     `${BASE_URL}/auth/login`,
 
-    JSON.stringify({ email: USER_EMAIL, password: USER_PASSWORD }),
+    loginJsonBody(USER),
 
     { headers: jsonHeaders(), tags: { endpoint: 'login' } },
 
@@ -547,7 +545,7 @@ export function setup() {
 
   if (!session?.token) {
 
-    throw new Error(`Login falhou (${USER_EMAIL}).`);
+    throw new Error(`Login falhou (${USER.email}).`);
 
   }
 
@@ -563,7 +561,7 @@ export function setup() {
 
       `ITERATIONS=${ITERATIONS} | VUS=${Math.min(VUS, ITERATIONS)} | ` +
 
-      `usuário=${USER_EMAIL}` +
+      `usuário=${USER.email}` +
 
       (PAYMENT_CONDITION_FILTER ? ` | paymentCondition=${PAYMENT_CONDITION_FILTER}` : ''),
 
@@ -603,7 +601,7 @@ export function setup() {
 
     console.warn(
 
-      `${mismatched.length} OC(s) não criadas por ${USER_EMAIL}; anexo de NF/finalização pode falhar.`,
+      `${mismatched.length} OC(s) não criadas por ${USER.email}; anexo de NF/finalização pode falhar.`,
 
     );
 

@@ -5,6 +5,16 @@ import { resolveRmServiceOrderFields } from '../utils/materialRequestServiceOrde
 /** Lock de sessão Postgres para serializar geração de requestNumber (mesmo padrão de DpRequest). */
 const MATERIAL_REQUEST_NUMBER_ADVISORY_LOCK = 91827365;
 
+/**
+ * Transação com advisory lock + generateRequestNumber + create.
+ * Prisma default: maxWait 2s, timeout 5s — insuficiente com latência Railway
+ * e fila serializada no lock sob concorrência (mesmo padrão de OC).
+ */
+const MATERIAL_REQUEST_CREATE_TX_OPTIONS = {
+  maxWait: Number(process.env.MATERIAL_REQUEST_CREATE_TX_MAX_WAIT_MS) || 30_000,
+  timeout: Number(process.env.MATERIAL_REQUEST_CREATE_TX_TIMEOUT_MS) || 90_000,
+};
+
 export interface RmDropdownMaterial {
   id: string;
   code: string;
@@ -277,7 +287,8 @@ export class MaterialRequestService {
     const demandSheetAttachmentName = (data.demandSheetAttachmentName || '').trim();
 
     // Serializa geração de requestNumber + create (evita race em UNIQUE)
-    const request = await prisma.$transaction(async (tx) => {
+    const request = await prisma.$transaction(
+      async (tx) => {
       await tx.$executeRawUnsafe(
         `SELECT pg_advisory_xact_lock(${MATERIAL_REQUEST_NUMBER_ADVISORY_LOCK})`,
       );
@@ -339,7 +350,9 @@ export class MaterialRequestService {
           }
         }
       });
-    });
+    },
+      MATERIAL_REQUEST_CREATE_TX_OPTIONS,
+    );
 
     return request;
   }

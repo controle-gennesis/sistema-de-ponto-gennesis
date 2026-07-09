@@ -20,20 +20,20 @@
  *   BASE_URL=http://localhost:5000/api
  *   VUS=5
  *   ITERATIONS=50
- *   APPROVER_EMAIL=teste1@loadtest.com
- *   APPROVER_PASSWORD=Teste123!
+ *   USER_EMAIL=... (obrigatório)
+ *   USER_PASSWORD=... (obrigatório)
  */
 
 import http from 'k6/http';
 import { check, sleep, fail } from 'k6';
 import exec from 'k6/execution';
 import { Counter } from 'k6/metrics';
+import { getUserCredentials, loginJsonBody } from './carga-auth.js';
 
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:5000/api';
 const VUS = Math.max(1, Number(__ENV.VUS || 5));
 const ITERATIONS = Math.max(1, Number(__ENV.ITERATIONS || 50));
-const APPROVER_EMAIL = __ENV.APPROVER_EMAIL || 'teste1@loadtest.com';
-const APPROVER_PASSWORD = __ENV.APPROVER_PASSWORD || 'Teste123!';
+const USER = getUserCredentials();
 
 /** Só incrementa em PATCH com status 200 + success. */
 const rmApproved = new Counter('rm_approved');
@@ -70,11 +70,10 @@ function parseJson(res) {
 }
 
 function loginApprover() {
-  const res = http.post(
-    `${BASE_URL}/auth/login`,
-    JSON.stringify({ email: APPROVER_EMAIL, password: APPROVER_PASSWORD }),
-    { headers: jsonHeaders(), tags: { endpoint: 'login' } },
-  );
+  const res = http.post(`${BASE_URL}/auth/login`, loginJsonBody(USER), {
+    headers: jsonHeaders(),
+    tags: { endpoint: 'login' },
+  });
   const body = parseJson(res);
   const token = body?.data?.token;
   if (res.status !== 200 || !token) {
@@ -140,14 +139,14 @@ export function setup() {
   const session = loginApprover();
   if (!session?.token) {
     throw new Error(
-      `Login do aprovador falhou (${APPROVER_EMAIL}). ` +
+      `Login do aprovador falhou (${USER.email}). ` +
         `Confira senha e rode: npx tsx scripts/conceder-aprovador-rm-teste.ts`,
     );
   }
 
   const pending = fetchPendingRms(session.token);
   console.log(
-    `setup — PENDING=${pending.length} | ITERATIONS=${ITERATIONS} | VUS=${Math.min(VUS, ITERATIONS)} | aprovador=${APPROVER_EMAIL}`,
+    `setup — PENDING=${pending.length} | ITERATIONS=${ITERATIONS} | VUS=${Math.min(VUS, ITERATIONS)} | aprovador=${USER.email}`,
   );
 
   if (pending.length === 0) {

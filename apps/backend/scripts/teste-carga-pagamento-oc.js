@@ -17,7 +17,7 @@
  *   BASE_URL=http://localhost:5000/api
  *   VUS=5
  *   ITERATIONS=20
- *   USER_EMAIL=teste1@loadtest.com
+ *   USER.email=teste1@loadtest.com
  *   USER_PASSWORD=Teste123!
  */
 
@@ -26,11 +26,12 @@ import { check, sleep, fail } from 'k6';
 import exec from 'k6/execution';
 import { Counter } from 'k6/metrics';
 
+import { getUserCredentials, loginJsonBody } from './carga-auth.js';
+
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:5000/api';
 const VUS = Math.max(1, Number(__ENV.VUS || 5));
 const ITERATIONS = Math.max(1, Number(__ENV.ITERATIONS || 20));
-const USER_EMAIL = __ENV.USER_EMAIL || 'teste1@loadtest.com';
-const USER_PASSWORD = __ENV.USER_PASSWORD || 'Teste123!';
+const USER = getUserCredentials();
 
 /** PDF mínimo válido em memória (k6 http.file). */
 const FAKE_PDF_BYTES = '%PDF-1.1\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF';
@@ -83,7 +84,7 @@ function parseJson(res) {
 function login() {
   const res = http.post(
     `${BASE_URL}/auth/login`,
-    JSON.stringify({ email: USER_EMAIL, password: USER_PASSWORD }),
+    loginJsonBody(USER),
     { headers: jsonHeaders(), tags: { endpoint: 'login' } },
   );
   const body = parseJson(res);
@@ -295,7 +296,7 @@ export function setup() {
   const session = login();
   if (!session?.token) {
     throw new Error(
-      `Login falhou (${USER_EMAIL}). Confira senha e rode: npx tsx scripts/criar-usuarios-teste.ts`,
+      `Login falhou (${USER.email}). Confira senha e rode: npx tsx scripts/criar-usuarios-teste.ts`,
     );
   }
 
@@ -306,7 +307,7 @@ export function setup() {
 
   console.log(
     `setup — APPROVED+AVISTA=${approved.length} | ITERATIONS=${ITERATIONS} | ` +
-      `VUS=${Math.min(VUS, ITERATIONS)} | usuário=${USER_EMAIL} | ` +
+      `VUS=${Math.min(VUS, ITERATIONS)} | usuário=${USER.email} | ` +
       `lançamento=${paymentMonth}/${paymentYear}`,
   );
 
@@ -328,7 +329,7 @@ export function setup() {
   );
   if (mismatchedCreator.length > 0) {
     console.warn(
-      `${mismatchedCreator.length} OC(s) APPROVED+AVISTA não foram criadas por ${USER_EMAIL}; ` +
+      `${mismatchedCreator.length} OC(s) APPROVED+AVISTA não foram criadas por ${USER.email}; ` +
         'anexo de NF/finalização pode falhar (exige createdBy).',
     );
   }

@@ -13,6 +13,16 @@ import {
 /** Lock distinto do requestNumber de RM (91827365) — serializa só a sequência de OC. */
 const PURCHASE_ORDER_NUMBER_ADVISORY_LOCK = 91827366;
 
+/**
+ * Transação com advisory lock + generateOrderNumber + create (includes pesados).
+ * Prisma default: maxWait 2s, timeout 5s — insuficiente com latência Railway
+ * (~8s avg / ~11s p95 por OC) e fila serializada no lock sob concorrência.
+ */
+const PURCHASE_ORDER_CREATE_TX_OPTIONS = {
+  maxWait: Number(process.env.PURCHASE_ORDER_CREATE_TX_MAX_WAIT_MS) || 30_000,
+  timeout: Number(process.env.PURCHASE_ORDER_CREATE_TX_TIMEOUT_MS) || 90_000,
+};
+
 function labelForOcCorrectionSource(previousStatus: string): string {
   if (previousStatus === 'PENDING') return 'Gestor';
   if (previousStatus === 'PENDING_DIRETORIA') return 'Diretoria';
@@ -615,7 +625,8 @@ export class PurchaseOrderService {
     }
 
     // Serializa geração de orderNumber + create (evita race em UNIQUE)
-    return prisma.$transaction(async (tx) => {
+    return prisma.$transaction(
+      async (tx) => {
       await tx.$executeRawUnsafe(
         `SELECT pg_advisory_xact_lock(${PURCHASE_ORDER_NUMBER_ADVISORY_LOCK})`,
       );
@@ -669,7 +680,9 @@ export class PurchaseOrderService {
         }
         throw error;
       }
-    });
+    },
+      PURCHASE_ORDER_CREATE_TX_OPTIONS,
+    );
   }
 
   private buildPurchaseOrderListWhere(filters: {

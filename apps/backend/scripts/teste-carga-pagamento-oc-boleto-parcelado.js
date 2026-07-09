@@ -21,13 +21,14 @@
  *   PARCEL_COUNT=2
  *   PARCEL_DUE_DAYS=30,60
  *   PAYMENT_CONDITION — filtra OCs por paymentCondition (opcional)
- *   USER_EMAIL, USER_PASSWORD
+ *   USER.email, USER_PASSWORD
  */
 
 import http from 'k6/http';
 import { check, sleep, fail } from 'k6';
 import exec from 'k6/execution';
 import { Counter } from 'k6/metrics';
+import { getUserCredentials, loginJsonBody } from './carga-auth.js';
 
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:5000/api';
 const VUS = Math.max(1, Number(__ENV.VUS || 3));
@@ -35,8 +36,7 @@ const ITERATIONS = Math.max(1, Number(__ENV.ITERATIONS || 10));
 const PARCEL_COUNT = Math.max(2, Number(__ENV.PARCEL_COUNT || 2));
 const PARCEL_DUE_DAYS = parseParcelDueDays(__ENV.PARCEL_DUE_DAYS || '30,60');
 const PAYMENT_CONDITION_FILTER = (__ENV.PAYMENT_CONDITION || '').trim();
-const USER_EMAIL = __ENV.USER_EMAIL || 'teste1@loadtest.com';
-const USER_PASSWORD = __ENV.USER_PASSWORD || 'Teste123!';
+const USER = getUserCredentials();
 
 const FAKE_PDF_BYTES = '%PDF-1.1\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF';
 
@@ -126,7 +126,7 @@ function splitAmountInInstallments(total, n) {
 function login() {
   const res = http.post(
     `${BASE_URL}/auth/login`,
-    JSON.stringify({ email: USER_EMAIL, password: USER_PASSWORD }),
+    loginJsonBody(USER),
     { headers: jsonHeaders(), tags: { endpoint: 'login' } },
   );
   const body = parseJson(res);
@@ -428,7 +428,7 @@ export function setup() {
 
   const session = login();
   if (!session?.token) {
-    throw new Error(`Login falhou (${USER_EMAIL}).`);
+    throw new Error(`Login falhou (${USER.email}).`);
   }
 
   const approved = fetchApprovedParcelOrders(session.token);
@@ -439,7 +439,7 @@ export function setup() {
   console.log(
     `setup — APPROVED+BOLETO+${PARCEL_COUNT}parcelas=${approved.length} | ` +
       `ITERATIONS=${ITERATIONS} | VUS=${Math.min(VUS, ITERATIONS)} | ` +
-      `usuário=${USER_EMAIL} | prazos=[${PARCEL_DUE_DAYS.join(',')}]` +
+      `usuário=${USER.email} | prazos=[${PARCEL_DUE_DAYS.join(',')}]` +
       (PAYMENT_CONDITION_FILTER ? ` | paymentCondition=${PAYMENT_CONDITION_FILTER}` : ''),
   );
 
@@ -461,7 +461,7 @@ export function setup() {
   );
   if (mismatched.length > 0) {
     console.warn(
-      `${mismatched.length} OC(s) não criadas por ${USER_EMAIL}; NF/finalização pode falhar.`,
+      `${mismatched.length} OC(s) não criadas por ${USER.email}; NF/finalização pode falhar.`,
     );
   }
 
