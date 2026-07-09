@@ -23,6 +23,7 @@ import {
   PERMISSION_ACCESS_ACTION,
   PERMISSION_CONTROLE_CATEGORY,
   PERMISSION_MODULE_KEYS_MANAGED_ONLY_ON_CONTRACT_MATRIX,
+  PERMISSION_MODULE_KEYS_OPEN_ACCESS,
   PERMISSION_MODULES,
   pathToModuleKey,
   type PermissionModuleDef,
@@ -35,6 +36,7 @@ import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
 /** Orçamento e relatórios fotográficos: só pela aba «Contratos», não pela matriz «Acesso». */
 const HIDDEN_FROM_ACCESS_MATRIX = new Set<string>([
   ...PERMISSION_MODULE_KEYS_MANAGED_ONLY_ON_CONTRACT_MATRIX,
+  ...PERMISSION_MODULE_KEYS_OPEN_ACCESS,
   // Registros de Ponto: a página só aparece para funcionários com `requiresTimeClock`,
   // não é controlada pela matriz de permissões.
   pathToModuleKey('/ponto'),
@@ -186,7 +188,6 @@ function inferCategoryFromHref(href: string): string {
   if (
     [
       '/ponto/dashboard',
-      '/ponto/conversas-whatsapp',
       '/ponto/aprovacoes',
       '/ponto/financeiro/gestao-solicitacoes',
       '/ponto/solicitacoes-dp',
@@ -206,6 +207,8 @@ function inferCategoryFromHref(href: string): string {
       '/ponto/gerenciar-atestados',
       '/ponto/solicitacoes',
       '/ponto/gerenciar-solicitacoes',
+      '/ponto/gerenciar-solicitacoes-dp',
+      '/ponto/conversas-whatsapp',
       '/ponto/ferias',
       '/ponto/gerenciar-ferias',
       '/ponto/gerenciar-feriados',
@@ -652,6 +655,7 @@ export function UserPermissionsEditor({
     );
     DEPRECATED_CONTROLE_KEYS.forEach((k) => next.delete(k));
     PERMISSION_MODULE_KEYS_MANAGED_ONLY_ON_CONTRACT_MATRIX.forEach((k) => next.delete(k));
+    PERMISSION_MODULE_KEYS_OPEN_ACCESS.forEach((k) => next.delete(k));
     const nextContract = new Set<ContractAction>();
     const nextEmployee = new Set<ContractAction>();
     for (const p of perms) {
@@ -1038,6 +1042,7 @@ export function UserPermissionsEditor({
       );
       DEPRECATED_CONTROLE_KEYS.forEach((k) => nextGeneral.delete(k));
       PERMISSION_MODULE_KEYS_MANAGED_ONLY_ON_CONTRACT_MATRIX.forEach((k) => nextGeneral.delete(k));
+      PERMISSION_MODULE_KEYS_OPEN_ACCESS.forEach((k) => nextGeneral.delete(k));
       const nextContractActions = new Set<ContractAction>();
       const nextEmployeeActions = new Set<ContractAction>();
       for (const p of source.permissions || []) {

@@ -45,20 +45,30 @@ export const PERMISSION_MODULE_KEYS_MANAGED_ONLY_ON_CONTRACT_MATRIX: readonly st
 ];
 
 /**
+ * Módulos com acesso liberado para todos os usuários autenticados.
+ * Permanecem em `PERMISSION_MODULES` para orfãos no banco; ocultos na matriz «Acesso».
+ */
+export const PERMISSION_MODULE_KEYS_OPEN_ACCESS: readonly string[] = [
+  pathToModuleKey('/ponto/drive'),
+  pathToModuleKey('/ponto/kanban'),
+];
+
+/**
  * Lista alinhada aos submenus do Sidebar (cada linha = um módulo).
  * Ordem: categorias como no menu lateral.
  */
 export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
   // Principal
   { key: pathToModuleKey('/ponto/dashboard'), name: 'Dashboard', href: '/ponto/dashboard', category: 'Principal' },
-  { key: pathToModuleKey('/ponto/conversas-whatsapp'), name: 'Central de Atendimentos', href: '/ponto/conversas-whatsapp', category: 'Principal' },
   { key: pathToModuleKey('/ponto/financeiro/gestao-solicitacoes'), name: 'Fluig - Processos', href: '/ponto/financeiro/gestao-solicitacoes', category: 'Principal' },
   { key: pathToModuleKey('/ponto/fluig/aprovacoes-workflow'), name: 'Fluig - Aprovações', href: '/ponto/fluig/aprovacoes-workflow', category: 'Principal' },
   { key: pathToModuleKey('/ponto/solicitacoes-dp'), name: 'Solicitações DP/ADM/TST', href: '/ponto/solicitacoes-dp', category: 'Principal' },
   { key: pathToModuleKey('/ponto/reserva-veiculos'), name: 'Reserva de Veículos', href: '/ponto/reserva-veiculos', category: 'Principal' },
   { key: pathToModuleKey('/ponto/entrega-logistica'), name: 'Entrega da Logística', href: '/ponto/entrega-logistica', category: 'Principal' },
   { key: pathToModuleKey('/ponto/flow'), name: 'Flow', href: '/ponto/flow', category: 'Principal' },
+  /** Acesso livre — oculto na matriz «Acesso» (ver PERMISSION_MODULE_KEYS_OPEN_ACCESS). */
   { key: pathToModuleKey('/ponto/drive'), name: 'Meu Drive', href: '/ponto/drive', category: 'Principal' },
+  /** Acesso livre — oculto na matriz «Acesso» (ver PERMISSION_MODULE_KEYS_OPEN_ACCESS). */
   { key: pathToModuleKey('/ponto/kanban'), name: 'Tasks', href: '/ponto/kanban', category: 'Principal' },
   // Departamento Pessoal
   { key: pathToModuleKey('/ponto/funcionarios'), name: 'Funcionários', href: '/ponto/funcionarios', category: 'Departamento Pessoal' },
@@ -68,6 +78,12 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
   { key: pathToModuleKey('/ponto/solicitacoes'), name: 'Alterações de Ponto', href: '/ponto/solicitacoes', category: 'Departamento Pessoal' },
   { key: pathToModuleKey('/ponto/gerenciar-solicitacoes'), name: 'Gerenciar Alterações de Ponto', href: '/ponto/gerenciar-solicitacoes', category: 'Departamento Pessoal' },
   { key: pathToModuleKey('/ponto/gerenciar-solicitacoes-dp'), name: 'Gerenciar Solicitações', href: '/ponto/gerenciar-solicitacoes-dp', category: 'Departamento Pessoal' },
+  {
+    key: pathToModuleKey('/ponto/conversas-whatsapp'),
+    name: 'Central de Atendimentos',
+    href: '/ponto/conversas-whatsapp',
+    category: 'Departamento Pessoal',
+  },
   // ADM/TST
   {
     key: pathToModuleKey('/ponto/gerenciar-solicitacoes-adm-tst'),

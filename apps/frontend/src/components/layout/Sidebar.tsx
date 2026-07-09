@@ -532,13 +532,6 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
               fluigApproverNameKeys.length > 0
           },
           {
-            name: 'Central de Atendimentos',
-            href: '/ponto/conversas-whatsapp',
-            icon: MessageSquare,
-            description: 'Conversas do chatbot WhatsApp para o pessoal ver',
-            permission: isAdministrator || isDepartmentPessoal || can(pk('/ponto/conversas-whatsapp'))
-          },
-          {
             name: 'Aprovações',
             href: '/ponto/aprovacoes',
             icon: FileCheck,
@@ -637,6 +630,13 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
             description: 'Tramitar solicitações do Departamento Pessoal',
             permission:
               isAdministrator || isDepartmentPessoal || can(pk('/ponto/gerenciar-solicitacoes-dp')),
+          },
+          {
+            name: 'Central de Atendimentos',
+            href: '/ponto/conversas-whatsapp',
+            icon: MessageSquare,
+            description: 'Conversas do chatbot WhatsApp para o pessoal ver',
+            permission: isAdministrator || isDepartmentPessoal || can(pk('/ponto/conversas-whatsapp'))
           },
           {
             name: 'Férias',
