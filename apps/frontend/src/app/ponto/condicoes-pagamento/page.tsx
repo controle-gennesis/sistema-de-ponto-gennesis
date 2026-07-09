@@ -420,7 +420,7 @@ export default function CondicoesPagamentoPage() {
           </Card>
 
           {showForm && (
-            <div className="fixed inset-0 z-[1100] flex items-center justify-center p-4">
+            <div className="app-modal-overlay fixed inset-0 z-[2100] flex items-center justify-center p-4">
               <div
                 className="absolute inset-0 bg-black/50"
                 aria-hidden
@@ -618,7 +618,7 @@ export default function CondicoesPagamentoPage() {
           )}
 
           {deleteId && (
-            <div className="fixed inset-0 z-[1100] flex items-center justify-center p-4">
+            <div className="app-modal-overlay fixed inset-0 z-[2100] flex items-center justify-center p-4">
               <div className="absolute inset-0 bg-black/50" aria-hidden onClick={() => setDeleteId(null)} />
               <div className="relative z-[1101] w-full max-w-sm rounded-lg bg-white p-6 shadow-xl dark:bg-gray-800">
                 <p className="mb-4 text-gray-900 dark:text-gray-100">Excluir esta condição de pagamento?</p>

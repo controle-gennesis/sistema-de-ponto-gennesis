@@ -499,7 +499,7 @@ export function RmApprovalsSection() {
         typeof document !== 'undefined' &&
         createPortal(
           <>
-            <div className="fixed inset-0 z-[200]" aria-hidden onClick={() => setActionMenu(null)} />
+            <div className="fixed inset-0 z-[2000]" aria-hidden onClick={() => setActionMenu(null)} />
             <div
               role="menu"
               className="fixed z-[201] w-56 rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800 overflow-hidden"

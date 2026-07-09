@@ -1852,7 +1852,7 @@ export function EmployeeList({
               createPortal(
                 <>
                   <div
-                    className="fixed inset-0 z-[200]"
+                    className="app-modal-overlay fixed inset-0 z-[2000]"
                     aria-hidden
                     onClick={() => setEmployeeActionMenu(null)}
                   />
@@ -1991,7 +1991,7 @@ export function EmployeeList({
         )}
 
         {isFiltersModalOpen && (
-          <div className="fixed inset-0 z-[1000] flex items-center justify-center">
+          <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center">
             <div className="absolute inset-0 bg-black/40" onClick={() => setIsFiltersModalOpen(false)} />
             <div className="relative mx-4 w-full max-w-3xl rounded-xl bg-white shadow-2xl dark:bg-gray-800">
               <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4 dark:border-gray-700">
@@ -2115,7 +2115,7 @@ export function EmployeeList({
 
         {/* Modal de confirmação de exclusão */}
         {deleteConfirm && (
-          <div className="fixed inset-0 z-[1000] flex items-center justify-center">
+          <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center">
             <div className="absolute inset-0 bg-black/40" onClick={() => setDeleteConfirm(null)} />
             <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-2xl max-w-md w-full mx-4">
               <div className="p-6">
@@ -2165,7 +2165,7 @@ export function EmployeeList({
 
         {/* Modal de confirmação de admissão (reativar) */}
         {reactivateConfirm && (
-          <div className="fixed inset-0 z-[1000] flex items-center justify-center">
+          <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center">
             <div className="absolute inset-0 bg-black/40" onClick={() => setReactivateConfirm(null)} />
             <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-2xl max-w-md w-full mx-4">
               <div className="p-6">
@@ -2213,7 +2213,7 @@ export function EmployeeList({
 
         {/* Modal de detalhes do funcionário */}
         {selectedEmployee && (
-          <div className="fixed inset-0 z-[110] flex items-center justify-center">
+          <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center">
             <div className="absolute inset-0 bg-black/40" onClick={() => setSelectedEmployee(null)} />
             <div className="relative w-full max-w-5xl mx-4 bg-white dark:bg-gray-800 rounded-2xl shadow-2xl overflow-hidden h-[85vh] overflow-y-auto">
               {/* Header + Abas fixos */}
@@ -2856,7 +2856,7 @@ export function EmployeeList({
                                         {openRecordMenu === recordMenuId && (
                                           <>
                                             <div 
-                                              className="fixed inset-0 z-10" 
+                                              className="app-modal-overlay fixed inset-0 z-10" 
                                               onClick={() => setOpenRecordMenu(null)}
                                             />
                                             <div className="absolute right-0 top-full mt-1 w-40 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 z-20 overflow-hidden">
@@ -2992,7 +2992,7 @@ export function EmployeeList({
 
         {/* Modal de edição de registro */}
         {editingRecord && (
-          <div className="fixed inset-0 z-[110] flex items-center justify-center">
+          <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center">
             <div className="absolute inset-0 bg-black/40" onClick={handleCancelEdit} />
             <div className="relative w-full max-w-md mx-4 bg-white dark:bg-gray-800 rounded-lg shadow-2xl">
               <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
@@ -3098,7 +3098,7 @@ export function EmployeeList({
 
       {/* Modal de criar ponto manualmente */}
       {showManualPointModal && selectedEmployee && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center">
+        <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center">
           <div className="absolute inset-0 bg-black/40" onClick={() => setShowManualPointModal(false)} />
           <div className="relative w-full max-w-md mx-4 bg-white dark:bg-gray-800 rounded-lg shadow-2xl">
             <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
@@ -3217,7 +3217,7 @@ export function EmployeeList({
 
       {/* Modal de importar pontos */}
       {showImportModal && selectedEmployee && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center">
+        <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center">
           <div className="absolute inset-0 bg-black/50" onClick={() => {
             setShowImportModal(false);
             setSelectedFile(null);
@@ -3411,7 +3411,7 @@ export function EmployeeList({
 
       {/* Modal de confirmação para deletar registro */}
       {deleteRecordConfirm && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center">
+        <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center">
           <div className="absolute inset-0 bg-black/50" onClick={() => setDeleteRecordConfirm(null)} />
           <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full mx-4">
             <div className="p-6">
@@ -3464,7 +3464,7 @@ export function EmployeeList({
       )}
 
       {showChangePasswordModal && selectedEmployee && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center">
+        <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center">
           <div className="absolute inset-0 bg-black/50" onClick={() => setShowChangePasswordModal(false)} />
           <div className="relative bg-white dark:bg-gray-800 rounded-xl shadow-xl max-w-md w-full mx-4 border border-gray-200 dark:border-gray-700">
             <div className="p-5 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">

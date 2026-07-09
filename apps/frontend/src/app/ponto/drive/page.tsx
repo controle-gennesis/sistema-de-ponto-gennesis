@@ -725,7 +725,7 @@ function DrivePageContent() {
       >
         {/* Overlay drag-and-drop */}
         {isDraggingOver && canWriteInCurrentFolder && (
-          <div className="fixed inset-0 z-50 bg-red-600/10 border-4 border-dashed border-red-500 flex items-center justify-center pointer-events-none">
+          <div className="fixed inset-0 z-[2000] bg-red-600/10 border-4 border-dashed border-red-500 flex items-center justify-center pointer-events-none">
             <div className="bg-white dark:bg-gray-800 rounded-lg p-8 shadow-xl text-center border border-gray-200 dark:border-gray-700">
               <Upload className="h-12 w-12 text-red-600 dark:text-red-400 mx-auto mb-3" />
               <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">

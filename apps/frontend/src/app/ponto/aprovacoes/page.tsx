@@ -1211,7 +1211,7 @@ export default function AprovacoesPage() {
             typeof document !== 'undefined' &&
             createPortal(
               <>
-                <div className="fixed inset-0 z-[200]" aria-hidden onClick={() => setEspelhoActionMenu(null)} />
+                <div className="fixed inset-0 z-[2000]" aria-hidden onClick={() => setEspelhoActionMenu(null)} />
                 <div
                   role="menu"
                   className="fixed z-[201] w-56 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800"
@@ -1430,7 +1430,7 @@ export default function AprovacoesPage() {
 
           {attachmentPreview && (
             <div
-              className="fixed inset-0 z-[1200] flex items-center justify-center bg-black/85 p-4"
+              className="app-modal-overlay fixed inset-0 z-[2200] flex items-center justify-center bg-black/85 p-4"
               role="dialog"
               aria-modal="true"
               aria-label="Visualizar anexo do atestado"

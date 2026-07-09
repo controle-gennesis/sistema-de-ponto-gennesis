@@ -436,7 +436,7 @@ export default function TomadoresEspelhoNfPage() {
         </div>
 
         {showForm ? (
-          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+          <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center p-4">
             <div
               className="absolute inset-0 bg-black/50"
               onClick={() => {
@@ -634,7 +634,7 @@ export default function TomadoresEspelhoNfPage() {
         ) : null}
 
         {showDeleteModal ? (
-          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+          <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-black/50" onClick={() => setShowDeleteModal(null)} />
             <div className="relative mx-4 w-full max-w-md rounded-lg bg-white p-6 shadow-xl dark:bg-gray-800">
               <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/30">

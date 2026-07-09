@@ -378,6 +378,12 @@
     overscroll-behavior: none;
   }
 
+  /* Impede clique/scroll na sidebar enquanto houver modal aberto */
+  html.modal-open [data-app-sidebar],
+  body.modal-open [data-app-sidebar] {
+    pointer-events: none !important;
+  }
+
   /* Raiz para dropdowns em portal (não intercepta cliques quando vazio) */
   #dropdown-portal-root {
     position: fixed;

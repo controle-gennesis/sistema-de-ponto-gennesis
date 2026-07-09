@@ -1187,7 +1187,7 @@ export default function AlocacaoPage() {
 
         {/* Modal de Centro de Custo */}
         {isModalOpen && selectedEmployee && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-black/40" onClick={handleCloseModal} />
             <div className="relative w-full max-w-4xl rounded-lg bg-white dark:bg-gray-800 p-6 shadow-lg max-h-[90vh] overflow-y-auto">
               <button

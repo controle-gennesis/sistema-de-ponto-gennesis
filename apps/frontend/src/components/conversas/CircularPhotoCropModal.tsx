@@ -92,7 +92,7 @@ export function CircularPhotoCropModal({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[200050] flex min-h-[100vh] flex-col bg-black/80 backdrop-blur-sm"
+      className="app-modal-overlay fixed inset-0 z-[200050] flex min-h-[100vh] flex-col bg-black/80 backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
       aria-labelledby="crop-photo-title"

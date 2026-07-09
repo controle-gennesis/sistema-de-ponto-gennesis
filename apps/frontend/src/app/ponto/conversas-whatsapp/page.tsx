@@ -1269,7 +1269,7 @@ export default function ConversasWhatsAppPage() {
         typeof document !== 'undefined' &&
         createPortal(
           <div
-            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4"
+            className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/60 p-4"
             role="dialog"
             aria-modal="true"
             aria-labelledby="whatsapp-atestado-conversa-title"
@@ -1315,7 +1315,7 @@ export default function ConversasWhatsAppPage() {
         typeof document !== 'undefined' &&
         createPortal(
           <div
-            className="fixed inset-0 z-[110] flex items-center justify-center bg-black/80 p-4"
+            className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center bg-black/80 p-4"
             role="dialog"
             aria-modal="true"
             aria-label="Visualizar arquivo do atestado"

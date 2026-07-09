@@ -5161,7 +5161,7 @@ export default function ContractDetailPage() {
 
           {/* Modal de aditivos do contrato */}
           {showAddendumModal && (
-            <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-2">
+            <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 p-2">
               <div className="absolute inset-0" onClick={() => setShowAddendumModal(false)} />
               <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
                 <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between sticky top-0 bg-white dark:bg-gray-800 z-10">
@@ -5278,7 +5278,7 @@ export default function ContractDetailPage() {
 
           {/* Modal ajuste valor anual (orçamento do órgão) */}
           {showValorAnualAdjustModal && (
-            <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-2">
+            <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 p-2">
               <div className="absolute inset-0" onClick={() => setShowValorAnualAdjustModal(false)} />
               <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto">
                 <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between sticky top-0 bg-white dark:bg-gray-800 z-10">
@@ -5398,7 +5398,7 @@ export default function ContractDetailPage() {
 
           {/* Modal Cadastrar Produção Semanal */}
           {showProductionModal && !editingProduction && (
-            <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50">
+            <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center bg-black/50">
               <div className="absolute inset-0" onClick={() => setShowProductionModal(false)} />
               <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full mx-4 max-h-[90vh] overflow-y-auto">
                 <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between sticky top-0 bg-white dark:bg-gray-800 z-10">
@@ -5498,7 +5498,7 @@ export default function ContractDetailPage() {
 
           {/* Modal Editar Produção Semanal */}
           {editingProduction && selectedProduction && (
-            <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50">
+            <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center bg-black/50">
               <div className="absolute inset-0" onClick={() => setEditingProduction(false)} />
               <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full mx-4 max-h-[90vh] overflow-y-auto">
                 <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between sticky top-0 bg-white dark:bg-gray-800 z-10">
@@ -5593,7 +5593,7 @@ export default function ContractDetailPage() {
 
           {/* Modal Cadastrar Faturamento */}
           {showBillingModal && (
-            <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50">
+            <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center bg-black/50">
               <div className="absolute inset-0" onClick={() => setShowBillingModal(false)} />
               <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full mx-4 max-h-[90vh] overflow-y-auto">
                 <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between sticky top-0 bg-white dark:bg-gray-800 z-10">
@@ -5774,7 +5774,7 @@ export default function ContractDetailPage() {
 
           {/* Modal Informar Valores do Pleito */}
           {showPleitoValoresModal && (
-            <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-2">
+            <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 p-2">
               <div className="absolute inset-0" onClick={() => setShowPleitoValoresModal(false)} />
               <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-lg w-full mx-4 max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
                 <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
@@ -5893,7 +5893,7 @@ export default function ContractDetailPage() {
 
           {/* Modal Resumo do Pleito */}
           {showPleitoResumoModal && (
-            <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-2">
+            <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 p-2">
               <div className="absolute inset-0" onClick={() => setShowPleitoResumoModal(false)} />
               <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
                 <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
@@ -5955,7 +5955,7 @@ export default function ContractDetailPage() {
 
           {/* Modal Detalhes do Faturamento */}
           {selectedBilling && (
-            <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-2">
+            <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 p-2">
               <div className="absolute inset-0" onClick={() => { setSelectedBilling(null); setEditingBilling(false); }} />
               <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-lg w-full mx-4 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
                 <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between sticky top-0 bg-white dark:bg-gray-800 z-10">
@@ -6122,7 +6122,7 @@ export default function ContractDetailPage() {
 
           {/* Modal Detalhes do Ordem de Serviço */}
           {selectedPleitoId && (
-            <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-2">
+            <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 p-2">
               <div className="absolute inset-0" onClick={() => setSelectedPleitoId(null)} />
               <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-3xl w-full mx-4 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
                 <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between sticky top-0 bg-white dark:bg-gray-800 z-10">

@@ -17,6 +17,7 @@ import { useNativeWebRTCCall } from '@/hooks/useNativeWebRTCCall';
 import { useChatSounds } from '@/hooks/useChatSounds';
 import { NativeCallOverlay } from '@/components/conversas/NativeCallOverlay';
 import { NativeCallProvider } from '@/contexts/NativeCallContext';
+import { useModalOverlayObserver } from '@/hooks/useModalOverlayObserver';
 
 interface MainLayoutProps {
   children: React.ReactNode;
@@ -42,6 +43,7 @@ export function MainLayout({ children, userRole, userName, onLogout }: MainLayou
   const { user } = usePermissions();
   const nativeCall = useNativeWebRTCCall({ userId: user?.id });
   useChatSounds({ userId: user?.id, callPhase: nativeCall.phase });
+  useModalOverlayObserver();
 
   useLayoutEffect(() => {
     setIsCollapsed(resolveInitialSidebarCollapsed(pathname));

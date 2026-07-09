@@ -534,7 +534,7 @@ export default function RecebimentoEntregasPageClient() {
                     createPortal(
                       <>
                         <div
-                          className="fixed inset-0 z-[1050]"
+                          className="app-modal-overlay fixed inset-0 z-[2100]"
                           aria-hidden
                           onClick={closeRowActionMenu}
                         />

@@ -3971,7 +3971,7 @@ function ConversasContent() {
                 editingMessageId &&
                 editingMessageModal &&
                 createPortal(
-                  <div className="fixed inset-0 z-[250] flex items-center justify-center px-4 py-6 sm:px-6">
+                  <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center px-4 py-6 sm:px-6">
                     <button
                       type="button"
                       className="absolute inset-0 bg-black/50 transition-opacity dark:bg-black/60"
@@ -4463,7 +4463,7 @@ function ConversasContent() {
                           {groupAvatarMenu && (
                             <>
                               <div
-                                className="fixed inset-0 z-[100]"
+                                className="fixed inset-0 z-[2000]"
                                 onClick={() => setGroupAvatarMenu(false)}
                               />
                               <div className="absolute left-1/2 -translate-x-1/2 top-[calc(100%+8px)] z-[101] min-w-[180px] rounded-xl bg-white dark:bg-gray-800 shadow-xl border border-gray-200 dark:border-gray-700 overflow-hidden py-1">
@@ -4848,7 +4848,7 @@ function ConversasContent() {
                       <button
                         type="button"
                         aria-label="Fechar modal"
-                        className="fixed inset-0 z-[1100] bg-black/50 backdrop-blur-[1px]"
+                        className="app-modal-overlay fixed inset-0 z-[2100] bg-black/50 backdrop-blur-[1px]"
                         onClick={() => {
                           if (addGroupMembersMutation.isPending) return;
                           setShowAddGroupMembers(false);
@@ -4857,7 +4857,7 @@ function ConversasContent() {
                         }}
                       />
                       <div
-                        className="fixed inset-0 z-[1101] flex items-center justify-center p-4 pointer-events-none"
+                        className="app-modal-overlay fixed inset-0 z-[1101] flex items-center justify-center p-4 pointer-events-none"
                         role="presentation"
                       >
                         <div

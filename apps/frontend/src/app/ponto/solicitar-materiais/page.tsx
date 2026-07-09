@@ -1701,7 +1701,7 @@ function SolicitarMateriaisPage() {
           </Card>
 
           {isListFiltersModalOpen && (
-            <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
+            <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center p-4">
               <div className="absolute inset-0 bg-black/40" onClick={() => setIsListFiltersModalOpen(false)} aria-hidden />
               <div className="relative mx-4 w-full max-w-2xl rounded-xl bg-white shadow-2xl dark:bg-gray-800">
                 <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4 dark:border-gray-700">
@@ -1813,7 +1813,7 @@ function SolicitarMateriaisPage() {
           )}
 
           {isNewRequestModalOpen && (
-            <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
+            <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center p-4">
               <div className="absolute inset-0 bg-black/40" onClick={closeNewRequestModal} aria-hidden />
               <div
                 className="relative flex max-h-[min(92vh,720px)] w-full max-w-3xl flex-col rounded-xl border border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-800"
@@ -2090,7 +2090,7 @@ function SolicitarMateriaisPage() {
         </div>
 
         {detailViewId && (
-          <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
+          <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center p-4">
             <div
               className="absolute inset-0 bg-black/40"
               onClick={() => setDetailViewId(null)}
@@ -2328,7 +2328,7 @@ function SolicitarMateriaisPage() {
         )}
 
         {correctionEditId && (
-          <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
+          <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center p-4">
             <div
               className="absolute inset-0 bg-black/50"
               onClick={() => !updateCorrectionMutation.isPending && setCorrectionEditId(null)}

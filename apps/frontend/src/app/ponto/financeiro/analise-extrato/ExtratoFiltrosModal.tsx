@@ -120,7 +120,7 @@ export function ExtratoFiltrosModal({
   }));
 
   return createPortal(
-    <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
+    <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center p-4">
       <button
         type="button"
         className="absolute inset-0 cursor-default bg-black/50"

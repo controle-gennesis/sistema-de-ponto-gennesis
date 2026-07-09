@@ -364,7 +364,7 @@ export default function NaturezaOrcamentariaPage() {
 
         {/* Form Modal */}
         {showForm && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-black/50" onClick={() => { setShowForm(false); setEditingItem(null); }} />
             <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto">
               <div className="p-6 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center sticky top-0 bg-white dark:bg-gray-800 z-10">
@@ -393,7 +393,7 @@ export default function NaturezaOrcamentariaPage() {
 
         {/* Import Modal (novo: mesma estrutura do modal de Centros de Custo) */}
         {isImportOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+          <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center bg-black bg-opacity-50">
             <div className="absolute inset-0" onClick={() => { setIsImportOpen(false); setFile(null); setParsedRows([]); setResult(null); }} />
             <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-6xl w-full mx-4 max-h-[90vh] overflow-y-auto">
               <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between sticky top-0 bg-white dark:bg-gray-800 z-10">
@@ -557,7 +557,7 @@ export default function NaturezaOrcamentariaPage() {
 
         {/* Delete confirmation */}
         {showDeleteId && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-black/50" onClick={() => setShowDeleteId(null)} />
             <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
               <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">Excluir registro?</h3>

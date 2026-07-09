@@ -2,6 +2,8 @@ import React, { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { clsx } from 'clsx';
 import { X } from 'lucide-react';
+import { MODAL_OVERLAY_CLASS } from '@/lib/zIndex';
+import { syncModalOpenClass } from '@/lib/modalBodyLock';
 
 let modalScrollLockCount = 0;
 
@@ -27,16 +29,10 @@ function isEventInTopModal(target: EventTarget | null): boolean {
 
 function lockPageScroll() {
   modalScrollLockCount += 1;
-  document.documentElement.classList.add('modal-open');
-  document.body.classList.add('modal-open');
 }
 
 function unlockPageScroll() {
   modalScrollLockCount = Math.max(0, modalScrollLockCount - 1);
-  if (modalScrollLockCount === 0) {
-    document.documentElement.classList.remove('modal-open');
-    document.body.classList.remove('modal-open');
-  }
 }
 
 export interface ModalProps {
@@ -92,6 +88,7 @@ export const Modal: React.FC<ModalProps> = ({
     };
 
     lockPageScroll();
+    syncModalOpenClass();
     document.addEventListener('keydown', handleEscape);
     document.addEventListener('wheel', blockBackgroundScroll, { passive: false, capture: true });
     document.addEventListener('touchmove', blockBackgroundScroll, { passive: false, capture: true });
@@ -102,6 +99,7 @@ export const Modal: React.FC<ModalProps> = ({
       document.removeEventListener('wheel', blockBackgroundScroll, { capture: true });
       document.removeEventListener('touchmove', blockBackgroundScroll, { capture: true });
       unlockPageScroll();
+      syncModalOpenClass();
     };
   }, [isOpen, onClose, closeOnEscape]);
 
@@ -125,8 +123,9 @@ export const Modal: React.FC<ModalProps> = ({
     <div
       ref={rootRef}
       className={clsx(
-        'fixed inset-0 overflow-hidden overscroll-none',
-        elevated ? 'z-[1100]' : 'z-[1000]',
+        MODAL_OVERLAY_CLASS,
+        'fixed inset-0 overflow-hidden overscroll-none touch-none',
+        elevated ? 'z-[2100]' : 'z-[2000]',
       )}
     >
       <div className="flex h-full min-h-0 items-center justify-center p-4 overflow-hidden">

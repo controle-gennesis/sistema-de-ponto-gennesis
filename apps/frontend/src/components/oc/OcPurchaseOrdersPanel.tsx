@@ -3488,7 +3488,7 @@ export function OcPurchaseOrdersPanel({
       </section>
 
       {rejectTarget && (
-        <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
+        <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/50" onClick={() => { setRejectTarget(null); setRejectReason(''); }} />
           <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full p-6">
             <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">Cancelar OC</h2>
@@ -3526,7 +3526,7 @@ export function OcPurchaseOrdersPanel({
       )}
 
       {correctionTarget && (
-        <div className="fixed inset-0 z-[1100] flex items-center justify-center p-4">
+        <div className="app-modal-overlay fixed inset-0 z-[2100] flex items-center justify-center p-4">
           <div
             className="absolute inset-0 bg-black/50"
             onClick={() => {
@@ -3577,7 +3577,7 @@ export function OcPurchaseOrdersPanel({
       )}
 
       {showEditOcModal && selectedOrder && editOcForm && (
-        <div className="fixed inset-0 z-[1100] flex items-center justify-center p-4">
+        <div className="app-modal-overlay fixed inset-0 z-[2100] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/50" onClick={() => setShowEditOcModal(false)} />
           <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto p-6">
             <div className="flex items-start justify-between gap-3 mb-4">
@@ -3656,7 +3656,7 @@ export function OcPurchaseOrdersPanel({
       )}
 
       {selectedOrder && !showEditOcModal && !correctionTarget && (
-        <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
+        <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/50" onClick={() => setSelectedOrder(null)} />
           <div
             className={`relative flex flex-col bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full mx-4 max-h-[min(92vh,880px)] ${
@@ -4965,7 +4965,7 @@ export function OcPurchaseOrdersPanel({
       )}
 
       {isApprovalFiltersModalOpen && (
-        <div className="fixed inset-0 z-[1100] flex items-center justify-center p-4">
+        <div className="app-modal-overlay fixed inset-0 z-[2100] flex items-center justify-center p-4">
           <div
             className="absolute inset-0 bg-black/40"
             onClick={() => setIsApprovalFiltersModalOpen(false)}
@@ -5078,7 +5078,7 @@ export function OcPurchaseOrdersPanel({
       </Modal>
 
       {isFinalizedFiltersModalOpen && (
-        <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
+        <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center p-4">
           <div
             className="absolute inset-0 bg-black/40"
             onClick={() => setIsFinalizedFiltersModalOpen(false)}
@@ -5184,7 +5184,7 @@ export function OcPurchaseOrdersPanel({
         typeof document !== 'undefined' &&
         createPortal(
           <>
-            <div className="fixed inset-0 z-[1100]" aria-hidden onClick={() => setOcActionMenu(null)} />
+            <div className="fixed inset-0 z-[2100]" aria-hidden onClick={() => setOcActionMenu(null)} />
             <div
               role="menu"
               className="fixed z-[1101] w-56 overflow-y-auto overflow-x-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800"

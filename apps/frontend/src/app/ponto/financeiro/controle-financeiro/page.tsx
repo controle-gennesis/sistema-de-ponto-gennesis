@@ -1421,7 +1421,7 @@ function MonthGroup({ year, month, items, onEdit, onDelete, deletingId }: MonthG
         createPortal(
           <>
             <div
-              className="fixed inset-0 z-[200]"
+              className="app-modal-overlay fixed inset-0 z-[2000]"
               aria-hidden
               onClick={() => setActionMenu(null)}
             />

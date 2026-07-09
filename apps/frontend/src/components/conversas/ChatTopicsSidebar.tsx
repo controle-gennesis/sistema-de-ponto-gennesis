@@ -513,10 +513,10 @@ export function ChatTopicsSidebar({
           <button
             type="button"
             aria-label="Fechar"
-            className="fixed inset-0 z-[1200] bg-black/50"
+            className="app-modal-overlay fixed inset-0 z-[2200] bg-black/50"
             onClick={() => !createMutation.isPending && setShowCreateModal(false)}
           />
-          <div className="fixed inset-0 z-[1201] flex items-center justify-center p-4 pointer-events-none">
+          <div className="app-modal-overlay fixed inset-0 z-[1201] flex items-center justify-center p-4 pointer-events-none">
             <div
               role="dialog"
               aria-modal="true"
@@ -595,10 +595,10 @@ export function ChatTopicsSidebar({
           <button
             type="button"
             aria-label="Fechar"
-            className="fixed inset-0 z-[1200] bg-black/50"
+            className="app-modal-overlay fixed inset-0 z-[2200] bg-black/50"
             onClick={() => !renameMutation.isPending && setRenameTopic(null)}
           />
-          <div className="fixed inset-0 z-[1201] flex items-center justify-center p-4 pointer-events-none">
+          <div className="app-modal-overlay fixed inset-0 z-[1201] flex items-center justify-center p-4 pointer-events-none">
             <div
               role="dialog"
               aria-modal="true"
@@ -668,10 +668,10 @@ export function ChatTopicsSidebar({
           <button
             type="button"
             aria-label="Fechar"
-            className="fixed inset-0 z-[1200] bg-black/50"
+            className="app-modal-overlay fixed inset-0 z-[2200] bg-black/50"
             onClick={() => !deleteMutation.isPending && setDeleteTopic(null)}
           />
-          <div className="fixed inset-0 z-[1201] flex items-center justify-center p-4 pointer-events-none">
+          <div className="app-modal-overlay fixed inset-0 z-[1201] flex items-center justify-center p-4 pointer-events-none">
             <div
               role="dialog"
               aria-modal="true"

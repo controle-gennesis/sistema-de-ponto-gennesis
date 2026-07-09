@@ -1555,7 +1555,7 @@ export default function AndamentoListPage() {
           )}
 
           {showPleitoValoresModal && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-2">
+            <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 p-2">
               <div className="absolute inset-0" onClick={() => setShowPleitoValoresModal(false)} />
               <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-lg w-full mx-4 max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
                 <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
@@ -1650,7 +1650,7 @@ export default function AndamentoListPage() {
           )}
 
           {showHistoricoPleitosModal && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-2">
+            <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 p-2">
               <div className="absolute inset-0" onClick={() => setShowHistoricoPleitosModal(false)} />
               <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-[95vw] w-full mx-4 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
                 <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between sticky top-0 bg-white dark:bg-gray-800 z-10">
@@ -1852,7 +1852,7 @@ export default function AndamentoListPage() {
           )}
 
           {showPleitoResumoModal && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-2">
+            <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 p-2">
               <div className="absolute inset-0" onClick={() => setShowPleitoResumoModal(false)} />
               <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
                 <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
@@ -1914,7 +1914,7 @@ export default function AndamentoListPage() {
           )}
 
           {showHistoricoBatchNfModal && (
-            <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-2">
+            <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 p-2">
               <div className="absolute inset-0" onClick={() => setShowHistoricoBatchNfModal(false)} />
               <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-md mx-4" onClick={(e) => e.stopPropagation()}>
                 <div className="px-5 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
@@ -1960,7 +1960,7 @@ export default function AndamentoListPage() {
           )}
 
           {selectedPleitoId && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-2">
+            <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 p-2">
               <div className="absolute inset-0" onClick={() => setSelectedPleitoId(null)} />
               <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-3xl w-full mx-4 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
                 <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between sticky top-0 bg-white dark:bg-gray-800 z-10">

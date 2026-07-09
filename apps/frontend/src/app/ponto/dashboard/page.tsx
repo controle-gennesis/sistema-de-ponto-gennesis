@@ -234,7 +234,7 @@ export default function DashboardPage() {
 
       {/* Modal de Funcionários Presentes */}
       {showPresentModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
+        <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center">
           <div className="absolute inset-0 bg-black/50" onClick={() => {
             setShowPresentModal(false);
             setSearchPresent('');
@@ -314,7 +314,7 @@ export default function DashboardPage() {
 
       {/* Modal de Funcionários Ausentes */}
       {showAbsentModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
+        <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center">
           <div className="absolute inset-0 bg-black/50" onClick={() => {
             setShowAbsentModal(false);
             setSearchAbsent('');
@@ -394,7 +394,7 @@ export default function DashboardPage() {
 
       {/* Modal de Funcionários Pendentes */}
       {showPendingModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
+        <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center">
           <div className="absolute inset-0 bg-black/50" onClick={() => {
             setShowPendingModal(false);
             setSearchPending('');

@@ -460,7 +460,7 @@ export default function PontoPage() {
 
       {/* Modal de registros detalhados */}
       {isPanelOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
+        <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center">
           <div className="absolute inset-0 bg-black/40" onClick={() => setIsPanelOpen(false)} />
           <div className="relative w-full max-w-3xl mx-4 bg-white dark:bg-gray-800 rounded-lg shadow-2xl overflow-hidden">
             <div className="px-6 py-4 border-b dark:border-gray-700 flex items-center justify-between">
@@ -513,7 +513,7 @@ export default function PontoPage() {
 
       {/* Modal de detalhamento do banco de horas */}
       {isBankDetailsOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
+        <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center">
           <div className="absolute inset-0 bg-black/40" onClick={() => setIsBankDetailsOpen(false)} />
           <div className="relative w-full max-w-6xl mx-4 bg-white dark:bg-gray-800 rounded-lg shadow-2xl overflow-hidden">
             <div className="px-6 py-4 border-b dark:border-gray-700">
@@ -658,7 +658,7 @@ export default function PontoPage() {
 
       {/* Modal de bater ponto */}
       {isPunchModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+        <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center p-4 bg-black/50">
           <div className="relative w-full max-w-md">
             <PunchCard
               onSuccess={() => {

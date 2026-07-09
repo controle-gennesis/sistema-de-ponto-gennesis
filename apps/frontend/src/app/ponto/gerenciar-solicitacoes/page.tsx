@@ -849,7 +849,7 @@ export default function GerenciarSolicitacoesPage() {
 
         {/* Modal de detalhes */}
         {selectedRequest && !showApprovalModal && !showRejectionModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-black/40" onClick={() => setSelectedRequest(null)} />
             <div className="relative w-full max-w-3xl bg-white dark:bg-gray-800 rounded-lg shadow-2xl overflow-hidden max-h-[90vh]">
               <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
@@ -926,7 +926,7 @@ export default function GerenciarSolicitacoesPage() {
 
         {/* Modal de aprovação */}
         {showApprovalModal && selectedRequest && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-black/40" onClick={() => {
               setShowApprovalModal(false);
               setSelectedRequest(null);
@@ -975,7 +975,7 @@ export default function GerenciarSolicitacoesPage() {
 
         {/* Modal de rejeição */}
         {showRejectionModal && selectedRequest && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-black/40" onClick={() => {
               setShowRejectionModal(false);
               setSelectedRequest(null);

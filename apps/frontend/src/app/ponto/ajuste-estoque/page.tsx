@@ -604,7 +604,7 @@ export default function AjusteEstoquePage() {
               </CardContent>
 
               {isHistoryFiltersModalOpen && (
-                <div className="fixed inset-0 z-[1000] flex items-center justify-center">
+                <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center">
                   <div
                     className="absolute inset-0 bg-black/40"
                     onClick={() => setIsHistoryFiltersModalOpen(false)}
@@ -692,7 +692,7 @@ export default function AjusteEstoquePage() {
             </Card>
 
           {isAdjustmentModalOpen && (
-            <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
+            <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center p-4">
               <div className="absolute inset-0 bg-black/40" onClick={closeAdjustmentModal} aria-hidden />
               <div
                 className="relative flex max-h-[min(92vh,720px)] w-full max-w-lg flex-col rounded-xl border border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-800"
@@ -828,7 +828,7 @@ export default function AjusteEstoquePage() {
           )}
 
           {historyDetail && (
-            <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
+            <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center p-4">
               <div className="absolute inset-0 bg-black/40" onClick={() => setHistoryDetail(null)} aria-hidden />
               <div className="relative z-10 w-full max-w-lg max-h-[min(90vh,32rem)] overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-900">
                 <div className="flex items-center justify-between border-b border-gray-200 dark:border-gray-700 px-4 py-3">

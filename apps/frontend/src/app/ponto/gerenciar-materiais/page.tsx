@@ -557,7 +557,7 @@ export default function GerenciarMateriaisPage() {
           const cancellationReason = getMaterialRequestCancellationReason(selectedRequest, detailOrders);
 
           return (
-          <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
+          <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center p-4">
             <div
               className="absolute inset-0 bg-black/50"
               onClick={() => {
@@ -707,7 +707,7 @@ export default function GerenciarMateriaisPage() {
 
         {/* Modal Criar OC */}
         {showCreateOCModal && selectedRequest && (
-          <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
+          <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center p-4">
             <div
               className="absolute inset-0 bg-black/50"
               onClick={() => {

@@ -569,7 +569,7 @@ export default function CentrosCustoPage() {
 
         {/* Modal de confirmação de exclusão */}
         {showDeleteModal && (
-          <div className="fixed inset-0 z-[110] flex items-center justify-center">
+          <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center">
             <div className="absolute inset-0 bg-black/50" onClick={() => setShowDeleteModal(null)} />
             <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
               <div className="flex items-center justify-center w-12 h-12 mx-auto mb-4 bg-red-100 dark:bg-red-900/30 rounded-full">
@@ -668,7 +668,7 @@ function CostCenterFormModal({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black bg-opacity-50">
+    <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center bg-black bg-opacity-50">
       <div className="absolute inset-0" onClick={onClose} />
       <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-3xl w-full mx-4 max-h-[90vh] overflow-y-auto">
         <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between sticky top-0 bg-white dark:bg-gray-800 z-10">
@@ -1128,7 +1128,7 @@ function ImportCostCentersModal({ isOpen, onClose, onSuccess }: { isOpen: boolea
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black bg-opacity-50">
+    <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center bg-black bg-opacity-50">
       <div className="absolute inset-0" onClick={handleClose} />
       <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-6xl w-full mx-4 max-h-[90vh] overflow-y-auto">
         <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between sticky top-0 bg-white dark:bg-gray-800 z-10">

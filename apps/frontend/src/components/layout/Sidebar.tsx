@@ -1227,7 +1227,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
       {/* Botão de menu mobile */}
       <button
         onClick={() => setIsOpen(true)}
-        className="lg:hidden fixed top-4 left-4 z-[100] p-2 bg-white dark:bg-gray-900 rounded-lg shadow-md hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-900 dark:text-gray-100"
+        className="lg:hidden fixed top-4 left-4 z-40 p-2 bg-white dark:bg-gray-900 rounded-lg shadow-md hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-900 dark:text-gray-100"
       >
         <Menu className="w-6 h-6" />
       </button>
@@ -1243,7 +1243,8 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
       {/* Dual-tier Sidebar */}
       <div
         ref={sidebarRef}
-        className={`fixed top-0 left-0 flex h-full transform overflow-visible transition-all ${SIDEBAR_TRANSITION_CLASS} z-[100] ${
+        data-app-sidebar
+        className={`fixed top-0 left-0 flex h-full transform overflow-visible transition-all ${SIDEBAR_TRANSITION_CLASS} z-40 ${
           isOpen ? 'translate-x-0' : '-translate-x-full'
         } lg:translate-x-0`}
       >
@@ -1631,7 +1632,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
 
       {/* Modal de Confirmação de Logout */}
       {showLogoutConfirm && (
-        <div className="fixed inset-0 z-[1000] flex items-center justify-center">
+        <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center">
           <div className="absolute inset-0 bg-black/50" onClick={handleCancelLogout} />
           <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
             <div className="flex items-center justify-center w-12 h-12 mx-auto mb-4 bg-yellow-100 dark:bg-yellow-900/30 rounded-full">

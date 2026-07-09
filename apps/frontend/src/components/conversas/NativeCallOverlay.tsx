@@ -597,7 +597,7 @@ export function NativeCallOverlay({
   }
 
   return createPortal(
-    <div className={`fixed inset-0 z-[200] flex min-h-0 flex-col ${overlayShellClass}`}>
+    <div className={`app-modal-overlay fixed inset-0 z-[2000] flex min-h-0 flex-col ${overlayShellClass}`}>
       {showMain && (
         <>
           <div className={`relative flex min-h-0 flex-1 flex-col bg-gradient-to-b ${callGradientClass}`}>

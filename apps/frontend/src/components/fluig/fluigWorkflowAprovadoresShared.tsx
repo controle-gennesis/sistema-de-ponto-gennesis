@@ -595,7 +595,7 @@ export const FilteredApproverRequestList = React.memo(function FilteredApproverR
       </CardContent>
 
       {isFiltersModalOpen ? (
-        <div className="fixed inset-0 z-[1000] flex items-center justify-center">
+        <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center">
           <div
             className="absolute inset-0 bg-black/40"
             onClick={() => setIsFiltersModalOpen(false)}

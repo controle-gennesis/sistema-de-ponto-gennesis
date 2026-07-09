@@ -8258,7 +8258,7 @@ export function OrcamentoPageView({
                         createPortal(
                           <>
                             <div
-                              className="fixed inset-0 z-[200]"
+                              className="app-modal-overlay fixed inset-0 z-[2000]"
                               aria-hidden
                               onClick={() => setOrcamentoListaActionMenu(null)}
                             />
@@ -8814,7 +8814,7 @@ export function OrcamentoPageView({
                       createPortal(
                         <>
                           <div
-                            className="fixed inset-0 z-[200]"
+                            className="app-modal-overlay fixed inset-0 z-[2000]"
                             aria-hidden
                             onClick={() => setMenuCtxAnalitico(null)}
                           />
@@ -10440,7 +10440,7 @@ export function OrcamentoPageView({
                       createPortal(
                         <>
                           <div
-                            className="fixed inset-0 z-[200]"
+                            className="app-modal-overlay fixed inset-0 z-[2000]"
                             aria-hidden
                             onClick={() => setMenuCtxMontagem(null)}
                           />
@@ -10769,7 +10769,7 @@ export function OrcamentoPageView({
 
       {/* ── Modal Orçafascio ─────────────────────────────────────────────── */}
       {orcafascioModalOpen && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+        <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <div className="relative w-full max-w-6xl max-h-[92vh] flex flex-col rounded-2xl bg-white dark:bg-gray-900 shadow-2xl overflow-hidden">
 
             {/* Header */}
@@ -11648,7 +11648,7 @@ export function OrcamentoPageView({
       )}
 
       {importOrcamentoModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+        <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center bg-black bg-opacity-50">
           <div
             className="absolute inset-0"
             onClick={() => {

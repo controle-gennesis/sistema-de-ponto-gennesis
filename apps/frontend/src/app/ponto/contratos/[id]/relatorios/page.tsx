@@ -460,7 +460,7 @@ export default function ContratoRelatoriosPage() {
                 createPortal(
                   <>
                     <div
-                      className="fixed inset-0 z-[200]"
+                      className="app-modal-overlay fixed inset-0 z-[2000]"
                       aria-hidden
                       onClick={() => setRelatorioActionMenu(null)}
                     />

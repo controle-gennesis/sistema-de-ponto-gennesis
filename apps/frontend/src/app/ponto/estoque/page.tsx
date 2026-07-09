@@ -1827,7 +1827,7 @@ export default function EstoquePage() {
               </CardContent>
 
               {isBalanceFiltersModalOpen && (
-                <div className="fixed inset-0 z-[1000] flex items-center justify-center">
+                <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center">
                   <div
                     className="absolute inset-0 bg-black/40"
                     onClick={() => setIsBalanceFiltersModalOpen(false)}
@@ -2080,7 +2080,7 @@ export default function EstoquePage() {
               </CardContent>
 
               {isHistoryFiltersModalOpen && (
-                <div className="fixed inset-0 z-[1000] flex items-center justify-center">
+                <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center">
                   <div
                     className="absolute inset-0 bg-black/40"
                     onClick={() => setIsHistoryFiltersModalOpen(false)}
@@ -2169,7 +2169,7 @@ export default function EstoquePage() {
           )}
 
           {balanceDetail && (
-            <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
+            <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center p-4">
               <div
                 className="absolute inset-0 bg-black/40"
                 onClick={() => setBalanceDetail(null)}
@@ -2266,7 +2266,7 @@ export default function EstoquePage() {
           )}
 
           {historyDetail && (
-            <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
+            <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center p-4">
               <div
                 className="absolute inset-0 bg-black/40"
                 onClick={() => setHistoryDetail(null)}
@@ -2341,7 +2341,7 @@ export default function EstoquePage() {
           )}
 
           {isMovementModalOpen && (
-            <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
+            <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center p-4">
               <div className="absolute inset-0 bg-black/40" onClick={closeMovementModal} aria-hidden />
               <div
                 className="relative flex max-h-[min(92vh,900px)] w-full max-w-4xl flex-col rounded-xl border border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-800"

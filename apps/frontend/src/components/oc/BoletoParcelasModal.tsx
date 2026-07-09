@@ -30,7 +30,7 @@ export function BoletoParcelasModal({
   const n = order.paymentParcelCount ?? 1;
 
   return (
-    <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
+    <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/50" onClick={onClose} />
       <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-6">
         <div className="flex items-start justify-between gap-2 mb-4">
