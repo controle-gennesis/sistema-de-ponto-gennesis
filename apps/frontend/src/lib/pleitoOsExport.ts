@@ -84,6 +84,37 @@ export function getOsEtiquetaAbertura(
   return isOsConcluida(p, billings) ? 'Concluída' : 'Aberta';
 }
 
+export type OsStatus = 'Aberta' | 'Pleiteado parcial' | 'Pleiteado' | 'Concluída';
+
+export function getOsStatus(
+  p: Pick<PleitoOsExportRow, 'divSe' | 'budget'>,
+  billings: BillingForOsCheck[],
+  allPleitos: PleitoForOsPleiteadoSum[]
+): OsStatus {
+  if (isOsConcluida(p, billings)) return 'Concluída';
+
+  const pleiteado = sumOsPleiteadoTotal(allPleitos, p.divSe);
+  if (pleiteado <= 0.01) return 'Aberta';
+
+  const pctPleiteado = getOsPleiteadoPct(p, allPleitos);
+  if (pctPleiteado !== null && pctPleiteado >= 99.99) return 'Pleiteado';
+
+  return 'Pleiteado parcial';
+}
+
+export function osStatusBadgeClass(status: OsStatus): string {
+  if (status === 'Concluída') {
+    return 'bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-100';
+  }
+  if (status === 'Pleiteado') {
+    return 'bg-violet-100 text-violet-800 dark:bg-violet-900/30 dark:text-violet-300';
+  }
+  if (status === 'Pleiteado parcial') {
+    return 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300';
+  }
+  return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300';
+}
+
 export function getOsStatusFaturamentoPct(
   p: Pick<PleitoOsExportRow, 'divSe' | 'budget'>,
   billings: BillingForOsCheck[]
@@ -92,6 +123,53 @@ export function getOsStatusFaturamentoPct(
   if (orcamento <= 0) return null;
   const acumulado = getOsFaturamentoAcumulado(p, billings);
   return (acumulado / orcamento) * 100;
+}
+
+export type PleitoForOsPleiteadoSum = {
+  divSe?: string | null;
+  billingRequest?: number | string | null;
+};
+
+/** Soma valores já pleiteados (billingRequest) para o mesmo OS/SE no contrato. */
+export function sumOsPleiteadoTotal(
+  allPleitos: PleitoForOsPleiteadoSum[],
+  divSe: string | null | undefined
+): number {
+  const key = (divSe || '').trim().toLowerCase();
+  if (!key) return 0;
+  return allPleitos.reduce((sum, p) => {
+    if ((p.divSe || '').trim().toLowerCase() !== key) return sum;
+    const br = p.billingRequest != null ? Number(p.billingRequest) : 0;
+    return sum + (Number.isFinite(br) && br > 0 ? br : 0);
+  }, 0);
+}
+
+export function getOsPleiteadoPct(
+  p: Pick<PleitoOsExportRow, 'divSe' | 'budget'>,
+  allPleitos: PleitoForOsPleiteadoSum[]
+): number | null {
+  const orcamento = parseBudgetToNumberSafe(p.budget);
+  if (orcamento <= 0) return null;
+  const pleiteado = sumOsPleiteadoTotal(allPleitos, p.divSe);
+  return (pleiteado / orcamento) * 100;
+}
+
+export function getOsRestantePleitear(
+  p: Pick<PleitoOsExportRow, 'divSe' | 'budget'>,
+  allPleitos: PleitoForOsPleiteadoSum[]
+): number | null {
+  const orcamento = parseBudgetToNumberSafe(p.budget);
+  if (orcamento <= 0) return null;
+  return Math.max(0, orcamento - sumOsPleiteadoTotal(allPleitos, p.divSe));
+}
+
+export function getOsRestanteFaturar(
+  p: Pick<PleitoOsExportRow, 'divSe' | 'budget'>,
+  billings: BillingForOsCheck[]
+): number | null {
+  const orcamento = parseBudgetToNumberSafe(p.budget);
+  if (orcamento <= 0) return null;
+  return Math.max(0, orcamento - getOsFaturamentoAcumulado(p, billings));
 }
 
 export function getPleitoOsSituacao(p: PleitoOsExportRow): string {

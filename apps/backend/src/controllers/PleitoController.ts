@@ -8,6 +8,14 @@ import {
   resolvePleitoCreateCore,
   type ResolvePleitoContractContext
 } from '../utils/pleitoCreateHelpers';
+import {
+  assertPleitoBillingAmount,
+  findBillingForPleito,
+  getPleitoBillableTotal,
+  getPleitoRemainingBalance,
+  syncPleitoFromBillings,
+  upsertBillingFromPleitoFaturamento
+} from '../utils/contractBillingPleitoSync';
 
 /** Cópia criada em "Gerar pleito"; distinta da linha principal da OS no contrato. */
 const PLEITO_HISTORICO_MARKER = '__PLEITO_HISTORICO__';
@@ -286,41 +294,124 @@ export class PleitoController {
       const row = await prisma.$transaction(async (tx) => {
         const updated = await tx.pleito.update({ where: { id }, data });
 
-        const isPaid = (updated.billingStatus || '').trim().toLowerCase() === 'pago';
-        const invoiceNumber = (updated.invoiceNumber || '').trim();
-        const serviceOrder = (updated.divSe || '').trim();
-        const grossValue = updated.billingRequest != null ? Number(updated.billingRequest) : 0;
+        const wasPaid = (existing.billingStatus || '').trim().toLowerCase() === 'pago';
+        const nextBillingStatus =
+          b.billingStatus !== undefined
+            ? (b.billingStatus || '').trim().toLowerCase()
+            : (existing.billingStatus || '').trim().toLowerCase();
+        const willBePaid = nextBillingStatus === 'pago';
+        const nextInvoice = (
+          b.invoiceNumber !== undefined ? b.invoiceNumber : updated.invoiceNumber
+        )
+          ?.trim()
+          .toString();
+        const faturar100 = b.faturar100 === true || b.faturar100 === 'true' || b.faturar100 === 1;
+        const faturarRestante = b.faturarRestante === true || b.faturarRestante === 'true' || b.faturarRestante === 1;
+        const faturarValor = b.faturarValor === true || b.faturarValor === 'true' || b.faturarValor === 1;
+        const valorFaturamento =
+          b.valorFaturamento != null && b.valorFaturamento !== ''
+            ? Number(b.valorFaturamento)
+            : 0;
 
-        // Quando o pleito for marcado como pago e tiver Nº NF, refletir automaticamente em faturamento.
-        if (updated.updatedContractId && isPaid && invoiceNumber && serviceOrder && grossValue > 0) {
-          const existingBilling = await tx.contractBilling.findFirst({
-            where: {
-              contractId: updated.updatedContractId,
-              invoiceNumber,
-              serviceOrder
-            }
+        if (faturar100 && updated.updatedContractId) {
+          if (!nextInvoice) {
+            throw createError('Informe o número da nota fiscal para faturar o pleito', 400);
+          }
+          const serviceOrder = (updated.divSe || '').trim();
+          if (!serviceOrder) {
+            throw createError('O pleito não possui OS/SE para vincular o faturamento', 400);
+          }
+          const pleitoTotal = getPleitoBillableTotal(updated);
+          if (pleitoTotal <= 0) {
+            throw createError('O pleito não possui valor apto para faturamento', 400);
+          }
+
+          await upsertBillingFromPleitoFaturamento(tx, {
+            pleitoId: updated.id,
+            contractId: updated.updatedContractId,
+            invoiceNumber: nextInvoice,
+            serviceOrder,
+            grossValue: pleitoTotal,
+            netValue: pleitoTotal,
+            issueDate: new Date()
           });
+          await syncPleitoFromBillings(tx, updated.id);
+        } else if (faturarRestante && updated.updatedContractId) {
+          if (!nextInvoice) {
+            throw createError('Informe o número da nota fiscal para faturar o saldo do pleito', 400);
+          }
+          const serviceOrder = (updated.divSe || '').trim();
+          if (!serviceOrder) {
+            throw createError('O pleito não possui OS/SE para vincular o faturamento', 400);
+          }
 
-          if (existingBilling) {
-            await tx.contractBilling.update({
-              where: { id: existingBilling.id },
-              data: {
-                issueDate: new Date(),
-                grossValue,
-                netValue: grossValue
-              }
-            });
-          } else {
-            await tx.contractBilling.create({
-              data: {
-                contractId: updated.updatedContractId,
-                issueDate: new Date(),
-                invoiceNumber,
-                serviceOrder,
-                grossValue,
-                netValue: grossValue
-              }
-            });
+          const remaining = await getPleitoRemainingBalance(
+            tx,
+            {
+              id: updated.id,
+              billingRequest: updated.billingRequest,
+              budget: updated.budget
+            },
+          );
+          if (remaining <= 0.01) {
+            throw createError('O pleito não possui saldo apto para faturamento', 400);
+          }
+
+          await upsertBillingFromPleitoFaturamento(tx, {
+            pleitoId: updated.id,
+            contractId: updated.updatedContractId,
+            invoiceNumber: nextInvoice,
+            serviceOrder,
+            grossValue: remaining,
+            netValue: remaining,
+            issueDate: new Date()
+          });
+          await syncPleitoFromBillings(tx, updated.id);
+        } else if (faturarValor && updated.updatedContractId) {
+          if (!nextInvoice) {
+            throw createError('Informe o número da nota fiscal para faturar o pleito', 400);
+          }
+          if (!Number.isFinite(valorFaturamento) || valorFaturamento <= 0) {
+            throw createError('Informe um valor válido para o faturamento parcial', 400);
+          }
+          const serviceOrder = (updated.divSe || '').trim();
+          if (!serviceOrder) {
+            throw createError('O pleito não possui OS/SE para vincular o faturamento', 400);
+          }
+
+          await assertPleitoBillingAmount(
+            tx,
+            {
+              id: updated.id,
+              updatedContractId: updated.updatedContractId,
+              divSe: updated.divSe,
+              billingRequest: updated.billingRequest,
+              budget: updated.budget
+            },
+            updated.updatedContractId,
+            valorFaturamento
+          );
+
+          await upsertBillingFromPleitoFaturamento(tx, {
+            pleitoId: updated.id,
+            contractId: updated.updatedContractId,
+            invoiceNumber: nextInvoice,
+            serviceOrder,
+            grossValue: valorFaturamento,
+            netValue: valorFaturamento,
+            issueDate: new Date()
+          });
+          await syncPleitoFromBillings(tx, updated.id);
+        } else if (willBePaid && !wasPaid) {
+          if (!nextInvoice) {
+            throw createError('Informe o número da nota fiscal antes de marcar como pago', 400);
+          }
+          const linkedBilling = await findBillingForPleito(tx, updated, nextInvoice);
+          if (!linkedBilling) {
+            throw createError(
+              'Não é possível marcar como pago sem faturamento vinculado. Cadastre o faturamento do pleito primeiro.',
+              400
+            );
           }
         }
 

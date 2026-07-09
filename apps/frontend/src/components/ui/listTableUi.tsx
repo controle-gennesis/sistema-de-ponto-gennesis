@@ -30,10 +30,10 @@ export function getListTableRowClassName(navigable = false, extra?: string) {
 
 export function rowActionMenuButtonClass(isOpen: boolean) {
   return [
-    'inline-flex h-8 w-8 items-center justify-center rounded-lg transition-all duration-200',
+    'inline-flex h-8 w-8 items-center justify-center rounded-lg border transition-all duration-200',
     isOpen
-      ? 'bg-red-100 text-red-600 opacity-100 dark:bg-red-950/50 dark:text-red-400'
-      : 'text-gray-400 opacity-40 hover:bg-white/70 hover:text-gray-700 hover:opacity-100 focus-visible:opacity-100 group-hover:opacity-100 dark:text-gray-500 dark:hover:bg-gray-800/70 dark:hover:text-gray-200',
+      ? 'border-red-200 bg-red-100 text-red-600 opacity-100 dark:border-red-900/50 dark:bg-red-950/50 dark:text-red-400'
+      : 'border-gray-200 bg-gray-50 text-gray-600 opacity-100 shadow-sm hover:border-gray-300 hover:bg-white hover:text-gray-800 focus-visible:ring-2 focus-visible:ring-gray-300 group-hover:border-gray-300 group-hover:bg-white dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:border-gray-500 dark:hover:bg-gray-700 dark:hover:text-gray-100 dark:group-hover:border-gray-500 dark:group-hover:bg-gray-700',
   ].join(' ');
 }
 

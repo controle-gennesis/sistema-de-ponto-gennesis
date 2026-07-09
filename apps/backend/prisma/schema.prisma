@@ -1312,6 +1312,7 @@ model ContractAnnualValue {
 model ContractBilling {
   id            String   @id @default(cuid())
   contractId    String
+  pleitoId      String? // Pleito vinculado (obrigatório em novos lançamentos)
   issueDate     DateTime // Data de emissão
   invoiceNumber String // Número da nota fiscal
   serviceOrder  String // Ordem de serviço
@@ -1323,8 +1324,10 @@ model ContractBilling {
 
   // Relacionamentos
   contract Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  pleito   Pleito?  @relation(fields: [pleitoId], references: [id], onDelete: SetNull)
 
   @@index([contractId])
+  @@index([pleitoId])
   @@map("contract_billings")
 }
 
@@ -1388,6 +1391,7 @@ model Pleito {
 
   service_orders  service_orders @relation(fields: [serviceOrderId], references: [id], onDelete: Cascade)
   updatedContract Contract?      @relation(fields: [updatedContractId], references: [id], onDelete: SetNull)
+  billings        ContractBilling[]
 
   @@unique([serviceOrderId, mes, ano])
   @@index([ano, mes])

@@ -52,6 +52,7 @@ import { PleitoFormModal } from '@/components/pleito/PleitoFormModal';
 import { PleitoOsPurchaseOrdersSection } from '@/components/pleito/PleitoOsPurchaseOrdersSection';
 import { ContractCronogramaMensalPanel } from '@/components/contract/ContractCronogramaMensalPanel';
 import { ContractHistoricoOsPanel } from '@/components/contract/ContractHistoricoOsPanel';
+import { ContractHistoricoPleitosPanel } from '@/components/contract/ContractHistoricoPleitosPanel';
 import { ContractOsPleitoListPanel } from '@/components/contract/ContractOsPleitoListPanel';
 import { RowActionMenuCell, RowActionMenuPortal, cadastroListClasses, rowActionMenuButtonClass } from '@/components/ui/RowActionMenu';
 import { listTableRowClasses } from '@/components/ui/listTableUi';
@@ -77,8 +78,9 @@ import {
   type DivSeOptionRow
 } from '@/lib/formatOsSePasta';
 import { loadPdfBrandingLogoDataUrl } from '@/lib/loadPdfBrandingLogo';
-import { getOsEtiquetaAbertura, isOsConcluida, type BillingForOsCheck } from '@/lib/pleitoOsExport';
+import { getOsPleiteadoPct, getOsRestanteFaturar, getOsRestantePleitear, getOsStatus, getOsStatusFaturamentoPct, isOsConcluida, osStatusBadgeClass, sumOsPleiteadoTotal, type BillingForOsCheck } from '@/lib/pleitoOsExport';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
+import { mapUsersToEmployeeOptions } from '@/lib/employeeSelectOptions';
 import {
   formatAjusteValorInput,
   maskAjusteValorInput,
@@ -102,6 +104,7 @@ import { ContractGastosResumoModal } from '@/components/contract/ContractGastosR
 interface ContractBilling {
   id: string;
   contractId: string;
+  pleitoId?: string | null;
   issueDate: string;
   invoiceNumber: string;
   serviceOrder: string;
@@ -138,6 +141,7 @@ interface ContractPleito {
   pv: string | null;
   ipi: string | null;
   billingRequest?: number | null;
+  accumulatedBilled?: number | null;
   createdAt?: string;
 }
 
@@ -257,8 +261,6 @@ function billingMatchesSearchTerm(b: ContractBilling, term: string): boolean {
 }
 
 const PLEITO_HISTORY_MARKER = '__PLEITO_HISTORICO__';
-const PLEITO_HISTORY_MARKER_GERADO_100 = '__PLEITO_HISTORICO__GERADO_100__';
-const HISTORICO_ETIQUETA_GERADO_100 = 'Gerado 100%';
 
 type RmPaidLineRow = { valor: number; natureza: string; dataISO: string | null };
 type RmNaturezaAggRow = { natureza: string; total: number; count: number };
@@ -347,22 +349,12 @@ const FILTER_STATUS_FATURAMENTO_OPTIONS = labeledToSelectOptions([
   { value: 'sem-orcamento', label: 'Sem orçamento' },
 ]);
 
-const HIST_MONTH_FILTER_OPTIONS = labeledToSelectOptions([
-  { value: 'all', label: 'Mês: Todos' },
-  ...MESES_FILTRO.filter((m) => m.value > 0).map((m) => ({
-    value: String(m.value),
-    label: m.label,
-  })),
-]);
-
-const HIST_ETIQUETA_FILTER_OPTIONS = labeledToSelectOptions([
-  { value: 'all', label: 'Etiqueta: Todas' },
-  { value: 'gerado-100', label: HISTORICO_ETIQUETA_GERADO_100 },
-]);
-
-const BILLING_STATUS_ROW_OPTIONS = labeledToSelectOptions([
-  { value: 'nao-pago', label: 'Não pago' },
-  { value: 'pago', label: 'Pago' },
+const FILTER_OS_STATUS_OPTIONS = labeledToSelectOptions([
+  { value: '', label: 'Todos' },
+  { value: 'Aberta', label: 'Aberta' },
+  { value: 'Pleiteado parcial', label: 'Pleiteado parcial' },
+  { value: 'Pleiteado', label: 'Pleiteado' },
+  { value: 'Concluída', label: 'Concluída' },
 ]);
 
 const CONTROLE_GERAL_META_AJUDA =
@@ -706,6 +698,46 @@ function isNetValueMissing(b: ContractBilling): boolean {
   return new Date(b.updatedAt).getTime() === new Date(b.createdAt).getTime();
 }
 
+function getPleitoBillableTotal(p: ContractPleito): number {
+  const br = p.billingRequest != null ? Number(p.billingRequest) : 0;
+  if (Number.isFinite(br) && br > 0) return br;
+  return parseBudgetToNumberSafe(p.budget);
+}
+
+function getPleitoBilledAmount(p: ContractPleito, billings: ContractBilling[]): number {
+  const linked = billings
+    .filter((b) => b.pleitoId === p.id)
+    .reduce((sum, b) => sum + Number(b.grossValue || 0), 0);
+  if (linked > 0) return linked;
+  const accumulated = p.accumulatedBilled != null ? Number(p.accumulatedBilled) : 0;
+  if (accumulated > 0) return accumulated;
+  const os = (p.divSe || '').trim();
+  if (!os) return 0;
+  return billings
+    .filter((b) => !b.pleitoId && (b.serviceOrder || '').trim() === os)
+    .reduce((sum, b) => sum + Number(b.grossValue || 0), 0);
+}
+
+function getPleitoRemainingBalance(p: ContractPleito, billings: ContractBilling[]): number {
+  const total = getPleitoBillableTotal(p);
+  if (total <= 0) return 0;
+  return Math.max(0, total - getPleitoBilledAmount(p, billings));
+}
+
+function isPleitoAptoParaFaturamento(p: ContractPleito, billings: ContractBilling[]): boolean {
+  const total = getPleitoBillableTotal(p);
+  if (total <= 0) return false;
+  return getPleitoRemainingBalance(p, billings) > 0.01;
+}
+
+function formatPleitoBillingOptionLabel(p: ContractPleito, billings: ContractBilling[]): string {
+  const saldo = getPleitoRemainingBalance(p, billings);
+  const desc = (p.serviceDescription || '').trim();
+  const shortDesc = desc.length > 40 ? `${desc.slice(0, 40)}…` : desc;
+  const pasta = p.folderNumber ? ` · Pasta ${p.folderNumber}` : '';
+  return `${formatOsSePasta(p.divSe || '-', p.folderNumber)}${pasta}${shortDesc ? ` — ${shortDesc}` : ''} (saldo ${formatCurrency(saldo)})`;
+}
+
 function parseBudgetToNumberSafe(v: string | null | undefined): number {
   if (!v) return 0;
   const s = String(v).replace(/[R$\s]/g, '').trim();
@@ -719,17 +751,13 @@ function parseBudgetToNumberSafe(v: string | null | undefined): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-function filterDivSeOptions(options: DivSeOptionRow[], query: string): DivSeOptionRow[] {
-  const q = query.trim().toLowerCase();
-  if (!q) return options;
-  return options.filter((o) => {
-    const label = formatOsSePasta(o.divSe, o.folderNumber).toLowerCase();
-    return (
-      label.includes(q) ||
-      o.divSe.toLowerCase().includes(q) ||
-      (o.folderNumber || '').toLowerCase().includes(q)
-    );
-  });
+function divSeOptionsToSelectOptions(options: DivSeOptionRow[]) {
+  return labeledToSelectOptions(
+    options.map((opt) => ({
+      value: opt.divSe,
+      label: formatOsSePasta(opt.divSe, opt.folderNumber),
+    }))
+  );
 }
 
 function formatCurrencyInput(value: number): string {
@@ -737,30 +765,91 @@ function formatCurrencyInput(value: number): string {
   return value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-/** Soma valores já pleiteados (billingRequest) para o mesmo OS/SE no contrato. */
-function sumBillingRequestSameOs(
-  allPleitos: ContractPleito[],
-  divSe: string | null | undefined
-): number {
-  const key = (divSe || '').trim().toLowerCase();
-  if (!key) return 0;
-  return allPleitos.reduce((sum, p) => {
-    if ((p.divSe || '').trim().toLowerCase() !== key) return sum;
-    const br = p.billingRequest != null ? Number(p.billingRequest) : 0;
-    return sum + (Number.isFinite(br) && br > 0 ? br : 0);
-  }, 0);
-}
-
 type PleitoGerarBuildResult =
   | { ok: true; items: { id: string; billingRequest: number }[] }
   | { ok: false; message: string };
 
-/** Monta payload para gerar pleito: % do orçamento por OS (mesmas regras do modal). */
+function formatPctFromNumber(pct: number): string {
+  if (pct <= 0) return '';
+  return pct.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function getPleitoGerarValorFromDraft(
+  id: string,
+  pleitos: ContractPleito[],
+  pctById: Record<string, string>,
+  valorById: Record<string, string>
+): number {
+  const p = pleitos.find((x) => x.id === id);
+  if (!p) return 0;
+  const orcamento = p.budget ? Number(p.budget) : 0;
+  const valorDirect = parseCurrencyInput(valorById[id] || '');
+  if (valorDirect > 0) return valorDirect;
+  const pct = parseCurrencyInput(pctById[id] || '');
+  if (orcamento > 0 && pct > 0) return (orcamento * pct) / 100;
+  return 0;
+}
+
+function getBatchPleitoValorSameOs(
+  id: string,
+  selectedIds: string[],
+  pleitos: ContractPleito[],
+  pctById: Record<string, string>,
+  valorById: Record<string, string>
+): number {
+  const current = pleitos.find((x) => x.id === id);
+  const osKey = (current?.divSe || '').trim().toLowerCase();
+  if (!osKey) return 0;
+  return selectedIds.reduce((sum, otherId) => {
+    if (otherId === id) return sum;
+    const p = pleitos.find((x) => x.id === otherId);
+    if (!p || (p.divSe || '').trim().toLowerCase() !== osKey) return sum;
+    return sum + getPleitoGerarValorFromDraft(otherId, pleitos, pctById, valorById);
+  }, 0);
+}
+
+function getMaxPleitoValorForOs(
+  id: string,
+  pleitos: ContractPleito[],
+  allPleitos: ContractPleito[],
+  selectedIds: string[],
+  pctById: Record<string, string>,
+  valorById: Record<string, string>
+): number {
+  const p = pleitos.find((x) => x.id === id);
+  if (!p) return 0;
+  const orcamento = p.budget ? Number(p.budget) : 0;
+  if (orcamento <= 0) return 0;
+  const alreadyPleiteado = sumOsPleiteadoTotal(allPleitos, p.divSe);
+  const batchOther = getBatchPleitoValorSameOs(id, selectedIds, pleitos, pctById, valorById);
+  return Math.max(0, orcamento - alreadyPleiteado - batchOther);
+}
+
+function clampPleitoDraftToMax(valor: number, maxValor: number): number {
+  if (valor <= 0 || maxValor <= 0) return 0;
+  return Math.min(valor, maxValor);
+}
+
+function pleitoDraftFromValor(valor: number, orc: number, maxValor: number): { pct: string; valor: string } {
+  const clamped = clampPleitoDraftToMax(valor, maxValor);
+  const pct = orc > 0 && clamped > 0 ? (clamped / orc) * 100 : 0;
+  return {
+    pct: formatPctFromNumber(pct),
+    valor: clamped > 0 ? formatCurrencyInput(clamped) : '',
+  };
+}
+
+function pleitoDraftFromPct(pct: number, orc: number, maxValor: number): { pct: string; valor: string } {
+  const rawValor = orc > 0 && pct > 0 ? (orc * pct) / 100 : 0;
+  return pleitoDraftFromValor(rawValor, orc, maxValor);
+}
+
+/** Monta payload para gerar pleito: valor do pleito por OS (via % ou valor em R$). */
 function buildPleitoGerarItems(
   ids: string[],
   pleitos: ContractPleito[],
   allPleitos: ContractPleito[],
-  getPctForId: (id: string) => number
+  getValorForId: (id: string) => number
 ): PleitoGerarBuildResult {
   const pendingByOs = new Map<string, number>();
   const items: { id: string; billingRequest: number }[] = [];
@@ -773,13 +862,12 @@ function buildPleitoGerarItems(
     if (orcamento <= 0) {
       return { ok: false, message: `A OS ${p.divSe || id} está sem orçamento para cálculo do pleito.` };
     }
-    const pct = getPctForId(id);
-    if (pct <= 0) {
-      return { ok: false, message: `Informe a % do orçamento para a OS ${p.divSe || id}` };
+    const valorCalculado = getValorForId(id);
+    if (valorCalculado <= 0) {
+      return { ok: false, message: `Informe a % ou o valor do pleito para a OS ${p.divSe || id}` };
     }
-    const valorCalculado = (orcamento * pct) / 100;
     const osKey = (p.divSe || '').trim().toLowerCase();
-    const alreadyPleiteado = sumBillingRequestSameOs(allPleitos, p.divSe);
+    const alreadyPleiteado = sumOsPleiteadoTotal(allPleitos, p.divSe);
     const batchPending = pendingByOs.get(osKey) || 0;
     if (alreadyPleiteado + batchPending + valorCalculado > orcamento + 0.01) {
       return { ok: false, message: 'valor faturado acima do permitido' };
@@ -792,26 +880,6 @@ function buildPleitoGerarItems(
 
 function isPleitoHistorico(p: ContractPleito): boolean {
   return (p.reportsBilling || '').trim() === PLEITO_HISTORY_MARKER;
-}
-
-function isPleitoGerado100(p: ContractPleito): boolean {
-  const marker = (p.reportsBilling || '').trim();
-  if (marker === PLEITO_HISTORY_MARKER_GERADO_100) return true;
-  const orc = parseBudgetToNumberSafe(p.budget);
-  const br = p.billingRequest != null ? Number(p.billingRequest) : 0;
-  return orc > 0 && br >= orc - 0.01;
-}
-
-function getHistoricoEtiqueta(p: ContractPleito): string | null {
-  if (isPleitoGerado100(p)) return HISTORICO_ETIQUETA_GERADO_100;
-  return null;
-}
-
-function osEtiquetaBadgeClass(etiqueta: 'Aberta' | 'Concluída'): string {
-  if (etiqueta === 'Concluída') {
-    return 'bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-100';
-  }
-  return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300';
 }
 
 function totvsQueryTransportErrorMessage(err: unknown): string {
@@ -865,9 +933,10 @@ export default function ContractDetailPage() {
     issueDate: '',
     invoiceNumber: '',
     serviceOrder: '',
-    grossValue: ''
+    pleitoId: '',
+    grossValue: '',
+    netValue: ''
   });
-  const [osSeDropdownOpen, setOsSeDropdownOpen] = useState(false);
   const [selectedBilling, setSelectedBilling] = useState<ContractBilling | null>(null);
   const [editingBilling, setEditingBilling] = useState(false);
   const [filterBillingOsSe, setFilterBillingOsSe] = useState('');
@@ -880,12 +949,12 @@ export default function ContractDetailPage() {
     grossValue: '',
     netValue: ''
   });
-  const [osSeEditDropdownOpen, setOsSeEditDropdownOpen] = useState(false);
   const [selectedPleitoId, setSelectedPleitoId] = useState<string | null>(null);
   const [pleitoToEdit, setPleitoToEdit] = useState<(PleitoFormData & { id: string }) | null>(null);
   const [filterStatusOrcamento, setFilterStatusOrcamento] = useState('');
   const [filterStatusExecucao, setFilterStatusExecucao] = useState('');
   const [filterStatusFaturamento, setFilterStatusFaturamento] = useState('');
+  const [filterOsStatus, setFilterOsStatus] = useState('');
   const [searchTermPleitos, setSearchTermPleitos] = useState('');
   const [showPleitosFilterModal, setShowPleitosFilterModal] = useState(false);
   const [searchTermProduction, setSearchTermProduction] = useState('');
@@ -900,31 +969,19 @@ export default function ContractDetailPage() {
   const [selectedForPleito, setSelectedForPleito] = useState<Set<string>>(new Set());
   const [osSelectionMenu, setOsSelectionMenu] = useState<RowActionMenuState>(null);
   const [valorPleiteado, setValorPleiteado] = useState<Record<string, string>>({});
+  const [pleitoValorInput, setPleitoValorInput] = useState<Record<string, string>>({});
   const [showPleitoValoresModal, setShowPleitoValoresModal] = useState(false);
   const [showPleitoResumoModal, setShowPleitoResumoModal] = useState(false);
-  const [showHistoricoPleitosModal, setShowHistoricoPleitosModal] = useState(false);
   const [showHistoricoOsModal, setShowHistoricoOsModal] = useState(false);
   const [showVisualizarPleitoModal, setShowVisualizarPleitoModal] = useState(false);
   const [showAndamentoTodosModal, setShowAndamentoTodosModal] = useState(false);
   const [showCronogramaMensalModal, setShowCronogramaMensalModal] = useState(false);
   const [showFaturamentoTodosModal, setShowFaturamentoTodosModal] = useState(false);
-  const [histYearFilter, setHistYearFilter] = useState('all');
-  const [histMonthFilter, setHistMonthFilter] = useState('all');
-  const [histOsFilter, setHistOsFilter] = useState('');
-  const [histPastaFilter, setHistPastaFilter] = useState('');
-  const [histDescricaoFilter, setHistDescricaoFilter] = useState('');
-  const [histEtiquetaFilter, setHistEtiquetaFilter] = useState('all');
-  const [historicoDrafts, setHistoricoDrafts] = useState<Record<string, { billingStatus: 'pago' | 'nao-pago'; invoiceNumber: string }>>({});
-  const [selectedHistoricoPleitos, setSelectedHistoricoPleitos] = useState<Set<string>>(new Set());
-  const [showHistoricoBatchNfModal, setShowHistoricoBatchNfModal] = useState(false);
-  const [historicoBatchInvoiceModalValue, setHistoricoBatchInvoiceModalValue] = useState('');
   const [pleitoGeradoData, setPleitoGeradoData] = useState<Array<{ pleito: ContractPleito; valorPleiteado: number; pctOrcamento: number }>>([]);
   const [productionForm, setProductionForm] = useState({ fillingDate: '', divSe: '', weeklyProductionValue: '', responsiblePerson: '' });
-  const [productionOsSeDropdownOpen, setProductionOsSeDropdownOpen] = useState(false);
   const [selectedProduction, setSelectedProduction] = useState<ContractWeeklyProduction | null>(null);
   const [editingProduction, setEditingProduction] = useState(false);
   const [productionEditForm, setProductionEditForm] = useState({ fillingDate: '', divSe: '', weeklyProductionValue: '', responsiblePerson: '' });
-  const [productionOsSeEditDropdownOpen, setProductionOsSeEditDropdownOpen] = useState(false);
   const [showValorAnualAdjustModal, setShowValorAnualAdjustModal] = useState(false);
   const [adjFormYear, setAdjFormYear] = useState(currentYear);
   const [adjFormDeltaStr, setAdjFormDeltaStr] = useState('');
@@ -952,6 +1009,18 @@ export default function ContractDetailPage() {
       const res = await api.get('/auth/me');
       return res.data;
     }
+  });
+
+  const { data: productionEmployeesData, isLoading: loadingProductionEmployees } = useQuery({
+    queryKey: ['production-responsible-options'],
+    queryFn: async () => {
+      const res = await api.get('/users', {
+        params: { page: 1, limit: 10000, status: 'all' },
+      });
+      return res.data;
+    },
+    enabled: showProductionModal,
+    retry: false,
   });
 
   const { data: contractData, isLoading: loadingContract } = useQuery({
@@ -1151,8 +1220,9 @@ export default function ContractDetailPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['contract-billings', contractId] });
+      queryClient.invalidateQueries({ queryKey: ['contract-pleitos', contractId] });
       setShowBillingModal(false);
-      setBillingForm({ issueDate: '', invoiceNumber: '', serviceOrder: '', grossValue: '' });
+      setBillingForm({ issueDate: '', invoiceNumber: '', serviceOrder: '', pleitoId: '', grossValue: '', netValue: '' });
       toast.success('Faturamento cadastrado com sucesso!');
     },
     onError: (err: { response?: { data?: { message?: string } } }) => {
@@ -1167,6 +1237,7 @@ export default function ContractDetailPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['contract-billings', contractId] });
+      queryClient.invalidateQueries({ queryKey: ['contract-pleitos', contractId] });
       setEditingBilling(false);
       toast.success('Faturamento atualizado com sucesso!');
     },
@@ -1182,6 +1253,7 @@ export default function ContractDetailPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['contract-billings', contractId] });
+      queryClient.invalidateQueries({ queryKey: ['contract-pleitos', contractId] });
       setSelectedBilling(null);
       setEditingBilling(false);
       toast.success('Faturamento excluído com sucesso!');
@@ -1503,25 +1575,68 @@ export default function ContractDetailPage() {
     [pleitos]
   );
 
-  const osSeFiltered = useMemo(
-    () => filterDivSeOptions(divSeOptions, billingForm.serviceOrder),
-    [divSeOptions, billingForm.serviceOrder]
+  const divSeSelectOptions = useMemo(
+    () => divSeOptionsToSelectOptions(divSeOptions),
+    [divSeOptions]
   );
 
-  const osSeEditFiltered = useMemo(
-    () => filterDivSeOptions(divSeOptions, billingEditForm.serviceOrder),
-    [divSeOptions, billingEditForm.serviceOrder]
+  const productionResponsibleSelectOptions = useMemo(
+    () => {
+      const list = Array.isArray(productionEmployeesData?.data) ? productionEmployeesData.data : [];
+      return labeledToSelectOptions(
+        mapUsersToEmployeeOptions(list).map((employee) => ({
+          value: employee.name,
+          label: employee.name,
+        }))
+      );
+    },
+    [productionEmployeesData]
   );
 
-  const productionOsSeFiltered = useMemo(
-    () => filterDivSeOptions(divSeOptions, productionForm.divSe),
-    [divSeOptions, productionForm.divSe]
+  const defaultProductionResponsiblePerson = useMemo(() => {
+    const name = String(userData?.data?.name ?? '').trim();
+    if (!name) return '';
+    const position = String(userData?.data?.employee?.position ?? '').trim();
+    if (position === 'Administrador') return '';
+    if (name.localeCompare('Administrador', 'pt-BR', { sensitivity: 'accent' }) === 0) return '';
+    return name;
+  }, [userData]);
+
+  const billablePleitos = useMemo(
+    () =>
+      allPleitos.filter(
+        (p) =>
+          (isPleitoHistorico(p) || (p.billingRequest != null && Number(p.billingRequest) > 0)) &&
+          isPleitoAptoParaFaturamento(p, billings)
+      ),
+    [allPleitos, billings]
   );
 
-  const productionOsSeEditFiltered = useMemo(
-    () => filterDivSeOptions(divSeOptions, productionEditForm.divSe),
-    [divSeOptions, productionEditForm.divSe]
+  const pleitosForBillingForm = useMemo(() => {
+    const os = billingForm.serviceOrder.trim();
+    if (!os) return billablePleitos;
+    return billablePleitos.filter((p) => (p.divSe || '').trim() === os);
+  }, [billablePleitos, billingForm.serviceOrder]);
+
+  const pleitosForBillingSelectOptions = useMemo(
+    () =>
+      labeledToSelectOptions(
+        pleitosForBillingForm.map((p) => ({
+          value: p.id,
+          label: formatPleitoBillingOptionLabel(p, billings),
+        }))
+      ),
+    [pleitosForBillingForm, billings]
   );
+
+  const selectedBillingPleito = useMemo(
+    () => billablePleitos.find((p) => p.id === billingForm.pleitoId) ?? allPleitos.find((p) => p.id === billingForm.pleitoId) ?? null,
+    [billablePleitos, allPleitos, billingForm.pleitoId]
+  );
+
+  const selectedBillingPleitoSaldo = selectedBillingPleito
+    ? getPleitoRemainingBalance(selectedBillingPleito, billings)
+    : null;
 
   const availableYears = useMemo(() => {
     if (!contract) return [];
@@ -2295,16 +2410,19 @@ export default function ContractDetailPage() {
         return true;
       });
     }
+    if (filterOsStatus) {
+      result = result.filter((p) => getOsStatus(p, billings, pleitos) === filterOsStatus);
+    }
 
     if (searchTermPleitos.trim()) {
       result = result.filter((p) => pleitoMatchesSearchTerm(p, searchTermPleitos));
     }
 
     return result;
-  }, [pleitos, isAllYears, selectedYear, selectedMonth, filterStatusOrcamento, filterStatusExecucao, filterStatusFaturamento, searchTermPleitos, billings]);
+  }, [pleitos, isAllYears, selectedYear, selectedMonth, filterStatusOrcamento, filterStatusExecucao, filterStatusFaturamento, filterOsStatus, searchTermPleitos, billings]);
 
   const hasActivePleitosFilter = Boolean(
-    filterStatusOrcamento || filterStatusExecucao || filterStatusFaturamento
+    filterStatusOrcamento || filterStatusExecucao || filterStatusFaturamento || filterOsStatus
   );
   const hasActiveProductionFilter = Boolean(filterProductionOsSe.trim() || filterProductionResponsible.trim());
   const hasActiveBillingFilter = Boolean(
@@ -2315,6 +2433,7 @@ export default function ContractDetailPage() {
     setFilterStatusOrcamento('');
     setFilterStatusExecucao('');
     setFilterStatusFaturamento('');
+    setFilterOsStatus('');
   };
 
   const clearProductionFilters = () => {
@@ -2335,6 +2454,7 @@ export default function ContractDetailPage() {
     filterStatusOrcamento,
     filterStatusExecucao,
     filterStatusFaturamento,
+    filterOsStatus,
     selectedYear,
     selectedMonth,
   ]);
@@ -2396,6 +2516,13 @@ export default function ContractDetailPage() {
     closeRowActionMenu: closePleitoRowActionMenu,
     isRowMenuOpen: isPleitoRowMenuOpen,
   } = useRowActionMenu(displayedPleitos);
+  const {
+    rowActionMenu: billingRowActionMenu,
+    rowForActionMenu: billingRowForActionMenu,
+    toggleRowActionMenu: toggleBillingRowActionMenu,
+    closeRowActionMenu: closeBillingRowActionMenu,
+    isRowMenuOpen: isBillingRowMenuOpen,
+  } = useRowActionMenu(displayedBillings);
   const visiblePleitoIds = useMemo(() => displayedPleitos.map((p) => p.id), [displayedPleitos]);
   const allVisibleSelected = visiblePleitoIds.length > 0 && visiblePleitoIds.every((id) => selectedForPleito.has(id));
   const someVisibleSelected = visiblePleitoIds.some((id) => selectedForPleito.has(id));
@@ -2414,19 +2541,34 @@ export default function ContractDetailPage() {
       return;
     }
     const gross = parseCurrencyInput(billingForm.grossValue);
+    const net = parseCurrencyInput(billingForm.netValue);
     if (!billingForm.issueDate || !billingForm.invoiceNumber.trim() || !billingForm.serviceOrder.trim()) {
       toast.error('Preencha todos os campos obrigatórios');
+      return;
+    }
+    if (!billingForm.pleitoId.trim()) {
+      toast.error('Selecione o pleito vinculado ao faturamento');
       return;
     }
     if (gross === 0) {
       toast.error('Valor bruto é obrigatório');
       return;
     }
+    if (net === 0) {
+      toast.error('Valor líquido é obrigatório');
+      return;
+    }
+    if (selectedBillingPleitoSaldo != null && gross > selectedBillingPleitoSaldo + 0.01) {
+      toast.error(`Valor bruto excede o saldo do pleito (${formatCurrency(selectedBillingPleitoSaldo)})`);
+      return;
+    }
     createBillingMutation.mutate({
       issueDate: billingForm.issueDate,
       invoiceNumber: billingForm.invoiceNumber.trim(),
       serviceOrder: billingForm.serviceOrder.trim(),
-      grossValue: gross
+      pleitoId: billingForm.pleitoId.trim(),
+      grossValue: gross,
+      netValue: net
     });
   };
 
@@ -2438,8 +2580,7 @@ export default function ContractDetailPage() {
     }
     if (!selectedBilling) return;
     const gross = parseCurrencyInput(billingEditForm.grossValue);
-    const netRaw = (billingEditForm.netValue || '').trim();
-    const netParsed = netRaw ? parseCurrencyInput(netRaw) : null;
+    const net = parseCurrencyInput(billingEditForm.netValue);
     if (!billingEditForm.issueDate || !billingEditForm.invoiceNumber.trim() || !billingEditForm.serviceOrder.trim()) {
       toast.error('Preencha todos os campos obrigatórios');
       return;
@@ -2448,8 +2589,8 @@ export default function ContractDetailPage() {
       toast.error('Valor bruto é obrigatório');
       return;
     }
-    if (netParsed !== null && netParsed < 0) {
-      toast.error('Valor líquido inválido');
+    if (net === 0) {
+      toast.error('Valor líquido é obrigatório');
       return;
     }
     updateBillingMutation.mutate({
@@ -2459,7 +2600,7 @@ export default function ContractDetailPage() {
         invoiceNumber: billingEditForm.invoiceNumber.trim(),
         serviceOrder: billingEditForm.serviceOrder.trim(),
         grossValue: gross,
-        ...(netParsed !== null ? { netValue: netParsed } : {})
+        netValue: net
       }
     });
   };
@@ -2570,6 +2711,7 @@ export default function ContractDetailPage() {
       setShowPleitoResumoModal(true);
       setSelectedForPleito(new Set());
       setValorPleiteado({});
+      setPleitoValorInput({});
       toast.success('Pleito gerado com sucesso!');
     },
     onError: (err: { response?: { data?: { message?: string } } }) => {
@@ -2681,6 +2823,18 @@ export default function ContractDetailPage() {
     deletePleitosSelecionadosMutation.mutate([pleito.id]);
   };
 
+  const handleRemoverFaturamento = (billing: ContractBilling) => {
+    closeBillingRowActionMenu();
+    if (!canDeleteContrato) {
+      toast.error('Você não tem permissão para excluir no módulo Contratos.');
+      return;
+    }
+    if (!window.confirm('Excluir este faturamento?')) {
+      return;
+    }
+    deleteBillingMutation.mutate(billing.id);
+  };
+
   const handleEditarPleitoOs = (pleito: ContractPleito) => {
     if (!canEditContrato) {
       toast.error('Você não tem permissão para editar no módulo Contratos.');
@@ -2721,7 +2875,7 @@ export default function ContractDetailPage() {
     }
     const ids = Array.from(selectedForPleito);
     const result = buildPleitoGerarItems(ids, pleitos, allPleitos, (id) =>
-      parseCurrencyInput(valorPleiteado[id] || '')
+      getPleitoGerarValorFromDraft(id, pleitos, valorPleiteado, pleitoValorInput)
     );
     if (!result.ok) {
       toast.error(result.message);
@@ -2743,7 +2897,13 @@ export default function ContractDetailPage() {
     ) {
       return;
     }
-    const result = buildPleitoGerarItems(ids, pleitos, allPleitos, () => 100);
+    const result = buildPleitoGerarItems(ids, pleitos, allPleitos, (id) => {
+      const p = pleitos.find((x) => x.id === id);
+      if (!p) return 0;
+      const orcamento = p.budget ? Number(p.budget) : 0;
+      const alreadyPleiteado = sumOsPleiteadoTotal(allPleitos, p.divSe);
+      return Math.max(0, orcamento - alreadyPleiteado);
+    });
     if (!result.ok) {
       toast.error(result.message);
       return;
@@ -2763,20 +2923,19 @@ export default function ContractDetailPage() {
         continue;
       }
       const orc = p.budget ? Number(p.budget) : 0;
-      const pct = parseCurrencyInput(valorPleiteado[id] || '');
-      const valor = orc > 0 && pct > 0 ? (orc * pct) / 100 : 0;
+      const valor = getPleitoGerarValorFromDraft(id, pleitos, valorPleiteado, pleitoValorInput);
       const osKey = (p.divSe || '').trim().toLowerCase();
-      const already = sumBillingRequestSameOs(allPleitos, p.divSe);
+      const already = sumOsPleiteadoTotal(allPleitos, p.divSe);
       const batchBefore = pendingByOs.get(osKey) || 0;
-      const excede = orc > 0 && pct > 0 && already + batchBefore + valor > orc + 0.01;
+      const excede = orc > 0 && valor > 0 && already + batchBefore + valor > orc + 0.01;
       byId[id] = excede;
       if (excede) anyExceeds = true;
-      if (orc > 0 && pct > 0) {
+      if (orc > 0 && valor > 0) {
         pendingByOs.set(osKey, batchBefore + valor);
       }
     }
     return { anyExceeds, byId };
-  }, [selectedForPleito, valorPleiteado, pleitos, allPleitos]);
+  }, [selectedForPleito, valorPleiteado, pleitoValorInput, pleitos, allPleitos]);
 
   const toggleSelectAllVisiblePleitos = (checked: boolean) => {
     if (checked) {
@@ -2798,233 +2957,17 @@ export default function ContractDetailPage() {
       visiblePleitoIds.forEach((id) => delete next[id]);
       return next;
     });
+    setPleitoValorInput((prev) => {
+      const next = { ...prev };
+      visiblePleitoIds.forEach((id) => delete next[id]);
+      return next;
+    });
   };
 
   const visualizarPleitos = useMemo(
     () => pleitos.filter((p) => selectedForPleito.has(p.id)),
     [pleitos, selectedForPleito]
   );
-
-  const generatedPleitos = useMemo(
-    () =>
-      allPleitos.filter((p) =>
-        isPleitoHistorico(p) ||
-        ((p.billingRequest != null ? Number(p.billingRequest) : 0) > 0)
-      ),
-    [allPleitos]
-  );
-  const historicoYears = useMemo(() => {
-    const years = new Set<number>();
-    generatedPleitos.forEach((p) => {
-      const y = p.creationYear ?? getDateYear(p.createdAt as unknown as string);
-      if (y) years.add(y);
-    });
-    return Array.from(years).sort((a, b) => b - a);
-  }, [generatedPleitos]);
-
-  const histYearFilterOptions = useMemo(
-    () =>
-      labeledToSelectOptions([
-        { value: 'all', label: 'Ano: Todos' },
-        ...historicoYears.map((y) => ({ value: String(y), label: String(y) })),
-      ]),
-    [historicoYears]
-  );
-
-  const filteredHistoricoPleitos = useMemo(() => {
-    const osQuery = histOsFilter.trim().toLowerCase();
-    const pastaQuery = histPastaFilter.trim().toLowerCase();
-    const descricaoQuery = histDescricaoFilter.trim().toLowerCase();
-    return generatedPleitos.filter((p) => {
-      const year = p.creationYear ?? getDateYear(p.createdAt as unknown as string);
-      const monthRaw = p.creationMonth ? parseInt(String(p.creationMonth).replace(/\D/g, '') || '0', 10) : null;
-      const month = monthRaw && monthRaw > 0 ? monthRaw : getDateMonth(p.createdAt as unknown as string);
-
-      if (histYearFilter !== 'all' && year !== Number(histYearFilter)) return false;
-      if (histMonthFilter !== 'all' && month !== Number(histMonthFilter)) return false;
-      if (osQuery && !(p.divSe || '').toLowerCase().includes(osQuery)) return false;
-      if (pastaQuery && !(p.folderNumber || '').toLowerCase().includes(pastaQuery)) return false;
-      if (descricaoQuery && !(p.serviceDescription || '').toLowerCase().includes(descricaoQuery)) return false;
-      if (histEtiquetaFilter === 'gerado-100' && getHistoricoEtiqueta(p) !== HISTORICO_ETIQUETA_GERADO_100) return false;
-      return true;
-    });
-  }, [generatedPleitos, histYearFilter, histMonthFilter, histOsFilter, histPastaFilter, histDescricaoFilter, histEtiquetaFilter]);
-
-  const [isSavingHistoricoPleitos, setIsSavingHistoricoPleitos] = useState(false);
-  const historicoDraftsInitRef = useRef(false);
-
-  const buildHistoricoDraftsFromPleitos = (pleitos: ContractPleito[]) => {
-    const nextDrafts: Record<string, { billingStatus: 'pago' | 'nao-pago'; invoiceNumber: string }> = {};
-    pleitos.forEach((p) => {
-      nextDrafts[p.id] = {
-        billingStatus: (p.billingStatus || '').toLowerCase() === 'pago' ? 'pago' : 'nao-pago',
-        invoiceNumber: p.invoiceNumber || '',
-      };
-    });
-    return nextDrafts;
-  };
-
-  const invalidateHistoricoAndBillings = async () => {
-    await queryClient.invalidateQueries({ queryKey: ['contract-pleitos', contractId] });
-    await queryClient.invalidateQueries({ queryKey: ['contract-billings', contractId] });
-  };
-
-  useEffect(() => {
-    if (!showHistoricoPleitosModal) {
-      historicoDraftsInitRef.current = false;
-      return;
-    }
-    if (historicoDraftsInitRef.current || loadingPleitos) return;
-    historicoDraftsInitRef.current = true;
-    setHistoricoDrafts(buildHistoricoDraftsFromPleitos(generatedPleitos));
-    setSelectedHistoricoPleitos(new Set());
-    setShowHistoricoBatchNfModal(false);
-    setHistoricoBatchInvoiceModalValue('');
-  }, [showHistoricoPleitosModal, loadingPleitos, generatedPleitos]);
-
-  const changedHistoricoPleitoIds = useMemo(() => {
-    return generatedPleitos
-      .filter((p) => {
-        const draft = historicoDrafts[p.id];
-        if (!draft) return false;
-        const currentBillingStatus = (p.billingStatus || '').toLowerCase() === 'pago' ? 'pago' : 'nao-pago';
-        const currentInvoiceNumber = (p.invoiceNumber || '').trim();
-        return currentBillingStatus !== draft.billingStatus || currentInvoiceNumber !== draft.invoiceNumber.trim();
-      })
-      .map((p) => p.id);
-  }, [generatedPleitos, historicoDrafts]);
-
-  const patchHistoricoPleitoFaturamento = async (
-    pleito: ContractPleito,
-    draft: { billingStatus: 'pago' | 'nao-pago'; invoiceNumber: string },
-    options?: { usarOrcamento100?: boolean }
-  ) => {
-    const orc = parseBudgetToNumberSafe(pleito.budget);
-    const payload: {
-      billingStatus: string;
-      invoiceNumber: string | null;
-      billingRequest?: string;
-    } = {
-      billingStatus: draft.billingStatus,
-      invoiceNumber: draft.invoiceNumber.trim() || null,
-    };
-    if (options?.usarOrcamento100 && draft.billingStatus === 'pago' && orc > 0) {
-      payload.billingRequest = orc.toFixed(2);
-    }
-    await api.patch(`/pleitos/${pleito.id}`, payload);
-  };
-
-  const handleSaveAllHistoricoPleitos = async () => {
-    if (changedHistoricoPleitoIds.length === 0) return;
-    setIsSavingHistoricoPleitos(true);
-    try {
-      await Promise.all(
-        changedHistoricoPleitoIds.map(async (pleitoId) => {
-          const draft = historicoDrafts[pleitoId];
-          const pleito = generatedPleitos.find((p) => p.id === pleitoId);
-          if (!draft || !pleito) return;
-          await patchHistoricoPleitoFaturamento(pleito, draft);
-        })
-      );
-      await invalidateHistoricoAndBillings();
-      setHistoricoDrafts((prev) => {
-        const next = { ...prev };
-        changedHistoricoPleitoIds.forEach((id) => {
-          const d = historicoDrafts[id];
-          if (d) {
-            next[id] = {
-              billingStatus: d.billingStatus,
-              invoiceNumber: d.invoiceNumber.trim(),
-            };
-          }
-        });
-        return next;
-      });
-      toast.success('Histórico de pleitos salvo e faturamento atualizado.');
-    } catch {
-      toast.error('Não foi possível salvar as informações do histórico de pleitos.');
-    } finally {
-      setIsSavingHistoricoPleitos(false);
-    }
-  };
-
-  const filteredHistoricoPleitoIds = useMemo(
-    () => filteredHistoricoPleitos.map((p) => p.id),
-    [filteredHistoricoPleitos]
-  );
-  const allFilteredHistoricoSelected = filteredHistoricoPleitoIds.length > 0 &&
-    filteredHistoricoPleitoIds.every((id) => selectedHistoricoPleitos.has(id));
-  const someFilteredHistoricoSelected = filteredHistoricoPleitoIds.some((id) => selectedHistoricoPleitos.has(id));
-
-  const toggleSelectAllFilteredHistoricoPleitos = (checked: boolean) => {
-    setSelectedHistoricoPleitos((prev) => {
-      const next = new Set(prev);
-      if (checked) {
-        filteredHistoricoPleitoIds.forEach((id) => next.add(id));
-      } else {
-        filteredHistoricoPleitoIds.forEach((id) => next.delete(id));
-      }
-      return next;
-    });
-  };
-
-  const handleOpenHistoricoFaturar100Modal = () => {
-    const idsSelecionados = Array.from(selectedHistoricoPleitos).filter((id) =>
-      filteredHistoricoPleitoIds.includes(id)
-    );
-    if (idsSelecionados.length === 0) {
-      toast.error('Selecione ao menos uma OS no histórico de pleitos.');
-      return;
-    }
-    setHistoricoBatchInvoiceModalValue('');
-    setShowHistoricoBatchNfModal(true);
-  };
-
-  const handleConfirmHistoricoFaturar100Selecionadas = async () => {
-    const idsSelecionados = Array.from(selectedHistoricoPleitos).filter((id) =>
-      filteredHistoricoPleitoIds.includes(id)
-    );
-    if (idsSelecionados.length === 0) {
-      toast.error('Selecione ao menos uma OS no histórico de pleitos.');
-      return;
-    }
-    const invoice = historicoBatchInvoiceModalValue.trim();
-    if (!invoice) {
-      toast.error('Informe o número da nota fiscal para faturar as OSs selecionadas.');
-      return;
-    }
-    const draftFaturado = {
-      billingStatus: 'pago' as const,
-      invoiceNumber: invoice,
-    };
-    setHistoricoDrafts((prev) => {
-      const next = { ...prev };
-      idsSelecionados.forEach((id) => {
-        next[id] = { ...draftFaturado };
-      });
-      return next;
-    });
-    setIsSavingHistoricoPleitos(true);
-    try {
-      await Promise.all(
-        idsSelecionados.map(async (id) => {
-          const pleito = generatedPleitos.find((p) => p.id === id);
-          if (!pleito) return;
-          await patchHistoricoPleitoFaturamento(pleito, draftFaturado, { usarOrcamento100: true });
-        })
-      );
-      await invalidateHistoricoAndBillings();
-      setShowHistoricoBatchNfModal(false);
-      setHistoricoBatchInvoiceModalValue('');
-      toast.success(
-        `${idsSelecionados.length} OS(s) faturada(s) a 100% com NF ${invoice}. O valor foi registrado no faturamento do contrato.`
-      );
-    } catch {
-      toast.error('Não foi possível faturar as OSs selecionadas. Tente novamente.');
-    } finally {
-      setIsSavingHistoricoPleitos(false);
-    }
-  };
 
   const handleExportPleitoPDF = async () => {
     if (pleitoGeradoData.length === 0) return;
@@ -4143,14 +4086,6 @@ export default function ContractDetailPage() {
                           <History className={OS_TOOLBAR_BTN_ICON} />
                           Histórico de OS
                         </button>
-                        <button
-                          type="button"
-                          onClick={() => setShowHistoricoPleitosModal(true)}
-                          className={OS_TOOLBAR_BTN}
-                        >
-                          <History className={OS_TOOLBAR_BTN_ICON} />
-                          Histórico de Pleitos
-                        </button>
                       </>
                     )}
                     <button
@@ -4278,30 +4213,30 @@ export default function ContractDetailPage() {
                         </th>
                         <th className={`${cadastroListClasses.th} whitespace-nowrap align-middle`}>ID</th>
                         <th className={`${cadastroListClasses.th} align-middle`}>Descrição</th>
+                        <th className={`${cadastroListClasses.thCenter} align-middle whitespace-nowrap`}>Status</th>
                         <th className={`${cadastroListClasses.thCenter} align-middle`}>Status Orçamento</th>
                         <th className={`${cadastroListClasses.thCenter} align-middle`}>Status Execução</th>
-                        <th className={`${cadastroListClasses.thCenter} align-middle whitespace-nowrap`}>Status Faturamento (%)</th>
-                        <th className={`${cadastroListClasses.thCenter} align-middle whitespace-nowrap`}>Data término</th>
-                        <th className={`${cadastroListClasses.thCenter} align-middle whitespace-nowrap`}>Etiqueta</th>
+                        <th className={`${cadastroListClasses.thCenter} align-middle whitespace-nowrap`}>% Pleiteado</th>
+                        <th className={`${cadastroListClasses.thCenter} align-middle whitespace-nowrap`}>% Faturado</th>
+                        <th className={`${cadastroListClasses.thNumeric} align-middle whitespace-nowrap`}>Restante a pleitear</th>
+                        <th className={`${cadastroListClasses.thNumeric} align-middle whitespace-nowrap`}>Restante a faturar</th>
                         <th className={`${cadastroListClasses.thNumeric} align-middle`}>Orçamento</th>
                         <th className={`${listTableRowClasses.actionTh} align-middle`}>Ação</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
                       {displayedPleitos.map((p) => {
-                        const osSe = (p.divSe || '').trim();
-                        const acumulado = billings
-                          .filter((b) => (b.serviceOrder || '').trim() === osSe)
-                          .reduce((sum, b) => sum + b.grossValue, 0);
-                        const orcamentoPleito = p.budget ? Number(p.budget) : 0;
-                        const statusFaturamentoPct = orcamentoPleito > 0 ? (acumulado / orcamentoPleito) * 100 : null;
-                        const osEtiqueta = getOsEtiquetaAbertura(p, billingsForOs);
+                        const osStatus = getOsStatus(p, billingsForOs, allPleitos);
+                        const pctPleiteado = getOsPleiteadoPct(p, allPleitos);
+                        const pctFaturado = getOsStatusFaturamentoPct(p, billingsForOs);
+                        const restantePleitear = getOsRestantePleitear(p, allPleitos);
+                        const restanteFaturar = getOsRestanteFaturar(p, billingsForOs);
                         const isSelected = selectedForPleito.has(p.id);
                         return (
                         <tr
                           key={p.id}
                           onClick={() => setSelectedPleitoId(p.id)}
-                          className={`hover:bg-gray-50 dark:hover:bg-gray-700/30 cursor-pointer ${isSelected ? 'bg-blue-50/50 dark:bg-blue-900/10' : ''}`}
+                          className={`group cursor-pointer transition-colors hover:bg-gray-50 dark:hover:bg-gray-700/30 ${isSelected ? 'bg-blue-50/50 dark:bg-blue-900/10' : ''}`}
                         >
                           <td className="px-3 py-3 align-middle" onClick={(e) => e.stopPropagation()}>
                             <div className="flex justify-center">
@@ -4325,6 +4260,11 @@ export default function ContractDetailPage() {
                                       delete nextVal[p.id];
                                       return nextVal;
                                     });
+                                    setPleitoValorInput((prev) => {
+                                      const nextVal = { ...prev };
+                                      delete nextVal[p.id];
+                                      return nextVal;
+                                    });
                                   }
                                 }}
                                 ariaLabel={`Selecionar ordem de serviço ${formatOsSePastaOrDash(p.divSe, p.folderNumber)}`}
@@ -4336,6 +4276,13 @@ export default function ContractDetailPage() {
                           </td>
                           <td className={`${cadastroListClasses.tdTruncate} align-middle`} title={p.serviceDescription}>
                             <span className="block truncate">{p.serviceDescription || '-'}</span>
+                          </td>
+                          <td className={`${cadastroListClasses.tdCenter} align-middle whitespace-nowrap`}>
+                            <span
+                              className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${osStatusBadgeClass(osStatus)}`}
+                            >
+                              {osStatus}
+                            </span>
                           </td>
                           <td className={`${cadastroListClasses.tdCenter} align-middle`}>
                             <span
@@ -4354,17 +4301,16 @@ export default function ContractDetailPage() {
                             </span>
                           </td>
                           <td className={`${cadastroListClasses.tdCenter} align-middle text-gray-900 dark:text-gray-100`}>
-                            {statusFaturamentoPct != null ? `${statusFaturamentoPct.toFixed(1)}%` : '-'}
+                            {pctPleiteado != null ? `${pctPleiteado.toFixed(1)}%` : '—'}
                           </td>
-                          <td className={`${cadastroListClasses.tdCenter} align-middle whitespace-nowrap text-gray-900 dark:text-gray-100`}>
-                            {p.endDate ? formatDate(p.endDate) : '-'}
+                          <td className={`${cadastroListClasses.tdCenter} align-middle text-gray-900 dark:text-gray-100`}>
+                            {pctFaturado != null ? `${pctFaturado.toFixed(1)}%` : '—'}
                           </td>
-                          <td className={`${cadastroListClasses.tdCenter} align-middle whitespace-nowrap`}>
-                            <span
-                              className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${osEtiquetaBadgeClass(osEtiqueta)}`}
-                            >
-                              {osEtiqueta}
-                            </span>
+                          <td className={`${cadastroListClasses.tdNumeric} align-middle text-gray-900 dark:text-gray-100`}>
+                            {restantePleitear != null ? formatCurrency(restantePleitear) : '—'}
+                          </td>
+                          <td className={`${cadastroListClasses.tdNumeric} align-middle text-gray-900 dark:text-gray-100`}>
+                            {restanteFaturar != null ? formatCurrency(restanteFaturar) : '—'}
                           </td>
                           <td className={`${cadastroListClasses.tdNumeric} align-middle font-medium text-gray-900 dark:text-gray-100`}>
                             {p.budget ? formatCurrency(Number(p.budget)) : '-'}
@@ -4445,6 +4391,8 @@ export default function ContractDetailPage() {
               )}
             </CardContent>
           </Card>
+
+          <ContractHistoricoPleitosPanel contractId={contractId} />
           </>
           ) : null}
 
@@ -4511,7 +4459,12 @@ export default function ContractDetailPage() {
                   <button
                     type="button"
                     onClick={() => {
-                      setProductionForm({ fillingDate: toInputDate(new Date()), divSe: '', weeklyProductionValue: '', responsiblePerson: '' });
+                      setProductionForm({
+                        fillingDate: toInputDate(new Date()),
+                        divSe: '',
+                        weeklyProductionValue: '',
+                        responsiblePerson: defaultProductionResponsiblePerson,
+                      });
                       setShowProductionModal(true);
                     }}
                     disabled={!canCreateContrato}
@@ -4541,7 +4494,12 @@ export default function ContractDetailPage() {
                   {productions.length === 0 && (
                   <button
                     onClick={() => {
-                    setProductionForm({ fillingDate: toInputDate(new Date()), divSe: '', weeklyProductionValue: '', responsiblePerson: '' });
+                    setProductionForm({
+                      fillingDate: toInputDate(new Date()),
+                      divSe: '',
+                      weeklyProductionValue: '',
+                      responsiblePerson: defaultProductionResponsiblePerson,
+                    });
                     setShowProductionModal(true);
                   }}
                     className="mt-3 text-amber-600 dark:text-amber-400 hover:underline text-sm font-medium"
@@ -4749,66 +4707,78 @@ export default function ContractDetailPage() {
                     totalPages={billingsListRange.totalPages}
                   />
                 <div className="overflow-x-auto">
-                  <table className="w-full" data-cc-skip-column-customizer="1">
+                  <table className="w-full text-sm" data-cc-skip-column-customizer="1">
                     <thead className="border-b border-gray-200 dark:border-gray-700">
                       <tr>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Data Emissão</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Nº Nota Fiscal</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">OS / SE</th>
-                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Valor Bruto</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Preenchimento</th>
-                        {canDeleteContrato && (
-                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase w-24">Ações</th>
-                        )}
+                        <th className={`${cadastroListClasses.th} whitespace-nowrap align-middle`}>OS / SE</th>
+                        <th className={`${cadastroListClasses.th} whitespace-nowrap align-middle`}>Nº Nota Fiscal</th>
+                        <th className={`${cadastroListClasses.thCenter} whitespace-nowrap align-middle`}>Data emissão</th>
+                        <th className={`${cadastroListClasses.thNumeric} align-middle`}>Valor bruto</th>
+                        {canDeleteContrato ? (
+                          <th className={`${listTableRowClasses.actionTh} align-middle`}>Ação</th>
+                        ) : null}
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                    <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
                       {displayedBillings.map((b) => (
                         <tr
                           key={b.id}
                           onClick={() => setSelectedBilling(b)}
-                          className="hover:bg-gray-50 dark:hover:bg-gray-700/30 cursor-pointer"
+                          className={listTableRowClasses.trNavigable}
                         >
-                          <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100">{formatDate(b.issueDate)}</td>
-                          <td className="px-4 py-3 text-sm font-mono text-gray-900 dark:text-gray-100">{b.invoiceNumber}</td>
-                          <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100">
+                          <td className={`${cadastroListClasses.tdMono} align-middle whitespace-nowrap`}>
                             {formatOsSePastaOrDash(b.serviceOrder, folderForDivSe(pleitos, b.serviceOrder))}
                           </td>
-                          <td className="px-4 py-3 text-sm text-right font-medium text-gray-900 dark:text-gray-100">
+                          <td className={`${cadastroListClasses.tdMono} align-middle whitespace-nowrap`}>
+                            {b.invoiceNumber}
+                          </td>
+                          <td className={`${cadastroListClasses.tdCenter} align-middle whitespace-nowrap text-gray-900 dark:text-gray-100`}>
+                            {formatDate(b.issueDate)}
+                          </td>
+                          <td className={`${cadastroListClasses.tdNumeric} align-middle`}>
                             <div className="flex flex-col items-end gap-1">
-                              <span>{formatCurrency(b.grossValue)}</span>
-                              {isNetValueMissing(b) && (
-                                <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
+                              <span className="font-medium text-gray-900 dark:text-gray-100">
+                                {formatCurrency(b.grossValue)}
+                              </span>
+                              {isNetValueMissing(b) ? (
+                                <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
                                   FAT. LIQUIDO NAO PREENCHIDO
                                 </span>
-                              )}
+                              ) : null}
                             </div>
                           </td>
-                          <td className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap">{formatDateTimeBr(b.createdAt || '')}</td>
-                          {canDeleteContrato && (
-                            <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
-                              <button
-                                onClick={() => {
-                                  if (!canDeleteContrato) {
-                                    toast.error('Você não tem permissão para excluir no módulo Contratos.');
-                                    return;
-                                  }
-                                  if (confirm('Excluir este faturamento?')) {
-                                    deleteBillingMutation.mutate(b.id);
-                                  }
-                                }}
-                                disabled={!canDeleteContrato || deleteBillingMutation.isPending}
-                                className="p-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                                title="Excluir"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </td>
-                          )}
+                          {canDeleteContrato ? (
+                            <RowActionMenuCell
+                              isOpen={isBillingRowMenuOpen(b.id)}
+                              onToggle={(e) => toggleBillingRowActionMenu(b.id, e.currentTarget)}
+                            />
+                          ) : null}
                         </tr>
                       ))}
                     </tbody>
                   </table>
+                  {billingRowActionMenu && billingRowForActionMenu ? (
+                    <RowActionMenuPortal
+                      menu={billingRowActionMenu}
+                      onClose={closeBillingRowActionMenu}
+                      onEdit={() => {}}
+                      onDelete={() => {}}
+                      hideDefaultActions
+                      extraItems={[
+                        {
+                          label: 'Remover',
+                          onClick: () => handleRemoverFaturamento(billingRowForActionMenu),
+                          disabled: !canDeleteContrato || deleteBillingMutation.isPending,
+                          disabledTitle: deleteBillingMutation.isPending
+                            ? 'Excluindo...'
+                            : 'Sem permissão para excluir',
+                          icon: (
+                            <Trash2 className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
+                          ),
+                        },
+                      ]}
+                    />
+                  ) : null}
                 </div>
                 <ListPagination
                   currentPage={billingsListPage}
@@ -5064,6 +5034,18 @@ export default function ContractDetailPage() {
                   value={filterStatusFaturamento}
                   onChange={setFilterStatusFaturamento}
                   options={FILTER_STATUS_FATURAMENTO_OPTIONS}
+                  allowEmpty={false}
+                  className="w-full"
+                />
+              </div>
+              <div>
+                <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Status
+                </label>
+                <StringSingleSelectDropdown
+                  value={filterOsStatus}
+                  onChange={setFilterOsStatus}
+                  options={FILTER_OS_STATUS_OPTIONS}
                   allowEmpty={false}
                   className="w-full"
                 />
@@ -5433,60 +5415,31 @@ export default function ContractDetailPage() {
                 </div>
                 <form onSubmit={handleProductionSubmit} className="p-6 space-y-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Data</label>
-                    <input
-                      type="date"
+                    <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Data</label>
+                    <DatePickerField
                       value={productionForm.fillingDate || toInputDate(new Date())}
-                      onChange={(e) => setProductionForm({ ...productionForm, fillingDate: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                      onChange={(fillingDate) => setProductionForm({ ...productionForm, fillingDate })}
+                      placeholder="dd/mm/aaaa"
+                      aria-label="Data do preenchimento"
                     />
-                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Data em que o preenchimento está sendo realizado</p>
+                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                      Data em que o preenchimento está sendo realizado
+                    </p>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Contrato</label>
-                    <div className="px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100">
-                      {contract ? `${contract.number} – ${contract.name}` : '-'}
-                    </div>
-                  </div>
-                  <div className="relative">
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">OS / SE *</label>
-                    <input
-                      type="text"
-                      required
+                    <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">OS / SE *</label>
+                    <StringSingleSelectDropdown
                       value={productionForm.divSe}
-                      onChange={(e) => {
-                        setProductionForm({ ...productionForm, divSe: e.target.value });
-                        setProductionOsSeDropdownOpen(true);
-                      }}
-                      onFocus={() => setProductionOsSeDropdownOpen(true)}
-                      onBlur={() => setTimeout(() => setProductionOsSeDropdownOpen(false), 150)}
-                      placeholder="Digite para buscar ou selecionar"
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                      onChange={(divSe) => setProductionForm({ ...productionForm, divSe })}
+                      options={divSeSelectOptions}
+                      allowEmpty={false}
+                      placeholder="Selecionar OS / SE"
+                      searchPlaceholder="Pesquisar OS / SE..."
+                      emptyOptionsMessage="Nenhuma OS cadastrada neste contrato."
+                      className="w-full"
                     />
-                    {productionOsSeDropdownOpen && (
-                      <div className="absolute z-20 mt-1 w-full max-h-48 overflow-y-auto bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg shadow-lg">
-                        {productionOsSeFiltered.length === 0 ? (
-                          <div className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">Nenhuma OS encontrada</div>
-                        ) : (
-                          productionOsSeFiltered.map((opt) => (
-                            <button
-                              key={`${opt.divSe}-${opt.folderNumber ?? ''}`}
-                              type="button"
-                              onMouseDown={(e) => {
-                                e.preventDefault();
-                                setProductionForm({ ...productionForm, divSe: opt.divSe });
-                                setProductionOsSeDropdownOpen(false);
-                              }}
-                              className="w-full px-3 py-2 text-left text-sm text-gray-900 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700 first:rounded-t-lg last:rounded-b-lg"
-                            >
-                              {formatOsSePasta(opt.divSe, opt.folderNumber)}
-                            </button>
-                          ))
-                        )}
-                      </div>
-                    )}
                     {divSeOptions.length === 0 && (
-                      <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
+                      <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
                         Nenhuma OS cadastrada em Ordem de Serviço. Cadastre uma ordem de serviço com o campo OS / SE.
                       </p>
                     )}
@@ -5509,14 +5462,17 @@ export default function ContractDetailPage() {
                     </div>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Responsável pelo Preenchimento *</label>
-                    <input
-                      type="text"
-                      required
+                    <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Responsável pelo Preenchimento *</label>
+                    <StringSingleSelectDropdown
                       value={productionForm.responsiblePerson}
-                      onChange={(e) => setProductionForm({ ...productionForm, responsiblePerson: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                      placeholder="Nome do responsável"
+                      onChange={(responsiblePerson) => setProductionForm({ ...productionForm, responsiblePerson })}
+                      options={productionResponsibleSelectOptions}
+                      allowEmpty={false}
+                      disabled={loadingProductionEmployees}
+                      placeholder={loadingProductionEmployees ? 'Carregando pessoas...' : 'Selecionar responsável'}
+                      searchPlaceholder="Pesquisar pessoa..."
+                      emptyOptionsMessage="Nenhuma pessoa encontrada."
+                      className="w-full"
                     />
                   </div>
                   <div className="flex justify-end gap-3 pt-4 border-t border-gray-200 dark:border-gray-700">
@@ -5529,7 +5485,7 @@ export default function ContractDetailPage() {
                     </button>
                     <button
                       type="submit"
-                      disabled={createProductionMutation.isPending}
+                      disabled={createProductionMutation.isPending || loadingProductionEmployees}
                       className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 disabled:opacity-50"
                     >
                       {createProductionMutation.isPending ? 'Salvando...' : 'Cadastrar'}
@@ -5559,58 +5515,32 @@ export default function ContractDetailPage() {
                 </div>
                 <form onSubmit={handleProductionEditSubmit} className="p-6 space-y-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Data</label>
-                    <input
-                      type="date"
-                      value={productionEditForm.fillingDate || (selectedProduction?.fillingDate ? toInputDate(selectedProduction.fillingDate) : '')}
-                      onChange={(e) => setProductionEditForm({ ...productionEditForm, fillingDate: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                    <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Data</label>
+                    <DatePickerField
+                      value={
+                        productionEditForm.fillingDate ||
+                        (selectedProduction?.fillingDate ? toInputDate(selectedProduction.fillingDate) : '')
+                      }
+                      onChange={(fillingDate) => setProductionEditForm({ ...productionEditForm, fillingDate })}
+                      placeholder="dd/mm/aaaa"
+                      aria-label="Data do preenchimento"
                     />
-                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Data em que o preenchimento foi realizado</p>
+                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                      Data em que o preenchimento foi realizado
+                    </p>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Contrato</label>
-                    <div className="px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100">
-                      {contract ? `${contract.number} – ${contract.name}` : '-'}
-                    </div>
-                  </div>
-                  <div className="relative">
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">OS / SE *</label>
-                    <input
-                      type="text"
-                      required
+                    <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">OS / SE *</label>
+                    <StringSingleSelectDropdown
                       value={productionEditForm.divSe}
-                      onChange={(e) => {
-                        setProductionEditForm({ ...productionEditForm, divSe: e.target.value });
-                        setProductionOsSeEditDropdownOpen(true);
-                      }}
-                      onFocus={() => setProductionOsSeEditDropdownOpen(true)}
-                      onBlur={() => setTimeout(() => setProductionOsSeEditDropdownOpen(false), 150)}
-                      placeholder="Digite para buscar ou selecionar"
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                      onChange={(divSe) => setProductionEditForm({ ...productionEditForm, divSe })}
+                      options={divSeSelectOptions}
+                      allowEmpty={false}
+                      placeholder="Selecionar OS / SE"
+                      searchPlaceholder="Pesquisar OS / SE..."
+                      emptyOptionsMessage="Nenhuma OS cadastrada neste contrato."
+                      className="w-full"
                     />
-                    {productionOsSeEditDropdownOpen && (
-                      <div className="absolute z-20 mt-1 w-full max-h-48 overflow-y-auto bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg shadow-lg">
-                        {productionOsSeEditFiltered.length === 0 ? (
-                          <div className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">Nenhuma OS encontrada</div>
-                        ) : (
-                          productionOsSeEditFiltered.map((opt) => (
-                            <button
-                              key={`${opt.divSe}-${opt.folderNumber ?? ''}`}
-                              type="button"
-                              onMouseDown={(e) => {
-                                e.preventDefault();
-                                setProductionEditForm({ ...productionEditForm, divSe: opt.divSe });
-                                setProductionOsSeEditDropdownOpen(false);
-                              }}
-                              className="w-full px-3 py-2 text-left text-sm text-gray-900 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700 first:rounded-t-lg last:rounded-b-lg"
-                            >
-                              {formatOsSePasta(opt.divSe, opt.folderNumber)}
-                            </button>
-                          ))
-                        )}
-                      </div>
-                    )}
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Valor da Produção Semanal *</label>
@@ -5680,68 +5610,82 @@ export default function ContractDetailPage() {
                 </div>
                 <form onSubmit={handleBillingSubmit} className="p-6 space-y-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Data de Emissão *</label>
-                    <input
-                      type="date"
-                      required
+                    <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Data de Emissão *</label>
+                    <DatePickerField
                       value={billingForm.issueDate}
-                      onChange={(e) => setBillingForm({ ...billingForm, issueDate: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                      onChange={(issueDate) => setBillingForm({ ...billingForm, issueDate })}
+                      placeholder="dd/mm/aaaa"
+                      aria-label="Data de emissão"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Número da Nota Fiscal *</label>
+                    <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Número da Nota Fiscal *</label>
                     <input
                       type="text"
                       required
                       value={billingForm.invoiceNumber}
                       onChange={(e) => setBillingForm({ ...billingForm, invoiceNumber: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                      className="h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
                       placeholder="Ex: 000123"
                     />
                   </div>
-                  <div className="relative">
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">OS / SE *</label>
-                    <input
-                      type="text"
-                      required
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">OS / SE *</label>
+                    <StringSingleSelectDropdown
                       value={billingForm.serviceOrder}
-                      onChange={(e) => {
-                        setBillingForm({ ...billingForm, serviceOrder: e.target.value });
-                        setOsSeDropdownOpen(true);
+                      onChange={(serviceOrder) => {
+                        setBillingForm((prev) => {
+                          const osTrimmed = serviceOrder.trim();
+                          const pleito = allPleitos.find((p) => p.id === prev.pleitoId);
+                          const pleitoStillValid =
+                            !!pleito && (!osTrimmed || (pleito.divSe || '').trim() === osTrimmed);
+                          return {
+                            ...prev,
+                            serviceOrder,
+                            pleitoId: pleitoStillValid ? prev.pleitoId : '',
+                          };
+                        });
                       }}
-                      onFocus={() => setOsSeDropdownOpen(true)}
-                      onBlur={() => setTimeout(() => setOsSeDropdownOpen(false), 150)}
-                      placeholder="Digite para buscar ou selecionar"
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                      options={divSeSelectOptions}
+                      allowEmpty={false}
+                      placeholder="Selecionar OS / SE"
+                      searchPlaceholder="Pesquisar OS / SE..."
+                      emptyOptionsMessage="Nenhuma OS cadastrada neste contrato."
+                      className="w-full"
                     />
-                    {osSeDropdownOpen && (
-                      <div className="absolute z-20 mt-1 w-full max-h-48 overflow-y-auto bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg shadow-lg">
-                        {osSeFiltered.length === 0 ? (
-                          <div className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">
-                            Nenhuma OS encontrada
-                          </div>
-                        ) : (
-                          osSeFiltered.map((opt) => (
-                            <button
-                              key={`${opt.divSe}-${opt.folderNumber ?? ''}`}
-                              type="button"
-                              onMouseDown={(e) => {
-                                e.preventDefault();
-                                setBillingForm({ ...billingForm, serviceOrder: opt.divSe });
-                                setOsSeDropdownOpen(false);
-                              }}
-                              className="w-full px-3 py-2 text-left text-sm text-gray-900 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700 first:rounded-t-lg last:rounded-b-lg"
-                            >
-                              {formatOsSePasta(opt.divSe, opt.folderNumber)}
-                            </button>
-                          ))
-                        )}
-                      </div>
-                    )}
                     {divSeOptions.length === 0 && (
-                      <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
+                      <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
                         Nenhuma OS cadastrada em Ordem de Serviço. Cadastre uma ordem de serviço com o campo OS / SE.
+                      </p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Pleito vinculado *</label>
+                    <StringSingleSelectDropdown
+                      value={billingForm.pleitoId}
+                      onChange={(pleitoId) => {
+                        const pleito = pleitosForBillingForm.find((p) => p.id === pleitoId);
+                        setBillingForm((prev) => ({
+                          ...prev,
+                          pleitoId,
+                          serviceOrder: pleito?.divSe?.trim() || prev.serviceOrder,
+                        }));
+                      }}
+                      options={pleitosForBillingSelectOptions}
+                      allowEmpty={false}
+                      placeholder="Selecionar pleito"
+                      searchPlaceholder="Pesquisar pleito..."
+                      emptyOptionsMessage="Nenhum pleito apto para faturamento."
+                      className="w-full"
+                    />
+                    {billingForm.serviceOrder.trim() && pleitosForBillingForm.length === 0 && (
+                      <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
+                        Nenhum pleito apto para faturamento nesta OS. Gere o pleito no histórico antes de lançar o faturamento.
+                      </p>
+                    )}
+                    {selectedBillingPleitoSaldo != null && billingForm.pleitoId && (
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                        Saldo disponível do pleito: {formatCurrency(selectedBillingPleitoSaldo)}
                       </p>
                     )}
                   </div>
@@ -5757,6 +5701,24 @@ export default function ContractDetailPage() {
                           const v = e.target.value.replace(/\D/g, '');
                           const formatted = v ? (Number(v) / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '';
                           setBillingForm({ ...billingForm, grossValue: formatted });
+                        }}
+                        className="w-full pl-10 pr-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                        placeholder="0,00"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Valor Líquido *</label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 font-medium">R$</span>
+                      <input
+                        type="text"
+                        required
+                        value={billingForm.netValue}
+                        onChange={(e) => {
+                          const v = e.target.value.replace(/\D/g, '');
+                          const formatted = v ? (Number(v) / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '';
+                          setBillingForm({ ...billingForm, netValue: formatted });
                         }}
                         className="w-full pl-10 pr-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
                         placeholder="0,00"
@@ -5822,16 +5784,24 @@ export default function ContractDetailPage() {
                   </button>
                 </div>
                 <div className="p-6 space-y-4">
-                  <p className="text-sm text-gray-600 dark:text-gray-400">Informe a % do orçamento para cada OS selecionada:</p>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                    Informe a % do orçamento ou o valor em R$ para cada OS selecionada:
+                  </p>
                   {Array.from(selectedForPleito).map((id) => {
                     const p = pleitos.find((x) => x.id === id);
                     if (!p) return null;
                     const orc = p.budget ? Number(p.budget) : 0;
-                    const pctNum = parseCurrencyInput(valorPleiteado[id] || '');
-                    const valorCalculado = orc > 0 && pctNum > 0 ? (orc * pctNum) / 100 : null;
-                    const alreadyPleiteado = sumBillingRequestSameOs(allPleitos, p.divSe);
-                    const restanteParaFaturar = orc > 0 ? Math.max(0, orc - alreadyPleiteado) : null;
-                    const excedeOrcamento = pleitoModalExcedeState.byId[id] === true;
+                    const selectedIds = Array.from(selectedForPleito);
+                    const alreadyPleiteado = sumOsPleiteadoTotal(allPleitos, p.divSe);
+                    const maxValor = getMaxPleitoValorForOs(
+                      id,
+                      pleitos,
+                      allPleitos,
+                      selectedIds,
+                      valorPleiteado,
+                      pleitoValorInput
+                    );
+                    const restantePleitear = orc > 0 ? maxValor : null;
                     return (
                       <div key={id} className="p-3 border border-gray-200 dark:border-gray-600 rounded-lg space-y-2">
                         <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
@@ -5840,31 +5810,64 @@ export default function ContractDetailPage() {
                         </p>
                         <p className="text-xs text-gray-500 dark:text-gray-400">Orçamento: {p.budget ? formatCurrency(Number(p.budget)) : '-'}</p>
                         <p className="text-xs text-gray-500 dark:text-gray-400">
-                          Restante para faturar:{' '}
-                          {restanteParaFaturar != null ? formatCurrency(restanteParaFaturar) : '—'}
+                          Restante a pleitear:{' '}
+                          {restantePleitear != null ? formatCurrency(restantePleitear) : '—'}
                         </p>
-                        {excedeOrcamento && (
-                          <p className="text-xs font-medium text-red-600 dark:text-red-400">valor faturado acima do permitido</p>
-                        )}
                         <div className="flex gap-4 items-end">
                           <div className="flex-1">
                             <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">% Orçamento</label>
-                            <input
-                              type="text"
-                              value={valorPleiteado[id] || ''}
-                              onChange={(e) => {
-                                const v = e.target.value.replace(/\D/g, '');
-                                const formatted = v ? (Number(v) / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '';
-                                setValorPleiteado((prev) => ({ ...prev, [id]: formatted }));
-                              }}
-                              placeholder="0,00"
-                              className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                            />
+                            <div className="relative">
+                              <input
+                                type="text"
+                                inputMode="numeric"
+                                value={valorPleiteado[id] || ''}
+                                onChange={(e) => {
+                                  const digits = e.target.value.replace(/\D/g, '');
+                                  const formatted = digits
+                                    ? (Number(digits) / 100).toLocaleString('pt-BR', {
+                                        minimumFractionDigits: 2,
+                                        maximumFractionDigits: 2,
+                                      })
+                                    : '';
+                                  const pct = parseCurrencyInput(formatted);
+                                  const draft = pleitoDraftFromPct(pct, orc, maxValor);
+                                  setValorPleiteado((prev) => ({ ...prev, [id]: draft.pct }));
+                                  setPleitoValorInput((prev) => ({ ...prev, [id]: draft.valor }));
+                                }}
+                                placeholder="0,00"
+                                className="w-full px-3 py-2 pr-8 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                              />
+                              <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">
+                                %
+                              </span>
+                            </div>
                           </div>
-                          <div className="w-40">
+                          <div className="flex-1">
                             <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Valor pleiteado</label>
-                            <div className="px-3 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700/50 text-gray-700 dark:text-gray-300">
-                              {valorCalculado != null ? formatCurrency(valorCalculado) : '—'}
+                            <div className="relative">
+                              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-medium text-gray-500 dark:text-gray-400">
+                                R$
+                              </span>
+                              <input
+                                type="text"
+                                inputMode="numeric"
+                                value={pleitoValorInput[id] || ''}
+                                onChange={(e) => {
+                                  const digits = e.target.value.replace(/\D/g, '');
+                                  const formatted = digits
+                                    ? (Number(digits) / 100).toLocaleString('pt-BR', {
+                                        minimumFractionDigits: 2,
+                                        maximumFractionDigits: 2,
+                                      })
+                                    : '';
+                                  const valor = parseCurrencyInput(formatted);
+                                  const draft = pleitoDraftFromValor(valor, orc, maxValor);
+                                  setPleitoValorInput((prev) => ({ ...prev, [id]: draft.valor }));
+                                  setValorPleiteado((prev) => ({ ...prev, [id]: draft.pct }));
+                                }}
+                                placeholder="0,00"
+                                className="w-full py-2 pl-10 pr-3 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                              />
                             </div>
                           </div>
                         </div>
@@ -5884,272 +5887,6 @@ export default function ContractDetailPage() {
                     {gerarPleitoMutation.isPending ? 'Gerando...' : 'Confirmar e Gerar'}
                   </button>
                 </div>
-              </div>
-            </div>
-          )}
-
-          {showHistoricoPleitosModal && (
-            <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-2">
-              <div className="absolute inset-0" onClick={() => setShowHistoricoPleitosModal(false)} />
-              <div
-                className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-[95vw] w-full mx-4 max-h-[90vh] overflow-y-auto"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between sticky top-0 bg-white dark:bg-gray-800 z-10">
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Histórico de Pleitos</h3>
-                  <button onClick={() => setShowHistoricoPleitosModal(false)} className="p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400">
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
-                <div className="p-6">
-                  {generatedPleitos.length === 0 ? (
-                    <div className="py-8 text-center text-gray-500 dark:text-gray-400">Nenhum pleito gerado até o momento.</div>
-                  ) : (
-                    <div className="space-y-4">
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
-                        <StringSingleSelectDropdown
-                          value={histMonthFilter}
-                          onChange={setHistMonthFilter}
-                          options={HIST_MONTH_FILTER_OPTIONS}
-                          allowEmpty={false}
-                        />
-                        <StringSingleSelectDropdown
-                          value={histYearFilter}
-                          onChange={setHistYearFilter}
-                          options={histYearFilterOptions}
-                          allowEmpty={false}
-                        />
-                        <input
-                          type="text"
-                          value={histOsFilter}
-                          onChange={(e) => setHistOsFilter(e.target.value)}
-                          placeholder="OS / SE"
-                          className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                        />
-                        <input
-                          type="text"
-                          value={histPastaFilter}
-                          onChange={(e) => setHistPastaFilter(e.target.value)}
-                          placeholder="Nº Pasta"
-                          className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                        />
-                        <input
-                          type="text"
-                          value={histDescricaoFilter}
-                          onChange={(e) => setHistDescricaoFilter(e.target.value)}
-                          placeholder="Descrição"
-                          className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                        />
-                        <StringSingleSelectDropdown
-                          value={histEtiquetaFilter}
-                          onChange={setHistEtiquetaFilter}
-                          options={HIST_ETIQUETA_FILTER_OPTIONS}
-                          allowEmpty={false}
-                        />
-                      </div>
-                      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                        <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={handleOpenHistoricoFaturar100Modal}
-                            disabled={isSavingHistoricoPleitos || selectedHistoricoPleitos.size === 0}
-                            className="px-4 py-2 text-sm font-medium rounded-lg bg-rose-700 text-white hover:bg-rose-800 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
-                          >
-                            Faturar 100% selecionadas
-                          </button>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={handleSaveAllHistoricoPleitos}
-                          disabled={isSavingHistoricoPleitos || changedHistoricoPleitoIds.length === 0}
-                          className="px-4 py-2 text-sm font-medium rounded-lg bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          {isSavingHistoricoPleitos
-                            ? 'Salvando...'
-                            : `Salvar alterações${changedHistoricoPleitoIds.length > 0 ? ` (${changedHistoricoPleitoIds.length})` : ''}`}
-                        </button>
-                      </div>
-                      <div className="overflow-x-auto">
-                      <table className="w-full min-w-[1500px]" data-cc-skip-column-customizer="1">
-                        <thead className="border-b border-gray-200 dark:border-gray-700">
-                          <tr>
-                            <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase w-12">
-                              <input
-                                type="checkbox"
-                                checked={allFilteredHistoricoSelected}
-                                ref={(el) => {
-                                  if (el) el.indeterminate = someFilteredHistoricoSelected && !allFilteredHistoricoSelected;
-                                }}
-                                onChange={(e) => toggleSelectAllFilteredHistoricoPleitos(e.target.checked)}
-                                onClick={(e) => e.stopPropagation()}
-                                aria-label="Selecionar OSs filtradas no histórico de pleitos"
-                                className="w-4 h-4 rounded border-gray-300 dark:border-gray-600 text-red-600 focus:ring-red-500"
-                              />
-                            </th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase whitespace-nowrap">Pago pelo cliente</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase whitespace-nowrap">Nº NF</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase whitespace-nowrap">Etiqueta</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">OS / SE</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Descrição</th>
-                            <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Orçamento</th>
-                            <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Valor pleiteado</th>
-                            <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">% Orçamento</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase whitespace-nowrap">Preenchimento</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-200 dark:border-gray-700">
-                          {filteredHistoricoPleitos.map((p) => {
-                            const orc = p.budget ? Number(p.budget) : 0;
-                            const valorPleito = p.billingRequest ? Number(p.billingRequest) : 0;
-                            const pct = orc > 0 ? (valorPleito / orc) * 100 : null;
-                            const rowDraft = historicoDrafts[p.id] || {
-                              billingStatus: ((p.billingStatus || '').toLowerCase() === 'pago' ? 'pago' : 'nao-pago') as 'pago' | 'nao-pago',
-                              invoiceNumber: p.invoiceNumber || ''
-                            };
-                            const etiqueta = getHistoricoEtiqueta(p);
-                            const isSelectedHistorico = selectedHistoricoPleitos.has(p.id);
-                            return (
-                              <tr
-                                key={p.id}
-                                onClick={() => setSelectedPleitoId(p.id)}
-                                className={`hover:bg-gray-50 dark:hover:bg-gray-700/30 cursor-pointer ${isSelectedHistorico ? 'bg-blue-50/50 dark:bg-blue-900/10' : ''}`}
-                              >
-                                <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
-                                  <input
-                                    type="checkbox"
-                                    checked={isSelectedHistorico}
-                                    onChange={(e) =>
-                                      setSelectedHistoricoPleitos((prev) => {
-                                        const next = new Set(prev);
-                                        if (e.target.checked) {
-                                          next.add(p.id);
-                                        } else {
-                                          next.delete(p.id);
-                                        }
-                                        return next;
-                                      })
-                                    }
-                                    className="w-4 h-4 rounded border-gray-300 dark:border-gray-600 text-red-600 focus:ring-red-500"
-                                  />
-                                </td>
-                                <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100" onClick={(e) => e.stopPropagation()}>
-                                  <StringSingleSelectDropdown
-                                    value={rowDraft.billingStatus}
-                                    onChange={(v) =>
-                                      setHistoricoDrafts((prev) => ({
-                                        ...prev,
-                                        [p.id]: {
-                                          ...rowDraft,
-                                          billingStatus: v === 'pago' ? 'pago' : 'nao-pago',
-                                        },
-                                      }))
-                                    }
-                                    options={BILLING_STATUS_ROW_OPTIONS}
-                                    disabled={isSavingHistoricoPleitos}
-                                    allowEmpty={false}
-                                  />
-                                </td>
-                                <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                                  <input
-                                    type="text"
-                                    value={rowDraft.invoiceNumber}
-                                    placeholder="Informar Nº NF"
-                                    disabled={isSavingHistoricoPleitos}
-                                    onChange={(e) =>
-                                      setHistoricoDrafts((prev) => ({
-                                        ...prev,
-                                        [p.id]: {
-                                          ...rowDraft,
-                                          invoiceNumber: e.target.value
-                                        }
-                                      }))
-                                    }
-                                    className="w-full min-w-[140px] bg-transparent border border-gray-200 dark:border-gray-700 rounded px-2 py-1 text-sm font-mono text-gray-900 dark:text-gray-100 placeholder:text-gray-400 disabled:opacity-60"
-                                  />
-                                </td>
-                                <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100 whitespace-nowrap">
-                                  {etiqueta ? (
-                                    <span className="inline-flex items-center rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300 px-2 py-0.5 text-xs font-medium">
-                                      {etiqueta}
-                                    </span>
-                                  ) : '-'}
-                                </td>
-                                <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">
-                                  {formatOsSePastaOrDash(p.divSe, p.folderNumber)}
-                                </td>
-                                <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100 max-w-xs truncate" title={p.serviceDescription}>{p.serviceDescription || '-'}</td>
-                                <td className="px-4 py-3 text-sm text-right text-gray-900 dark:text-gray-100">{p.budget ? formatCurrency(Number(p.budget)) : '-'}</td>
-                                <td className="px-4 py-3 text-sm text-right text-gray-900 dark:text-gray-100">{formatCurrency(valorPleito)}</td>
-                                <td className="px-4 py-3 text-sm text-center text-gray-900 dark:text-gray-100">{pct != null ? `${pct.toFixed(1)}%` : '-'}</td>
-                                <td className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap">{formatDateTimeBr(p.createdAt || '')}</td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                    </div>
-                  )}
-                </div>
-                {showHistoricoBatchNfModal && (
-                  <div
-                    className="absolute inset-0 z-20 flex items-center justify-center bg-black/50 p-2"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <div
-                      className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-md mx-4"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <div className="px-5 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
-                        <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">
-                          Faturar 100% das OSs selecionadas
-                        </h3>
-                        <button
-                          type="button"
-                          onClick={() => setShowHistoricoBatchNfModal(false)}
-                          className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400"
-                        >
-                          <X className="w-4 h-4" />
-                        </button>
-                      </div>
-                      <div className="px-5 py-4 space-y-3">
-                        <p className="text-sm text-gray-600 dark:text-gray-300">
-                          Informe o número da nota fiscal para aplicar em todas as OSs selecionadas. O valor
-                          faturado será 100% do orçamento de cada OS.
-                        </p>
-                        <input
-                          type="text"
-                          value={historicoBatchInvoiceModalValue}
-                          onChange={(e) => setHistoricoBatchInvoiceModalValue(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') void handleConfirmHistoricoFaturar100Selecionadas();
-                          }}
-                          placeholder="Número da Nota Fiscal"
-                          className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                          autoFocus
-                        />
-                      </div>
-                      <div className="px-5 py-4 border-t border-gray-200 dark:border-gray-700 flex items-center justify-end gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setShowHistoricoBatchNfModal(false)}
-                          disabled={isSavingHistoricoPleitos}
-                          className="px-4 py-2 text-sm font-medium rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
-                        >
-                          Cancelar
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => void handleConfirmHistoricoFaturar100Selecionadas()}
-                          disabled={isSavingHistoricoPleitos}
-                          className="px-4 py-2 text-sm font-medium rounded-lg bg-rose-700 text-white hover:bg-rose-800 disabled:opacity-50"
-                        >
-                          {isSavingHistoricoPleitos ? 'Salvando…' : 'Aplicar e faturar'}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                )}
               </div>
             </div>
           )}
@@ -6253,63 +5990,39 @@ export default function ContractDetailPage() {
                 {editingBilling ? (
                   <form onSubmit={handleBillingEditSubmit} className="p-6 space-y-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Data de Emissão *</label>
-                      <input
-                        type="date"
-                        required
+                      <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Data de Emissão *</label>
+                      <DatePickerField
                         value={billingEditForm.issueDate}
-                        onChange={(e) => setBillingEditForm({ ...billingEditForm, issueDate: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                        onChange={(issueDate) => setBillingEditForm({ ...billingEditForm, issueDate })}
+                        placeholder="dd/mm/aaaa"
+                        aria-label="Data de emissão"
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Número da Nota Fiscal *</label>
+                      <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Número da Nota Fiscal *</label>
                       <input
                         type="text"
                         required
                         value={billingEditForm.invoiceNumber}
                         onChange={(e) => setBillingEditForm({ ...billingEditForm, invoiceNumber: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                        className="h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
                         placeholder="Ex: 000123"
                       />
                     </div>
-                    <div className="relative">
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">OS / SE *</label>
-                      <input
-                        type="text"
-                        required
+                    <div>
+                      <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">OS / SE *</label>
+                      <StringSingleSelectDropdown
                         value={billingEditForm.serviceOrder}
-                        onChange={(e) => {
-                          setBillingEditForm({ ...billingEditForm, serviceOrder: e.target.value });
-                          setOsSeEditDropdownOpen(true);
-                        }}
-                        onFocus={() => setOsSeEditDropdownOpen(true)}
-                        onBlur={() => setTimeout(() => setOsSeEditDropdownOpen(false), 150)}
-                        placeholder="Digite para buscar ou selecionar"
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                        onChange={(serviceOrder) =>
+                          setBillingEditForm({ ...billingEditForm, serviceOrder })
+                        }
+                        options={divSeSelectOptions}
+                        allowEmpty={false}
+                        placeholder="Selecionar OS / SE"
+                        searchPlaceholder="Pesquisar OS / SE..."
+                        emptyOptionsMessage="Nenhuma OS cadastrada neste contrato."
+                        className="w-full"
                       />
-                      {osSeEditDropdownOpen && (
-                        <div className="absolute z-20 mt-1 w-full max-h-48 overflow-y-auto bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg shadow-lg">
-                          {osSeEditFiltered.length === 0 ? (
-                            <div className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">Nenhuma OS encontrada</div>
-                          ) : (
-                            osSeEditFiltered.map((opt) => (
-                              <button
-                                key={`${opt.divSe}-${opt.folderNumber ?? ''}`}
-                                type="button"
-                                onMouseDown={(e) => {
-                                  e.preventDefault();
-                                  setBillingEditForm({ ...billingEditForm, serviceOrder: opt.divSe });
-                                  setOsSeEditDropdownOpen(false);
-                                }}
-                                className="w-full px-3 py-2 text-left text-sm text-gray-900 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700 first:rounded-t-lg last:rounded-b-lg"
-                              >
-                                {formatOsSePasta(opt.divSe, opt.folderNumber)}
-                              </button>
-                            ))
-                          )}
-                        </div>
-                      )}
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Valor Bruto *</label>
@@ -6330,11 +6043,12 @@ export default function ContractDetailPage() {
                       </div>
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Valor Líquido</label>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Valor Líquido *</label>
                       <div className="relative">
                         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 font-medium">R$</span>
                         <input
                           type="text"
+                          required
                           value={billingEditForm.netValue}
                           onChange={(e) => {
                             const v = e.target.value.replace(/\D/g, '');
@@ -6347,7 +6061,7 @@ export default function ContractDetailPage() {
                             setBillingEditForm({ ...billingEditForm, netValue: formatted });
                           }}
                           className="w-full pl-10 pr-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                          placeholder="Se vazio, será 0,00"
+                          placeholder="0,00"
                         />
                       </div>
                     </div>
@@ -6541,36 +6255,33 @@ export default function ContractDetailPage() {
               <table className="w-full text-sm" data-cc-skip-column-customizer="1">
                 <thead className="border-b border-gray-200 dark:border-gray-700">
                   <tr>
-                    <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500 dark:text-gray-400">
-                      Data Emissão
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500 dark:text-gray-400">
-                      Nº Nota Fiscal
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500 dark:text-gray-400">
-                      OS / SE
-                    </th>
-                    <th className="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500 dark:text-gray-400">
-                      Valor Bruto
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500 dark:text-gray-400">
-                      Preenchimento
-                    </th>
+                    <th className={`${cadastroListClasses.th} whitespace-nowrap align-middle`}>OS / SE</th>
+                    <th className={`${cadastroListClasses.th} whitespace-nowrap align-middle`}>Nº Nota Fiscal</th>
+                    <th className={`${cadastroListClasses.thCenter} whitespace-nowrap align-middle`}>Data emissão</th>
+                    <th className={`${cadastroListClasses.thNumeric} align-middle`}>Valor bruto</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
                   {filteredBillings.map((b) => (
-                    <tr key={b.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/40">
-                      <td className="px-4 py-3 text-gray-900 dark:text-gray-100">{formatDate(b.issueDate)}</td>
-                      <td className="px-4 py-3 font-mono text-gray-900 dark:text-gray-100">{b.invoiceNumber}</td>
-                      <td className="px-4 py-3 text-gray-900 dark:text-gray-100">
+                    <tr
+                      key={b.id}
+                      className={listTableRowClasses.tr}
+                      onClick={() => {
+                        setShowFaturamentoTodosModal(false);
+                        setSelectedBilling(b);
+                      }}
+                    >
+                      <td className={`${cadastroListClasses.tdMono} align-middle whitespace-nowrap`}>
                         {formatOsSePastaOrDash(b.serviceOrder, folderForDivSe(pleitos, b.serviceOrder))}
                       </td>
-                      <td className="px-4 py-3 text-right font-medium text-gray-900 dark:text-gray-100">
-                        {formatCurrency(b.grossValue)}
+                      <td className={`${cadastroListClasses.tdMono} align-middle whitespace-nowrap`}>
+                        {b.invoiceNumber}
                       </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-gray-500 dark:text-gray-400">
-                        {formatDateTimeBr(b.createdAt || '')}
+                      <td className={`${cadastroListClasses.tdCenter} align-middle whitespace-nowrap`}>
+                        {formatDate(b.issueDate)}
+                      </td>
+                      <td className={`${cadastroListClasses.tdNumeric} align-middle font-medium`}>
+                        {formatCurrency(b.grossValue)}
                       </td>
                     </tr>
                   ))}
