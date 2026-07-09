@@ -222,7 +222,14 @@ router.post('/', async (req: AuthRequest, res: Response, next: NextFunction) => 
       message: 'Requisição de material criada com sucesso'
     });
   } catch (error) {
+    // Não engolir erros Prisma (ex.: P2002 Unique) — o errorHandler mapeia P2002 → 409.
+    // O regex antigo batia em "materialRequest" na mensagem do Prisma e devolvia 400 + stack.
+    const isPrisma =
+      error instanceof Error &&
+      (error.name === 'PrismaClientKnownRequestError' ||
+        error.name === 'PrismaClientValidationError');
     if (
+      !isPrisma &&
       error instanceof Error &&
       /obrigat|necessário|material|Quantidade|centro de custo|ordem de serviço|projeto|anexo|ficha de demanda|observação/i.test(
         error.message

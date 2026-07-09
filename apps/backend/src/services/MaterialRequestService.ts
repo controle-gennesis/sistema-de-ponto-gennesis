@@ -1,6 +1,9 @@
 import { prisma } from '../lib/prisma';
-import type { EngineeringMaterial } from '@prisma/client';
+import type { EngineeringMaterial, Prisma } from '@prisma/client';
 import { resolveRmServiceOrderFields } from '../utils/materialRequestServiceOrder';
+
+/** Lock de sessão Postgres para serializar geração de requestNumber (mesmo padrão de DpRequest). */
+const MATERIAL_REQUEST_NUMBER_ADVISORY_LOCK = 91827365;
 
 export interface RmDropdownMaterial {
   id: string;
@@ -161,11 +164,12 @@ export class MaterialRequestService {
   }
 
   /**
-   * Gera número único para requisição (formato: REQ-YYYY-NNN)
+   * Gera número único para requisição (formato: REQ-YYYY-NNN).
+   * Deve ser chamado dentro de uma transação que já obteve o advisory lock.
    */
-  private async generateRequestNumber(): Promise<string> {
+  private async generateRequestNumber(tx: Prisma.TransactionClient): Promise<string> {
     const year = new Date().getFullYear();
-    const lastRequest = await prisma.materialRequest.findFirst({
+    const lastRequest = await tx.materialRequest.findFirst({
       where: {
         requestNumber: {
           startsWith: `REQ-${year}-`
@@ -178,8 +182,8 @@ export class MaterialRequestService {
 
     let sequence = 1;
     if (lastRequest) {
-      const lastSequence = parseInt(lastRequest.requestNumber.split('-')[2]);
-      sequence = lastSequence + 1;
+      const lastSequence = parseInt(lastRequest.requestNumber.split('-')[2], 10);
+      sequence = (Number.isFinite(lastSequence) ? lastSequence : 0) + 1;
     }
 
     return `REQ-${year}-${sequence.toString().padStart(3, '0')}`;
@@ -232,8 +236,6 @@ export class MaterialRequestService {
       }
     }
 
-    const requestNumber = await this.generateRequestNumber();
-
     // Buscar preços dos materiais
     const materials = await prisma.engineeringMaterial.findMany({
       where: {
@@ -274,62 +276,69 @@ export class MaterialRequestService {
     const demandSheetAttachmentUrl = (data.demandSheetAttachmentUrl || '').trim();
     const demandSheetAttachmentName = (data.demandSheetAttachmentName || '').trim();
 
-    // Criar requisição com itens
-    const request = await prisma.materialRequest.create({
-      data: {
-        requestNumber,
-        requestedBy: data.requestedBy,
-        costCenterId: data.costCenterId,
-        projectId,
-        serviceOrderId,
-        serviceOrder,
-        obra,
-        description: data.description?.trim() || null,
-        demandSheet,
-        demandSheetAttachmentUrl,
-        demandSheetAttachmentName,
-        priority: data.priority || 'MEDIUM',
-        status: 'PENDING',
-        items: {
-          create: data.items.map(item => {
-            const material = materialMap.get(item.materialId);
-            const qty = Number(item.quantity);
-            const rawMedian = material?.medianPrice;
-            const unitPriceNum = rawMedian != null ? Number(rawMedian) : 0;
-            const safeUnit = Number.isFinite(unitPriceNum) ? unitPriceNum : 0;
-            const totalPrice = safeUnit * qty;
-            const safeTotal = Number.isFinite(totalPrice) ? totalPrice : 0;
+    // Serializa geração de requestNumber + create (evita race em UNIQUE)
+    const request = await prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe(
+        `SELECT pg_advisory_xact_lock(${MATERIAL_REQUEST_NUMBER_ADVISORY_LOCK})`,
+      );
+      const requestNumber = await this.generateRequestNumber(tx);
 
-            return {
-              materialId: item.materialId,
-              quantity: qty,
-              unit: material?.unit || 'UN',
-              unitPrice: safeUnit,
-              totalPrice: safeTotal,
-              notes: (item.notes || '').trim(),
-              attachmentUrl: item.attachmentUrl ?? null,
-              attachmentName: item.attachmentName ?? null,
-              status: 'PENDING'
-            };
-          })
-        }
-      },
-      include: {
-        requester: {
-          select: {
-            id: true,
-            name: true,
-            email: true
+      return tx.materialRequest.create({
+        data: {
+          requestNumber,
+          requestedBy: data.requestedBy,
+          costCenterId: data.costCenterId,
+          projectId,
+          serviceOrderId,
+          serviceOrder,
+          obra,
+          description: data.description?.trim() || null,
+          demandSheet,
+          demandSheetAttachmentUrl,
+          demandSheetAttachmentName,
+          priority: data.priority || 'MEDIUM',
+          status: 'PENDING',
+          items: {
+            create: data.items.map(item => {
+              const material = materialMap.get(item.materialId);
+              const qty = Number(item.quantity);
+              const rawMedian = material?.medianPrice;
+              const unitPriceNum = rawMedian != null ? Number(rawMedian) : 0;
+              const safeUnit = Number.isFinite(unitPriceNum) ? unitPriceNum : 0;
+              const totalPrice = safeUnit * qty;
+              const safeTotal = Number.isFinite(totalPrice) ? totalPrice : 0;
+
+              return {
+                materialId: item.materialId,
+                quantity: qty,
+                unit: material?.unit || 'UN',
+                unitPrice: safeUnit,
+                totalPrice: safeTotal,
+                notes: (item.notes || '').trim(),
+                attachmentUrl: item.attachmentUrl ?? null,
+                attachmentName: item.attachmentName ?? null,
+                status: 'PENDING'
+              };
+            })
           }
         },
-        costCenter: true,
-        project: true,
-        items: {
-          include: {
-            material: true
+        include: {
+          requester: {
+            select: {
+              id: true,
+              name: true,
+              email: true
+            }
+          },
+          costCenter: true,
+          project: true,
+          items: {
+            include: {
+              material: true
+            }
           }
         }
-      }
+      });
     });
 
     return request;

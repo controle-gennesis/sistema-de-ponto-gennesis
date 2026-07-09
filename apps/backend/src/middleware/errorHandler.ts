@@ -57,25 +57,34 @@ export const errorHandler = (
     console.error('❌ Prisma Known Request:', code, prisma.meta ?? {});
 
     let message = 'Erro ao processar a solicitação do banco de dados';
+    let statusCode = 500;
+
     if (code === 'P2002') {
-      message = 'Recurso já existe (violação de chave única)';
+      // Unique constraint — Conflict (não expor stack/detalhe do Prisma ao cliente)
+      const target = Array.isArray(prisma.meta?.target)
+        ? (prisma.meta!.target as string[]).join(', ')
+        : typeof prisma.meta?.target === 'string'
+          ? prisma.meta.target
+          : null;
+      message = target
+        ? `Recurso já existe (campo único: ${target})`
+        : 'Recurso já existe (violação de chave única)';
+      statusCode = 409;
     } else if (code === 'P2003') {
       message = 'Referência inválida no banco de dados (vínculo com outro registro inexistente)';
+      statusCode = 400;
     } else if (code === 'P2021' || code === 'P2022') {
       message =
         'Esquema do banco está desatualizado em relação ao aplicativo. Rode as migrations (prisma migrate deploy) ou contate o suporte.';
+      statusCode = 503;
     } else if (code === 'P2011') {
       message = 'Campo obrigatório não preenchido ou nulo onde o banco exige valor';
+      statusCode = 400;
     }
 
     error = {
       message,
-      statusCode:
-        code === 'P2021' || code === 'P2022'
-          ? 503
-          : code === 'P2003'
-            ? 400
-            : 409,
+      statusCode,
       prismaCode: code
     } as AppError & { prismaCode?: string };
   }
