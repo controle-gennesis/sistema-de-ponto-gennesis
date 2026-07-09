@@ -436,6 +436,7 @@ export async function exportLicitacaoAnalisePdf(input: ExportLicitacaoAnalisePdf
   });
 
   y = drawSectionTitle(doc, y, contentW, 'Análise de Viabilidade');
+  y += 6;
 
   if (input.sections.length === 0) {
     y = ensureSpace(doc, y, 14);
