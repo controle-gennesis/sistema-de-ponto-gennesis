@@ -285,6 +285,199 @@ async function ensurePurchaseOrderPixFields(prisma: PrismaClient): Promise<void>
   }
 }
 
+async function ensureLicitacoesTables(prisma: PrismaClient): Promise<void> {
+  if (await tableExists(prisma, 'licitacoes')) return;
+
+  console.warn(
+    '[Schema] Tabelas de licitações ausentes — criando automaticamente. ' +
+      'Prefira: cd apps/backend && npx prisma migrate deploy && npx prisma generate'
+  );
+
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "licitacoes" (
+      "id" TEXT NOT NULL,
+      "titulo" TEXT NOT NULL,
+      "numeroProcesso" TEXT,
+      "orgao" TEXT,
+      "modalidade" TEXT,
+      "status" TEXT NOT NULL DEFAULT 'RASCUNHO',
+      "objeto" TEXT,
+      "valorEstimado" TEXT,
+      "estado" TEXT,
+      "regiaoKey" TEXT,
+      "vigenciaContrato" TEXT,
+      "analiseJson" JSONB,
+      "createdBy" TEXT NOT NULL,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" TIMESTAMP(3) NOT NULL,
+      CONSTRAINT "licitacoes_pkey" PRIMARY KEY ("id")
+    );
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "licitacao_documentos" (
+      "id" TEXT NOT NULL,
+      "licitacaoId" TEXT NOT NULL,
+      "originalName" TEXT NOT NULL,
+      "storagePath" TEXT NOT NULL,
+      "mimeType" TEXT NOT NULL,
+      "size" INTEGER NOT NULL,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "licitacao_documentos_pkey" PRIMARY KEY ("id")
+    );
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "licitacoes_createdBy_idx" ON "licitacoes"("createdBy");
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "licitacoes_status_idx" ON "licitacoes"("status");
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "licitacoes_createdAt_idx" ON "licitacoes"("createdAt");
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "licitacao_documentos_licitacaoId_idx"
+    ON "licitacao_documentos"("licitacaoId");
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    DO $$
+    BEGIN
+      ALTER TABLE "licitacoes" ADD CONSTRAINT "licitacoes_createdBy_fkey"
+        FOREIGN KEY ("createdBy") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+    EXCEPTION WHEN duplicate_object THEN NULL;
+    END $$;
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    DO $$
+    BEGIN
+      ALTER TABLE "licitacao_documentos" ADD CONSTRAINT "licitacao_documentos_licitacaoId_fkey"
+        FOREIGN KEY ("licitacaoId") REFERENCES "licitacoes"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+    EXCEPTION WHEN duplicate_object THEN NULL;
+    END $$;
+  `);
+}
+
+async function ensureLicitacaoRegiaoAceitesTable(prisma: PrismaClient): Promise<void> {
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "licitacao_regiao_aceites" (
+      "id" TEXT NOT NULL,
+      "regiaoKey" TEXT NOT NULL,
+      "spreadsheetId" TEXT NOT NULL,
+      "rowKey" TEXT NOT NULL,
+      "rowSnapshot" JSONB,
+      "acceptedBy" TEXT NOT NULL,
+      "acceptedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "licitacao_regiao_aceites_pkey" PRIMARY KEY ("id")
+    );
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    CREATE UNIQUE INDEX IF NOT EXISTS "licitacao_regiao_aceites_regiao_sheet_row_key"
+    ON "licitacao_regiao_aceites"("regiaoKey", "spreadsheetId", "rowKey");
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "licitacao_regiao_aceites_regiaoKey_idx"
+    ON "licitacao_regiao_aceites"("regiaoKey");
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    DO $$
+    BEGIN
+      ALTER TABLE "licitacao_regiao_aceites" ADD CONSTRAINT "licitacao_regiao_aceites_acceptedBy_fkey"
+        FOREIGN KEY ("acceptedBy") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+    EXCEPTION WHEN duplicate_object THEN NULL;
+    END $$;
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "licitacao_regiao_aceites"
+    ADD COLUMN IF NOT EXISTS "licitacaoId" TEXT;
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "licitacao_regiao_aceites"
+    ADD COLUMN IF NOT EXISTS "processoExcluido" BOOLEAN NOT NULL DEFAULT FALSE;
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "licitacao_regiao_aceites_licitacaoId_idx"
+    ON "licitacao_regiao_aceites"("licitacaoId");
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    DO $$
+    BEGIN
+      ALTER TABLE "licitacao_regiao_aceites" ADD CONSTRAINT "licitacao_regiao_aceites_licitacaoId_fkey"
+        FOREIGN KEY ("licitacaoId") REFERENCES "licitacoes"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+    EXCEPTION WHEN duplicate_object THEN NULL;
+    END $$;
+  `);
+}
+
+async function ensureLicitacaoColumns(prisma: PrismaClient): Promise<void> {
+  if (!(await tableExists(prisma, 'licitacoes'))) return;
+
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "licitacoes"
+    ADD COLUMN IF NOT EXISTS "estado" TEXT;
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "licitacoes"
+    ADD COLUMN IF NOT EXISTS "regiaoKey" TEXT;
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "licitacoes"
+    ADD COLUMN IF NOT EXISTS "arquivada" BOOLEAN NOT NULL DEFAULT FALSE;
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "licitacoes"
+    ADD COLUMN IF NOT EXISTS "arquivadaEm" TIMESTAMP(3);
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "licitacoes"
+    ADD COLUMN IF NOT EXISTS "arquivadaMotivo" TEXT;
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "licitacoes_arquivada_idx"
+    ON "licitacoes"("arquivada");
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "licitacoes_arquivada_motivo_idx"
+    ON "licitacoes"("arquivadaMotivo");
+  `);
+  await prisma.$executeRawUnsafe(`
+    UPDATE "licitacoes"
+    SET "arquivadaMotivo" = "analiseJson"->>'arquivadaMotivo'
+    WHERE COALESCE("arquivada", FALSE) = TRUE
+      AND "arquivadaMotivo" IS NULL
+      AND ("analiseJson"->>'arquivadaMotivo') IN (
+        'suspensa', 'declinada', 'encerrada', 'em_andamento', 'vencidas', 'aguardando_aprovacao'
+      );
+  `);
+  await prisma.$executeRawUnsafe(`
+    UPDATE "licitacoes"
+    SET "arquivadaMotivo" = NULL
+    WHERE COALESCE("arquivada", FALSE) = TRUE
+      AND "arquivadaMotivo" = 'encerrada'
+      AND COALESCE("analiseJson"->>'arquivadaMotivo', '') = '';
+  `);
+}
+
+async function ensureLicitacaoConfigTable(prisma: PrismaClient): Promise<void> {
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "licitacao_config" (
+      "key" TEXT NOT NULL,
+      "value" JSONB NOT NULL,
+      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "licitacao_config_pkey" PRIMARY KEY ("key")
+    );
+  `);
+}
+
 /**
  * Corrige drift conhecido entre Prisma schema e bancos de produção onde migrate deploy não aplicou tudo.
  * DDL idempotente (IF NOT EXISTS / duplicate_object).
@@ -296,6 +489,10 @@ export async function ensureProductionSchema(prisma: PrismaClient): Promise<void
     await ensureMaterialRequestItemColumns(prisma);
     await ensureDemandSheetApprovals(prisma);
     await ensurePurchaseOrderStageApprovals(prisma);
+    await ensureLicitacoesTables(prisma);
+    await ensureLicitacaoColumns(prisma);
+    await ensureLicitacaoRegiaoAceitesTable(prisma);
+    await ensureLicitacaoConfigTable(prisma);
     console.log('[Schema] Verificação de tabelas/colunas críticas concluída.');
   } catch (e) {
     console.error('[Schema] Falha ao garantir esquema de produção:', e);

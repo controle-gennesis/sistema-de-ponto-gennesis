@@ -230,6 +230,11 @@ export default function ControleGeralContratosPage() {
             showContractDetails
             contractsForDetailLookup={rawList}
             enableContractFluxoModal
+            overviewForExport={{
+              contracts: rawList,
+              filterYear,
+              searchTerm: searchTerm.trim() || undefined
+            }}
           />
 
           {loadingOverview ? (

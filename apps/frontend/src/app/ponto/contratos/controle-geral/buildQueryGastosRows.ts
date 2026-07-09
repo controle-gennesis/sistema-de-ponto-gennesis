@@ -1,6 +1,7 @@
 import type { GastosOperacionaisRow } from './ControleGeralGastosOperacionaisPanel';
 import {
   GASTOS_OPERACIONAIS_LOCALITIES,
+  inferContractLocalityFromHints,
   isContractExcludedFromPresentation,
   listContractsForLocalities,
   normalizeContractOrderKey,
@@ -577,31 +578,101 @@ export function aggregateGastosDetailRows(detailRows: QueryGastosDetailRow[]): G
 /**
  * Garante que contratos do catálogo (ex.: DF/GO - ADM LOCAL) apareçam na tabela
  * mesmo sem linhas na planilha de gastos — necessário para restaurar ocultos.
+ * Também inclui contratos cadastrados no banco e chaves ocultas salvas localmente.
  */
+export type GastosMergeDatabaseContract = {
+  name: string;
+  costCenter?: { code?: string; name?: string } | null;
+};
+
+function mergeContractNameIntoRows(
+  byKey: Map<string, GastosOperacionaisRow>,
+  contract: string
+): void {
+  const canonical = normalizeGastosOperacionaisContractName(contract);
+  const key = normalizeContractOrderKey(canonical);
+  if (byKey.has(key)) return;
+
+  byKey.set(key, {
+    rowKey: canonical,
+    contract: canonical,
+    mesesApuracao: 0,
+    anoMin: 0,
+    anoMax: 0,
+    totalAcumulado: 0
+  });
+}
+
+function shouldMergeContractForVisibleLocalities(
+  contract: string,
+  visibleLocalities: readonly GastosOperacionaisLocality[] | undefined,
+  localityOverrides: GastosOperacionaisLocalityOverrideMap,
+  costCenter?: { code?: string; name?: string } | null
+): boolean {
+  if (!visibleLocalities?.length) return true;
+
+  const key = normalizeContractOrderKey(contract);
+  const effective = getEffectiveContractLocality(contract, localityOverrides);
+  if (effective !== 'OUTROS') {
+    return visibleLocalities.includes(effective);
+  }
+
+  const inferred = inferContractLocalityFromHints(contract, costCenter);
+  if (inferred) {
+    return visibleLocalities.includes(inferred);
+  }
+
+  return false;
+}
+
 export function mergeCatalogContractsIntoGastosRows(
   rows: GastosOperacionaisRow[],
-  visibleLocalities?: readonly GastosOperacionaisLocality[]
+  visibleLocalities?: readonly GastosOperacionaisLocality[],
+  options?: {
+    databaseContracts?: readonly GastosMergeDatabaseContract[];
+    spreadsheetContracts?: readonly string[];
+    excludedContractKeys?: readonly string[];
+    resolveExcludedLabel?: (key: string) => string | undefined;
+    localityOverrides?: GastosOperacionaisLocalityOverrideMap;
+  }
 ): GastosOperacionaisRow[] {
-  if (!visibleLocalities?.length) return rows;
-
   const byKey = new Map<string, GastosOperacionaisRow>();
   for (const row of rows) {
     byKey.set(normalizeContractOrderKey(row.contract), row);
   }
 
-  for (const contract of listContractsForLocalities(visibleLocalities)) {
-    const canonical = normalizeGastosOperacionaisContractName(contract);
-    const key = normalizeContractOrderKey(canonical);
-    if (byKey.has(key)) continue;
+  const localityOverrides = options?.localityOverrides ?? {};
+  const namesToMerge = new Set<string>();
 
-    byKey.set(key, {
-      rowKey: canonical,
-      contract: canonical,
-      mesesApuracao: 0,
-      anoMin: 0,
-      anoMax: 0,
-      totalAcumulado: 0
-    });
+  for (const contract of listContractsForLocalities(visibleLocalities)) {
+    namesToMerge.add(contract);
+  }
+
+  for (const entry of options?.databaseContracts ?? []) {
+    const name = entry.name?.trim();
+    if (!name) continue;
+    if (!shouldMergeContractForVisibleLocalities(name, visibleLocalities, localityOverrides, entry.costCenter)) {
+      continue;
+    }
+    namesToMerge.add(name);
+  }
+
+  for (const contract of options?.spreadsheetContracts ?? []) {
+    const name = contract?.trim();
+    if (!name) continue;
+    if (!shouldMergeContractForVisibleLocalities(name, visibleLocalities, localityOverrides)) {
+      continue;
+    }
+    namesToMerge.add(name);
+  }
+
+  for (const excludedKey of options?.excludedContractKeys ?? []) {
+    const label = options?.resolveExcludedLabel?.(excludedKey)?.trim() || excludedKey.trim();
+    if (label) namesToMerge.add(label);
+  }
+
+  for (const contract of Array.from(namesToMerge)) {
+    mergeContractNameIntoRows(byKey, contract);
   }
 
   return sortContractsByCustomOrder(Array.from(byKey.values()));

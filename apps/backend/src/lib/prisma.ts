@@ -15,14 +15,35 @@ const prismaLogLevels: Prisma.LogLevel[] = process.env.PRISMA_LOG_QUERIES === 't
   ? ['query', 'error', 'warn'] 
   : ['error', 'warn'];
 
-const prisma = new PrismaClient({
-  datasources: {
-    db: {
-      url: databaseUrl || process.env.DATABASE_URL,
+function buildPrismaClient(): PrismaClient {
+  return new PrismaClient({
+    datasources: {
+      db: {
+        url: databaseUrl || process.env.DATABASE_URL,
+      },
     },
-  },
-  log: prismaLogLevels,
-});
+    log: prismaLogLevels,
+  });
+}
+
+let prisma = buildPrismaClient();
+
+/** Recria o client se modelos novos ainda não estiverem na instância em memória (após prisma generate). */
+export function getPrisma(): PrismaClient {
+  const p = prisma as PrismaClient & {
+    licitacao?: unknown;
+    licitacaoDocumento?: unknown;
+  };
+  if (!p.licitacao || !p.licitacaoDocumento) {
+    console.warn(
+      '[Prisma] Recriando PrismaClient — modelos de Licitações ausentes na instância em memória.'
+    );
+    const previous = prisma;
+    prisma = buildPrismaClient();
+    void previous.$disconnect().catch(() => undefined);
+  }
+  return prisma;
+}
 
 // Configurar pool de conexões para evitar "too many connections"
 // Isso garante que não abra mais conexões do que o banco permite
@@ -57,6 +78,15 @@ if (!p.extratoCaixaFiltroSalvo) {
   console.error(
     '❌ @prisma/client sem ExtratoCaixaFiltroSalvo (filtros salvos do extrato). Rode em apps/backend: npx prisma generate e reinicie o servidor.',
   );
+}
+
+const pLicit = getPrisma() as { licitacao?: unknown; licitacaoDocumento?: unknown };
+if (!pLicit.licitacao || !pLicit.licitacaoDocumento) {
+  console.error(
+    '❌ @prisma/client sem modelos Licitações. Rode em apps/backend: npx prisma generate e reinicie o npm run dev.',
+  );
+} else if (process.env.NODE_ENV === 'development') {
+  console.log('✅ Prisma: modelos Licitações (licitacoes / licitacao_documentos) carregados.');
 }
 
 export { prisma };

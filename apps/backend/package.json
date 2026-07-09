@@ -51,6 +51,7 @@
     "node-cron": "^3.0.3",
     "nodemailer": "^8.0.4",
     "oauth-1.0a": "^2.2.6",
+    "pdf-parse": "^1.1.1",
     "pdfkit": "^0.17.2",
     "resend": "^3.2.0",
     "uuid": "^9.0.1",

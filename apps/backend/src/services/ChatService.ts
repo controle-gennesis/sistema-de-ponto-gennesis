@@ -6,6 +6,21 @@ import fs from 'fs';
 import { prisma } from '../lib/prisma';
 import { gennecyBotUserWhereExclude } from '../lib/gennecyBotUser';
 
+const CHAT_TOPIC_DELETE_ALLOWED_EMAILS = new Set(['controle@gennesisengenharia.com.br']);
+
+function normalizeTopicTitle(title: string): string {
+  return String(title ?? '').trim();
+}
+
+function assertValidTopicTitle(trimmedTitle: string): void {
+  if (trimmedTitle.length < 2) {
+    throw new Error('O título do tópico deve ter pelo menos 2 caracteres');
+  }
+  if (trimmedTitle.length > 200) {
+    throw new Error('Título do tópico muito longo (máximo 200 caracteres)');
+  }
+}
+
 export interface CreateChatData {
   initiatorId: string;
   recipientDepartment: string;
@@ -2015,13 +2030,8 @@ export class ChatService {
   ) {
     await this.assertDirectOrGroupChatAccess(chatId, userId);
 
-    const trimmedTitle = String(title ?? '').trim();
-    if (trimmedTitle.length < 2) {
-      throw new Error('O título do tópico deve ter pelo menos 2 caracteres');
-    }
-    if (trimmedTitle.length > 200) {
-      throw new Error('Título do tópico muito longo (máximo 200 caracteres)');
-    }
+    const trimmedTitle = normalizeTopicTitle(title);
+    assertValidTopicTitle(trimmedTitle);
 
     const now = new Date();
 
@@ -2173,6 +2183,60 @@ export class ChatService {
     await prisma.$transaction(updates);
 
     return this.listChatTopics(chatId, userId);
+  }
+
+  /**
+   * Renomeia um tópico da conversa
+   */
+  async renameChatTopic(chatId: string, topicId: string, userId: string, title: string) {
+    await this.assertDirectOrGroupChatAccess(chatId, userId);
+
+    const topic = await prisma.chatTopic.findFirst({
+      where: { id: topicId, chatId }
+    });
+    if (!topic) throw new Error('Tópico não encontrado');
+
+    const trimmedTitle = normalizeTopicTitle(title);
+    assertValidTopicTitle(trimmedTitle);
+
+    if (topic.title === trimmedTitle) {
+      const current = await prisma.chatTopic.findUnique({
+        where: { id: topicId },
+        include: this.chatTopicInclude()
+      });
+      if (!current) throw new Error('Tópico não encontrado');
+      return this.mapChatTopicRow(current);
+    }
+
+    const updated = await prisma.chatTopic.update({
+      where: { id: topicId },
+      data: { title: trimmedTitle },
+      include: this.chatTopicInclude()
+    });
+
+    return this.mapChatTopicRow(updated);
+  }
+
+  canDeleteChatTopics(userEmail: string): boolean {
+    return CHAT_TOPIC_DELETE_ALLOWED_EMAILS.has(userEmail.trim().toLowerCase());
+  }
+
+  /**
+   * Exclui um tópico (mensagens permanecem na conversa geral)
+   */
+  async deleteChatTopic(chatId: string, topicId: string, userId: string, userEmail: string) {
+    await this.assertDirectOrGroupChatAccess(chatId, userId);
+
+    if (!this.canDeleteChatTopics(userEmail)) {
+      throw new Error('Sem permissão para excluir tópicos');
+    }
+
+    const topic = await prisma.chatTopic.findFirst({
+      where: { id: topicId, chatId }
+    });
+    if (!topic) throw new Error('Tópico não encontrado');
+
+    await prisma.chatTopic.delete({ where: { id: topicId } });
   }
 
   /**
