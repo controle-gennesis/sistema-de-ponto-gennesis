@@ -12,6 +12,7 @@ import { useTheme } from '@/context/ThemeContext';
 import { Loading } from '@/components/ui/Loading';
 import { useBrandingLogo } from '@/hooks/useBrandingLogo';
 import { persistUnbBranding } from '@/lib/unbBranding';
+import { APP_TITLE } from '@/lib/pageTitle';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -30,7 +31,7 @@ export default function LoginPage() {
 
   const supportWhatsAppDigits = '5561981622021';
   const supportWhatsAppUrl = `https://wa.me/${supportWhatsAppDigits}?text=${encodeURIComponent(
-    'Olá! Esqueci minha senha do Gennesis Attendance e preciso de ajuda para alterar.'
+    `Olá! Esqueci minha senha do ${APP_TITLE} e preciso de ajuda para alterar.`
   )}`;
 
   const handleSubmit = async (e: React.FormEvent) => {

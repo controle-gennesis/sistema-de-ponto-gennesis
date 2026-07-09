@@ -1,6 +1,6 @@
 import { PERMISSION_MODULES } from '@sistema-ponto/permission-modules';
 
-export const APP_TITLE = 'Gennesis Attendance';
+export const APP_TITLE = 'Gennesis Conecta';
 
 /** Rotas que não estão em PERMISSION_MODULES ou usam href diferente no menu. */
 const EXTRA_PAGE_TITLES: Record<string, string> = {

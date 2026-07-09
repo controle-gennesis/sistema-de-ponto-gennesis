@@ -567,13 +567,6 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
             description: 'Finalizar solicitações de entrega logística',
             permission: isAdministrator || can(pk('/ponto/entrega-logistica'))
           },
-          {
-            name: 'Flow',
-            href: '/ponto/flow',
-            icon: Workflow,
-            description: 'Processos e fluxogramas de trabalho',
-            permission: isAdministrator || can(pk('/ponto/flow'))
-          },
         ]
       },
       {
@@ -1374,6 +1367,21 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
                   <HardDrive className="w-5 h-5" />
                 </Link>
               </SidebarRailTooltip>
+              {(isAdministrator || can(pk('/ponto/flow'))) && (
+                <SidebarRailTooltip label="Flow">
+                  <Link
+                    href="/ponto/flow"
+                    aria-label="Flow"
+                    className={`w-10 h-10 rounded-xl transition-all duration-200 flex items-center justify-center ${
+                      isFooterShortcutActive('/ponto/flow')
+                        ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-500'
+                        : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
+                    }`}
+                  >
+                    <Workflow className="w-5 h-5" />
+                  </Link>
+                </SidebarRailTooltip>
+              )}
             </div>
             <div className="mt-2 flex flex-col items-center gap-2">
               <div className="h-px w-12 shrink-0 bg-gray-200 dark:bg-gray-700" />

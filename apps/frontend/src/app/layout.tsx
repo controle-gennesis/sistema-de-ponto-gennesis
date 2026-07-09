@@ -5,6 +5,7 @@ import './globals.css';
 import { Providers } from '@/components/providers/Providers';
 import { ToasterWrapper } from '@/components/ui/ToasterWrapper';
 import { Favicon } from '@/components/Favicon';
+import { APP_TITLE } from '@/lib/pageTitle';
 
 const inter = Inter({ subsets: ['latin'] });
 
@@ -16,8 +17,8 @@ export default function RootLayout({
   return (
     <html lang="pt-BR">
       <head>
-        <title>Gennesis Attendance</title>
-        <meta name="description" content="Sistema completo para controle de frequência de colaboradores" />
+        <title>{APP_TITLE}</title>
+        <meta name="description" content="Plataforma integrada de gestão da Gennesis Engenharia" />
         <meta name="keywords" content="ponto, frequência, engenharia, controle, horas" />
         <meta name="robots" content="noindex, nofollow" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />

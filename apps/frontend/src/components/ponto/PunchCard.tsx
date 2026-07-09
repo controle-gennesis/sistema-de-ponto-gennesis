@@ -11,6 +11,7 @@ import { useGeolocation } from '@/hooks/useGeolocation';
 import { useWebcam } from '@/hooks/useWebcam';
 import { TimeRecordType } from '@/types';
 import api from '@/lib/api';
+import { APP_TITLE } from '@/lib/pageTitle';
 
 interface PunchCardProps {
   onSuccess?: () => void;
@@ -339,7 +340,7 @@ export const PunchCard: React.FC<PunchCardProps> = ({ onSuccess, showCloseButton
         ctx.fillStyle = '#9CA3AF';
         ctx.font = '12px Arial';
         ctx.textAlign = 'center';
-        ctx.fillText('Gennesis Attendance - Sistema de Controle de Ponto', width / 2, height - 30);
+        ctx.fillText(`${APP_TITLE} - Sistema de Controle de Ponto`, width / 2, height - 30);
 
         // Converter para imagem e fazer download
         canvas.toBlob((blob) => {
