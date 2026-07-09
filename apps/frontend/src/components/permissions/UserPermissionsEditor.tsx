@@ -194,7 +194,6 @@ function inferCategoryFromHref(href: string): string {
       '/ponto/drive',
       '/ponto/reserva-veiculos',
       '/ponto/entrega-logistica',
-      '/ponto/flow',
     ].some((p) => h === p)
   ) {
     return 'Principal';
