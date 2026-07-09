@@ -2,13 +2,12 @@
  * Teste de carga k6 — Materiais / Suprimentos
  *
  * Pré-requisitos:
- *   1. Backend rodando (padrão: http://localhost:5000)
- *   2. Usuários de teste: npx tsx scripts/criar-usuarios-teste.ts
- *   3. OS de teste: npx tsx scripts/criar-os-teste.ts
- *   4. k6 instalado: https://k6.io/docs/get-started/installation/
+ *   1. Backend rodando
+ *   2. k6 instalado
+ *   3. USER_EMAIL e USER_PASSWORD definidos (obrigatório)
  *
  * Gerar exatamente 50 RMs (modo seed — padrão):
- *   k6 run -e MODE=seed -e ITERATIONS=50 -e VUS=5 scripts/teste-carga-suprimentos.js
+ *   k6 run -e USER_EMAIL=... -e USER_PASSWORD=... -e MODE=seed -e ITERATIONS=50 -e VUS=5 scripts/teste-carga-suprimentos.js
  *
  * Carga completa (ramping até 30 VUs):
  *   k6 run -e MODE=load scripts/teste-carga-suprimentos.js
@@ -19,13 +18,22 @@
  *   MODE=seed|load          (default: seed)
  *   ITERATIONS=50           (só MODE=seed)
  *   VUS=5                   (só MODE=seed)
+ *   COST_CENTER_IDS=id1,id2 (lista fixa; RMs alternam entre os CCs)
+ *   USER_EMAIL=...          (obrigatório)
+ *   USER_PASSWORD=...       (obrigatório)
  */
 
 import http from 'k6/http';
 import { check, sleep, fail } from 'k6';
-import { SharedArray } from 'k6/data';
 import { Counter } from 'k6/metrics';
 import { randomIntBetween } from 'https://jslib.k6.io/k6-utils/1.4.0/index.js';
+import {
+  parseCostCenterIds,
+  resolveOsContexts,
+  pickOsContext,
+  formatOsContextsSummary,
+} from './carga-cc-context.js';
+import { getUserCredentials, loginJsonBody } from './carga-auth.js';
 
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:5000/api';
 const MATERIAL_ID = __ENV.MATERIAL_ID || 'cmr0wp8qf000n47fczdmn8ybb';
@@ -36,9 +44,7 @@ const SEED_VUS = Number(__ENV.VUS || 5);
 /** Só incrementa quando POST /material-requests retorna 201 + id. */
 const rmCreated = new Counter('rm_created');
 
-const users = new SharedArray('test-users', () => {
-  return JSON.parse(open('./test-users.json'));
-});
+const USER = getUserCredentials();
 
 const seedOptions = {
   scenarios: {
@@ -95,12 +101,11 @@ function parseJson(res) {
   }
 }
 
-function login(user) {
-  const res = http.post(
-    `${BASE_URL}/auth/login`,
-    JSON.stringify({ email: user.email, password: user.password }),
-    { headers: jsonHeaders(), tags: { endpoint: 'login' } },
-  );
+function login(credentials = USER) {
+  const res = http.post(`${BASE_URL}/auth/login`, loginJsonBody(credentials), {
+    headers: jsonHeaders(),
+    tags: { endpoint: 'login' },
+  });
 
   const ok = check(res, {
     'login status 200': (r) => r.status === 200,
@@ -116,39 +121,14 @@ function login(user) {
 }
 
 function findCostCenterWithServiceOrder(token) {
-  const res = http.get(`${BASE_URL}/cost-centers?isActive=true&limit=500`, {
-    headers: jsonHeaders(token),
-    tags: { endpoint: 'cost_centers' },
-  });
+  const contexts = resolveOsContexts(token, BASE_URL, jsonHeaders, http);
+  return contexts[0] || null;
+}
 
-  check(res, { 'cost-centers status 200': (r) => r.status === 200 });
-  const costCenters = parseJson(res)?.data;
-  if (!Array.isArray(costCenters) || costCenters.length === 0) {
-    return null;
-  }
-
-  for (const cc of costCenters) {
-    const osRes = http.get(`${BASE_URL}/service-orders?costCenterId=${cc.id}`, {
-      headers: jsonHeaders(token),
-      tags: { endpoint: 'service_orders' },
-    });
-
-    if (osRes.status !== 200) continue;
-
-    const body = parseJson(osRes);
-    const orders = Array.isArray(body?.data) ? body.data : Array.isArray(body) ? body : [];
-    if (orders.length === 0) continue;
-
-    const os = orders[0];
-    return {
-      costCenterId: cc.id,
-      costCenterCode: cc.code,
-      serviceOrderId: os.id,
-      serviceOrder: os.label || `OS ${os.numero}/${os.ano}`,
-    };
-  }
-
-  return null;
+function pickIterationOsContext(osContexts) {
+  // seed: __ITER é estável por iteração; load: usa VU para espalhar entre CCs
+  const index = MODE === 'seed' ? __ITER : __VU - 1;
+  return pickOsContext(osContexts, index);
 }
 
 function createMaterialRequest(token, ctx) {
@@ -213,9 +193,9 @@ function listMaterialRequests(token, userId) {
  * Em MODE=seed, cada iteração precisa produzir 1 RM.
  * Retenta login/create se falhar (não "gasta" a iteração sem criar).
  */
-function createOneRmWithRetries(user, osCtx, maxAttempts = 5) {
+function createOneRmWithRetries(osCtx, maxAttempts = 5) {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    const session = login(user);
+    const session = login();
     if (!session?.token) {
       console.warn(`VU ${__VU}: login falhou (tentativa ${attempt}/${maxAttempts})`);
       sleep(0.5);
@@ -248,38 +228,36 @@ export function setup() {
       `Backend indisponível em ${BASE_URL}. Suba o servidor antes de rodar o k6.`,
     );
   }
-  if (users.length === 0) {
-    throw new Error('test-users.json vazio. Rode: npx tsx scripts/criar-usuarios-teste.ts');
-  }
 
-  // Valida centro+OS uma vez (evita VU “vazio” que não cria RM)
-  const probeUser = users[0];
-  const session = login(probeUser);
+  const session = login();
   if (!session?.token) {
-    throw new Error(`Falha no login de setup (${probeUser.email})`);
+    throw new Error(`Falha no login de setup (${USER.email}). Verifique USER_EMAIL e USER_PASSWORD.`);
   }
 
-  const osCtx = findCostCenterWithServiceOrder(session.token);
-  if (!osCtx) {
-    throw new Error(
-      'Nenhum centro de custo com OS listável. Rode: npx tsx scripts/criar-os-teste.ts',
-    );
+  const osContexts = resolveOsContexts(session.token, BASE_URL, jsonHeaders, http);
+  if (osContexts.length === 0) {
+    const hint = parseCostCenterIds().length
+      ? 'Verifique COST_CENTER_IDS (IDs inválidos ou sem OS listável).'
+      : 'Defina COST_CENTER_IDS com centros de custo reais que tenham OS listável.';
+    throw new Error(`Nenhum centro de custo com OS listável. ${hint}`);
   }
 
   console.log(
-    `setup OK — MODE=${MODE} | CC=${osCtx.costCenterCode} | OS=${osCtx.serviceOrderId}` +
+    `setup OK — MODE=${MODE} | user=${USER.email} | CCs=${osContexts.length} | ${formatOsContextsSummary(osContexts)}` +
       (MODE === 'seed' ? ` | iterations=${SEED_ITERATIONS} vus=${SEED_VUS}` : ''),
   );
 
-  return { osCtx };
+  return { osContexts };
 }
 
 export default function (data) {
-  const user = users[(__VU - 1) % users.length];
-  const osCtx = data.osCtx;
+  const osCtx = pickIterationOsContext(data.osContexts);
+  if (!osCtx) {
+    fail('Nenhum contexto de OS disponível para esta iteração.');
+  }
 
   if (MODE === 'seed') {
-    const created = createOneRmWithRetries(user, osCtx);
+    const created = createOneRmWithRetries(osCtx);
     const ok = check(null, {
       'iteração criou RM de fato': () => !!created,
     });
@@ -292,18 +270,16 @@ export default function (data) {
     return;
   }
 
-  // MODE=load — fluxo original
-  const session = login(user);
+  // MODE=load
+  const session = login();
   if (!session?.token) {
     sleep(1);
     return;
   }
 
-  const ctx = findCostCenterWithServiceOrder(session.token) || osCtx;
+  const ctx = pickIterationOsContext(data.osContexts);
   if (!ctx) {
-    console.warn(
-      `VU ${__VU}: Nenhum centro de custo com OS encontrado — rode o script criar-os-teste.ts antes`,
-    );
+    console.warn(`VU ${__VU}: sem contexto de OS — verifique COST_CENTER_IDS`);
     sleep(1);
     return;
   }

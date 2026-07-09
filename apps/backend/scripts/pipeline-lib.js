@@ -104,8 +104,17 @@ function parseConfig({
   const baseUrl = normalizeApiUrl(
     argv['base-url'] ?? process.env.BASE_URL ?? 'http://localhost:5000/api',
   );
-  const userEmail = argv['user-email'] ?? process.env.USER_EMAIL ?? 'teste1@loadtest.com';
-  const userPassword = argv['user-password'] ?? process.env.USER_PASSWORD ?? 'Teste123!';
+  const costCenterIds = String(
+    argv['cost-center-ids'] ?? process.env.COST_CENTER_IDS ?? '',
+  ).trim();
+  const userEmail = String(argv['user-email'] ?? process.env.USER_EMAIL ?? '').trim();
+  const userPassword = String(argv['user-password'] ?? process.env.USER_PASSWORD ?? '').trim();
+  if (!userEmail || !userPassword) {
+    throw new Error(
+      'Defina USER_EMAIL e USER_PASSWORD (variáveis de ambiente ou --user-email=... --user-password=...). ' +
+        'Não há usuário de teste padrão — os usuários @loadtest.com foram removidos de produção.',
+    );
+  }
   const k6Bin = process.env.K6_BIN || null;
 
   return {
@@ -114,6 +123,7 @@ function parseConfig({
     parcelCount,
     paymentVus,
     baseUrl,
+    costCenterIds,
     userEmail,
     userPassword,
     k6Bin,
@@ -352,11 +362,34 @@ function parseK6Metrics(output) {
   return metrics;
 }
 
+const SENSITIVE_K6_ENV_KEYS = new Set([
+  'USER_PASSWORD',
+  'APPROVER_PASSWORD',
+  'TEST_PASSWORD',
+  'LOGIN_PASSWORD',
+]);
+
+function maskK6EnvValue(key, value) {
+  if (SENSITIVE_K6_ENV_KEYS.has(key)) return '***';
+  return value;
+}
+
 function buildK6Env(stepEnv, config) {
+  const userEmail = config.userEmail;
   const env = {
     BASE_URL: config.baseUrl,
-    USER_EMAIL: config.userEmail,
+    USER_EMAIL: userEmail,
     USER_PASSWORD: config.userPassword,
+    // Scripts de cotação/aprovação RM aceitam aliases explícitos (mesmo valor do pipeline).
+    APPROVER_EMAIL: userEmail,
+    APPROVER_PASSWORD: config.userPassword,
+    // Aprovação OC: se não houver 3 usuários distintos, cada papel usa USER_EMAIL.
+    COMPRAS_EMAIL: process.env.COMPRAS_EMAIL || userEmail,
+    GESTOR_EMAIL: process.env.GESTOR_EMAIL || userEmail,
+    DIRETORIA_EMAIL: process.env.DIRETORIA_EMAIL || userEmail,
+    ...(config.costCenterIds ? { COST_CENTER_IDS: config.costCenterIds } : {}),
+    ...(process.env.MATERIAL_ID ? { MATERIAL_ID: process.env.MATERIAL_ID } : {}),
+    ...(process.env.SUPPLIER_ID ? { SUPPLIER_ID: process.env.SUPPLIER_ID } : {}),
     ...stepEnv,
   };
   return Object.fromEntries(
@@ -377,7 +410,7 @@ function runK6Step(k6Bin, script, env) {
   args.push(scriptPath);
 
   const envPreview = Object.entries(env)
-    .map(([k, v]) => `-e ${k}=${v}`)
+    .map(([k, v]) => `-e ${k}=${maskK6EnvValue(k, v)}`)
     .join(' ');
 
   console.log(`\n${'='.repeat(78)}`);

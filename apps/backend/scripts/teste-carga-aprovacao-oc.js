@@ -19,25 +19,23 @@
  *   BASE_URL=http://localhost:5000/api
  *   VUS=5
  *   ITERATIONS=20
- *   COMPRAS_EMAIL=teste1@loadtest.com
- *   GESTOR_EMAIL=teste2@loadtest.com
- *   DIRETORIA_EMAIL=teste3@loadtest.com
+ *   OC.compras=teste1@loadtest.com
+ *   OC.gestor=teste2@loadtest.com
+ *   OC.diretoria=teste3@loadtest.com
  *   TEST_PASSWORD=Teste123!
  */
 
 import http from 'k6/http';
 import { check, sleep, fail } from 'k6';
 import { Counter } from 'k6/metrics';
+import { getOcApproverCredentials, loginJsonBodyForEmail } from './carga-auth.js';
 
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:5000/api';
 const VUS = Math.max(1, Number(__ENV.VUS || 5));
 const ITERATIONS = Math.max(1, Number(__ENV.ITERATIONS || 20));
 const BATCH_SIZE = Math.min(VUS, ITERATIONS);
 
-const COMPRAS_EMAIL = __ENV.COMPRAS_EMAIL || 'teste1@loadtest.com';
-const GESTOR_EMAIL = __ENV.GESTOR_EMAIL || 'teste2@loadtest.com';
-const DIRETORIA_EMAIL = __ENV.DIRETORIA_EMAIL || 'teste3@loadtest.com';
-const TEST_PASSWORD = __ENV.TEST_PASSWORD || 'Teste123!';
+const OC = getOcApproverCredentials();
 
 const ocAprovadaCompras = new Counter('oc_aprovada_compras');
 const ocAprovadaGestor = new Counter('oc_aprovada_gestor');
@@ -80,7 +78,7 @@ function parseJson(res) {
 function login(email) {
   const res = http.post(
     `${BASE_URL}/auth/login`,
-    JSON.stringify({ email, password: TEST_PASSWORD }),
+    loginJsonBodyForEmail(email, OC.password),
     { headers: jsonHeaders(), tags: { endpoint: 'login' } },
   );
   const body = parseJson(res);
@@ -195,9 +193,9 @@ function approveBatch(token, orders, nextStatus, endpointTag, expectedStatus, co
 function runPhaseCompras(orders) {
   console.log(`\n=== Fase 1 — Compras (${orders.length} OC(s), lote=${BATCH_SIZE}) ===`);
 
-  const session = login(COMPRAS_EMAIL);
+  const session = login(OC.compras);
   if (!session?.token) {
-    fail(`Login Compras falhou (${COMPRAS_EMAIL}). Rode: npx tsx scripts/conceder-aprovador-oc-teste.ts`);
+    fail(`Login Compras falhou (${OC.compras}). Rode: npx tsx scripts/conceder-aprovador-oc-teste.ts`);
   }
 
   const listed = fetchOrdersByStatus(session.token, 'PENDING_COMPRAS', 'list_pending_compras');
@@ -226,9 +224,9 @@ function runPhaseCompras(orders) {
 function runPhaseGestor(orders) {
   console.log(`\n=== Fase 2 — Gestor (${orders.length} OC(s), lote=${BATCH_SIZE}) ===`);
 
-  const session = login(GESTOR_EMAIL);
+  const session = login(OC.gestor);
   if (!session?.token) {
-    fail(`Login Gestor falhou (${GESTOR_EMAIL}). Rode: npx tsx scripts/conceder-aprovador-oc-teste.ts`);
+    fail(`Login Gestor falhou (${OC.gestor}). Rode: npx tsx scripts/conceder-aprovador-oc-teste.ts`);
   }
 
   const listed = fetchOrdersByStatus(session.token, 'PENDING', 'list_pending_gestor');
@@ -257,10 +255,10 @@ function runPhaseGestor(orders) {
 function runPhaseDiretoria(orders) {
   console.log(`\n=== Fase 3 — Diretoria (${orders.length} OC(s), lote=${BATCH_SIZE}) ===`);
 
-  const session = login(DIRETORIA_EMAIL);
+  const session = login(OC.diretoria);
   if (!session?.token) {
     fail(
-      `Login Diretoria falhou (${DIRETORIA_EMAIL}). Rode: npx tsx scripts/conceder-aprovador-oc-teste.ts`,
+      `Login Diretoria falhou (${OC.diretoria}). Rode: npx tsx scripts/conceder-aprovador-oc-teste.ts`,
     );
   }
 
@@ -296,10 +294,10 @@ export function setup() {
     );
   }
 
-  const session = login(COMPRAS_EMAIL);
+  const session = login(OC.compras);
   if (!session?.token) {
     throw new Error(
-      `Login Compras falhou (${COMPRAS_EMAIL}). ` +
+      `Login Compras falhou (${OC.compras}). ` +
         `Confira senha e rode: npx tsx scripts/conceder-aprovador-oc-teste.ts`,
     );
   }
@@ -307,8 +305,8 @@ export function setup() {
   const pending = fetchOrdersByStatus(session.token, 'PENDING_COMPRAS', 'list_pending_compras');
   console.log(
     `setup — PENDING_COMPRAS=${pending.length} | ITERATIONS=${ITERATIONS} | ` +
-      `BATCH_SIZE=${BATCH_SIZE} | compras=${COMPRAS_EMAIL} | gestor=${GESTOR_EMAIL} | ` +
-      `diretoria=${DIRETORIA_EMAIL}`,
+      `BATCH_SIZE=${BATCH_SIZE} | compras=${OC.compras} | gestor=${OC.gestor} | ` +
+      `diretoria=${OC.diretoria}`,
   );
 
   if (pending.length === 0) {

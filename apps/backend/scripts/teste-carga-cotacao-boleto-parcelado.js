@@ -26,18 +26,18 @@ import http from 'k6/http';
 import { check, sleep, fail } from 'k6';
 import exec from 'k6/execution';
 import { Counter } from 'k6/metrics';
+import { getUserCredentials, loginJsonBody, requireSupplierId } from './carga-auth.js';
 
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:5000/api';
 const VUS = Math.max(1, Number(__ENV.VUS || 5));
 const ITERATIONS = Math.max(1, Number(__ENV.ITERATIONS || 10));
-const SUPPLIER_ID = __ENV.SUPPLIER_ID || 'cmrc53c00000011n6ae9vqwnk';
+const SUPPLIER_ID = requireSupplierId();
 const UNIT_PRICE = Number(__ENV.UNIT_PRICE || 10.5);
 const PARCEL_COUNT = Math.max(2, Number(__ENV.PARCEL_COUNT || 2));
 const PARCEL_DUE_DAYS = parseParcelDueDays(__ENV.PARCEL_DUE_DAYS || '30,60');
 const PAYMENT_CONDITION_LABEL =
   __ENV.PAYMENT_CONDITION_LABEL || 'Boleto 2x 30/60 teste carga k6';
-const USER_EMAIL = __ENV.APPROVER_EMAIL || 'teste1@loadtest.com';
-const USER_PASSWORD = __ENV.APPROVER_PASSWORD || 'Teste123!';
+const USER = getUserCredentials();
 
 const quoteMapCreated = new Counter('quote_map_created');
 const quotesSaved = new Counter('quotes_saved');
@@ -108,7 +108,7 @@ function parseJson(res) {
 function login() {
   const res = http.post(
     `${BASE_URL}/auth/login`,
-    JSON.stringify({ email: USER_EMAIL, password: USER_PASSWORD }),
+    loginJsonBody(USER),
     { headers: jsonHeaders(), tags: { endpoint: 'login' } },
   );
   const body = parseJson(res);
@@ -326,7 +326,7 @@ export function setup() {
 
   const session = login();
   if (!session?.token) {
-    throw new Error(`Login falhou (${USER_EMAIL}).`);
+    throw new Error(`Login falhou (${USER.email}).`);
   }
 
   const paymentConditionCode = ensureParcelPaymentCondition(session.token);
