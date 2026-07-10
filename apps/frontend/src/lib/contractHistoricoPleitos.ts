@@ -16,7 +16,7 @@ export interface ContractPleitoHistorico {
   budgetStatus: string | null;
   executionStatus: string | null;
   billingStatus: string | null;
-  invoiceNumber: string | null;
+  invoiceNumber?: string | null;
   creationMonth: string | null;
   creationYear: number | null;
   billingRequest?: number | null;
