@@ -502,7 +502,7 @@ export function RmApprovalsSection() {
             <div className="fixed inset-0 z-[2000]" aria-hidden onClick={() => setActionMenu(null)} />
             <div
               role="menu"
-              className="fixed z-[201] w-56 rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800 overflow-hidden"
+              className="fixed z-[2001] w-56 rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800 overflow-hidden"
               style={{ top: actionMenu.top, left: actionMenu.left }}
             >
               <button

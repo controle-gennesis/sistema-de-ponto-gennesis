@@ -62,6 +62,7 @@ function formatCurrency(value: number) {
 function situacaoBadgeClass(situacao: string): string {
   if (situacao === 'Concluída') return 'bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-100';
   if (situacao === 'Aberta') return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300';
+  if (situacao === 'Faturado') return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300';
   if (situacao === 'Gerado 100%') return 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300';
   if (situacao === 'Pleito gerado' || situacao === 'Pleito parcial') {
     return 'bg-violet-100 text-violet-800 dark:bg-violet-900/30 dark:text-violet-300';
@@ -259,7 +260,7 @@ export function ContractHistoricoOsPanel({ contractId }: ContractHistoricoOsPane
       const os = formatOsSePastaOrDash(p.divSe, p.folderNumber).toLowerCase();
       const desc = (p.serviceDescription || '').toLowerCase();
       const etiqueta = getOsEtiquetaAbertura(p, billingsForOs).toLowerCase();
-      const situacao = getPleitoOsSituacao(p).toLowerCase();
+      const situacao = getPleitoOsSituacao(p, billingsForOs).toLowerCase();
       return os.includes(q) || desc.includes(q) || etiqueta.includes(q) || situacao.includes(q);
     });
   }, [allOs, selectedYears, selectedMonths, selectedOsIds, search, billingsForOs]);
@@ -429,7 +430,7 @@ export function ContractHistoricoOsPanel({ contractId }: ContractHistoricoOsPane
             <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
               {filteredOs.map((p) => {
                 const etiqueta = getOsEtiquetaAbertura(p, billingsForOs);
-                const situacaoPleito = getPleitoOsSituacao(p);
+                const situacaoPleito = getPleitoOsSituacao(p, billingsForOs);
                 const valorPleiteado = p.billingRequest ? Number(p.billingRequest) : 0;
                 const statusFatPct = getOsStatusFaturamentoPct(p, billingsForOs);
                 const orcamentoNum = getPleitoOrcamentoValor(p);

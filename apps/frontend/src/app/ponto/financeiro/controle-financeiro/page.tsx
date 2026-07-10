@@ -1427,7 +1427,7 @@ function MonthGroup({ year, month, items, onEdit, onDelete, deletingId }: MonthG
             />
             <div
               role="menu"
-              className="fixed z-[201] w-48 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 overflow-hidden"
+              className="fixed z-[2001] w-48 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 overflow-hidden"
               style={{
                 top: actionMenu.top,
                 left: actionMenu.left,

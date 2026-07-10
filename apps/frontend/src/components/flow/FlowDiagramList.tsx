@@ -164,7 +164,7 @@ export function FlowDiagramList({ onOpen }: Props) {
       <div className="text-center">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">Flow</h1>
         <p className="mt-2 text-sm text-gray-600 dark:text-gray-400 sm:text-base">
-          Crie e edite fluxogramas BPMN manualmente — raias, tarefas, decisões e conexões.
+          Crie e edite fluxogramas BPMN
         </p>
       </div>
 
@@ -182,8 +182,8 @@ export function FlowDiagramList({ onOpen }: Props) {
         <CardHeader className="border-b border-gray-200 px-6 py-4 dark:border-gray-700">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex items-center space-x-3">
-              <div className="flex-shrink-0 rounded-lg bg-violet-100 p-2 dark:bg-violet-900/30 sm:p-3">
-                <Workflow className="h-5 w-5 text-violet-600 dark:text-violet-400 sm:h-6 sm:w-6" />
+              <div className="flex-shrink-0 rounded-lg bg-red-100 p-2 dark:bg-red-900/30 sm:p-3">
+                <Workflow className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6" />
               </div>
               <div>
                 <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Meus fluxogramas</h3>
@@ -207,7 +207,7 @@ export function FlowDiagramList({ onOpen }: Props) {
                     onChange={(e) => setSearchQuery(e.target.value)}
                     placeholder="Pesquisar fluxograma..."
                     aria-label="Pesquisar fluxogramas"
-                    className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-violet-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                    className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
                   />
                   {searchQuery && (
                     <button
@@ -225,7 +225,7 @@ export function FlowDiagramList({ onOpen }: Props) {
                   onClick={() => setIsFiltersModalOpen(true)}
                   className={`relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border bg-white text-gray-700 transition-colors hover:bg-gray-50 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700 ${
                     hasAdvancedFilters
-                      ? 'border-violet-400 dark:border-violet-600'
+                      ? 'border-red-400 dark:border-red-600'
                       : 'border-gray-300 dark:border-gray-600'
                   }`}
                   aria-label="Abrir filtro"
@@ -233,7 +233,7 @@ export function FlowDiagramList({ onOpen }: Props) {
                 >
                   <Filter className="h-4 w-4" />
                   {hasAdvancedFilters && (
-                    <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-violet-500" />
+                    <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-red-500" />
                   )}
                 </button>
               </div>
@@ -326,7 +326,7 @@ export function FlowDiagramList({ onOpen }: Props) {
               <button
                 type="button"
                 onClick={clearFilters}
-                className="inline-flex items-center gap-2 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-sm font-medium text-violet-700 transition-colors hover:bg-violet-100 dark:border-violet-800/60 dark:bg-violet-950/30 dark:text-violet-300 dark:hover:bg-violet-900/40"
+                className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
               >
                 <RotateCcw className="h-4 w-4" />
                 Limpar filtros
@@ -361,8 +361,8 @@ function DiagramCard({
     <div className="group rounded-lg border border-gray-200 p-4 transition-shadow hover:shadow-md dark:border-gray-700">
       <button type="button" onClick={onOpen} className="w-full text-left">
         <div className="mb-3 flex items-start gap-3">
-          <div className="flex-shrink-0 rounded-lg bg-violet-100 p-2 dark:bg-violet-900/30">
-            <Workflow className="h-5 w-5 text-violet-600 dark:text-violet-400" />
+          <div className="flex-shrink-0 rounded-lg bg-red-100 p-2 dark:bg-red-900/30">
+            <Workflow className="h-5 w-5 text-red-600 dark:text-red-400" />
           </div>
           <div className="min-w-0 flex-1">
             <p className="truncate font-medium text-gray-900 dark:text-gray-100">{item.name}</p>

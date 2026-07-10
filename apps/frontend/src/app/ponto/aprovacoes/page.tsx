@@ -1214,7 +1214,7 @@ export default function AprovacoesPage() {
                 <div className="fixed inset-0 z-[2000]" aria-hidden onClick={() => setEspelhoActionMenu(null)} />
                 <div
                   role="menu"
-                  className="fixed z-[201] w-56 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800"
+                  className="fixed z-[2001] w-56 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800"
                   style={{ top: espelhoActionMenu.top, left: espelhoActionMenu.left }}
                 >
                   <button

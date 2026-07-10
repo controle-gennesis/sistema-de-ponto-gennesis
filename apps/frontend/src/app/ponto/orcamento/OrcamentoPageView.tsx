@@ -8264,7 +8264,7 @@ export function OrcamentoPageView({
                             />
                             <div
                               role="menu"
-                              className="fixed z-[201] w-56 rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800 overflow-hidden"
+                              className="fixed z-[2001] w-56 rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800 overflow-hidden"
                               style={{
                                 top: orcamentoListaActionMenu.top,
                                 left: orcamentoListaActionMenu.left
@@ -8820,7 +8820,7 @@ export function OrcamentoPageView({
                           />
                           <div
                             role="menu"
-                            className="fixed z-[201] min-w-[17rem] max-w-[min(100vw-1rem,22rem)] overflow-hidden rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-800"
+                            className="fixed z-[2001] min-w-[17rem] max-w-[min(100vw-1rem,22rem)] overflow-hidden rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-800"
                             style={{ left: menuCtxAnalitico.left, top: menuCtxAnalitico.top }}
                             onClick={(e) => e.stopPropagation()}
                           >
@@ -10446,7 +10446,7 @@ export function OrcamentoPageView({
                           />
                           <div
                             role="menu"
-                            className="fixed z-[201] w-56 overflow-hidden rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-800"
+                            className="fixed z-[2001] w-56 overflow-hidden rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-800"
                             style={{ left: menuCtxMontagem.left, top: menuCtxMontagem.top }}
                             onClick={e => e.stopPropagation()}
                           >

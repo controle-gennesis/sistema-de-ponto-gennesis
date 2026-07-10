@@ -88,9 +88,8 @@ import {
 } from '@/lib/extratoCaixaAjuste';
 import { formatDateTimeBr } from '@/lib/dateTimeBr';
 import {
-  aggregateGastosOperacionaisMonthlyTotals,
-  aggregateGastosOperacionaisYearlyTotals,
-  filterGastosDetailRowsForSystemContract,
+  aggregateGastosNaturezaMonthlyTotals,
+  aggregateGastosNaturezaYearlyTotals,
   filterGastosNaturezaDetailRowsForSystemContract,
   gastosMonthPeriodBounds,
   gastosYearPeriodBounds
@@ -638,6 +637,12 @@ function formatCurrency(value: number) {
   }).format(value);
 }
 
+function signedGastosValueClassName(value: number): string {
+  if (value > 0) return 'text-green-600 dark:text-green-400';
+  if (value < 0) return 'text-red-600 dark:text-red-400';
+  return 'text-violet-800 dark:text-violet-300';
+}
+
 /** Anos civis com pelo menos um mês de vigência (alinhado à tabela Acumulado Anual). */
 function buildContractAvailableYears(startDate: string, endDate: string): number[] {
   const start = parseDateSafe(startDate);
@@ -666,14 +671,7 @@ function buildContractAvailableYears(startDate: string, endDate: string): number
 }
 
 function getYearsBetween(startDate: string, endDate: string): number {
-  if (!startDate || !endDate) return 0;
-  const start = parseDateSafe(startDate);
-  const end = parseDateSafe(endDate);
-  if (!start || !end) return 0;
-  if (end <= start) return 0;
-  // Conta anos completos de vigência (ex: 01/03/2026 a 01/03/2028 = 2 anos)
-  const diffMonths = (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth());
-  return Math.max(1, Math.floor(diffMonths / 12));
+  return countContractYearsOfVigencia(startDate, endDate);
 }
 
 function getValorMaisAditivosAnual(valuePlusAddenda: number, startDate: string, endDate: string): number | null {
@@ -2091,29 +2089,6 @@ export default function ContractDetailPage() {
     return valores;
   }, [totvsTotalPagoRes, safeSelectedYear, metaSchedule]);
 
-  const contractGastosOperacionaisRows = useMemo(() => {
-    if (!contract) return [];
-    return filterGastosDetailRowsForSystemContract(
-      gastosOperacionaisModuleData?.detailRows ?? [],
-      {
-        name: contract.name,
-        costCenter: contract.costCenter
-      }
-    );
-  }, [contract, gastosOperacionaisModuleData?.detailRows]);
-
-  const gastosOperacionaisPorMes = useMemo(
-    () => aggregateGastosOperacionaisMonthlyTotals(contractGastosOperacionaisRows, safeSelectedYear),
-    [contractGastosOperacionaisRows, safeSelectedYear]
-  );
-
-  const gastosOperacionaisPorAno = useMemo(
-    () => aggregateGastosOperacionaisYearlyTotals(contractGastosOperacionaisRows, availableYears),
-    [contractGastosOperacionaisRows, availableYears]
-  );
-
-  const gastosOperacionaisTemDados = contractGastosOperacionaisRows.length > 0;
-
   const contractGastosNaturezaRows = useMemo(() => {
     if (!contract) return [];
     return filterGastosNaturezaDetailRowsForSystemContract(
@@ -2124,6 +2099,18 @@ export default function ContractDetailPage() {
       }
     );
   }, [contract, gastosOperacionaisModuleData?.naturezaDetailRows]);
+
+  const gastosOperacionaisPorMes = useMemo(
+    () => aggregateGastosNaturezaMonthlyTotals(contractGastosNaturezaRows, safeSelectedYear),
+    [contractGastosNaturezaRows, safeSelectedYear]
+  );
+
+  const gastosOperacionaisPorAno = useMemo(
+    () => aggregateGastosNaturezaYearlyTotals(contractGastosNaturezaRows, availableYears),
+    [contractGastosNaturezaRows, availableYears]
+  );
+
+  const gastosOperacionaisTemDados = contractGastosNaturezaRows.length > 0;
 
   const gastosResumoModalNaturezaRows = useMemo(() => {
     if (!gastosResumoModal || !contract) return [];
@@ -3716,7 +3703,7 @@ export default function ContractDetailPage() {
                         {availableYears.map((year) => {
                           const valor = gastosOperacionaisPorAno[year] ?? 0;
                           const celulaClicavel =
-                            !gastosOperacionaisCarregando && valor > 0;
+                            !gastosOperacionaisCarregando && valor !== 0;
                           return (
                           <td
                             key={year}
@@ -3735,7 +3722,7 @@ export default function ContractDetailPage() {
                               }
                             }}
                             title={celulaClicavel ? 'Ver resumo por categoria' : undefined}
-                            className={`px-4 py-3 text-center text-sm font-medium text-violet-800 dark:text-violet-300 ${
+                            className={`px-4 py-3 text-center text-sm font-medium ${signedGastosValueClassName(valor)} ${
                               celulaClicavel
                                 ? 'cursor-pointer transition-colors hover:bg-violet-100/70 dark:hover:bg-violet-900/35'
                                 : ''
@@ -3743,8 +3730,8 @@ export default function ContractDetailPage() {
                           >
                             {gastosOperacionaisCarregando
                               ? '…'
-                              : valor > 0
-                                ? formatCurrency(valor)
+                              : valor !== 0
+                                ? formatCurrency(Math.abs(valor))
                                 : '-'}
                           </td>
                           );
@@ -3878,7 +3865,7 @@ export default function ContractDetailPage() {
                         {MESES.map((mes, i) => {
                           const valor = gastosOperacionaisPorMes[i];
                           const celulaClicavel =
-                            !gastosOperacionaisCarregando && valor > 0;
+                            !gastosOperacionaisCarregando && valor !== 0;
                           return (
                           <td
                             key={mes}
@@ -3897,7 +3884,7 @@ export default function ContractDetailPage() {
                               }
                             }}
                             title={celulaClicavel ? 'Ver resumo por categoria' : undefined}
-                            className={`px-4 py-3 text-center text-sm font-medium text-violet-800 dark:text-violet-300 ${
+                            className={`px-4 py-3 text-center text-sm font-medium ${signedGastosValueClassName(valor)} ${
                               celulaClicavel
                                 ? 'cursor-pointer transition-colors hover:bg-violet-100/70 dark:hover:bg-violet-900/35'
                                 : ''
@@ -3905,8 +3892,8 @@ export default function ContractDetailPage() {
                           >
                             {gastosOperacionaisCarregando
                               ? '…'
-                              : valor > 0
-                                ? formatCurrency(valor)
+                              : valor !== 0
+                                ? formatCurrency(Math.abs(valor))
                                 : '-'}
                           </td>
                           );
@@ -3998,6 +3985,212 @@ export default function ContractDetailPage() {
               </div>
             </CardContent>
           </Card>
+
+          {canAccessProducaoSemanalModulo ? (
+          <>
+          {/* Produção Semanal */}
+          <Card>
+            <CardHeader className={cadastroListClasses.cardHeader}>
+              <div className={cadastroListClasses.cardHeaderRow}>
+                <div className={cadastroListClasses.cardHeaderIconRow}>
+                  <div className="rounded-lg bg-amber-100 p-2 sm:p-3 dark:bg-amber-900/30">
+                    <BarChart3 className="h-5 w-5 text-amber-600 dark:text-amber-400 sm:h-6 sm:w-6" />
+                  </div>
+                  <div className="min-w-0">
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 sm:text-xl">
+                      Produção Semanal
+                    </h3>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                      {loadingProductions
+                        ? 'Carregando...'
+                        : filteredProductions.length === 1
+                          ? '1 registro'
+                          : `${filteredProductions.length} registros`}
+                    </p>
+                  </div>
+                </div>
+                <div className={cadastroListClasses.cardToolbar}>
+                  <div className="relative min-w-[240px] flex-1 sm:w-[280px] sm:flex-none">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
+                    <input
+                      type="search"
+                      value={searchTermProduction}
+                      onChange={(e) => setSearchTermProduction(e.target.value)}
+                      placeholder="Buscar OS, responsável, valor..."
+                      className={`${LIST_SEARCH_INPUT_CLASS} focus:ring-amber-500`}
+                    />
+                    {searchTermProduction ? (
+                      <button
+                        type="button"
+                        onClick={() => setSearchTermProduction('')}
+                        aria-label="Limpar busca"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-300"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    ) : null}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowProductionFilterModal(true)}
+                    className={`relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition-colors ${
+                      hasActiveProductionFilter
+                        ? 'border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100 dark:border-amber-800/60 dark:bg-amber-950/30 dark:text-amber-300 dark:hover:bg-amber-900/40'
+                        : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
+                    }`}
+                    aria-label="Abrir filtro"
+                    title={hasActiveProductionFilter ? 'Filtro (ativo)' : 'Filtro'}
+                  >
+                    <Filter className="h-4 w-4" />
+                    {hasActiveProductionFilter ? (
+                      <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-amber-500 ring-2 ring-white dark:ring-gray-900" />
+                    ) : null}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setProductionForm({
+                        fillingDate: toInputDate(new Date()),
+                        divSe: '',
+                        weeklyProductionValue: '',
+                        responsiblePerson: defaultProductionResponsiblePerson,
+                      });
+                      setShowProductionModal(true);
+                    }}
+                    disabled={!canCreateContrato}
+                    className="flex h-10 items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-700 transition-colors hover:bg-amber-100 dark:border-amber-800/60 dark:bg-amber-950/30 dark:text-amber-300 dark:hover:bg-amber-900/40 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+                  >
+                    <Plus className="h-4 w-4 shrink-0" />
+                    <span>Nova Produção Semanal</span>
+                  </button>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className={cadastroListClasses.cardContent}>
+              {loadingProductions ? (
+                <div className="p-8 text-center text-gray-500 dark:text-gray-400">
+                  Carregando...
+                </div>
+              ) : filteredProductions.length === 0 ? (
+                <div className="p-8 text-center">
+                  <BarChart3 className="w-12 h-12 mx-auto text-gray-300 dark:text-gray-600 mb-3" />
+                  <p className="text-gray-500 dark:text-gray-400">
+                    {productions.length === 0
+                      ? 'Nenhuma produção semanal cadastrada.'
+                      : searchTermProduction.trim() || hasActiveProductionFilter
+                        ? 'Nenhuma produção semanal encontrada com os filtros atuais.'
+                        : 'Nenhuma produção semanal no período selecionado.'}
+                  </p>
+                  {productions.length === 0 && (
+                  <button
+                    onClick={() => {
+                    setProductionForm({
+                      fillingDate: toInputDate(new Date()),
+                      divSe: '',
+                      weeklyProductionValue: '',
+                      responsiblePerson: defaultProductionResponsiblePerson,
+                    });
+                    setShowProductionModal(true);
+                  }}
+                    className="mt-3 text-amber-600 dark:text-amber-400 hover:underline text-sm font-medium"
+                  >
+                    Cadastrar primeira produção semanal
+                  </button>
+                  )}
+                </div>
+              ) : (
+                <>
+                  <CadastroListSummary
+                    startItem={productionListRange.startItem}
+                    endItem={productionListRange.endItem}
+                    total={filteredProductions.length}
+                    itemLabel="registro"
+                    itemLabelPlural="registros"
+                    currentPage={productionListPage}
+                    totalPages={productionListRange.totalPages}
+                  />
+                <div className="overflow-x-auto">
+                  <table className="w-full" data-cc-skip-column-customizer="1">
+                    <thead className="border-b border-gray-200 dark:border-gray-700">
+                      <tr>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Data</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">OS / SE</th>
+                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Valor da Produção Semanal</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Responsável pelo Preenchimento</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Preenchimento</th>
+                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase w-24">Ações</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                      {displayedProductions.map((p) => (
+                        <tr
+                          key={p.id}
+                          className="hover:bg-gray-50 dark:hover:bg-gray-700/30"
+                        >
+                          <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100">{p.fillingDate ? formatDate(p.fillingDate) : '-'}</td>
+                          <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">
+                            {formatOsSePastaOrDash(p.divSe, folderForDivSe(pleitos, p.divSe))}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-right font-medium text-gray-900 dark:text-gray-100">{formatCurrency(p.weeklyProductionValue)}</td>
+                          <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100">{p.responsiblePerson}</td>
+                          <td className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap">{formatDateTimeBr(p.createdAt || '')}</td>
+                          <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
+                            <div className="flex items-center justify-end gap-1">
+                              <button
+                                onClick={() => {
+                                  if (!canEditContrato) {
+                                    toast.error('Você não tem permissão para editar no módulo Contratos.');
+                                    return;
+                                  }
+                                  setSelectedProduction(p);
+                                  setProductionEditForm({
+                                    fillingDate: p.fillingDate ? toInputDate(p.fillingDate) : '',
+                                    divSe: p.divSe,
+                                    weeklyProductionValue: formatCurrencyInput(p.weeklyProductionValue),
+                                    responsiblePerson: p.responsiblePerson
+                                  });
+                                  setEditingProduction(true);
+                                }}
+                                disabled={!canEditContrato}
+                                className="p-2 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                title="Editar"
+                              >
+                                <Edit2 className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={() => {
+                                  if (!canDeleteContrato) {
+                                    toast.error('Você não tem permissão para excluir no módulo Contratos.');
+                                    return;
+                                  }
+                                  if (confirm('Excluir esta produção semanal?')) {
+                                    deleteProductionMutation.mutate(p.id);
+                                  }
+                                }}
+                                disabled={!canDeleteContrato}
+                                className="p-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                title="Excluir"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <ListPagination
+                  currentPage={productionListPage}
+                  totalPages={productionListRange.totalPages}
+                  onPageChange={setProductionListPage}
+                />
+                </>
+              )}
+            </CardContent>
+          </Card>
+          </>
+          ) : null}
 
           {canAccessOrdemServicoModulo ? (
           <>
@@ -4393,212 +4586,6 @@ export default function ContractDetailPage() {
           </Card>
 
           <ContractHistoricoPleitosPanel contractId={contractId} />
-          </>
-          ) : null}
-
-          {canAccessProducaoSemanalModulo ? (
-          <>
-          {/* Produção Semanal */}
-          <Card>
-            <CardHeader className={cadastroListClasses.cardHeader}>
-              <div className={cadastroListClasses.cardHeaderRow}>
-                <div className={cadastroListClasses.cardHeaderIconRow}>
-                  <div className="rounded-lg bg-amber-100 p-2 sm:p-3 dark:bg-amber-900/30">
-                    <BarChart3 className="h-5 w-5 text-amber-600 dark:text-amber-400 sm:h-6 sm:w-6" />
-                  </div>
-                  <div className="min-w-0">
-                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 sm:text-xl">
-                      Produção Semanal
-                    </h3>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">
-                      {loadingProductions
-                        ? 'Carregando...'
-                        : filteredProductions.length === 1
-                          ? '1 registro'
-                          : `${filteredProductions.length} registros`}
-                    </p>
-                  </div>
-                </div>
-                <div className={cadastroListClasses.cardToolbar}>
-                  <div className="relative min-w-[240px] flex-1 sm:w-[280px] sm:flex-none">
-                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
-                    <input
-                      type="search"
-                      value={searchTermProduction}
-                      onChange={(e) => setSearchTermProduction(e.target.value)}
-                      placeholder="Buscar OS, responsável, valor..."
-                      className={`${LIST_SEARCH_INPUT_CLASS} focus:ring-amber-500`}
-                    />
-                    {searchTermProduction ? (
-                      <button
-                        type="button"
-                        onClick={() => setSearchTermProduction('')}
-                        aria-label="Limpar busca"
-                        className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-300"
-                      >
-                        <X className="h-4 w-4" />
-                      </button>
-                    ) : null}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setShowProductionFilterModal(true)}
-                    className={`relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition-colors ${
-                      hasActiveProductionFilter
-                        ? 'border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100 dark:border-amber-800/60 dark:bg-amber-950/30 dark:text-amber-300 dark:hover:bg-amber-900/40'
-                        : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
-                    }`}
-                    aria-label="Abrir filtro"
-                    title={hasActiveProductionFilter ? 'Filtro (ativo)' : 'Filtro'}
-                  >
-                    <Filter className="h-4 w-4" />
-                    {hasActiveProductionFilter ? (
-                      <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-amber-500 ring-2 ring-white dark:ring-gray-900" />
-                    ) : null}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setProductionForm({
-                        fillingDate: toInputDate(new Date()),
-                        divSe: '',
-                        weeklyProductionValue: '',
-                        responsiblePerson: defaultProductionResponsiblePerson,
-                      });
-                      setShowProductionModal(true);
-                    }}
-                    disabled={!canCreateContrato}
-                    className="flex h-10 items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-700 transition-colors hover:bg-amber-100 dark:border-amber-800/60 dark:bg-amber-950/30 dark:text-amber-300 dark:hover:bg-amber-900/40 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
-                  >
-                    <Plus className="h-4 w-4 shrink-0" />
-                    <span>Nova Produção Semanal</span>
-                  </button>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent className={cadastroListClasses.cardContent}>
-              {loadingProductions ? (
-                <div className="p-8 text-center text-gray-500 dark:text-gray-400">
-                  Carregando...
-                </div>
-              ) : filteredProductions.length === 0 ? (
-                <div className="p-8 text-center">
-                  <BarChart3 className="w-12 h-12 mx-auto text-gray-300 dark:text-gray-600 mb-3" />
-                  <p className="text-gray-500 dark:text-gray-400">
-                    {productions.length === 0
-                      ? 'Nenhuma produção semanal cadastrada.'
-                      : searchTermProduction.trim() || hasActiveProductionFilter
-                        ? 'Nenhuma produção semanal encontrada com os filtros atuais.'
-                        : 'Nenhuma produção semanal no período selecionado.'}
-                  </p>
-                  {productions.length === 0 && (
-                  <button
-                    onClick={() => {
-                    setProductionForm({
-                      fillingDate: toInputDate(new Date()),
-                      divSe: '',
-                      weeklyProductionValue: '',
-                      responsiblePerson: defaultProductionResponsiblePerson,
-                    });
-                    setShowProductionModal(true);
-                  }}
-                    className="mt-3 text-amber-600 dark:text-amber-400 hover:underline text-sm font-medium"
-                  >
-                    Cadastrar primeira produção semanal
-                  </button>
-                  )}
-                </div>
-              ) : (
-                <>
-                  <CadastroListSummary
-                    startItem={productionListRange.startItem}
-                    endItem={productionListRange.endItem}
-                    total={filteredProductions.length}
-                    itemLabel="registro"
-                    itemLabelPlural="registros"
-                    currentPage={productionListPage}
-                    totalPages={productionListRange.totalPages}
-                  />
-                <div className="overflow-x-auto">
-                  <table className="w-full" data-cc-skip-column-customizer="1">
-                    <thead className="border-b border-gray-200 dark:border-gray-700">
-                      <tr>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Data</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">OS / SE</th>
-                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Valor da Produção Semanal</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Responsável pelo Preenchimento</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Preenchimento</th>
-                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase w-24">Ações</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                      {displayedProductions.map((p) => (
-                        <tr
-                          key={p.id}
-                          className="hover:bg-gray-50 dark:hover:bg-gray-700/30"
-                        >
-                          <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100">{p.fillingDate ? formatDate(p.fillingDate) : '-'}</td>
-                          <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">
-                            {formatOsSePastaOrDash(p.divSe, folderForDivSe(pleitos, p.divSe))}
-                          </td>
-                          <td className="px-4 py-3 text-sm text-right font-medium text-gray-900 dark:text-gray-100">{formatCurrency(p.weeklyProductionValue)}</td>
-                          <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100">{p.responsiblePerson}</td>
-                          <td className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap">{formatDateTimeBr(p.createdAt || '')}</td>
-                          <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
-                            <div className="flex items-center justify-end gap-1">
-                              <button
-                                onClick={() => {
-                                  if (!canEditContrato) {
-                                    toast.error('Você não tem permissão para editar no módulo Contratos.');
-                                    return;
-                                  }
-                                  setSelectedProduction(p);
-                                  setProductionEditForm({
-                                    fillingDate: p.fillingDate ? toInputDate(p.fillingDate) : '',
-                                    divSe: p.divSe,
-                                    weeklyProductionValue: formatCurrencyInput(p.weeklyProductionValue),
-                                    responsiblePerson: p.responsiblePerson
-                                  });
-                                  setEditingProduction(true);
-                                }}
-                                disabled={!canEditContrato}
-                                className="p-2 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                                title="Editar"
-                              >
-                                <Edit2 className="w-4 h-4" />
-                              </button>
-                              <button
-                                onClick={() => {
-                                  if (!canDeleteContrato) {
-                                    toast.error('Você não tem permissão para excluir no módulo Contratos.');
-                                    return;
-                                  }
-                                  if (confirm('Excluir esta produção semanal?')) {
-                                    deleteProductionMutation.mutate(p.id);
-                                  }
-                                }}
-                                disabled={!canDeleteContrato}
-                                className="p-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                                title="Excluir"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                <ListPagination
-                  currentPage={productionListPage}
-                  totalPages={productionListRange.totalPages}
-                  onPageChange={setProductionListPage}
-                />
-                </>
-              )}
-            </CardContent>
-          </Card>
           </>
           ) : null}
 

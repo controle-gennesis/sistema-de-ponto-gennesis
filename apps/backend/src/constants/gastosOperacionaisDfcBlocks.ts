@@ -511,13 +511,13 @@ export function isGastosOperacionaisPositiveCreditNatureza(natureza: string): bo
 }
 
 /**
- * Contribuição no total DFC: soma das magnitudes das despesas (vermelho) menos créditos (verde).
+ * Contribuição no total DFC: despesas como saída (negativo) e créditos como entrada (positivo).
  */
 export function gastosNaturezaTotalContribution(natureza: string, total: number): number {
   if (!Number.isFinite(total) || total === 0) return 0;
   const magnitude = Math.abs(total);
   if (isGastosOperacionaisPositiveCreditNatureza(natureza)) {
-    return -magnitude;
+    return magnitude;
   }
-  return magnitude;
+  return -magnitude;
 }

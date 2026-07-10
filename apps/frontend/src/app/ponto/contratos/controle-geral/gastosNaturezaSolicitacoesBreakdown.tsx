@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Loader2 } from 'lucide-react';
 import api from '@/lib/api';
 import type { GastosNaturezaAggRow } from './buildQueryGastosRows';
+import { gastosNaturezaTotalContribution } from './gastosOperacionaisAllowedNaturezas';
 
 export type GastosNaturezaSolicitacaoLancamentoRow = {
   linhaId: string;
@@ -328,7 +329,15 @@ export function GastosNaturezaSolicitacoesBreakdown({
 
   return (
     <>
-      {solicitacoes.map((solicitacao) => (
+      {solicitacoes.map((solicitacao) => {
+        const signedValor = gastosNaturezaTotalContribution(solicitacao.natureza, solicitacao.valor);
+        const signedClass =
+          signedValor > 0
+            ? 'text-green-600 dark:text-green-400'
+            : signedValor < 0
+              ? 'text-red-600 dark:text-red-400'
+              : valueClassName;
+        return (
         <tr
           key={solicitacao.linhaId}
           className="cursor-pointer bg-gray-50/60 hover:bg-gray-100/80 dark:bg-gray-800/20 dark:hover:bg-gray-800/40"
@@ -341,11 +350,12 @@ export function GastosNaturezaSolicitacoesBreakdown({
               {solicitacao.natureza !== row.natureza ? ` · ${solicitacao.natureza}` : ''}
             </span>
           </td>
-          <td className={`px-4 py-1.5 text-right text-xs tabular-nums whitespace-nowrap ${valueClassName}`}>
-            {formatCurrency(Math.abs(solicitacao.valor))}
+          <td className={`px-4 py-1.5 text-right text-xs tabular-nums whitespace-nowrap ${signedClass}`}>
+            {formatCurrency(signedValor)}
           </td>
         </tr>
-      ))}
+        );
+      })}
     </>
   );
 }

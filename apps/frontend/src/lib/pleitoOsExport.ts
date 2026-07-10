@@ -172,7 +172,11 @@ export function getOsRestanteFaturar(
   return Math.max(0, orcamento - getOsFaturamentoAcumulado(p, billings));
 }
 
-export function getPleitoOsSituacao(p: PleitoOsExportRow): string {
+export function getPleitoOsSituacao(
+  p: PleitoOsExportRow,
+  billings: BillingForOsCheck[] = []
+): string {
+  if (isOsConcluida(p, billings)) return 'Faturado';
   const marker = (p.reportsBilling || '').trim();
   if (marker === PLEITO_HISTORY_MARKER_GERADO_100) return 'Gerado 100%';
   const orc = parseBudgetToNumberSafe(p.budget);
@@ -211,7 +215,7 @@ function pleitoToXlsxRow(p: PleitoOsExportRow, billings: BillingForOsCheck[]): (
   const statusFatPct = getOsStatusFaturamentoPct(p, billings);
   return [
     getOsEtiquetaAbertura(p, billings),
-    getPleitoOsSituacao(p),
+    getPleitoOsSituacao(p, billings),
     formatOsSePasta(p.divSe, p.folderNumber),
     p.folderNumber ?? '',
     p.creationMonth ?? '',

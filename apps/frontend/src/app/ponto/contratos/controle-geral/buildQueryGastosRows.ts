@@ -309,13 +309,13 @@ export function groupGastosNaturezaModalRows(rows: readonly GastosNaturezaAggRow
     const current = groups.get(row.dfcLeafBlockId);
     if (current) {
       current.rows.push(row);
-      current.subtotal += gastosNaturezaTotalContribution(row.natureza, row.total);
+      current.subtotal += row.total;
     } else {
       groups.set(row.dfcLeafBlockId, {
         leafBlockId: row.dfcLeafBlockId,
         leafLabel,
         rows: [row],
-        subtotal: gastosNaturezaTotalContribution(row.natureza, row.total)
+        subtotal: row.total
       });
       groupParentPaths.set(row.dfcLeafBlockId, parentPathLabels);
     }

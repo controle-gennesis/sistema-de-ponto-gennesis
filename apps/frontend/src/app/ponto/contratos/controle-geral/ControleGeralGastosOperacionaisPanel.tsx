@@ -33,7 +33,6 @@ import {
   getGastosNaturezaAggRowKey,
   groupGastosNaturezaModalRows,
   gastosNaturezaTotalContribution,
-  isGastosOperacionaisPositiveCreditNatureza,
   deriveEmissaoMonthYearFromPeriod,
   EMPTY_GASTOS_OPERACIONAIS_FILTERS,
   filterGastosDetailRows,
@@ -205,11 +204,10 @@ function formatGastosNaturezaDate(iso: string): string {
   return `${match[3]}/${match[2]}/${match[1]}`;
 }
 
-function gastosNaturezaModalValueClassName(natureza: string): string {
-  if (isGastosOperacionaisPositiveCreditNatureza(natureza)) {
-    return 'text-green-600 dark:text-green-400';
-  }
-  return 'text-red-600 dark:text-red-400';
+function gastosNaturezaModalValueClassName(value: number): string {
+  if (value > 0) return 'text-green-600 dark:text-green-400';
+  if (value < 0) return 'text-red-600 dark:text-red-400';
+  return 'text-gray-600 dark:text-gray-400';
 }
 
 function calcGastoFaturamentoPercent(gastos: number, faturamento: number): number | null {
@@ -971,11 +969,7 @@ export function ControleGeralGastosOperacionaisPanel({
   ]);
 
   const naturezaModalTotal = useMemo(
-    () =>
-      naturezaModalRows.reduce(
-        (sum, row) => sum + gastosNaturezaTotalContribution(row.natureza, row.total),
-        0
-      ),
+    () => naturezaModalRows.reduce((sum, row) => sum + row.total, 0),
     [naturezaModalRows]
   );
 
@@ -1045,9 +1039,9 @@ export function ControleGeralGastosOperacionaisPanel({
               </button>
             </td>
             <td
-              className={`px-4 py-2 text-right text-sm tabular-nums font-medium whitespace-nowrap ${gastosNaturezaModalValueClassName(row.natureza)}`}
+              className={`px-4 py-2 text-right text-sm tabular-nums font-medium whitespace-nowrap ${gastosNaturezaModalValueClassName(row.total)}`}
             >
-              {formatCurrency(Math.abs(row.total))}
+              {formatCurrency(row.total)}
             </td>
           </tr>
           {isExpanded && naturezaModalContract ? (
@@ -1057,7 +1051,7 @@ export function ControleGeralGastosOperacionaisPanel({
               periodFrom={filters.periodFrom}
               periodTo={filters.periodTo}
               paddingLeft={paddingLeft}
-              valueClassName={gastosNaturezaModalValueClassName(row.natureza)}
+              valueClassName={gastosNaturezaModalValueClassName(row.total)}
               formatCurrency={formatCurrency}
               formatDate={formatGastosNaturezaDate}
               onOpenSolicitacao={setSelectedNaturezaSolicitacao}
@@ -1910,8 +1904,8 @@ export function ControleGeralGastosOperacionaisPanel({
                                   {formatCurrency(row.recebidoAcumulado ?? 0)}
                                 </td>
                               ) : null}
-                              <td className={`${amountCurrencyCellClassName} text-red-600 dark:text-red-400`}>
-                                {formatCurrency(Math.abs(row.totalAcumulado))}
+                              <td className={`${amountCurrencyCellClassName} ${gastosNaturezaModalValueClassName(row.totalAcumulado)}`}>
+                                {formatCurrency(row.totalAcumulado)}
                               </td>
                               {showFaturamentoColumn ? (
                                 <td
@@ -2083,7 +2077,7 @@ export function ControleGeralGastosOperacionaisPanel({
                                 <span>{dfcTree.rootLabel}</span>
                               </button>
                             </td>
-                            <td className="px-4 py-2.5 text-right text-sm tabular-nums font-semibold whitespace-nowrap text-red-600 dark:text-red-400">
+                            <td className={`px-4 py-2.5 text-right text-sm tabular-nums font-semibold whitespace-nowrap ${gastosNaturezaModalValueClassName(dfcTree.rootSubtotal)}`}>
                               {formatCurrency(dfcTree.rootSubtotal)}
                             </td>
                           </tr>
@@ -2114,7 +2108,7 @@ export function ControleGeralGastosOperacionaisPanel({
                                           <span>{branch.label}</span>
                                         </button>
                                       </td>
-                                      <td className="px-4 py-2.5 text-right text-sm tabular-nums font-semibold whitespace-nowrap text-red-600 dark:text-red-400">
+                                      <td className={`px-4 py-2.5 text-right text-sm tabular-nums font-semibold whitespace-nowrap ${gastosNaturezaModalValueClassName(branch.subtotal)}`}>
                                         {formatCurrency(branch.subtotal)}
                                       </td>
                                     </tr>
@@ -2151,7 +2145,7 @@ export function ControleGeralGastosOperacionaisPanel({
                                                     <span>{group.leafLabel}</span>
                                                   </button>
                                                 </td>
-                                                <td className="px-4 py-2.5 text-right text-sm tabular-nums font-semibold whitespace-nowrap text-red-600 dark:text-red-400">
+                                                <td className={`px-4 py-2.5 text-right text-sm tabular-nums font-semibold whitespace-nowrap ${gastosNaturezaModalValueClassName(group.subtotal)}`}>
                                                   {formatCurrency(group.subtotal)}
                                                 </td>
                                               </tr>
@@ -2191,13 +2185,11 @@ export function ControleGeralGastosOperacionaisPanel({
                               <span>Outras naturezas</span>
                             </button>
                           </td>
-                          <td className="px-4 py-2.5 text-right text-sm tabular-nums font-semibold whitespace-nowrap text-red-600 dark:text-red-400">
+                          <td className={`px-4 py-2.5 text-right text-sm tabular-nums font-semibold whitespace-nowrap ${gastosNaturezaModalValueClassName(
+                            naturezaModalGrouped.ungrouped.reduce((sum, row) => sum + row.total, 0)
+                          )}`}>
                             {formatCurrency(
-                              naturezaModalGrouped.ungrouped.reduce(
-                                (sum, row) =>
-                                  sum + gastosNaturezaTotalContribution(row.natureza, row.total),
-                                0
-                              )
+                              naturezaModalGrouped.ungrouped.reduce((sum, row) => sum + row.total, 0)
                             )}
                           </td>
                         </tr>
@@ -2210,7 +2202,7 @@ export function ControleGeralGastosOperacionaisPanel({
                   <tfoot>
                     <tr className="border-t border-gray-200 bg-gray-50 font-semibold dark:border-gray-700 dark:bg-gray-800/80">
                       <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100">Total</td>
-                      <td className="px-4 py-3 text-right text-sm tabular-nums whitespace-nowrap text-red-600 dark:text-red-400">
+                      <td className={`px-4 py-3 text-right text-sm tabular-nums whitespace-nowrap ${gastosNaturezaModalValueClassName(naturezaModalTotal)}`}>
                         {formatCurrency(naturezaModalTotal)}
                       </td>
                     </tr>
@@ -2242,9 +2234,19 @@ export function ControleGeralGastosOperacionaisPanel({
               </p>
             </div>
             <p
-              className={`text-lg font-semibold tabular-nums ${gastosNaturezaModalValueClassName(selectedNaturezaSolicitacao.natureza)}`}
+              className={`text-lg font-semibold tabular-nums ${gastosNaturezaModalValueClassName(
+                gastosNaturezaTotalContribution(
+                  selectedNaturezaSolicitacao.natureza,
+                  selectedNaturezaSolicitacao.valor
+                )
+              )}`}
             >
-              {formatCurrency(Math.abs(selectedNaturezaSolicitacao.valor))}
+              {formatCurrency(
+                gastosNaturezaTotalContribution(
+                  selectedNaturezaSolicitacao.natureza,
+                  selectedNaturezaSolicitacao.valor
+                )
+              )}
             </p>
             {selectedNaturezaSolicitacao.lancamentosAgrupados &&
             selectedNaturezaSolicitacao.lancamentosAgrupados.length > 1 ? (
@@ -2253,7 +2255,12 @@ export function ControleGeralGastosOperacionaisPanel({
                   Lançamentos que compõem o total
                 </p>
                 <ul className="divide-y divide-gray-200 dark:divide-gray-700">
-                  {selectedNaturezaSolicitacao.lancamentosAgrupados.map((lancamento) => (
+                  {selectedNaturezaSolicitacao.lancamentosAgrupados.map((lancamento) => {
+                    const signedValor = gastosNaturezaTotalContribution(
+                      selectedNaturezaSolicitacao.natureza,
+                      lancamento.valor
+                    );
+                    return (
                     <li
                       key={lancamento.linhaId}
                       className="flex items-start justify-between gap-4 px-4 py-3 text-sm"
@@ -2262,12 +2269,13 @@ export function ControleGeralGastosOperacionaisPanel({
                         {lancamento.dataISO ? formatGastosNaturezaDate(lancamento.dataISO) : '—'}
                       </span>
                       <span
-                        className={`shrink-0 tabular-nums font-medium ${gastosNaturezaModalValueClassName(selectedNaturezaSolicitacao.natureza)}`}
+                        className={`shrink-0 tabular-nums font-medium ${gastosNaturezaModalValueClassName(signedValor)}`}
                       >
-                        {formatCurrency(Math.abs(lancamento.valor))}
+                        {formatCurrency(signedValor)}
                       </span>
                     </li>
-                  ))}
+                    );
+                  })}
                 </ul>
               </div>
             ) : null}

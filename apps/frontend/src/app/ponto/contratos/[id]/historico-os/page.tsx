@@ -76,6 +76,9 @@ function situacaoBadgeClass(situacao: string): string {
   if (situacao === 'Aberta') {
     return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300';
   }
+  if (situacao === 'Faturado') {
+    return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300';
+  }
   if (situacao === 'Gerado 100%') {
     return 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300';
   }
@@ -306,7 +309,7 @@ export default function HistoricoOsPage() {
       const os = formatOsSePastaOrDash(p.divSe, p.folderNumber).toLowerCase();
       const desc = (p.serviceDescription || '').toLowerCase();
       const etiqueta = getOsEtiquetaAbertura(p, billingsForOs).toLowerCase();
-      const situacao = getPleitoOsSituacao(p).toLowerCase();
+      const situacao = getPleitoOsSituacao(p, billingsForOs).toLowerCase();
       return os.includes(q) || desc.includes(q) || etiqueta.includes(q) || situacao.includes(q);
     });
   }, [allOs, selectedYears, selectedMonths, selectedOsIds, search, billingsForOs]);
@@ -534,7 +537,7 @@ export default function HistoricoOsPage() {
                 <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
                   {filteredOs.map((p) => {
                     const etiqueta = getOsEtiquetaAbertura(p, billingsForOs);
-                    const situacaoPleito = getPleitoOsSituacao(p);
+                    const situacaoPleito = getPleitoOsSituacao(p, billingsForOs);
                     const mesAno =
                       p.creationMonth && p.creationYear
                         ? `${String(p.creationMonth).padStart(2, '0')}/${p.creationYear}`

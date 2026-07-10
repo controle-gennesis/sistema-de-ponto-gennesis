@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
@@ -16,8 +16,6 @@ import {
   MoreVertical,
   Eye,
   Pencil,
-  ChevronDown,
-  ChevronUp,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import {
@@ -26,6 +24,9 @@ import {
   listTableRowClasses,
   rowActionMenuButtonClass,
 } from '@/components/ui/RowActionMenu';
+import { DatePickerField } from '@/components/ui/DatePickerField';
+import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
@@ -113,20 +114,28 @@ function parseCurrencyInput(value: string): number {
   return isNaN(num) ? 0 : num;
 }
 
+/** Menor k ≥ 1 tal que (início + k anos) ≥ fim — mesma regra do detalhe do contrato / backend. */
 function getYearsBetween(startDate: string, endDate: string): number {
   if (!startDate || !endDate) return 0;
   const startMatch = String(startDate).match(/^(\d{4})-(\d{2})-(\d{2})/);
   const endMatch = String(endDate).match(/^(\d{4})-(\d{2})-(\d{2})/);
   const start = startMatch
-    ? new Date(`${startMatch[1]}-${startMatch[2]}-${startMatch[3]}T12:00:00`)
+    ? new Date(Number(startMatch[1]), Number(startMatch[2]) - 1, Number(startMatch[3]), 12, 0, 0, 0)
     : new Date(startDate);
   const end = endMatch
-    ? new Date(`${endMatch[1]}-${endMatch[2]}-${endMatch[3]}T12:00:00`)
+    ? new Date(Number(endMatch[1]), Number(endMatch[2]) - 1, Number(endMatch[3]), 12, 0, 0, 0)
     : new Date(endDate);
-  if (end <= start) return 0;
-  // Conta anos completos de vigência (ex: 01/03/2026 a 01/03/2028 = 2 anos)
-  const diffMonths = (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth());
-  return Math.max(1, Math.floor(diffMonths / 12));
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end.getTime() <= start.getTime()) {
+    return 0;
+  }
+  const addYears = (d: Date, years: number) =>
+    new Date(d.getFullYear() + years, d.getMonth(), d.getDate(), 12, 0, 0, 0);
+  let k = 0;
+  while (k < 100) {
+    k += 1;
+    if (addYears(start, k).getTime() >= end.getTime()) return k;
+  }
+  return 0;
 }
 
 function getValorMaisAditivosAnual(valuePlusAddenda: number, startDate: string, endDate: string): number | null {
@@ -905,7 +914,7 @@ export default function ContratosPage() {
                     />
                     <div
                       role="menu"
-                      className="fixed z-[201] w-56 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 overflow-hidden"
+                      className="fixed z-[2001] w-56 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 overflow-hidden"
                       style={{
                         top: contractActionMenu.top,
                         left: contractActionMenu.left,
@@ -1066,173 +1075,21 @@ function ContractFormModal({
   loadingCostCenters: boolean;
 }) {
   const ccList = Array.isArray(costCenters) ? costCenters : [];
-  const [ccDropdownOpen, setCcDropdownOpen] = useState(false);
-  const [ccSearch, setCcSearch] = useState('');
-  const ccSearchInputRef = useRef<HTMLInputElement>(null);
-  const ccTriggerRef = useRef<HTMLButtonElement>(null);
-  const ccPopoverRef = useRef<HTMLDivElement>(null);
-  const [dropdownPos, setDropdownPos] = useState<{ top: number; left: number; width: number } | null>(null);
 
-  const syncCcDropdownPlacement = useCallback(() => {
-    const el = ccTriggerRef.current;
-    if (!el) return;
-    const r = el.getBoundingClientRect();
-    const gap = 4;
-    let top = r.bottom + gap;
-    /** altura disponível até o fim da viewport (popover fica sempre visível) */
-    const maxPopoverH = 320;
-    const spaceBelow = window.innerHeight - top - 12;
-    if (spaceBelow < 120) {
-      const above = Math.max(8, r.top - gap - maxPopoverH);
-      top = above;
-    }
-    setDropdownPos({
-      top,
-      left: r.left,
-      width: Math.max(r.width, 280),
-    });
-  }, []);
-
-  const filteredCostCenters = useMemo(() => {
-    const q = ccSearch.trim().toLowerCase();
-    if (!q) return ccList;
-    return ccList.filter((cc) => {
-      const label = `${cc.code ? `${cc.code} - ` : ''}${cc.name || 'Sem nome'}`.toLowerCase();
-      return label.includes(q);
-    });
-  }, [ccList, ccSearch]);
-
-  useLayoutEffect(() => {
-    if (!ccDropdownOpen) return;
-    syncCcDropdownPlacement();
-    window.addEventListener('resize', syncCcDropdownPlacement);
-    window.addEventListener('scroll', syncCcDropdownPlacement, true);
-    return () => {
-      window.removeEventListener('resize', syncCcDropdownPlacement);
-      window.removeEventListener('scroll', syncCcDropdownPlacement, true);
-    };
-  }, [ccDropdownOpen, syncCcDropdownPlacement]);
-
-  useEffect(() => {
-    if (!ccDropdownOpen) return;
-    const onDocMouseDown = (e: MouseEvent) => {
-      const t = e.target as Node;
-      if (ccTriggerRef.current?.contains(t)) return;
-      if (ccPopoverRef.current?.contains(t)) return;
-      setCcDropdownOpen(false);
-    };
-    document.addEventListener('mousedown', onDocMouseDown);
-    return () => document.removeEventListener('mousedown', onDocMouseDown);
-  }, [ccDropdownOpen]);
-
-  useEffect(() => {
-    if (!isOpen) {
-      setCcDropdownOpen(false);
-      setCcSearch('');
-    }
-  }, [isOpen]);
-
-  useEffect(() => {
-    if (!ccDropdownOpen) return;
-    const id = window.requestAnimationFrame(() => ccSearchInputRef.current?.focus());
-    return () => window.cancelAnimationFrame(id);
-  }, [ccDropdownOpen]);
-
-  useEffect(() => {
-    if (!ccDropdownOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setCcDropdownOpen(false);
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [ccDropdownOpen]);
-
-  function costCenterDisplayLabel(cc: CostCenter): string {
-    return `${cc.code ? `${cc.code} - ` : ''}${cc.name || 'Sem nome'}`;
-  }
+  const costCenterSelectOptions = useMemo(
+    () =>
+      labeledToSelectOptions(
+        ccList.map((cc) => {
+          const label = `${cc.code ? `${cc.code} - ` : ''}${cc.name || 'Sem nome'}`;
+          return { value: cc.id, label, searchText: label };
+        })
+      ),
+    [ccList]
+  );
 
   if (!isOpen) return null;
 
-  const ccDropdownPanel =
-    ccDropdownOpen && !loadingCostCenters && dropdownPos ? (
-      <div
-        ref={ccPopoverRef}
-        role="listbox"
-        className="fixed z-[9999] rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-lg flex flex-col overflow-hidden"
-        style={{
-          top: dropdownPos.top,
-          left: dropdownPos.left,
-          width: dropdownPos.width,
-          maxHeight: Math.min(320, typeof window !== 'undefined' ? window.innerHeight - dropdownPos.top - 12 : 320),
-        }}
-        onMouseDown={(e) => e.stopPropagation()}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="shrink-0 border-b border-gray-100 dark:border-gray-700 px-3 pt-2 pb-2 bg-white dark:bg-gray-800">
-          <div className="relative">
-            <Search className="w-4 h-4 text-gray-400 dark:text-gray-500 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-            <input
-              ref={ccSearchInputRef}
-              type="search"
-              value={ccSearch}
-              onChange={(e) => setCcSearch(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Escape') setCcDropdownOpen(false);
-              }}
-              placeholder="Pesquisar centro de custo..."
-              autoComplete="off"
-              className="w-full pl-9 pr-3 py-2 rounded-md border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-900/40 text-sm text-gray-900 dark:text-gray-100 outline-none focus:ring-2 focus:ring-red-500/70 focus:border-red-500 dark:focus:border-red-500"
-            />
-          </div>
-        </div>
-        <div className="overflow-y-auto min-h-0 flex-1 py-1 max-h-52">
-          {ccSearch.trim() === '' && (
-            <button
-              type="button"
-              className={`w-full px-4 py-2.5 text-left text-sm ${
-                !formData.costCenterId
-                  ? 'bg-red-600 text-white'
-                  : 'text-gray-900 dark:text-gray-100 hover:bg-red-600 hover:text-white dark:hover:bg-red-600 dark:hover:text-white'
-              }`}
-              onClick={() => {
-                setFormData({ ...formData, costCenterId: '' });
-                setCcDropdownOpen(false);
-              }}
-            >
-              {!formData.costCenterId ? 'Selecione o centro de custo' : 'Limpar seleção'}
-            </button>
-          )}
-          {filteredCostCenters.length === 0 ? (
-            <div className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400">Nenhum centro encontrado.</div>
-          ) : (
-            filteredCostCenters.map((cc) => (
-              <button
-                key={cc.id}
-                type="button"
-                className={`w-full px-4 py-2.5 text-left text-sm ${
-                  formData.costCenterId === cc.id
-                    ? 'bg-red-600 text-white'
-                    : 'text-gray-900 dark:text-gray-100 hover:bg-red-600 hover:text-white dark:hover:bg-red-600 dark:hover:text-white'
-                }`}
-                onClick={() => {
-                  setFormData({ ...formData, costCenterId: cc.id });
-                  setCcDropdownOpen(false);
-                  setCcSearch('');
-                }}
-              >
-                {costCenterDisplayLabel(cc)}
-              </button>
-            ))
-          )}
-        </div>
-      </div>
-    ) : null;
-
   return (
-    <>
-      {typeof document !== 'undefined' && ccDropdownPanel
-        ? createPortal(ccDropdownPanel, document.body)
-        : null}
     <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center bg-black bg-opacity-50">
       <div className="absolute inset-0" onClick={onClose} />
       <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
@@ -1253,7 +1110,7 @@ function ContractFormModal({
           <form onSubmit={onSubmit} className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
                   Nome do Contrato *
                 </label>
                 <input
@@ -1261,12 +1118,12 @@ function ContractFormModal({
                   required
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
+                  className="h-10 w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
                   placeholder="Ex: Contrato de Obra X"
                 />
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              <div className="md:col-span-2">
+                <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
                   Número do Contrato *
                 </label>
                 <input
@@ -1274,74 +1131,52 @@ function ContractFormModal({
                   required
                   value={formData.number}
                   onChange={(e) => setFormData({ ...formData, number: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
+                  className="h-10 w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
                   placeholder="Ex: 001/2025"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
                   Início da Vigência *
                 </label>
-                <input
-                  type="date"
-                  required
+                <DatePickerField
                   value={formData.startDate}
-                  onChange={(e) => setFormData({ ...formData, startDate: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
+                  onChange={(startDate) => setFormData({ ...formData, startDate })}
+                  placeholder="dd/mm/aaaa"
+                  aria-label="Início da vigência"
+                  className="w-full"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
                   Fim da Vigência *
                 </label>
-                <input
-                  type="date"
-                  required
+                <DatePickerField
                   value={formData.endDate}
-                  onChange={(e) => setFormData({ ...formData, endDate: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
+                  onChange={(endDate) => setFormData({ ...formData, endDate })}
+                  placeholder="dd/mm/aaaa"
+                  aria-label="Fim da vigência"
+                  className="w-full"
                 />
               </div>
               <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
                   Centro de Custo *
                 </label>
-                <div className="relative">
-                  <button
-                    ref={ccTriggerRef}
-                    type="button"
-                    disabled={loadingCostCenters}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (ccDropdownOpen) {
-                        setCcDropdownOpen(false);
-                        return;
-                      }
-                      syncCcDropdownPlacement();
-                      setCcDropdownOpen(true);
-                    }}
-                    className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-left flex items-center justify-between gap-2 disabled:opacity-50 outline-none focus:ring-2 focus:ring-red-500/80 dark:focus:ring-red-500/70 focus:border-red-500 dark:focus:border-red-500"
-                  >
-                    <span className="truncate min-w-0">
-                      {loadingCostCenters
-                        ? 'Carregando...'
-                        : (() => {
-                            if (!formData.costCenterId) return 'Selecione o centro de custo';
-                            const cc = ccList.find((c) => c.id === formData.costCenterId);
-                            if (!cc) return 'Selecione o centro de custo';
-                            return costCenterDisplayLabel(cc);
-                          })()}
-                    </span>
-                    {ccDropdownOpen ? (
-                      <ChevronUp className="w-4 h-4 shrink-0 opacity-60" />
-                    ) : (
-                      <ChevronDown className="w-4 h-4 shrink-0 opacity-60" />
-                    )}
-                  </button>
-                </div>
+                <StringSingleSelectDropdown
+                  value={formData.costCenterId || ''}
+                  onChange={(costCenterId) => setFormData({ ...formData, costCenterId })}
+                  options={costCenterSelectOptions}
+                  allowEmpty={false}
+                  disabled={loadingCostCenters}
+                  placeholder={loadingCostCenters ? 'Carregando...' : 'Selecione o centro de custo'}
+                  searchPlaceholder="Pesquisar centro de custo..."
+                  emptyOptionsMessage="Nenhum centro de custo disponível."
+                  className="w-full"
+                />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
                   Valor mais Aditivos *
                 </label>
                 <div className="relative">
@@ -1354,10 +1189,15 @@ function ContractFormModal({
                     value={formData.valuePlusAddenda}
                     onChange={(e) => {
                       const v = e.target.value.replace(/\D/g, '');
-                      const formatted = v ? (Number(v) / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '';
+                      const formatted = v
+                        ? (Number(v) / 100).toLocaleString('pt-BR', {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })
+                        : '';
                       setFormData({ ...formData, valuePlusAddenda: formatted });
                     }}
-                    className="w-full pl-12 pr-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
+                    className="h-10 w-full pl-12 pr-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
                     placeholder="0,00"
                   />
                 </div>
@@ -1366,10 +1206,10 @@ function ContractFormModal({
                 </p>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
                   Valor mais Aditivos Anual
                 </label>
-                <div className="px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100 font-medium">
+                <div className="flex h-10 items-center px-3 border border-gray-200 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100 font-medium">
                   {(() => {
                     const valor = parseCurrencyInput(formData.valuePlusAddenda);
                     const anual = getValorMaisAditivosAnual(valor, formData.startDate, formData.endDate);
@@ -1416,6 +1256,5 @@ function ContractFormModal({
         </div>
       </div>
     </div>
-    </>
   );
 }

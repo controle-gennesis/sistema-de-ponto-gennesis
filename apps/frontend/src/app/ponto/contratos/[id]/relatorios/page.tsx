@@ -466,7 +466,7 @@ export default function ContratoRelatoriosPage() {
                     />
                     <div
                       role="menu"
-                      className="fixed z-[201] w-56 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800"
+                      className="fixed z-[2001] w-56 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800"
                       style={{ top: relatorioActionMenu.top, left: relatorioActionMenu.left }}
                     >
                       <button

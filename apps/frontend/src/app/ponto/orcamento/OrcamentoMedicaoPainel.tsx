@@ -630,7 +630,7 @@ export function OrcamentoMedicaoPainel({
         <div className="fixed inset-0 z-[2000]" aria-hidden onClick={() => setMenuCtxMedicao(null)} />
         <div
           role="menu"
-          className="fixed z-[201] min-w-[12rem] overflow-hidden rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-800"
+          className="fixed z-[2001] min-w-[12rem] overflow-hidden rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-800"
           style={{ left: menuCtxMedicao.left, top: menuCtxMedicao.top }}
           onClick={e => e.stopPropagation()}
         >

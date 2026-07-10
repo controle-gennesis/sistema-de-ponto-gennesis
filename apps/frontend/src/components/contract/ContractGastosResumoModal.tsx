@@ -3,11 +3,9 @@
 import React, { useMemo } from 'react';
 import { Modal } from '@/components/ui/Modal';
 import {
-  gastosNaturezaTotalContribution,
   groupGastosNaturezaModalRows,
   type GastosNaturezaAggRow
 } from '@/app/ponto/contratos/controle-geral/buildQueryGastosRows';
-import { isGastosOperacionaisPositiveCreditNatureza } from '@/app/ponto/contratos/controle-geral/gastosOperacionaisAllowedNaturezas';
 
 function formatCurrency(value: number) {
   return new Intl.NumberFormat('pt-BR', {
@@ -15,14 +13,13 @@ function formatCurrency(value: number) {
     currency: 'BRL',
     minimumFractionDigits: 2,
     maximumFractionDigits: 2
-  }).format(value);
+  }).format(Math.abs(value));
 }
 
-function valueClassName(natureza: string): string {
-  if (isGastosOperacionaisPositiveCreditNatureza(natureza)) {
-    return 'text-green-600 dark:text-green-400';
-  }
-  return 'text-red-600 dark:text-red-400';
+function signedValueClassName(value: number): string {
+  if (value > 0) return 'text-green-600 dark:text-green-400';
+  if (value < 0) return 'text-red-600 dark:text-red-400';
+  return 'text-gray-600 dark:text-gray-400';
 }
 
 type ContractGastosResumoModalProps = {
@@ -41,11 +38,7 @@ export function ContractGastosResumoModal({
   const grouped = useMemo(() => groupGastosNaturezaModalRows(naturezaRows), [naturezaRows]);
 
   const total = useMemo(
-    () =>
-      naturezaRows.reduce(
-        (sum, row) => sum + gastosNaturezaTotalContribution(row.natureza, row.total),
-        0
-      ),
+    () => naturezaRows.reduce((sum, row) => sum + row.total, 0),
     [naturezaRows]
   );
 
@@ -75,7 +68,9 @@ export function ContractGastosResumoModal({
                     <td className="px-4 py-2.5 text-sm text-gray-900 dark:text-gray-100">
                       {dfcTree.rootLabel}
                     </td>
-                    <td className="px-4 py-2.5 text-right text-sm tabular-nums font-semibold whitespace-nowrap text-red-600 dark:text-red-400">
+                    <td
+                      className={`px-4 py-2.5 text-right text-sm tabular-nums font-semibold whitespace-nowrap ${signedValueClassName(dfcTree.rootSubtotal)}`}
+                    >
                       {formatCurrency(dfcTree.rootSubtotal)}
                     </td>
                   </tr>
@@ -89,7 +84,9 @@ export function ContractGastosResumoModal({
                           >
                             {branch.label}
                           </td>
-                          <td className="px-4 py-2 text-right text-sm tabular-nums font-semibold whitespace-nowrap text-red-600 dark:text-red-400">
+                          <td
+                            className={`px-4 py-2 text-right text-sm tabular-nums font-semibold whitespace-nowrap ${signedValueClassName(branch.subtotal)}`}
+                          >
                             {formatCurrency(branch.subtotal)}
                           </td>
                         </tr>
@@ -102,7 +99,9 @@ export function ContractGastosResumoModal({
                           >
                             {group.leafLabel}
                           </td>
-                          <td className="px-4 py-2 text-right text-sm tabular-nums font-medium whitespace-nowrap text-red-600 dark:text-red-400">
+                          <td
+                            className={`px-4 py-2 text-right text-sm tabular-nums font-medium whitespace-nowrap ${signedValueClassName(group.subtotal)}`}
+                          >
                             {formatCurrency(group.subtotal)}
                           </td>
                         </tr>
@@ -115,15 +114,17 @@ export function ContractGastosResumoModal({
                 <tr key={row.natureza} className="hover:bg-gray-50/80 dark:hover:bg-gray-800/30">
                   <td className="px-4 py-2 text-sm text-gray-800 dark:text-gray-200">{row.natureza}</td>
                   <td
-                    className={`px-4 py-2 text-right text-sm tabular-nums font-medium whitespace-nowrap ${valueClassName(row.natureza)}`}
+                    className={`px-4 py-2 text-right text-sm tabular-nums font-medium whitespace-nowrap ${signedValueClassName(row.total)}`}
                   >
-                    {formatCurrency(Math.abs(row.total))}
+                    {formatCurrency(row.total)}
                   </td>
                 </tr>
               ))}
               <tr className="border-t-2 border-gray-200 bg-gray-50 font-semibold dark:border-gray-600 dark:bg-gray-800/70">
                 <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100">Total</td>
-                <td className="px-4 py-3 text-right text-sm tabular-nums whitespace-nowrap text-red-600 dark:text-red-400">
+                <td
+                  className={`px-4 py-3 text-right text-sm tabular-nums whitespace-nowrap ${signedValueClassName(total)}`}
+                >
                   {formatCurrency(total)}
                 </td>
               </tr>

@@ -4,6 +4,8 @@ import {
   normalizeContractOrderKey,
   normalizeGastosOperacionaisContractName
 } from './gastosOperacionaisContractOrder';
+import { shouldShowInGastosNaturezaModal } from './gastosOperacionaisNaturezaModal';
+import { gastosNaturezaTotalContribution } from './gastosOperacionaisAllowedNaturezas';
 
 export type ControleGeralFluxoPoint = {
   monthKey: string;
@@ -224,7 +226,9 @@ export function aggregateGastosOperacionaisMonthlyTotals(
   const porMes = new Array(12).fill(0);
   for (const row of rows) {
     if (row.year !== year || row.month < 1 || row.month > 12) continue;
-    porMes[row.month - 1] += Math.abs(row.total);
+    // Totais diários já vêm com contribuição DFC (despesa negativa / crédito positivo).
+    // Somar com Math.abs por dia inflava o valor da linha vs. o resumo do modal.
+    porMes[row.month - 1] += row.total;
   }
   return porMes;
 }
@@ -237,7 +241,36 @@ export function aggregateGastosOperacionaisYearlyTotals(
   const porAno: Record<number, number> = {};
   for (const row of rows) {
     if (!allowed.has(row.year)) continue;
-    porAno[row.year] = (porAno[row.year] ?? 0) + Math.abs(row.total);
+    porAno[row.year] = (porAno[row.year] ?? 0) + row.total;
+  }
+  return porAno;
+}
+
+/** Agrega pelo mesmo critério do modal de resumo (naturezas + contribuição DFC no frontend). */
+export function aggregateGastosNaturezaMonthlyTotals(
+  rows: readonly QueryGastosNaturezaDetailRow[],
+  year: number
+): number[] {
+  const porMes = new Array(12).fill(0);
+  for (const row of rows) {
+    if (row.year !== year || row.month < 1 || row.month > 12) continue;
+    if (!shouldShowInGastosNaturezaModal(row.natureza)) continue;
+    porMes[row.month - 1] += gastosNaturezaTotalContribution(row.natureza, row.total);
+  }
+  return porMes;
+}
+
+export function aggregateGastosNaturezaYearlyTotals(
+  rows: readonly QueryGastosNaturezaDetailRow[],
+  years: readonly number[]
+): Record<number, number> {
+  const allowed = new Set(years);
+  const porAno: Record<number, number> = {};
+  for (const row of rows) {
+    if (!allowed.has(row.year)) continue;
+    if (!shouldShowInGastosNaturezaModal(row.natureza)) continue;
+    porAno[row.year] =
+      (porAno[row.year] ?? 0) + gastosNaturezaTotalContribution(row.natureza, row.total);
   }
   return porAno;
 }
