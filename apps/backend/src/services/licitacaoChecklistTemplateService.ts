@@ -1,4 +1,8 @@
-import { DEFAULT_LICITACAO_CHECKLIST, type LicitacaoChecklistSection } from '../constants/licitacaoChecklistDefault';
+import {
+  DEFAULT_LICITACAO_CHECKLIST,
+  LICITACAO_CHECKLIST_TEMPLATE_VERSION,
+  type LicitacaoChecklistSection,
+} from '../constants/licitacaoChecklistDefault';
 import { canManageLicitacaoChecklist } from '../lib/licitacaoChecklistAuth';
 import {
   CHECKLIST_TEMPLATE_KEY,
@@ -7,6 +11,8 @@ import {
 } from './licitacaoConfigStore';
 
 export type { LicitacaoChecklistSection };
+
+const CHECKLIST_TEMPLATE_VERSION_KEY = 'checklist_template_version';
 
 function parseChecklistTemplate(raw: unknown): LicitacaoChecklistSection[] | null {
   if (!Array.isArray(raw)) return null;
@@ -63,6 +69,18 @@ function validateChecklistTemplate(sections: LicitacaoChecklistSection[]): void 
 
 export async function getLicitacaoChecklistTemplate(): Promise<LicitacaoChecklistSection[]> {
   try {
+    const storedVersion = await licitacaoConfigGet(CHECKLIST_TEMPLATE_VERSION_KEY);
+    const needsUpgrade = storedVersion !== LICITACAO_CHECKLIST_TEMPLATE_VERSION;
+
+    if (needsUpgrade) {
+      await licitacaoConfigSet(CHECKLIST_TEMPLATE_KEY, DEFAULT_LICITACAO_CHECKLIST);
+      await licitacaoConfigSet(
+        CHECKLIST_TEMPLATE_VERSION_KEY,
+        LICITACAO_CHECKLIST_TEMPLATE_VERSION
+      );
+      return DEFAULT_LICITACAO_CHECKLIST;
+    }
+
     const stored = await licitacaoConfigGet(CHECKLIST_TEMPLATE_KEY);
     const parsed = parseChecklistTemplate(stored);
     if (parsed) return parsed;
@@ -85,6 +103,10 @@ export async function updateLicitacaoChecklistTemplate(
   }
   validateChecklistTemplate(parsed);
   await licitacaoConfigSet(CHECKLIST_TEMPLATE_KEY, parsed);
+  await licitacaoConfigSet(
+    CHECKLIST_TEMPLATE_VERSION_KEY,
+    LICITACAO_CHECKLIST_TEMPLATE_VERSION
+  );
   return parsed;
 }
 

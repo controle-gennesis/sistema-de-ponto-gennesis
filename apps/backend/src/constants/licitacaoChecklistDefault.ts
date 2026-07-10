@@ -1,175 +1,215 @@
-export type LicitacaoChecklistSection = { id: string; title: string; items: Array<{ id: string; label: string }> };
+export type LicitacaoChecklistSection = {
+  id: string;
+  title: string;
+  items: Array<{ id: string; label: string }>;
+};
+
+/** Bump ao alterar o template padrão (força atualização no banco). */
+export const LICITACAO_CHECKLIST_TEMPLATE_VERSION = 2;
 
 export const DEFAULT_LICITACAO_CHECKLIST: LicitacaoChecklistSection[] = [
   {
     id: 'viabilidade-financeira',
     title: '1. Viabilidade Financeira',
     items: [
-      { id: 'valor-estimado', label: 'Valor estimado da contratação.' },
-      { id: 'prazo-contratual', label: 'Prazo contratual.' },
-      { id: 'possibilidade-prorrogacao', label: 'Possibilidade de prorrogação.' },
-      { id: 'ticket-medio-mensal', label: 'Ticket médio mensal do contrato.' },
-      { id: 'capital-giro-inicial', label: 'Necessidade de capital de giro inicial.' },
-      { id: 'prazo-pagamento-orgao', label: 'Prazo médio de pagamento do órgão.' },
-      { id: 'aquisicao-equipamentos', label: 'Necessidade de aquisição de equipamentos ou veículos.' },
-      { id: 'mao-obra-adicional', label: 'Necessidade de contratação de mão de obra adicional.' },
-      { id: 'garantias-contratuais', label: 'Necessidade de garantias contratuais.' },
-      { id: 'reajuste-indice', label: 'Reajuste previsto e índice utilizado.' },
-      { id: 'repactuacao-mao-obra', label: 'Existência de repactuação para mão de obra.' },
-      { id: 'margem-liquida', label: 'Margem líquida estimada.' },
-      { id: 'tir-roi', label: 'TIR e ROI estimados do contrato.' },
+      { id: 'valor-estimado', label: 'Valor estimado da contratação:' },
+      { id: 'prazo-contratual', label: 'Prazo contratual:' },
+      {
+        id: 'possibilidade-prorrogacao',
+        label: 'Há possibilidade de prorrogação? De quanto?',
+      },
+      { id: 'ticket-medio-mensal', label: 'Ticket médio mensal do contrato:' },
+      {
+        id: 'periodo-vigencia',
+        label: 'Qual o período de vigência do contrato / serviço?',
+      },
+      {
+        id: 'investimento-inicial',
+        label: 'O contrato exige investimento inicial relevante? Quanto?',
+      },
+      {
+        id: 'aquisicao-equipamentos-materiais',
+        label:
+          'Há necessidade de aquisição de equipamentos, veículos ou materiais? Descrever.',
+      },
+      { id: 'margem-liquida', label: 'Margem líquida estimada:' },
     ],
   },
   {
     id: 'criterio-julgamento',
     title: '2. Critério de Julgamento',
     items: [
-      { id: 'menor-preco', label: 'Menor preço.' },
-      { id: 'tecnica-preco', label: 'Técnica e preço.' },
-      { id: 'maior-desconto', label: 'Maior desconto.' },
-      { id: 'melhor-tecnica', label: 'Melhor técnica.' },
-      { id: 'peso-tecnica', label: 'Peso da proposta técnica.' },
-      { id: 'peso-comercial', label: 'Peso da proposta comercial.' },
-      { id: 'nota-minima-tecnica', label: 'Nota mínima exigida na proposta técnica.' },
+      { id: 'modo-disputa', label: 'Modo de disputa:' },
+      { id: 'criterio-julgamento', label: 'Critério de julgamento:' },
+      { id: 'julgamento-item-grupo-lote', label: 'Julgamento por item, grupo ou lote:' },
+      { id: 'desconto-maximo-permitido', label: 'Desconto máximo permitido:' },
+      {
+        id: 'proposta-tecnica-nota-minima',
+        label: 'Existe proposta técnica? Qual a nota mínima exigida?',
+      },
+      {
+        id: 'disputa-compativel-estrategia',
+        label: 'A disputa é compatível com a estratégia da empresa?',
+      },
     ],
   },
   {
     id: 'objeto-licitacao',
     title: '3. Objeto da Licitação',
     items: [
-      { id: 'manutencao-predial', label: 'Manutenção predial.' },
-      { id: 'engenharia-civil', label: 'Engenharia civil.' },
-      { id: 'ar-condicionado', label: 'Ar-condicionado.' },
-      { id: 'eletrica', label: 'Elétrica.' },
-      { id: 'hidraulica', label: 'Hidráulica.' },
-      { id: 'reformas-obras', label: 'Reformas e obras.' },
-      { id: 'facilities', label: 'Facilities.' },
-      { id: 'escopo-compativel', label: 'Escopo compatível com a experiência da empresa.' },
-      { id: 'complexidade-operacional', label: 'Complexidade operacional aceitável.' },
-    ],
-  },
-  {
-    id: 'capacidade-operacional',
-    title: '4. Capacidade Operacional',
-    items: [
-      { id: 'quantidade-postos', label: 'Quantidade de postos previstos.' },
-      { id: 'profissionais-tecnicos', label: 'Quantidade de profissionais técnicos exigidos.' },
-      { id: 'equipes-simultaneas', label: 'Quantidade de equipes simultâneas necessárias.' },
-      { id: 'supervisores-engenheiros', label: 'Disponibilidade de supervisores e engenheiros.' },
-      { id: 'atendimento-24x7', label: 'Existência de atendimento 24x7 ou plantão.' },
-      { id: 'sla-compativel', label: 'SLA de atendimento compatível com a estrutura atual.' },
-      { id: 'regiao-logistica', label: 'Região de atendimento e logística.' },
+      { id: 'objeto-resumido', label: 'Objeto resumido:' },
+      { id: 'area-atuacao', label: 'Qual a área de atuação da licitação?' },
+      {
+        id: 'objeto-compativel-experiencia',
+        label: 'O objeto é compatível com a atuação/experiência da empresa?',
+      },
+      {
+        id: 'escopo-fornecimento-materiais',
+        label: 'O escopo exige fornecimento relevante de materiais?',
+      },
+      {
+        id: 'complexidade-operacional',
+        label: 'A complexidade operacional é aceitável?',
+      },
     ],
   },
   {
     id: 'habilitacao-tecnica',
-    title: '5. Habilitação Técnica',
+    title: '4. Habilitação Técnica',
     items: [
-      { id: 'cat-compativel', label: 'CAT compatível.' },
-      { id: 'acervos-tecnicos', label: 'Acervos técnicos suficientes.' },
-      { id: 'quantitativos-minimos', label: 'Quantitativos mínimos atendidos.' },
-      { id: 'atestados-capacidade', label: 'Atestados de capacidade técnica compatíveis.' },
-      { id: 'registro-crea-cau', label: 'Registro CREA/CAU atualizado.' },
-      { id: 'responsaveis-tecnicos', label: 'Responsáveis técnicos disponíveis.' },
-      { id: 'certificacoes', label: 'Certificações exigidas.' },
+      {
+        id: 'atestados-cat-empresa',
+        label: 'Quais os atestados/CAT exigidos da EMPRESA? Descrever.',
+      },
+      {
+        id: 'empresa-habilita-documentacao',
+        label: 'A empresa se habilita / possui documentação técnica compatível?',
+      },
+      {
+        id: 'exige-atestado-cat-profissionais',
+        label: 'Exige atestado/CAT dos profissionais?',
+      },
+      {
+        id: 'profissionais-exigidos-detalhes',
+        label:
+          'Quais os profissionais exigidos, respectivas profissões, quantidades e atestações/CAT obrigatórias?',
+      },
+      {
+        id: 'profissionais-quadro-tecnico',
+        label:
+          'Citar os profissionais que a empresa possui em seu quadro técnico com as respectivas atestações (Nome + Função):',
+      },
+      {
+        id: 'profissionais-nao-possui',
+        label: 'Citar os profissionais que a empresa NÃO possui em seu quadro técnico:',
+      },
+      {
+        id: 'necessidade-contratar-profissional',
+        label: 'Há necessidade de contratar profissional com habilitação técnica compatível?',
+      },
     ],
   },
   {
     id: 'habilitacao-economico-financeira',
-    title: '6. Habilitação Econômico-Financeira',
+    title: '5. Habilitação Econômico-Financeira',
     items: [
-      { id: 'patrimonio-liquido', label: 'Patrimônio líquido mínimo.' },
-      { id: 'liquidez-corrente', label: 'Índice de liquidez corrente.' },
-      { id: 'liquidez-geral', label: 'Índice de liquidez geral.' },
-      { id: 'solvencia-geral', label: 'Índice de solvência geral.' },
-      { id: 'capital-social-minimo', label: 'Capital social mínimo exigido.' },
-      { id: 'garantia-proposta', label: 'Garantia de proposta.' },
-      { id: 'seguro-garantia', label: 'Seguro garantia contratual.' },
+      { id: 'patrimonio-liquido-minimo', label: 'Exige patrimônio líquido mínimo:' },
+      { id: 'capital-social-minimo', label: 'Exige capital social mínimo:' },
+      { id: 'indices-contabeis-minimos', label: 'Exige índices contábeis mínimos:' },
+      { id: 'garantia-proposta', label: 'Exige garantia de proposta:' },
+      { id: 'garantia-contratual', label: 'Exige garantia contratual:' },
+      {
+        id: 'atende-exigencias-economico-financeiras',
+        label: 'A empresa atende às exigências econômico-financeiras?',
+      },
     ],
   },
   {
     id: 'habilitacao-fiscal-trabalhista',
-    title: '7. Habilitação Fiscal e Trabalhista',
+    title: '6. Habilitação Fiscal e Trabalhista',
     items: [
-      { id: 'cnd-federal', label: 'CND Federal.' },
-      { id: 'cnd-estadual', label: 'CND Estadual.' },
-      { id: 'cnd-municipal', label: 'CND Municipal.' },
-      { id: 'fgts', label: 'FGTS.' },
-      { id: 'inss', label: 'INSS.' },
-      { id: 'cndt', label: 'CNDT.' },
-      { id: 'sicaf', label: 'SICAF atualizado.' },
-      { id: 'cadastro-orgao', label: 'Cadastro do órgão atualizado.' },
+      {
+        id: 'documentacao-vencida-pendente',
+        label: 'Há alguma documentação vencida ou pendente?',
+      },
+    ],
+  },
+  {
+    id: 'capacidade-operacional',
+    title: '7. Capacidade Operacional',
+    items: [
+      { id: 'quantidade-postos', label: 'Quantidade de postos previstos:' },
+      { id: 'necessidade-equipe-fixa', label: 'Necessidade de equipe fixa?' },
+      {
+        id: 'servicos-equipe-sob-demanda',
+        label: 'Pode haver necessidade de serviços/equipe sob demanda? Se sim, quais?',
+      },
+      {
+        id: 'quantidade-equipes-simultaneas',
+        label: 'Quantidade de equipes simultâneas necessárias:',
+      },
+      {
+        id: 'quantidade-supervisores-engenheiros',
+        label: 'Quantidade de supervisores e engenheiros exigidos:',
+      },
+      {
+        id: 'quantidade-modalidades-profissionais',
+        label: 'Quantidade e modalidades dos profissionais técnicos exigidos:',
+      },
+      {
+        id: 'atendimento-24h-plantao',
+        label: 'Há exigência de atendimento 24h, plantão ou sobreaviso?',
+      },
+      {
+        id: 'equipamentos-ferramentas-veiculos',
+        label: 'Há exigência de equipamentos, ferramentas ou veículos específicos?',
+      },
     ],
   },
   {
     id: 'analise-edital',
     title: '8. Análise do Edital',
     items: [
-      { id: 'penalidades', label: 'Penalidades previstas.' },
-      { id: 'multas-sla', label: 'Multas por SLA.' },
-      { id: 'glosas', label: 'Possibilidade de glosas.' },
-      { id: 'responsabilidades-contratada', label: 'Responsabilidades da contratada.' },
-      { id: 'riscos-transferidos', label: 'Riscos transferidos para a empresa.' },
-      { id: 'exigencias-restritivas', label: 'Exigências excessivas ou restritivas.' },
-      { id: 'impugnacao-esclarecimentos', label: 'Necessidade de impugnação ou esclarecimentos.' },
+      {
+        id: 'aceita-consorcio',
+        label: 'Aceita consórcio? Quais as observações/especificações informadas?',
+      },
+      { id: 'permite-adesao', label: 'Permite adesão:' },
+      { id: 'grupos', label: 'Grupos:' },
+      { id: 'local-execucao', label: 'Local de execução:' },
+      { id: 'tabela-referencia', label: 'Tabela de referência utilizada:' },
+      { id: 'penalidades-relevantes', label: 'Penalidades relevantes:' },
+      { id: 'possibilidade-glosas', label: 'Possibilidade de glosas:' },
+      {
+        id: 'esclarecimento-impugnacao',
+        label:
+          'É necessário pedir esclarecimento ou impugnar algum ponto? Se sim, descrever.',
+      },
     ],
   },
   {
-    id: 'analise-concorrencia',
-    title: '9. Análise da Concorrência',
+    id: 'estrategia',
+    title: '9. Estratégia',
     items: [
-      { id: 'empresas-participantes', label: 'Empresas que normalmente participam.' },
-      { id: 'historico-descontos', label: 'Histórico de descontos vencedores.' },
-      { id: 'historico-orgao', label: 'Histórico do órgão contratante.' },
-      { id: 'agressividade-concorrencia', label: 'Grau de agressividade esperado da concorrência.' },
-      { id: 'possibilidade-vitoria', label: 'Possibilidade real de vitória.' },
-    ],
-  },
-  {
-    id: 'estrategia-comercial',
-    title: '10. Estratégia Comercial',
-    items: [
-      { id: 'preco-minimo', label: 'Preço mínimo sustentável.' },
-      { id: 'preco-alvo', label: 'Preço alvo.' },
-      { id: 'preco-agressivo', label: 'Preço agressivo.' },
-      { id: 'margem-minima', label: 'Margem mínima aceitável.' },
-      { id: 'estrategia-desconto', label: 'Estratégia de desconto.' },
-      { id: 'estrategia-tecnica', label: 'Estratégia técnica.' },
-    ],
-  },
-  {
-    id: 'analise-riscos',
-    title: '11. Análise de Riscos',
-    items: [
-      { id: 'dependencia-cliente-unico', label: 'Dependência excessiva de um único cliente.' },
-      { id: 'financiamento-bancario', label: 'Necessidade de financiamento bancário.' },
-      { id: 'exposicao-trabalhista', label: 'Exposição trabalhista.' },
-      { id: 'variacao-materiais', label: 'Exposição a variações de materiais.' },
-      { id: 'exposicao-cambial', label: 'Exposição cambial.' },
-      { id: 'atraso-pagamento', label: 'Risco de atraso de pagamento.' },
-      { id: 'risco-operacional', label: 'Risco operacional.' },
+      { id: 'desconto-maximo-sustentavel', label: 'Desconto máximo sustentável:' },
+      {
+        id: 'preco-margem-minima-alvo',
+        label: 'Preço/margem mínima aceitável e preço alvo:',
+      },
     ],
   },
   {
     id: 'decisao-final',
-    title: '12. Decisão Final',
+    title: '10. Decisão Final',
     items: [
-      { id: 'participar', label: 'Participar.' },
-      { id: 'participar-ajuste-edital', label: 'Participar apenas se houver ajuste no edital.' },
-      { id: 'participar-consorcio', label: 'Participar em consórcio.' },
-      { id: 'nao-participar', label: 'Não participar.' },
-    ],
-  },
-  {
-    id: 'criterios-rapidos',
-    title: 'Critérios rápidos para decisão',
-    items: [
-      { id: 'margem-superior-8', label: 'Margem líquida estimada superior a 8%.' },
-      { id: 'capital-giro-suportavel', label: 'Capital de giro suportável.' },
-      { id: 'baixo-risco-juridico', label: 'Baixo risco jurídico.' },
-      { id: 'habilitacao-tecnica-atendida', label: 'Habilitação técnica atendida.' },
-      { id: 'equipe-disponivel', label: 'Equipe disponível para execução.' },
-      { id: 'boa-probabilidade-vitoria', label: 'Boa probabilidade de vitória.' },
+      {
+        id: 'habilitacao-atendida',
+        label: 'Habilitação atendida (Empresa e Profissionais):',
+      },
+      { id: 'risco-aceitavel', label: 'Risco aceitável:' },
+      { id: 'participar', label: 'Participar:' },
+      { id: 'nao-participar', label: 'Não participar:' },
+      { id: 'justificativa-decisao', label: 'Justificativa da decisão?' },
     ],
   },
 ];

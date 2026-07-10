@@ -1936,16 +1936,13 @@ export default function LicitacoesPage() {
                     disabled={!canEditAnaliseManual || saveAnaliseMutation.isPending}
                   />
 
-                  <Card
-                    padding="none"
-                    className="flex h-[calc(100dvh-10rem)] max-h-[calc(100dvh-10rem)] flex-col overflow-hidden shadow-sm"
-                  >
-                    <CardHeader className="shrink-0 border-b border-gray-100 px-5 py-2 dark:border-gray-800">
+                  <Card padding="none" className="flex flex-col overflow-hidden shadow-sm">
+                    <CardHeader className="shrink-0 border-b border-gray-100 px-5 py-3 dark:border-gray-800">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <div className="flex items-center gap-2">
-                          <User className="h-5 w-5 text-red-600" />
+                          <ClipboardList className="h-5 w-5 text-red-600" />
                           <h3 className="font-semibold text-gray-900 dark:text-gray-100">
-                            Análise manual
+                            Análise manual — Checklist
                           </h3>
                         </div>
                         <button
@@ -1963,8 +1960,8 @@ export default function LicitacoesPage() {
                         </button>
                       </div>
                     </CardHeader>
-                    <CardContent className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-hidden px-5 py-2.5">
-                      <div className="shrink-0 space-y-2">
+                    <CardContent className="flex flex-col gap-3 px-5 py-4">
+                      <div className="space-y-2">
                         <div className="flex flex-wrap items-end gap-2">
                           <label className="min-w-0 flex-1">
                             <span className="mb-0.5 block text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
@@ -2048,7 +2045,7 @@ export default function LicitacoesPage() {
                           </p>
                         ) : null}
                       </div>
-                      <div className="min-h-0 flex-[1_1_0%] overflow-y-auto rounded-lg border border-gray-200 bg-gray-50/50 px-3 py-2 dark:border-gray-700 dark:bg-gray-950/30">
+                      <div className="h-[min(68vh,720px)] overflow-y-auto rounded-lg border border-gray-200 bg-gray-50/50 px-3 py-3 dark:border-gray-700 dark:bg-gray-950/30">
                         <LicitacaoChecklistEditor
                           key={selectedId}
                           sections={checklistSections}
@@ -2063,20 +2060,28 @@ export default function LicitacoesPage() {
                           managingItems={updateChecklistTemplateMutation.isPending}
                         />
                       </div>
-                      <label className="mt-5 flex shrink-0 flex-col gap-1">
-                        <span className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                    </CardContent>
+                  </Card>
+
+                  <Card padding="none" className="flex flex-col overflow-hidden shadow-sm">
+                    <CardHeader className="shrink-0 border-b border-gray-100 px-5 py-3 dark:border-gray-800">
+                      <div className="flex items-center gap-2">
+                        <User className="h-5 w-5 text-red-600" />
+                        <h3 className="font-semibold text-gray-900 dark:text-gray-100">
                           Sua análise
-                        </span>
-                        <textarea
-                          value={analiseUsuario}
-                          onChange={(e) => handleAnaliseUsuarioChange(e.target.value)}
-                          rows={8}
-                          placeholder="Descreva sua análise: riscos, oportunidades, recomendações, observações gerais…"
-                          disabled={saveAnaliseMutation.isPending || !canEditAnaliseManual}
-                          className="h-[min(220px,26vh)] min-h-[140px] max-h-[40vh] shrink-0 resize-y rounded-lg border border-gray-300 bg-white px-3 py-3 text-sm leading-relaxed text-gray-900 disabled:cursor-not-allowed disabled:bg-gray-50 disabled:opacity-70 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:disabled:bg-gray-950"
-                        />
-                      </label>
-                      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-gray-100 pt-2 dark:border-gray-800">
+                        </h3>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="flex flex-col gap-3 px-5 py-4">
+                      <textarea
+                        value={analiseUsuario}
+                        onChange={(e) => handleAnaliseUsuarioChange(e.target.value)}
+                        rows={12}
+                        placeholder="Descreva sua análise: riscos, oportunidades, recomendações, observações gerais…"
+                        disabled={saveAnaliseMutation.isPending || !canEditAnaliseManual}
+                        className="min-h-[240px] w-full resize-y rounded-lg border border-gray-300 bg-white px-4 py-3 text-sm leading-relaxed text-gray-900 disabled:cursor-not-allowed disabled:bg-gray-50 disabled:opacity-70 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:disabled:bg-gray-950"
+                      />
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-gray-100 pt-3 dark:border-gray-800">
                         <span className="text-xs text-gray-500">
                           {saveAnaliseMutation.isPending || saveStatus === 'saving'
                             ? 'Salvando…'
