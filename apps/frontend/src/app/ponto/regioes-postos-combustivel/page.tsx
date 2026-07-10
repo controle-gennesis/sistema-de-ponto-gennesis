@@ -406,9 +406,9 @@ export default function RegioesPostosCombustivelPage() {
                       <colgroup>
                         <col className="w-[4.5rem]" />
                         <col />
-                        <col className="w-[18rem] sm:w-[22rem]" />
-                        <col className="w-[7rem]" />
-                        <col className="w-[6rem]" />
+                        <col className="w-[16rem] sm:w-[20rem]" />
+                        <col className="w-[12rem] sm:w-[14rem]" />
+                        <col className="w-[7.5rem]" />
                         <col className="w-[4.5rem]" />
                       </colgroup>
                       <thead className="border-b border-gray-200 dark:border-gray-700">
@@ -422,10 +422,10 @@ export default function RegioesPostosCombustivelPage() {
                           <th scope="col" className={`${cadastroListClasses.th} min-w-[14rem]`}>
                             Endereço
                           </th>
-                          <th scope="col" className={cadastroListClasses.thCenter}>
+                          <th scope="col" className={`${cadastroListClasses.thCenter} min-w-[12rem]`}>
                             Cidade
                           </th>
-                          <th scope="col" className={cadastroListClasses.thCenter}>
+                          <th scope="col" className={`${cadastroListClasses.thCenter} w-[7.5rem]`}>
                             Status
                           </th>
                           <th scope="col" className={cadastroListClasses.thRight}>
@@ -449,12 +449,17 @@ export default function RegioesPostosCombustivelPage() {
                                 {station.address || '—'}
                               </span>
                             </td>
-                            <td className={cadastroListClasses.tdCenter}>
-                              {station.city?.name ?? station.cityCode}
-                            </td>
-                            <td className={cadastroListClasses.tdCenter}>
+                            <td className={`${cadastroListClasses.tdTruncate} text-center`}>
                               <span
-                                className={`inline-flex items-center justify-center rounded-full px-2 py-1 text-xs font-medium ${
+                                className="block whitespace-normal break-words text-sm text-gray-900 dark:text-gray-100"
+                                title={station.city?.name ?? station.cityCode}
+                              >
+                                {station.city?.name ?? station.cityCode}
+                              </span>
+                            </td>
+                            <td className={`${cadastroListClasses.tdCenter} w-[7.5rem]`}>
+                              <span
+                                className={`inline-flex shrink-0 items-center justify-center rounded-full px-2.5 py-1 text-xs font-medium whitespace-nowrap ${
                                   station.isActive
                                     ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
                                     : 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400'
