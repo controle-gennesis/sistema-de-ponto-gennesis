@@ -481,9 +481,20 @@ async function generateOrderNumber(tx: Prisma.TransactionClient): Promise<string
   return `${prefix}${n.toString().padStart(4, '0')}`;
 }
 
-/** Listagem: menos joins aninhados para listas grandes (detalhe via getById). */
+/** Listagem: joins enxutos (detalhe completo via getById). */
 const purchaseOrderIncludeList = {
-  supplier: true,
+  supplier: {
+    select: {
+      id: true,
+      code: true,
+      name: true,
+      cnpj: true,
+      bank: true,
+      agency: true,
+      account: true,
+      accountDigit: true
+    }
+  },
   quoteMap: { select: { id: true, createdAt: true } },
   materialRequest: {
     select: {
@@ -495,7 +506,17 @@ const purchaseOrderIncludeList = {
     }
   },
   creator: { select: { id: true, name: true, email: true } },
-  items: { include: { material: true, materialRequestItem: true } }
+  items: {
+    select: {
+      id: true,
+      quantity: true,
+      unit: true,
+      unitPrice: true,
+      totalPrice: true,
+      materialId: true,
+      material: { select: { id: true, name: true, description: true, unit: true } }
+    }
+  }
 } as const;
 
 const purchaseOrderIncludeDetail = {
@@ -797,7 +818,7 @@ export class PurchaseOrderService {
   }) {
     const where = this.buildPurchaseOrderListWhere(filters);
     const page = filters.page || 1;
-    const limit = Math.min(Math.max(filters.limit || 20, 1), 100);
+    const limit = Math.min(Math.max(filters.limit || 20, 1), 500);
     const skip = (page - 1) * limit;
     const [orders, total] = await Promise.all([
       prisma.purchaseOrder.findMany({
@@ -809,27 +830,8 @@ export class PurchaseOrderService {
       }),
       prisma.purchaseOrder.count({ where })
     ]);
-    let enriched = await enrichOrdersParcelPlans(orders);
-    const syncTargets = enriched.filter(
-      (o) =>
-        (o.status === 'APPROVED' && o.paymentType === 'BOLETO') ||
-        o.status === 'PENDING_NF_ATTACHMENT'
-    );
-    if (syncTargets.length > 0) {
-      await Promise.all(
-        syncTargets.map((o) => this.syncDocumentsFromStockReceipt(o.orderNumber))
-      );
-      const refreshed = await prisma.purchaseOrder.findMany({
-        where: { id: { in: syncTargets.map((o) => o.id) } },
-        include: purchaseOrderIncludeList
-      });
-      const refreshedMap = new Map(refreshed.map((o) => [o.id, o]));
-      enriched = await enrichOrdersParcelPlans(
-        enriched.map((o) => refreshedMap.get(o.id) || o)
-      );
-    }
-    enriched = await this.applyCreationBoletoAutoReleaseToListedOrders(enriched);
-    enriched = await this.normalizeStaleBoletoPhaseReleasedToListedOrders(enriched);
+    /** Listagem = só leitura. Syncs de estoque/boleto ficam no lançamento de estoque e nas mutações. */
+    const enriched = await enrichOrdersParcelPlans(orders);
     return { orders: enriched, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } };
   }
 

@@ -1760,7 +1760,9 @@ export function OcPurchaseOrdersPanel({
     queryFn: async () => {
       const res = await api.get('/purchase-orders', { params: { limit: 500 } });
       return res.data;
-    }
+    },
+    staleTime: 30_000,
+    refetchOnWindowFocus: false
   });
 
   const { data: selectedOrderFresh, isFetching: isFetchingOrderDetail } = useQuery({
@@ -1811,7 +1813,10 @@ export function OcPurchaseOrdersPanel({
     queryFn: async () => {
       const res = await api.get('/stock/movements', { params: { limit: 1000 } });
       return res.data;
-    }
+    },
+    enabled: !isLoading && !!ordersData,
+    staleTime: 60_000,
+    refetchOnWindowFocus: false
   });
 
   const shouldTrackFinancialEntryForOc =
@@ -2375,7 +2380,9 @@ export function OcPurchaseOrdersPanel({
       return res.data;
     },
     enabled: activeTab === 'FINALIZADAS',
-    placeholderData: (previousData) => previousData
+    placeholderData: (previousData) => previousData,
+    staleTime: 30_000,
+    refetchOnWindowFocus: false
   });
 
   const { data: suppliersForFilter = [] } = useQuery({
