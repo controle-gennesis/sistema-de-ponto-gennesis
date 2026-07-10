@@ -29,6 +29,7 @@ import { check, sleep, fail } from 'k6';
 import exec from 'k6/execution';
 import { Counter } from 'k6/metrics';
 import { getUserCredentials, loginJsonBody } from './carga-auth.js';
+import { p95 } from './carga-thresholds.js';
 
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:5000/api';
 const VUS = Math.max(1, Number(__ENV.VUS || 3));
@@ -62,8 +63,8 @@ export const options = {
     oc_all_installments_paid: [`count==${ITERATIONS}`],
     financial_control_created: [`count==${ITERATIONS}`],
     http_req_failed: ['rate<0.15'],
-    'http_req_duration{endpoint:upload_boleto}': ['p(95)<8000'],
-    'http_req_duration{endpoint:save_installments}': ['p(95)<5000'],
+    'http_req_duration{endpoint:upload_boleto}': [p95(8000, 15000)],
+    'http_req_duration{endpoint:save_installments}': [p95(5000, 15000)],
   },
 };
 

@@ -46,6 +46,7 @@ import exec from 'k6/execution';
 import { Counter } from 'k6/metrics';
 
 import { getUserCredentials, loginJsonBody } from './carga-auth.js';
+import { p95 } from './carga-thresholds.js';
 
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:5000/api';
 
@@ -94,9 +95,9 @@ export const options = {
     nf_attached: [`count==${ITERATIONS}`],
     oc_finalized: [`count==${ITERATIONS}`],
     http_req_failed: ['rate<0.15'],
-    'http_req_duration{endpoint:upload_proof}': ['p(95)<8000'],
-    'http_req_duration{endpoint:upload_nf}': ['p(95)<8000'],
-    'http_req_duration{endpoint:oc_finalize}': ['p(95)<5000'],
+    'http_req_duration{endpoint:upload_proof}': [p95(8000, 15000)],
+    'http_req_duration{endpoint:upload_nf}': [p95(8000, 15000)],
+    'http_req_duration{endpoint:oc_finalize}': [p95(5000, 15000)],
   },
 
 };

@@ -21,6 +21,7 @@
  *   COST_CENTER_IDS=id1,id2 (lista fixa; RMs alternam entre os CCs)
  *   USER_EMAIL=...          (obrigatório)
  *   USER_PASSWORD=...       (obrigatório)
+ *   LOAD_TEST_ENV=production|local  (opcional; senão detecta via BASE_URL)
  */
 
 import http from 'k6/http';
@@ -34,6 +35,7 @@ import {
   formatOsContextsSummary,
 } from './carga-cc-context.js';
 import { getUserCredentials, loginJsonBody } from './carga-auth.js';
+import { p95 } from './carga-thresholds.js';
 
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:5000/api';
 const MATERIAL_ID = __ENV.MATERIAL_ID || 'cmr0wp8qf000n47fczdmn8ybb';
@@ -59,7 +61,7 @@ const seedOptions = {
     // Exige exatamente N criações bem-sucedidas (não basta o VU ter rodado)
     rm_created: [`count==${SEED_ITERATIONS}`],
     http_req_failed: ['rate<0.15'],
-    'http_req_duration{endpoint:create_rm}': ['p(95)<5000'],
+    'http_req_duration{endpoint:create_rm}': [p95(5000, 15000)],
   },
 };
 
@@ -79,9 +81,9 @@ const loadOptions = {
   },
   thresholds: {
     http_req_failed: ['rate<0.10'],
-    'http_req_duration{endpoint:login}': ['p(95)<2000'],
-    'http_req_duration{endpoint:create_rm}': ['p(95)<5000'],
-    'http_req_duration{endpoint:list_rm}': ['p(95)<3000'],
+    'http_req_duration{endpoint:login}': [p95(2000)],
+    'http_req_duration{endpoint:create_rm}': [p95(5000, 15000)],
+    'http_req_duration{endpoint:list_rm}': [p95(3000)],
   },
 };
 

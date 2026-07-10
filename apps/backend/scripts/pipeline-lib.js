@@ -374,10 +374,22 @@ function maskK6EnvValue(key, value) {
   return value;
 }
 
+function resolveLoadTestEnv(baseUrl) {
+  const flag = String(process.env.LOAD_TEST_ENV || '')
+    .trim()
+    .toLowerCase();
+  if (flag === 'production' || flag === 'prod') return 'production';
+  if (flag === 'local' || flag === 'dev' || flag === 'development') return 'local';
+  const url = String(baseUrl || '').toLowerCase();
+  if (/railway\.app|rlwy\.net/.test(url)) return 'production';
+  return 'local';
+}
+
 function buildK6Env(stepEnv, config) {
   const userEmail = config.userEmail;
   const env = {
     BASE_URL: config.baseUrl,
+    LOAD_TEST_ENV: resolveLoadTestEnv(config.baseUrl),
     USER_EMAIL: userEmail,
     USER_PASSWORD: config.userPassword,
     // Scripts de cotação/aprovação RM aceitam aliases explícitos (mesmo valor do pipeline).
@@ -467,7 +479,8 @@ async function runPipeline({ title, config, steps }) {
   console.log(
     `# ITERATIONS=${config.iterations} | VUS=${config.vus}` +
       (config.parcelCount ? ` | PARCEL_COUNT=${config.parcelCount}` : '') +
-      ` | BASE_URL=${config.baseUrl}`,
+      ` | BASE_URL=${config.baseUrl}` +
+      ` | LOAD_TEST_ENV=${resolveLoadTestEnv(config.baseUrl)}`,
   );
   console.log(`${'#'.repeat(78)}\n`);
 
