@@ -1770,9 +1770,9 @@ export function OcPurchaseOrdersPanel({
       return res.data?.data as PurchaseOrder | undefined;
     },
     enabled: !!selectedOrder?.id,
-    staleTime: 0,
-    refetchOnMount: 'always',
-    refetchOnWindowFocus: true
+    staleTime: 60_000,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false
   });
 
   useEffect(() => {
@@ -2536,6 +2536,7 @@ export function OcPurchaseOrdersPanel({
         toast.error('Não foi possível carregar a OC.');
         return;
       }
+      queryClient.setQueryData(['purchase-order-detail', order.id], order);
       setSelectedOrder(order);
     } catch (e: unknown) {
       const err = e as { response?: { data?: { message?: string } } };

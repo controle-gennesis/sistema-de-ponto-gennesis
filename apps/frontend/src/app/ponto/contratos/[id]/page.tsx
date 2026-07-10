@@ -3419,7 +3419,7 @@ export default function ContractDetailPage() {
                   </div>
                   <div className="ml-3 sm:ml-4 min-w-0 flex-1">
                     <p className="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400 whitespace-normal">
-                      Anual faturado{!isAllYears ? ` (${safeSelectedYear})` : ''}
+                      Saldo anual faturado
                     </p>
                     <p className="text-lg sm:text-2xl font-bold text-gray-900 dark:text-gray-100 mt-1 truncate">
                       {formatCurrency(isAllYears ? faturamentoTotalTodosAnos : faturamentoAnual)}
@@ -3436,7 +3436,7 @@ export default function ContractDetailPage() {
                   </div>
                   <div className="ml-3 sm:ml-4 min-w-0 flex-1">
                     <p className="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400 whitespace-normal">
-                      Anual pendente{!isAllYears ? ` (${safeSelectedYear})` : ''}
+                      Saldo anual pendente
                     </p>
                     <p className="text-lg sm:text-2xl font-bold text-gray-900 dark:text-gray-100 mt-1 truncate">
                       {isAllYears ? '—' : saldoAnual !== null ? formatCurrency(saldoAnual) : '-'}
@@ -3453,7 +3453,7 @@ export default function ContractDetailPage() {
                   </div>
                   <div className="ml-3 sm:ml-4 min-w-0 flex-1">
                     <p className="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400 whitespace-normal">
-                      Contratual faturado
+                      Saldo contratual faturado
                     </p>
                     <p className="text-lg sm:text-2xl font-bold text-gray-900 dark:text-gray-100 mt-1 truncate">
                       {formatCurrency(faturamentoTotalTodosAnos)}
@@ -3470,7 +3470,7 @@ export default function ContractDetailPage() {
                   </div>
                   <div className="ml-3 sm:ml-4 min-w-0 flex-1">
                     <p className="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400 whitespace-normal">
-                      Contratual pendente
+                      Saldo contratual pendente
                     </p>
                     <p className="text-lg sm:text-2xl font-bold text-gray-900 dark:text-gray-100 mt-1 truncate">
                       {pendenteParaFaturarTodosAnos !== null

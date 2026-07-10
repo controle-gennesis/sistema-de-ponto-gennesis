@@ -396,10 +396,15 @@ export class StockShortfallService {
       );
     }
 
-    const constructionMaterials = await prisma.constructionMaterial.findMany({
-      where: { isActive: true },
-      select: { id: true, name: true, unit: true }
-    });
+    // Só materiais que aparecem nas entradas (evita carregar o catálogo inteiro a cada open).
+    const materialIds = Array.from(sumByConstructionMaterial.keys());
+    const constructionMaterials =
+      materialIds.length === 0
+        ? []
+        : await prisma.constructionMaterial.findMany({
+            where: { id: { in: materialIds } },
+            select: { id: true, name: true, unit: true }
+          });
     const cmByNormName = new Map<string, { id: string; unit: string }>();
     for (const cm of constructionMaterials) {
       cmByNormName.set(normalizeMaterialName(cm.name), { id: cm.id, unit: cm.unit });

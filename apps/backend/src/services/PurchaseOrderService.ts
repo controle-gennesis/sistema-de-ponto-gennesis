@@ -919,37 +919,46 @@ export class PurchaseOrderService {
     });
     if (!order) return null;
 
-    try {
-      await this.syncDocumentsFromStockReceipt(order.orderNumber);
-    } catch (err) {
-      console.error('[PurchaseOrder] syncDocumentsFromStockReceipt on getById', order.orderNumber, err);
-    }
-    try {
-      await this.normalizeParallelBoletoInstallmentsIfNeeded(id);
-    } catch (err) {
-      console.error('[PurchaseOrder] normalizeParallelBoletoInstallmentsIfNeeded on getById', order.orderNumber, err);
-    }
-    try {
-      await this.syncInstallmentProofsFromOrderPaymentProof(id);
-    } catch (err) {
-      console.error('[PurchaseOrder] syncInstallmentProofsFromOrderPaymentProof on getById', order.orderNumber, err);
-    }
-    try {
-      await this.maybeSkipAttachBoletoFromCreation(id);
-    } catch (err) {
-      console.error('[PurchaseOrder] maybeSkipAttachBoletoFromCreation on getById', order.orderNumber, err);
-    }
-    try {
-      await this.normalizeStaleBoletoPhaseReleased(id);
-    } catch (err) {
-      console.error('[PurchaseOrder] normalizeStaleBoletoPhaseReleased on getById', order.orderNumber, err);
-    }
+    /** Em status terminal o sync de estoque no GET só atrasa a abertura (scans ILIKE pesados). */
+    const skipLiveSync =
+      order.status === 'FINALIZED' ||
+      order.status === 'SENT' ||
+      order.status === 'RECEIVED';
 
-    const refreshed = await prisma.purchaseOrder.findUnique({
-      where: { id },
-      include: purchaseOrderIncludeDetail
-    });
-    if (!refreshed) return null;
+    let refreshed = order;
+    if (!skipLiveSync) {
+      try {
+        await this.syncDocumentsFromStockReceipt(order.orderNumber);
+      } catch (err) {
+        console.error('[PurchaseOrder] syncDocumentsFromStockReceipt on getById', order.orderNumber, err);
+      }
+      try {
+        await this.normalizeParallelBoletoInstallmentsIfNeeded(id);
+      } catch (err) {
+        console.error('[PurchaseOrder] normalizeParallelBoletoInstallmentsIfNeeded on getById', order.orderNumber, err);
+      }
+      try {
+        await this.syncInstallmentProofsFromOrderPaymentProof(id);
+      } catch (err) {
+        console.error('[PurchaseOrder] syncInstallmentProofsFromOrderPaymentProof on getById', order.orderNumber, err);
+      }
+      try {
+        await this.maybeSkipAttachBoletoFromCreation(id);
+      } catch (err) {
+        console.error('[PurchaseOrder] maybeSkipAttachBoletoFromCreation on getById', order.orderNumber, err);
+      }
+      try {
+        await this.normalizeStaleBoletoPhaseReleased(id);
+      } catch (err) {
+        console.error('[PurchaseOrder] normalizeStaleBoletoPhaseReleased on getById', order.orderNumber, err);
+      }
+
+      const reloaded = await prisma.purchaseOrder.findUnique({
+        where: { id },
+        include: purchaseOrderIncludeDetail
+      });
+      if (reloaded) refreshed = reloaded;
+    }
 
     const [withPlan] = await enrichOrdersParcelPlans([refreshed]);
     const stockReceipt = await stockShortfallService.getReceiptSummaryForOrderNumber(withPlan.orderNumber);
