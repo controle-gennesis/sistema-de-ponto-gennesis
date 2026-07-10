@@ -112,16 +112,26 @@ const isProduction = process.env.NODE_ENV === 'production' ||
                      !!process.env.PORT;
 
 const allowedOrigins = [
+  'https://www.gennesisconecta.com.br',
+  'https://gennesisconecta.com.br',
   'https://sistema-pontofrontend-production.up.railway.app',
   'https://sistema-pontobackend-production.up.railway.app',
   'http://localhost:3000',
   'http://localhost:19006'
 ];
 
+function isTrustedAppOrigin(origin: string): boolean {
+  return (
+    origin.includes('gennesisconecta.com.br') ||
+    origin.includes('railway.app') ||
+    origin.includes('localhost')
+  );
+}
+
 // Função para verificar se a origem é permitida
 const isOriginAllowed = (origin: string | undefined): boolean => {
   if (!origin) return true; // Permitir requisições sem origem (ex: Postman)
-  if (origin.includes('railway.app') || origin.includes('localhost')) return true;
+  if (isTrustedAppOrigin(origin)) return true;
   return allowedOrigins.includes(origin);
 };
 
@@ -189,7 +199,7 @@ const rateLimit429Handler = (
   message: string,
 ) => {
   const origin = req.headers.origin;
-  if (origin && (origin.includes('railway.app') || origin.includes('localhost'))) {
+  if (origin && (origin.includes('gennesisconecta.com.br') || origin.includes('railway.app') || origin.includes('localhost'))) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Access-Control-Allow-Credentials', 'true');
   }

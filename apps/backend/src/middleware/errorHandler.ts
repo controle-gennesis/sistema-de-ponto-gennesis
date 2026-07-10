@@ -122,7 +122,7 @@ export const errorHandler = (
 
   // 🔸 Garantir que headers CORS sejam enviados mesmo em caso de erro
   const origin = req.headers.origin;
-  if (origin && (origin.includes('railway.app') || origin.includes('localhost'))) {
+  if (origin && (origin.includes('gennesisconecta.com.br') || origin.includes('railway.app') || origin.includes('localhost'))) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Access-Control-Allow-Credentials', 'true');
   }
