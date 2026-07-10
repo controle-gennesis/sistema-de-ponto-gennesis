@@ -39,6 +39,7 @@ import {
   serializeChecklistForSave,
   createUniqueChecklistItemId,
   buildChecklistResumo,
+  buildChecklistExportSections,
   LICITACAO_CHECKLIST,
   type ChecklistItemState,
   type ChecklistSectionDef,
@@ -49,7 +50,7 @@ const NOTEBOOK_LM_LOGIN_EMAIL = 'contratos.licitacoesgennesis@gmail.com';
 
 const LICITACAO_SELECTED_ID_KEY = 'licitacoes:selectedId';
 const LICITACAO_VIEW_MODE_KEY = 'licitacoes:viewMode';
-const AUTO_SAVE_MS = 500;
+const AUTO_SAVE_MS = 60_000;
 
 const BRASIL_UFS = [
   'AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 'MT', 'MS', 'MG',
@@ -752,9 +753,11 @@ export default function LicitacoesPage() {
 
   const triggerSave = useCallback(() => {
     if (!selectedIdRef.current || !hasUserEditedRef.current) return;
-    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    // Não reinicia o timer a cada tecla — salva no máximo a cada 60s.
+    if (autoSaveTimerRef.current) return;
     autoSaveTimerRef.current = setTimeout(() => {
       autoSaveTimerRef.current = null;
+      if (!selectedIdRef.current || !hasUserEditedRef.current) return;
       saveAnaliseRef.current({ silent: true });
     }, AUTO_SAVE_MS);
   }, []);
@@ -838,13 +841,13 @@ export default function LicitacoesPage() {
     finalizarAnaliseMutation.mutate();
   }, [finalizarAnaliseMutation, linkNotebookLm, selectedId]);
 
-  const handleExportResumoPdf = useCallback(async () => {
+  const handleExportChecklistPdf = useCallback(async () => {
     if (!selected) return;
 
     setExportingPdf(true);
     try {
       const manual = analiseManualRef.current;
-      const resumo = buildChecklistResumo(checklistSections, manual.checklistState);
+      const sections = buildChecklistExportSections(checklistSections, manual.checklistState);
       const responsavel =
         manual.responsavelAnalise.trim() || userData?.data?.name?.trim() || '';
 
@@ -853,7 +856,7 @@ export default function LicitacoesPage() {
         responsavelAnalise: responsavel,
         linkNotebookLm: manual.linkNotebookLm,
         analiseUsuario: manual.analiseUsuario,
-        sections: resumo.map((section) => ({
+        sections: sections.map((section) => ({
           title: section.title,
           items: section.items.map((item) => ({
             label: item.label,
@@ -863,7 +866,7 @@ export default function LicitacoesPage() {
         })),
       });
 
-      toast.success('PDF exportado com sucesso.');
+      toast.success('Checklist exportado em PDF.');
     } catch {
       toast.error('Erro ao gerar o PDF. Tente novamente.');
     } finally {
@@ -1845,11 +1848,26 @@ export default function LicitacoesPage() {
                     className="flex h-[calc(100dvh-10rem)] max-h-[calc(100dvh-10rem)] flex-col overflow-hidden shadow-sm"
                   >
                     <CardHeader className="shrink-0 border-b border-gray-100 px-5 py-2 dark:border-gray-800">
-                      <div className="flex items-center gap-2">
-                        <User className="h-5 w-5 text-red-600" />
-                        <h3 className="font-semibold text-gray-900 dark:text-gray-100">
-                          Análise manual
-                        </h3>
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <User className="h-5 w-5 text-red-600" />
+                          <h3 className="font-semibold text-gray-900 dark:text-gray-100">
+                            Análise manual
+                          </h3>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => void handleExportChecklistPdf()}
+                          disabled={exportingPdf || !selected}
+                          className="inline-flex h-9 items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-800 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
+                        >
+                          {exportingPdf ? (
+                            <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                          ) : (
+                            <Download className="h-4 w-4" aria-hidden />
+                          )}
+                          {exportingPdf ? 'Gerando PDF…' : 'Exportar checklist PDF'}
+                        </button>
                       </div>
                     </CardHeader>
                     <CardContent className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-hidden px-5 py-2.5">
@@ -1946,7 +1964,7 @@ export default function LicitacoesPage() {
                           disabled={
                             saveAnaliseMutation.isPending || !canEditAnaliseManual
                           }
-                          canManageItems={canManageChecklistItems}
+                          canManageItems={true}
                           onAddItem={handleAddChecklistItem}
                           onRemoveItem={handleRemoveChecklistItem}
                           managingItems={updateChecklistTemplateMutation.isPending}
@@ -2038,8 +2056,8 @@ export default function LicitacoesPage() {
                         </div>
                         <button
                           type="button"
-                          onClick={() => void handleExportResumoPdf()}
-                          disabled={exportingPdf}
+                          onClick={() => void handleExportChecklistPdf()}
+                          disabled={exportingPdf || !selected}
                           className="inline-flex h-9 items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-800 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
                         >
                           {exportingPdf ? (
@@ -2047,7 +2065,7 @@ export default function LicitacoesPage() {
                           ) : (
                             <Download className="h-4 w-4" aria-hidden />
                           )}
-                          {exportingPdf ? 'Gerando PDF…' : 'Exportar PDF'}
+                          {exportingPdf ? 'Gerando PDF…' : 'Exportar checklist PDF'}
                         </button>
                       </div>
                     </CardHeader>

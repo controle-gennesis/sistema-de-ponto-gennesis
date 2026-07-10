@@ -1,10 +1,7 @@
-export const LICITACAO_CHECKLIST_ADMIN_EMAILS = new Set([
-  'controle@gennesisengenharia.com.br',
-]);
-
-export function canManageLicitacaoChecklist(email: string | null | undefined): boolean {
-  const normalized = String(email ?? '')
-    .trim()
-    .toLowerCase();
-  return LICITACAO_CHECKLIST_ADMIN_EMAILS.has(normalized);
+/**
+ * Qualquer usuário autenticado pode adicionar/excluir itens do checklist
+ * de análise de licitações.
+ */
+export function canManageLicitacaoChecklist(_email?: string | null): boolean {
+  return true;
 }
