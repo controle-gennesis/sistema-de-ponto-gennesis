@@ -3,10 +3,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { Filter, Fuel, Plus, Search, X } from 'lucide-react';
+import { Filter, Fuel, Plus, Search, Upload, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Modal } from '@/components/ui/Modal';
+import { SpreadsheetImportModal } from '@/components/ui/SpreadsheetImportModal';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
@@ -29,6 +30,11 @@ import {
   RowActionMenuPortal,
 } from '@/components/ui/RowActionMenu';
 import { useRowActionMenu } from '@/hooks/useRowActionMenu';
+import {
+  FUEL_STATION_IMPORT_COLUMNS,
+  downloadFuelStationImportTemplate,
+  parseFuelStationsFromFile,
+} from '@/lib/fuelGasStationImport';
 
 type FuelStateCode = 'DF' | 'GO';
 
@@ -75,6 +81,7 @@ export default function RegioesPostosCombustivelPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
   const [showStationForm, setShowStationForm] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
   const [formStateCode, setFormStateCode] = useState<FuelStateCode>('DF');
   const [editingStation, setEditingStation] = useState<GasStation | null>(null);
   const [deleteStationId, setDeleteStationId] = useState<string | null>(null);
@@ -350,6 +357,14 @@ export default function RegioesPostosCombustivelPage() {
                     {hasActiveFilter ? (
                       <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
                     ) : null}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowImportModal(true)}
+                    className="flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-800 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
+                  >
+                    <Upload className="h-4 w-4 shrink-0" />
+                    <span>Importar</span>
                   </button>
                   <button
                     type="button"
@@ -724,6 +739,28 @@ export default function RegioesPostosCombustivelPage() {
             </div>
           </form>
         </Modal>
+
+        <SpreadsheetImportModal
+          isOpen={showImportModal}
+          onClose={() => setShowImportModal(false)}
+          title="Importar postos de combustível"
+          templateHint="Baixe o modelo (abas Postos e Cidades). Preencha Estado (DF/GO), Cidade, Nome do posto… O código do posto é gerado automaticamente."
+          columns={FUEL_STATION_IMPORT_COLUMNS}
+          bodyKey="stations"
+          importPath="/fuel-gas-stations/import"
+          downloadTemplate={downloadFuelStationImportTemplate}
+          parseFile={async (file) => {
+            const report = await parseFuelStationsFromFile(file);
+            return {
+              items: report.stations,
+              skipped: report.skipped,
+              totalRows: report.totalRows,
+            };
+          }}
+          onImported={() => {
+            void queryClient.invalidateQueries({ queryKey: ['fuel-gas-stations'] });
+          }}
+        />
       </MainLayout>
     </ProtectedRoute>
   );

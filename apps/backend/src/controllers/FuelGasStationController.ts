@@ -110,6 +110,76 @@ export class FuelGasStationController {
     }
   }
 
+  async importStations(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      await this.assertAccess(req);
+      const { stations } = req.body;
+
+      if (!Array.isArray(stations) || stations.length === 0) {
+        throw createError('Envie um array "stations" com ao menos um item', 400);
+      }
+
+      let created = 0;
+      const errors: { index: number; message: string }[] = [];
+      const displayNumbers = await reserveFuelGasStationDisplayNumbers(stations.length);
+
+      for (let i = 0; i < stations.length; i++) {
+        const row = stations[i] as Record<string, unknown>;
+        try {
+          const body = stationBodySchema.parse(row);
+          assertValidSatelliteCityCode(body.cityCode);
+
+          const displayNumber = displayNumbers[i];
+          if (!displayNumber) {
+            errors.push({ index: i, message: 'Não foi possível gerar o código do posto' });
+            continue;
+          }
+
+          await prisma.fuelGasStation.create({
+            data: {
+              displayNumber,
+              cityCode: body.cityCode.trim().toUpperCase(),
+              name: body.name.trim(),
+              address: body.address?.trim() || null,
+              sortOrder: body.sortOrder ?? 0,
+              isActive: body.isActive ?? true,
+            },
+          });
+
+          created += 1;
+        } catch (err: unknown) {
+          if (err instanceof z.ZodError) {
+            const first = err.issues[0];
+            errors.push({
+              index: i,
+              message: first?.message || 'Dados inválidos',
+            });
+            continue;
+          }
+          const message =
+            err instanceof Error
+              ? err.message === 'Cidade satélite inválida'
+                ? err.message
+                : err.message
+              : 'Erro ao importar linha';
+          errors.push({ index: i, message });
+        }
+      }
+
+      res.json({
+        success: true,
+        data: {
+          created,
+          failed: errors.length,
+          errors,
+        },
+        message: `Importação concluída: ${created} criado(s), ${errors.length} erro(s)`,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
   async update(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       await this.assertAccess(req);

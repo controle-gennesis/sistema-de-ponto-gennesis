@@ -332,7 +332,16 @@ export class StockShortfallService {
   /**
    * Resumo de entradas de estoque vinculadas à OC (por Nº OC nas observações da movimentação).
    */
-  async getReceiptSummaryForOrderNumber(orderNumber: string): Promise<StockReceiptSummary> {
+  async getReceiptSummaryForOrderNumber(
+    orderNumber: string,
+    preloaded?: {
+      items: Array<{
+        quantity: unknown;
+        unit: string;
+        material: { name: string | null; description: string | null } | null;
+      }>;
+    }
+  ): Promise<StockReceiptSummary> {
     const trimmed = orderNumber.trim();
     const empty: StockReceiptSummary = {
       hasReceipts: false,
@@ -343,15 +352,22 @@ export class StockShortfallService {
     };
     if (!trimmed) return empty;
 
-    const po = await prisma.purchaseOrder.findUnique({
-      where: { orderNumber: trimmed },
-      include: { items: { include: { material: true } } }
-    });
-    if (!po) return empty;
+    const poItems =
+      preloaded?.items ??
+      (
+        await prisma.purchaseOrder.findUnique({
+          where: { orderNumber: trimmed },
+          include: { items: { include: { material: true } } }
+        })
+      )?.items;
 
+    if (!poItems) return empty;
+
+    /** Needle exato do formato gravado nas notas — evita ILIKE case-insensitive (scan mais caro). */
+    const needle = `Nº OC: ${trimmed}`;
     const movements = await prisma.stockMovement.findMany({
       where: {
-        notes: { contains: trimmed, mode: 'insensitive' }
+        notes: { contains: needle }
       },
       include: {
         material: { select: { id: true, name: true, unit: true } },
@@ -371,7 +387,7 @@ export class StockShortfallService {
       return {
         hasReceipts: false,
         hasExits,
-        lines: po.items.map((item) => {
+        lines: poItems.map((item) => {
           const eng = item.material;
           const label = (eng?.name || eng?.description || '').trim() || '—';
           const ordered = Number(item.quantity);
@@ -411,7 +427,7 @@ export class StockShortfallService {
     }
 
     const lines: StockReceiptSummaryLine[] = [];
-    for (const item of po.items) {
+    for (const item of poItems) {
       const eng = item.material;
       const label = (eng?.name || eng?.description || '').trim() || '—';
       const ordered = Number(item.quantity);

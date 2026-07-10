@@ -1763,7 +1763,7 @@ export function OcPurchaseOrdersPanel({
     }
   });
 
-  const { data: selectedOrderFresh } = useQuery({
+  const { data: selectedOrderFresh, isFetching: isFetchingOrderDetail } = useQuery({
     queryKey: ['purchase-order-detail', selectedOrder?.id],
     queryFn: async () => {
       const res = await api.get(`/purchase-orders/${selectedOrder!.id}`);
@@ -1777,8 +1777,34 @@ export function OcPurchaseOrdersPanel({
 
   useEffect(() => {
     if (!selectedOrderFresh || selectedOrderFresh.id !== selectedOrder?.id) return;
-    setSelectedOrder(selectedOrderFresh);
+    setSelectedOrder((prev) => {
+      if (!prev || prev.id !== selectedOrderFresh.id) return selectedOrderFresh;
+      return {
+        ...selectedOrderFresh,
+        stockReceipt: prev.stockReceipt ?? selectedOrderFresh.stockReceipt
+      };
+    });
   }, [selectedOrderFresh, selectedOrder?.id]);
+
+  const { data: selectedOrderStockReceipt, isFetching: isFetchingStockReceipt } = useQuery({
+    queryKey: ['purchase-order-stock-receipt', selectedOrder?.id],
+    queryFn: async () => {
+      const res = await api.get(`/purchase-orders/${selectedOrder!.id}/stock-receipt`);
+      return res.data?.data as PurchaseOrder['stockReceipt'];
+    },
+    enabled: !!selectedOrder?.id,
+    staleTime: 60_000,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false
+  });
+
+  useEffect(() => {
+    if (!selectedOrder?.id || selectedOrderStockReceipt === undefined) return;
+    setSelectedOrder((prev) => {
+      if (!prev || prev.id !== selectedOrder.id) return prev;
+      return { ...prev, stockReceipt: selectedOrderStockReceipt };
+    });
+  }, [selectedOrder?.id, selectedOrderStockReceipt]);
 
   const { data: stockMovementsData } = useQuery({
     queryKey: ['stock-movements-oc-tags'],
@@ -2527,23 +2553,17 @@ export function OcPurchaseOrdersPanel({
     }
   };
 
-  const openOrderDetail = async (o: PurchaseOrder) => {
-    setOrderDetailLoadingId(o.id);
-    try {
-      const res = await api.get(`/purchase-orders/${o.id}`);
-      const order = res.data?.data as PurchaseOrder | undefined;
-      if (!order) {
-        toast.error('Não foi possível carregar a OC.');
-        return;
-      }
-      queryClient.setQueryData(['purchase-order-detail', order.id], order);
-      setSelectedOrder(order);
-    } catch (e: unknown) {
-      const err = e as { response?: { data?: { message?: string } } };
-      toast.error(err.response?.data?.message || 'Erro ao carregar detalhes da OC.');
-    } finally {
-      setOrderDetailLoadingId(null);
-    }
+  const openOrderDetail = (o: PurchaseOrder) => {
+    /** Abre na hora com o que já está na lista; o detalhe completo e o estoque entram em background. */
+    setSelectedOrder(o);
+    void queryClient.prefetchQuery({
+      queryKey: ['purchase-order-detail', o.id],
+      queryFn: async () => {
+        const res = await api.get(`/purchase-orders/${o.id}`);
+        return res.data?.data as PurchaseOrder | undefined;
+      },
+      staleTime: 60_000
+    });
   };
 
   const toggleCnabSelection = (id: string) => {
@@ -3383,15 +3403,10 @@ export function OcPurchaseOrdersPanel({
                                 <button
                                   type="button"
                                   onClick={() => openOrderDetail(o)}
-                                  disabled={orderDetailLoadingId === o.id}
-                                  className="inline-flex rounded-lg p-2 text-blue-600 transition-colors hover:bg-blue-50 disabled:opacity-50 dark:text-blue-400 dark:hover:bg-blue-900/20"
+                                  className="inline-flex rounded-lg p-2 text-blue-600 transition-colors hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/20"
                                   title="Ver detalhes"
                                 >
-                                  {orderDetailLoadingId === o.id ? (
-                                    <Loader2 className="h-4 w-4 animate-spin" />
-                                  ) : (
-                                    <Eye className="h-4 w-4" />
-                                  )}
+                                  <Eye className="h-4 w-4" />
                                 </button>
                               </>
                             )}
@@ -3680,6 +3695,12 @@ export function OcPurchaseOrdersPanel({
                     >
                       {purchaseOrderPhaseLabel(selectedOrder.status)}
                     </span>
+                    {isFetchingOrderDetail ? (
+                      <span className="inline-flex items-center gap-1 text-xs text-gray-400">
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        Atualizando…
+                      </span>
+                    ) : null}
                     {selectedOrderLatestStockMovement ? (
                       <span className="text-xs text-gray-500 dark:text-gray-400">
                         Estoque:{' '}
@@ -4290,6 +4311,17 @@ export function OcPurchaseOrdersPanel({
                   const hasExits =
                     Boolean(stockReceipt?.hasExits) || exitBatches.length > 0;
                   const hasAnyStockActivity = hasReceipts || hasExits;
+                  const stockStillLoading =
+                    isFetchingStockReceipt && selectedOrderStockReceipt === undefined;
+
+                  if (stockStillLoading) {
+                    return (
+                      <p className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+                        <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+                        Carregando movimentações do estoque…
+                      </p>
+                    );
+                  }
 
                   if (!hasAnyStockActivity) {
                     return (
@@ -5204,14 +5236,9 @@ export function OcPurchaseOrdersPanel({
                   setOcActionMenu(null);
                   openOrderDetail(orderForActionMenu);
                 }}
-                disabled={orderDetailLoadingId === orderForActionMenu.id}
                 className={OC_MENU_ITEM_CLASS}
               >
-                {orderDetailLoadingId === orderForActionMenu.id ? (
-                  <Loader2 className="h-4 w-4 shrink-0 animate-spin text-blue-600 dark:text-blue-400" />
-                ) : (
-                  <Eye className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
-                )}
+                <Eye className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
                 <span>Ver detalhes</span>
               </button>
               {activeTab === 'ATTACH_BOLETO' &&

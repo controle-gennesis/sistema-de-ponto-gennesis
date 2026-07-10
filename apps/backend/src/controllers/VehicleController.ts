@@ -7,8 +7,14 @@ import { listFipeBrands, listFipeModels } from '../services/FipeService';
 import {
   isValidBrazilianPlate,
   normalizePlacaForStorage,
-  placaVariants
+  placaVariants,
+  repairBrazilianPlate
 } from '../lib/brazilianVehiclePlate';
+import {
+  createVehicleImportNormalizeContext,
+  normalizeVehicleImportFields,
+  repairExistingVehicleModelsFromFipe
+} from '../lib/vehicleImportNormalize';
 
 function normalizeOptionalString(value: unknown): string | null {
   if (value === null || value === undefined) return null;
@@ -50,8 +56,11 @@ function parseFrotaPartic(value: unknown): VehicleUsageType | null {
 }
 
 function buildVehicleData(body: Record<string, unknown>) {
-  const contrato =
+  const contratoRaw =
     normalizeOptionalString(body.contrato) ?? normalizeOptionalString(body.projeto);
+  const contrato = contratoRaw
+    ? contratoRaw.replace(/^\d{1,2}(?:\.\d{1,2})+\s*[-–—]\s*/, '').trim() || contratoRaw
+    : null;
 
   return {
     marcaVeic: normalizeOptionalString(body.marcaVeic),
@@ -117,6 +126,12 @@ export class VehicleController {
 
   async getAll(req: AuthRequest, res: Response, next: NextFunction) {
     try {
+      try {
+        await repairExistingVehicleModelsFromFipe();
+      } catch (err) {
+        console.error('[Vehicle] repairExistingVehicleModelsFromFipe', err);
+      }
+
       const { search, isActive, page = 1, limit = 20 } = req.query;
       const where: Record<string, unknown> = {};
 
@@ -196,6 +211,104 @@ export class VehicleController {
       });
 
       res.status(201).json({ success: true, data: vehicle });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async importVehicles(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const { vehicles } = req.body;
+
+      if (!Array.isArray(vehicles) || vehicles.length === 0) {
+        throw createError('Envie um array "vehicles" com ao menos um item', 400);
+      }
+
+      let created = 0;
+      const errors: { index: number; message: string }[] = [];
+      const reservedCodes = await reserveVehicleCodes(vehicles.length);
+      const seenPlacas = new Set<string>();
+      const normalizeCtx = await createVehicleImportNormalizeContext();
+
+      for (let i = 0; i < vehicles.length; i++) {
+        const row = vehicles[i] as Record<string, unknown>;
+        try {
+          const normalized = await normalizeVehicleImportFields(
+            {
+              marcaVeic: normalizeOptionalString(row.marcaVeic),
+              modeloVeic:
+                normalizeOptionalString(row.modeloVeic) ||
+                normalizeOptionalString(row.veiculo) ||
+                normalizeOptionalString(row.descricao),
+              contrato:
+                normalizeOptionalString(row.contrato) || normalizeOptionalString(row.projeto),
+              polo: normalizeOptionalString(row.polo)
+            },
+            normalizeCtx
+          );
+
+          const repairedPlaca = repairBrazilianPlate(row.placaVeic ?? row.placa);
+          const parsed = buildVehicleData({
+            ...row,
+            marcaVeic: normalized.marcaVeic,
+            modeloVeic: normalized.modeloVeic,
+            contrato: normalized.contrato,
+            polo: normalized.polo,
+            placaVeic: repairedPlaca || row.placaVeic || row.placa
+          });
+
+          if (!parsed.modeloVeic) {
+            errors.push({ index: i, message: 'Modelo do veículo é obrigatório' });
+            continue;
+          }
+          if (!parsed.placaVeic) {
+            errors.push({ index: i, message: 'Placa é obrigatória' });
+            continue;
+          }
+          if (!repairedPlaca || !isValidBrazilianPlate(parsed.placaVeic)) {
+            errors.push({
+              index: i,
+              message: `Não foi possível corrigir a placa "${String(row.placaVeic ?? row.placa ?? '').trim()}". Use ABC-1234 ou ABC1D23.`
+            });
+            continue;
+          }
+
+          const placaKey = parsed.placaVeic.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+          if (seenPlacas.has(placaKey)) {
+            errors.push({ index: i, message: `Placa duplicada na planilha: ${parsed.placaVeic}` });
+            continue;
+          }
+
+          const existingPlaca = await findDuplicatePlaca(parsed.placaVeic);
+          if (existingPlaca) {
+            errors.push({ index: i, message: `Já existe um veículo com a placa ${parsed.placaVeic}` });
+            continue;
+          }
+
+          await prisma.vehicle.create({
+            data: {
+              ...parsed,
+              code: reservedCodes[i]
+            }
+          });
+
+          seenPlacas.add(placaKey);
+          created += 1;
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : 'Erro ao importar linha';
+          errors.push({ index: i, message });
+        }
+      }
+
+      res.json({
+        success: true,
+        data: {
+          created,
+          failed: errors.length,
+          errors
+        },
+        message: `Importação concluída: ${created} criado(s), ${errors.length} erro(s)`
+      });
     } catch (error) {
       next(error);
     }

@@ -210,6 +210,16 @@ router.post('/cnab400', async (req: AuthRequest, res: Response, next: NextFuncti
   }
 });
 
+router.get('/:id/stock-receipt', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const stockReceipt = await service.getStockReceiptSummary(req.params.id);
+    if (!stockReceipt) throw createError('Ordem de compra não encontrada', 404);
+    res.json({ success: true, data: stockReceipt });
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.get('/:id', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const order = await service.getById(req.params.id);

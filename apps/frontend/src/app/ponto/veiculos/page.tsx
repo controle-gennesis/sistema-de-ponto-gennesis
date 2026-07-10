@@ -3,8 +3,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { Car, Loader2, Plus, Search, X } from 'lucide-react';
+import { Car, Loader2, Plus, Search, Upload, X } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
+import { SpreadsheetImportModal } from '@/components/ui/SpreadsheetImportModal';
 import {
   CadastroListEmpty,
   CadastroListLoading,
@@ -33,6 +34,11 @@ import {
   isValidBrazilianPlate,
   maskBrazilianPlate
 } from '@/lib/brazilianVehiclePlate';
+import {
+  VEHICLE_IMPORT_COLUMNS,
+  downloadVehicleImportTemplate,
+  parseVehiclesFromFile,
+} from '@/lib/vehicleImport';
 
 type VehicleUsageType = 'FROTA' | 'PARTICULAR';
 
@@ -112,6 +118,14 @@ function formatVehicleModel(vehicle: Pick<Vehicle, 'marcaVeic' | 'modeloVeic'>):
   return modelo || marca || '—';
 }
 
+/** "02.06.01.01.011 - TJGO..." → "TJGO..." */
+function formatVehicleContratoLabel(value: string | null | undefined): string {
+  const trimmed = (value || '').trim();
+  if (!trimmed) return '—';
+  const withoutCode = trimmed.replace(/^\d{1,2}(?:\.\d{1,2})+\s*[-–—]\s*/, '').trim();
+  return withoutCode || trimmed;
+}
+
 function extractBaseModelName(fullName: string): string {
   const trimmed = fullName.trim();
   if (!trimmed) return '';
@@ -125,6 +139,7 @@ export default function VeiculosPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage] = useState(20);
   const [showForm, setShowForm] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
   const [editing, setEditing] = useState<Vehicle | null>(null);
   const [formData, setFormData] = useState<VehicleFormState>(EMPTY_FORM);
   const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -519,6 +534,14 @@ export default function VeiculosPage() {
                   </div>
                   <button
                     type="button"
+                    onClick={() => setShowImportModal(true)}
+                    className="flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-800 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
+                  >
+                    <Upload className="h-4 w-4 shrink-0" />
+                    <span>Importar</span>
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => {
                       setEditing(null);
                       resetForm();
@@ -582,7 +605,9 @@ export default function VeiculosPage() {
                             <td className={cadastroListClasses.tdMono}>
                               {formatPlacaDisplay(vehicle.placaVeic)}
                             </td>
-                            <td className={cadastroListClasses.td}>{vehicle.contrato || '—'}</td>
+                            <td className={cadastroListClasses.td}>
+                              {formatVehicleContratoLabel(vehicle.contrato)}
+                            </td>
                             <td className={cadastroListClasses.td}>{vehicle.responsavel || '—'}</td>
                             <td className={cadastroListClasses.td}>
                               {formatFrotaPartic(vehicle.frotaPartic)}
@@ -908,6 +933,28 @@ export default function VeiculosPage() {
               </div>
             </div>
           )}
+
+          <SpreadsheetImportModal
+            isOpen={showImportModal}
+            onClose={() => setShowImportModal(false)}
+            title="Importar veículos"
+            templateHint="Marca/modelo e contrato são associados automaticamente (FIPE + cadastros). Pode enviar nomes abreviados ou bagunçados — o sistema tenta corrigir."
+            columns={VEHICLE_IMPORT_COLUMNS}
+            bodyKey="vehicles"
+            importPath="/vehicles/import"
+            downloadTemplate={downloadVehicleImportTemplate}
+            parseFile={async (file) => {
+              const report = await parseVehiclesFromFile(file);
+              return {
+                items: report.vehicles,
+                skipped: report.skipped,
+                totalRows: report.totalRows,
+              };
+            }}
+            onImported={() => {
+              void queryClient.invalidateQueries({ queryKey: ['vehicles'] });
+            }}
+          />
         </div>
       </MainLayout>
     </ProtectedRoute>
