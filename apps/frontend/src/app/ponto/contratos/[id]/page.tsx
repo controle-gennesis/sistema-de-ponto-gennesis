@@ -65,7 +65,6 @@ import {
   isBudgetStatusInValorOrcadoSum,
   type PleitoFormData
 } from '@/lib/pleitoForm';
-import { pleitoStatusReadOnlySpanClass } from '@/lib/pleitoStatusStyles';
 import { useContractTableColumnCustomizer } from '@/components/useContractTableColumnCustomizer';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
@@ -4459,9 +4458,8 @@ export default function ContractDetailPage() {
                         <th className={`${cadastroListClasses.thCenter} align-middle whitespace-nowrap`}>Status</th>
                         <th className={`${cadastroListClasses.thCenter} align-middle whitespace-nowrap`}>% Pleiteado</th>
                         <th className={`${cadastroListClasses.thCenter} align-middle whitespace-nowrap`}>Pleito</th>
+                        <th className={`${cadastroListClasses.thNumeric} align-middle whitespace-nowrap`}>Valor pleiteado</th>
                         <th className={`${cadastroListClasses.thCenter} align-middle whitespace-nowrap`}>Status Pleito</th>
-                        <th className={`${cadastroListClasses.thCenter} align-middle`}>Status Orçamento</th>
-                        <th className={`${cadastroListClasses.thCenter} align-middle`}>Status Execução</th>
                         <th className={`${cadastroListClasses.thNumeric} align-middle whitespace-nowrap`}>Restante a pleitear</th>
                         <th className={`${cadastroListClasses.thNumeric} align-middle`}>Orçamento</th>
                         <th className={`${listTableRowClasses.actionTh} align-middle`}>Ação</th>
@@ -4546,6 +4544,26 @@ export default function ContractDetailPage() {
                               </div>
                             )}
                           </td>
+                          <td className={`${cadastroListClasses.tdNumeric} align-middle text-gray-900 dark:text-gray-100`}>
+                            {linkedPleitos.length === 0 ? (
+                              <span className="text-xs text-gray-400 dark:text-gray-500">—</span>
+                            ) : (
+                              <div className="flex flex-col items-end gap-0.5">
+                                {linkedPleitos.map((lp) => {
+                                  const valorLp = lp.billingRequest != null ? Number(lp.billingRequest) : 0;
+                                  return (
+                                    <span
+                                      key={lp.id}
+                                      className="block whitespace-nowrap text-xs font-medium tabular-nums"
+                                      title={`Pleito ${formatDisplayId(pleitoDisplayIds, lp.id)}`}
+                                    >
+                                      {formatCurrency(Number.isFinite(valorLp) ? valorLp : 0)}
+                                    </span>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </td>
                           <td className={`${cadastroListClasses.tdCenter} align-middle`}>
                             {linkedPleitos.length === 0 ? (
                               <span className="text-xs text-gray-400 dark:text-gray-500">—</span>
@@ -4565,22 +4583,6 @@ export default function ContractDetailPage() {
                                 })}
                               </div>
                             )}
-                          </td>
-                          <td className={`${cadastroListClasses.tdCenter} align-middle`}>
-                            <span
-                              className={pleitoStatusReadOnlySpanClass('budget', p.budgetStatus)}
-                              title={p.budgetStatus || ''}
-                            >
-                              {p.budgetStatus || '—'}
-                            </span>
-                          </td>
-                          <td className={`${cadastroListClasses.tdCenter} align-middle`}>
-                            <span
-                              className={pleitoStatusReadOnlySpanClass('execution', p.executionStatus)}
-                              title={p.executionStatus || ''}
-                            >
-                              {p.executionStatus || '—'}
-                            </span>
                           </td>
                           <td className={`${cadastroListClasses.tdNumeric} align-middle text-gray-900 dark:text-gray-100`}>
                             {restantePleitear != null ? formatCurrency(restantePleitear) : '—'}
