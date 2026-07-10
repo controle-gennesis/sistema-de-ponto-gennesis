@@ -313,16 +313,18 @@ export default function GerenciarMateriaisPage() {
       const res = await api.get('/material-requests', { params: { limit: 500 } });
       return res.data;
     },
-    staleTime: 0,
-    refetchOnMount: 'always',
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
   });
 
   const { data: ordersData } = useQuery({
-    queryKey: ['purchase-orders', 'list-full'],
+    queryKey: ['purchase-orders', 'list-summary'],
     queryFn: async () => {
-      const res = await api.get('/purchase-orders', { params: { limit: 500 } });
+      const res = await api.get('/purchase-orders', { params: { limit: 500, summary: '1' } });
       return res.data;
-    }
+    },
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
   });
 
   // Criar Ordem de Compra

@@ -519,6 +519,19 @@ const purchaseOrderIncludeList = {
   }
 } as const;
 
+/** Listagem resumida (mapa/gerenciar): sem itens — bem mais leve. */
+const purchaseOrderIncludeListSummary = {
+  supplier: { select: { id: true, code: true, name: true } },
+  materialRequest: {
+    select: {
+      id: true,
+      requestNumber: true,
+      costCenter: { select: { id: true, code: true, name: true } }
+    }
+  },
+  creator: { select: { id: true, name: true } }
+} as const;
+
 const purchaseOrderIncludeDetail = {
   supplier: true,
   quoteMap: {
@@ -815,18 +828,24 @@ export class PurchaseOrderService {
     q?: string;
     page?: number;
     limit?: number;
+    /** false = listagem leve (sem itens) — mapa/gerenciar só precisam do vínculo RM. */
+    includeItems?: boolean;
   }) {
     const where = this.buildPurchaseOrderListWhere(filters);
     const page = filters.page || 1;
     const limit = Math.min(Math.max(filters.limit || 20, 1), 500);
     const skip = (page - 1) * limit;
+    const includeItems = filters.includeItems !== false;
+    const include = includeItems
+      ? purchaseOrderIncludeList
+      : purchaseOrderIncludeListSummary;
     const [orders, total] = await Promise.all([
       prisma.purchaseOrder.findMany({
         where,
         skip,
         take: limit,
         orderBy: [{ updatedAt: 'desc' }, { orderNumber: 'desc' }],
-        include: purchaseOrderIncludeList
+        include
       }),
       prisma.purchaseOrder.count({ where })
     ]);

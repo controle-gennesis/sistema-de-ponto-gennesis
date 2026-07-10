@@ -42,8 +42,17 @@ router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
       limit,
       orderDateFrom,
       orderDateTo,
-      q
+      q,
+      includeItems,
+      summary
     } = req.query;
+    const wantItems =
+      summary === '1' ||
+      summary === 'true' ||
+      includeItems === '0' ||
+      includeItems === 'false'
+        ? false
+        : true;
     const result = await service.list({
       status: status as string,
       supplierId: supplierId as string,
@@ -55,7 +64,8 @@ router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
       orderDateTo: typeof orderDateTo === 'string' ? orderDateTo : undefined,
       q: typeof q === 'string' ? q : undefined,
       page: page ? parseInt(page as string, 10) : 1,
-      limit: limit ? parseInt(limit as string, 10) : 20
+      limit: limit ? parseInt(limit as string, 10) : 20,
+      includeItems: wantItems
     });
     res.json({ success: true, data: result.orders, pagination: result.pagination });
   } catch (error) {

@@ -90,6 +90,8 @@ export function RmApprovalsSection() {
       return (res.data?.data ?? []) as MaterialRequest[];
     },
     enabled: canApproveMaterialRequests,
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
   });
 
   const requests = requestsData ?? [];

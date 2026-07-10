@@ -428,11 +428,33 @@ export class MaterialRequestService {
               name: true
             }
           },
-          costCenter: true,
-          project: true,
+          costCenter: {
+            select: { id: true, code: true, name: true, state: true, polo: true }
+          },
+          project: {
+            select: { id: true, name: true, code: true }
+          },
           items: {
-            include: {
-              material: true
+            select: {
+              id: true,
+              quantity: true,
+              unit: true,
+              unitPrice: true,
+              totalPrice: true,
+              notes: true,
+              attachmentUrl: true,
+              attachmentName: true,
+              status: true,
+              materialId: true,
+              material: {
+                select: {
+                  id: true,
+                  name: true,
+                  description: true,
+                  unit: true,
+                  sinapiCode: true
+                }
+              }
             }
           },
           purchaseOrders: {
@@ -441,7 +463,7 @@ export class MaterialRequestService {
               status: true,
               orderNumber: true
             },
-            orderBy: { createdAt: 'asc' }
+            orderBy: { createdAt: 'asc' as const }
           }
         }
       }),

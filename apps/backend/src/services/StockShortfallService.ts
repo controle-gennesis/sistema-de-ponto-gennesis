@@ -448,13 +448,8 @@ export class StockShortfallService {
     return { hasReceipts: true, hasExits, lines, batches, exitBatches };
   }
 
-  /** Quantidade de furos abertos (com recálculo leve e limitado por throttle). */
+  /** Quantidade de furos abertos — só COUNT (sem rebuild no GET). */
   async countOpenPending(): Promise<number> {
-    const now = Date.now();
-    if (now - this.lastRebuildAt > StockShortfallService.REBUILD_THROTTLE_MS) {
-      await this.rebuildFromExistingMovements();
-      this.lastRebuildAt = now;
-    }
     return prisma.stockShortfall.count({
       where: { status: StockShortfallStatus.ABERTO }
     });
@@ -470,11 +465,7 @@ export class StockShortfallService {
     limit?: number;
     skipRebuild?: boolean;
   }) {
-    if (!params.skipRebuild) {
-      await this.rebuildFromExistingMovements();
-      this.lastRebuildAt = Date.now();
-    }
-
+    /** Rebuild/sync fica nas mutações de estoque — GET de listagem deve ser rápido. */
     const limit = Math.min(params.limit ?? 200, 500);
     const where: Prisma.StockShortfallWhereInput = {};
 

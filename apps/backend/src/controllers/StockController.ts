@@ -294,16 +294,15 @@ export class StockController {
       if (type === 'IN' && notes) {
         const ocNum = extractOcNumberFromMovementNotes(String(notes));
         if (ocNum) {
-          try {
-            await stockShortfallService.syncForOrderNumber(ocNum);
-          } catch (err) {
-            console.error('[StockShortfall] syncForOrderNumber', ocNum, err);
-          }
-          try {
-            await purchaseOrderService.syncDocumentsFromStockReceipt(ocNum);
-          } catch (err) {
-            console.error('[PurchaseOrder] syncDocumentsFromStockReceipt', ocNum, err);
-          }
+          /** Não atrasa a resposta da entrada — sync em background. */
+          void Promise.all([
+            stockShortfallService.syncForOrderNumber(ocNum).catch((err) => {
+              console.error('[StockShortfall] syncForOrderNumber', ocNum, err);
+            }),
+            purchaseOrderService.syncDocumentsFromStockReceipt(ocNum).catch((err) => {
+              console.error('[PurchaseOrder] syncDocumentsFromStockReceipt', ocNum, err);
+            })
+          ]);
         }
       }
 

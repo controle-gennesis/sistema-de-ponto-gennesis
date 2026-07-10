@@ -267,15 +267,19 @@ export default function MapaCotacaoPage() {
     queryFn: async () => {
       const res = await api.get('/material-requests', { params: { status: 'APPROVED', limit: 500 } });
       return res.data;
-    }
+    },
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
   });
 
-  const { data: ordersData, isLoading: loadingOrders } = useQuery({
-    queryKey: ['purchase-orders', 'list-full'],
+  const { data: ordersData } = useQuery({
+    queryKey: ['purchase-orders', 'list-summary'],
     queryFn: async () => {
-      const res = await api.get('/purchase-orders', { params: { limit: 500 } });
+      const res = await api.get('/purchase-orders', { params: { limit: 500, summary: '1' } });
       return res.data;
-    }
+    },
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
   });
 
   const { data: boletoPaymentConditions } = useQuery({
@@ -324,12 +328,14 @@ export default function MapaCotacaoPage() {
     [approvedRequests]
   );
 
-  const { data: suppliersData, isLoading: loadingSuppliers } = useQuery({
+  const { data: suppliersData } = useQuery({
     queryKey: ['suppliers-map'],
     queryFn: async () => {
       const res = await api.get('/suppliers', { params: { limit: 500 } });
       return res.data;
-    }
+    },
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
   });
 
   const suppliers: Supplier[] = useMemo(
@@ -723,7 +729,7 @@ export default function MapaCotacaoPage() {
     }
   });
 
-  if (loadingUser || loadingRequests || loadingSuppliers || loadingOrders) {
+  if (loadingUser || loadingRequests) {
     return (
       <Loading
         message="Carregando mapa de cotação..."
