@@ -30,6 +30,10 @@ export interface ContractBillingHistorico {
   pleitoId?: string | null;
   serviceOrder: string;
   grossValue: number;
+  netValue?: number | null;
+  invoiceNumber?: string | null;
+  issueDate?: string | null;
+  createdAt?: string | null;
 }
 
 const MESES_FILTRO = [
@@ -234,4 +238,117 @@ export function historicoEtiquetaBadgeClass(etiqueta: string): string {
 
 export function formatPleitoOsLabel(p: ContractPleitoHistorico): string {
   return formatOsSePasta(p.divSe || '-', p.folderNumber);
+}
+
+/** IDs sequenciais estáveis (1..N) por ordem de criação / emissão. */
+export function buildDisplayIdMap(
+  items: ReadonlyArray<{ id: string; createdAt?: string | null; issueDate?: string | null }>
+): Map<string, number> {
+  const sorted = [...items].sort((a, b) => {
+    const ta = a.createdAt
+      ? new Date(a.createdAt).getTime()
+      : a.issueDate
+        ? new Date(a.issueDate).getTime()
+        : 0;
+    const tb = b.createdAt
+      ? new Date(b.createdAt).getTime()
+      : b.issueDate
+        ? new Date(b.issueDate).getTime()
+        : 0;
+    if (ta !== tb) return ta - tb;
+    return a.id.localeCompare(b.id);
+  });
+  const map = new Map<string, number>();
+  sorted.forEach((item, index) => map.set(item.id, index + 1));
+  return map;
+}
+
+export function formatDisplayId(map: Map<string, number>, id: string): string {
+  const n = map.get(id);
+  return n != null ? String(n).padStart(2, '0') : '—';
+}
+
+function normalizeOsKey(divSe: string | null | undefined): string {
+  return (divSe || '').trim().toLowerCase();
+}
+
+/** Pleitos gerados vinculados à mesma OS / SE. */
+export function getOsLinkedPleitos<T extends ContractPleitoHistorico>(
+  allPleitos: T[],
+  divSe: string | null | undefined
+): T[] {
+  const key = normalizeOsKey(divSe);
+  if (!key) return [];
+  return allPleitos
+    .filter((p) => isGeneratedPleito(p) && normalizeOsKey(p.divSe) === key)
+    .sort((a, b) => {
+      const ta = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const tb = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      return ta - tb;
+    });
+}
+
+/** Faturamentos vinculados à OS (por pleitoId ou serviceOrder ≈ divSe). */
+export function getOsLinkedBillings<T extends ContractBillingHistorico>(
+  billings: T[],
+  allPleitos: ContractPleitoHistorico[],
+  divSe: string | null | undefined
+): T[] {
+  const key = (divSe || '').trim();
+  if (!key) return [];
+  const linkedPleitoIds = new Set(getOsLinkedPleitos(allPleitos, divSe).map((p) => p.id));
+  return billings
+    .filter((b) => {
+      if (b.pleitoId && linkedPleitoIds.has(b.pleitoId)) return true;
+      return (b.serviceOrder || '').trim() === key;
+    })
+    .sort((a, b) => {
+      const ta = a.issueDate ? new Date(a.issueDate).getTime() : a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const tb = b.issueDate ? new Date(b.issueDate).getTime() : b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      if (ta !== tb) return ta - tb;
+      return a.id.localeCompare(b.id);
+    });
+}
+
+/** Faturamentos gerados para um pleito específico (mesma regra de soma do valor faturado). */
+export function getPleitoLinkedBillings<T extends ContractBillingHistorico>(
+  p: ContractPleitoHistorico,
+  billings: T[]
+): T[] {
+  const byPleitoId = billings.filter((b) => b.pleitoId === p.id);
+  if (byPleitoId.length > 0) {
+    return [...byPleitoId].sort((a, b) => {
+      const ta = a.issueDate ? new Date(a.issueDate).getTime() : a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const tb = b.issueDate ? new Date(b.issueDate).getTime() : b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      if (ta !== tb) return ta - tb;
+      return a.id.localeCompare(b.id);
+    });
+  }
+  const os = (p.divSe || '').trim();
+  if (!os) return [];
+  return billings
+    .filter((b) => !b.pleitoId && (b.serviceOrder || '').trim() === os)
+    .sort((a, b) => {
+      const ta = a.issueDate ? new Date(a.issueDate).getTime() : a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const tb = b.issueDate ? new Date(b.issueDate).getTime() : b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      if (ta !== tb) return ta - tb;
+      return a.id.localeCompare(b.id);
+    });
+}
+
+export type BillingAndamentoStatus = 'Faturado' | 'Líquido pendente';
+
+export function getBillingAndamentoStatus(b: {
+  netValue?: number | string | null;
+}): BillingAndamentoStatus {
+  const net = b.netValue != null ? Number(b.netValue) : NaN;
+  if (!Number.isFinite(net) || net <= 0) return 'Líquido pendente';
+  return 'Faturado';
+}
+
+export function billingAndamentoBadgeClass(status: BillingAndamentoStatus): string {
+  if (status === 'Líquido pendente') {
+    return 'inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-900/30 dark:text-amber-300';
+  }
+  return 'inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300';
 }

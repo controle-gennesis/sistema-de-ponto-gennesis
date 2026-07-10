@@ -1,20 +1,24 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ChevronDown, FileDown, FileSpreadsheet } from 'lucide-react';
+import { FileDown, FileSpreadsheet, Filter, Search, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '@/lib/api';
 import { formatOsSePastaOrDash } from '@/lib/formatOsSePasta';
-import { pleitoStatusReadOnlySpanClass } from '@/lib/pleitoStatusStyles';
 import { Loading } from '@/components/ui/Loading';
+import { Modal } from '@/components/ui/Modal';
+import { Button } from '@/components/ui/Button';
+import { CadastroListSummary, getCadastroListRange } from '@/components/ui/CadastroListSummary';
+import { ListPagination } from '@/components/ui/ListPagination';
+import { cadastroListClasses } from '@/components/ui/RowActionMenu';
+import { listTableRowClasses } from '@/components/ui/listTableUi';
 import { formatDateTimeBr } from '@/lib/dateTimeBr';
 import {
   exportHistoricoOsPdf,
   exportPleitosOsToXlsx,
   computeHistoricoOsTotals,
   getOsEtiquetaAbertura,
-  getOsFaturamentoAcumulado,
   getOsStatusFaturamentoPct,
   getPleitoCreationMonth,
   getPleitoCreationYear,
@@ -23,6 +27,14 @@ import {
   type BillingForOsCheck,
   type PleitoOsExportRow,
 } from '@/lib/pleitoOsExport';
+
+const LIST_DISPLAY_LIMIT = 10;
+
+const LIST_SEARCH_INPUT_CLASS =
+  'h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100';
+
+const TOOLBAR_BTN =
+  'inline-flex h-10 shrink-0 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700';
 
 const MESES_OPCOES = [
   { value: 1, label: 'Janeiro' },
@@ -39,17 +51,6 @@ const MESES_OPCOES = [
   { value: 12, label: 'Dezembro' },
 ];
 
-function formatDate(dateStr: string | null | undefined) {
-  if (!dateStr) return '—';
-  const raw = String(dateStr).trim();
-  const only = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  const d = only
-    ? new Date(Number(only[1]), Number(only[2]) - 1, Number(only[3]), 12, 0, 0, 0)
-    : new Date(raw);
-  if (Number.isNaN(d.getTime())) return '—';
-  return d.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
-}
-
 function formatCurrency(value: number) {
   return new Intl.NumberFormat('pt-BR', {
     style: 'currency',
@@ -64,7 +65,10 @@ function situacaoBadgeClass(situacao: string): string {
   if (situacao === 'Aberta') return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300';
   if (situacao === 'Faturado') return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300';
   if (situacao === 'Gerado 100%') return 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300';
-  if (situacao === 'Pleito gerado' || situacao === 'Pleito parcial') {
+  if (situacao === 'Pleiteado parcial') {
+    return 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300';
+  }
+  if (situacao === 'Pleito gerado') {
     return 'bg-violet-100 text-violet-800 dark:bg-violet-900/30 dark:text-violet-300';
   }
   return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300';
@@ -77,70 +81,43 @@ function toggleInSet<T>(set: Set<T>, value: T, checked: boolean): Set<T> {
   return next;
 }
 
-function CheckboxFilterDropdown<T extends string | number>({
+function CheckboxFilterGroup<T extends string | number>({
   title,
   options,
   selected,
   onChange,
-  allLabel = 'Marcar todos',
-  noneLabel = 'Limpar',
-  minWidth = '11rem',
 }: {
   title: string;
   options: { value: T; label: string }[];
   selected: Set<T>;
   onChange: (next: Set<T>) => void;
-  allLabel?: string;
-  noneLabel?: string;
-  minWidth?: string;
 }) {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onPointerDown = (e: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener('mousedown', onPointerDown);
-    return () => document.removeEventListener('mousedown', onPointerDown);
-  }, [open]);
-
   return (
-    <div ref={rootRef} className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
-        style={{ minWidth }}
-      >
-        <span className="truncate">{title}</span>
-        {selected.size > 0 ? (
-          <span className="rounded-full bg-blue-100 px-1.5 text-xs font-medium text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
-            {selected.size}
-          </span>
-        ) : null}
-        <ChevronDown className="h-4 w-4 shrink-0 opacity-60" />
-      </button>
-      {open ? (
-        <div className="absolute left-0 z-20 mt-1 max-h-64 w-64 overflow-y-auto rounded-lg border border-gray-200 bg-white p-2 shadow-lg dark:border-gray-700 dark:bg-gray-800">
-          <div className="mb-2 flex gap-2 border-b border-gray-100 pb-2 dark:border-gray-700">
-            <button
-              type="button"
-              className="text-xs text-blue-600 hover:underline dark:text-blue-400"
-              onClick={() => onChange(new Set(options.map((o) => o.value)))}
-            >
-              {allLabel}
-            </button>
-            <button
-              type="button"
-              className="text-xs text-gray-500 hover:underline dark:text-gray-400"
-              onClick={() => onChange(new Set())}
-            >
-              {noneLabel}
-            </button>
-          </div>
-          {options.map((opt) => (
+    <div>
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <label className="text-sm font-medium text-gray-700 dark:text-gray-300">{title}</label>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            className="text-xs text-blue-600 hover:underline dark:text-blue-400"
+            onClick={() => onChange(new Set(options.map((o) => o.value)))}
+          >
+            Marcar todos
+          </button>
+          <button
+            type="button"
+            className="text-xs text-gray-500 hover:underline dark:text-gray-400"
+            onClick={() => onChange(new Set())}
+          >
+            Limpar
+          </button>
+        </div>
+      </div>
+      <div className="max-h-40 space-y-0.5 overflow-y-auto rounded-lg border border-gray-200 p-2 dark:border-gray-700">
+        {options.length === 0 ? (
+          <p className="px-2 py-1.5 text-sm text-gray-500 dark:text-gray-400">Sem opções</p>
+        ) : (
+          options.map((opt) => (
             <label
               key={String(opt.value)}
               className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-700/50"
@@ -153,9 +130,12 @@ function CheckboxFilterDropdown<T extends string | number>({
               />
               <span className="truncate text-gray-800 dark:text-gray-200">{opt.label}</span>
             </label>
-          ))}
-        </div>
-      ) : null}
+          ))
+        )}
+      </div>
+      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+        {selected.size === 0 ? 'Nenhum marcado = todos' : `${selected.size} selecionado(s)`}
+      </p>
     </div>
   );
 }
@@ -169,7 +149,9 @@ export function ContractHistoricoOsPanel({ contractId }: ContractHistoricoOsPane
   const [selectedYears, setSelectedYears] = useState<Set<number>>(new Set());
   const [selectedMonths, setSelectedMonths] = useState<Set<number>>(new Set());
   const [selectedOsIds, setSelectedOsIds] = useState<Set<string>>(new Set());
+  const [showFilterModal, setShowFilterModal] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
+  const [listPage, setListPage] = useState(1);
 
   const { data: contractData, isLoading: loadingContract } = useQuery({
     queryKey: ['contract', contractId],
@@ -265,12 +247,35 @@ export function ContractHistoricoOsPanel({ contractId }: ContractHistoricoOsPane
     });
   }, [allOs, selectedYears, selectedMonths, selectedOsIds, search, billingsForOs]);
 
+  useEffect(() => {
+    setListPage(1);
+  }, [search, selectedYears, selectedMonths, selectedOsIds]);
+
+  const listRange = useMemo(
+    () => getCadastroListRange(listPage, LIST_DISPLAY_LIMIT, filteredOs.length),
+    [listPage, filteredOs.length]
+  );
+
+  const displayedOs = useMemo(() => {
+    const start = (listPage - 1) * LIST_DISPLAY_LIMIT;
+    return filteredOs.slice(start, start + LIST_DISPLAY_LIMIT);
+  }, [filteredOs, listPage]);
+
   const totals = useMemo(
     () => computeHistoricoOsTotals(filteredOs, billingsForOs),
     [filteredOs, billingsForOs]
   );
 
   const contract = (contractData as { data?: { name: string; number: string } } | undefined)?.data;
+
+  const hasActiveFilter =
+    selectedYears.size > 0 || selectedMonths.size > 0 || selectedOsIds.size > 0;
+
+  const clearFilters = () => {
+    setSelectedYears(new Set());
+    setSelectedMonths(new Set());
+    setSelectedOsIds(new Set());
+  };
 
   const handleExportExcel = () => {
     if (filteredOs.length === 0) {
@@ -311,178 +316,255 @@ export function ContractHistoricoOsPanel({ contractId }: ContractHistoricoOsPane
     return <Loading message="Carregando histórico..." />;
   }
 
+  const countLabel =
+    filteredOs.length === 1 ? '1 ordem de serviço' : `${filteredOs.length} ordens de serviço`;
+
   return (
-    <div className="space-y-4">
-      {contract ? (
-        <p className="text-sm text-gray-500 dark:text-gray-400">
-          {contract.number} – {contract.name}
-        </p>
-      ) : null}
-      <p className="text-sm text-gray-600 dark:text-gray-400">
-        Todas as ordens de serviço cadastradas neste contrato.
-      </p>
-      <div className="flex flex-wrap items-center gap-2">
-        <input
-          type="search"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Buscar descrição ou situação…"
-          className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 sm:w-56"
-        />
-        <button
-          type="button"
-          onClick={handleExportExcel}
-          disabled={filteredOs.length === 0}
-          className="inline-flex items-center gap-2 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          <FileSpreadsheet className="h-4 w-4" />
-          Exportar Excel
-        </button>
-        <button
-          type="button"
-          onClick={handleExportPdf}
-          disabled={allOs.length === 0 || exportingPdf}
-          className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          <FileDown className="h-4 w-4" />
-          {exportingPdf ? 'Gerando PDF…' : 'Exportar PDF'}
-        </button>
+    <>
+      <div className="space-y-4">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            {contract ? (
+              <p className="truncate text-sm font-medium text-gray-900 dark:text-gray-100">
+                {contract.number} – {contract.name}
+              </p>
+            ) : null}
+            <p className="text-sm text-gray-500 dark:text-gray-400">{countLabel}</p>
+          </div>
+          {allOs.length > 0 ? (
+            <div className={cadastroListClasses.cardToolbar}>
+              <div className="relative min-w-[220px] flex-1 sm:w-[280px] sm:flex-none">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
+                <input
+                  type="search"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Buscar OS, descrição, situação..."
+                  className={LIST_SEARCH_INPUT_CLASS}
+                />
+                {search ? (
+                  <button
+                    type="button"
+                    onClick={() => setSearch('')}
+                    aria-label="Limpar busca"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-300"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                ) : null}
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowFilterModal(true)}
+                className={`relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition-colors ${
+                  hasActiveFilter
+                    ? 'border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100 dark:border-blue-800/60 dark:bg-blue-950/30 dark:text-blue-300 dark:hover:bg-blue-900/40'
+                    : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
+                }`}
+                aria-label="Abrir filtro"
+                title={hasActiveFilter ? 'Filtro (ativo)' : 'Filtro'}
+              >
+                <Filter className="h-4 w-4" />
+                {hasActiveFilter ? (
+                  <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-blue-500 ring-2 ring-white dark:ring-gray-900" />
+                ) : null}
+              </button>
+              <button
+                type="button"
+                onClick={handleExportExcel}
+                disabled={filteredOs.length === 0}
+                className={TOOLBAR_BTN}
+                title="Exportar Excel"
+              >
+                <FileSpreadsheet className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                Excel
+              </button>
+              <button
+                type="button"
+                onClick={handleExportPdf}
+                disabled={allOs.length === 0 || exportingPdf}
+                className={TOOLBAR_BTN}
+                title="Exportar PDF"
+              >
+                <FileDown className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
+                {exportingPdf ? 'PDF…' : 'PDF'}
+              </button>
+            </div>
+          ) : null}
+        </div>
+
+        {filteredOs.length > 0 ? (
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+            <div className="flex items-baseline justify-between gap-3 rounded-lg border border-gray-200 bg-gray-50/80 px-3 py-2 dark:border-gray-700 dark:bg-gray-800/40 sm:flex-col sm:items-stretch sm:justify-start sm:gap-0.5">
+              <span className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                Total orçado
+              </span>
+              <span className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">
+                {formatCurrency(totals.totalOrcado)}
+              </span>
+            </div>
+            <div className="flex items-baseline justify-between gap-3 rounded-lg border border-gray-200 bg-gray-50/80 px-3 py-2 dark:border-gray-700 dark:bg-gray-800/40 sm:flex-col sm:items-stretch sm:justify-start sm:gap-0.5">
+              <span className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                Total pleiteado
+              </span>
+              <span className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">
+                {formatCurrency(totals.totalPleiteado)}
+              </span>
+            </div>
+            <div className="flex items-baseline justify-between gap-3 rounded-lg border border-gray-200 bg-gray-50/80 px-3 py-2 dark:border-gray-700 dark:bg-gray-800/40 sm:flex-col sm:items-stretch sm:justify-start sm:gap-0.5">
+              <span className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                Total faturado
+              </span>
+              <span className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">
+                {formatCurrency(totals.totalFaturado)}
+              </span>
+            </div>
+          </div>
+        ) : null}
+
+        {allOs.length === 0 ? (
+          <div className="py-10 text-center text-gray-500 dark:text-gray-400">
+            Nenhuma ordem de serviço cadastrada.
+          </div>
+        ) : filteredOs.length === 0 ? (
+          <div className="py-10 text-center text-gray-500 dark:text-gray-400">
+            Nenhuma OS encontrada com os filtros selecionados.
+          </div>
+        ) : (
+          <>
+            <CadastroListSummary
+              startItem={listRange.startItem}
+              endItem={listRange.endItem}
+              total={filteredOs.length}
+              itemLabel="ordem de serviço"
+              itemLabelPlural="ordens de serviço"
+              currentPage={listPage}
+              totalPages={listRange.totalPages}
+            />
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[960px] text-sm" data-cc-skip-column-customizer="1">
+                <thead className="border-b border-gray-200 dark:border-gray-700">
+                  <tr>
+                    <th className={`${cadastroListClasses.th} whitespace-nowrap align-middle`}>OS / SE</th>
+                    <th className={`${cadastroListClasses.th} align-middle`}>Descrição</th>
+                    <th className={`${cadastroListClasses.thCenter} whitespace-nowrap align-middle`}>
+                      Etiqueta
+                    </th>
+                    <th className={`${cadastroListClasses.thCenter} whitespace-nowrap align-middle`}>
+                      Situação pleito
+                    </th>
+                    <th className={`${cadastroListClasses.thNumeric} align-middle`}>Orçamento</th>
+                    <th className={`${cadastroListClasses.thNumeric} whitespace-nowrap align-middle`}>
+                      Valor pleiteado
+                    </th>
+                    <th className={`${cadastroListClasses.thCenter} whitespace-nowrap align-middle`}>
+                      Fat. (%)
+                    </th>
+                    <th className={`${cadastroListClasses.th} whitespace-nowrap align-middle`}>
+                      Preenchimento
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
+                  {displayedOs.map((p) => {
+                    const etiqueta = getOsEtiquetaAbertura(p, billingsForOs);
+                    const situacaoPleito = getPleitoOsSituacao(p, billingsForOs);
+                    const valorPleiteado = p.billingRequest ? Number(p.billingRequest) : 0;
+                    const statusFatPct = getOsStatusFaturamentoPct(p, billingsForOs);
+                    const orcamentoNum = getPleitoOrcamentoValor(p);
+                    return (
+                      <tr key={p.id} className={listTableRowClasses.tr}>
+                        <td className={`${cadastroListClasses.tdMono} align-middle whitespace-nowrap`}>
+                          {formatOsSePastaOrDash(p.divSe, p.folderNumber)}
+                        </td>
+                        <td
+                          className={`${cadastroListClasses.tdTruncate} align-middle`}
+                          title={p.serviceDescription || ''}
+                        >
+                          <span className="block truncate">{p.serviceDescription || '—'}</span>
+                        </td>
+                        <td className={`${cadastroListClasses.tdCenter} align-middle whitespace-nowrap`}>
+                          <span
+                            className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${situacaoBadgeClass(etiqueta)}`}
+                          >
+                            {etiqueta}
+                          </span>
+                        </td>
+                        <td className={`${cadastroListClasses.tdCenter} align-middle whitespace-nowrap`}>
+                          <span
+                            className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${situacaoBadgeClass(situacaoPleito)}`}
+                          >
+                            {situacaoPleito}
+                          </span>
+                        </td>
+                        <td
+                          className={`${cadastroListClasses.tdNumeric} align-middle text-gray-900 dark:text-gray-100`}
+                        >
+                          {orcamentoNum > 0 ? formatCurrency(orcamentoNum) : p.budget || '—'}
+                        </td>
+                        <td
+                          className={`${cadastroListClasses.tdNumeric} align-middle text-gray-900 dark:text-gray-100`}
+                        >
+                          {formatCurrency(valorPleiteado)}
+                        </td>
+                        <td
+                          className={`${cadastroListClasses.tdCenter} align-middle text-gray-900 dark:text-gray-100`}
+                        >
+                          {statusFatPct != null ? `${statusFatPct.toFixed(1)}%` : '—'}
+                        </td>
+                        <td className={`${cadastroListClasses.tdMuted} align-middle whitespace-nowrap`}>
+                          {formatDateTimeBr(p.createdAt, '—')}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <ListPagination
+              currentPage={listPage}
+              totalPages={listRange.totalPages}
+              onPageChange={setListPage}
+            />
+          </>
+        )}
       </div>
-      {allOs.length > 0 ? (
-        <div className="flex flex-wrap items-center gap-2">
-          <CheckboxFilterDropdown
+
+      <Modal
+        isOpen={showFilterModal}
+        onClose={() => setShowFilterModal(false)}
+        title="Filtros — Histórico de OS"
+        size="md"
+      >
+        <div className="space-y-4">
+          <CheckboxFilterGroup
             title="Ano de criação"
             options={yearOptions}
             selected={selectedYears}
             onChange={setSelectedYears}
           />
-          <CheckboxFilterDropdown
+          <CheckboxFilterGroup
             title="Mês de criação"
             options={monthOptions}
             selected={selectedMonths}
             onChange={setSelectedMonths}
-            minWidth="12rem"
           />
-          <CheckboxFilterDropdown
+          <CheckboxFilterGroup
             title="OS / SE"
             options={osOptions}
             selected={selectedOsIds}
             onChange={setSelectedOsIds}
-            minWidth="14rem"
           />
-        </div>
-      ) : null}
-      {filteredOs.length > 0 ? (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <div className="rounded-lg border border-gray-200 bg-white px-4 py-3 dark:border-gray-700 dark:bg-gray-900/50">
-            <p className="text-xs text-gray-500 dark:text-gray-400">Total orçado (filtro)</p>
-            <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-              {formatCurrency(totals.totalOrcado)}
-            </p>
-          </div>
-          <div className="rounded-lg border border-gray-200 bg-white px-4 py-3 dark:border-gray-700 dark:bg-gray-900/50">
-            <p className="text-xs text-gray-500 dark:text-gray-400">Total pleiteado (filtro)</p>
-            <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-              {formatCurrency(totals.totalPleiteado)}
-            </p>
-          </div>
-          <div className="rounded-lg border border-gray-200 bg-white px-4 py-3 dark:border-gray-700 dark:bg-gray-900/50">
-            <p className="text-xs text-gray-500 dark:text-gray-400">Total faturado (filtro)</p>
-            <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-              {formatCurrency(totals.totalFaturado)}
-            </p>
+          <div className="flex items-center justify-between gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
+            <Button type="button" variant="outline" onClick={clearFilters}>
+              Limpar filtros
+            </Button>
+            <Button type="button" onClick={() => setShowFilterModal(false)}>
+              Fechar
+            </Button>
           </div>
         </div>
-      ) : null}
-      {allOs.length === 0 ? (
-        <p className="text-gray-500 dark:text-gray-400">Nenhuma ordem de serviço cadastrada.</p>
-      ) : filteredOs.length === 0 ? (
-        <p className="text-gray-500 dark:text-gray-400">Nenhuma OS encontrada com os filtros selecionados.</p>
-      ) : (
-        <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900/50">
-          <table className="w-full min-w-[1200px] text-sm">
-            <thead className="border-b border-gray-200 bg-gray-100 dark:border-gray-700 dark:bg-gray-800">
-              <tr>
-                <th className="whitespace-nowrap px-3 py-2 text-left font-medium text-gray-700 dark:text-gray-300">
-                  Etiqueta
-                </th>
-                <th className="whitespace-nowrap px-3 py-2 text-left font-medium text-gray-700 dark:text-gray-300">
-                  Situação pleito
-                </th>
-                <th className="min-w-[10rem] whitespace-nowrap px-3 py-2 text-left font-medium text-gray-700 dark:text-gray-300">
-                  OS / SE
-                </th>
-                <th className="px-3 py-2 text-left font-medium text-gray-700 dark:text-gray-300">Descrição</th>
-                <th className="whitespace-nowrap px-3 py-2 text-right font-medium text-gray-700 dark:text-gray-300">
-                  Orçamento
-                </th>
-                <th className="whitespace-nowrap px-3 py-2 text-right font-medium text-gray-700 dark:text-gray-300">
-                  Valor pleiteado
-                </th>
-                <th className="whitespace-nowrap px-3 py-2 text-center font-medium text-gray-700 dark:text-gray-300">
-                  Fat. (%)
-                </th>
-                <th className="whitespace-nowrap px-3 py-2 text-left font-medium text-gray-700 dark:text-gray-300">
-                  Preenchimento
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-              {filteredOs.map((p) => {
-                const etiqueta = getOsEtiquetaAbertura(p, billingsForOs);
-                const situacaoPleito = getPleitoOsSituacao(p, billingsForOs);
-                const valorPleiteado = p.billingRequest ? Number(p.billingRequest) : 0;
-                const statusFatPct = getOsStatusFaturamentoPct(p, billingsForOs);
-                const orcamentoNum = getPleitoOrcamentoValor(p);
-                return (
-                  <tr key={p.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/40">
-                    <td className="whitespace-nowrap px-3 py-2">
-                      <span
-                        className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${situacaoBadgeClass(etiqueta)}`}
-                      >
-                        {etiqueta}
-                      </span>
-                    </td>
-                    <td className="whitespace-nowrap px-3 py-2">
-                      <span
-                        className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${situacaoBadgeClass(situacaoPleito)}`}
-                      >
-                        {situacaoPleito}
-                      </span>
-                    </td>
-                    <td className="whitespace-nowrap px-3 py-2 font-medium text-gray-900 dark:text-gray-100">
-                      {formatOsSePastaOrDash(p.divSe, p.folderNumber)}
-                    </td>
-                    <td
-                      className="max-w-xs truncate px-3 py-2 text-gray-900 dark:text-gray-100"
-                      title={p.serviceDescription || ''}
-                    >
-                      {p.serviceDescription || '—'}
-                    </td>
-                    <td className="whitespace-nowrap px-3 py-2 text-right text-gray-900 dark:text-gray-100">
-                      {orcamentoNum > 0 ? formatCurrency(orcamentoNum) : p.budget || '—'}
-                    </td>
-                    <td className="whitespace-nowrap px-3 py-2 text-right text-gray-900 dark:text-gray-100">
-                      {formatCurrency(valorPleiteado)}
-                    </td>
-                    <td className="whitespace-nowrap px-3 py-2 text-center text-gray-900 dark:text-gray-100">
-                      {statusFatPct != null ? `${statusFatPct.toFixed(1)}%` : '—'}
-                    </td>
-                    <td className="whitespace-nowrap px-3 py-2 text-gray-500 dark:text-gray-400">
-                      {formatDateTimeBr(p.createdAt, '—')}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-      {filteredOs.length > 0 ? (
-        <p className="text-xs text-gray-500 dark:text-gray-400">
-          Exibindo {filteredOs.length} de {allOs.length} ordem(ns) de serviço.
-        </p>
-      ) : null}
-    </div>
+      </Modal>
+    </>
   );
 }

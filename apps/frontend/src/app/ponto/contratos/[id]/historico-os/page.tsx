@@ -82,7 +82,10 @@ function situacaoBadgeClass(situacao: string): string {
   if (situacao === 'Gerado 100%') {
     return 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300';
   }
-  if (situacao === 'Pleito gerado' || situacao === 'Pleito parcial') {
+  if (situacao === 'Pleiteado parcial') {
+    return 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300';
+  }
+  if (situacao === 'Pleito gerado') {
     return 'bg-violet-100 text-violet-800 dark:bg-violet-900/30 dark:text-violet-300';
   }
   return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300';

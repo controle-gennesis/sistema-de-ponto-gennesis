@@ -78,7 +78,16 @@ import {
   type DivSeOptionRow
 } from '@/lib/formatOsSePasta';
 import { loadPdfBrandingLogoDataUrl } from '@/lib/loadPdfBrandingLogo';
-import { getOsPleiteadoPct, getOsRestanteFaturar, getOsRestantePleitear, getOsStatus, getOsStatusFaturamentoPct, isOsConcluida, osStatusBadgeClass, sumOsPleiteadoTotal, type BillingForOsCheck } from '@/lib/pleitoOsExport';
+import { getOsPleiteadoPct, getOsRestantePleitear, getOsStatus, isOsConcluida, osStatusBadgeClass, sumOsPleiteadoTotal, type BillingForOsCheck } from '@/lib/pleitoOsExport';
+import {
+  billingAndamentoBadgeClass,
+  buildDisplayIdMap,
+  formatDisplayId,
+  getHistoricoEtiqueta,
+  getOsLinkedPleitos,
+  historicoEtiquetaBadgeClass,
+  isGeneratedPleito,
+} from '@/lib/contractHistoricoPleitos';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import { mapUsersToEmployeeOptions } from '@/lib/employeeSelectOptions';
 import {
@@ -2325,7 +2334,7 @@ export default function ContractDetailPage() {
 
   // Faturamento filtrado por ano e mês (para exibição nas tabelas)
   const filteredBillings = useMemo(() => {
-    return billings.filter((b) => {
+    const rows = billings.filter((b) => {
       const d = parseDateSafe(b.issueDate);
       if (!d) return false;
       if (!isAllYears && d.getFullYear() !== selectedYear) return false;
@@ -2350,15 +2359,30 @@ export default function ContractDetailPage() {
 
       return true;
     });
+
+    return [...rows].sort((a, b) => {
+      const ta = parseDateSafe(a.issueDate)?.getTime() ?? 0;
+      const tb = parseDateSafe(b.issueDate)?.getTime() ?? 0;
+      if (tb !== ta) return tb - ta;
+      const ca = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const cb = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      if (cb !== ca) return cb - ca;
+      return b.id.localeCompare(a.id);
+    });
   }, [billings, isAllYears, selectedYear, selectedMonth, searchTermBillings, filterBillingOsSe, filterBillingInvoice, filterBillingGross]);
 
-  // Pleitos filtrados por ano, mês e filtros de status
+  // Pleitos filtrados por ano, mês e filtros de status.
+  // OS concluídas ficam fora da lista padrão (vão para Histórico), mas entram
+  // quando o filtro pede explicitamente Concluída ou faturamento 100%.
   const filteredPleitos = useMemo(() => {
-    let result = pleitos.filter((p) => {
+    const includeConcluidas =
+      filterOsStatus === 'Concluída' || filterStatusFaturamento === '100';
+
+    let result = allPleitos.filter((p) => {
+      if (isPleitoHistorico(p)) return false;
+      if (!includeConcluidas && isOsConcluida(p, billingsForOs)) return false;
+
       const monthNum = p.creationMonth ? parseInt(String(p.creationMonth).replace(/\D/g, '') || '0', 10) : null;
-      const baseDate = monthNum && p.creationYear
-        ? new Date(p.creationYear, monthNum - 1, 1, 12, 0, 0, 0)
-        : parseDateSafe(p.startDate || p.createdAt || null);
       const year = p.creationYear ?? getDateYear(p.startDate);
       if (!isAllYears && (year === null || year !== selectedYear)) return false;
       if (selectedMonth === 0) return true;
@@ -2398,7 +2422,9 @@ export default function ContractDetailPage() {
       });
     }
     if (filterOsStatus) {
-      result = result.filter((p) => getOsStatus(p, billings, pleitos) === filterOsStatus);
+      result = result.filter(
+        (p) => getOsStatus(p, billingsForOs, allPleitos) === filterOsStatus
+      );
     }
 
     if (searchTermPleitos.trim()) {
@@ -2406,7 +2432,19 @@ export default function ContractDetailPage() {
     }
 
     return result;
-  }, [pleitos, isAllYears, selectedYear, selectedMonth, filterStatusOrcamento, filterStatusExecucao, filterStatusFaturamento, filterOsStatus, searchTermPleitos, billings]);
+  }, [
+    allPleitos,
+    billingsForOs,
+    isAllYears,
+    selectedYear,
+    selectedMonth,
+    filterStatusOrcamento,
+    filterStatusExecucao,
+    filterStatusFaturamento,
+    filterOsStatus,
+    searchTermPleitos,
+    billings,
+  ]);
 
   const hasActivePleitosFilter = Boolean(
     filterStatusOrcamento || filterStatusExecucao || filterStatusFaturamento || filterOsStatus
@@ -2496,6 +2534,18 @@ export default function ContractDetailPage() {
     () => getCadastroListRange(billingsListPage, LIST_DISPLAY_LIMIT, filteredBillings.length),
     [billingsListPage, filteredBillings.length]
   );
+
+  const generatedPleitosForIds = useMemo(
+    () => allPleitos.filter((p) => isGeneratedPleito(p)),
+    [allPleitos]
+  );
+
+  const pleitoDisplayIds = useMemo(
+    () => buildDisplayIdMap(generatedPleitosForIds),
+    [generatedPleitosForIds]
+  );
+
+  const billingDisplayIds = useMemo(() => buildDisplayIdMap(billings), [billings]);
   const {
     rowActionMenu: pleitoRowActionMenu,
     rowForActionMenu: pleitoRowForActionMenu,
@@ -4407,12 +4457,12 @@ export default function ContractDetailPage() {
                         <th className={`${cadastroListClasses.th} whitespace-nowrap align-middle`}>ID</th>
                         <th className={`${cadastroListClasses.th} align-middle`}>Descrição</th>
                         <th className={`${cadastroListClasses.thCenter} align-middle whitespace-nowrap`}>Status</th>
+                        <th className={`${cadastroListClasses.thCenter} align-middle whitespace-nowrap`}>% Pleiteado</th>
+                        <th className={`${cadastroListClasses.thCenter} align-middle whitespace-nowrap`}>Pleito</th>
+                        <th className={`${cadastroListClasses.thCenter} align-middle whitespace-nowrap`}>Status Pleito</th>
                         <th className={`${cadastroListClasses.thCenter} align-middle`}>Status Orçamento</th>
                         <th className={`${cadastroListClasses.thCenter} align-middle`}>Status Execução</th>
-                        <th className={`${cadastroListClasses.thCenter} align-middle whitespace-nowrap`}>% Pleiteado</th>
-                        <th className={`${cadastroListClasses.thCenter} align-middle whitespace-nowrap`}>% Faturado</th>
                         <th className={`${cadastroListClasses.thNumeric} align-middle whitespace-nowrap`}>Restante a pleitear</th>
-                        <th className={`${cadastroListClasses.thNumeric} align-middle whitespace-nowrap`}>Restante a faturar</th>
                         <th className={`${cadastroListClasses.thNumeric} align-middle`}>Orçamento</th>
                         <th className={`${listTableRowClasses.actionTh} align-middle`}>Ação</th>
                       </tr>
@@ -4421,10 +4471,9 @@ export default function ContractDetailPage() {
                       {displayedPleitos.map((p) => {
                         const osStatus = getOsStatus(p, billingsForOs, allPleitos);
                         const pctPleiteado = getOsPleiteadoPct(p, allPleitos);
-                        const pctFaturado = getOsStatusFaturamentoPct(p, billingsForOs);
                         const restantePleitear = getOsRestantePleitear(p, allPleitos);
-                        const restanteFaturar = getOsRestanteFaturar(p, billingsForOs);
                         const isSelected = selectedForPleito.has(p.id);
+                        const linkedPleitos = getOsLinkedPleitos(allPleitos, p.divSe);
                         return (
                         <tr
                           key={p.id}
@@ -4477,6 +4526,46 @@ export default function ContractDetailPage() {
                               {osStatus}
                             </span>
                           </td>
+                          <td className={`${cadastroListClasses.tdCenter} align-middle text-gray-900 dark:text-gray-100`}>
+                            {pctPleiteado != null ? `${pctPleiteado.toFixed(1)}%` : '—'}
+                          </td>
+                          <td className={`${cadastroListClasses.tdCenter} align-middle`}>
+                            {linkedPleitos.length === 0 ? (
+                              <span className="text-xs text-gray-400 dark:text-gray-500">—</span>
+                            ) : (
+                              <div className="flex flex-col items-center gap-0.5">
+                                {linkedPleitos.map((lp) => (
+                                  <span
+                                    key={lp.id}
+                                    className="block font-mono text-xs font-medium text-gray-900 dark:text-gray-100"
+                                    title={`Pleito ${formatDisplayId(pleitoDisplayIds, lp.id)}`}
+                                  >
+                                    {formatDisplayId(pleitoDisplayIds, lp.id)}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </td>
+                          <td className={`${cadastroListClasses.tdCenter} align-middle`}>
+                            {linkedPleitos.length === 0 ? (
+                              <span className="text-xs text-gray-400 dark:text-gray-500">—</span>
+                            ) : (
+                              <div className="flex flex-col items-center gap-1">
+                                {linkedPleitos.map((lp) => {
+                                  const etiqueta = getHistoricoEtiqueta(lp, billings) || 'Pleiteado';
+                                  return (
+                                    <span
+                                      key={lp.id}
+                                      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${historicoEtiquetaBadgeClass(etiqueta)}`}
+                                      title={etiqueta}
+                                    >
+                                      {etiqueta}
+                                    </span>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </td>
                           <td className={`${cadastroListClasses.tdCenter} align-middle`}>
                             <span
                               className={pleitoStatusReadOnlySpanClass('budget', p.budgetStatus)}
@@ -4493,17 +4582,8 @@ export default function ContractDetailPage() {
                               {p.executionStatus || '—'}
                             </span>
                           </td>
-                          <td className={`${cadastroListClasses.tdCenter} align-middle text-gray-900 dark:text-gray-100`}>
-                            {pctPleiteado != null ? `${pctPleiteado.toFixed(1)}%` : '—'}
-                          </td>
-                          <td className={`${cadastroListClasses.tdCenter} align-middle text-gray-900 dark:text-gray-100`}>
-                            {pctFaturado != null ? `${pctFaturado.toFixed(1)}%` : '—'}
-                          </td>
                           <td className={`${cadastroListClasses.tdNumeric} align-middle text-gray-900 dark:text-gray-100`}>
                             {restantePleitear != null ? formatCurrency(restantePleitear) : '—'}
-                          </td>
-                          <td className={`${cadastroListClasses.tdNumeric} align-middle text-gray-900 dark:text-gray-100`}>
-                            {restanteFaturar != null ? formatCurrency(restanteFaturar) : '—'}
                           </td>
                           <td className={`${cadastroListClasses.tdNumeric} align-middle font-medium text-gray-900 dark:text-gray-100`}>
                             {p.budget ? formatCurrency(Number(p.budget)) : '-'}
@@ -4697,42 +4777,50 @@ export default function ContractDetailPage() {
                   <table className="w-full text-sm" data-cc-skip-column-customizer="1">
                     <thead className="border-b border-gray-200 dark:border-gray-700">
                       <tr>
+                        <th className={`${cadastroListClasses.th} whitespace-nowrap align-middle`}>ID</th>
                         <th className={`${cadastroListClasses.th} whitespace-nowrap align-middle`}>OS / SE</th>
-                        <th className={`${cadastroListClasses.th} whitespace-nowrap align-middle`}>Nº Nota Fiscal</th>
+                        <th className={`${cadastroListClasses.th} whitespace-nowrap align-middle`}>Nº NF</th>
                         <th className={`${cadastroListClasses.thCenter} whitespace-nowrap align-middle`}>Data emissão</th>
-                        <th className={`${cadastroListClasses.thNumeric} align-middle`}>Valor bruto</th>
+                        <th className={`${cadastroListClasses.thNumeric} align-middle whitespace-nowrap`}>Valor bruto</th>
+                        <th className={`${cadastroListClasses.thNumeric} align-middle whitespace-nowrap`}>Valor líquido</th>
+                        <th className={`${cadastroListClasses.thCenter} whitespace-nowrap align-middle`}>Status</th>
                         {canDeleteContrato ? (
                           <th className={`${listTableRowClasses.actionTh} align-middle`}>Ação</th>
                         ) : null}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
-                      {displayedBillings.map((b) => (
+                      {displayedBillings.map((b) => {
+                        const liquidoMissing = isNetValueMissing(b);
+                        const fatStatus = liquidoMissing ? 'Líquido pendente' : 'Faturado';
+                        return (
                         <tr
                           key={b.id}
                           onClick={() => setSelectedBilling(b)}
                           className={listTableRowClasses.trNavigable}
                         >
                           <td className={`${cadastroListClasses.tdMono} align-middle whitespace-nowrap`}>
-                            {formatOsSePastaOrDash(b.serviceOrder, folderForDivSe(pleitos, b.serviceOrder))}
+                            {formatDisplayId(billingDisplayIds, b.id)}
                           </td>
                           <td className={`${cadastroListClasses.tdMono} align-middle whitespace-nowrap`}>
-                            {b.invoiceNumber}
+                            {formatOsSePastaOrDash(b.serviceOrder, folderForDivSe(allPleitos, b.serviceOrder))}
+                          </td>
+                          <td className={`${cadastroListClasses.tdMono} align-middle whitespace-nowrap`}>
+                            {(b.invoiceNumber || '').trim() || '—'}
                           </td>
                           <td className={`${cadastroListClasses.tdCenter} align-middle whitespace-nowrap text-gray-900 dark:text-gray-100`}>
                             {formatDate(b.issueDate)}
                           </td>
-                          <td className={`${cadastroListClasses.tdNumeric} align-middle`}>
-                            <div className="flex flex-col items-end gap-1">
-                              <span className="font-medium text-gray-900 dark:text-gray-100">
-                                {formatCurrency(b.grossValue)}
-                              </span>
-                              {isNetValueMissing(b) ? (
-                                <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
-                                  FAT. LIQUIDO NAO PREENCHIDO
-                                </span>
-                              ) : null}
-                            </div>
+                          <td className={`${cadastroListClasses.tdNumeric} align-middle font-medium text-gray-900 dark:text-gray-100`}>
+                            {formatCurrency(b.grossValue)}
+                          </td>
+                          <td className={`${cadastroListClasses.tdNumeric} align-middle text-gray-900 dark:text-gray-100`}>
+                            {liquidoMissing ? '—' : formatCurrency(b.netValue)}
+                          </td>
+                          <td className={`${cadastroListClasses.tdCenter} align-middle whitespace-nowrap`}>
+                            <span className={billingAndamentoBadgeClass(fatStatus)}>
+                              {fatStatus}
+                            </span>
                           </td>
                           {canDeleteContrato ? (
                             <RowActionMenuCell
@@ -4741,7 +4829,8 @@ export default function ContractDetailPage() {
                             />
                           ) : null}
                         </tr>
-                      ))}
+                        );
+                      })}
                     </tbody>
                   </table>
                   {billingRowActionMenu && billingRowForActionMenu ? (
@@ -6242,36 +6331,54 @@ export default function ContractDetailPage() {
               <table className="w-full text-sm" data-cc-skip-column-customizer="1">
                 <thead className="border-b border-gray-200 dark:border-gray-700">
                   <tr>
+                    <th className={`${cadastroListClasses.th} whitespace-nowrap align-middle`}>ID</th>
                     <th className={`${cadastroListClasses.th} whitespace-nowrap align-middle`}>OS / SE</th>
-                    <th className={`${cadastroListClasses.th} whitespace-nowrap align-middle`}>Nº Nota Fiscal</th>
+                    <th className={`${cadastroListClasses.th} whitespace-nowrap align-middle`}>Nº NF</th>
                     <th className={`${cadastroListClasses.thCenter} whitespace-nowrap align-middle`}>Data emissão</th>
-                    <th className={`${cadastroListClasses.thNumeric} align-middle`}>Valor bruto</th>
+                    <th className={`${cadastroListClasses.thNumeric} align-middle whitespace-nowrap`}>Valor bruto</th>
+                    <th className={`${cadastroListClasses.thNumeric} align-middle whitespace-nowrap`}>Valor líquido</th>
+                    <th className={`${cadastroListClasses.thCenter} whitespace-nowrap align-middle`}>Status</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
-                  {filteredBillings.map((b) => (
-                    <tr
-                      key={b.id}
-                      className={listTableRowClasses.tr}
-                      onClick={() => {
-                        setShowFaturamentoTodosModal(false);
-                        setSelectedBilling(b);
-                      }}
-                    >
-                      <td className={`${cadastroListClasses.tdMono} align-middle whitespace-nowrap`}>
-                        {formatOsSePastaOrDash(b.serviceOrder, folderForDivSe(pleitos, b.serviceOrder))}
-                      </td>
-                      <td className={`${cadastroListClasses.tdMono} align-middle whitespace-nowrap`}>
-                        {b.invoiceNumber}
-                      </td>
-                      <td className={`${cadastroListClasses.tdCenter} align-middle whitespace-nowrap`}>
-                        {formatDate(b.issueDate)}
-                      </td>
-                      <td className={`${cadastroListClasses.tdNumeric} align-middle font-medium`}>
-                        {formatCurrency(b.grossValue)}
-                      </td>
-                    </tr>
-                  ))}
+                  {filteredBillings.map((b) => {
+                    const liquidoMissing = isNetValueMissing(b);
+                    const fatStatus = liquidoMissing ? 'Líquido pendente' : 'Faturado';
+                    return (
+                      <tr
+                        key={b.id}
+                        className={listTableRowClasses.tr}
+                        onClick={() => {
+                          setShowFaturamentoTodosModal(false);
+                          setSelectedBilling(b);
+                        }}
+                      >
+                        <td className={`${cadastroListClasses.tdMono} align-middle whitespace-nowrap`}>
+                          {formatDisplayId(billingDisplayIds, b.id)}
+                        </td>
+                        <td className={`${cadastroListClasses.tdMono} align-middle whitespace-nowrap`}>
+                          {formatOsSePastaOrDash(b.serviceOrder, folderForDivSe(allPleitos, b.serviceOrder))}
+                        </td>
+                        <td className={`${cadastroListClasses.tdMono} align-middle whitespace-nowrap`}>
+                          {(b.invoiceNumber || '').trim() || '—'}
+                        </td>
+                        <td className={`${cadastroListClasses.tdCenter} align-middle whitespace-nowrap`}>
+                          {formatDate(b.issueDate)}
+                        </td>
+                        <td className={`${cadastroListClasses.tdNumeric} align-middle font-medium`}>
+                          {formatCurrency(b.grossValue)}
+                        </td>
+                        <td className={`${cadastroListClasses.tdNumeric} align-middle`}>
+                          {liquidoMissing ? '—' : formatCurrency(b.netValue)}
+                        </td>
+                        <td className={`${cadastroListClasses.tdCenter} align-middle whitespace-nowrap`}>
+                          <span className={billingAndamentoBadgeClass(fatStatus)}>
+                            {fatStatus}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
               <p className="border-t border-gray-200 px-4 py-2 text-xs text-gray-500 dark:border-gray-700 dark:text-gray-400">

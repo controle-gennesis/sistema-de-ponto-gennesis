@@ -10,16 +10,21 @@ import {
   HIST_ETIQUETA_FILTER_OPTIONS,
   HIST_MONTH_FILTER_OPTIONS,
   HISTORICO_ETIQUETA_FATURADO_PARCIAL,
+  billingAndamentoBadgeClass,
+  buildDisplayIdMap,
   canHistoricoFaturar,
   canHistoricoFaturar100,
   canHistoricoFaturarRestante,
+  formatDisplayId,
   formatHistoricoCurrency,
+  getBillingAndamentoStatus,
   getDateMonth,
   getDateYear,
   getHistoricoClientePagoLabel,
   getHistoricoEtiqueta,
   getPleitoBillableTotal,
   getPleitoBilledAmount,
+  getPleitoLinkedBillings,
   getPleitoRemainingBalance,
   historicoClientePagoClass,
   historicoEtiquetaBadgeClass,
@@ -226,6 +231,9 @@ export function ContractHistoricoPleitosPanel({ contractId }: { contractId: stri
     () => getCadastroListRange(listPage, LIST_DISPLAY_LIMIT, filteredPleitos.length),
     [listPage, filteredPleitos.length]
   );
+
+  const pleitoDisplayIds = useMemo(() => buildDisplayIdMap(generatedPleitos), [generatedPleitos]);
+  const billingDisplayIds = useMemo(() => buildDisplayIdMap(billings), [billings]);
 
   const displayedPleitoIds = useMemo(() => displayedPleitos.map((p) => p.id), [displayedPleitos]);
 
@@ -566,14 +574,16 @@ export function ContractHistoricoPleitosPanel({ contractId }: { contractId: stri
                           />
                         </div>
                       </th>
+                      <th className={`${cadastroListClasses.th} whitespace-nowrap align-middle`}>ID</th>
                       <th className={`${cadastroListClasses.th} whitespace-nowrap align-middle`}>OS / SE</th>
                       <th className={`${cadastroListClasses.th} align-middle`}>Descrição</th>
                       <th className={`${cadastroListClasses.thCenter} whitespace-nowrap align-middle`}>Status</th>
                       <th className={`${cadastroListClasses.thNumeric} align-middle`}>Valor pleiteado</th>
                       <th className={`${cadastroListClasses.thNumeric} align-middle whitespace-nowrap`}>Valor faturado</th>
+                      <th className={`${cadastroListClasses.thCenter} whitespace-nowrap align-middle`}>Fat.</th>
+                      <th className={`${cadastroListClasses.thCenter} whitespace-nowrap align-middle`}>Status Fat.</th>
                       <th className={`${cadastroListClasses.thNumeric} align-middle whitespace-nowrap`}>Restante a faturar</th>
-                      <th className={`${cadastroListClasses.th} whitespace-nowrap align-middle`}>Pago pelo cliente</th>
-                      <th className={`${cadastroListClasses.th} whitespace-nowrap align-middle`}>Nº NF</th>
+                      <th className={`${cadastroListClasses.thCenter} whitespace-nowrap align-middle`}>Pago pelo cliente</th>
                       <th className={`${listTableRowClasses.actionTh} align-middle`}>Ação</th>
                     </tr>
                   </thead>
@@ -586,6 +596,7 @@ export function ContractHistoricoPleitosPanel({ contractId }: { contractId: stri
                       const etiqueta = getHistoricoEtiqueta(p, billings);
                       const isSelected = selectedPleitos.has(p.id);
                       const clientePagoLabel = getHistoricoClientePagoLabel(p, billings);
+                      const linkedBillings = getPleitoLinkedBillings(p, billings);
 
                       return (
                         <tr
@@ -607,6 +618,9 @@ export function ContractHistoricoPleitosPanel({ contractId }: { contractId: stri
                                 ariaLabel={`Selecionar pleito ${formatOsSePastaOrDash(p.divSe, p.folderNumber)}`}
                               />
                             </div>
+                          </td>
+                          <td className={`${cadastroListClasses.tdMono} align-middle whitespace-nowrap`}>
+                            {formatDisplayId(pleitoDisplayIds, p.id)}
                           </td>
                           <td className={`${cadastroListClasses.tdMono} align-middle whitespace-nowrap`}>
                             {formatOsSePastaOrDash(p.divSe, p.folderNumber)}
@@ -631,14 +645,52 @@ export function ContractHistoricoPleitosPanel({ contractId }: { contractId: stri
                           <td className={`${cadastroListClasses.tdNumeric} align-middle font-medium text-gray-900 dark:text-gray-100`}>
                             {totalFaturavel > 0 ? formatHistoricoCurrency(valorFaturado) : '—'}
                           </td>
+                          <td className={`${cadastroListClasses.tdCenter} align-middle`}>
+                            {linkedBillings.length === 0 ? (
+                              <span className="text-xs text-gray-400 dark:text-gray-500">—</span>
+                            ) : (
+                              <div className="flex flex-col items-center gap-0.5">
+                                {linkedBillings.map((b) => (
+                                  <span
+                                    key={b.id}
+                                    className="block font-mono text-xs font-medium text-gray-900 dark:text-gray-100"
+                                    title={
+                                      b.invoiceNumber
+                                        ? `NF ${b.invoiceNumber}`
+                                        : `Fat. ${formatDisplayId(billingDisplayIds, b.id)}`
+                                    }
+                                  >
+                                    {formatDisplayId(billingDisplayIds, b.id)}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </td>
+                          <td className={`${cadastroListClasses.tdCenter} align-middle`}>
+                            {linkedBillings.length === 0 ? (
+                              <span className="text-xs text-gray-400 dark:text-gray-500">—</span>
+                            ) : (
+                              <div className="flex flex-col items-center gap-1">
+                                {linkedBillings.map((b) => {
+                                  const fatStatus = getBillingAndamentoStatus(b);
+                                  return (
+                                    <span
+                                      key={b.id}
+                                      className={billingAndamentoBadgeClass(fatStatus)}
+                                      title={b.invoiceNumber ? `NF ${b.invoiceNumber}` : fatStatus}
+                                    >
+                                      {fatStatus}
+                                    </span>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </td>
                           <td className={`${cadastroListClasses.tdNumeric} align-middle text-gray-900 dark:text-gray-100`}>
                             {totalFaturavel > 0 ? formatHistoricoCurrency(restanteFaturar) : '—'}
                           </td>
-                          <td className={`${cadastroListClasses.td} align-middle whitespace-nowrap`}>
+                          <td className={`${cadastroListClasses.tdCenter} align-middle whitespace-nowrap`}>
                             <span className={historicoClientePagoClass(p, billings)}>{clientePagoLabel}</span>
-                          </td>
-                          <td className={`${cadastroListClasses.tdMono} align-middle whitespace-nowrap text-gray-900 dark:text-gray-100`}>
-                            {(p.invoiceNumber || '').trim() || '—'}
                           </td>
                           <RowActionMenuCell
                             isOpen={isRowMenuOpen(p.id)}

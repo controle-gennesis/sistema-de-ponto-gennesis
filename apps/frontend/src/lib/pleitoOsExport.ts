@@ -183,7 +183,7 @@ export function getPleitoOsSituacao(
   const br = p.billingRequest != null ? Number(p.billingRequest) : 0;
   if (orc > 0 && br >= orc - 0.01) return 'Gerado 100%';
   if (marker === PLEITO_HISTORY_MARKER) return 'Pleito gerado';
-  if (br > 0) return 'Pleito parcial';
+  if (br > 0) return 'Pleiteado parcial';
   return 'Ativa';
 }
 
