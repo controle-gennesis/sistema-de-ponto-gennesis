@@ -291,3 +291,24 @@ export function buildChecklistResumo(
   }
   return resumo;
 }
+
+/** Checklist completo (todos os itens) para exportação em PDF. */
+export function buildChecklistExportSections(
+  sections: ChecklistSectionDef[],
+  state: Record<string, ChecklistItemState>
+): ChecklistResumoSection[] {
+  return sections.map((section) => ({
+    id: section.id,
+    title: section.title,
+    items: section.items.map((item) => {
+      const key = checklistItemKey(section.id, item.id);
+      const row = state[key];
+      return {
+        id: item.id,
+        label: item.label,
+        checked: Boolean(row?.checked),
+        comentario: row?.comentario?.trim() ?? '',
+      };
+    }),
+  }));
+}

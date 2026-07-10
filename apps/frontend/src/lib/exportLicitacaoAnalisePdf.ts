@@ -125,7 +125,7 @@ function drawPageHeader(
   doc.setTextColor(...TEXT_BLACK);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(13);
-  doc.text('Licitações — Resumo da análise', textX, 12);
+  doc.text('Licitações — Checklist da análise', textX, 12);
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8);
@@ -241,7 +241,7 @@ function drawMetaLines(
   doc.setTextColor(...TEXT_MUTED);
 
   const parts = [
-    `${stats.totalItens} item(ns) no resumo`,
+    `${stats.totalItens} item(ns) no checklist`,
     `${stats.totalMarcados} marcado(s)`,
     `${stats.totalComentados} com comentário`,
   ];
@@ -435,7 +435,7 @@ export async function exportLicitacaoAnalisePdf(input: ExportLicitacaoAnalisePdf
     totalComentados,
   });
 
-  y = drawSectionTitle(doc, y, contentW, 'Análise de Viabilidade');
+  y = drawSectionTitle(doc, y, contentW, 'Checklist — Análise de Viabilidade');
   y += 6;
 
   if (input.sections.length === 0) {
@@ -448,7 +448,7 @@ export async function exportLicitacaoAnalisePdf(input: ExportLicitacaoAnalisePdf
     doc.setFontSize(9);
     doc.setTextColor(...TEXT_MUTED);
     doc.text(
-      'Nenhum item marcado ou comentado no checklist ainda.',
+      'Nenhum item no checklist.',
       MARGIN + contentW / 2,
       y + 8,
       { align: 'center' }
@@ -475,5 +475,5 @@ export async function exportLicitacaoAnalisePdf(input: ExportLicitacaoAnalisePdf
 
   const datePart = generatedAt.toISOString().slice(0, 10);
   const slug = slugifyFileName(input.titulo) || 'licitacao';
-  doc.save(`licitacao-analise_${slug}_${datePart}.pdf`);
+  doc.save(`licitacao-checklist_${slug}_${datePart}.pdf`);
 }
