@@ -18,7 +18,7 @@
     "@sistema-ponto/permission-modules": "file:../../packages/permission-modules",
     "@tanstack/react-query": "^5.14.2",
     "@tanstack/react-query-devtools": "5.14.2",
-    "@xyflow/react": "^12.11.1",
+    "@xyflow/react": "^12.11.2",
     "axios": "^1.6.2",
     "bpmn-js": "^18.19.0",
     "clsx": "^2.0.0",

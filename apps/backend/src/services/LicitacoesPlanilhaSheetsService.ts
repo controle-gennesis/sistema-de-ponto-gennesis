@@ -1,5 +1,10 @@
 import { buildLicitacaoRegiaoRowKey } from '../lib/licitacaoRegiaoRowKey';
 import { listLicitacaoRegiaoAceites } from './licitacaoRegiaoAceiteStore';
+import {
+  getCanonicalRegiaoHeaders,
+  listLicitacaoRegiaoManuais,
+  snapshotToCells,
+} from './licitacaoRegiaoManualStore';
 
 const DEFAULT_SPREADSHEET_ID = '1a91oJtIVYdydilp9hrmtVXnPwnXQ5Pf0';
 const SHEET_LIST_CACHE_TTL_MS = 60_000;
@@ -23,6 +28,8 @@ export type LicitacaoRegiaoSheetData = {
   headers: string[];
   rows: string[][];
   rowKeys: string[];
+  /** rowKeys criados manualmente no sistema (não vêm da planilha). */
+  manualRowKeys: string[];
   aceites: LicitacaoRegiaoAceiteSummary[];
   rowCount: number;
   sheetAvailable: boolean;
@@ -135,14 +142,44 @@ function buildEmptySheetData(tab: LicitacaoRegiaoTab): LicitacaoRegiaoSheetData 
   return {
     tab,
     spreadsheetId: spreadsheetId(),
-    headers: [],
+    headers: getCanonicalRegiaoHeaders(tab.key),
     rows: [],
     rowKeys: [],
+    manualRowKeys: [],
     aceites: [],
     rowCount: 0,
     sheetAvailable: false,
     fetchedAt: new Date().toISOString(),
     syncSource: 'csv_export',
+  };
+}
+
+async function mergeManualRowsIntoSheet(
+  tab: LicitacaoRegiaoTab,
+  data: LicitacaoRegiaoSheetData
+): Promise<LicitacaoRegiaoSheetData> {
+  const manuais = await listLicitacaoRegiaoManuais(tab.key);
+  if (manuais.length === 0) {
+    return {
+      ...data,
+      manualRowKeys: data.manualRowKeys ?? [],
+    };
+  }
+
+  const headers =
+    data.headers.length > 0 ? data.headers : getCanonicalRegiaoHeaders(tab.key);
+  const manualRows = manuais.map((manual) => snapshotToCells(headers, manual.rowSnapshot));
+  const manualRowKeys = manuais.map((manual) => manual.rowKey);
+
+  return {
+    ...data,
+    headers,
+    rows: [...manualRows, ...data.rows],
+    rowKeys: [...manualRowKeys, ...data.rowKeys],
+    manualRowKeys,
+    rowCount: manualRows.length + data.rows.length,
+    // Com manuais, a lista deve ser exibível mesmo sem aba na planilha.
+    sheetAvailable: data.sheetAvailable || manuais.length > 0,
   };
 }
 
@@ -564,7 +601,11 @@ export async function fetchLicitacaoRegiaoSheet(
     const cachedEmpty = emptySheetCache.get(cacheKey);
     if (!forceRefresh && cachedEmpty && cachedEmpty.expiresAt > Date.now()) {
       const aceites = await loadAceitesSummary(tab.key, cachedEmpty.data.spreadsheetId);
-      return { ...cachedEmpty.data, aceites, fetchedAt: new Date().toISOString() };
+      return mergeManualRowsIntoSheet(tab, {
+        ...cachedEmpty.data,
+        aceites,
+        fetchedAt: new Date().toISOString(),
+      });
     }
 
     const empty = buildEmptySheetData(tab);
@@ -572,7 +613,8 @@ export async function fetchLicitacaoRegiaoSheet(
       data: empty,
       expiresAt: Date.now() + SHEET_LIST_CACHE_TTL_MS,
     });
-    return empty;
+    const aceites = await loadAceitesSummary(tab.key, empty.spreadsheetId);
+    return mergeManualRowsIntoSheet(tab, { ...empty, aceites });
   }
 
   const processed = await fetchSheetRows(sheetMeta);
@@ -586,16 +628,17 @@ export async function fetchLicitacaoRegiaoSheet(
   );
   const aceites = await loadAceitesSummary(tab.key, sheetId);
 
-  return {
+  return mergeManualRowsIntoSheet(tab, {
     tab,
     spreadsheetId: sheetId,
     headers: processed.headers,
     rows: processed.rows,
     rowKeys,
+    manualRowKeys: [],
     aceites,
     rowCount: processed.rows.length,
     sheetAvailable: true,
     fetchedAt: new Date().toISOString(),
     syncSource: processed.syncSource,
-  };
+  });
 }

@@ -298,6 +298,32 @@ async function ensureFinancialControlAguardarPagamentoStatus(prisma: PrismaClien
   `);
 }
 
+async function ensureDpRequestTypeAdmAsos(prisma: PrismaClient): Promise<void> {
+  const rows = await prisma.$queryRaw<{ exists: boolean }[]>`
+    SELECT EXISTS (
+      SELECT 1
+      FROM pg_enum e
+      INNER JOIN pg_type t ON e.enumtypid = t.oid
+      WHERE t.typname = 'DpRequestType'
+        AND e.enumlabel = 'ADM_ASOS'
+    ) AS "exists"
+  `;
+  if (rows[0]?.exists) return;
+
+  console.warn(
+    '[Schema] Enum DpRequestType sem ADM_ASOS — adicionando. ' +
+      'Prefira: cd apps/backend && npx prisma migrate deploy.',
+  );
+  await prisma.$executeRawUnsafe(`
+    DO $$
+    BEGIN
+      ALTER TYPE "DpRequestType" ADD VALUE 'ADM_ASOS';
+    EXCEPTION
+      WHEN duplicate_object THEN NULL;
+    END $$;
+  `);
+}
+
 async function ensurePurchaseOrderPixFields(prisma: PrismaClient): Promise<void> {
   if (!(await tableExists(prisma, 'purchase_orders'))) return;
 
@@ -444,6 +470,40 @@ async function ensureLicitacaoRegiaoAceitesTable(prisma: PrismaClient): Promise<
   `);
 }
 
+async function ensureLicitacaoRegiaoManuaisTable(prisma: PrismaClient): Promise<void> {
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "licitacao_regiao_manuais" (
+      "id" TEXT NOT NULL,
+      "regiaoKey" TEXT NOT NULL,
+      "rowKey" TEXT NOT NULL,
+      "headers" JSONB NOT NULL,
+      "rowSnapshot" JSONB NOT NULL,
+      "createdBy" TEXT NOT NULL,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "licitacao_regiao_manuais_pkey" PRIMARY KEY ("id")
+    );
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    CREATE UNIQUE INDEX IF NOT EXISTS "licitacao_regiao_manuais_regiao_row_key"
+    ON "licitacao_regiao_manuais"("regiaoKey", "rowKey");
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "licitacao_regiao_manuais_regiaoKey_idx"
+    ON "licitacao_regiao_manuais"("regiaoKey");
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    DO $$
+    BEGIN
+      ALTER TABLE "licitacao_regiao_manuais" ADD CONSTRAINT "licitacao_regiao_manuais_createdBy_fkey"
+        FOREIGN KEY ("createdBy") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+    EXCEPTION WHEN duplicate_object THEN NULL;
+    END $$;
+  `);
+}
+
 async function ensureLicitacaoColumns(prisma: PrismaClient): Promise<void> {
   if (!(await tableExists(prisma, 'licitacoes'))) return;
 
@@ -516,9 +576,11 @@ export async function ensureProductionSchema(prisma: PrismaClient): Promise<void
     await ensureDemandSheetApprovals(prisma);
     await ensurePurchaseOrderStageApprovals(prisma);
     await ensureFinancialControlAguardarPagamentoStatus(prisma);
+    await ensureDpRequestTypeAdmAsos(prisma);
     await ensureLicitacoesTables(prisma);
     await ensureLicitacaoColumns(prisma);
     await ensureLicitacaoRegiaoAceitesTable(prisma);
+    await ensureLicitacaoRegiaoManuaisTable(prisma);
     await ensureLicitacaoConfigTable(prisma);
     console.log('[Schema] Verificação de tabelas/colunas críticas concluída.');
   } catch (e) {
