@@ -15,11 +15,15 @@ router.get('/planilha-regioes', (req, res, next) => ctrl.listRegiaoTabs(req, res
 router.get('/planilha-regioes/:regiaoKey', (req, res, next) => ctrl.getRegiaoSheet(req, res, next));
 router.post('/planilha-regioes/aceites', (req, res, next) => ctrl.registrarAceiteRegiao(req, res, next));
 router.delete('/planilha-regioes/aceites', (req, res, next) => ctrl.desfazerAceiteRegiao(req, res, next));
+router.post('/planilha-regioes/manuais', (req, res, next) => ctrl.createManualRegiao(req, res, next));
+router.delete('/planilha-regioes/manuais', (req, res, next) => ctrl.deleteManualRegiao(req, res, next));
 
 router.get('/', (req, res, next) => ctrl.list(req, res, next));
 router.post('/', (req, res, next) => ctrl.create(req, res, next));
 router.get('/:id', (req, res, next) => ctrl.getById(req, res, next));
 router.patch('/:id/analise-manual', (req, res, next) => ctrl.updateAnaliseManual(req, res, next));
+router.patch('/:id/assumir-analise', (req, res, next) => ctrl.assumirAnaliseManual(req, res, next));
+router.patch('/:id/liberar-analise', (req, res, next) => ctrl.liberarAnaliseManual(req, res, next));
 router.patch('/:id/finalizar-analise', (req, res, next) => ctrl.finalizarAnaliseManual(req, res, next));
 router.patch('/:id/arquivar', (req, res, next) => ctrl.arquivarAnalise(req, res, next));
 router.patch('/:id/desarquivar', (req, res, next) => ctrl.desarquivarAnalise(req, res, next));

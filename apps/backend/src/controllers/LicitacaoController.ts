@@ -2,6 +2,7 @@ import { Response, NextFunction } from 'express';
 import multer from 'multer';
 import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
+import { prisma } from '../lib/prisma';
 import { licitacaoService } from '../services/LicitacaoService';
 import {
   isLicitacaoArquivadaMotivo,
@@ -25,6 +26,12 @@ import {
   getLicitacaoRegiaoAceitesByRowKeys,
   getLicitacaoIdsForAceiteRowKeys,
 } from '../services/licitacaoRegiaoAceiteStore';
+import {
+  createLicitacaoRegiaoManual,
+  deleteLicitacaoRegiaoManual,
+  getCanonicalRegiaoHeaders,
+  normalizeManualRowSnapshot,
+} from '../services/licitacaoRegiaoManualStore';
 import {
   removeLicitacoesLinkedToAceites,
   syncAceitesToLicitacoes,
@@ -213,6 +220,120 @@ export class LicitacaoController {
     }
   }
 
+  async createManualRegiao(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const regiaoKey = typeof req.body?.regiaoKey === 'string' ? req.body.regiaoKey.trim() : '';
+      const tab = findLicitacaoRegiaoTab(regiaoKey);
+      if (!regiaoKey || !tab) {
+        throw createError('Região inválida.', 400);
+      }
+
+      const fieldsRaw = req.body?.fields;
+      if (!fieldsRaw || typeof fieldsRaw !== 'object' || Array.isArray(fieldsRaw)) {
+        throw createError('Informe os campos da licitação.', 400);
+      }
+
+      let headers: string[] = [];
+      try {
+        const sheet = await fetchLicitacaoRegiaoSheet(regiaoKey, false);
+        headers = sheet.headers.length > 0 ? sheet.headers : getCanonicalRegiaoHeaders(regiaoKey);
+      } catch {
+        headers = getCanonicalRegiaoHeaders(regiaoKey);
+      }
+
+      const fields: Record<string, string> = {};
+      for (const [key, value] of Object.entries(fieldsRaw as Record<string, unknown>)) {
+        if (typeof value === 'string') fields[key] = value;
+        else if (value != null) fields[key] = String(value);
+      }
+
+      const rowSnapshot = normalizeManualRowSnapshot(headers, fields);
+      if (Object.keys(rowSnapshot).length === 0) {
+        throw createError('Preencha ao menos um campo da licitação.', 400);
+      }
+
+      const created = await createLicitacaoRegiaoManual({
+        regiaoKey,
+        headers,
+        rowSnapshot,
+        createdBy: req.user!.id,
+      });
+
+      invalidateLicitacaoRegiaoSheetCache(regiaoKey);
+
+      res.status(201).json({
+        success: true,
+        data: {
+          rowKey: created.rowKey,
+          headers: created.headers,
+          rowSnapshot: created.rowSnapshot,
+          createdBy: created.createdBy,
+          createdByName: created.createdByName,
+          createdAt: created.createdAt.toISOString(),
+        },
+        message: 'Licitação criada e adicionada à lista da região.',
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Erro ao criar licitação';
+      next(error instanceof Error ? createError(message, 400) : error);
+    }
+  }
+
+  async deleteManualRegiao(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const regiaoKey = typeof req.body?.regiaoKey === 'string' ? req.body.regiaoKey.trim() : '';
+      let spreadsheetId =
+        typeof req.body?.spreadsheetId === 'string' ? req.body.spreadsheetId.trim() : '';
+      const rowKey = typeof req.body?.rowKey === 'string' ? req.body.rowKey.trim() : '';
+
+      if (!regiaoKey || !findLicitacaoRegiaoTab(regiaoKey)) {
+        throw createError('Região inválida.', 400);
+      }
+      if (!rowKey.startsWith('manual:')) {
+        throw createError('Somente licitações criadas no sistema podem ser excluídas por aqui.', 400);
+      }
+
+      if (!spreadsheetId) {
+        try {
+          const sheet = await fetchLicitacaoRegiaoSheet(regiaoKey, false);
+          spreadsheetId = sheet.spreadsheetId;
+        } catch {
+          spreadsheetId = '';
+        }
+      }
+
+      if (spreadsheetId) {
+        const licitacaoIds = await getLicitacaoIdsForAceiteRowKeys({
+          regiaoKey,
+          spreadsheetId,
+          rowKeys: [rowKey],
+        });
+        await deleteLicitacaoRegiaoAceites({
+          regiaoKey,
+          spreadsheetId,
+          rowKeys: [rowKey],
+        });
+        await removeLicitacoesLinkedToAceites(licitacaoIds);
+      }
+
+      const deleted = await deleteLicitacaoRegiaoManual({ regiaoKey, rowKey });
+      if (!deleted) {
+        throw createError('Licitação manual não encontrada.', 404);
+      }
+
+      invalidateLicitacaoRegiaoSheetCache(regiaoKey);
+
+      res.json({
+        success: true,
+        data: { rowKey },
+        message: 'Licitação removida da lista da região.',
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Erro ao excluir licitação';
+      next(error instanceof Error ? createError(message, 400) : error);
+    }
+  }
+
   async list(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const search = typeof req.query.search === 'string' ? req.query.search : undefined;
@@ -285,8 +406,26 @@ export class LicitacaoController {
   async updateAnaliseManual(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const body = req.body ?? {};
+      const current = await licitacaoService.getById(req.params.id);
+      if (!current) throw createError('Licitação não encontrada', 404);
+
+      const claimedById =
+        typeof current.analiseJson?.responsavelAnaliseId === 'string'
+          ? current.analiseJson.responsavelAnaliseId.trim()
+          : '';
+      if (claimedById && claimedById !== req.user!.id && !req.user!.isAdmin) {
+        const claimedByName =
+          (typeof current.analiseJson?.responsavelAnalise === 'string' &&
+            current.analiseJson.responsavelAnalise.trim()) ||
+          'outro usuário';
+        throw createError(
+          `Esta análise está assumida por ${claimedByName}. Peça a liberação ou assuma outra solicitação.`,
+          403
+        );
+      }
+
       const data = await licitacaoService.update(req.params.id, {
-        responsavelAnalise: body.responsavelAnalise,
+        // Responsável só muda via Assumir/Liberar — evita sobrescrever a trava.
         linkNotebookLm: body.linkNotebookLm,
         analiseUsuario: body.analiseUsuario,
         checklistAnalise: body.checklistAnalise,
@@ -295,6 +434,44 @@ export class LicitacaoController {
       });
       res.json({ success: true, data });
     } catch (error) {
+      next(error);
+    }
+  }
+
+  async assumirAnaliseManual(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const user = await prisma.user.findUnique({
+        where: { id: req.user!.id },
+        select: { name: true },
+      });
+      const data = await licitacaoService.assumirAnaliseManual(
+        req.params.id,
+        req.user!.id,
+        user?.name ?? ''
+      );
+      res.json({ success: true, data, message: 'Análise assumida com sucesso.' });
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('já foi assumida')) {
+        next(createError(error.message, 409));
+        return;
+      }
+      next(error instanceof Error ? createError(error.message, 400) : error);
+    }
+  }
+
+  async liberarAnaliseManual(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const data = await licitacaoService.liberarAnaliseManual(
+        req.params.id,
+        req.user!.id,
+        Boolean(req.user!.isAdmin)
+      );
+      res.json({ success: true, data, message: 'Análise liberada.' });
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('Somente quem assumiu')) {
+        next(createError(error.message, 403));
+        return;
+      }
       next(error instanceof Error ? createError(error.message, 400) : error);
     }
   }

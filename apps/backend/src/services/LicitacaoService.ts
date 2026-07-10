@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { backendUploadsRoot } from '../lib/uploads';
+import { getPrisma } from '../lib/prisma';
 import { buildLicitacaoTituloExibicao } from '../lib/licitacaoDisplay';
 import { extractRegiaoKeyFromAnaliseJson, extractRegiaoLabelFromAnaliseJson } from '../lib/licitacaoRegiao';
 import { extractEstadoFromAnaliseJson } from '../lib/licitacaoEstado';
@@ -148,6 +149,8 @@ export type LicitacaoAnalisePersistida = {
   analisePronta?: boolean;
   analiseProntaEm?: string | null;
   responsavelAnalise?: string | null;
+  responsavelAnaliseId?: string | null;
+  responsavelAnaliseEm?: string | null;
   analiseUsuario?: string | null;
   analiseUsuarioAtualizadaEm?: string | null;
   checklistAnalise?: Record<string, { checked: boolean; comentario: string | null }>;
@@ -278,6 +281,10 @@ function parseAnaliseJson(raw: unknown): LicitacaoAnalisePersistida {
     analisePronta: o.analisePronta === true,
     analiseProntaEm: typeof o.analiseProntaEm === 'string' ? o.analiseProntaEm : null,
     responsavelAnalise: typeof o.responsavelAnalise === 'string' ? o.responsavelAnalise : null,
+    responsavelAnaliseId:
+      typeof o.responsavelAnaliseId === 'string' ? o.responsavelAnaliseId : null,
+    responsavelAnaliseEm:
+      typeof o.responsavelAnaliseEm === 'string' ? o.responsavelAnaliseEm : null,
     analiseUsuario: typeof o.analiseUsuario === 'string' ? o.analiseUsuario : null,
     analiseUsuarioAtualizadaEm:
       typeof o.analiseUsuarioAtualizadaEm === 'string' ? o.analiseUsuarioAtualizadaEm : null,
@@ -319,6 +326,14 @@ function mergeAnaliseJson(
     analiseProntaEm: patch.analiseProntaEm !== undefined ? patch.analiseProntaEm : base.analiseProntaEm,
     responsavelAnalise:
       patch.responsavelAnalise !== undefined ? patch.responsavelAnalise : base.responsavelAnalise,
+    responsavelAnaliseId:
+      patch.responsavelAnaliseId !== undefined
+        ? patch.responsavelAnaliseId
+        : base.responsavelAnaliseId,
+    responsavelAnaliseEm:
+      patch.responsavelAnaliseEm !== undefined
+        ? patch.responsavelAnaliseEm
+        : base.responsavelAnaliseEm,
     analiseUsuario: patch.analiseUsuario !== undefined ? patch.analiseUsuario : base.analiseUsuario,
     analiseUsuarioAtualizadaEm:
       patch.analiseUsuarioAtualizadaEm !== undefined
@@ -699,6 +714,74 @@ export class LicitacaoService {
       analiseJson: mergeAnaliseJson(current.analiseJson, {
         analiseManualFinalizada: true,
         analiseManualFinalizadaEm: now,
+      }),
+    });
+    return serializeLicitacao(row);
+  }
+
+  async assumirAnaliseManual(id: string, userId: string, userName?: string) {
+    const current = await licitacaoStoreGetById(id);
+    if (!current) throw new Error('Licitação não encontrada');
+
+    const analise = parseAnaliseJson(current.analiseJson);
+    const claimedById = analise.responsavelAnaliseId?.trim() || null;
+    if (claimedById && claimedById !== userId) {
+      const claimedByName = analise.responsavelAnalise?.trim() || 'outro usuário';
+      throw new Error(`Esta análise já foi assumida por ${claimedByName}.`);
+    }
+
+    let name = userName?.trim() || '';
+    if (!name) {
+      const user = await getPrisma().user.findUnique({
+        where: { id: userId },
+        select: { name: true },
+      });
+      name = user?.name?.trim() || analise.responsavelAnalise?.trim() || 'Usuário';
+    }
+
+    if (claimedById === userId && analise.responsavelAnalise?.trim() === name) {
+      return serializeLicitacao(current);
+    }
+
+    const row = await licitacaoStoreUpdate(id, {
+      analiseJson: mergeAnaliseJson(current.analiseJson, {
+        responsavelAnalise: name,
+        responsavelAnaliseId: userId,
+        responsavelAnaliseEm: new Date().toISOString(),
+      }),
+    });
+    return serializeLicitacao(row);
+  }
+
+  async liberarAnaliseManual(id: string, userId: string, isAdmin: boolean) {
+    const current = await licitacaoStoreGetById(id);
+    if (!current) throw new Error('Licitação não encontrada');
+
+    const analise = parseAnaliseJson(current.analiseJson);
+    const claimedById = analise.responsavelAnaliseId?.trim() || null;
+    if (!claimedById) {
+      // Limpa nome legado sem trava real, se ainda existir.
+      if (!analise.responsavelAnalise?.trim()) {
+        return serializeLicitacao(current);
+      }
+      const row = await licitacaoStoreUpdate(id, {
+        analiseJson: mergeAnaliseJson(current.analiseJson, {
+          responsavelAnalise: null,
+          responsavelAnaliseId: null,
+          responsavelAnaliseEm: null,
+        }),
+      });
+      return serializeLicitacao(row);
+    }
+    if (claimedById !== userId && !isAdmin) {
+      throw new Error('Somente quem assumiu a análise (ou um administrador) pode liberá-la.');
+    }
+
+    const row = await licitacaoStoreUpdate(id, {
+      analiseJson: mergeAnaliseJson(current.analiseJson, {
+        responsavelAnalise: null,
+        responsavelAnaliseId: null,
+        responsavelAnaliseEm: null,
       }),
     });
     return serializeLicitacao(row);

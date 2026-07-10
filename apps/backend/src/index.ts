@@ -319,6 +319,12 @@ app.put('/api/licitacoes/checklist-template', authenticate, (req, res, next) =>
 app.patch('/api/licitacoes/:id/analise-manual', authenticate, (req, res, next) =>
   licitacaoExtraCtrl.updateAnaliseManual(req as AuthRequest, res, next)
 );
+app.patch('/api/licitacoes/:id/assumir-analise', authenticate, (req, res, next) =>
+  licitacaoExtraCtrl.assumirAnaliseManual(req as AuthRequest, res, next)
+);
+app.patch('/api/licitacoes/:id/liberar-analise', authenticate, (req, res, next) =>
+  licitacaoExtraCtrl.liberarAnaliseManual(req as AuthRequest, res, next)
+);
 app.patch('/api/licitacoes/:id/finalizar-analise', authenticate, (req, res, next) =>
   licitacaoExtraCtrl.finalizarAnaliseManual(req as AuthRequest, res, next)
 );
@@ -339,6 +345,12 @@ app.post('/api/licitacoes/planilha-regioes/aceites', authenticate, (req, res, ne
 );
 app.delete('/api/licitacoes/planilha-regioes/aceites', authenticate, (req, res, next) =>
   licitacaoExtraCtrl.desfazerAceiteRegiao(req as AuthRequest, res, next)
+);
+app.post('/api/licitacoes/planilha-regioes/manuais', authenticate, (req, res, next) =>
+  licitacaoExtraCtrl.createManualRegiao(req as AuthRequest, res, next)
+);
+app.delete('/api/licitacoes/planilha-regioes/manuais', authenticate, (req, res, next) =>
+  licitacaoExtraCtrl.deleteManualRegiao(req as AuthRequest, res, next)
 );
 app.use('/api/licitacoes', licitacoesRoutes);
 
