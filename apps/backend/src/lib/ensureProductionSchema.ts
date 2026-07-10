@@ -470,6 +470,32 @@ async function ensureLicitacaoRegiaoAceitesTable(prisma: PrismaClient): Promise<
   `);
 }
 
+async function ensureLicitacaoRegiaoSheetRowsTable(prisma: PrismaClient): Promise<void> {
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "licitacao_regiao_sheet_rows" (
+      "id" TEXT NOT NULL,
+      "regiaoKey" TEXT NOT NULL,
+      "spreadsheetId" TEXT NOT NULL,
+      "rowKey" TEXT NOT NULL,
+      "headers" JSONB NOT NULL,
+      "rowSnapshot" JSONB NOT NULL,
+      "firstSeenAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "lastSeenAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "licitacao_regiao_sheet_rows_pkey" PRIMARY KEY ("id")
+    );
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    CREATE UNIQUE INDEX IF NOT EXISTS "licitacao_regiao_sheet_rows_regiao_sheet_row_key"
+    ON "licitacao_regiao_sheet_rows"("regiaoKey", "spreadsheetId", "rowKey");
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "licitacao_regiao_sheet_rows_regiaoKey_idx"
+    ON "licitacao_regiao_sheet_rows"("regiaoKey");
+  `);
+}
+
 async function ensureLicitacaoRegiaoManuaisTable(prisma: PrismaClient): Promise<void> {
   await prisma.$executeRawUnsafe(`
     CREATE TABLE IF NOT EXISTS "licitacao_regiao_manuais" (
@@ -581,6 +607,7 @@ export async function ensureProductionSchema(prisma: PrismaClient): Promise<void
     await ensureLicitacaoColumns(prisma);
     await ensureLicitacaoRegiaoAceitesTable(prisma);
     await ensureLicitacaoRegiaoManuaisTable(prisma);
+    await ensureLicitacaoRegiaoSheetRowsTable(prisma);
     await ensureLicitacaoConfigTable(prisma);
     console.log('[Schema] Verificação de tabelas/colunas críticas concluída.');
   } catch (e) {

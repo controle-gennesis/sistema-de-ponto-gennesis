@@ -5,6 +5,13 @@ import {
   listLicitacaoRegiaoManuais,
   snapshotToCells,
 } from './licitacaoRegiaoManualStore';
+import {
+  buildSheetRowBusinessKey,
+  cellsToSnapshot,
+  listLicitacaoRegiaoSheetRows,
+  retainedRowsMissingFromSheet,
+  upsertLicitacaoRegiaoSheetRows,
+} from './licitacaoRegiaoSheetRowStore';
 
 const DEFAULT_SPREADSHEET_ID = '1a91oJtIVYdydilp9hrmtVXnPwnXQ5Pf0';
 const SHEET_LIST_CACHE_TTL_MS = 60_000;
@@ -180,6 +187,65 @@ async function mergeManualRowsIntoSheet(
     rowCount: manualRows.length + data.rows.length,
     // Com manuais, a lista deve ser exibível mesmo sem aba na planilha.
     sheetAvailable: data.sheetAvailable || manuais.length > 0,
+  };
+}
+
+/**
+ * Persiste linhas vistas na planilha e reanexa as que sumiram (append-only).
+ * Inclusões na sheet aparecem; exclusões na sheet não removem do sistema.
+ */
+async function mergeRetainedSheetRows(
+  tab: LicitacaoRegiaoTab,
+  data: LicitacaoRegiaoSheetData
+): Promise<LicitacaoRegiaoSheetData> {
+  const headers =
+    data.headers.length > 0 ? data.headers : getCanonicalRegiaoHeaders(tab.key);
+
+  if (data.rows.length > 0) {
+    await upsertLicitacaoRegiaoSheetRows({
+      regiaoKey: tab.key,
+      spreadsheetId: data.spreadsheetId,
+      headers,
+      rows: data.rows.map((cells, index) => ({
+        rowKey: data.rowKeys[index] ?? buildLicitacaoRegiaoRowKey(tab.key, data.spreadsheetId, cells),
+        cells,
+      })),
+    });
+  }
+
+  const stored = await listLicitacaoRegiaoSheetRows({
+    regiaoKey: tab.key,
+    spreadsheetId: data.spreadsheetId,
+  });
+  if (stored.length === 0) {
+    return { ...data, headers };
+  }
+
+  const liveRowKeys = new Set(data.rowKeys);
+  const liveBusinessKeys = new Set<string>();
+  for (const cells of data.rows) {
+    const businessKey = buildSheetRowBusinessKey(cellsToSnapshot(headers, cells));
+    if (businessKey) liveBusinessKeys.add(businessKey);
+  }
+
+  const retained = retainedRowsMissingFromSheet({
+    headers,
+    liveRowKeys,
+    liveBusinessKeys,
+    stored,
+  });
+
+  if (retained.rows.length === 0) {
+    return { ...data, headers };
+  }
+
+  return {
+    ...data,
+    headers,
+    rows: [...data.rows, ...retained.rows],
+    rowKeys: [...data.rowKeys, ...retained.rowKeys],
+    rowCount: data.rows.length + retained.rows.length,
+    sheetAvailable: true,
   };
 }
 
@@ -601,11 +667,12 @@ export async function fetchLicitacaoRegiaoSheet(
     const cachedEmpty = emptySheetCache.get(cacheKey);
     if (!forceRefresh && cachedEmpty && cachedEmpty.expiresAt > Date.now()) {
       const aceites = await loadAceitesSummary(tab.key, cachedEmpty.data.spreadsheetId);
-      return mergeManualRowsIntoSheet(tab, {
+      const withRetained = await mergeRetainedSheetRows(tab, {
         ...cachedEmpty.data,
         aceites,
         fetchedAt: new Date().toISOString(),
       });
+      return mergeManualRowsIntoSheet(tab, withRetained);
     }
 
     const empty = buildEmptySheetData(tab);
@@ -614,7 +681,8 @@ export async function fetchLicitacaoRegiaoSheet(
       expiresAt: Date.now() + SHEET_LIST_CACHE_TTL_MS,
     });
     const aceites = await loadAceitesSummary(tab.key, empty.spreadsheetId);
-    return mergeManualRowsIntoSheet(tab, { ...empty, aceites });
+    const withRetained = await mergeRetainedSheetRows(tab, { ...empty, aceites });
+    return mergeManualRowsIntoSheet(tab, withRetained);
   }
 
   const processed = await fetchSheetRows(sheetMeta);
@@ -628,7 +696,7 @@ export async function fetchLicitacaoRegiaoSheet(
   );
   const aceites = await loadAceitesSummary(tab.key, sheetId);
 
-  return mergeManualRowsIntoSheet(tab, {
+  const withRetained = await mergeRetainedSheetRows(tab, {
     tab,
     spreadsheetId: sheetId,
     headers: processed.headers,
@@ -641,4 +709,6 @@ export async function fetchLicitacaoRegiaoSheet(
     fetchedAt: new Date().toISOString(),
     syncSource: processed.syncSource,
   });
+
+  return mergeManualRowsIntoSheet(tab, withRetained);
 }

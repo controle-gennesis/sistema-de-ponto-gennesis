@@ -46,6 +46,8 @@ import {
 } from './licitacaoChecklist';
 
 const NOTEBOOK_LM_URL = 'https://notebooklm.google.com/';
+const DRIVE_CATS_URL =
+  'https://drive.google.com/drive/u/2/folders/16NH0gVAwbBV4_EMSCNUKiAE5pgKjZ9OW';
 const NOTEBOOK_LM_LOGIN_EMAIL = 'contratos.licitacoesgennesis@gmail.com';
 
 const LICITACAO_SELECTED_ID_KEY = 'licitacoes:selectedId';
@@ -1159,15 +1161,26 @@ export default function LicitacoesPage() {
               </p>
             </div>
             <div className="flex flex-col gap-1.5 sm:items-end">
-              <a
-                href={NOTEBOOK_LM_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-red-600 px-4 text-sm font-semibold text-white transition-colors hover:bg-red-700"
-              >
-                <ExternalLink className="h-4 w-4 shrink-0" aria-hidden />
-                Abrir Notebook LM
-              </a>
+              <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+                <a
+                  href={DRIVE_CATS_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-800 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
+                >
+                  <ExternalLink className="h-4 w-4 shrink-0" aria-hidden />
+                  Abrir drive das CATs
+                </a>
+                <a
+                  href={NOTEBOOK_LM_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-red-600 px-4 text-sm font-semibold text-white transition-colors hover:bg-red-700"
+                >
+                  <ExternalLink className="h-4 w-4 shrink-0" aria-hidden />
+                  Abrir Notebook LM
+                </a>
+              </div>
               <p className="max-w-sm text-xs leading-relaxed text-gray-600 dark:text-gray-400 sm:text-right">
                 Acesse com o e-mail{' '}
                 <span className="font-mono font-medium text-gray-800 dark:text-gray-200">
