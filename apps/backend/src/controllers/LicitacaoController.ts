@@ -429,6 +429,8 @@ export class LicitacaoController {
         linkNotebookLm: body.linkNotebookLm,
         analiseUsuario: body.analiseUsuario,
         checklistAnalise: body.checklistAnalise,
+        naoSeHabilita: body.naoSeHabilita,
+        naoSeHabilitaItens: body.naoSeHabilitaItens,
         decisaoAnaliseFinal: body.decisaoAnaliseFinal,
         analiseFinalTexto: body.analiseFinalTexto,
       });

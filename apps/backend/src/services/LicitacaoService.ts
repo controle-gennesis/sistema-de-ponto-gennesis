@@ -155,6 +155,8 @@ export type LicitacaoAnalisePersistida = {
   analiseUsuarioAtualizadaEm?: string | null;
   checklistAnalise?: Record<string, { checked: boolean; comentario: string | null }>;
   linkNotebookLm?: string | null;
+  naoSeHabilita?: boolean;
+  naoSeHabilitaItens?: Array<{ id: string; title: string; isDone: boolean }>;
   analiseManualFinalizada?: boolean;
   analiseManualFinalizadaEm?: string | null;
   origemRegiao?: LicitacaoOrigemRegiao | null;
@@ -245,6 +247,22 @@ function parseChecklistAnalise(
   return Object.keys(out).length ? out : undefined;
 }
 
+function parseNaoSeHabilitaItens(
+  raw: unknown
+): Array<{ id: string; title: string; isDone: boolean }> {
+  if (!Array.isArray(raw)) return [];
+  const items: Array<{ id: string; title: string; isDone: boolean }> = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+    const o = entry as Record<string, unknown>;
+    const id = typeof o.id === 'string' ? o.id.trim() : '';
+    const title = typeof o.title === 'string' ? o.title.trim() : '';
+    if (!id || !title) continue;
+    items.push({ id, title, isDone: o.isDone === true });
+  }
+  return items;
+}
+
 function parseOrigemRegiao(raw: unknown): LicitacaoOrigemRegiao | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const o = raw as Partial<LicitacaoOrigemRegiao>;
@@ -290,6 +308,8 @@ function parseAnaliseJson(raw: unknown): LicitacaoAnalisePersistida {
       typeof o.analiseUsuarioAtualizadaEm === 'string' ? o.analiseUsuarioAtualizadaEm : null,
     linkNotebookLm: typeof o.linkNotebookLm === 'string' ? o.linkNotebookLm : null,
     checklistAnalise: parseChecklistAnalise(o.checklistAnalise),
+    naoSeHabilita: o.naoSeHabilita === true,
+    naoSeHabilitaItens: parseNaoSeHabilitaItens(o.naoSeHabilitaItens),
     analiseManualFinalizada: o.analiseManualFinalizada === true,
     analiseManualFinalizadaEm:
       typeof o.analiseManualFinalizadaEm === 'string' ? o.analiseManualFinalizadaEm : null,
@@ -343,6 +363,12 @@ function mergeAnaliseJson(
       patch.linkNotebookLm !== undefined ? patch.linkNotebookLm : base.linkNotebookLm,
     checklistAnalise:
       patch.checklistAnalise !== undefined ? patch.checklistAnalise : base.checklistAnalise,
+    naoSeHabilita:
+      patch.naoSeHabilita !== undefined ? patch.naoSeHabilita : base.naoSeHabilita,
+    naoSeHabilitaItens:
+      patch.naoSeHabilitaItens !== undefined
+        ? patch.naoSeHabilitaItens
+        : base.naoSeHabilitaItens,
     analiseManualFinalizada:
       patch.analiseManualFinalizada !== undefined
         ? patch.analiseManualFinalizada
@@ -612,6 +638,8 @@ export class LicitacaoService {
       linkNotebookLm: string;
       analiseUsuario: string;
       checklistAnalise: Record<string, { checked: boolean; comentario: string }>;
+      naoSeHabilita: boolean;
+      naoSeHabilitaItens: Array<{ id: string; title: string; isDone: boolean }>;
       decisaoAnaliseFinal: LicitacaoDecisaoAnaliseFinal | null;
       analiseFinalTexto: string;
     }>
@@ -620,7 +648,9 @@ export class LicitacaoService {
       data.responsavelAnalise !== undefined ||
       data.linkNotebookLm !== undefined ||
       data.analiseUsuario !== undefined ||
-      data.checklistAnalise !== undefined;
+      data.checklistAnalise !== undefined ||
+      data.naoSeHabilita !== undefined ||
+      data.naoSeHabilitaItens !== undefined;
     const hasAnaliseFinal =
       data.decisaoAnaliseFinal !== undefined || data.analiseFinalTexto !== undefined;
 
@@ -651,6 +681,12 @@ export class LicitacaoService {
           ? { linkNotebookLm: data.linkNotebookLm.trim() || null }
           : {}),
         ...(checklistPatch !== undefined ? { checklistAnalise: checklistPatch } : {}),
+        ...(data.naoSeHabilita !== undefined
+          ? { naoSeHabilita: data.naoSeHabilita === true }
+          : {}),
+        ...(data.naoSeHabilitaItens !== undefined
+          ? { naoSeHabilitaItens: parseNaoSeHabilitaItens(data.naoSeHabilitaItens) }
+          : {}),
         ...(data.decisaoAnaliseFinal !== undefined
           ? {
               decisaoAnaliseFinal:

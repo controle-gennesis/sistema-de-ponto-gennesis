@@ -31,6 +31,10 @@ import api from '@/lib/api';
 import { exportLicitacaoAnalisePdf } from '@/lib/exportLicitacaoAnalisePdf';
 import { LicitacaoChecklistEditor } from './LicitacaoChecklistEditor';
 import { LicitacaoChecklistResumo } from './LicitacaoChecklistResumo';
+import {
+  LicitacaoNaoSeHabilitaPanel,
+  type NaoSeHabilitaItem,
+} from './LicitacaoNaoSeHabilitaPanel';
 import { LicitacoesRegiaoPanel } from './LicitacoesRegiaoPanel';
 import { buildLicitacaoTituloDisplay } from './licitacaoDisplay';
 import {
@@ -39,7 +43,6 @@ import {
   serializeChecklistForSave,
   createUniqueChecklistItemId,
   buildChecklistResumo,
-  buildChecklistExportSections,
   LICITACAO_CHECKLIST,
   type ChecklistItemState,
   type ChecklistSectionDef,
@@ -213,6 +216,8 @@ type LicitacaoAnaliseJson = {
   analiseUsuarioAtualizadaEm?: string | null;
   checklistAnalise?: Record<string, { checked: boolean; comentario: string }>;
   linkNotebookLm?: string | null;
+  naoSeHabilita?: boolean;
+  naoSeHabilitaItens?: NaoSeHabilitaItem[];
   indiceDocumentos?: Array<{ documentoId: string; nome: string }>;
   analiseManualFinalizada?: boolean;
   analiseManualFinalizadaEm?: string | null;
@@ -372,6 +377,8 @@ export default function LicitacoesPage() {
   const [exportingPdf, setExportingPdf] = useState(false);
   const [responsavelAnalise, setResponsavelAnalise] = useState('');
   const [linkNotebookLm, setLinkNotebookLm] = useState('');
+  const [naoSeHabilita, setNaoSeHabilita] = useState(false);
+  const [naoSeHabilitaItens, setNaoSeHabilitaItens] = useState<NaoSeHabilitaItem[]>([]);
   const [analiseUsuario, setAnaliseUsuario] = useState('');
   const [decisaoAnaliseFinal, setDecisaoAnaliseFinal] =
     useState<LicitacaoDecisaoAnaliseFinal | null>(null);
@@ -424,6 +431,8 @@ export default function LicitacoesPage() {
     decisaoAnaliseFinal: null as LicitacaoDecisaoAnaliseFinal | null,
     analiseFinalTexto: '',
     checklistState: {} as Record<string, ChecklistItemState>,
+    naoSeHabilita: false,
+    naoSeHabilitaItens: [] as NaoSeHabilitaItem[],
   });
   const selectedIdRef = useRef<string | null>(selectedId);
 
@@ -591,14 +600,27 @@ export default function LicitacoesPage() {
       decisaoAnaliseFinal,
       analiseFinalTexto,
       checklistState,
+      naoSeHabilita,
+      naoSeHabilitaItens,
     };
-  }, [responsavelAnalise, linkNotebookLm, analiseUsuario, decisaoAnaliseFinal, analiseFinalTexto, checklistState]);
+  }, [
+    responsavelAnalise,
+    linkNotebookLm,
+    analiseUsuario,
+    decisaoAnaliseFinal,
+    analiseFinalTexto,
+    checklistState,
+    naoSeHabilita,
+    naoSeHabilitaItens,
+  ]);
 
   useEffect(() => {
     if (!selectedId) {
       hasUserEditedRef.current = false;
       setResponsavelAnalise('');
       setLinkNotebookLm('');
+      setNaoSeHabilita(false);
+      setNaoSeHabilitaItens([]);
       setAnaliseUsuario('');
       setDecisaoAnaliseFinal(null);
       setAnaliseFinalTexto('');
@@ -620,6 +642,23 @@ export default function LicitacoesPage() {
       responsavelAnalise: savedResponsavelId ? savedResponsavel : '',
     };
     setLinkNotebookLm(selected.analiseJson?.linkNotebookLm ?? '');
+    setNaoSeHabilita(selected.analiseJson?.naoSeHabilita === true);
+    setNaoSeHabilitaItens(
+      Array.isArray(selected.analiseJson?.naoSeHabilitaItens)
+        ? selected.analiseJson.naoSeHabilitaItens
+            .filter(
+              (item): item is NaoSeHabilitaItem =>
+                Boolean(item) &&
+                typeof item.id === 'string' &&
+                typeof item.title === 'string'
+            )
+            .map((item) => ({
+              id: item.id,
+              title: item.title,
+              isDone: item.isDone === true,
+            }))
+        : []
+    );
     setAnaliseUsuario(selected.analiseJson?.analiseUsuario ?? '');
     setDecisaoAnaliseFinal(
       isDecisaoAnaliseFinalValue(selected.analiseJson?.decisaoAnaliseFinal)
@@ -732,6 +771,8 @@ export default function LicitacoesPage() {
         decisaoAnaliseFinal: payload.decisaoAnaliseFinal,
         analiseFinalTexto: payload.analiseFinalTexto,
         checklistAnalise: serializeChecklistForSave(payload.checklistState),
+        naoSeHabilita: payload.naoSeHabilita,
+        naoSeHabilitaItens: payload.naoSeHabilitaItens,
       });
       return { licitacao: res.data?.data as Licitacao, silent: opts?.silent ?? false, id };
     },
@@ -774,6 +815,8 @@ export default function LicitacoesPage() {
       decisaoAnaliseFinal,
       analiseFinalTexto,
       checklistState,
+      naoSeHabilita,
+      naoSeHabilitaItens,
     };
     if (autoSaveTimerRef.current) {
       clearTimeout(autoSaveTimerRef.current);
@@ -788,6 +831,8 @@ export default function LicitacoesPage() {
     decisaoAnaliseFinal,
     analiseFinalTexto,
     checklistState,
+    naoSeHabilita,
+    naoSeHabilitaItens,
   ]);
 
   const finalizarAnaliseMutation = useMutation({
@@ -802,6 +847,8 @@ export default function LicitacoesPage() {
         decisaoAnaliseFinal,
         analiseFinalTexto,
         checklistState,
+        naoSeHabilita,
+        naoSeHabilitaItens,
       };
       if (autoSaveTimerRef.current) {
         clearTimeout(autoSaveTimerRef.current);
@@ -849,7 +896,7 @@ export default function LicitacoesPage() {
     setExportingPdf(true);
     try {
       const manual = analiseManualRef.current;
-      const sections = buildChecklistExportSections(checklistSections, manual.checklistState);
+      const sections = buildChecklistResumo(checklistSections, manual.checklistState);
       const responsavel =
         manual.responsavelAnalise.trim() || userData?.data?.name?.trim() || '';
 
@@ -858,6 +905,11 @@ export default function LicitacoesPage() {
         responsavelAnalise: responsavel,
         linkNotebookLm: manual.linkNotebookLm,
         analiseUsuario: manual.analiseUsuario,
+        naoSeHabilita: manual.naoSeHabilita,
+        naoSeHabilitaItens: manual.naoSeHabilitaItens.map((item) => ({
+          title: item.title,
+          isDone: item.isDone,
+        })),
         sections: sections.map((section) => ({
           title: section.title,
           items: section.items.map((item) => ({
@@ -948,6 +1000,26 @@ export default function LicitacoesPage() {
       hasUserEditedRef.current = true;
       setLinkNotebookLm(value);
       analiseManualRef.current = { ...analiseManualRef.current, linkNotebookLm: value };
+      triggerSave();
+    },
+    [triggerSave]
+  );
+
+  const handleNaoSeHabilitaChange = useCallback(
+    (enabled: boolean) => {
+      hasUserEditedRef.current = true;
+      setNaoSeHabilita(enabled);
+      analiseManualRef.current = { ...analiseManualRef.current, naoSeHabilita: enabled };
+      triggerSave();
+    },
+    [triggerSave]
+  );
+
+  const handleNaoSeHabilitaItensChange = useCallback(
+    (items: NaoSeHabilitaItem[]) => {
+      hasUserEditedRef.current = true;
+      setNaoSeHabilitaItens(items);
+      analiseManualRef.current = { ...analiseManualRef.current, naoSeHabilitaItens: items };
       triggerSave();
     },
     [triggerSave]
@@ -1855,6 +1927,14 @@ export default function LicitacoesPage() {
                       </label>
                     </CardContent>
                   </Card>
+
+                  <LicitacaoNaoSeHabilitaPanel
+                    enabled={naoSeHabilita}
+                    onEnabledChange={handleNaoSeHabilitaChange}
+                    items={naoSeHabilitaItens}
+                    onItemsChange={handleNaoSeHabilitaItensChange}
+                    disabled={!canEditAnaliseManual || saveAnaliseMutation.isPending}
+                  />
 
                   <Card
                     padding="none"

@@ -17,6 +17,8 @@ export type ExportLicitacaoAnalisePdfInput = {
   linkNotebookLm?: string;
   analiseUsuario?: string;
   sections: LicitacaoAnalisePdfChecklistSection[];
+  naoSeHabilita?: boolean;
+  naoSeHabilitaItens?: Array<{ title: string; isDone: boolean }>;
   generatedAt?: Date;
 };
 
@@ -225,6 +227,52 @@ function drawNotebookLinkBlock(
   return y + blockH + 4;
 }
 
+function drawNaoSeHabilitaSection(
+  doc: jsPDF,
+  y: number,
+  contentW: number,
+  enabled: boolean | undefined,
+  items: Array<{ title: string; isDone: boolean }> | undefined
+): number {
+  if (!enabled) return y;
+
+  y = drawSectionTitle(doc, y, contentW, 'Não se habilita');
+  y += 2;
+
+  const list = items ?? [];
+  if (list.length === 0) {
+    y = ensureSpace(doc, y, 12);
+    doc.setFont('helvetica', 'italic');
+    doc.setFontSize(9);
+    doc.setTextColor(...TEXT_MUTED);
+    doc.text('Marcado, sem itens adicionados.', MARGIN + 2, y + 5);
+    return y + 12;
+  }
+
+  for (let index = 0; index < list.length; index += 1) {
+    const item = list[index];
+    const label = `Item ${index + 1} - ${item.title}`;
+    const lines = doc.splitTextToSize(label, contentW - 10) as string[];
+    const blockH = Math.max(10, 6 + lines.length * 4.2);
+
+    y = ensureSpace(doc, y, blockH + 2);
+    doc.setDrawColor(...BORDER);
+    doc.setFillColor(255, 255, 255);
+    doc.roundedRect(MARGIN, y, contentW, blockH, 1.5, 1.5, 'FD');
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.setTextColor(...TEXT_BLACK);
+    let ly = y + 6.5;
+    for (const line of lines) {
+      doc.text(line, MARGIN + 4, ly);
+      ly += 4.2;
+    }
+    y += blockH + 2;
+  }
+  return y + 4;
+}
+
 function drawMetaLines(
   doc: jsPDF,
   y: number,
@@ -241,7 +289,7 @@ function drawMetaLines(
   doc.setTextColor(...TEXT_MUTED);
 
   const parts = [
-    `${stats.totalItens} item(ns) no checklist`,
+    `${stats.totalItens} item(ns) no resumo`,
     `${stats.totalMarcados} marcado(s)`,
     `${stats.totalComentados} com comentário`,
   ];
@@ -429,11 +477,20 @@ export async function exportLicitacaoAnalisePdf(input: ExportLicitacaoAnalisePdf
   let y = drawPageHeader(doc, pageWidth, logo, generatedAt, input.titulo);
   y = drawResponsavelBlock(doc, y, contentW, input.responsavelAnalise);
   y = drawNotebookLinkBlock(doc, y, contentW, input.linkNotebookLm);
+  y = drawNaoSeHabilitaSection(
+    doc,
+    y,
+    contentW,
+    input.naoSeHabilita,
+    input.naoSeHabilitaItens
+  );
   y = drawMetaLines(doc, y, contentW, {
     totalItens,
     totalMarcados,
     totalComentados,
   });
+
+  y = drawAnaliseSection(doc, y, contentW, input.analiseUsuario);
 
   y = drawSectionTitle(doc, y, contentW, 'Checklist — Análise de Viabilidade');
   y += 6;
@@ -448,7 +505,7 @@ export async function exportLicitacaoAnalisePdf(input: ExportLicitacaoAnalisePdf
     doc.setFontSize(9);
     doc.setTextColor(...TEXT_MUTED);
     doc.text(
-      'Nenhum item no checklist.',
+      'Nenhum item marcado ou comentado no checklist.',
       MARGIN + contentW / 2,
       y + 8,
       { align: 'center' }
@@ -470,7 +527,6 @@ export async function exportLicitacaoAnalisePdf(input: ExportLicitacaoAnalisePdf
     }
   }
 
-  drawAnaliseSection(doc, y, contentW, input.analiseUsuario);
   drawFooter(doc);
 
   const datePart = generatedAt.toISOString().slice(0, 10);
