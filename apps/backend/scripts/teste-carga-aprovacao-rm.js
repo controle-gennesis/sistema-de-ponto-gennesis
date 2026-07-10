@@ -29,6 +29,7 @@ import { check, sleep, fail } from 'k6';
 import exec from 'k6/execution';
 import { Counter } from 'k6/metrics';
 import { getUserCredentials, loginJsonBody } from './carga-auth.js';
+import { p95 } from './carga-thresholds.js';
 
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:5000/api';
 const VUS = Math.max(1, Number(__ENV.VUS || 5));
@@ -51,7 +52,7 @@ export const options = {
   thresholds: {
     rm_approved: [`count==${ITERATIONS}`],
     http_req_failed: ['rate<0.15'],
-    'http_req_duration{endpoint:approve_rm}': ['p(95)<5000'],
+    'http_req_duration{endpoint:approve_rm}': [p95(5000)],
   },
 };
 

@@ -26,6 +26,7 @@ import exec from 'k6/execution';
 import { Counter } from 'k6/metrics';
 
 import { getUserCredentials, loginJsonBody, requireSupplierId } from './carga-auth.js';
+import { p95 } from './carga-thresholds.js';
 
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:5000/api';
 const VUS = Math.max(1, Number(__ENV.VUS || 5));
@@ -52,9 +53,10 @@ export const options = {
     quotes_saved: [`count==${ITERATIONS}`],
     oc_generated: [`count==${ITERATIONS}`],
     http_req_failed: ['rate<0.15'],
-    'http_req_duration{endpoint:quote_map_create}': ['p(95)<5000'],
-    'http_req_duration{endpoint:quotes_save}': ['p(95)<5000'],
-    'http_req_duration{endpoint:oc_generate}': ['p(95)<8000'],
+    'http_req_duration{endpoint:quote_map_create}': [p95(5000)],
+    'http_req_duration{endpoint:quotes_save}': [p95(5000)],
+    // Prod: generate já mediu ~8s avg / ~11s p95 (lock + latência Railway)
+    'http_req_duration{endpoint:oc_generate}': [p95(8000, 20000)],
   },
 };
 

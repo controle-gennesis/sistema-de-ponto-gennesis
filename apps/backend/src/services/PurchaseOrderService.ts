@@ -23,6 +23,16 @@ const PURCHASE_ORDER_CREATE_TX_OPTIONS = {
   timeout: Number(process.env.PURCHASE_ORDER_CREATE_TX_TIMEOUT_MS) || 90_000,
 };
 
+/**
+ * updateStatus: update + include detalhado (joins pesados).
+ * Sob concorrência (http.batch do k6) + pool connection_limit=5 + latência Railway,
+ * o default Prisma (maxWait 2s / timeout 5s) estoura P2028.
+ */
+const PURCHASE_ORDER_STATUS_TX_OPTIONS = {
+  maxWait: Number(process.env.PURCHASE_ORDER_STATUS_TX_MAX_WAIT_MS) || 30_000,
+  timeout: Number(process.env.PURCHASE_ORDER_STATUS_TX_TIMEOUT_MS) || 90_000,
+};
+
 function labelForOcCorrectionSource(previousStatus: string): string {
   if (previousStatus === 'PENDING') return 'Gestor';
   if (previousStatus === 'PENDING_DIRETORIA') return 'Diretoria';
@@ -1296,7 +1306,7 @@ export class PurchaseOrderService {
       }
 
       return po;
-    });
+    }, PURCHASE_ORDER_STATUS_TX_OPTIONS);
     const [e] = await enrichOrdersParcelPlans([updated]);
     return e;
   }
