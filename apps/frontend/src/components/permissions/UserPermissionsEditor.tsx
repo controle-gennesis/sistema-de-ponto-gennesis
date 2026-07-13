@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import {
@@ -577,6 +577,9 @@ export function UserPermissionsEditor({
 
   /** Serialização estável para comparar com o último estado vindo do servidor (evita PUT na hidratação). */
   const baselineSerializedRef = useRef<string | null>(null);
+  /** Evita PUTs concorrentes (causa 409 na unique userId+module+action). */
+  const saveInFlightRef = useRef(false);
+  const saveQueuedRef = useRef(false);
 
   const {
     data: userPermissionData,
@@ -814,6 +817,26 @@ export function UserPermissionsEditor({
   const { mutate: persistPermissions, mutateAsync: persistPermissionsAsync, isPending: isSavingPermissions } =
     saveMutation;
 
+  const enqueuePersistPermissions = useCallback(() => {
+    if (saveInFlightRef.current) {
+      saveQueuedRef.current = true;
+      return;
+    }
+    saveInFlightRef.current = true;
+    void (async () => {
+      try {
+        do {
+          saveQueuedRef.current = false;
+          await persistPermissionsAsync();
+        } while (saveQueuedRef.current);
+      } catch {
+        /* onError do mutation já exibe toast */
+      } finally {
+        saveInFlightRef.current = false;
+      }
+    })();
+  }, [persistPermissionsAsync]);
+
   /** Salva automaticamente após alterações (debounce), sem disparar na sincronização inicial com o servidor. */
   useEffect(() => {
     if (loadingPermissions || permissionError) return;
@@ -839,7 +862,7 @@ export function UserPermissionsEditor({
         contractModuleFlagsRef.current
       );
       if (latest === baselineSerializedRef.current) return;
-      persistPermissions();
+      enqueuePersistPermissions();
     }, 450);
 
     return () => window.clearTimeout(t);
@@ -852,7 +875,7 @@ export function UserPermissionsEditor({
     contractModuleFlags,
     loadingPermissions,
     permissionError,
-    persistPermissions,
+    enqueuePersistPermissions,
   ]);
 
   // Garante persistência ao sair da tela (ex.: botão Voltar externo/página pai),
@@ -869,9 +892,9 @@ export function UserPermissionsEditor({
         contractModuleFlagsRef.current
       );
       if (latest === baselineSerializedRef.current) return;
-      persistPermissions();
+      enqueuePersistPermissions();
     };
-  }, [persistPermissions]);
+  }, [enqueuePersistPermissions]);
 
   const modulesByCategory = useMemo(() => {
     const map = new Map<string, PermissionModuleDef[]>();

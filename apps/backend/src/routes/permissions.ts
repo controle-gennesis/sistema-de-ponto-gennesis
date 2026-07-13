@@ -418,6 +418,9 @@ router.put('/users/:userId', requirePermissionManagerOrAdministrator, async (req
     }
 
     await prisma.$transaction(async (tx) => {
+      // Serializa saves concorrentes do mesmo usuário (auto-save com debounce no front).
+      await tx.$queryRaw`SELECT id FROM users WHERE id = ${userId} FOR UPDATE`;
+
       await tx.userPermission.deleteMany({
         where: { userId },
       });
