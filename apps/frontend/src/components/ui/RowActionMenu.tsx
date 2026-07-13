@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import { Edit, MoreVertical, Trash2 } from 'lucide-react';
 import type { RowActionMenuState } from '@/hooks/useRowActionMenu';
 import { listTableRowClasses, rowActionMenuButtonClass } from '@/components/ui/listTableUi';
+import { Z_ACTION_MENU } from '@/lib/zIndex';
 
 export type RowActionMenuExtraItem = {
   label: string;
@@ -72,7 +73,8 @@ type RowActionMenuPortalProps = {
   extraItems?: RowActionMenuExtraItem[];
   /** Oculta Editar/Excluir — exibe só `extraItems` */
   hideDefaultActions?: boolean;
-  zIndex?: { backdrop: number; menu: number };
+  /** z-index do overlay que contém o menu */
+  zIndex?: number;
 };
 
 export function RowActionMenuPortal({
@@ -85,22 +87,22 @@ export function RowActionMenuPortal({
   deleteDisabledTitle,
   extraItems = [],
   hideDefaultActions = false,
-  zIndex = { backdrop: 1050, menu: 1051 }
+  zIndex = Z_ACTION_MENU
 }: RowActionMenuPortalProps) {
   if (!menu || typeof document === 'undefined') return null;
 
   return createPortal(
-    <>
-      <div
-        className="fixed inset-0"
-        style={{ zIndex: zIndex.backdrop }}
-        aria-hidden
-        onClick={onClose}
-      />
+    <div
+      className="fixed inset-0"
+      style={{ zIndex }}
+      onClick={onClose}
+    >
       <div
         role="menu"
-        className="fixed w-56 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800"
-        style={{ top: menu.top, left: menu.left, zIndex: zIndex.menu }}
+        className="absolute w-56 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800"
+        style={{ top: menu.top, left: menu.left }}
+        onClick={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
       >
         {!hideDefaultActions ? (
           <button
@@ -173,7 +175,7 @@ export function RowActionMenuPortal({
           </button>
         ) : null}
       </div>
-    </>,
+    </div>,
     document.body
   );
 }

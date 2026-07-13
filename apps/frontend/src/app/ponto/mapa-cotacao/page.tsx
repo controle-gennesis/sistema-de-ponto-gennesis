@@ -258,7 +258,9 @@ export default function MapaCotacaoPage() {
   const { data: requestsData, isLoading: loadingRequests } = useQuery({
     queryKey: ['material-requests-approved-map'],
     queryFn: async () => {
-      const res = await api.get('/material-requests', { params: { status: 'APPROVED', limit: 500 } });
+      const res = await api.get('/material-requests', {
+        params: { status: 'APPROVED', limit: 200, summary: '1' },
+      });
       return res.data;
     },
     staleTime: 30_000,
@@ -346,7 +348,19 @@ export default function MapaCotacaoPage() {
     [suppliers]
   );
 
-  const selectedRequest = approvedRequests.find((r) => r.id === selectedRequestId) || null;
+  const { data: selectedRequestFull, isLoading: loadingSelectedRequest } = useQuery({
+    queryKey: ['material-request-detail', selectedRequestId],
+    queryFn: async () => {
+      const res = await api.get(`/material-requests/${selectedRequestId}`);
+      return (res.data?.data ?? res.data) as MaterialRequest;
+    },
+    enabled: !!selectedRequestId,
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
+  });
+
+  const selectedRequest =
+    selectedRequestFull?.id === selectedRequestId ? selectedRequestFull : null;
 
   useEffect(() => {
     if (!selectedRequestId) return;
@@ -366,7 +380,7 @@ export default function MapaCotacaoPage() {
       return;
     }
     setOcItemQtyByItemId(
-      Object.fromEntries(selectedRequest.items.map((i) => [i.id, Number(i.quantity)]))
+      Object.fromEntries((selectedRequest.items ?? []).map((i) => [i.id, Number(i.quantity)]))
     );
   }, [selectedRequest?.id]);
 
@@ -687,8 +701,8 @@ export default function MapaCotacaoPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
+      queryClient.invalidateQueries({ queryKey: ['material-requests'] });
       toast.success('Mapa gerado e OCs criadas com sucesso!');
-      router.push('/ponto/ordem-de-compra');
     },
     onError: (error: any) => {
       toast.error(error?.response?.data?.message || error?.message || 'Erro ao gerar OCs');
@@ -771,7 +785,7 @@ export default function MapaCotacaoPage() {
                     />
                   </div>
 
-                  {!selectedRequest ? (
+                  {!selectedRequestId ? (
                     <div className="mt-4 rounded-lg border border-dashed border-gray-300 bg-gray-50/80 px-6 py-12 text-center dark:border-gray-600 dark:bg-gray-900/30">
                       <FileText className="mx-auto mb-3 h-10 w-10 text-gray-400 dark:text-gray-500" />
                       <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -780,6 +794,10 @@ export default function MapaCotacaoPage() {
                       <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                         Depois você poderá escolher os fornecedores para comparar preços
                       </p>
+                    </div>
+                  ) : loadingSelectedRequest || !selectedRequest ? (
+                    <div className="mt-4 flex items-center justify-center gap-2 py-12 text-sm text-gray-500 dark:text-gray-400">
+                      <Loading message="Carregando itens da RM..." size="sm" />
                     </div>
                   ) : (
                     <div className="mt-4 min-w-0">

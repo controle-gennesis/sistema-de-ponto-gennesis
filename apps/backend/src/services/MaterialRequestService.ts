@@ -369,11 +369,14 @@ export class MaterialRequestService {
     priority?: string;
     page?: number;
     limit?: number;
+    /** false = listagem leve sem linhas de item (detalhe via getById). */
+    includeItems?: boolean;
   }) {
     const page = Math.max(1, filters.page || 1);
     const rawLimit = filters.limit ?? 20;
     const limit = Math.min(Math.max(rawLimit, 1), 500);
     const skip = (page - 1) * limit;
+    const includeItems = filters.includeItems !== false;
 
     const where: any = {};
 
@@ -399,6 +402,43 @@ export class MaterialRequestService {
       where.priority = filters.priority;
     }
 
+    const baseInclude = {
+      requester: {
+        select: {
+          id: true,
+          name: true,
+          email: true
+        }
+      },
+      approver: {
+        select: {
+          id: true,
+          name: true,
+          email: true
+        }
+      },
+      rejecter: {
+        select: {
+          id: true,
+          name: true
+        }
+      },
+      costCenter: {
+        select: { id: true, code: true, name: true, state: true, polo: true }
+      },
+      project: {
+        select: { id: true, name: true, code: true }
+      },
+      purchaseOrders: {
+        select: {
+          id: true,
+          status: true,
+          orderNumber: true
+        },
+        orderBy: { createdAt: 'asc' as const }
+      }
+    } as const;
+
     const [requests, total] = await Promise.all([
       prisma.materialRequest.findMany({
         where,
@@ -407,65 +447,37 @@ export class MaterialRequestService {
         orderBy: {
           requestedAt: 'desc'
         },
-        include: {
-          requester: {
-            select: {
-              id: true,
-              name: true,
-              email: true
-            }
-          },
-          approver: {
-            select: {
-              id: true,
-              name: true,
-              email: true
-            }
-          },
-          rejecter: {
-            select: {
-              id: true,
-              name: true
-            }
-          },
-          costCenter: {
-            select: { id: true, code: true, name: true, state: true, polo: true }
-          },
-          project: {
-            select: { id: true, name: true, code: true }
-          },
-          items: {
-            select: {
-              id: true,
-              quantity: true,
-              unit: true,
-              unitPrice: true,
-              totalPrice: true,
-              notes: true,
-              attachmentUrl: true,
-              attachmentName: true,
-              status: true,
-              materialId: true,
-              material: {
+        include: includeItems
+          ? {
+              ...baseInclude,
+              items: {
                 select: {
                   id: true,
-                  name: true,
-                  description: true,
+                  quantity: true,
                   unit: true,
-                  sinapiCode: true
+                  unitPrice: true,
+                  totalPrice: true,
+                  notes: true,
+                  attachmentUrl: true,
+                  attachmentName: true,
+                  status: true,
+                  materialId: true,
+                  material: {
+                    select: {
+                      id: true,
+                      name: true,
+                      description: true,
+                      unit: true,
+                      sinapiCode: true
+                    }
+                  }
                 }
               }
             }
-          },
-          purchaseOrders: {
-            select: {
-              id: true,
-              status: true,
-              orderNumber: true
-            },
-            orderBy: { createdAt: 'asc' as const }
-          }
-        }
+          : {
+              ...baseInclude,
+              _count: { select: { items: true } }
+            }
       }),
       prisma.materialRequest.count({ where })
     ]);

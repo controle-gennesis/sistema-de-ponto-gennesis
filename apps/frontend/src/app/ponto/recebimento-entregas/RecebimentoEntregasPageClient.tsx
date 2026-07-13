@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { CheckCircle2, Clock, Filter, PackageCheck, Search, X } from 'lucide-react';
@@ -15,6 +14,7 @@ import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDr
 import { ButtonSeg } from '@/app/ponto/solicitacoes-dp/DpSolicitacaoTypeFields';
 import api from '@/lib/api';
 import { RowActionMenuCell } from '@/components/ui/RowActionMenu';
+import { ActionMenuOverlay } from '@/components/ui/ActionMenuOverlay';
 import { getListTableRowClassName, listTableRowClasses, ListRowNavigableLabel } from '@/components/ui/listTableUi';
 import { useRowActionMenu } from '@/hooks/useRowActionMenu';
 import toast from 'react-hot-toast';
@@ -529,37 +529,28 @@ export default function RecebimentoEntregasPageClient() {
                   {rowActionMenu &&
                     rowForActionMenu &&
                     viewTab === 'pending' &&
-                    !rowForActionMenu.receivedByEngineering &&
-                    typeof document !== 'undefined' &&
-                    createPortal(
-                      <>
-                        <div
-                          className="app-modal-overlay fixed inset-0 z-[2100]"
-                          aria-hidden
-                          onClick={closeRowActionMenu}
-                        />
-                        <div
-                          role="menu"
-                          className="fixed z-[1051] w-56 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800"
-                          style={{ top: rowActionMenu.top, left: rowActionMenu.left }}
+                    !rowForActionMenu.receivedByEngineering && (
+                      <ActionMenuOverlay
+                        open
+                        onClose={closeRowActionMenu}
+                        top={rowActionMenu.top}
+                        left={rowActionMenu.left}
+                      >
+                        <button
+                          type="button"
+                          role="menuitem"
+                          disabled={receiveMutation.isPending}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            closeRowActionMenu();
+                            setConfirmRow(rowForActionMenu);
+                          }}
+                          className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-gray-300 dark:hover:bg-gray-700"
                         >
-                          <button
-                            type="button"
-                            role="menuitem"
-                            disabled={receiveMutation.isPending}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              closeRowActionMenu();
-                              setConfirmRow(rowForActionMenu);
-                            }}
-                            className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-gray-300 dark:hover:bg-gray-700"
-                          >
-                            <CheckCircle2 className="h-4 w-4 shrink-0 text-green-600 dark:text-green-400" />
-                            <span>Confirmar recebimento</span>
-                          </button>
-                        </div>
-                      </>,
-                      document.body
+                          <CheckCircle2 className="h-4 w-4 shrink-0 text-green-600 dark:text-green-400" />
+                          <span>Confirmar recebimento</span>
+                        </button>
+                      </ActionMenuOverlay>
                     )}
 
                   {totalPages > 1 && (

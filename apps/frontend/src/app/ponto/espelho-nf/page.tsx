@@ -26,6 +26,7 @@ import { Loading } from '@/components/ui/Loading';
 import { Modal } from '@/components/ui/Modal';
 import api from '@/lib/api';
 import { getListTableRowClassName, ListRowNavigableLabel, rowActionMenuButtonClass } from '@/components/ui/listTableUi';
+import { ActionMenuOverlay } from '@/components/ui/ActionMenuOverlay';
 import toast from 'react-hot-toast';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
@@ -3480,22 +3481,13 @@ export default function EspelhoNfPage() {
               </CardContent>
             </Card>
 
-          {mirrorActionMenu && mirrorMenuItem && typeof document !== 'undefined'
-            ? createPortal(
-                <>
-                  <div
-                    className="app-modal-overlay fixed inset-0 z-[2000]"
-                    aria-hidden
-                    onClick={() => setMirrorActionMenu(null)}
-                  />
-                  <div
-                    role="menu"
-                    className="fixed z-[2001] w-56 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800"
-                    style={{
-                      top: mirrorActionMenu.top,
-                      left: mirrorActionMenu.left
-                    }}
-                  >
+          {mirrorActionMenu && mirrorMenuItem ? (
+            <ActionMenuOverlay
+              open
+              onClose={() => setMirrorActionMenu(null)}
+              top={mirrorActionMenu.top}
+              left={mirrorActionMenu.left}
+            >
                     {(() => {
                       const menuApproval = resolveEspelhoApprovalStatus(
                         mirrorMenuItem.id,
@@ -3573,11 +3565,8 @@ export default function EspelhoNfPage() {
                         </>
                       );
                     })()}
-                  </div>
-                </>,
-                document.body
-              )
-            : null}
+            </ActionMenuOverlay>
+          ) : null}
 
           {detailMirror && (
             <div

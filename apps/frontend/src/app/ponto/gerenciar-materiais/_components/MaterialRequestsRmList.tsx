@@ -34,6 +34,9 @@ import { formatRmListDisplayId } from '../_lib/rmListDisplay';
 import {
   materialRequestOcListRows,
 } from '@/components/oc/materialRequestOcListRows';
+import {
+  Z_ACTION_MENU,
+} from '@/lib/zIndex';
 const cellPad = 'px-2 sm:px-3 py-3';
 const cellPadTh = 'px-2 sm:px-3 py-4';
 const rmColCls = 'w-[4%] min-w-[3rem] max-w-[4.5rem]';
@@ -412,12 +415,20 @@ export function MaterialRequestsRmList({
         requestForMenu &&
         typeof document !== 'undefined' &&
         createPortal(
-          <>
-            <div className="fixed inset-0 z-[2000]" aria-hidden onClick={() => setActionMenu(null)} />
+          <div
+            className="fixed inset-0"
+            style={{ zIndex: Z_ACTION_MENU }}
+            onClick={() => setActionMenu(null)}
+          >
             <div
               role="menu"
-              className="fixed z-[2001] w-56 rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800 overflow-hidden"
-              style={{ top: actionMenu.top, left: actionMenu.left }}
+              className="absolute w-56 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800"
+              style={{
+                top: actionMenu.top,
+                left: actionMenu.left,
+              }}
+              onClick={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
             >
               <button
                 type="button"
@@ -445,7 +456,7 @@ export function MaterialRequestsRmList({
                   </Link>
                 )}
             </div>
-          </>,
+          </div>,
           document.body
         )}
     </Card>

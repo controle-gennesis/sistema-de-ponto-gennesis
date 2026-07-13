@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useState, useMemo, useEffect, useDeferredValue } from 'react';
-import { createPortal } from 'react-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Trash2, Users, Search, AlertTriangle, X, Clock, Calendar, User, Download, Edit, Save, Camera, FileCheck, Eye, EyeOff, Plus, ChevronDown, ChevronUp, CheckCircle, RotateCcw, Upload, FileSpreadsheet, Loader2, MoreVertical, DoorOpen, DoorClosed, Utensils, UtensilsCrossed, XCircle, UserX, Shield, Filter, KeyRound } from 'lucide-react';
 import * as XLSX from 'xlsx';
@@ -14,6 +13,7 @@ import {
   EMPLOYEE_STATUS_FILTER_OPTIONS,
   labeledToSelectOptions,
 } from '@/lib/selectOptionBuilders';
+import { ActionMenuOverlay } from '@/components/ui/ActionMenuOverlay';
 import { getListTableRowClassName, ListRowNavigableLabel, rowActionMenuButtonClass } from '@/components/ui/listTableUi';
 import { TOMADORES_LIST } from '@/constants/tomadores';
 import { 
@@ -1859,106 +1859,93 @@ export function EmployeeList({
               </table>
             </div>
 
-            {employeeActionMenu &&
-              employeeForActionMenu &&
-              typeof document !== 'undefined' &&
-              createPortal(
-                <>
-                  <div
-                    className="app-modal-overlay fixed inset-0 z-[2000]"
-                    aria-hidden
-                    onClick={() => setEmployeeActionMenu(null)}
-                  />
-                  <div
-                    role="menu"
-                    className="fixed z-[2001] w-56 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 overflow-hidden"
-                    style={{
-                      top: employeeActionMenu.top,
-                      left: employeeActionMenu.left,
+            {employeeActionMenu && employeeForActionMenu && (
+              <ActionMenuOverlay
+                open
+                onClose={() => setEmployeeActionMenu(null)}
+                top={employeeActionMenu.top}
+                left={employeeActionMenu.left}
+              >
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setEmployeeActionMenu(null);
+                    setSelectedEmployee(employeeForActionMenu);
+                    setDetailsTab('info');
+                  }}
+                  className="w-full flex items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+                >
+                  <Eye className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
+                  <span>Ver detalhes</span>
+                </button>
+                {canChangeEmployeePassword && employeeForActionMenu.isActive && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setEmployeeActionMenu(null);
+                      setSelectedEmployee(employeeForActionMenu);
+                      setPasswordForm({ newPassword: '', confirmPassword: '' });
+                      setShowNewPassword(false);
+                      setShowConfirmPassword(false);
+                      setShowChangePasswordModal(true);
                     }}
+                    className="w-full flex items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 border-t border-gray-200 dark:border-gray-700"
                   >
-                    <button
-                      type="button"
-                      role="menuitem"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setEmployeeActionMenu(null);
-                        setSelectedEmployee(employeeForActionMenu);
-                        setDetailsTab('info');
-                      }}
-                      className="w-full flex items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
-                    >
-                      <Eye className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
-                      <span>Ver detalhes</span>
-                    </button>
-                    {canChangeEmployeePassword && employeeForActionMenu.isActive && (
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setEmployeeActionMenu(null);
-                          setSelectedEmployee(employeeForActionMenu);
-                          setPasswordForm({ newPassword: '', confirmPassword: '' });
-                          setShowNewPassword(false);
-                          setShowConfirmPassword(false);
-                          setShowChangePasswordModal(true);
-                        }}
-                        className="w-full flex items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 border-t border-gray-200 dark:border-gray-700"
-                      >
-                        <KeyRound className="w-4 h-4 text-amber-500 dark:text-amber-400 shrink-0" />
-                        <span>Alterar senha</span>
-                      </button>
-                    )}
-                    {canDeleteEmployees && showDeleteButton && employeeForActionMenu.isActive && (
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setEmployeeActionMenu(null);
-                          setDeleteConfirm(employeeForActionMenu.id);
-                        }}
-                        className="w-full flex items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 border-t border-gray-200 dark:border-gray-700"
-                      >
-                        <UserX className="w-4 h-4 text-red-600 dark:text-red-400 shrink-0" />
-                        <span>Desligar o funcionário</span>
-                      </button>
-                    )}
-                    {(canEditEmployees || canDeleteEmployees) && showDeleteButton && !employeeForActionMenu.isActive && (
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setEmployeeActionMenu(null);
-                          setReactivateConfirm(employeeForActionMenu.id);
-                        }}
-                        className="w-full flex items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 border-t border-gray-200 dark:border-gray-700"
-                      >
-                        <CheckCircle className="w-4 h-4 text-green-600 dark:text-green-400 shrink-0" />
-                        <span>Reativar funcionário</span>
-                      </button>
-                    )}
-                    {canManageUserPermissions && onManagePermissions && (
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setEmployeeActionMenu(null);
-                          onManagePermissions(employeeForActionMenu);
-                        }}
-                        className="w-full flex items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 border-t border-gray-200 dark:border-gray-700"
-                      >
-                        <Shield className="w-4 h-4 text-gray-600 dark:text-gray-400 shrink-0" />
-                        <span>Gerenciar permissões</span>
-                      </button>
-                    )}
-                  </div>
-                </>,
-                document.body
-              )}
+                    <KeyRound className="w-4 h-4 text-amber-500 dark:text-amber-400 shrink-0" />
+                    <span>Alterar senha</span>
+                  </button>
+                )}
+                {canDeleteEmployees && showDeleteButton && employeeForActionMenu.isActive && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setEmployeeActionMenu(null);
+                      setDeleteConfirm(employeeForActionMenu.id);
+                    }}
+                    className="w-full flex items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 border-t border-gray-200 dark:border-gray-700"
+                  >
+                    <UserX className="w-4 h-4 text-red-600 dark:text-red-400 shrink-0" />
+                    <span>Desligar o funcionário</span>
+                  </button>
+                )}
+                {(canEditEmployees || canDeleteEmployees) && showDeleteButton && !employeeForActionMenu.isActive && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setEmployeeActionMenu(null);
+                      setReactivateConfirm(employeeForActionMenu.id);
+                    }}
+                    className="w-full flex items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 border-t border-gray-200 dark:border-gray-700"
+                  >
+                    <CheckCircle className="w-4 h-4 text-green-600 dark:text-green-400 shrink-0" />
+                    <span>Reativar funcionário</span>
+                  </button>
+                )}
+                {canManageUserPermissions && onManagePermissions && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setEmployeeActionMenu(null);
+                      onManagePermissions(employeeForActionMenu);
+                    }}
+                    className="w-full flex items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 border-t border-gray-200 dark:border-gray-700"
+                  >
+                    <Shield className="w-4 h-4 text-gray-600 dark:text-gray-400 shrink-0" />
+                    <span>Gerenciar permissões</span>
+                  </button>
+                )}
+              </ActionMenuOverlay>
+            )}
 
             {/* Botões de paginação */}
             {totalPages > 1 && (

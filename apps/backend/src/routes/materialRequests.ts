@@ -122,11 +122,20 @@ router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
       requestedBy,
       priority,
       page = '1',
-      limit = '500'
+      limit = '100',
+      summary,
+      includeItems
     } = req.query;
 
     const pageNum = Math.max(1, parseInt(String(page), 10) || 1);
-    const limitNum = Math.min(Math.max(parseInt(String(limit), 10) || 500, 1), 500);
+    const limitNum = Math.min(Math.max(parseInt(String(limit), 10) || 100, 1), 500);
+    const wantItems =
+      summary === '1' ||
+      summary === 'true' ||
+      includeItems === '0' ||
+      includeItems === 'false'
+        ? false
+        : true;
 
     let scopeCostCenterIds: string[] | null = null;
     if (req.user?.id && !requestedBy) {
@@ -144,6 +153,7 @@ router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
       priority: priority as string,
       page: pageNum,
       limit: limitNum,
+      includeItems: wantItems,
     };
 
     if (scopeCostCenterIds !== null) {

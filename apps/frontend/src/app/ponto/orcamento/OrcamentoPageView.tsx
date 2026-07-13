@@ -43,6 +43,7 @@ import { useCostCenters } from '@/hooks/useCostCenters';
 import api from '@/lib/api';
 import { FORM_FIELD_INPUT_CLS } from '@/lib/formFieldUi';
 import { Modal } from '@/components/ui/Modal';
+import { ActionMenuOverlay } from '@/components/ui/ActionMenuOverlay';
 import { DatePickerField } from '@/components/ui/DatePickerField';
 import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
 import { formatCadastroListId } from '@/components/ui/CadastroListSummary';
@@ -8253,55 +8254,43 @@ export function OrcamentoPageView({
                           </tbody>
                         </table>
                       </div>
-                      {orcamentoListaActionMenu &&
-                        typeof document !== 'undefined' &&
-                        createPortal(
-                          <>
-                            <div
-                              className="app-modal-overlay fixed inset-0 z-[2000]"
-                              aria-hidden
-                              onClick={() => setOrcamentoListaActionMenu(null)}
-                            />
-                            <div
-                              role="menu"
-                              className="fixed z-[2001] w-56 rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800 overflow-hidden"
-                              style={{
-                                top: orcamentoListaActionMenu.top,
-                                left: orcamentoListaActionMenu.left
-                              }}
-                            >
-                              <button
-                                type="button"
-                                role="menuitem"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  const id = orcamentoListaActionMenu.orcamentoId;
-                                  setOrcamentoListaActionMenu(null);
-                                  abrirOrcamentoDaLista(id);
-                                }}
-                                className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700"
-                              >
-                                <Eye className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
-                                <span>Ver detalhes</span>
-                              </button>
-                              <button
-                                type="button"
-                                role="menuitem"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  const { orcamentoId, nome } = orcamentoListaActionMenu;
-                                  setOrcamentoListaActionMenu(null);
-                                  excluirOrcamentoDaLista(orcamentoId, nome);
-                                }}
-                                className="flex w-full items-center gap-2 border-t border-gray-200 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-700"
-                              >
-                                <Trash2 className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
-                                <span>Excluir</span>
-                              </button>
-                            </div>
-                          </>,
-                          document.body
-                        )}
+                      {orcamentoListaActionMenu && (
+                        <ActionMenuOverlay
+                          open
+                          onClose={() => setOrcamentoListaActionMenu(null)}
+                          top={orcamentoListaActionMenu.top}
+                          left={orcamentoListaActionMenu.left}
+                        >
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const id = orcamentoListaActionMenu.orcamentoId;
+                              setOrcamentoListaActionMenu(null);
+                              abrirOrcamentoDaLista(id);
+                            }}
+                            className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700"
+                          >
+                            <Eye className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
+                            <span>Ver detalhes</span>
+                          </button>
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const { orcamentoId, nome } = orcamentoListaActionMenu;
+                              setOrcamentoListaActionMenu(null);
+                              excluirOrcamentoDaLista(orcamentoId, nome);
+                            }}
+                            className="flex w-full items-center gap-2 border-t border-gray-200 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-700"
+                          >
+                            <Trash2 className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
+                            <span>Excluir</span>
+                          </button>
+                        </ActionMenuOverlay>
+                      )}
                     </>
                   )}
                 </CardContent>
@@ -8809,21 +8798,14 @@ export function OrcamentoPageView({
                         Exportar orçamento analítico (.xlsx)
                       </button>
                     </div>
-                    {menuCtxAnalitico &&
-                      typeof document !== 'undefined' &&
-                      createPortal(
-                        <>
-                          <div
-                            className="app-modal-overlay fixed inset-0 z-[2000]"
-                            aria-hidden
-                            onClick={() => setMenuCtxAnalitico(null)}
-                          />
-                          <div
-                            role="menu"
-                            className="fixed z-[2001] min-w-[17rem] max-w-[min(100vw-1rem,22rem)] overflow-hidden rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-800"
-                            style={{ left: menuCtxAnalitico.left, top: menuCtxAnalitico.top }}
-                            onClick={(e) => e.stopPropagation()}
-                          >
+                    {menuCtxAnalitico && (
+                      <ActionMenuOverlay
+                        open
+                        onClose={() => setMenuCtxAnalitico(null)}
+                        top={menuCtxAnalitico.top}
+                        left={menuCtxAnalitico.left}
+                        panelClassName="min-w-[17rem] max-w-[min(100vw-1rem,22rem)] py-1"
+                      >
                             {menuCtxAnalitico.kind === 'composicao' ? (
                               <>
                                 <button
@@ -8922,10 +8904,8 @@ export function OrcamentoPageView({
                                 </button>
                               </>
                             )}
-                          </div>
-                        </>,
-                        document.body
-                      )}
+                      </ActionMenuOverlay>
+                    )}
                     </>
                     )}
                   </div>
@@ -10435,21 +10415,14 @@ export function OrcamentoPageView({
                       </table>
                     </div>
 
-                    {menuCtxMontagem &&
-                      typeof document !== 'undefined' &&
-                      createPortal(
-                        <>
-                          <div
-                            className="app-modal-overlay fixed inset-0 z-[2000]"
-                            aria-hidden
-                            onClick={() => setMenuCtxMontagem(null)}
-                          />
-                          <div
-                            role="menu"
-                            className="fixed z-[2001] w-56 overflow-hidden rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-800"
-                            style={{ left: menuCtxMontagem.left, top: menuCtxMontagem.top }}
-                            onClick={e => e.stopPropagation()}
-                          >
+                    {menuCtxMontagem && (
+                      <ActionMenuOverlay
+                        open
+                        onClose={() => setMenuCtxMontagem(null)}
+                        top={menuCtxMontagem.top}
+                        left={menuCtxMontagem.left}
+                        panelClassName="w-56 py-1"
+                      >
                             {menuCtxMontagem.kind === 'composicao' && (
                               <button
                                 type="button"
@@ -10533,10 +10506,8 @@ export function OrcamentoPageView({
                               <Trash2 className="h-4 w-4 shrink-0" aria-hidden />
                               Apagar
                             </button>
-                          </div>
-                        </>,
-                        document.body
-                      )}
+                      </ActionMenuOverlay>
+                    )}
 
                     <div className="mt-6 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50/40 dark:bg-gray-900/30 px-4 py-4 sm:px-5">
                       <h4 className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-3">

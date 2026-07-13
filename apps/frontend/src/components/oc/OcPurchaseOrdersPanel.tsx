@@ -47,6 +47,9 @@ import { normalizeCostCentersResponse } from '@/lib/costCenters';
 import { absoluteUploadUrl } from '@/lib/apiOrigin';
 import { parseLastOcCorrectionInfo } from '@/lib/ocCorrectionNotes';
 import { exportPurchaseOrderPdf } from '@/lib/exportPurchaseOrderPdf';
+import {
+  Z_ACTION_MENU,
+} from '@/lib/zIndex';
 import { PaymentConditionSelect, buildPaymentConditionLabelMap } from '@/components/oc/PaymentConditionSelect';
 import {
   OcPurchaseOrderFormFields,
@@ -383,6 +386,16 @@ function parseOcNfAttachments(raw: unknown): Array<{ url: string; name: string |
 
 /** Total da OC na listagem: itens + frete (fallback em registros antigos só com amountToPay). */
 function orderGrandTotal(o: Pick<PurchaseOrder, 'items' | 'freightAmount' | 'amountToPay'>): number {
+  const hasLineItems = (o.items?.length ?? 0) > 0;
+  // Listagem summary não traz items — preferir amountToPay
+  if (
+    !hasLineItems &&
+    o.amountToPay != null &&
+    o.amountToPay !== '' &&
+    Number.isFinite(Number(o.amountToPay))
+  ) {
+    return Number(o.amountToPay);
+  }
   const items = o.items?.reduce((s, i) => s + Number(i.totalPrice), 0) ?? 0;
   const fRaw = o.freightAmount;
   if (fRaw != null && fRaw !== '' && Number.isFinite(Number(fRaw))) {
@@ -1756,9 +1769,9 @@ export function OcPurchaseOrdersPanel({
   const currentUserId = userData?.data?.id as string | undefined;
 
   const { data: ordersData, isLoading } = useQuery({
-    queryKey: ['purchase-orders', 'list-full'],
+    queryKey: ['purchase-orders', 'list-summary'],
     queryFn: async () => {
-      const res = await api.get('/purchase-orders', { params: { limit: 500 } });
+      const res = await api.get('/purchase-orders', { params: { limit: 500, summary: '1' } });
       return res.data;
     },
     staleTime: 30_000,
@@ -1809,12 +1822,13 @@ export function OcPurchaseOrdersPanel({
   }, [selectedOrder?.id, selectedOrderStockReceipt]);
 
   const { data: stockMovementsData } = useQuery({
-    queryKey: ['stock-movements-oc-tags'],
+    queryKey: ['stock-movements-oc-tags', selectedOrder?.id],
     queryFn: async () => {
       const res = await api.get('/stock/movements', { params: { limit: 1000 } });
       return res.data;
     },
-    enabled: !isLoading && !!ordersData,
+    // Só ao abrir detalhe — evita puxar 1000 movimentos em toda listagem
+    enabled: !!selectedOrder?.id,
     staleTime: 60_000,
     refetchOnWindowFocus: false
   });
@@ -5223,17 +5237,22 @@ export function OcPurchaseOrdersPanel({
         orderForActionMenu &&
         typeof document !== 'undefined' &&
         createPortal(
-          <>
-            <div className="fixed inset-0 z-[2100]" aria-hidden onClick={() => setOcActionMenu(null)} />
+          <div
+            className="fixed inset-0"
+            style={{ zIndex: Z_ACTION_MENU }}
+            onClick={() => setOcActionMenu(null)}
+          >
             <div
               role="menu"
-              className="fixed z-[1101] w-56 overflow-y-auto overflow-x-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800"
+              className="absolute w-56 overflow-y-auto overflow-x-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800"
               style={{
                 top: ocActionMenu.top,
                 left: ocActionMenu.left,
                 maxHeight: ocActionMenu.maxHeight,
-                transform: ocActionMenu.placement === 'above' ? 'translateY(-100%)' : undefined
+                transform: ocActionMenu.placement === 'above' ? 'translateY(-100%)' : undefined,
               }}
+              onClick={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
             >
               <button
                 type="button"
@@ -5519,7 +5538,7 @@ export function OcPurchaseOrdersPanel({
                   </>
                 )}
             </div>
-          </>,
+          </div>,
           document.body
         )}
 

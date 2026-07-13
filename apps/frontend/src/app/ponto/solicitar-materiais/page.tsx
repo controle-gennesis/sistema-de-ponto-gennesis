@@ -676,7 +676,7 @@ function SolicitarMateriaisPage() {
     queryKey: ['material-requests'],
     queryFn: async () => {
       const res = await api.get('/material-requests', {
-        params: { requestedBy: userData?.data?.id, limit: 500 }
+        params: { requestedBy: userData?.data?.id, limit: 200, summary: '1' }
       });
       return res.data;
     },

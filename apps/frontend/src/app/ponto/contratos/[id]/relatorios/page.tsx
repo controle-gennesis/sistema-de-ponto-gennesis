@@ -5,7 +5,6 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Plus, FileImage, Trash2, Pencil, Search, MoreVertical, Eye, Calculator, ChevronDown } from 'lucide-react';
-import { createPortal } from 'react-dom';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Modal } from '@/components/ui/Modal';
 import { MainLayout } from '@/components/layout/MainLayout';
@@ -13,6 +12,7 @@ import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import toast from 'react-hot-toast';
 import api from '@/lib/api';
+import { ActionMenuOverlay } from '@/components/ui/ActionMenuOverlay';
 import { getListTableRowClassName, ListRowNavigableLabel, rowActionMenuButtonClass } from '@/components/ui/listTableUi';
 
 interface RelatorioEntry {
@@ -455,68 +455,59 @@ export default function ContratoRelatoriosPage() {
                   </table>
                 </div>
               )}
-              {relatorioActionMenu &&
-                typeof document !== 'undefined' &&
-                createPortal(
-                  <>
-                    <div
-                      className="app-modal-overlay fixed inset-0 z-[2000]"
-                      aria-hidden
-                      onClick={() => setRelatorioActionMenu(null)}
-                    />
-                    <div
-                      role="menu"
-                      className="fixed z-[2001] w-56 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800"
-                      style={{ top: relatorioActionMenu.top, left: relatorioActionMenu.left }}
-                    >
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          const id = relatorioActionMenu.relatorioId;
-                          setRelatorioActionMenu(null);
-                          router.push(`/ponto/contratos/${contractId}/relatorios/${id}`);
-                        }}
-                        className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700"
-                      >
-                        <Eye className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
-                        <span>Ver detalhes</span>
-                      </button>
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          const { relatorioId, titulo } = relatorioActionMenu;
-                          setRelatorioActionMenu(null);
-                          abrirModalEdicao(relatorioId, titulo);
-                        }}
-                        className="flex w-full items-center gap-2 border-t border-gray-200 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-700"
-                      >
-                        <Pencil className="h-4 w-4 shrink-0 text-gray-600 dark:text-gray-300" />
-                        <span>Editar</span>
-                      </button>
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          const { relatorioId, titulo } = relatorioActionMenu;
-                          setRelatorioActionMenu(null);
-                          if (confirm(`Excluir "${titulo}"? Esta ação não pode ser desfeita.`)) {
-                            deleteMutation.mutate(relatorioId);
-                          }
-                        }}
-                        className="flex w-full items-center gap-2 border-t border-gray-200 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-700"
-                      >
-                        <Trash2 className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
-                        <span>Excluir</span>
-                      </button>
-                    </div>
-                  </>,
-                  document.body
-                )}
+              {relatorioActionMenu && (
+                <ActionMenuOverlay
+                  open
+                  onClose={() => setRelatorioActionMenu(null)}
+                  top={relatorioActionMenu.top}
+                  left={relatorioActionMenu.left}
+                >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const id = relatorioActionMenu.relatorioId;
+                      setRelatorioActionMenu(null);
+                      router.push(`/ponto/contratos/${contractId}/relatorios/${id}`);
+                    }}
+                    className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700"
+                  >
+                    <Eye className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
+                    <span>Ver detalhes</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const { relatorioId, titulo } = relatorioActionMenu;
+                      setRelatorioActionMenu(null);
+                      abrirModalEdicao(relatorioId, titulo);
+                    }}
+                    className="flex w-full items-center gap-2 border-t border-gray-200 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-700"
+                  >
+                    <Pencil className="h-4 w-4 shrink-0 text-gray-600 dark:text-gray-300" />
+                    <span>Editar</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const { relatorioId, titulo } = relatorioActionMenu;
+                      setRelatorioActionMenu(null);
+                      if (confirm(`Excluir "${titulo}"? Esta ação não pode ser desfeita.`)) {
+                        deleteMutation.mutate(relatorioId);
+                      }
+                    }}
+                    className="flex w-full items-center gap-2 border-t border-gray-200 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-700"
+                  >
+                    <Trash2 className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
+                    <span>Excluir</span>
+                  </button>
+                </ActionMenuOverlay>
+              )}
             </CardContent>
           </Card>
         </div>

@@ -310,7 +310,7 @@ export default function GerenciarMateriaisPage() {
   const { data: requestsData, isLoading: loadingRequests, refetch } = useQuery({
     queryKey: ['material-requests-manage'],
     queryFn: async () => {
-      const res = await api.get('/material-requests', { params: { limit: 500 } });
+      const res = await api.get('/material-requests', { params: { limit: 200, summary: '1' } });
       return res.data;
     },
     staleTime: 30_000,
@@ -544,9 +544,14 @@ export default function GerenciarMateriaisPage() {
             filteredRequests={filteredRequests}
             ordersByMaterialRequestId={ordersByMaterialRequestId}
             currentUserId={userData?.data?.id}
-            onDetails={(request) => {
-              setSelectedRequest(request);
-              setShowDetailsModal(true);
+            onDetails={async (request) => {
+              try {
+                const res = await api.get(`/material-requests/${request.id}`);
+                setSelectedRequest((res.data?.data ?? res.data) as MaterialRequest);
+                setShowDetailsModal(true);
+              } catch {
+                toast.error('Erro ao carregar detalhes da RM');
+              }
             }}
           />
         </div>

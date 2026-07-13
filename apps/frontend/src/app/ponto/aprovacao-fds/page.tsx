@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { ClipboardCheck, Edit, MoreVertical, Plus, Search, Trash2, X } from 'lucide-react';
@@ -13,6 +12,7 @@ import { Loading } from '@/components/ui/Loading';
 import { FichaDemandaApprovalFormModal } from '@/components/engenharia/FichaDemandaApprovalFormModal';
 import { FdStatusBadges } from '@/components/engenharia/FdStatusBadges';
 import api from '@/lib/api';
+import { ActionMenuOverlay } from '@/components/ui/ActionMenuOverlay';
 import { listTableRowClasses, rowActionMenuButtonClass } from '@/components/ui/listTableUi';
 import {
   formatCurrencyDisplay,
@@ -416,57 +416,47 @@ export default function AprovacaoFdsPage() {
                     </div>
                   )}
 
-                  {rowActionMenu &&
-                    rowForActionMenu &&
-                    typeof document !== 'undefined' &&
-                    createPortal(
-                      <>
-                        <div
-                          className="app-modal-overlay fixed inset-0 z-[2000]"
-                          aria-hidden
-                          onClick={() => setRowActionMenu(null)}
-                        />
-                        <div
-                          role="menu"
-                          className="fixed z-[2001] w-56 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800"
-                          style={{ top: rowActionMenu.top, left: rowActionMenu.left }}
-                        >
-                          <button
-                            type="button"
-                            role="menuitem"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setRowActionMenu(null);
-                              openEdit(rowForActionMenu);
-                            }}
-                            disabled={rowForActionMenu.status !== 'WAITING_MANAGER'}
-                            className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-gray-300 dark:hover:bg-gray-700"
-                          >
-                            <Edit className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
-                            <span>Editar</span>
-                          </button>
-                          <button
-                            type="button"
-                            role="menuitem"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setRowActionMenu(null);
-                              if (rowForActionMenu.status !== 'WAITING_MANAGER') {
-                                toast.error('Somente fichas aguardando aprovação podem ser excluídas.');
-                                return;
-                              }
-                              setDeleteId(rowForActionMenu.id);
-                            }}
-                            disabled={rowForActionMenu.status !== 'WAITING_MANAGER'}
-                            className="flex w-full items-center gap-2 border-t border-gray-200 px-3 py-2.5 text-left text-sm hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-700"
-                          >
-                            <Trash2 className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
-                            <span>Excluir</span>
-                          </button>
-                        </div>
-                      </>,
-                      document.body
-                    )}
+                  {rowActionMenu && rowForActionMenu && (
+                    <ActionMenuOverlay
+                      open
+                      onClose={() => setRowActionMenu(null)}
+                      top={rowActionMenu.top}
+                      left={rowActionMenu.left}
+                    >
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setRowActionMenu(null);
+                          openEdit(rowForActionMenu);
+                        }}
+                        disabled={rowForActionMenu.status !== 'WAITING_MANAGER'}
+                        className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-gray-300 dark:hover:bg-gray-700"
+                      >
+                        <Edit className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
+                        <span>Editar</span>
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setRowActionMenu(null);
+                          if (rowForActionMenu.status !== 'WAITING_MANAGER') {
+                            toast.error('Somente fichas aguardando aprovação podem ser excluídas.');
+                            return;
+                          }
+                          setDeleteId(rowForActionMenu.id);
+                        }}
+                        disabled={rowForActionMenu.status !== 'WAITING_MANAGER'}
+                        className="flex w-full items-center gap-2 border-t border-gray-200 px-3 py-2.5 text-left text-sm hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-700"
+                      >
+                        <Trash2 className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
+                        <span>Excluir</span>
+                      </button>
+                    </ActionMenuOverlay>
+                  )}
                 </>
               )}
             </CardContent>

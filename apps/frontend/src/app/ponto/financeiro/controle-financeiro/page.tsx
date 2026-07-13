@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'react-hot-toast';
 import {
@@ -29,6 +28,7 @@ import {
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { listTableRowClasses, rowActionMenuButtonClass } from '@/components/ui/listTableUi';
+import { ActionMenuOverlay } from '@/components/ui/ActionMenuOverlay';
 import { Modal } from '@/components/ui/Modal';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
@@ -1415,54 +1415,42 @@ function MonthGroup({ year, month, items, onEdit, onDelete, deletingId }: MonthG
         </CardContent>
       </div>
 
-      {actionMenu &&
-        entryForMenu &&
-        typeof document !== 'undefined' &&
-        createPortal(
-          <>
-            <div
-              className="app-modal-overlay fixed inset-0 z-[2000]"
-              aria-hidden
-              onClick={() => setActionMenu(null)}
-            />
-            <div
-              role="menu"
-              className="fixed z-[2001] w-48 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 overflow-hidden"
-              style={{
-                top: actionMenu.top,
-                left: actionMenu.left,
-              }}
-            >
-              <button
-                type="button"
-                role="menuitem"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setActionMenu(null);
-                  onEdit(entryForMenu);
-                }}
-                className="w-full flex items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
-              >
-                <Pencil className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
-                <span>Editar lançamento</span>
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setActionMenu(null);
-                  onDelete(entryForMenu.id);
-                }}
-                className="w-full flex items-center gap-2 px-3 py-2.5 text-left text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 border-t border-gray-200 dark:border-gray-700"
-              >
-                <Trash2 className="w-4 h-4 shrink-0" />
-                <span>Excluir lançamento</span>
-              </button>
-            </div>
-          </>,
-          document.body,
-        )}
+      {actionMenu && entryForMenu && (
+        <ActionMenuOverlay
+          open
+          onClose={() => setActionMenu(null)}
+          top={actionMenu.top}
+          left={actionMenu.left}
+          panelClassName="w-48"
+        >
+          <button
+            type="button"
+            role="menuitem"
+            onClick={(e) => {
+              e.stopPropagation();
+              setActionMenu(null);
+              onEdit(entryForMenu);
+            }}
+            className="w-full flex items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+          >
+            <Pencil className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
+            <span>Editar lançamento</span>
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={(e) => {
+              e.stopPropagation();
+              setActionMenu(null);
+              onDelete(entryForMenu.id);
+            }}
+            className="w-full flex items-center gap-2 px-3 py-2.5 text-left text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 border-t border-gray-200 dark:border-gray-700"
+          >
+            <Trash2 className="w-4 h-4 shrink-0" />
+            <span>Excluir lançamento</span>
+          </button>
+        </ActionMenuOverlay>
+      )}
     </Card>
   );
 }

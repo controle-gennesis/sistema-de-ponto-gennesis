@@ -31,9 +31,9 @@ export default function OrdemDeCompraPage() {
   };
 
   const { data: ordersData, isLoading: loadingOrders } = useQuery({
-    queryKey: ['purchase-orders', 'list-full'],
+    queryKey: ['purchase-orders', 'list-summary'],
     queryFn: async () => {
-      const res = await api.get('/purchase-orders', { params: { limit: 500 } });
+      const res = await api.get('/purchase-orders', { params: { limit: 500, summary: '1' } });
       return res.data;
     },
     enabled: !!user,

@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import {
@@ -24,6 +23,7 @@ import {
   listTableRowClasses,
   rowActionMenuButtonClass,
 } from '@/components/ui/RowActionMenu';
+import { ActionMenuOverlay } from '@/components/ui/ActionMenuOverlay';
 import { DatePickerField } from '@/components/ui/DatePickerField';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
@@ -915,88 +915,75 @@ export default function ContratosPage() {
                   </tbody>
                 </table>
               </div>
-              {contractActionMenu &&
-                contractForActionMenu &&
-                typeof document !== 'undefined' &&
-                createPortal(
-                  <>
-                    <div
-                      className="app-modal-overlay fixed inset-0 z-[2000]"
-                      aria-hidden
-                      onClick={() => setContractActionMenu(null)}
-                    />
-                    <div
-                      role="menu"
-                      className="fixed z-[2001] w-56 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 overflow-hidden"
-                      style={{
-                        top: contractActionMenu.top,
-                        left: contractActionMenu.left,
+              {contractActionMenu && contractForActionMenu && (
+                <ActionMenuOverlay
+                  open
+                  onClose={() => setContractActionMenu(null)}
+                  top={contractActionMenu.top}
+                  left={contractActionMenu.left}
+                >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setContractActionMenu(null);
+                      openContractDetails(contractForActionMenu.id);
+                    }}
+                    className="w-full flex items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+                  >
+                    <Eye className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
+                    <span>Ver detalhes</span>
+                  </button>
+                  {canEditContrato && (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setContractActionMenu(null);
+                        handleEdit(contractForActionMenu);
                       }}
+                      className="w-full flex items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 border-t border-gray-200 dark:border-gray-700"
                     >
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setContractActionMenu(null);
-                          openContractDetails(contractForActionMenu.id);
-                        }}
-                        className="w-full flex items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
-                      >
-                        <Eye className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
-                        <span>Ver detalhes</span>
-                      </button>
-                      {canEditContrato && (
-                        <button
-                          type="button"
-                          role="menuitem"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setContractActionMenu(null);
-                            handleEdit(contractForActionMenu);
-                          }}
-                          className="w-full flex items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 border-t border-gray-200 dark:border-gray-700"
-                        >
-                          <Pencil className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
-                          <span>Editar contrato</span>
-                        </button>
-                      )}
-                      {canDeleteContrato && (
-                        <button
-                          type="button"
-                          role="menuitem"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setContractActionMenu(null);
-                            setShowDeleteModal(contractForActionMenu.id);
-                          }}
-                          className="w-full flex items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 border-t border-gray-200 dark:border-gray-700"
-                        >
-                          <Trash2 className="w-4 h-4 text-red-600 dark:text-red-400 shrink-0" />
-                          <span>Excluir contrato</span>
-                        </button>
-                      )}
-                      {canManageUserPermissions && (
-                        <button
-                          type="button"
-                          role="menuitem"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setContractActionMenu(null);
-                            setPermissionsContract(contractForActionMenu);
-                            setPermissionsTarget(null);
-                            setPermissionTab('gerais');
-                          }}
-                          className="w-full flex items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 border-t border-gray-200 dark:border-gray-700"
-                        >
-                          <Shield className="w-4 h-4 text-gray-600 dark:text-gray-400 shrink-0" />
-                          <span>Gerenciar permissões</span>
-                        </button>
-                      )}
-                    </div>
-                  </>,
-                  document.body
-                )}
+                      <Pencil className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                      <span>Editar contrato</span>
+                    </button>
+                  )}
+                  {canDeleteContrato && (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setContractActionMenu(null);
+                        setShowDeleteModal(contractForActionMenu.id);
+                      }}
+                      className="w-full flex items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 border-t border-gray-200 dark:border-gray-700"
+                    >
+                      <Trash2 className="w-4 h-4 text-red-600 dark:text-red-400 shrink-0" />
+                      <span>Excluir contrato</span>
+                    </button>
+                  )}
+                  {canManageUserPermissions && (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setContractActionMenu(null);
+                        setPermissionsContract(contractForActionMenu);
+                        setPermissionsTarget(null);
+                        setPermissionTab('gerais');
+                      }}
+                      className="w-full flex items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 border-t border-gray-200 dark:border-gray-700"
+                    >
+                      <Shield className="w-4 h-4 text-gray-600 dark:text-gray-400 shrink-0" />
+                      <span>Gerenciar permissões</span>
+                    </button>
+                  )}
+                </ActionMenuOverlay>
+              )}
             </CardContent>
           </Card>
           </>

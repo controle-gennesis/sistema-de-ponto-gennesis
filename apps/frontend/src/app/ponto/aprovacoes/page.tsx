@@ -1210,12 +1210,17 @@ export default function AprovacoesPage() {
             espelhoForActionMenu &&
             typeof document !== 'undefined' &&
             createPortal(
-              <>
-                <div className="fixed inset-0 z-[2000]" aria-hidden onClick={() => setEspelhoActionMenu(null)} />
+              <div
+                className="fixed inset-0"
+                style={{ zIndex: 2101 }}
+                onClick={() => setEspelhoActionMenu(null)}
+              >
                 <div
                   role="menu"
-                  className="fixed z-[2001] w-56 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800"
+                  className="absolute w-56 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800"
                   style={{ top: espelhoActionMenu.top, left: espelhoActionMenu.left }}
+                  onClick={(e) => e.stopPropagation()}
+                  onMouseDown={(e) => e.stopPropagation()}
                 >
                   <button
                     type="button"
@@ -1282,7 +1287,7 @@ export default function AprovacoesPage() {
                     <span>Baixar PDF</span>
                   </button>
                 </div>
-              </>,
+              </div>,
               document.body
             )}
 

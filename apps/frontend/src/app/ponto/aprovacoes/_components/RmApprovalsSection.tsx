@@ -37,6 +37,9 @@ import {
 } from '@/app/ponto/gerenciar-materiais/_lib/display';
 import { formatRmListDisplayId } from '@/app/ponto/gerenciar-materiais/_lib/rmListDisplay';
 import { matchesMaterialRequestSearch, normalizeFluxSearch } from '@/app/ponto/gerenciar-materiais/_lib/search';
+import {
+  Z_ACTION_MENU,
+} from '@/lib/zIndex';
 
 type RmPhaseFilter = 'PENDING' | 'IN_REVIEW' | 'ALL';
 
@@ -84,7 +87,7 @@ export function RmApprovalsSection() {
   const { data: requestsData, isLoading } = useQuery({
     queryKey: ['approvals', 'material-requests', rmPhase],
     queryFn: async () => {
-      const params: Record<string, string> = { limit: '500' };
+      const params: Record<string, string> = { limit: '200', summary: '1' };
       if (rmPhase !== 'ALL') params.status = rmPhase;
       const res = await api.get('/material-requests', { params });
       return (res.data?.data ?? []) as MaterialRequest[];
@@ -372,11 +375,14 @@ export function RmApprovalsSection() {
             <div>
               <p className="mb-2 text-xs text-gray-500 dark:text-gray-400">Itens</p>
               <ul className="space-y-1 rounded-lg border border-gray-200 p-3 dark:border-gray-700">
-                {detailRequest.items.map((item) => (
+                {detailRequest.items?.map((item) => (
                   <li key={item.id} className="text-gray-800 dark:text-gray-200">
                     {materialItemLabel(item)} — {item.quantity} {item.unit}
                   </li>
                 ))}
+                {(!detailRequest.items || detailRequest.items.length === 0) && (
+                  <li className="text-gray-500 dark:text-gray-400">Nenhum item</li>
+                )}
               </ul>
             </div>
           </div>
@@ -500,20 +506,33 @@ export function RmApprovalsSection() {
         requestForMenu &&
         typeof document !== 'undefined' &&
         createPortal(
-          <>
-            <div className="fixed inset-0 z-[2000]" aria-hidden onClick={() => setActionMenu(null)} />
+          <div
+            className="fixed inset-0"
+            style={{ zIndex: Z_ACTION_MENU }}
+            onClick={() => setActionMenu(null)}
+          >
             <div
               role="menu"
-              className="fixed z-[2001] w-56 rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800 overflow-hidden"
-              style={{ top: actionMenu.top, left: actionMenu.left }}
+              className="absolute w-56 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800"
+              style={{
+                top: actionMenu.top,
+                left: actionMenu.left,
+              }}
+              onClick={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
             >
               <button
                 type="button"
                 role="menuitem"
-                onClick={(e) => {
+                onClick={async (e) => {
                   e.stopPropagation();
                   setActionMenu(null);
-                  setDetailRequest(requestForMenu);
+                  try {
+                    const res = await api.get(`/material-requests/${requestForMenu.id}`);
+                    setDetailRequest((res.data?.data ?? res.data) as MaterialRequest);
+                  } catch {
+                    toast.error('Erro ao carregar detalhes da RM');
+                  }
                 }}
                 className={MENU_ITEM_CLASS}
               >
@@ -579,7 +598,7 @@ export function RmApprovalsSection() {
                 </button>
               )}
             </div>
-          </>,
+          </div>,
           document.body
         )}
     </>
