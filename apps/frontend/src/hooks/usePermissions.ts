@@ -182,7 +182,6 @@ export function usePermissions() {
   const contractsKey = pk('/ponto/contratos');
   /** Ações granulares persistidas além do `acesso` do módulo (matriz Ver/Criar/Editar/Excluir). */
   const EMPLOYEE_MODULE_CRUD = ['ver', 'criar', 'editar', 'excluir'] as const;
-  const CONTRACT_MODULE_CRUD = ['ver', 'criar', 'editar', 'excluir'] as const;
   const isElevatedUser = isAdministrator || !!permissionData?.isAdmin;
   const hasEmployeeAcesso = can(employeesKey);
   /**
@@ -215,9 +214,14 @@ export function usePermissions() {
     : hasEmployeeAcesso;
 
   const hasContractAcesso = can(contractsKey);
+  /**
+   * Granular de verdade = criar/editar/excluir marcados.
+   * Só `ver` (ou só `acesso`) não deve bloquear cadastro dentro do contrato liberado.
+   */
+  const CONTRACT_MODULE_MUTATIONS = ['criar', 'editar', 'excluir'] as const;
   const hasContractGranular =
     !isElevatedUser &&
-    CONTRACT_MODULE_CRUD.some((a) => allowedActionSet.has(`${contractsKey}:${a}`));
+    CONTRACT_MODULE_MUTATIONS.some((a) => allowedActionSet.has(`${contractsKey}:${a}`));
   const canCreateContracts = hasContractGranular
     ? canAction(contractsKey, 'criar')
     : hasContractAcesso;
@@ -306,15 +310,26 @@ export function usePermissions() {
     isElevatedUser ||
     (can(pk('/ponto/contratos')) && hasOrcamentoViaAnyAllowedContract);
 
-  /** Tela global «Ordem de Serviço»: módulo Contratos + checklist OS em pelo menos um contrato. */
+  /**
+   * Tela global «Ordem de Serviço»:
+   * exige Ver/acesso do módulo na aba Acesso + checklist O.S. em pelo menos um contrato liberado.
+   * (Antes ignorava a matriz Acesso e liberava só com Contratos + flag O.S.)
+   */
   const canAccessOsRoutePage =
     isElevatedUser ||
-    (can(pk('/ponto/contratos')) && hasOrdemServicoViaAnyAllowedContract);
+    (can(pk('/ponto/andamento-da-os')) &&
+      can(pk('/ponto/contratos')) &&
+      hasOrdemServicoViaAnyAllowedContract);
 
-  /** Recebimento de entregas: módulo Contratos + ao menos um contrato liberado. */
+  /**
+   * Recebimento de entregas:
+   * exige Ver/acesso do módulo na aba Acesso + ao menos um contrato liberado.
+   */
   const canAccessRecebimentoEntregasRoutePage =
     isElevatedUser ||
-    (can(pk('/ponto/contratos')) && allowedContractIds.length > 0);
+    (can(pk('/ponto/recebimento-entregas')) &&
+      can(pk('/ponto/contratos')) &&
+      allowedContractIds.length > 0);
 
   const canAccessContractOrdemServicoTab = (contractId: string) => {
     if (isElevatedUser) return true;

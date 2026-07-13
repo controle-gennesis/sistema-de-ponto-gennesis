@@ -912,6 +912,7 @@ export default function ContractDetailPage() {
     can,
     canAction,
     permissions,
+    canAccessContract,
     canAccessContractOrcamentoTab,
     canAccessContractRelatoriosTab,
     canAccessContractOrdemServicoTab,
@@ -924,8 +925,12 @@ export default function ContractDetailPage() {
   const canAccessRelatorios = canAccessContractRelatoriosTab(contractId);
   const canAccessOrdemServicoModulo = canAccessContractOrdemServicoTab(contractId);
   const canAccessProducaoSemanalModulo = canAccessContractProducaoSemanalTab(contractId);
-  const canCreateContrato = isElevatedUser || permissions.canCreateContracts;
-  const canEditContrato = isElevatedUser || permissions.canEditContracts;
+  // Liberado na aba Contratos = pode cadastrar/editar neste contrato (sem exigir coluna Criar da aba Acesso)
+  const hasThisContractAccess = isElevatedUser || canAccessContract(contractId);
+  const canCreateContrato =
+    isElevatedUser || permissions.canCreateContracts || hasThisContractAccess;
+  const canEditContrato =
+    isElevatedUser || permissions.canEditContracts || hasThisContractAccess;
   const canDeleteContrato = isElevatedUser || permissions.canDeleteContracts;
 
   const containerRef = useRef<HTMLDivElement | null>(null);
