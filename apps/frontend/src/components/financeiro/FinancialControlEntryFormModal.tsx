@@ -163,10 +163,14 @@ export function FinancialControlEntryFormModal({
     },
     onSuccess: () => {
       toast.success('Lançamento criado com sucesso');
-      queryClient.invalidateQueries({ queryKey: ['financial-control'] });
-      queryClient.invalidateQueries({ queryKey: ['financial-control-by-oc'] });
-      queryClient.invalidateQueries({ queryKey: ['financial-control-has-entry'] });
-      queryClient.invalidateQueries({ queryKey: ['financial-control-batch-by-oc'] });
+      // Só refresca queries de vínculo OC (aba Pagamento); lista mensal fica stale sem forçar refetch.
+      void queryClient.invalidateQueries({ queryKey: ['financial-control-by-oc'] });
+      void queryClient.invalidateQueries({ queryKey: ['financial-control-has-entry'] });
+      void queryClient.invalidateQueries({ queryKey: ['financial-control-batch-by-oc'] });
+      void queryClient.invalidateQueries({
+        queryKey: ['financial-control'],
+        refetchType: 'active',
+      });
       onSuccess?.();
       onClose();
     },
@@ -182,10 +186,13 @@ export function FinancialControlEntryFormModal({
     },
     onSuccess: () => {
       toast.success('Lançamento atualizado');
-      queryClient.invalidateQueries({ queryKey: ['financial-control'] });
-      queryClient.invalidateQueries({ queryKey: ['financial-control-by-oc'] });
-      queryClient.invalidateQueries({ queryKey: ['financial-control-has-entry'] });
-      queryClient.invalidateQueries({ queryKey: ['financial-control-batch-by-oc'] });
+      void queryClient.invalidateQueries({ queryKey: ['financial-control-by-oc'] });
+      void queryClient.invalidateQueries({ queryKey: ['financial-control-has-entry'] });
+      void queryClient.invalidateQueries({ queryKey: ['financial-control-batch-by-oc'] });
+      void queryClient.invalidateQueries({
+        queryKey: ['financial-control'],
+        refetchType: 'active',
+      });
       onSuccess?.();
       onClose();
     },

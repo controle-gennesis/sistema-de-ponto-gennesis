@@ -2094,10 +2094,20 @@ export function OcPurchaseOrdersPanel({
       return res.data;
     },
     onSuccess: (resp: { data?: PurchaseOrder }) => {
-      queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
-      queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
       const updated = resp?.data;
-      if (updated) setSelectedOrder((prev) => (prev?.id === updated.id ? updated : prev));
+      if (updated?.id) {
+        patchOcInListSummaryCache(queryClient, updated.id, (order) => ({
+          ...order,
+          paymentBoletoUrl: updated.paymentBoletoUrl ?? order.paymentBoletoUrl,
+          paymentBoletoName: updated.paymentBoletoName ?? order.paymentBoletoName,
+          paymentBoletoInstallments:
+            updated.paymentBoletoInstallments ?? order.paymentBoletoInstallments,
+          paymentBoletoPhaseReleased:
+            updated.paymentBoletoPhaseReleased ?? order.paymentBoletoPhaseReleased,
+          updatedAt: updated.updatedAt ?? new Date().toISOString(),
+        }));
+        setSelectedOrder((prev) => (prev?.id === updated.id ? { ...prev, ...updated } : prev));
+      }
       toast.success('Boleto de pagamento anexado.');
     },
     onError: (error: { response?: { data?: { message?: string } }; message?: string }) =>
@@ -2119,11 +2129,17 @@ export function OcPurchaseOrdersPanel({
       return res.data;
     },
     onSuccess: (resp: { data?: PurchaseOrder }) => {
-      queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
-      queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
       const updated = resp?.data;
-      if (updated) {
-        setSelectedOrder((prev) => (prev?.id === updated.id ? updated : prev));
+      if (updated?.id) {
+        patchOcInListSummaryCache(queryClient, updated.id, (order) => ({
+          ...order,
+          paymentProofUrl: updated.paymentProofUrl ?? order.paymentProofUrl,
+          paymentProofName: updated.paymentProofName ?? order.paymentProofName,
+          paymentBoletoInstallments:
+            updated.paymentBoletoInstallments ?? order.paymentBoletoInstallments,
+          updatedAt: updated.updatedAt ?? new Date().toISOString(),
+        }));
+        setSelectedOrder((prev) => (prev?.id === updated.id ? { ...prev, ...updated } : prev));
       }
       setProofFileDraft(null);
       toast.success('Comprovante de pagamento anexado.');
@@ -2137,9 +2153,20 @@ export function OcPurchaseOrdersPanel({
       const res = await api.patch(`/purchase-orders/${id}/reopen-payment-boleto`);
       return res.data;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
-      queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
+    onSuccess: (resp: { data?: PurchaseOrder }, id) => {
+      const updated = resp?.data;
+      if (updated?.id) {
+        patchOcInListSummaryCache(queryClient, updated.id, (order) => ({
+          ...order,
+          ...updated,
+          updatedAt: updated.updatedAt ?? new Date().toISOString(),
+        }));
+      } else {
+        patchOcInListSummaryCache(queryClient, id, {
+          paymentBoletoPhaseReleased: false,
+          updatedAt: new Date().toISOString(),
+        });
+      }
       setSelectedOrder(null);
       toast.success('A OC voltou para a fase Anexar Boleto.');
     },
@@ -2152,18 +2179,42 @@ export function OcPurchaseOrdersPanel({
       const res = await api.patch(`/purchase-orders/${id}/release-payment-boleto-phase`);
       return res.data;
     },
+    onMutate: async (id) => {
+      await queryClient.cancelQueries({ queryKey: ['purchase-orders', 'list-summary'] });
+      const previous = queryClient.getQueryData<PurchaseOrdersListSummaryCache>([
+        'purchase-orders',
+        'list-summary',
+      ]);
+      patchOcInListSummaryCache(queryClient, id, {
+        paymentBoletoPhaseReleased: true,
+        updatedAt: new Date().toISOString(),
+      });
+      return { previous };
+    },
     onSuccess: (resp: { data?: PurchaseOrder }) => {
-      queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
-      queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
       const updated = resp?.data;
-      if (updated) {
-        setSelectedOrder((prev) => (prev?.id === updated.id ? updated : prev));
+      if (updated?.id) {
+        patchOcInListSummaryCache(queryClient, updated.id, (order) => ({
+          ...order,
+          ...updated,
+          paymentBoletoPhaseReleased: true,
+          updatedAt: updated.updatedAt ?? new Date().toISOString(),
+        }));
+        setSelectedOrder((prev) => (prev?.id === updated.id ? { ...prev, ...updated } : prev));
         setBoletoParcelModalOrder((prev) => (prev?.id === updated.id ? null : prev));
       }
       toast.success('OC enviada para a fase Pagamento.');
     },
-    onError: (error: { response?: { data?: { message?: string } }; message?: string }) =>
-      toast.error(error.response?.data?.message || error.message || 'Erro ao confirmar fase Pagamento')
+    onError: (
+      error: { response?: { data?: { message?: string } }; message?: string },
+      _id,
+      context
+    ) => {
+      if (context?.previous) {
+        queryClient.setQueryData(['purchase-orders', 'list-summary'], context.previous);
+      }
+      toast.error(error.response?.data?.message || error.message || 'Erro ao confirmar fase Pagamento');
+    },
   });
 
   const attachBoletoInstallmentProofMutation = useMutation({
@@ -2190,10 +2241,20 @@ export function OcPurchaseOrdersPanel({
       return res.data;
     },
     onSuccess: (resp: { data?: PurchaseOrder }, vars) => {
-      queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
-      queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
       const updated = resp?.data;
-      if (updated) setSelectedOrder((prev) => (prev?.id === updated.id ? updated : prev));
+      if (updated?.id) {
+        patchOcInListSummaryCache(queryClient, updated.id, (order) => ({
+          ...order,
+          paymentBoletoInstallments:
+            updated.paymentBoletoInstallments ?? order.paymentBoletoInstallments,
+          paymentProofUrl: updated.paymentProofUrl ?? order.paymentProofUrl,
+          paymentProofName: updated.paymentProofName ?? order.paymentProofName,
+          paymentBoletoPhaseReleased:
+            updated.paymentBoletoPhaseReleased ?? order.paymentBoletoPhaseReleased,
+          updatedAt: updated.updatedAt ?? new Date().toISOString(),
+        }));
+        setSelectedOrder((prev) => (prev?.id === updated.id ? { ...prev, ...updated } : prev));
+      }
       if (vars?.installmentIndex != null) {
         setInstallmentProofDraftByIdx((prev) => {
           const next = { ...prev };
@@ -2214,10 +2275,15 @@ export function OcPurchaseOrdersPanel({
       return res.data;
     },
     onSuccess: (resp: { data?: PurchaseOrder }) => {
-      queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
-      queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
       const updated = resp?.data;
-      if (updated) setSelectedOrder((prev) => (prev?.id === updated.id ? updated : prev));
+      if (updated?.id) {
+        patchOcInListSummaryCache(queryClient, updated.id, (order) => ({
+          ...order,
+          ...updated,
+          updatedAt: updated.updatedAt ?? new Date().toISOString(),
+        }));
+        setSelectedOrder((prev) => (prev?.id === updated.id ? { ...prev, ...updated } : prev));
+      }
       toast.success('Próxima parcela liberada para o comprador anexar o boleto.');
     },
     onError: (error: { response?: { data?: { message?: string } }; message?: string }) =>
@@ -2747,10 +2813,14 @@ export function OcPurchaseOrdersPanel({
     !canSendCurrentBoletoToPayment(selectedOrder);
 
   const handleBoletoParcelsSaved = (payload: { data: unknown }) => {
-    queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
     const updated = (payload as { data?: PurchaseOrder })?.data;
-    if (updated) {
-      setSelectedOrder((prev) => (prev?.id === updated.id ? updated : prev));
+    if (updated?.id) {
+      patchOcInListSummaryCache(queryClient, updated.id, (order) => ({
+        ...order,
+        ...updated,
+        updatedAt: updated.updatedAt ?? new Date().toISOString(),
+      }));
+      setSelectedOrder((prev) => (prev?.id === updated.id ? { ...prev, ...updated } : prev));
     }
   };
 

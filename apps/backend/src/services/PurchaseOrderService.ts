@@ -1187,9 +1187,11 @@ export class PurchaseOrderService {
       if (st === 'PENDING_PROOF_CORRECTION') {
         // Permissão da aba Correção Comprovante é validada na rota (assertOcFlowStatusChange).
       }
-      if (order.paymentType === 'BOLETO' && !order.paymentBoletoPhaseReleased) {
+      let boletoMeta: { paymentParcelCount: number } | null = null;
+      if (order.paymentType === 'BOLETO') {
         const [meta] = await enrichOrdersParcelPlans([order]);
-        if (meta.paymentParcelCount <= 1) {
+        boletoMeta = meta;
+        if (!order.paymentBoletoPhaseReleased && meta.paymentParcelCount <= 1) {
           throw new Error(
             'Envie a OC para a fase Pagamento (botão após anexar o boleto) antes de enviar o comprovante para validação'
           );
@@ -1198,41 +1200,39 @@ export class PurchaseOrderService {
       let proofUrl = (order.paymentProofUrl || '').trim();
       let proofName = ((order.paymentProofName || '').trim() || null) as string | null;
 
-      if (order.paymentType === 'BOLETO') {
-        const [meta] = await enrichOrdersParcelPlans([order]);
-        if (meta.paymentParcelCount > 1) {
-          const inst = parseStoredInstallments(order.paymentBoletoInstallments);
-          const parallel = useParallelBoletoPaymentFlow(inst, meta.paymentParcelCount);
-          if (parallel) {
-            if (!allInstallmentsHavePaymentProof(inst, meta.paymentParcelCount)) {
+      if (order.paymentType === 'BOLETO' && boletoMeta && boletoMeta.paymentParcelCount > 1) {
+        const n = boletoMeta.paymentParcelCount;
+        const inst = parseStoredInstallments(order.paymentBoletoInstallments);
+        const parallel = useParallelBoletoPaymentFlow(inst, n);
+        if (parallel) {
+          if (!allInstallmentsHavePaymentProof(inst, n)) {
+            throw new Error(
+              'Anexe o comprovante de pagamento em todas as parcelas antes de enviar para validação'
+            );
+          }
+        } else {
+          if (allMultiInstallmentsPaid(inst, n)) {
+            if (!proofUrl && !allInstallmentsHavePaymentProof(inst, n)) {
               throw new Error(
-                'Anexe o comprovante de pagamento em todas as parcelas antes de enviar para validação'
+                'Anexe o comprovante de pagamento antes de enviar para validação'
               );
             }
           } else {
-            if (allMultiInstallmentsPaid(inst, meta.paymentParcelCount)) {
-              if (!proofUrl && !allInstallmentsHavePaymentProof(inst, meta.paymentParcelCount)) {
-                throw new Error(
-                  'Anexe o comprovante de pagamento antes de enviar para validação'
-                );
-              }
-            } else {
-              const proofIdx = firstNonPaidInstallmentWithProof(inst, meta.paymentParcelCount);
-              if (proofIdx < 0) {
-                throw new Error(
-                  'Anexe o comprovante de pagamento da parcela atual antes de enviar para validação'
-                );
-              }
+            const proofIdx = firstNonPaidInstallmentWithProof(inst, n);
+            if (proofIdx < 0) {
+              throw new Error(
+                'Anexe o comprovante de pagamento da parcela atual antes de enviar para validação'
+              );
             }
           }
-          if (!proofUrl) {
-            for (let i = 0; i < meta.paymentParcelCount; i++) {
-              const fromInst = (inst[i]?.installmentProofUrl || '').trim();
-              if (fromInst) {
-                proofUrl = fromInst;
-                proofName = ((inst[i]?.installmentProofName || '').trim() || null) as string | null;
-                break;
-              }
+        }
+        if (!proofUrl) {
+          for (let i = 0; i < n; i++) {
+            const fromInst = (inst[i]?.installmentProofUrl || '').trim();
+            if (fromInst) {
+              proofUrl = fromInst;
+              proofName = ((inst[i]?.installmentProofName || '').trim() || null) as string | null;
+              break;
             }
           }
         }
@@ -1240,15 +1240,6 @@ export class PurchaseOrderService {
 
       if (!proofUrl) {
         throw new Error('Anexe o comprovante de pagamento antes de enviar para validação');
-      }
-
-      const financialEntriesCount = await prisma.financialControlEntry.count({
-        where: { ocNumber: { equals: order.orderNumber, mode: 'insensitive' } },
-      });
-      if (financialEntriesCount === 0) {
-        throw new Error(
-          'Registre o lançamento no Controle Financeiro antes de enviar para validação do comprovante'
-        );
       }
 
       if (!(order.paymentProofUrl || '').trim() && proofUrl) {
@@ -1635,7 +1626,7 @@ export class PurchaseOrderService {
         paymentBoletoInstallments: [row] as unknown as Prisma.InputJsonValue,
         updatedAt: new Date()
       },
-      include: purchaseOrderIncludeDetail
+      include: purchaseOrderIncludeListSummary
     }).then(async (o) => {
       const [e] = await enrichOrdersParcelPlans([o]);
       return e;
@@ -1760,7 +1751,7 @@ export class PurchaseOrderService {
     const updated = await prisma.purchaseOrder.update({
       where: { id },
       data,
-      include: purchaseOrderIncludeDetail
+      include: purchaseOrderIncludeListSummary
     });
     const [e] = await enrichOrdersParcelPlans([updated]);
     return e;
@@ -1780,6 +1771,8 @@ export class PurchaseOrderService {
         id: true,
         status: true,
         paymentType: true,
+        paymentCondition: true,
+        paymentBoletoInstallments: true,
         paymentBoletoPhaseReleased: true,
         createdBy: true,
       },
@@ -1792,31 +1785,10 @@ export class PurchaseOrderService {
         'Só é possível anexar comprovante na fase Pagamento ou em correção do comprovante'
       );
     }
-    if (order.status === 'PENDING_PROOF_CORRECTION') {
-      // Permissão da aba Correção Comprovante é validada na rota.
-    }
     if (order.paymentType === 'BOLETO' && !order.paymentBoletoPhaseReleased) {
       throw new Error(
         'Confirme o envio para a fase Pagamento (botão após anexar o boleto) antes de anexar o comprovante'
       );
-    }
-    if (order.paymentType === 'BOLETO') {
-      const full = await prisma.purchaseOrder.findUnique({
-        where: { id },
-        select: { paymentCondition: true, paymentBoletoInstallments: true }
-      });
-      if (full) {
-        const [meta] = await enrichOrdersParcelPlans([{ paymentCondition: full.paymentCondition }]);
-        const n = meta.paymentParcelCount;
-        if (n > 1) {
-          const inst = parseStoredInstallments(full.paymentBoletoInstallments);
-          if (!allMultiInstallmentsPaid(inst, n)) {
-            throw new Error(
-              'Aguarde o pagamento de todas as parcelas (financeiro libera cada uma) antes de anexar o comprovante'
-            );
-          }
-        }
-      }
     }
     const url = (data.paymentProofUrl || '').trim();
     if (!url) {
@@ -1829,26 +1801,25 @@ export class PurchaseOrderService {
       updatedAt: new Date()
     };
     if (order.paymentType === 'BOLETO') {
-      const full = await prisma.purchaseOrder.findUnique({
-        where: { id },
-        select: { paymentCondition: true, paymentBoletoInstallments: true }
-      });
-      if (full) {
-        const [meta] = await enrichOrdersParcelPlans([{ paymentCondition: full.paymentCondition }]);
-        const n = meta.paymentParcelCount;
-        if (n > 1) {
-          const inst = parseStoredInstallments(full.paymentBoletoInstallments);
-          const spread = spreadOrderPaymentProofToPaidInstallments(inst, n, url, proofName);
-          if (spread) {
-            updateData.paymentBoletoInstallments = spread as unknown as Prisma.InputJsonValue;
-          }
+      const [meta] = await enrichOrdersParcelPlans([{ paymentCondition: order.paymentCondition }]);
+      const n = meta.paymentParcelCount;
+      if (n > 1) {
+        const inst = parseStoredInstallments(order.paymentBoletoInstallments);
+        if (!allMultiInstallmentsPaid(inst, n)) {
+          throw new Error(
+            'Aguarde o pagamento de todas as parcelas (financeiro libera cada uma) antes de anexar o comprovante'
+          );
+        }
+        const spread = spreadOrderPaymentProofToPaidInstallments(inst, n, url, proofName);
+        if (spread) {
+          updateData.paymentBoletoInstallments = spread as unknown as Prisma.InputJsonValue;
         }
       }
     }
     const updated = await prisma.purchaseOrder.update({
       where: { id },
       data: updateData,
-      include: purchaseOrderIncludeDetail
+      include: purchaseOrderIncludeListSummary
     });
     const [e] = await enrichOrdersParcelPlans([updated]);
     return e;
@@ -2028,7 +1999,7 @@ export class PurchaseOrderService {
               paymentBoletoPhaseReleased: true,
               updatedAt: new Date()
             },
-            include: purchaseOrderIncludeDetail
+            include: purchaseOrderIncludeListSummary
           });
           const [e] = await enrichOrdersParcelPlans([updated]);
           return e;
@@ -2043,7 +2014,7 @@ export class PurchaseOrderService {
         paymentBoletoPhaseReleased: true,
         updatedAt: new Date()
       },
-      include: purchaseOrderIncludeDetail
+      include: purchaseOrderIncludeListSummary
     });
     const [e] = await enrichOrdersParcelPlans([updated]);
     return e;
@@ -2120,7 +2091,7 @@ export class PurchaseOrderService {
         paymentBoletoPhaseReleased: true,
         updatedAt: new Date()
       },
-      include: purchaseOrderIncludeDetail
+      include: purchaseOrderIncludeListSummary
     });
     const [e] = await enrichOrdersParcelPlans([updated]);
     return e;
@@ -2178,7 +2149,7 @@ export class PurchaseOrderService {
         paymentBoletoPhaseReleased: allPaid,
         updatedAt: new Date()
       },
-      include: purchaseOrderIncludeDetail
+      include: purchaseOrderIncludeListSummary
     });
     const [e] = await enrichOrdersParcelPlans([updated]);
     return e;
@@ -2216,7 +2187,7 @@ export class PurchaseOrderService {
         paymentBoletoPhaseReleased: false,
         updatedAt: new Date()
       },
-      include: purchaseOrderIncludeDetail
+      include: purchaseOrderIncludeListSummary
     });
     const [e] = await enrichOrdersParcelPlans([updated]);
     return e;
