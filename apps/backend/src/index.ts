@@ -99,6 +99,7 @@ const licitacaoExtraCtrl = new LicitacaoController();
 
 const prismaPool = getPrismaPoolConfig();
 console.log('🚀 Iniciando aplicação...');
+console.log('   📦 Deploy trigger: 2026-07-13-login-opts');
 console.log(`   🔐 Password hashing: ${getPasswordHashImplementation()}`);
 console.log(
   `   🗄️  Prisma pool: connection_limit=${prismaPool.connectionLimit}, pool_timeout=${prismaPool.poolTimeout}s`,

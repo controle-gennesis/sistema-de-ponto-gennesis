@@ -1,5 +1,6 @@
 'use client';
 
+// Deploy trigger: 2026-07-13-login-opts
 import { Inter } from 'next/font/google';
 import './globals.css';
 import { Providers } from '@/components/providers/Providers';
