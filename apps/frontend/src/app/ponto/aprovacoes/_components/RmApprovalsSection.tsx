@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Ban,
@@ -19,6 +18,7 @@ import api from '@/lib/api';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Loading } from '@/components/ui/Loading';
 import { Modal } from '@/components/ui/Modal';
+import { ActionMenuOverlay } from '@/components/ui/ActionMenuOverlay';
 import { cadastroListClasses } from '@/components/ui/RowActionMenu';
 import {
   getListTableRowClassName,
@@ -37,9 +37,6 @@ import {
 } from '@/app/ponto/gerenciar-materiais/_lib/display';
 import { formatRmListDisplayId } from '@/app/ponto/gerenciar-materiais/_lib/rmListDisplay';
 import { matchesMaterialRequestSearch, normalizeFluxSearch } from '@/app/ponto/gerenciar-materiais/_lib/search';
-import {
-  Z_ACTION_MENU,
-} from '@/lib/zIndex';
 
 type RmPhaseFilter = 'PENDING' | 'IN_REVIEW' | 'ALL';
 
@@ -184,6 +181,15 @@ export function RmApprovalsSection() {
     },
   });
 
+  const openRequestDetail = async (request: MaterialRequest) => {
+    try {
+      const res = await api.get(`/material-requests/${request.id}`);
+      setDetailRequest((res.data?.data ?? res.data) as MaterialRequest);
+    } catch {
+      toast.error('Erro ao carregar detalhes da RM');
+    }
+  };
+
   if (!canApproveMaterialRequests) {
     return null;
   }
@@ -280,7 +286,11 @@ export function RmApprovalsSection() {
                     const priorityInfo = getPriorityInfo(request.priority);
 
                     return (
-                      <tr key={request.id} className={getListTableRowClassName(false)}>
+                      <tr
+                        key={request.id}
+                        onClick={() => void openRequestDetail(request)}
+                        className={getListTableRowClassName(true)}
+                      >
                         <td
                           className={rmTdCls}
                           title={request.requestNumber || undefined}
@@ -310,7 +320,7 @@ export function RmApprovalsSection() {
                             {priorityInfo.label}
                           </span>
                         </td>
-                        <td className={actionTdCls}>
+                        <td className={actionTdCls} onClick={(e) => e.stopPropagation()}>
                           <div className="flex justify-end">
                             <button
                               type="button"
@@ -502,92 +512,56 @@ export function RmApprovalsSection() {
         </div>
       </Modal>
 
-      {actionMenu &&
-        requestForMenu &&
-        typeof document !== 'undefined' &&
-        createPortal(
-          <div
-            className="fixed inset-0"
-            style={{ zIndex: Z_ACTION_MENU }}
-            onClick={() => setActionMenu(null)}
-          >
-            <div
-              role="menu"
-              className="absolute w-56 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800"
-              style={{
-                top: actionMenu.top,
-                left: actionMenu.left,
+      <ActionMenuOverlay
+        open={!!actionMenu && !!requestForMenu}
+        onClose={() => setActionMenu(null)}
+        top={actionMenu?.top ?? 0}
+        left={actionMenu?.left ?? 0}
+      >
+        {requestForMenu ? (
+          <>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setActionMenu(null);
+                void openRequestDetail(requestForMenu);
               }}
-              onClick={(e) => e.stopPropagation()}
-              onMouseDown={(e) => e.stopPropagation()}
+              className={MENU_ITEM_CLASS}
             >
-              <button
-                type="button"
-                role="menuitem"
-                onClick={async (e) => {
-                  e.stopPropagation();
-                  setActionMenu(null);
-                  try {
-                    const res = await api.get(`/material-requests/${requestForMenu.id}`);
-                    setDetailRequest((res.data?.data ?? res.data) as MaterialRequest);
-                  } catch {
-                    toast.error('Erro ao carregar detalhes da RM');
-                  }
-                }}
-                className={MENU_ITEM_CLASS}
-              >
-                <Eye className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
-                <span>Ver detalhes</span>
-              </button>
-              {requestForMenu.status === 'PENDING' && (
-                <>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setActionMenu(null);
-                      setApproveTarget(requestForMenu);
-                    }}
-                    className={MENU_ITEM_BORDER_CLASS}
-                  >
-                    <CheckCircle className="h-4 w-4 shrink-0 text-green-600 dark:text-green-400" />
-                    <span>Aprovar requisição</span>
-                  </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setActionMenu(null);
-                      setCorrectionTarget(requestForMenu);
-                    }}
-                    className={MENU_ITEM_BORDER_CLASS}
-                  >
-                    <Wrench className="h-4 w-4 shrink-0 text-amber-500 dark:text-amber-400" />
-                    <span>Enviar para correção RM</span>
-                  </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setActionMenu(null);
-                      setCancelTarget(requestForMenu);
-                    }}
-                    className={MENU_ITEM_BORDER_CLASS}
-                  >
-                    <Ban className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
-                    <span>Cancelar requisição</span>
-                  </button>
-                </>
-              )}
-              {requestForMenu.status === 'IN_REVIEW' && (
+              <Eye className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
+              <span>Ver detalhes</span>
+            </button>
+            {requestForMenu.status === 'PENDING' && (
+              <>
                 <button
                   type="button"
                   role="menuitem"
-                  onClick={(e) => {
-                    e.stopPropagation();
+                  onClick={() => {
+                    setActionMenu(null);
+                    setApproveTarget(requestForMenu);
+                  }}
+                  className={MENU_ITEM_BORDER_CLASS}
+                >
+                  <CheckCircle className="h-4 w-4 shrink-0 text-green-600 dark:text-green-400" />
+                  <span>Aprovar requisição</span>
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setActionMenu(null);
+                    setCorrectionTarget(requestForMenu);
+                  }}
+                  className={MENU_ITEM_BORDER_CLASS}
+                >
+                  <Wrench className="h-4 w-4 shrink-0 text-amber-500 dark:text-amber-400" />
+                  <span>Enviar para correção RM</span>
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
                     setActionMenu(null);
                     setCancelTarget(requestForMenu);
                   }}
@@ -596,11 +570,25 @@ export function RmApprovalsSection() {
                   <Ban className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
                   <span>Cancelar requisição</span>
                 </button>
-              )}
-            </div>
-          </div>,
-          document.body
-        )}
+              </>
+            )}
+            {requestForMenu.status === 'IN_REVIEW' && (
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setActionMenu(null);
+                  setCancelTarget(requestForMenu);
+                }}
+                className={MENU_ITEM_BORDER_CLASS}
+              >
+                <Ban className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
+                <span>Cancelar requisição</span>
+              </button>
+            )}
+          </>
+        ) : null}
+      </ActionMenuOverlay>
     </>
   );
 }
