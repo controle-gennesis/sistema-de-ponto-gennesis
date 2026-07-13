@@ -28,8 +28,12 @@ export function usePermissions() {
   } = useQuery({
     queryKey: ['user'],
     queryFn: async () => {
-      // Evita resposta 304 para auth/me, que o Axios trata como erro.
-      const res = await api.get('/auth/me', { params: { _ts: Date.now() } });
+      const res = await api.get('/auth/me', {
+        headers: {
+          'Cache-Control': 'no-cache',
+          Pragma: 'no-cache',
+        },
+      });
       return res.data;
     },
     staleTime: 5 * 60 * 1000,
@@ -420,6 +424,7 @@ export function useRoutePermission(route: string) {
     isDepartmentCompras,
     isDepartmentJuridico,
     can,
+    canAccessContract,
     dpApprovalContractIds,
     canApproveEspelhoNf,
     canAccessOrcamentoRoutePage,
@@ -430,7 +435,7 @@ export function useRoutePermission(route: string) {
   } = usePermissions();
 
   if (isLoading) {
-    return { hasAccess: false, isLoading: true };
+    return { hasAccess: false, isLoading: true, canAccessContract };
   }
 
   const isAdministrator = isElevatedUser;
@@ -561,5 +566,6 @@ export function useRoutePermission(route: string) {
   return {
     hasAccess: routePermissions[route] ?? true,
     isLoading: false,
+    canAccessContract,
   };
 }

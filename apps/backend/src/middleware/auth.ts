@@ -205,7 +205,10 @@ export const optionalAuth = async (
   }
 };
 
-// Middleware para refresh token que aceita tokens expirados
+/** Após o access token expirar, ainda permite refresh por este período (evita renovação infinita). */
+const REFRESH_GRACE_MS = 24 * 60 * 60 * 1000; // 24h
+
+// Middleware para refresh: token válido OU expirado dentro da janela de graça
 export const authenticateForRefresh = async (
   req: AuthRequest,
   res: Response,
@@ -218,22 +221,42 @@ export const authenticateForRefresh = async (
       throw createError('Token de acesso necessário', 401);
     }
 
-    // Decodificar token mesmo se expirado (ignoreExpiration)
-    let decoded: any;
+    if (!process.env.JWT_SECRET) {
+      throw createError('Erro de configuração do servidor', 500);
+    }
+
+    if (token.split('.').length !== 3) {
+      throw createError('Token inválido', 401);
+    }
+
+    let decoded: { id: string; email?: string; role?: string; exp?: number };
     try {
-      decoded = jwt.verify(token, process.env.JWT_SECRET!) as any;
-    } catch (error: any) {
-      // Se o token expirou, tenta decodificar sem verificar expiração
-      if (error.name === 'TokenExpiredError') {
-        decoded = jwt.decode(token) as any;
-        if (!decoded || !decoded.id) {
-          throw createError('Token inválido', 401);
-        }
-      } else {
+      decoded = jwt.verify(token, process.env.JWT_SECRET) as typeof decoded;
+    } catch (error: unknown) {
+      const err = error as { name?: string };
+      if (err.name !== 'TokenExpiredError') {
         throw createError('Token inválido', 401);
       }
+
+      // Assinatura ok, só a expiração falhou — revalida com ignoreExpiration
+      decoded = jwt.verify(token, process.env.JWT_SECRET, {
+        ignoreExpiration: true,
+      }) as typeof decoded;
+
+      if (!decoded?.exp) {
+        throw createError('Token inválido', 401);
+      }
+
+      const expiredAtMs = decoded.exp * 1000;
+      if (Date.now() - expiredAtMs > REFRESH_GRACE_MS) {
+        throw createError('Sessão expirada. Faça login novamente.', 401);
+      }
     }
-    
+
+    if (!decoded?.id) {
+      throw createError('Token inválido', 401);
+    }
+
     const user = await prisma.user.findUnique({
       where: { id: decoded.id },
       select: {

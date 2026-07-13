@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
-import bcrypt from 'bcryptjs';
 import { prisma } from '../lib/prisma';
+import { hashPassword } from '../lib/passwordHash';
 
 export const getAllEmployees = async (req: Request, res: Response) => {
   try {
@@ -148,7 +148,7 @@ export const createEmployee = async (req: Request, res: Response) => {
     }
 
     // Hash da senha
-    const hashedPassword = await bcrypt.hash(password, 10);
+    const hashedPassword = await hashPassword(password, 10);
 
     // Criar usuário e funcionário em uma transação
     const result = await prisma.$transaction(async (tx: any) => {

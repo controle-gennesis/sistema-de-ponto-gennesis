@@ -1,6 +1,10 @@
 import express from 'express';
 import multer from 'multer';
-import { authenticate, authenticateForRefresh } from '../middleware/auth';
+import {
+  authenticate,
+  authenticateForRefresh,
+  requireAdministrator,
+} from '../middleware/auth';
 import { AuthController } from '../controllers/AuthController';
 
 const router = express.Router();
@@ -12,10 +16,12 @@ const uploadAvatar = multer({
 });
 
 // Rotas públicas
-router.post('/register', authController.register);
 router.post('/login', authController.login);
-// Rota pública de refresh que aceita tokens expirados
+// Aceita access token válido ou expirado dentro da janela de graça
 router.post('/refresh-token', authenticateForRefresh, authController.publicRefreshToken);
+
+// Registro apenas para administradores autenticados (criação de usuários também existe em /users)
+router.post('/register', authenticate, requireAdministrator, authController.register);
 
 // Rotas protegidas
 router.use(authenticate);

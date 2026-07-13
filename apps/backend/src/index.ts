@@ -90,13 +90,19 @@ import licitacoesRoutes from './routes/licitacoes';
 import { LicitacaoController } from './controllers/LicitacaoController';
 import { authenticate, AuthRequest } from './middleware/auth';
 import { removeOrphanUserPermissions } from './lib/permissionRegistrySync';
-import { prisma } from './lib/prisma';
+import { getPrismaPoolConfig, prisma } from './lib/prisma';
+import { getPasswordHashImplementation } from './lib/passwordHash';
 import { ensureProductionSchema } from './lib/ensureProductionSchema';
 import { attachCallSignaling } from './realtime/wsCallSignaling';
 
 const licitacaoExtraCtrl = new LicitacaoController();
 
+const prismaPool = getPrismaPoolConfig();
 console.log('🚀 Iniciando aplicação...');
+console.log(`   🔐 Password hashing: ${getPasswordHashImplementation()}`);
+console.log(
+  `   🗄️  Prisma pool: connection_limit=${prismaPool.connectionLimit}, pool_timeout=${prismaPool.poolTimeout}s`,
+);
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '5000', 10);
@@ -241,8 +247,25 @@ const authMeLimiter = rateLimit({
     ),
 });
 
+// Limite dedicado contra brute-force em login (só conta falhas)
+const authLoginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: enableRateLimit ? 20 : 10_000,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
+  skip: skipRateLimit,
+  handler: (req, res) =>
+    rateLimit429Handler(
+      req,
+      res,
+      'Muitas tentativas de login. Aguarde 15 minutos e tente novamente.',
+    ),
+});
+
 app.use(limiter);
 app.use('/api/auth/me', authMeLimiter);
+app.use('/api/auth/login', authLoginLimiter);
 
 // Logging
 app.use(morgan('combined'));

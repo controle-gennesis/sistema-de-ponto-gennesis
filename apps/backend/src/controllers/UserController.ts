@@ -1,8 +1,8 @@
 import { Response, NextFunction } from 'express';
-import bcrypt from 'bcryptjs';
 import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
+import { hashPassword } from '../lib/passwordHash';
 import { gennecyBotUserWhereExclude } from '../lib/gennecyBotUser';
 
 export class UserController {
@@ -29,7 +29,7 @@ export class UserController {
         throw createError('Usuário não encontrado', 404);
       }
 
-      const hashedPassword = await bcrypt.hash(password, 12);
+      const hashedPassword = await hashPassword(password);
 
       await prisma.user.update({
         where: { id },
@@ -225,7 +225,7 @@ export class UserController {
       }
 
       // Criptografar senha
-      const hashedPassword = await bcrypt.hash(password, 12);
+      const hashedPassword = await hashPassword(password);
 
       // Criar usuário e funcionário em transação
       const result = await prisma.$transaction(async (tx: any) => {

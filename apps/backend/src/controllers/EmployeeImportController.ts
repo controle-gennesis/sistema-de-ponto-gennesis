@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import * as XLSX from 'xlsx';
-import bcrypt from 'bcryptjs';
 import { prisma } from '../lib/prisma';
+import { hashPassword } from '../lib/passwordHash';
 import { createError } from '../middleware/errorHandler';
 
 interface ImportRow {
@@ -363,7 +363,7 @@ export const importEmployees = async (req: Request, res: Response) => {
         const requiresTimeClock = row['Precisa Bater Ponto']?.toLowerCase() === 'sim' || row['Precisa Bater Ponto']?.toLowerCase() === 's' || !row['Precisa Bater Ponto'];
 
         // Criar usuário e funcionário
-        const hashedPassword = await bcrypt.hash(defaultPassword, 10);
+        const hashedPassword = await hashPassword(defaultPassword, 10);
 
         const result = await prisma.$transaction(async (tx: any) => {
           const user = await tx.user.create({
@@ -630,7 +630,7 @@ export const importEmployeesBulk = async (req: Request, res: Response) => {
         const requiresTimeClock = emp['Precisa Bater Ponto']?.toLowerCase() === 'sim' || emp['Precisa Bater Ponto']?.toLowerCase() === 's' || !emp['Precisa Bater Ponto'];
 
         // Criar usuário e funcionário
-        const hashedPassword = await bcrypt.hash(defaultPassword, 10);
+        const hashedPassword = await hashPassword(defaultPassword, 10);
 
         const result = await prisma.$transaction(async (tx: any) => {
           const user = await tx.user.create({

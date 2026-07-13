@@ -1,11 +1,38 @@
 import { PrismaClient, Prisma } from '@prisma/client';
 
-// Configurar DATABASE_URL com connection pool limit se não tiver
+/** Default seguro sob carga (ex.: 30 logins simultâneos). Override: PRISMA_CONNECTION_LIMIT */
+const DEFAULT_CONNECTION_LIMIT = 12;
+/** Tempo de espera na fila do pool (segundos). Override: PRISMA_POOL_TIMEOUT */
+const DEFAULT_POOL_TIMEOUT = 20;
+
+function resolvePoolNumber(envKey: string, fallback: number): number {
+  const raw = process.env[envKey];
+  if (!raw) return fallback;
+  const n = Number.parseInt(raw, 10);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+function upsertQueryParam(url: string, key: string, value: string): string {
+  const re = new RegExp(`([?&])${key}=[^&]*`);
+  if (re.test(url)) {
+    return url.replace(re, `$1${key}=${value}`);
+  }
+  const separator = url.includes('?') ? '&' : '?';
+  return `${url}${separator}${key}=${value}`;
+}
+
+// Configurar DATABASE_URL com connection pool (sobrescreve limit baixo se já existir)
 let databaseUrl = process.env.DATABASE_URL || '';
-if (databaseUrl && !databaseUrl.includes('connection_limit')) {
-  // Adiciona connection_limit se não existir
-  const separator = databaseUrl.includes('?') ? '&' : '?';
-  databaseUrl = `${databaseUrl}${separator}connection_limit=5&pool_timeout=10`;
+const connectionLimit = resolvePoolNumber('PRISMA_CONNECTION_LIMIT', DEFAULT_CONNECTION_LIMIT);
+const poolTimeout = resolvePoolNumber('PRISMA_POOL_TIMEOUT', DEFAULT_POOL_TIMEOUT);
+
+if (databaseUrl) {
+  databaseUrl = upsertQueryParam(databaseUrl, 'connection_limit', String(connectionLimit));
+  databaseUrl = upsertQueryParam(databaseUrl, 'pool_timeout', String(poolTimeout));
+}
+
+export function getPrismaPoolConfig(): { connectionLimit: number; poolTimeout: number } {
+  return { connectionLimit, poolTimeout };
 }
 
 // Configurar logs do Prisma
@@ -90,4 +117,3 @@ if (!pLicit.licitacao || !pLicit.licitacaoDocumento) {
 }
 
 export { prisma };
-

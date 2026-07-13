@@ -1,9 +1,9 @@
 import { Request, Response, NextFunction } from 'express';
-import bcrypt from 'bcryptjs';
 import jwt, { SignOptions } from 'jsonwebtoken';
 import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
+import { comparePassword, hashPassword } from '../lib/passwordHash';
 import { ChatService } from '../services/ChatService';
 
 const chatUploadService = new ChatService();
@@ -43,7 +43,7 @@ export class AuthController {
       }
 
       // Criptografar senha
-      const hashedPassword = await bcrypt.hash(password, 12);
+      const hashedPassword = await hashPassword(password);
 
       // Criar usuário
       const user = await prisma.user.create({
@@ -63,18 +63,11 @@ export class AuthController {
         }
       });
 
-      // Gerar token
-      const token = jwt.sign(
-        { id: user.id, email: user.email, role: user.role },
-        process.env.JWT_SECRET as string,
-        { expiresIn: '7d' }
-      );
-
+      // Não emite token de sessão: registro é administrativo (ver rota protegida)
       return res.status(201).json({
         success: true,
         data: {
           user,
-          token,
         },
         message: 'Usuário criado com sucesso'
       });
@@ -119,7 +112,7 @@ export class AuthController {
         throw createError('Credenciais inválidas', 401);
       }
 
-      const isPasswordValid = await bcrypt.compare(password, user.password);
+      const isPasswordValid = await comparePassword(password, user.password);
       if (!isPasswordValid) {
         throw createError('Credenciais inválidas', 401);
       }
@@ -164,6 +157,10 @@ export class AuthController {
       if (!user) {
         throw createError('Usuário não encontrado', 404);
       }
+
+      // Evita 304 no browser/Axios (tratado como erro no cliente)
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
 
       return res.json({
         success: true,
@@ -235,25 +232,11 @@ export class AuthController {
 
   async refreshToken(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      const userId = req.user!.id;
+      // authenticate já validou usuário ativo em req.user
+      const { id, email, role } = req.user!;
 
-      const user = await prisma.user.findUnique({
-        where: { id: userId },
-        select: {
-          id: true,
-          email: true,
-          role: true,
-          isActive: true,
-        }
-      });
-
-      if (!user || !user.isActive) {
-        throw createError('Usuário não encontrado ou inativo', 401);
-      }
-
-      // Gerar novo token
       const token = jwt.sign(
-        { id: user.id, email: user.email, role: user.role },
+        { id, email, role },
         process.env.JWT_SECRET as string,
         { expiresIn: '7d' }
       );
@@ -268,29 +251,13 @@ export class AuthController {
     }
   }
 
-  // Método público para refresh que aceita tokens expirados
+  // Refresh via authenticateForRefresh (já validou usuário ativo)
   async publicRefreshToken(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      // O middleware authenticateForRefresh já validou e populou req.user
-      const userId = req.user!.id;
+      const { id, email, role } = req.user!;
 
-      const user = await prisma.user.findUnique({
-        where: { id: userId },
-        select: {
-          id: true,
-          email: true,
-          role: true,
-          isActive: true,
-        }
-      });
-
-      if (!user || !user.isActive) {
-        throw createError('Usuário não encontrado ou inativo', 401);
-      }
-
-      // Gerar novo token
       const token = jwt.sign(
-        { id: user.id, email: user.email, role: user.role },
+        { id, email, role },
         process.env.JWT_SECRET as string,
         { expiresIn: '7d' }
       );
@@ -320,13 +287,13 @@ export class AuthController {
       }
 
       // Verificar senha atual
-      const isCurrentPasswordValid = await bcrypt.compare(currentPassword, user.password);
+      const isCurrentPasswordValid = await comparePassword(currentPassword, user.password);
       if (!isCurrentPasswordValid) {
         throw createError('Senha atual incorreta', 400);
       }
 
       // Criptografar nova senha
-      const hashedNewPassword = await bcrypt.hash(newPassword, 12);
+      const hashedNewPassword = await hashPassword(newPassword);
 
       // Atualizar senha e marcar como não é mais primeiro login
       await prisma.user.update({

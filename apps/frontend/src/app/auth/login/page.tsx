@@ -42,14 +42,13 @@ export default function LoginPage() {
     try {
       const loginResponse = await authService.login(formData, rememberMe);
       persistUnbBranding(loginResponse.user?.employee?.costCenter);
-      // Limpar cache do React Query
-      queryClient.clear();
+      // Invalida só o que depende da sessão (evita limpar cache útil de outras queries)
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['user'] }),
+        queryClient.invalidateQueries({ queryKey: ['me-permissions'] }),
+      ]);
       toast.success('Login realizado com sucesso!');
-      
-      // Todos os usuários autenticados vão para a Home (página de boas-vindas).
-      setTimeout(() => {
-        router.push('/ponto/home');
-      }, 300);
+      router.push('/ponto/home');
     } catch (error: any) {
       // Verificar se é erro de credenciais inválidas
       if (error.message?.includes('Credenciais inválidas') || 

@@ -1,6 +1,6 @@
 import { ChatType, UserRole } from '@prisma/client';
-import bcrypt from 'bcryptjs';
 import { prisma } from '../lib/prisma';
+import { hashPassword } from '../lib/passwordHash';
 import { KanbanService } from './KanbanService';
 import { buildFuelOpenRequestsStatusMessage } from '../lib/fuelRefuelChatNotify';
 import {
@@ -65,7 +65,7 @@ async function getOrCreateGennecyBotUserId(): Promise<string> {
     return existing.id;
   }
 
-  const passwordHash = await bcrypt.hash(
+  const passwordHash = await hashPassword(
     `gennecy-bot-${process.env.JWT_SECRET || 'local'}`,
     10,
   );

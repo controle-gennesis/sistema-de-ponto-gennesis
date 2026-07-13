@@ -7,13 +7,12 @@
 import 'dotenv/config';
 import { writeFileSync } from 'fs';
 import { join } from 'path';
-import bcrypt from 'bcryptjs';
 import { pathToModuleKey, PERMISSION_ACCESS_ACTION } from '@sistema-ponto/permission-modules';
 import { prisma } from '../src/lib/prisma';
+import { BCRYPT_ROUNDS, hashPassword } from '../src/lib/passwordHash';
 
 const TOTAL_USERS = 30;
 const PASSWORD = 'Teste123!';
-const BCRYPT_ROUNDS = 12;
 
 const OUTPUT_FILE = join(__dirname, 'test-users.json');
 
@@ -133,7 +132,7 @@ async function upsertTestUser(index: number, hashedPassword: string): Promise<vo
 async function main(): Promise<void> {
   console.log(`Criando ou atualizando ${TOTAL_USERS} usuários de teste...\n`);
 
-  const hashedPassword = await bcrypt.hash(PASSWORD, BCRYPT_ROUNDS);
+  const hashedPassword = await hashPassword(PASSWORD, BCRYPT_ROUNDS);
   const credentials: TestUserCredential[] = [];
 
   for (let index = 1; index <= TOTAL_USERS; index += 1) {
