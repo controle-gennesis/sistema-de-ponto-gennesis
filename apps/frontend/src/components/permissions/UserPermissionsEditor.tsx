@@ -440,12 +440,15 @@ function UserSearchSelect({
   onSearchValueChange,
   selectedUserId,
   onSelectUserId,
+  onActivate,
 }: {
   users: PermissionUserListItem[];
   searchValue: string;
   onSearchValueChange: (value: string) => void;
   selectedUserId: string;
   onSelectUserId: (id: string) => void;
+  /** Dispara ao focar o campo (ex.: lazy-load da lista de usuários). */
+  onActivate?: () => void;
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const selectedUser = useMemo(() => users.find((u) => u.id === selectedUserId) ?? null, [users, selectedUserId]);
@@ -460,9 +463,13 @@ function UserSearchSelect({
       <input
         type="text"
         value={searchValue}
-        onFocus={() => setIsOpen(true)}
+        onFocus={() => {
+          onActivate?.();
+          setIsOpen(true);
+        }}
         onBlur={() => setTimeout(() => setIsOpen(false), 120)}
         onChange={(e) => {
+          onActivate?.();
           onSearchValueChange(e.target.value);
           onSelectUserId('');
           if (!isOpen) setIsOpen(true);
@@ -475,7 +482,9 @@ function UserSearchSelect({
       {isOpen && (
         <div className="absolute z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-800">
           {filteredUsers.length === 0 ? (
-            <div className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">Nenhum funcionário encontrado.</div>
+            <div className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">
+              {users.length === 0 ? 'Carregando usuários...' : 'Nenhum funcionário encontrado.'}
+            </div>
           ) : (
             filteredUsers.map((u) => {
               const isSelected = u.id === selectedUserId || (!selectedUserId && selectedUser?.id === u.id);
@@ -608,15 +617,20 @@ export function UserPermissionsEditor({
   const { data: contractsList = [] } = useQuery({
     queryKey: ['permission-contracts-list'],
     queryFn: async () => (await api.get('/permissions/contracts')).data?.data as ContractOption[],
-    enabled: (isPositionMode || !!userId) && !!userPermissionData && !userPermissionData.isAdmin,
+    enabled:
+      (isPositionMode || !!userId) &&
+      !!userPermissionData &&
+      !userPermissionData.isAdmin &&
+      activeTab === 'contratos',
     staleTime: 60_000,
     refetchOnWindowFocus: false,
   });
 
+  const [loadCopyUsers, setLoadCopyUsers] = useState(false);
   const { data: permissionUsers = [] } = useQuery({
     queryKey: ['permission-users'],
     queryFn: async () => (await api.get('/permissions/users')).data?.data as PermissionUserListItem[],
-    enabled: !isPositionMode && !!userId,
+    enabled: !isPositionMode && !!userId && loadCopyUsers,
     staleTime: 60_000,
     refetchOnWindowFocus: false,
     retry: false,
@@ -1378,6 +1392,7 @@ export function UserPermissionsEditor({
                         onSearchValueChange={setCopyGeneralSearch}
                         selectedUserId={copyFromUserIdGeneral}
                         onSelectUserId={setCopyFromUserIdGeneral}
+                        onActivate={() => setLoadCopyUsers(true)}
                       />
                       <button
                         type="button"
@@ -1588,6 +1603,7 @@ export function UserPermissionsEditor({
                         onSearchValueChange={setCopyContractsSearch}
                         selectedUserId={copyFromUserIdContracts}
                         onSelectUserId={setCopyFromUserIdContracts}
+                        onActivate={() => setLoadCopyUsers(true)}
                       />
                       <button
                         type="button"

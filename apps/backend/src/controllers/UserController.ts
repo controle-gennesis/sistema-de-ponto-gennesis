@@ -50,10 +50,22 @@ export class UserController {
 
   async getAllUsers(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      const { page = 1, limit = 10, search, role, department, status } = req.query;
+      const {
+        page = 1,
+        limit = 10,
+        search,
+        role,
+        department,
+        position,
+        status,
+        light,
+        excludeAdmin,
+      } = req.query;
       // Limitar o máximo de registros por página para evitar sobrecarga
       const limitNum = Math.min(Number(limit), 1000); // Máximo de 1000 registros por página
       const skip = (Number(page) - 1) * limitNum;
+      const isLight = light === '1' || light === 'true';
+      const shouldExcludeAdmin = excludeAdmin === '1' || excludeAdmin === 'true';
 
       const where: any = {
         ...gennecyBotUserWhereExclude(),
@@ -77,13 +89,23 @@ export class UserController {
         where.role = role;
       }
 
-      // Construir condições de busca
+      // Construir condições de busca (usuário + campos do vínculo employee)
       const searchConditions: any[] = [];
       if (search) {
+        const q = String(search).trim();
         searchConditions.push(
-          { name: { contains: search as string, mode: 'insensitive' } },
-          { email: { contains: search as string, mode: 'insensitive' } },
-          { cpf: { contains: search as string } }
+          { name: { contains: q, mode: 'insensitive' } },
+          { email: { contains: q, mode: 'insensitive' } },
+          { cpf: { contains: q } },
+          { employee: { employeeId: { contains: q, mode: 'insensitive' } } },
+          { employee: { department: { contains: q, mode: 'insensitive' } } },
+          { employee: { position: { contains: q, mode: 'insensitive' } } },
+          { employee: { company: { contains: q, mode: 'insensitive' } } },
+          { employee: { polo: { contains: q, mode: 'insensitive' } } },
+          { employee: { costCenter: { contains: q, mode: 'insensitive' } } },
+          { employee: { client: { contains: q, mode: 'insensitive' } } },
+          { employee: { categoriaFinanceira: { contains: q, mode: 'insensitive' } } },
+          { employee: { modality: { contains: q, mode: 'insensitive' } } }
         );
       }
 
@@ -92,21 +114,63 @@ export class UserController {
         where.OR = searchConditions;
       }
 
-      // Filtro de departamento - precisa ser combinado corretamente com OR
+      const employeeFilters: Record<string, unknown> = {};
       if (department) {
+        employeeFilters.department = { contains: department as string, mode: 'insensitive' };
+      }
+      if (position) {
+        employeeFilters.position = { contains: position as string, mode: 'insensitive' };
+      }
+      if (shouldExcludeAdmin) {
+        employeeFilters.NOT = {
+          position: { equals: 'Administrador', mode: 'insensitive' },
+        };
+      }
+
+      if (Object.keys(employeeFilters).length > 0) {
         if (where.OR) {
-          // Se já existe OR, precisamos combinar com AND
-          where.AND = [
-            { OR: where.OR },
-            { employee: { department: { contains: department as string, mode: 'insensitive' } } }
-          ];
+          where.AND = [{ OR: where.OR }, { employee: employeeFilters }];
           delete where.OR;
         } else {
-          where.employee = {
-            department: { contains: department as string, mode: 'insensitive' }
-          };
+          where.employee = employeeFilters;
         }
       }
+
+      const employeeSelectLight = {
+        id: true,
+        employeeId: true,
+        department: true,
+        position: true,
+        hireDate: true,
+        birthDate: true,
+        isRemote: true,
+        costCenter: true,
+        client: true,
+        company: true,
+        polo: true,
+        categoriaFinanceira: true,
+        modality: true,
+        requiresTimeClock: true,
+      } as const;
+
+      const employeeSelectFull = {
+        ...employeeSelectLight,
+        salary: true,
+        workSchedule: true,
+        bank: true,
+        accountType: true,
+        agency: true,
+        operation: true,
+        account: true,
+        digit: true,
+        pixKeyType: true,
+        pixKey: true,
+        dailyFoodVoucher: true,
+        dailyTransportVoucher: true,
+        familySalary: true,
+        dangerPay: true,
+        unhealthyPay: true,
+      } as const;
 
       const [users, total] = await Promise.all([
         prisma.user.findMany({
@@ -115,45 +179,12 @@ export class UserController {
           take: limitNum,
           include: {
             employee: {
-              select: {
-                id: true,
-                employeeId: true,
-                department: true,
-                position: true,
-                hireDate: true,
-                birthDate: true,
-                salary: true,
-                isRemote: true,
-                workSchedule: true,
-                costCenter: true,
-                client: true,
-                // Novos campos
-                company: true,
-                bank: true,
-                accountType: true,
-                agency: true,
-                operation: true,
-                account: true,
-                digit: true,
-                pixKeyType: true,
-                pixKey: true,
-                dailyFoodVoucher: true,
-                dailyTransportVoucher: true,
-                modality: true,
-                familySalary: true,
-                dangerPay: true,
-                unhealthyPay: true,
-                // Novos campos - Polo e Categoria Financeira
-                polo: true,
-                categoriaFinanceira: true,
-                // Campo para controlar se precisa bater ponto
-                requiresTimeClock: true,
-              }
-            }
+              select: isLight ? employeeSelectLight : employeeSelectFull,
+            },
           },
-          orderBy: { createdAt: 'desc' }
+          orderBy: { name: 'asc' },
         }),
-        prisma.user.count({ where })
+        prisma.user.count({ where }),
       ]);
 
       res.json({
@@ -163,8 +194,8 @@ export class UserController {
           page: Number(page),
           limit: limitNum,
           total,
-          totalPages: Math.ceil(total / limitNum)
-        }
+          totalPages: Math.ceil(total / limitNum),
+        },
       });
     } catch (error: any) {
       console.error('Erro ao buscar usuários:', error);

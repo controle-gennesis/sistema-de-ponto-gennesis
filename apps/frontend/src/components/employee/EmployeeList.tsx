@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useDeferredValue } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Trash2, Users, Search, AlertTriangle, X, Clock, Calendar, User, Download, Edit, Save, Camera, FileCheck, Eye, EyeOff, Plus, ChevronDown, ChevronUp, CheckCircle, RotateCcw, Upload, FileSpreadsheet, Loader2, MoreVertical, DoorOpen, DoorClosed, Utensils, UtensilsCrossed, XCircle, UserX, Shield, Filter, KeyRound } from 'lucide-react';
@@ -141,6 +141,7 @@ export function EmployeeList({
 }: EmployeeListProps) {
   const { costCentersList } = useCostCenters();
   const [searchTerm, setSearchTerm] = useState('');
+  const deferredSearchTerm = useDeferredValue(searchTerm.trim());
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   /** Menu flutuante: fixed + portal para não ser cortado pelo overflow-x da tabela */
   const [employeeActionMenu, setEmployeeActionMenu] = useState<{
@@ -413,16 +414,27 @@ export function EmployeeList({
     XLSX.writeFile(wb, fileName);
   };
 
-  // Buscar funcionários (cap alinhado ao backend; filtros adicionais no cliente)
-  const { data: employeesData, isLoading, error } = useQuery({
-    queryKey: ['employees', statusFilter],
+  // Lista leve: busca/departamento/cargo no servidor; demais filtros no cliente
+  const { data: employeesData, isLoading, isFetching, error } = useQuery({
+    queryKey: [
+      'employees',
+      statusFilter,
+      deferredSearchTerm,
+      departmentFilter,
+      positionFilter,
+    ],
     queryFn: async () => {
       const res = await api.get('/users', {
-        params: { 
+        params: {
           page: 1,
           limit: 500,
-          status: statusFilter === 'all' ? 'all' : statusFilter
-        }
+          light: 1,
+          excludeAdmin: 1,
+          status: statusFilter === 'all' ? 'all' : statusFilter,
+          ...(deferredSearchTerm ? { search: deferredSearchTerm } : {}),
+          ...(departmentFilter !== 'all' ? { department: departmentFilter } : {}),
+          ...(positionFilter !== 'all' ? { position: positionFilter } : {}),
+        },
       });
       return res.data;
     },
@@ -430,6 +442,19 @@ export function EmployeeList({
     refetchOnWindowFocus: false,
     retry: false,
     throwOnError: false,
+    placeholderData: (prev) => prev,
+  });
+
+  // Detalhe completo só ao abrir o funcionário (lista vem em modo light)
+  const { data: selectedEmployeeDetail } = useQuery({
+    queryKey: ['employee-detail', selectedEmployee?.id],
+    enabled: !!selectedEmployee?.id,
+    queryFn: async () => {
+      const res = await api.get(`/users/${selectedEmployee!.id}`);
+      return res.data?.data as Employee;
+    },
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
   });
 
   // Buscar registros de ponto do funcionário selecionado
@@ -1093,6 +1118,55 @@ export function EmployeeList({
   const modalities: string[] = ['Todos', ...MODALITIES_LIST];
   const pagination = employeesData?.pagination || { total: 0, totalPages: 0 };
 
+  // Preferir detalhe completo quando o modal está aberto
+  useEffect(() => {
+    if (!selectedEmployeeDetail?.id || !selectedEmployee?.id) return;
+    if (selectedEmployeeDetail.id !== selectedEmployee.id) return;
+    // Lista light não traz salary; só atualiza enquanto o payload ainda for leve
+    if (selectedEmployee.employee && selectedEmployee.employee.salary !== undefined) return;
+    setSelectedEmployee(selectedEmployeeDetail);
+  }, [selectedEmployeeDetail, selectedEmployee]);
+
+  // Filtrar funcionários (busca/departamento/cargo/admin já vêm do servidor)
+  const filteredEmployees = useMemo(() => {
+    if (!employees || employees.length === 0) {
+      return [];
+    }
+    
+    return employees.filter((emp: Employee) => {
+      if (emp.role !== 'EMPLOYEE') return false;
+      if (isGennecyBotUser(emp)) return false;
+      
+      if (costCenterFilter !== 'all' && 
+          (!emp.employee?.costCenter || !emp.employee.costCenter.toLowerCase().includes(costCenterFilter.toLowerCase()))) {
+        return false;
+      }
+      
+      if (clientFilter !== 'all' && 
+          (!emp.employee?.client || !emp.employee.client.toLowerCase().includes(clientFilter.toLowerCase()))) {
+        return false;
+      }
+      
+      if (companyFilter !== 'all' && emp.employee?.company !== companyFilter) {
+        return false;
+      }
+      
+      if (poloFilter !== 'all' && emp.employee?.polo !== poloFilter) {
+        return false;
+      }
+      
+      if (categoriaFinanceiraFilter !== 'all' && emp.employee?.categoriaFinanceira !== categoriaFinanceiraFilter) {
+        return false;
+      }
+      
+      if (modalityFilter !== 'all' && emp.employee?.modality !== modalityFilter) {
+        return false;
+      }
+      
+      return true;
+    });
+  }, [employees, costCenterFilter, clientFilter, companyFilter, poloFilter, categoriaFinanceiraFilter, modalityFilter]);
+
   const departmentFilterSelectOptions = useMemo(
     () => filterOptionsWithAll(['Todos', ...DEPARTMENTS_LIST], 'Todos'),
     []
@@ -1141,90 +1215,6 @@ export function EmployeeList({
       ),
     []
   );
-
-  // Filtrar apenas funcionários (não RH/Admin) e por todos os filtros
-  const filteredEmployees = useMemo(() => {
-    if (!employees || employees.length === 0) {
-      return [];
-    }
-    
-    return employees.filter((emp: Employee) => {
-      // Apenas funcionários (não RH/Admin)
-      if (emp.role !== 'EMPLOYEE') return false;
-
-      // Conta de serviço da assistente Gennecy (chat interno)
-      if (isGennecyBotUser(emp)) return false;
-      
-      // Ocultar funcionários com cargo "Administrador"
-      if (emp.employee?.position === 'Administrador') return false;
-      
-      // Busca geral - verifica em todos os campos
-      if (searchTerm.trim() !== '') {
-        const searchLower = searchTerm.toLowerCase().trim();
-        const searchNumbers = searchTerm.replace(/\D/g, '');
-        
-        const matchesSearch = 
-          (emp.name || '').toLowerCase().includes(searchLower) ||
-          (emp.email || '').toLowerCase().includes(searchLower) ||
-          (emp.cpf && searchNumbers.length > 0 && emp.cpf.replace(/\D/g, '').includes(searchNumbers)) ||
-          (emp.employee?.employeeId || '').toLowerCase().includes(searchLower) ||
-          (emp.employee?.department || '').toLowerCase().includes(searchLower) ||
-          (emp.employee?.position || '').toLowerCase().includes(searchLower) ||
-          (emp.employee?.company || '').toLowerCase().includes(searchLower) ||
-          (emp.employee?.polo || '').toLowerCase().includes(searchLower) ||
-          (emp.employee?.costCenter || '').toLowerCase().includes(searchLower) ||
-          (emp.employee?.client || '').toLowerCase().includes(searchLower) ||
-          (emp.employee?.categoriaFinanceira || '').toLowerCase().includes(searchLower) ||
-          (emp.employee?.modality || '').toLowerCase().includes(searchLower);
-        
-        if (!matchesSearch) {
-          return false;
-        }
-      }
-      
-      // Filtros específicos
-      if (departmentFilter !== 'all' && 
-          (!emp.employee?.department || !emp.employee.department.toLowerCase().includes(departmentFilter.toLowerCase()))) {
-        return false;
-      }
-      
-      if (positionFilter !== 'all' && 
-          (!emp.employee?.position || !emp.employee.position.toLowerCase().includes(positionFilter.toLowerCase()))) {
-        return false;
-      }
-      
-      if (costCenterFilter !== 'all' && 
-          (!emp.employee?.costCenter || !emp.employee.costCenter.toLowerCase().includes(costCenterFilter.toLowerCase()))) {
-        return false;
-      }
-      
-      if (clientFilter !== 'all' && 
-          (!emp.employee?.client || !emp.employee.client.toLowerCase().includes(clientFilter.toLowerCase()))) {
-        return false;
-      }
-      
-      if (companyFilter !== 'all' && emp.employee?.company !== companyFilter) {
-        return false;
-      }
-      
-      if (poloFilter !== 'all' && emp.employee?.polo !== poloFilter) {
-        return false;
-      }
-      
-      if (categoriaFinanceiraFilter !== 'all' && emp.employee?.categoriaFinanceira !== categoriaFinanceiraFilter) {
-        return false;
-      }
-      
-      if (modalityFilter !== 'all' && emp.employee?.modality !== modalityFilter) {
-        return false;
-      }
-      
-      return true;
-    }).sort((a: Employee, b: Employee) => {
-      // Ordenação alfabética por nome
-      return a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' });
-    });
-  }, [employees, searchTerm, departmentFilter, positionFilter, costCenterFilter, clientFilter, companyFilter, poloFilter, categoriaFinanceiraFilter, modalityFilter]);
 
   // Aplicar paginação nos funcionários filtrados
   const totalFiltered = filteredEmployees.length;
@@ -1325,8 +1315,25 @@ export function EmployeeList({
     if (emp) {
       setSelectedEmployee(emp);
       setDetailsTab('info');
+      onForceOpenEmployeeConsumed?.();
+      return;
     }
-    onForceOpenEmployeeConsumed?.();
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await api.get(`/users/${forceOpenEmployeeId}`);
+        if (cancelled || !res.data?.data) return;
+        setSelectedEmployee(res.data.data);
+        setDetailsTab('info');
+      } catch {
+        /* ignore */
+      } finally {
+        if (!cancelled) onForceOpenEmployeeConsumed?.();
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [forceOpenEmployeeId, employees, isLoading, onForceOpenEmployeeConsumed]);
 
   // Função para limpar todos os filtros
@@ -1710,6 +1717,11 @@ export function EmployeeList({
             <p className="text-sm text-gray-500 dark:text-gray-500 mt-2">
               {error instanceof Error ? error.message : 'Erro desconhecido'}
             </p>
+          </div>
+        ) : isLoading || (isFetching && employees.length === 0) ? (
+          <div className="text-center py-12">
+            <Loader2 className="w-10 h-10 animate-spin text-red-600 dark:text-red-400 mx-auto mb-4" />
+            <p className="text-gray-600 dark:text-gray-400">Carregando funcionários...</p>
           </div>
         ) : filteredEmployees.length === 0 ? (
           <div className="text-center py-8">
