@@ -1917,9 +1917,17 @@ export function OcPurchaseOrdersPanel({
       patchOcInListSummaryCache(queryClient, id, approvalOptimisticPatch(currentStatus, currentUserId));
       setSelectedOrder(null);
       setOcActionMenu(null);
-      return { previous };
+      const toastId = `oc-approve-${id}`;
+      if (currentStatus === 'PENDING_DIRETORIA') {
+        toast.success('OC aprovada pela diretoria.', { id: toastId });
+      } else if (currentStatus === 'PENDING') {
+        toast.success('OC enviada para aprovação da diretoria.', { id: toastId });
+      } else {
+        toast.success('OC aprovada pelo compras e enviada para aprovação do gestor.', { id: toastId });
+      }
+      return { previous, toastId };
     },
-    onSuccess: (data, variables) => {
+    onSuccess: (data) => {
       const updated = data?.data as PurchaseOrder | undefined;
       if (updated?.id) {
         patchOcInListSummaryCache(queryClient, updated.id, (order) => ({
@@ -1930,13 +1938,6 @@ export function OcPurchaseOrdersPanel({
           approvedBy: updated.approvedBy ?? order.approvedBy
         }));
       }
-      if (variables.currentStatus === 'PENDING_DIRETORIA') {
-        toast.success('OC aprovada pela diretoria.');
-      } else if (variables.currentStatus === 'PENDING') {
-        toast.success('OC enviada para aprovação da diretoria.');
-      } else {
-        toast.success('OC aprovada pelo compras e enviada para aprovação do gestor.');
-      }
       void queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
       void queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
     },
@@ -1944,7 +1945,9 @@ export function OcPurchaseOrdersPanel({
       if (context?.previous) {
         queryClient.setQueryData(['purchase-orders', 'list-summary'], context.previous);
       }
-      toast.error(error.response?.data?.message || 'Erro ao aprovar');
+      toast.error(error.response?.data?.message || 'Erro ao aprovar', {
+        id: context?.toastId
+      });
     }
   });
 
@@ -1967,10 +1970,11 @@ export function OcPurchaseOrdersPanel({
       setRejectReason('');
       setSelectedOrder(null);
       setOcActionMenu(null);
-      return { previous };
+      const toastId = `oc-reject-${id}`;
+      toast.success('Ordem de compra cancelada.', { id: toastId });
+      return { previous, toastId };
     },
     onSuccess: () => {
-      toast.success('Ordem de compra cancelada.');
       void queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
       void queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
     },
@@ -1978,7 +1982,9 @@ export function OcPurchaseOrdersPanel({
       if (context?.previous) {
         queryClient.setQueryData(['purchase-orders', 'list-summary'], context.previous);
       }
-      toast.error(error.response?.data?.message || 'Erro ao cancelar');
+      toast.error(error.response?.data?.message || 'Erro ao cancelar', {
+        id: context?.toastId
+      });
     }
   });
 
@@ -2006,10 +2012,11 @@ export function OcPurchaseOrdersPanel({
       setCorrectionReason('');
       setSelectedOrder(null);
       setOcActionMenu(null);
-      return { previous };
+      const toastId = `oc-correction-${id}`;
+      toast.success('OC enviada para CORREÇÃO OC.', { id: toastId });
+      return { previous, toastId };
     },
     onSuccess: () => {
-      toast.success('OC enviada para CORREÇÃO OC.');
       void queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
       void queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
     },
@@ -2017,7 +2024,9 @@ export function OcPurchaseOrdersPanel({
       if (context?.previous) {
         queryClient.setQueryData(['purchase-orders', 'list-summary'], context.previous);
       }
-      toast.error(error.response?.data?.message || 'Erro ao enviar para correção');
+      toast.error(error.response?.data?.message || 'Erro ao enviar para correção', {
+        id: context?.toastId
+      });
     }
   });
 
