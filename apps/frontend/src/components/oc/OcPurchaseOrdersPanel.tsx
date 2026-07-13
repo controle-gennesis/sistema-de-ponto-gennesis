@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import {
   FileText,
   Eye,
@@ -356,6 +356,49 @@ function approvalLabel(currentStatus: string): string {
   if (currentStatus === 'PENDING_DIRETORIA') return 'Aprovar (Diretoria)';
   if (currentStatus === 'PENDING') return 'Aprovar (Gestor)';
   return 'Aprovar (Compras)';
+}
+
+type PurchaseOrdersListSummaryCache = {
+  data?: PurchaseOrder[];
+  pagination?: unknown;
+  success?: boolean;
+};
+
+function patchOcInListSummaryCache(
+  queryClient: QueryClient,
+  id: string,
+  patch: Partial<PurchaseOrder> | ((order: PurchaseOrder) => PurchaseOrder)
+) {
+  queryClient.setQueryData(
+    ['purchase-orders', 'list-summary'],
+    (old: PurchaseOrdersListSummaryCache | undefined) => {
+      if (!old?.data || !Array.isArray(old.data)) return old;
+      return {
+        ...old,
+        data: old.data.map((order) => {
+          if (order.id !== id) return order;
+          return typeof patch === 'function' ? patch(order) : { ...order, ...patch };
+        })
+      };
+    }
+  );
+}
+
+function approvalOptimisticPatch(
+  currentStatus: string,
+  userId: string | undefined
+): Partial<PurchaseOrder> {
+  const nextStatus = nextApprovalStatus(currentStatus);
+  const patch: Partial<PurchaseOrder> = { status: nextStatus };
+  if (!userId) return patch;
+  if (currentStatus === 'PENDING_COMPRAS' || currentStatus === 'DRAFT') {
+    patch.comprasApprovedBy = userId;
+  } else if (currentStatus === 'PENDING') {
+    patch.gestorApprovedBy = userId;
+  } else if (currentStatus === 'PENDING_DIRETORIA') {
+    patch.approvedBy = userId;
+  }
+  return patch;
 }
 
 function isStockSyncedDocumentUrl(url: string): boolean {
@@ -1865,10 +1908,28 @@ export function OcPurchaseOrdersPanel({
       const res = await api.patch(`/purchase-orders/${id}/status`, { status: nextStatus });
       return res.data;
     },
-    onSuccess: (_data, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
-      queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
+    onMutate: async ({ id, currentStatus }) => {
+      await queryClient.cancelQueries({ queryKey: ['purchase-orders', 'list-summary'] });
+      const previous = queryClient.getQueryData<PurchaseOrdersListSummaryCache>([
+        'purchase-orders',
+        'list-summary'
+      ]);
+      patchOcInListSummaryCache(queryClient, id, approvalOptimisticPatch(currentStatus, currentUserId));
       setSelectedOrder(null);
+      setOcActionMenu(null);
+      return { previous };
+    },
+    onSuccess: (data, variables) => {
+      const updated = data?.data as PurchaseOrder | undefined;
+      if (updated?.id) {
+        patchOcInListSummaryCache(queryClient, updated.id, (order) => ({
+          ...order,
+          status: updated.status ?? order.status,
+          comprasApprovedBy: updated.comprasApprovedBy ?? order.comprasApprovedBy,
+          gestorApprovedBy: updated.gestorApprovedBy ?? order.gestorApprovedBy,
+          approvedBy: updated.approvedBy ?? order.approvedBy
+        }));
+      }
       if (variables.currentStatus === 'PENDING_DIRETORIA') {
         toast.success('OC aprovada pela diretoria.');
       } else if (variables.currentStatus === 'PENDING') {
@@ -1876,9 +1937,15 @@ export function OcPurchaseOrdersPanel({
       } else {
         toast.success('OC aprovada pelo compras e enviada para aprovação do gestor.');
       }
+      void queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
+      void queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
     },
-    onError: (error: { response?: { data?: { message?: string } } }) =>
-      toast.error(error.response?.data?.message || 'Erro ao aprovar')
+    onError: (error: { response?: { data?: { message?: string } } }, _variables, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(['purchase-orders', 'list-summary'], context.previous);
+      }
+      toast.error(error.response?.data?.message || 'Erro ao aprovar');
+    }
   });
 
   const rejectMutation = useMutation({
@@ -1889,16 +1956,30 @@ export function OcPurchaseOrdersPanel({
       });
       return res.data;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
-      queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
+    onMutate: async ({ id }) => {
+      await queryClient.cancelQueries({ queryKey: ['purchase-orders', 'list-summary'] });
+      const previous = queryClient.getQueryData<PurchaseOrdersListSummaryCache>([
+        'purchase-orders',
+        'list-summary'
+      ]);
+      patchOcInListSummaryCache(queryClient, id, { status: 'REJECTED' });
       setRejectTarget(null);
       setRejectReason('');
       setSelectedOrder(null);
-      toast.success('Ordem de compra cancelada.');
+      setOcActionMenu(null);
+      return { previous };
     },
-    onError: (error: { response?: { data?: { message?: string } } }) =>
-      toast.error(error.response?.data?.message || 'Erro ao cancelar')
+    onSuccess: () => {
+      toast.success('Ordem de compra cancelada.');
+      void queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
+      void queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
+    },
+    onError: (error: { response?: { data?: { message?: string } } }, _variables, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(['purchase-orders', 'list-summary'], context.previous);
+      }
+      toast.error(error.response?.data?.message || 'Erro ao cancelar');
+    }
   });
 
   const openOcCorrectionModal = (order: PurchaseOrder) => {
@@ -1914,16 +1995,30 @@ export function OcPurchaseOrdersPanel({
       });
       return res.data;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
-      queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
+    onMutate: async ({ id }) => {
+      await queryClient.cancelQueries({ queryKey: ['purchase-orders', 'list-summary'] });
+      const previous = queryClient.getQueryData<PurchaseOrdersListSummaryCache>([
+        'purchase-orders',
+        'list-summary'
+      ]);
+      patchOcInListSummaryCache(queryClient, id, { status: 'IN_REVIEW' });
       setCorrectionTarget(null);
       setCorrectionReason('');
       setSelectedOrder(null);
-      toast.success('OC enviada para CORREÇÃO OC.');
+      setOcActionMenu(null);
+      return { previous };
     },
-    onError: (error: { response?: { data?: { message?: string } } }) =>
-      toast.error(error.response?.data?.message || 'Erro ao enviar para correção')
+    onSuccess: () => {
+      toast.success('OC enviada para CORREÇÃO OC.');
+      void queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
+      void queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
+    },
+    onError: (error: { response?: { data?: { message?: string } } }, _variables, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(['purchase-orders', 'list-summary'], context.previous);
+      }
+      toast.error(error.response?.data?.message || 'Erro ao enviar para correção');
+    }
   });
 
   const resubmitOcMutation = useMutation({

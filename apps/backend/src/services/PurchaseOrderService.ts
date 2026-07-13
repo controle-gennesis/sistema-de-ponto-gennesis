@@ -945,6 +945,20 @@ export class PurchaseOrderService {
     return withPlan;
   }
 
+  /** Contexto leve para PATCH /status (evita getById com joins pesados só para checar permissão). */
+  async getStatusChangeContext(id: string) {
+    return prisma.purchaseOrder.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        status: true,
+        materialRequest: {
+          select: { costCenter: { select: { id: true } } }
+        }
+      }
+    });
+  }
+
   /** Resumo de recebimento/saída no estoque (consulta separada para não atrasar a abertura da modal). */
   async getStockReceiptSummary(id: string) {
     const order = await prisma.purchaseOrder.findUnique({
@@ -1236,11 +1250,6 @@ export class PurchaseOrderService {
       if (release) {
         Object.assign(data, release);
       }
-      try {
-        await this.syncDocumentsFromStockReceipt(order.orderNumber);
-      } catch (err) {
-        console.error('[PurchaseOrder] syncDocumentsFromStockReceipt on APPROVED', order.orderNumber, err);
-      }
     }
 
     if (status === 'IN_REVIEW' || (status === 'PENDING_COMPRAS' && st === 'IN_REVIEW')) {
@@ -1286,7 +1295,8 @@ export class PurchaseOrderService {
       const po = await tx.purchaseOrder.update({
         where: { id },
         data,
-        include: purchaseOrderIncludeDetail
+        // Resposta leve — o front atualiza a lista summary; detalhe completo vem do GET :id
+        include: purchaseOrderIncludeListSummary
       });
 
       if (status === 'REJECTED' && order.materialRequestId) {
@@ -1311,6 +1321,13 @@ export class PurchaseOrderService {
 
       return po;
     }, PURCHASE_ORDER_STATUS_TX_OPTIONS);
+
+    if (status === 'APPROVED') {
+      void this.syncDocumentsFromStockReceipt(order.orderNumber).catch((err) => {
+        console.error('[PurchaseOrder] syncDocumentsFromStockReceipt on APPROVED', order.orderNumber, err);
+      });
+    }
+
     const [e] = await enrichOrdersParcelPlans([updated]);
     return e;
   }

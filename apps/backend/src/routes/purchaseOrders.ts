@@ -283,7 +283,7 @@ router.patch('/:id/status', async (req: AuthRequest, res: Response, next: NextFu
     const { status, rejectionReason } = req.body;
     if (!status) throw createError('Status é obrigatório', 400);
     if (!req.user?.id) throw createError('Usuário não autenticado', 401);
-    const existing = await service.getById(req.params.id);
+    const existing = await service.getStatusChangeContext(req.params.id);
     if (!existing) throw createError('Ordem de compra não encontrada', 404);
     await assertOcApprovalStatusChange(
       req.user.id,
