@@ -5,6 +5,11 @@ import { createError } from '../middleware/errorHandler';
 import { extractOcNumberFromMovementNotes } from '../utils/stockMovementNotes';
 import { stockShortfallService } from '../services/StockShortfallService';
 import { PurchaseOrderService } from '../services/PurchaseOrderService';
+import {
+  applyUnbCostCenterScopeToIdFilter,
+  assertCostCenterAllowedForUnbUser,
+  getUserUnbCostCenterScope,
+} from '../lib/unbCostCenterScope';
 
 const purchaseOrderService = new PurchaseOrderService();
 
@@ -14,12 +19,28 @@ export class StockController {
    */
   async listMovements(req: AuthRequest, res: Response, next: NextFunction) {
     try {
+      if (!req.user?.id) throw createError('Usuário não autenticado', 401);
       const { costCenterId, month, year, category, materialId, type, page = 1, limit = 100 } = req.query;
 
       const where: any = {};
 
-      if (costCenterId) {
-        where.costCenterId = String(costCenterId);
+      const unbScope = await getUserUnbCostCenterScope(req.user.id, !!req.user.isAdmin);
+      const scoped = applyUnbCostCenterScopeToIdFilter(
+        unbScope,
+        costCenterId ? String(costCenterId) : undefined,
+      );
+      if (scoped.denyAll) {
+        res.json({
+          success: true,
+          data: [],
+          pagination: { page: 1, limit: Number(limit) || 100, total: 0, totalPages: 0 },
+        });
+        return;
+      }
+      if (scoped.costCenterId) {
+        where.costCenterId = scoped.costCenterId;
+      } else if (scoped.costCenterIds?.length) {
+        where.costCenterId = { in: scoped.costCenterIds };
       }
 
       if (materialId) {
@@ -101,6 +122,7 @@ export class StockController {
    */
   async getStockBalance(req: AuthRequest, res: Response, next: NextFunction) {
     try {
+      if (!req.user?.id) throw createError('Usuário não autenticado', 401);
       const { costCenterId, category, search } = req.query;
       const movementsWhere: any = {
         material: {
@@ -108,8 +130,19 @@ export class StockController {
         }
       };
 
-      if (costCenterId) {
-        movementsWhere.costCenterId = String(costCenterId);
+      const unbScope = await getUserUnbCostCenterScope(req.user.id, !!req.user.isAdmin);
+      const scoped = applyUnbCostCenterScopeToIdFilter(
+        unbScope,
+        costCenterId ? String(costCenterId) : undefined,
+      );
+      if (scoped.denyAll) {
+        res.json({ success: true, data: [] });
+        return;
+      }
+      if (scoped.costCenterId) {
+        movementsWhere.costCenterId = scoped.costCenterId;
+      } else if (scoped.costCenterIds?.length) {
+        movementsWhere.costCenterId = { in: scoped.costCenterIds };
       }
 
       if (category) {
@@ -238,6 +271,13 @@ export class StockController {
 
         if (!costCenter) {
           throw createError('Centro de custo não encontrado', 404);
+        }
+        await assertCostCenterAllowedForUnbUser(req.user.id, !!req.user.isAdmin, String(costCenterId));
+      } else {
+        // Usuário UNB não pode lançar movimento sem centro de custo (escaparia o escopo).
+        const unbScope = await getUserUnbCostCenterScope(req.user.id, !!req.user.isAdmin);
+        if (unbScope !== null) {
+          throw createError('Informe um centro de custo UNB para a movimentação', 400);
         }
       }
 

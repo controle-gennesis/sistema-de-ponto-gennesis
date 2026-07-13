@@ -2,6 +2,7 @@ import { Response, NextFunction } from 'express';
 import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
+import { getUserUnbCostCenterScope } from '../lib/unbCostCenterScope';
 
 /**
  * Gera um código automático para o centro de custo no formato CC-YYYY-XXX
@@ -81,6 +82,13 @@ export class CostCenterController {
 
       if (isActive !== undefined) {
         where.isActive = isActive === 'true';
+      }
+
+      const unbScope = req.user?.id
+        ? await getUserUnbCostCenterScope(req.user.id, !!req.user.isAdmin)
+        : null;
+      if (unbScope !== null) {
+        where.id = { in: unbScope.length > 0 ? unbScope : ['__none__'] };
       }
 
       // Limitar o máximo de registros por página (até 2000 para listagens completas, ex.: análise de extrato)

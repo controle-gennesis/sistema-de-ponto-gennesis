@@ -16,6 +16,10 @@ import {
   OC_TAB_PAYMENT_KEY,
   OC_TAB_PROOF_CORRECTION_KEY,
 } from '../lib/ocApprovalAccess';
+import {
+  applyUnbCostCenterScopeToIdFilter,
+  getUserUnbCostCenterScope,
+} from '../lib/unbCostCenterScope';
 
 const router = Router();
 const service = new PurchaseOrderService();
@@ -38,6 +42,7 @@ router.use(authenticate);
 
 router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
+    if (!req.user?.id) throw createError('Usuário não autenticado', 401);
     const {
       status,
       supplierId,
@@ -60,11 +65,27 @@ router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
       includeItems === 'false'
         ? false
         : true;
+
+    const unbScope = await getUserUnbCostCenterScope(req.user.id, !!req.user.isAdmin);
+    const scoped = applyUnbCostCenterScopeToIdFilter(
+      unbScope,
+      typeof costCenterId === 'string' ? costCenterId : undefined,
+    );
+    if (scoped.denyAll) {
+      res.json({
+        success: true,
+        data: [],
+        pagination: { page: 1, limit: 20, total: 0, totalPages: 0 },
+      });
+      return;
+    }
+
     const result = await service.list({
       status: status as string,
       supplierId: supplierId as string,
       materialRequestId: materialRequestId as string,
-      costCenterId: typeof costCenterId === 'string' ? costCenterId : undefined,
+      costCenterId: scoped.costCenterId,
+      costCenterIds: scoped.costCenterIds,
       serviceOrderId: typeof serviceOrderId === 'string' ? serviceOrderId : undefined,
       serviceOrderText: typeof serviceOrderText === 'string' ? serviceOrderText : undefined,
       orderDateFrom: typeof orderDateFrom === 'string' ? orderDateFrom : undefined,
@@ -82,10 +103,24 @@ router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
 
 router.get('/export-finalized-csv', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
+    if (!req.user?.id) throw createError('Usuário não autenticado', 401);
     const { supplierId, costCenterId, orderDateFrom, orderDateTo, q } = req.query;
+    const unbScope = await getUserUnbCostCenterScope(req.user.id, !!req.user.isAdmin);
+    const scoped = applyUnbCostCenterScopeToIdFilter(
+      unbScope,
+      typeof costCenterId === 'string' ? costCenterId : undefined,
+    );
+    if (scoped.denyAll) {
+      const name = `ocs-finalizadas-${new Date().toISOString().slice(0, 10)}.csv`;
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="${name}"`);
+      res.send('');
+      return;
+    }
     const csv = await service.exportFinalizedOrdersCsv({
       supplierId: typeof supplierId === 'string' ? supplierId : undefined,
-      costCenterId: typeof costCenterId === 'string' ? costCenterId : undefined,
+      costCenterId: scoped.costCenterId,
+      costCenterIds: scoped.costCenterIds,
       orderDateFrom: typeof orderDateFrom === 'string' ? orderDateFrom : undefined,
       orderDateTo: typeof orderDateTo === 'string' ? orderDateTo : undefined,
       q: typeof q === 'string' ? q : undefined

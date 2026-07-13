@@ -16,6 +16,7 @@ import {
   getRmApproverListScopeCostCenterIds,
   isRmApproverStatusChange,
 } from '../lib/rmApprovalAccess';
+import { assertCostCenterAllowedForUnbUser } from '../lib/unbCostCenterScope';
 
 const router = Router();
 const materialRequestService = new MaterialRequestService();
@@ -205,6 +206,8 @@ router.post('/', async (req: AuthRequest, res: Response, next: NextFunction) => 
       throw createError('Centro de custo e itens são obrigatórios', 400);
     }
 
+    await assertCostCenterAllowedForUnbUser(req.user.id, !!req.user.isAdmin, costCenterId);
+
     const request = await materialRequestService.createMaterialRequest({
       requestedBy: req.user.id,
       costCenterId,
@@ -299,6 +302,8 @@ router.patch('/:id', async (req: AuthRequest, res: Response, next: NextFunction)
     if (!costCenterId || !items || !Array.isArray(items) || items.length === 0) {
       throw createError('Centro de custo e itens são obrigatórios', 400);
     }
+
+    await assertCostCenterAllowedForUnbUser(req.user.id, !!req.user.isAdmin, costCenterId);
 
     const request = await materialRequestService.updateMaterialRequestInCorrection(id, req.user.id, {
       costCenterId,

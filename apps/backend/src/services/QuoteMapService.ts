@@ -469,7 +469,38 @@ export class QuoteMapService {
       throw new Error('Nenhum dos fornecedores marcados venceu itens neste mapa');
     }
 
-    const createdOrders = [];
+    const maxQtyByRmItem = new Map<string, Decimal>(
+      (rm.items as Array<{ id: string; quantity: unknown }>).map((it) => [
+        it.id,
+        new Decimal(it.quantity as any),
+      ]),
+    );
+
+    const boletoConditionCodes = Array.from(
+      new Set(
+        [...paymentMap.values()]
+          .filter((p) => p.paymentType === 'BOLETO' && p.paymentCondition)
+          .map((p) => p.paymentCondition as string),
+      ),
+    );
+    const paymentConditionByCode = new Map<
+      string,
+      { parcelCount: number | null; parcelDueDays: unknown }
+    >();
+    if (boletoConditionCodes.length > 0) {
+      const condRows = await this.db.paymentCondition.findMany({
+        where: { code: { in: boletoConditionCodes } },
+        select: { code: true, parcelCount: true, parcelDueDays: true },
+      });
+      for (const row of condRows) {
+        paymentConditionByCode.set(row.code, {
+          parcelCount: row.parcelCount,
+          parcelDueDays: row.parcelDueDays,
+        });
+      }
+    }
+
+    const createPayloads: any[] = [];
 
     for (const supplierId of supplierIdsToGenerate) {
       const pay = paymentMap.get(supplierId);
@@ -478,7 +509,6 @@ export class QuoteMapService {
       const freight = freightBySupplier[supplierId] ?? new Decimal(0);
       const winnerItems = itemsBySupplier[supplierId] ?? [];
 
-      let itemsTotal = new Decimal(0);
       const items = (winnerItems as any[]).map((w: any) => {
         const unit = unitPriceBySupplierItem.get(`${supplierId}:${w.materialRequestItemId}`);
         if (!unit) throw new Error('Preço unitário cotado não encontrado para um vencedor');
@@ -492,7 +522,6 @@ export class QuoteMapService {
         if (quantity.gt(requestedQty)) {
           throw new Error('Quantidade da OC não pode exceder a solicitada na SC');
         }
-        itemsTotal = itemsTotal.add(unit.mul(quantity));
         return {
           materialRequestItemId: w.materialRequestItemId,
           materialId: w.materialRequestItem.materialId,
@@ -503,30 +532,34 @@ export class QuoteMapService {
         };
       });
 
-      const created = await this.purchaseOrderService.create(
-        {
-          materialRequestId: map.materialRequestId,
-          quoteMapId: map.id,
-          supplierId,
-          items,
-          paymentType: pay.paymentType,
-          paymentCondition: pay.paymentCondition,
-          paymentDetails: pay.paymentDetails ?? null,
-          pixKeyType: pay.pixKeyType ?? null,
-          pixKey: pay.pixKey ?? null,
-          boletoAttachmentUrl: pay.boletoAttachmentUrl,
-          boletoAttachmentName: pay.boletoAttachmentName,
-          creationBoletoInstallments: pay.creationBoletoInstallments,
-          freightAmount: Number(freight),
-          notes: pay.observations ?? null
-        } as any,
-        userId
-      );
-      createdOrders.push(created);
+      createPayloads.push({
+        materialRequestId: map.materialRequestId,
+        quoteMapId: map.id,
+        supplierId,
+        items,
+        paymentType: pay.paymentType,
+        paymentCondition: pay.paymentCondition,
+        paymentDetails: pay.paymentDetails ?? null,
+        pixKeyType: pay.pixKeyType ?? null,
+        pixKey: pay.pixKey ?? null,
+        boletoAttachmentUrl: pay.boletoAttachmentUrl,
+        boletoAttachmentName: pay.boletoAttachmentName,
+        creationBoletoInstallments: pay.creationBoletoInstallments,
+        freightAmount: Number(freight),
+        notes: pay.observations ?? null
+      });
     }
 
-    const snapshotPdfUrl = await this.saveQuoteMapSnapshotPdf(quoteMapId);
+    const createdOrders = await this.purchaseOrderService.createMany(createPayloads, userId, {
+      maxQtyByRmItem,
+      paymentConditionByCode,
+    });
+
+    const snapshotPdfUrl = `/uploads/quote-maps/${quoteMapId}/snapshot.pdf`;
+    // PDF fora do caminho crítico — o download regenera sob demanda se ainda não existir.
+    void this.saveQuoteMapSnapshotPdf(quoteMapId).catch((err) => {
+      console.error('[QuoteMap] snapshot PDF em background falhou', quoteMapId, err);
+    });
     return { orders: createdOrders, snapshotPdfUrl };
   }
 }
-

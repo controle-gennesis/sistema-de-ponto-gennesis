@@ -2319,9 +2319,15 @@ export function OcPurchaseOrdersPanel({
           status: updated.status ?? order.status
         }));
         if (updated.status === 'APPROVED') {
-          toast.success('Comprovante validado. Prosiga com a próxima parcela na fase Pagamento.', {
-            id: `oc-proof-validate-${updated.id}`
-          });
+          const backToAttachBoleto = updated.paymentBoletoPhaseReleased !== true;
+          toast.success(
+            backToAttachBoleto
+              ? 'Comprovante validado. A OC voltou para a fase Anexar Boleto (próxima parcela).'
+              : 'Comprovante validado. Prosiga com a próxima parcela na fase Pagamento.',
+            {
+              id: `oc-proof-validate-${updated.id}`
+            }
+          );
         }
       }
       void queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
@@ -4836,7 +4842,7 @@ export function OcPurchaseOrdersPanel({
                     </p>
                     <p className="text-xs text-gray-600 dark:text-gray-400">
                       Lançamento registrado. Anexe o comprovante desta parcela e envie para validação. Após a
-                      validação, a OC volta para Pagamento (próxima parcela) ou Anexar NF (última parcela).
+                      validação, a OC volta para Anexar Boleto (próxima parcela) ou Anexar NF (última parcela).
                     </p>
                     {(() => {
                       const instRows = parsePaymentBoletoInstallments(selectedOrder.paymentBoletoInstallments);

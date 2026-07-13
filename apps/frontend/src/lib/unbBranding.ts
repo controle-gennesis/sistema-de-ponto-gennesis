@@ -48,6 +48,37 @@ export function resolveBrandingLogoAlt(useUnbBranding: boolean): string {
   return useUnbBranding ? 'Predial Engenharia' : 'Gennesis Engenharia';
 }
 
+export type OcPdfCompanyHeader = {
+  name: string;
+  subtitle: string;
+  address: string;
+  phone: string;
+  cnpj: string;
+};
+
+/** Emitente da OC no PDF — Gennesis ou Consórcio Predial (UNB). */
+export function resolveOcPdfCompanyHeader(useUnbBranding: boolean): OcPdfCompanyHeader {
+  if (useUnbBranding) {
+    return {
+      name: 'Consórcio Predial',
+      subtitle: '',
+      address: 'SOFN, QUADRA 4, CONJUNTO G, LOTE 07, SALA 66, ZONA INDUSTRIAL, BRASÍLIA, DF',
+      phone: '',
+      cnpj: '58.344.545/0001-03',
+    };
+  }
+  return {
+    name:
+      process.env.NEXT_PUBLIC_OC_PDF_COMPANY_NAME || 'Gennesis Engenharia e Consultoria LTDA',
+    subtitle: process.env.NEXT_PUBLIC_OC_PDF_COMPANY_SUBTITLE || 'Engenharia e Consultoria',
+    address:
+      process.env.NEXT_PUBLIC_OC_PDF_COMPANY_ADDRESS ||
+      'SHIS QI 15, Sobreloja 55 — Lago Sul — Brasília/DF',
+    phone: process.env.NEXT_PUBLIC_OC_PDF_COMPANY_PHONE || '',
+    cnpj: process.env.NEXT_PUBLIC_OC_PDF_COMPANY_CNPJ || '17.851.596/0001-36',
+  };
+}
+
 export function readStoredUnbBranding(): boolean {
   if (typeof window === 'undefined') return false;
   return localStorage.getItem(UNB_BRANDING_STORAGE_KEY) === '1';

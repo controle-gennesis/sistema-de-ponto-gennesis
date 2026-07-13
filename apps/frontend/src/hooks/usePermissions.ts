@@ -103,6 +103,8 @@ export function usePermissions() {
   const dpApprovalContractIds: string[] = permissionData?.dpApprovalContractIds ?? [];
   const dpApprovalContractIdSet = new Set(dpApprovalContractIds);
   const gestorCostCenterIds: string[] = permissionData?.gestorCostCenterIds ?? [];
+  const isUnbUser = !!permissionData?.isUnbUser;
+  const unbCostCenterIds: string[] = permissionData?.unbCostCenterIds ?? [];
 
   type ContractModuleFlagRow = {
     orcamento: boolean;
@@ -419,6 +421,8 @@ export function usePermissions() {
     allowedContractIds,
     dpApprovalContractIds,
     gestorCostCenterIds,
+    isUnbUser,
+    unbCostCenterIds,
     gestorScopedCostCenterIds,
     canCreateSensitiveDpRequestType,
     canAccessDpApproverPages,

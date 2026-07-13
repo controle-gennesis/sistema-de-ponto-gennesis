@@ -14,9 +14,9 @@ import {
 const PURCHASE_ORDER_NUMBER_ADVISORY_LOCK = 91827366;
 
 /**
- * Transação com advisory lock + generateOrderNumber + create (includes pesados).
- * Prisma default: maxWait 2s, timeout 5s — insuficiente com latência Railway
- * (~8s avg / ~11s p95 por OC) e fila serializada no lock sob concorrência.
+ * Transação com advisory lock + generateOrderNumber + create.
+ * Include de create é enxuto (purchaseOrderIncludeCreate) para não segurar o lock
+ * com joins pesados. Timeouts altos cobrem fila sob concorrência na Railway.
  */
 const PURCHASE_ORDER_CREATE_TX_OPTIONS = {
   maxWait: Number(process.env.PURCHASE_ORDER_CREATE_TX_MAX_WAIT_MS) || 30_000,
@@ -471,7 +471,8 @@ async function generateOrderNumber(tx: Prisma.TransactionClient): Promise<string
   const prefix = `OC-${year}-`;
   const last = await tx.purchaseOrder.findFirst({
     where: { orderNumber: { startsWith: prefix } },
-    orderBy: { orderNumber: 'desc' }
+    orderBy: { orderNumber: 'desc' },
+    select: { orderNumber: true },
   });
   let n = 1;
   if (last) {
@@ -480,6 +481,57 @@ async function generateOrderNumber(tx: Prisma.TransactionClient): Promise<string
   }
   return `${prefix}${n.toString().padStart(4, '0')}`;
 }
+
+/** Reserva N números consecutivos sob o mesmo peek (lock já obtido). */
+async function generateOrderNumbers(tx: Prisma.TransactionClient, count: number): Promise<string[]> {
+  if (count <= 0) return [];
+  const year = new Date().getFullYear();
+  const prefix = `OC-${year}-`;
+  const last = await tx.purchaseOrder.findFirst({
+    where: { orderNumber: { startsWith: prefix } },
+    orderBy: { orderNumber: 'desc' },
+    select: { orderNumber: true },
+  });
+  let n = 1;
+  if (last) {
+    const num = parseInt(last.orderNumber.replace(prefix, ''), 10);
+    if (!isNaN(num)) n = num + 1;
+  }
+  return Array.from({ length: count }, (_, i) => `${prefix}${(n + i).toString().padStart(4, '0')}`);
+}
+
+type PreparedOcCreate = {
+  createDataBase: {
+    orderNumber?: string;
+    materialRequestId: string | null;
+    quoteMapId: string | null;
+    supplierId: string;
+    expectedDelivery: Date | null;
+    deliveryAddress: string | null;
+    paymentType: string | null;
+    paymentCondition: string | null;
+    paymentDetails: string | null;
+    pixKeyType: string | null;
+    pixKey: string | null;
+    boletoAttachmentUrl: string | null;
+    boletoAttachmentName: string | null;
+    paymentBoletoInstallments?: Prisma.InputJsonValue;
+    freightAmount: Decimal;
+    amountToPay: Decimal;
+    notes: string | null;
+    createdBy: string;
+    items: { create: Array<Record<string, unknown>> };
+  };
+};
+
+export type CreatePurchaseOrderOptions = {
+  /** Evita rebuscar a SC quando o caller já validou quantidades. */
+  maxQtyByRmItem?: Map<string, Decimal> | null;
+  /** Evita rebuscar condição de pagamento no loop do mapa. */
+  paymentConditionRow?: { parcelCount: number | null; parcelDueDays: unknown } | null;
+  /** Prefetch de várias condições (mapa de cotação com fornecedores distintos). */
+  paymentConditionByCode?: Map<string, { parcelCount: number | null; parcelDueDays: unknown }>;
+};
 
 /** Listagem: joins enxutos (detalhe completo via getById). */
 const purchaseOrderIncludeList = {
@@ -532,6 +584,24 @@ const purchaseOrderIncludeListSummary = {
   creator: { select: { id: true, name: true } }
 } as const;
 
+/**
+ * Create/generate: include enxuto (sem quoteMap completo nem todos os itens da SC).
+ * O detalhe pesado fica em getById — evita segurar o advisory lock por ~8–11s.
+ */
+const purchaseOrderIncludeCreate = {
+  supplier: { select: { id: true, code: true, name: true, cnpj: true } },
+  materialRequest: {
+    select: {
+      id: true,
+      requestNumber: true,
+      serviceOrder: true,
+      costCenter: { select: { id: true, code: true, name: true } }
+    }
+  },
+  creator: { select: { id: true, name: true, email: true } },
+  items: { include: { material: { select: { id: true, name: true, description: true, code: true } } } }
+} as const;
+
 const purchaseOrderIncludeDetail = {
   supplier: true,
   quoteMap: {
@@ -557,7 +627,11 @@ const purchaseOrderIncludeDetail = {
 } as const;
 
 export class PurchaseOrderService {
-  async create(data: CreatePurchaseOrderData, userId: string) {
+  private async prepareCreatePayload(
+    data: CreatePurchaseOrderData,
+    userId: string,
+    options?: CreatePurchaseOrderOptions,
+  ): Promise<PreparedOcCreate['createDataBase']> {
     if (!data.supplierId || !data.items?.length) {
       throw new Error('Fornecedor e itens são obrigatórios');
     }
@@ -575,10 +649,12 @@ export class PurchaseOrderService {
     }
 
     let maxQtyByRmItem: Map<string, Decimal> | null = null;
-    if (data.materialRequestId) {
+    if (options && 'maxQtyByRmItem' in options) {
+      maxQtyByRmItem = options.maxQtyByRmItem ?? null;
+    } else if (data.materialRequestId) {
       const rm = await prisma.materialRequest.findUnique({
         where: { id: data.materialRequestId },
-        select: { items: { select: { id: true, quantity: true } } }
+        select: { items: { select: { id: true, quantity: true } } },
       });
       if (rm?.items?.length) {
         maxQtyByRmItem = new Map(rm.items.map((it) => [it.id, new Decimal(it.quantity)]));
@@ -602,7 +678,7 @@ export class PurchaseOrderService {
         unit: i.unit,
         unitPrice: price,
         totalPrice: total,
-        notes: i.notes || null
+        notes: i.notes || null,
       };
     });
     const freight =
@@ -620,18 +696,23 @@ export class PurchaseOrderService {
     let boletoAttachmentName = data.boletoAttachmentName || null;
 
     if (data.paymentType === 'BOLETO' && data.paymentCondition) {
-      const cond = await prisma.paymentCondition.findUnique({
-        where: { code: data.paymentCondition },
-        select: { parcelCount: true, parcelDueDays: true }
-      });
+      let cond: { parcelCount: number | null; parcelDueDays: unknown } | null | undefined;
+      if (options?.paymentConditionByCode) {
+        cond = options.paymentConditionByCode.get(data.paymentCondition) ?? null;
+      } else if (options && 'paymentConditionRow' in options) {
+        cond = options.paymentConditionRow;
+      } else {
+        cond = await prisma.paymentCondition.findUnique({
+          where: { code: data.paymentCondition },
+          select: { parcelCount: true, parcelDueDays: true },
+        });
+      }
       const parcelCount = cond?.parcelCount && cond.parcelCount >= 1 ? cond.parcelCount : 1;
       const parcelDueDays = normalizeParcelDueDaysJson(cond?.parcelDueDays);
 
       if (parcelCount > 1) {
         const drafts = data.creationBoletoInstallments;
-        const hasBoletoDrafts =
-          Array.isArray(drafts) &&
-          drafts.some((d) => (d?.boletoUrl || '').trim());
+        const hasBoletoDrafts = Array.isArray(drafts) && drafts.some((d) => (d?.boletoUrl || '').trim());
         if (hasBoletoDrafts) {
           if (!Array.isArray(drafts) || drafts.length !== parcelCount) {
             throw new Error(`Anexe ${parcelCount} boletos (um para cada parcela).`);
@@ -646,14 +727,14 @@ export class PurchaseOrderService {
             parcelCount,
             parcelDueDays,
             Number(amountToPay),
-            new Date()
+            new Date(),
           ) as unknown as Prisma.InputJsonValue;
         } else {
           paymentBoletoInstallments = buildEmptyPaymentInstallments(
             parcelCount,
             parcelDueDays,
             Number(amountToPay),
-            new Date()
+            new Date(),
           ) as unknown as Prisma.InputJsonValue;
         }
         boletoAttachmentUrl = null;
@@ -663,70 +744,102 @@ export class PurchaseOrderService {
           1,
           parcelDueDays,
           Number(amountToPay),
-          new Date()
+          new Date(),
         ) as unknown as Prisma.InputJsonValue;
       }
     }
 
-    // Serializa geração de orderNumber + create (evita race em UNIQUE)
-    return prisma.$transaction(
-      async (tx) => {
+    return {
+      materialRequestId: data.materialRequestId || null,
+      quoteMapId: data.quoteMapId || null,
+      supplierId: data.supplierId,
+      expectedDelivery: data.expectedDelivery || null,
+      deliveryAddress: data.deliveryAddress || null,
+      paymentType: data.paymentType || null,
+      paymentCondition: data.paymentCondition || null,
+      paymentDetails: data.paymentDetails || null,
+      pixKeyType: data.pixKeyType?.trim() || null,
+      pixKey: data.pixKey?.trim() || null,
+      boletoAttachmentUrl,
+      boletoAttachmentName,
+      ...(paymentBoletoInstallments ? { paymentBoletoInstallments } : {}),
+      freightAmount: freight,
+      amountToPay,
+      notes: data.notes || null,
+      createdBy: userId,
+      items: { create: items },
+    };
+  }
+
+  private async createRowInTx(
+    tx: Prisma.TransactionClient,
+    createDataBase: PreparedOcCreate['createDataBase'] & { orderNumber: string },
+  ) {
+    try {
+      return await tx.purchaseOrder.create({
+        data: { ...createDataBase, status: 'PENDING_COMPRAS' as any },
+        include: purchaseOrderIncludeCreate,
+      });
+    } catch (error: any) {
+      const msg = typeof error?.message === 'string' ? error.message : '';
+      const isPrismaValidation = error?.name === 'PrismaClientValidationError' && msg;
+      if (isPrismaValidation && msg.includes('PENDING_COMPRAS')) {
+        return await tx.purchaseOrder.create({
+          data: { ...createDataBase, status: 'PENDING' as any },
+          include: purchaseOrderIncludeCreate,
+        });
+      }
+      if (isPrismaValidation && msg.includes('quoteMapId') && createDataBase.quoteMapId) {
+        const { quoteMapId: _omit, ...withoutQuote } = createDataBase as typeof createDataBase & {
+          quoteMapId?: string | null;
+        };
+        return await tx.purchaseOrder.create({
+          data: { ...withoutQuote, status: 'PENDING_COMPRAS' as any },
+          include: purchaseOrderIncludeCreate,
+        });
+      }
+      throw error;
+    }
+  }
+
+  async create(data: CreatePurchaseOrderData, userId: string, options?: CreatePurchaseOrderOptions) {
+    const createDataBase = await this.prepareCreatePayload(data, userId, options);
+
+    return prisma.$transaction(async (tx) => {
       await tx.$executeRawUnsafe(
         `SELECT pg_advisory_xact_lock(${PURCHASE_ORDER_NUMBER_ADVISORY_LOCK})`,
       );
       const orderNumber = await generateOrderNumber(tx);
+      return this.createRowInTx(tx, { ...createDataBase, orderNumber });
+    }, PURCHASE_ORDER_CREATE_TX_OPTIONS);
+  }
 
-      const createDataBase = {
-        orderNumber,
-        materialRequestId: data.materialRequestId || null,
-        quoteMapId: data.quoteMapId || null,
-        supplierId: data.supplierId,
-        expectedDelivery: data.expectedDelivery || null,
-        deliveryAddress: data.deliveryAddress || null,
-        paymentType: data.paymentType || null,
-        paymentCondition: data.paymentCondition || null,
-        paymentDetails: data.paymentDetails || null,
-        pixKeyType: data.pixKeyType?.trim() || null,
-        pixKey: data.pixKey?.trim() || null,
-        boletoAttachmentUrl,
-        boletoAttachmentName,
-        ...(paymentBoletoInstallments ? { paymentBoletoInstallments } : {}),
-        freightAmount: freight,
-        amountToPay,
-        notes: data.notes || null,
-        createdBy: userId,
-        items: { create: items }
-      } as const;
+  /**
+   * Cria várias OCs (ex.: mapa de cotação) com um único advisory lock e números consecutivos.
+   * Prep/validação ficam fora da transação para manter o lock curto.
+   */
+  async createMany(entries: CreatePurchaseOrderData[], userId: string, options?: CreatePurchaseOrderOptions) {
+    if (entries.length === 0) return [];
+    if (entries.length === 1) {
+      return [await this.create(entries[0], userId, options)];
+    }
 
-      try {
-        return await tx.purchaseOrder.create({
-          data: { ...createDataBase, status: 'PENDING_COMPRAS' as any },
-          include: purchaseOrderIncludeDetail
-        });
-      } catch (error: any) {
-        const msg = typeof error?.message === 'string' ? error.message : '';
-        const isPrismaValidation = error?.name === 'PrismaClientValidationError' && msg;
-        // Compatibilidade temporária: Prisma Client antigo sem enum / campo.
-        if (isPrismaValidation && msg.includes('PENDING_COMPRAS')) {
-          return await tx.purchaseOrder.create({
-            data: { ...createDataBase, status: 'PENDING' as any },
-            include: purchaseOrderIncludeDetail
-          });
-        }
-        if (isPrismaValidation && msg.includes('quoteMapId') && createDataBase.quoteMapId) {
-          const { quoteMapId: _omit, ...withoutQuote } = createDataBase as typeof createDataBase & {
-            quoteMapId?: string | null;
-          };
-          return await tx.purchaseOrder.create({
-            data: { ...withoutQuote, status: 'PENDING_COMPRAS' as any },
-            include: purchaseOrderIncludeDetail
-          });
-        }
-        throw error;
+    const prepared = [];
+    for (const data of entries) {
+      prepared.push(await this.prepareCreatePayload(data, userId, options));
+    }
+
+    return prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe(
+        `SELECT pg_advisory_xact_lock(${PURCHASE_ORDER_NUMBER_ADVISORY_LOCK})`,
+      );
+      const orderNumbers = await generateOrderNumbers(tx, prepared.length);
+      const created = [];
+      for (let i = 0; i < prepared.length; i++) {
+        created.push(await this.createRowInTx(tx, { ...prepared[i], orderNumber: orderNumbers[i] }));
       }
-    },
-      PURCHASE_ORDER_CREATE_TX_OPTIONS,
-    );
+      return created;
+    }, PURCHASE_ORDER_CREATE_TX_OPTIONS);
   }
 
   private buildPurchaseOrderListWhere(filters: {
@@ -734,6 +847,7 @@ export class PurchaseOrderService {
     supplierId?: string;
     materialRequestId?: string;
     costCenterId?: string;
+    costCenterIds?: string[];
     serviceOrderId?: string;
     serviceOrderText?: string;
     orderDateFrom?: string;
@@ -748,6 +862,8 @@ export class PurchaseOrderService {
 
     if (filters.costCenterId) {
       andParts.push({ materialRequest: { costCenterId: filters.costCenterId } });
+    } else if (filters.costCenterIds?.length) {
+      andParts.push({ materialRequest: { costCenterId: { in: filters.costCenterIds } } });
     }
 
     const serviceOrderParts: object[] = [];
@@ -821,6 +937,7 @@ export class PurchaseOrderService {
     supplierId?: string;
     materialRequestId?: string;
     costCenterId?: string;
+    costCenterIds?: string[];
     serviceOrderId?: string;
     serviceOrderText?: string;
     orderDateFrom?: string;
@@ -860,6 +977,7 @@ export class PurchaseOrderService {
   async exportFinalizedOrdersCsv(filters: {
     supplierId?: string;
     costCenterId?: string;
+    costCenterIds?: string[];
     orderDateFrom?: string;
     orderDateTo?: string;
     q?: string;
@@ -868,6 +986,7 @@ export class PurchaseOrderService {
       status: 'FINALIZED,SENT',
       supplierId: filters.supplierId,
       costCenterId: filters.costCenterId,
+      costCenterIds: filters.costCenterIds,
       orderDateFrom: filters.orderDateFrom,
       orderDateTo: filters.orderDateTo,
       q: filters.q

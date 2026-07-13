@@ -458,6 +458,7 @@ export class StockShortfallService {
   async list(params: {
     status?: 'ABERTO' | 'RESOLVIDO' | 'ALL';
     costCenterId?: string;
+    costCenterIds?: string[];
     category?: string;
     month?: number;
     year?: number;
@@ -475,6 +476,8 @@ export class StockShortfallService {
 
     if (params.costCenterId) {
       where.costCenterId = params.costCenterId;
+    } else if (params.costCenterIds?.length) {
+      where.costCenterId = { in: params.costCenterIds };
     }
 
     if (params.month && params.year) {

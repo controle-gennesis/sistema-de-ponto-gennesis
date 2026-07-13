@@ -1,6 +1,11 @@
 import jsPDF from 'jspdf';
 import api from '@/lib/api';
 import { loadPdfBrandingLogo } from '@/lib/loadPdfBrandingLogo';
+import {
+  resolveOcPdfCompanyHeader,
+  shouldUseUnbBranding,
+  type OcPdfCompanyHeader,
+} from '@/lib/unbBranding';
 import { formatPaymentConditionDisplay, type PaymentConditionRow } from '@/components/oc/PaymentConditionSelect';
 
 const PAYMENT_TYPE: Record<string, string> = {
@@ -28,24 +33,41 @@ async function paymentConditionLabelsMerged(): Promise<Record<string, string>> {
   }
 }
 
-/** Emitente da OC no PDF (sobrescreva com NEXT_PUBLIC_OC_PDF_* no .env do frontend). */
-function companyHeader() {
-  return {
-    name:
-      process.env.NEXT_PUBLIC_OC_PDF_COMPANY_NAME || 'Gennesis Engenharia e Consultoria LTDA',
-    subtitle: process.env.NEXT_PUBLIC_OC_PDF_COMPANY_SUBTITLE || 'Engenharia e Consultoria',
-    address:
-      process.env.NEXT_PUBLIC_OC_PDF_COMPANY_ADDRESS ||
-      'SHIS QI 15, Sobreloja 55 — Lago Sul — Brasília/DF',
-    phone: process.env.NEXT_PUBLIC_OC_PDF_COMPANY_PHONE || '',
-    cnpj: process.env.NEXT_PUBLIC_OC_PDF_COMPANY_CNPJ || '17.851.596/0001-36'
-  };
-}
-
 function companyCnpjPhoneLine(co: { cnpj: string; phone: string }): string {
   const tel = (co.phone || '').trim();
   if (tel) return `CNPJ: ${co.cnpj}  |  Tel.: ${tel}`;
   return `CNPJ: ${co.cnpj}`;
+}
+
+/** Desenha nome/endereço/CNPJ do emitente; retorna o Y final. */
+function drawCompanyHeaderBlock(
+  pdf: jsPDF,
+  co: OcPdfCompanyHeader,
+  x: number,
+  startY: number,
+  maxWidth: number,
+): number {
+  let ty = startY;
+  pdf.setFont('helvetica', 'bold');
+  pdf.setFontSize(11);
+  pdf.splitTextToSize(co.name, maxWidth).forEach((ln: string) => {
+    pdf.text(ln, x, ty);
+    ty += 5;
+  });
+  pdf.setFont('helvetica', 'normal');
+  pdf.setFontSize(8);
+  if (co.subtitle.trim()) {
+    pdf.splitTextToSize(co.subtitle, maxWidth).forEach((ln: string) => {
+      pdf.text(ln, x, ty);
+      ty += 4;
+    });
+  }
+  pdf.splitTextToSize(co.address, maxWidth).forEach((ln: string) => {
+    pdf.text(ln, x, ty);
+    ty += 4;
+  });
+  pdf.text(companyCnpjPhoneLine(co), x, ty);
+  return ty;
 }
 
 const FOOTER_NOTES = [
@@ -136,7 +158,12 @@ export async function exportPurchaseOrderPdf(orderId: string): Promise<void> {
   const cw = pageW - 2 * margin;
   let y = margin;
 
-  const co = companyHeader();
+  const co = resolveOcPdfCompanyHeader(
+    shouldUseUnbBranding(
+      order.materialRequest?.costCenter?.name,
+      order.materialRequest?.serviceOrder,
+    ),
+  );
   const logo = await loadPdfBrandingLogo({
     contextLabels: [
       order.materialRequest?.costCenter?.name,
@@ -149,32 +176,12 @@ export async function exportPurchaseOrderPdf(orderId: string): Promise<void> {
   if (logo) {
     pdf.addImage(logo.dataUrl, 'PNG', margin, margin, logo.wMm, logo.hMm);
     const tx = margin + logo.wMm + 4;
-    let ty = margin + 4;
-    pdf.setFont('helvetica', 'bold');
-    pdf.setFontSize(11);
-    pdf.text(co.name, tx, ty);
-    ty += 5;
-    pdf.setFont('helvetica', 'normal');
-    pdf.setFontSize(8);
-    pdf.text(co.subtitle, tx, ty);
-    ty += 4;
-    pdf.text(co.address, tx, ty);
-    ty += 4;
-    pdf.text(companyCnpjPhoneLine(co), tx, ty);
+    const textMaxW = pageW - margin - tx;
+    const ty = drawCompanyHeaderBlock(pdf, co, tx, margin + 4, textMaxW);
     y = Math.max(margin + logo.hMm, ty) + 6;
   } else {
-    pdf.setFont('helvetica', 'bold');
-    pdf.setFontSize(11);
-    pdf.text(co.name, margin, y);
-    y += 5;
-    pdf.setFont('helvetica', 'normal');
-    pdf.setFontSize(8);
-    pdf.text(co.subtitle, margin, y);
-    y += 4;
-    pdf.text(co.address, margin, y);
-    y += 4;
-    pdf.text(companyCnpjPhoneLine(co), margin, y);
-    y += 8;
+    const ty = drawCompanyHeaderBlock(pdf, co, margin, y, cw);
+    y = ty + 8;
   }
 
   pdf.setFont('helvetica', 'bold');
