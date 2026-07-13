@@ -959,22 +959,22 @@ function ocListShowsOrderDateColumn(tab: OcTab): boolean {
   );
 }
 
-function canUserAttachNfOnOrder(order: PurchaseOrder, currentUserId?: string | null): boolean {
+function canUserAttachNfOnOrder(order: PurchaseOrder, _currentUserId?: string | null): boolean {
   return (
     order.status === 'PENDING_NF_ATTACHMENT' &&
-    !!currentUserId &&
-    order.creator?.id === currentUserId &&
     parseOcNfAttachments(order.nfAttachments).length === 0
   );
 }
 
-function canUserFinalizeOcWithNf(order: PurchaseOrder, currentUserId?: string | null): boolean {
+function canUserFinalizeOcWithNf(order: PurchaseOrder, _currentUserId?: string | null): boolean {
   return (
     order.status === 'PENDING_NF_ATTACHMENT' &&
-    !!currentUserId &&
-    order.creator?.id === currentUserId &&
     parseOcNfAttachments(order.nfAttachments).length > 0
   );
+}
+
+function canUserManageNfOnOrder(order: PurchaseOrder): boolean {
+  return order.status === 'PENDING_NF_ATTACHMENT';
 }
 
 function OcListDownloadIconLink({
@@ -2214,15 +2214,31 @@ export function OcPurchaseOrdersPanel({
       });
       return res.data;
     },
-    onSuccess: (resp: { data?: PurchaseOrder }) => {
-      queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
-      queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
-      const updated = resp?.data;
-      if (updated) setSelectedOrder((prev) => (prev?.id === updated.id ? updated : prev));
-      toast.success('OC enviada para Validação Comprovante.');
+    onMutate: async (id) => {
+      await queryClient.cancelQueries({ queryKey: ['purchase-orders', 'list-summary'] });
+      const previous = queryClient.getQueryData<PurchaseOrdersListSummaryCache>([
+        'purchase-orders',
+        'list-summary'
+      ]);
+      patchOcInListSummaryCache(queryClient, id, { status: 'PENDING_PROOF_VALIDATION' });
+      setSelectedOrder(null);
+      setOcActionMenu(null);
+      const toastId = `oc-proof-submit-${id}`;
+      toast.success('OC enviada para Validação Comprovante.', { id: toastId });
+      return { previous, toastId };
     },
-    onError: (error: { response?: { data?: { message?: string } }; message?: string }) =>
-      toast.error(error.response?.data?.message || error.message || 'Erro ao enviar para validação')
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
+      void queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
+    },
+    onError: (error: { response?: { data?: { message?: string } }; message?: string }, _v, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(['purchase-orders', 'list-summary'], context.previous);
+      }
+      toast.error(error.response?.data?.message || error.message || 'Erro ao enviar para validação', {
+        id: context?.toastId
+      });
+    }
   });
 
   const requestProofCorrectionMutation = useMutation({
@@ -2233,15 +2249,31 @@ export function OcPurchaseOrdersPanel({
       });
       return res.data;
     },
-    onSuccess: (resp: { data?: PurchaseOrder }) => {
-      queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
-      queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
-      const updated = resp?.data;
-      if (updated) setSelectedOrder((prev) => (prev?.id === updated.id ? updated : prev));
-      toast.success('OC enviada para correção do comprovante.');
+    onMutate: async ({ id }) => {
+      await queryClient.cancelQueries({ queryKey: ['purchase-orders', 'list-summary'] });
+      const previous = queryClient.getQueryData<PurchaseOrdersListSummaryCache>([
+        'purchase-orders',
+        'list-summary'
+      ]);
+      patchOcInListSummaryCache(queryClient, id, { status: 'PENDING_PROOF_CORRECTION' });
+      setSelectedOrder(null);
+      setOcActionMenu(null);
+      const toastId = `oc-proof-correction-${id}`;
+      toast.success('OC enviada para correção do comprovante.', { id: toastId });
+      return { previous, toastId };
     },
-    onError: (error: { response?: { data?: { message?: string } }; message?: string }) =>
-      toast.error(error.response?.data?.message || error.message || 'Erro ao solicitar correção')
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
+      void queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
+    },
+    onError: (error: { response?: { data?: { message?: string } }; message?: string }, _v, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(['purchase-orders', 'list-summary'], context.previous);
+      }
+      toast.error(error.response?.data?.message || error.message || 'Erro ao solicitar correção', {
+        id: context?.toastId
+      });
+    }
   });
 
   const validateProofMutation = useMutation({
@@ -2249,19 +2281,43 @@ export function OcPurchaseOrdersPanel({
       const res = await api.patch(`/purchase-orders/${id}/status`, { status: 'PENDING_NF_ATTACHMENT' });
       return res.data;
     },
-    onSuccess: (resp: { data?: PurchaseOrder }) => {
-      queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
-      queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
-      const updated = resp?.data;
-      if (updated) setSelectedOrder((prev) => (prev?.id === updated.id ? updated : prev));
-      toast.success(
-        updated?.status === 'APPROVED'
-          ? 'Comprovante validado. Prosiga com a próxima parcela na fase Pagamento.'
-          : 'Comprovante validado. O comprador pode anexar a(s) nota(s) fiscal(is).'
-      );
+    onMutate: async (id) => {
+      await queryClient.cancelQueries({ queryKey: ['purchase-orders', 'list-summary'] });
+      const previous = queryClient.getQueryData<PurchaseOrdersListSummaryCache>([
+        'purchase-orders',
+        'list-summary'
+      ]);
+      patchOcInListSummaryCache(queryClient, id, { status: 'PENDING_NF_ATTACHMENT' });
+      setSelectedOrder(null);
+      setOcActionMenu(null);
+      const toastId = `oc-proof-validate-${id}`;
+      toast.success('Comprovante validado. A OC foi para a fase Anexar NF.', { id: toastId });
+      return { previous, toastId };
     },
-    onError: (error: { response?: { data?: { message?: string } }; message?: string }) =>
-      toast.error(error.response?.data?.message || error.message || 'Erro ao validar comprovante')
+    onSuccess: (resp: { data?: PurchaseOrder }) => {
+      const updated = resp?.data;
+      if (updated?.id) {
+        patchOcInListSummaryCache(queryClient, updated.id, (order) => ({
+          ...order,
+          status: updated.status ?? order.status
+        }));
+        if (updated.status === 'APPROVED') {
+          toast.success('Comprovante validado. Prosiga com a próxima parcela na fase Pagamento.', {
+            id: `oc-proof-validate-${updated.id}`
+          });
+        }
+      }
+      void queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
+      void queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
+    },
+    onError: (error: { response?: { data?: { message?: string } }; message?: string }, _v, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(['purchase-orders', 'list-summary'], context.previous);
+      }
+      toast.error(error.response?.data?.message || error.message || 'Erro ao validar comprovante', {
+        id: context?.toastId
+      });
+    }
   });
 
   const appendNfMutation = useMutation({
@@ -2282,7 +2338,13 @@ export function OcPurchaseOrdersPanel({
       queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
       queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
       const updated = resp?.data;
-      if (updated) setSelectedOrder((prev) => (prev?.id === updated.id ? updated : prev));
+      if (updated) {
+        setSelectedOrder((prev) => (prev?.id === updated.id ? { ...prev, ...updated } : prev));
+        patchOcInListSummaryCache(queryClient, updated.id, (order) => ({
+          ...order,
+          nfAttachments: updated.nfAttachments ?? order.nfAttachments
+        }));
+      }
       setNfFileDraft(null);
       toast.success('Nota fiscal anexada.');
     },
@@ -2299,7 +2361,13 @@ export function OcPurchaseOrdersPanel({
       queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
       queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
       const updated = resp?.data;
-      if (updated) setSelectedOrder((prev) => (prev?.id === updated.id ? updated : prev));
+      if (updated) {
+        setSelectedOrder((prev) => (prev?.id === updated.id ? { ...prev, ...updated } : prev));
+        patchOcInListSummaryCache(queryClient, updated.id, (order) => ({
+          ...order,
+          nfAttachments: updated.nfAttachments ?? order.nfAttachments
+        }));
+      }
       toast.success('Nota fiscal removida.');
     },
     onError: (error: { response?: { data?: { message?: string } }; message?: string }) =>
@@ -2311,14 +2379,31 @@ export function OcPurchaseOrdersPanel({
       const res = await api.patch(`/purchase-orders/${id}/status`, { status: 'FINALIZED' });
       return res.data;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
-      queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
+    onMutate: async (id) => {
+      await queryClient.cancelQueries({ queryKey: ['purchase-orders', 'list-summary'] });
+      const previous = queryClient.getQueryData<PurchaseOrdersListSummaryCache>([
+        'purchase-orders',
+        'list-summary'
+      ]);
+      patchOcInListSummaryCache(queryClient, id, { status: 'FINALIZED' });
       setSelectedOrder(null);
-      toast.success('OC finalizada. Ela aparece na aba Finalizadas.');
+      setOcActionMenu(null);
+      const toastId = `oc-finalize-${id}`;
+      toast.success('OC finalizada. Ela aparece na aba Finalizadas.', { id: toastId });
+      return { previous, toastId };
     },
-    onError: (error: { response?: { data?: { message?: string } }; message?: string }) =>
-      toast.error(error.response?.data?.message || error.message || 'Erro ao finalizar OC')
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
+      void queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
+    },
+    onError: (error: { response?: { data?: { message?: string } }; message?: string }, _v, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(['purchase-orders', 'list-summary'], context.previous);
+      }
+      toast.error(error.response?.data?.message || error.message || 'Erro ao finalizar OC', {
+        id: context?.toastId
+      });
+    }
   });
 
   const allOrders: PurchaseOrder[] = ordersData?.data || [];
@@ -4116,7 +4201,7 @@ export function OcPurchaseOrdersPanel({
                           {isStockSyncedDocumentUrl(nf.url) && (
                             <span className="text-[11px] text-teal-700 dark:text-teal-300">Estoque</span>
                           )}
-                          {selectedOrder.creator?.id === currentUserId && (
+                          {canUserManageNfOnOrder(selectedOrder) && (
                             <button
                               type="button"
                               disabled={removeNfMutation.isPending}
@@ -4132,8 +4217,8 @@ export function OcPurchaseOrdersPanel({
                   ) : (
                     <p className="text-xs text-gray-500 dark:text-gray-400">Nenhuma NF anexada ainda.</p>
                   )}
-                  {selectedOrder.creator?.id === currentUserId ? (
-                    parseOcNfAttachments(selectedOrder.nfAttachments).length === 0 ? (
+                  {canUserManageNfOnOrder(selectedOrder) &&
+                    parseOcNfAttachments(selectedOrder.nfAttachments).length === 0 && (
                     <div className="flex flex-col sm:flex-row sm:items-center gap-2">
                       <input
                         type="file"
@@ -4153,13 +4238,8 @@ export function OcPurchaseOrdersPanel({
                         {appendNfMutation.isPending ? 'Enviando…' : 'Anexar NF'}
                       </button>
                     </div>
-                    ) : null
-                  ) : (
-                    <p className="text-xs text-amber-700 dark:text-amber-300">
-                      Somente quem criou a OC pode anexar ou remover NFs nesta fase.
-                    </p>
                   )}
-                  {selectedOrder.creator?.id === currentUserId && (
+                  {canUserManageNfOnOrder(selectedOrder) && (
                     <button
                       type="button"
                       disabled={

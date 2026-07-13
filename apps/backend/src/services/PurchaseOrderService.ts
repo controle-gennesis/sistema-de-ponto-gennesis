@@ -1179,11 +1179,9 @@ export class PurchaseOrderService {
       if (st !== 'PENDING_PROOF_VALIDATION') {
         throw new Error('Apenas OC em validação de comprovante pode seguir para anexo de NF');
       }
-      try {
-        await this.syncNfAttachmentsFromStockReceipt(order.orderNumber);
-      } catch (err) {
+      void this.syncNfAttachmentsFromStockReceipt(order.orderNumber).catch((err) => {
         console.error('[PurchaseOrder] syncNfAttachmentsFromStockReceipt before NF phase', order.orderNumber, err);
-      }
+      });
       const forProof = await prisma.purchaseOrder.findUnique({
         where: { id },
         select: {
@@ -1211,13 +1209,10 @@ export class PurchaseOrderService {
       }
       const row = await prisma.purchaseOrder.findUnique({
         where: { id },
-        select: { nfAttachments: true, createdBy: true }
+        select: { nfAttachments: true }
       });
       if (!row) {
         throw new Error('Ordem de compra não encontrada');
-      }
-      if (row.createdBy !== userId) {
-        throw new Error('Apenas quem criou a OC pode finalizar após anexar as notas fiscais');
       }
       const nfs = parseNfAttachments(row.nfAttachments);
       if (nfs.length === 0) {
@@ -1732,7 +1727,7 @@ export class PurchaseOrderService {
   }
 
   /**
-   * Comprador: anexa uma NF na fase após validação do comprovante (pode repetir quantas vezes precisar).
+   * Anexa uma NF na fase após validação do comprovante (qualquer usuário autenticado com acesso à OC).
    */
   async appendNfAttachment(
     id: string,
@@ -1749,8 +1744,8 @@ export class PurchaseOrderService {
     if (order.status !== 'PENDING_NF_ATTACHMENT') {
       throw new Error('Só é possível anexar NF quando a OC está na fase Anexar NF');
     }
-    if (!userId || order.createdBy !== userId) {
-      throw new Error('Apenas quem criou a OC pode anexar notas fiscais nesta fase');
+    if (!userId) {
+      throw new Error('Usuário não autenticado');
     }
     const url = (data.nfUrl || '').trim();
     if (!url) {
@@ -1769,14 +1764,14 @@ export class PurchaseOrderService {
         nfAttachments: list as unknown as Prisma.InputJsonValue,
         updatedAt: new Date()
       },
-      include: purchaseOrderIncludeDetail
+      include: purchaseOrderIncludeListSummary
     });
     const [e] = await enrichOrdersParcelPlans([updated]);
     return e;
   }
 
   /**
-   * Comprador: remove uma NF anexada (ainda na fase Anexar NF).
+   * Remove uma NF anexada (ainda na fase Anexar NF).
    */
   async removeNfAttachment(id: string, index: number, userId?: string) {
     const order = await prisma.purchaseOrder.findUnique({
@@ -1789,8 +1784,8 @@ export class PurchaseOrderService {
     if (order.status !== 'PENDING_NF_ATTACHMENT') {
       throw new Error('Só é possível remover NF na fase Anexar NF');
     }
-    if (!userId || order.createdBy !== userId) {
-      throw new Error('Apenas quem criou a OC pode remover notas fiscais nesta fase');
+    if (!userId) {
+      throw new Error('Usuário não autenticado');
     }
     const list = parseNfAttachments(order.nfAttachments);
     if (!Number.isInteger(index) || index < 0 || index >= list.length) {
@@ -1803,7 +1798,7 @@ export class PurchaseOrderService {
         nfAttachments: list.length > 0 ? (list as unknown as Prisma.InputJsonValue) : Prisma.JsonNull,
         updatedAt: new Date()
       },
-      include: purchaseOrderIncludeDetail
+      include: purchaseOrderIncludeListSummary
     });
     const [e] = await enrichOrdersParcelPlans([updated]);
     return e;
