@@ -387,20 +387,13 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
     return 0;
   };
 
-  const moduleBadgeCountForId = (categoryId: string): number => {
-    if (categoryId === 'main') return approvalCounts.total + entregaLogisticaPendingCount;
-    if (categoryId === 'suprimentos') {
-      return (
-        fdNotificationCounts.pendingPurchase +
-        pendingFuroCount +
-        fuelSuppliesPendingCount +
-        vehicleReservationSuppliesPendingCount +
-        (canApproveMaterialRequests ? approvalCounts.rm : 0)
-      );
-    }
-    if (categoryId === 'engenharia') return recebimentoPendingCount;
-    return 0;
-  };
+  /** Soma só badges das páginas que a pessoa realmente vê nesse módulo. */
+  const moduleBadgeCountForVisibleItems = (
+    items: Array<{ href: string; permission: boolean }>,
+  ): number =>
+    items
+      .filter((item) => item.permission)
+      .reduce((sum, item) => sum + navBadgeCountForHref(item.href), 0);
 
   // Verificar se o funcionário precisa bater ponto
   const requiresTimeClock = user?.employee?.requiresTimeClock !== false;
@@ -1297,7 +1290,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
                 );
               }
 
-              const moduleBadge = moduleBadgeCountForId(category.id);
+              const moduleBadge = moduleBadgeCountForVisibleItems(visibleItems);
               return (
                 <SidebarRailTooltip key={category.id} label={category.name}>
                   <button

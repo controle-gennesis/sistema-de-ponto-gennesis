@@ -22,6 +22,7 @@ import {
 import {
   PERMISSION_ACCESS_ACTION,
   PERMISSION_CONTROLE_CATEGORY,
+  PERMISSION_CONTROLE_GROUP_ORDER,
   PERMISSION_MODULE_KEYS_MANAGED_ONLY_ON_CONTRACT_MATRIX,
   PERMISSION_MODULE_KEYS_OPEN_ACCESS,
   PERMISSION_MODULES,
@@ -88,12 +89,10 @@ const CONTRACTS_MODULE_KEY = pathToModuleKey('/ponto/contratos');
 const EMPLOYEES_MODULE_KEY = pathToModuleKey('/ponto/funcionarios');
 /** Removido da UI (gestor por contrato na aba Contratos); ainda pode existir no banco até o próximo salvamento. */
 const DEPRECATED_DP_APPROVE_CONTROLE_KEY = pathToModuleKey('/ponto/controle/aprovar-solicitacoes-dp');
-const DEPRECATED_OC_GESTOR_CONTROLE_KEY = pathToModuleKey('/ponto/controle/aprovar-oc-gestor');
 const DEPRECATED_RM_APPROVE_CONTROLE_KEY = pathToModuleKey('/ponto/controle/aprovar-requisicoes-materiais');
 
 const DEPRECATED_CONTROLE_KEYS = new Set([
   DEPRECATED_DP_APPROVE_CONTROLE_KEY,
-  DEPRECATED_OC_GESTOR_CONTROLE_KEY,
   DEPRECATED_RM_APPROVE_CONTROLE_KEY,
 ]);
 const CONTRACT_ACTIONS = ['ver', 'criar', 'editar', 'excluir'] as const;
@@ -307,6 +306,7 @@ function displayModuleName(m: PermissionModuleDef): string {
 }
 
 function moduleIcon(href: string): LucideIcon {
+  if (href.startsWith('/ponto/controle')) return Settings;
   if (href.includes('dashboard')) return LayoutDashboard;
   if (href.includes('financeiro')) return Wallet;
   if (href.includes('contratos') || href.includes('orcamento') || href.includes('os') || href.includes('pleitos'))
@@ -322,7 +322,6 @@ function moduleIcon(href: string): LucideIcon {
     return FolderOpen;
   if (href === '/ponto') return Clock;
   if (href.startsWith('/relatorios')) return Layers;
-  if (href.startsWith('/ponto/controle')) return Settings;
   if (href.includes('funcionarios') || href.includes('ferias') || href.includes('atestados')) return User;
   return Layers;
 }
@@ -909,17 +908,26 @@ export function UserPermissionsEditor({
     return CATEGORY_ORDER.filter((c) => map.has(c)).map((c) => ({ category: c, modules: map.get(c)! }));
   }, []);
 
-  const controleModulesByCategory = useMemo(() => {
+  const controleModulesByGroup = useMemo(() => {
     const map = new Map<string, PermissionModuleDef[]>();
     for (const m of PERMISSION_MODULES) {
       const cat = moduleCategory(m);
       if (cat !== PERMISSION_CONTROLE_CATEGORY) continue;
       if (DEPRECATED_CONTROLE_KEYS.has(m.key)) continue;
-      const list = map.get(cat) ?? [];
+      const group = (m as PermissionModuleDef).group?.trim() || 'Geral';
+      const list = map.get(group) ?? [];
       list.push(m);
-      map.set(cat, list);
+      map.set(group, list);
     }
-    return CATEGORY_ORDER.filter((c) => map.has(c)).map((c) => ({ category: c, modules: map.get(c)! }));
+    const ordered = PERMISSION_CONTROLE_GROUP_ORDER.filter((g) => map.has(g)).map((g) => ({
+      group: g,
+      modules: map.get(g)!,
+    }));
+    const extras = [...map.keys()]
+      .filter((g) => !(PERMISSION_CONTROLE_GROUP_ORDER as readonly string[]).includes(g))
+      .sort((a, b) => a.localeCompare(b, 'pt-BR'))
+      .map((g) => ({ group: g, modules: map.get(g)! }));
+    return [...ordered, ...extras];
   }, []);
 
   const toggleModule = (key: string) => {
@@ -1325,7 +1333,9 @@ export function UserPermissionsEditor({
   };
 
   const displayCategories =
-    activeTab === 'controle' ? controleModulesByCategory : modulesByCategory;
+    activeTab === 'controle'
+      ? controleModulesByGroup.map(({ group, modules }) => ({ category: group, modules }))
+      : modulesByCategory;
 
   return (
     <div className="w-full space-y-0">

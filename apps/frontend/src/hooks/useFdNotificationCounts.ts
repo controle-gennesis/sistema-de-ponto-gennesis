@@ -11,8 +11,6 @@ export type FdNotificationCounts = {
   pendingPurchase: number;
 };
 
-const emptyCounts: FdNotificationCounts = { pendingManager: 0, pendingPurchase: 0 };
-
 export function useFdNotificationCounts() {
   const {
     isLoading,
@@ -44,7 +42,10 @@ export function useFdNotificationCounts() {
   });
 
   return {
-    counts: query.data ?? emptyCounts,
+    counts: {
+      pendingManager: canFetchManager ? (query.data?.pendingManager ?? 0) : 0,
+      pendingPurchase: canFetchPurchase ? (query.data?.pendingPurchase ?? 0) : 0,
+    },
     isLoading: query.isLoading,
     refetch: query.refetch,
   };

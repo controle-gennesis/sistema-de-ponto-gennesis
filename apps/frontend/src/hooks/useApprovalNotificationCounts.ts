@@ -92,11 +92,18 @@ export function useApprovalNotificationCounts() {
     const dp = base?.dp ?? 0;
     const fd = base?.fd ?? 0;
     const fuel = canApproveFuel ? (base?.fuel ?? 0) : 0;
-    const oc = base?.oc ?? 0;
+    const oc = canApproveOc ? (base?.oc ?? 0) : 0;
     const rm = canApproveMaterialRequests ? (base?.rm ?? 0) : 0;
     const total = dp + espelho + fd + fuel + oc + rm;
     return { dp, espelho, fd, fuel, oc, rm, total };
-  }, [mainQuery.data, espelhoQuery.data, canApproveEspelhoNf, canApproveFuel, canApproveMaterialRequests]);
+  }, [
+    mainQuery.data,
+    espelhoQuery.data,
+    canApproveEspelhoNf,
+    canApproveFuel,
+    canApproveOc,
+    canApproveMaterialRequests,
+  ]);
 
   return {
     counts,

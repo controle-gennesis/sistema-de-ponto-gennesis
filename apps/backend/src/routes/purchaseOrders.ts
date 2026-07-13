@@ -8,7 +8,14 @@ import { AuthRequest } from '../middleware/auth';
 import { PurchaseOrderService } from '../services/PurchaseOrderService';
 import { createError } from '../middleware/errorHandler';
 import { backendUploadsRoot } from '../lib/uploads';
-import { assertOcApprovalStatusChange } from '../lib/ocApprovalAccess';
+import {
+  assertOcFlowStatusChange,
+  assertUserHasOcModule,
+  OC_TAB_ATTACH_BOLETO_KEY,
+  OC_TAB_ATTACH_NF_KEY,
+  OC_TAB_PAYMENT_KEY,
+  OC_TAB_PROOF_CORRECTION_KEY,
+} from '../lib/ocApprovalAccess';
 
 const router = Router();
 const service = new PurchaseOrderService();
@@ -201,6 +208,13 @@ router.post('/', async (req: AuthRequest, res: Response, next: NextFunction) => 
 /** Remessa CNAB400 (layout igual ao financeiro) para OCs aprovadas selecionadas */
 router.post('/cnab400', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
+    if (!req.user?.id) throw createError('Usuário não autenticado', 401);
+    await assertUserHasOcModule(
+      req.user.id,
+      !!req.user.isAdmin,
+      OC_TAB_PAYMENT_KEY,
+      'Sem permissão na aba Pagamento da OC'
+    );
     const { orderIds } = req.body as { orderIds?: string[] };
     if (!Array.isArray(orderIds) || orderIds.length === 0) {
       throw createError('Envie orderIds (array de ids das OCs)', 400);
@@ -216,6 +230,10 @@ router.post('/cnab400', async (req: AuthRequest, res: Response, next: NextFuncti
     );
     res.send(content);
   } catch (error) {
+    if (error instanceof Error && /Sem permissão/.test(error.message)) {
+      res.status(403).json({ success: false, message: error.message });
+      return;
+    }
     next(error);
   }
 });
@@ -242,13 +260,24 @@ router.get('/:id', async (req: AuthRequest, res: Response, next: NextFunction) =
 
 router.patch('/:id/nf-attachments/remove', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
+    if (!req.user?.id) throw createError('Usuário não autenticado', 401);
+    await assertUserHasOcModule(
+      req.user.id,
+      !!req.user.isAdmin,
+      OC_TAB_ATTACH_NF_KEY,
+      'Sem permissão na aba Anexar NF da OC'
+    );
     const index = Number((req.body as { index?: unknown })?.index);
     const order = await service.removeNfAttachment(req.params.id, index, req.user?.id);
     res.json({ success: true, data: order, message: 'Nota fiscal removida' });
   } catch (error) {
+    if (error instanceof Error && /Sem permissão/.test(error.message)) {
+      res.status(403).json({ success: false, message: error.message });
+      return;
+    }
     if (
       error instanceof Error &&
-      /Ordem de compra não encontrada|Só é possível|Apenas quem criou|Índice/.test(error.message)
+      /Ordem de compra não encontrada|Só é possível|Apenas quem criou|Índice|Usuário não autenticado/.test(error.message)
     ) {
       res.status(400).json({ success: false, message: error.message });
       return;
@@ -259,6 +288,13 @@ router.patch('/:id/nf-attachments/remove', async (req: AuthRequest, res: Respons
 
 router.patch('/:id/nf-attachments', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
+    if (!req.user?.id) throw createError('Usuário não autenticado', 401);
+    await assertUserHasOcModule(
+      req.user.id,
+      !!req.user.isAdmin,
+      OC_TAB_ATTACH_NF_KEY,
+      'Sem permissão na aba Anexar NF da OC'
+    );
     const { nfUrl, nfName } = req.body as { nfUrl?: string; nfName?: string };
     const order = await service.appendNfAttachment(
       req.params.id,
@@ -267,9 +303,13 @@ router.patch('/:id/nf-attachments', async (req: AuthRequest, res: Response, next
     );
     res.json({ success: true, data: order, message: 'Nota fiscal anexada' });
   } catch (error) {
+    if (error instanceof Error && /Sem permissão/.test(error.message)) {
+      res.status(403).json({ success: false, message: error.message });
+      return;
+    }
     if (
       error instanceof Error &&
-      /Ordem de compra não encontrada|Só é possível|Apenas quem criou|obrigatório/.test(error.message)
+      /Ordem de compra não encontrada|Só é possível|Apenas quem criou|obrigatório|Usuário não autenticado/.test(error.message)
     ) {
       res.status(400).json({ success: false, message: error.message });
       return;
@@ -285,7 +325,7 @@ router.patch('/:id/status', async (req: AuthRequest, res: Response, next: NextFu
     if (!req.user?.id) throw createError('Usuário não autenticado', 401);
     const existing = await service.getStatusChangeContext(req.params.id);
     if (!existing) throw createError('Ordem de compra não encontrada', 404);
-    await assertOcApprovalStatusChange(
+    await assertOcFlowStatusChange(
       req.user.id,
       !!req.user.isAdmin,
       String(existing?.status ?? ''),
@@ -334,6 +374,13 @@ router.patch('/:id/details', async (req: AuthRequest, res: Response, next: NextF
 
 router.patch('/:id/payment-boleto', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
+    if (!req.user?.id) throw createError('Usuário não autenticado', 401);
+    await assertUserHasOcModule(
+      req.user.id,
+      !!req.user.isAdmin,
+      OC_TAB_ATTACH_BOLETO_KEY,
+      'Sem permissão na aba Anexar Boleto da OC'
+    );
     const { paymentBoletoUrl, paymentBoletoName } = req.body as {
       paymentBoletoUrl?: string;
       paymentBoletoName?: string;
@@ -345,9 +392,13 @@ router.patch('/:id/payment-boleto', async (req: AuthRequest, res: Response, next
     );
     res.json({ success: true, data: order, message: 'Boleto de pagamento anexado com sucesso' });
   } catch (error) {
+    if (error instanceof Error && /Sem permissão/.test(error.message)) {
+      res.status(403).json({ success: false, message: error.message });
+      return;
+    }
     if (
       error instanceof Error &&
-      /Ordem de compra não encontrada|Só é possível|apenas a OC|obrigatória|várias parcelas/.test(error.message)
+      /Ordem de compra não encontrada|Só é possível|apenas a OC|obrigatória|várias parcelas|Usuário não autenticado/.test(error.message)
     ) {
       res.status(400).json({ success: false, message: error.message });
       return;
@@ -358,6 +409,13 @@ router.patch('/:id/payment-boleto', async (req: AuthRequest, res: Response, next
 
 router.patch('/:id/payment-boleto-installments', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
+    if (!req.user?.id) throw createError('Usuário não autenticado', 401);
+    await assertUserHasOcModule(
+      req.user.id,
+      !!req.user.isAdmin,
+      OC_TAB_ATTACH_BOLETO_KEY,
+      'Sem permissão na aba Anexar Boleto da OC'
+    );
     const body = req.body as { installments?: unknown };
     const order = await service.savePaymentBoletoInstallments(
       req.params.id,
@@ -366,9 +424,13 @@ router.patch('/:id/payment-boleto-installments', async (req: AuthRequest, res: R
     );
     res.json({ success: true, data: order, message: 'Parcelas de boleto atualizadas com sucesso' });
   } catch (error) {
+    if (error instanceof Error && /Sem permissão/.test(error.message)) {
+      res.status(403).json({ success: false, message: error.message });
+      return;
+    }
     if (
       error instanceof Error &&
-      /Ordem de compra não encontrada|Só é possível|apenas|Envie exatamente|inválid|parcela/.test(error.message)
+      /Ordem de compra não encontrada|Só é possível|apenas|Envie exatamente|inválid|parcela|Usuário não autenticado/.test(error.message)
     ) {
       res.status(400).json({ success: false, message: error.message });
       return;
@@ -379,6 +441,18 @@ router.patch('/:id/payment-boleto-installments', async (req: AuthRequest, res: R
 
 router.patch('/:id/payment-proof', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
+    if (!req.user?.id) throw createError('Usuário não autenticado', 401);
+    const existing = await service.getStatusChangeContext(req.params.id);
+    if (!existing) throw createError('Ordem de compra não encontrada', 404);
+    const moduleKey =
+      existing.status === 'PENDING_PROOF_CORRECTION'
+        ? OC_TAB_PROOF_CORRECTION_KEY
+        : OC_TAB_PAYMENT_KEY;
+    const moduleMsg =
+      existing.status === 'PENDING_PROOF_CORRECTION'
+        ? 'Sem permissão na aba Correção Comprovante da OC'
+        : 'Sem permissão na aba Pagamento da OC';
+    await assertUserHasOcModule(req.user.id, !!req.user.isAdmin, moduleKey, moduleMsg);
     const { paymentProofUrl, paymentProofName } = req.body as {
       paymentProofUrl?: string;
       paymentProofName?: string;
@@ -390,6 +464,10 @@ router.patch('/:id/payment-proof', async (req: AuthRequest, res: Response, next:
     );
     res.json({ success: true, data: order, message: 'Comprovante de pagamento anexado com sucesso' });
   } catch (error) {
+    if (error instanceof Error && /Sem permissão/.test(error.message)) {
+      res.status(403).json({ success: false, message: error.message });
+      return;
+    }
     if (
       error instanceof Error &&
       /Ordem de compra não encontrada|Só é possível|obrigatório|Confirme o envio|Aguarde o pagamento de todas as parcelas|Apenas o financeiro|Usuário não autenticado/.test(
@@ -405,12 +483,23 @@ router.patch('/:id/payment-proof', async (req: AuthRequest, res: Response, next:
 
 router.patch('/:id/release-payment-boleto-phase', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
+    if (!req.user?.id) throw createError('Usuário não autenticado', 401);
+    await assertUserHasOcModule(
+      req.user.id,
+      !!req.user.isAdmin,
+      OC_TAB_ATTACH_BOLETO_KEY,
+      'Sem permissão na aba Anexar Boleto da OC'
+    );
     const order = await service.releasePaymentBoletoPhase(req.params.id, req.user?.id);
     res.json({ success: true, data: order, message: 'OC enviada para a fase Pagamento.' });
   } catch (error) {
+    if (error instanceof Error && /Sem permissão/.test(error.message)) {
+      res.status(403).json({ success: false, message: error.message });
+      return;
+    }
     if (
       error instanceof Error &&
-      /Ordem de compra não encontrada|Só é possível|apenas a OC|Anexe|Registre|Aguarde o financeiro|Não há parcela|já está com o financeiro/.test(
+      /Ordem de compra não encontrada|Só é possível|apenas a OC|Anexe|Registre|Aguarde o financeiro|Não há parcela|já está com o financeiro|Usuário não autenticado/.test(
         error.message
       )
     ) {
@@ -423,6 +512,13 @@ router.patch('/:id/release-payment-boleto-phase', async (req: AuthRequest, res: 
 
 router.patch('/:id/payment-boleto-installment-proof', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
+    if (!req.user?.id) throw createError('Usuário não autenticado', 401);
+    await assertUserHasOcModule(
+      req.user.id,
+      !!req.user.isAdmin,
+      OC_TAB_PAYMENT_KEY,
+      'Sem permissão na aba Pagamento da OC'
+    );
     const { paymentProofUrl, paymentProofName, installmentIndex } = req.body as {
       paymentProofUrl?: string;
       paymentProofName?: string;
@@ -442,9 +538,13 @@ router.patch('/:id/payment-boleto-installment-proof', async (req: AuthRequest, r
     );
     res.json({ success: true, data: order, message: 'Comprovante da parcela anexado com sucesso' });
   } catch (error) {
+    if (error instanceof Error && /Sem permissão/.test(error.message)) {
+      res.status(403).json({ success: false, message: error.message });
+      return;
+    }
     if (
       error instanceof Error &&
-      /Ordem de compra não encontrada|Só é possível|aplica-se apenas|Não há parcela|obrigatório|parcela única|fase Pagamento/.test(
+      /Ordem de compra não encontrada|Só é possível|aplica-se apenas|Não há parcela|obrigatório|parcela única|fase Pagamento|Usuário não autenticado/.test(
         error.message
       )
     ) {
@@ -457,6 +557,13 @@ router.patch('/:id/payment-boleto-installment-proof', async (req: AuthRequest, r
 
 router.patch('/:id/return-after-boleto-installment-paid', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
+    if (!req.user?.id) throw createError('Usuário não autenticado', 401);
+    await assertUserHasOcModule(
+      req.user.id,
+      !!req.user.isAdmin,
+      OC_TAB_PAYMENT_KEY,
+      'Sem permissão na aba Pagamento da OC'
+    );
     const order = await service.returnAfterBoletoInstallmentPaid(req.params.id, req.user?.id);
     res.json({
       success: true,
@@ -464,9 +571,13 @@ router.patch('/:id/return-after-boleto-installment-paid', async (req: AuthReques
       message: 'Parcela marcada como paga. O comprador pode anexar o boleto da próxima parcela, se houver.'
     });
   } catch (error) {
+    if (error instanceof Error && /Sem permissão/.test(error.message)) {
+      res.status(403).json({ success: false, message: error.message });
+      return;
+    }
     if (
       error instanceof Error &&
-      /Ordem de compra não encontrada|Só é possível|aplica-se apenas a OC|não está na fase Pagamento|mais de uma parcela|Não há parcela aguardando|Anexe o comprovante desta parcela/.test(
+      /Ordem de compra não encontrada|Só é possível|aplica-se apenas a OC|não está na fase Pagamento|mais de uma parcela|Não há parcela aguardando|Anexe o comprovante desta parcela|Usuário não autenticado/.test(
         error.message
       )
     ) {
@@ -479,6 +590,13 @@ router.patch('/:id/return-after-boleto-installment-paid', async (req: AuthReques
 
 router.patch('/:id/reopen-payment-boleto', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
+    if (!req.user?.id) throw createError('Usuário não autenticado', 401);
+    await assertUserHasOcModule(
+      req.user.id,
+      !!req.user.isAdmin,
+      OC_TAB_ATTACH_BOLETO_KEY,
+      'Sem permissão na aba Anexar Boleto da OC'
+    );
     const order = await service.reopenAttachPaymentBoleto(req.params.id, req.user?.id);
     res.json({
       success: true,
@@ -486,7 +604,11 @@ router.patch('/:id/reopen-payment-boleto', async (req: AuthRequest, res: Respons
       message: 'Boleto removido. A OC voltou para a fase Anexar Boleto.'
     });
   } catch (error) {
-    if (error instanceof Error && /Ordem de compra não encontrada|Só é possível|apenas|Não há/.test(error.message)) {
+    if (error instanceof Error && /Sem permissão/.test(error.message)) {
+      res.status(403).json({ success: false, message: error.message });
+      return;
+    }
+    if (error instanceof Error && /Ordem de compra não encontrada|Só é possível|apenas|Não há|Usuário não autenticado/.test(error.message)) {
       res.status(400).json({ success: false, message: error.message });
       return;
     }

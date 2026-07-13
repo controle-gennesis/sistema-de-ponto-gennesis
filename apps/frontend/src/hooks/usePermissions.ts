@@ -272,6 +272,24 @@ export function usePermissions() {
     can(pk('/ponto/controle/aprovar-oc-gestor'));
   const canApproveOc = canApproveOcCompras || canApproveOcDiretoria || canApproveOcGestor;
 
+  /** Ações por aba do fluxo de OC (Controle). Admin libera todas. */
+  const canActOcAttachBoleto =
+    isAdministrator || !!permissionData?.isAdmin || can(pk('/ponto/controle/oc-anexar-boleto'));
+  const canActOcPayment =
+    isAdministrator || !!permissionData?.isAdmin || can(pk('/ponto/controle/oc-pagamento'));
+  const canActOcValidateProof =
+    isAdministrator ||
+    !!permissionData?.isAdmin ||
+    can(pk('/ponto/controle/oc-validar-comprovante'));
+  const canActOcProofCorrection =
+    isAdministrator ||
+    !!permissionData?.isAdmin ||
+    can(pk('/ponto/controle/oc-corrigir-comprovante'));
+  const canActOcAttachNf =
+    isAdministrator || !!permissionData?.isAdmin || can(pk('/ponto/controle/oc-anexar-nf'));
+  const canActOcCorrection =
+    isAdministrator || !!permissionData?.isAdmin || can(pk('/ponto/controle/oc-correcao'));
+
   /** Aprovação de RMs: gestor por contrato ou permissão legada Controle. */
   const canApproveMaterialRequests =
     isAdministrator ||
@@ -409,6 +427,12 @@ export function usePermissions() {
     canApproveOcCompras,
     canApproveOcDiretoria,
     canApproveOcGestor,
+    canActOcAttachBoleto,
+    canActOcPayment,
+    canActOcValidateProof,
+    canActOcProofCorrection,
+    canActOcAttachNf,
+    canActOcCorrection,
     canApproveMaterialRequests,
     canApproveFuel,
     canViewKanbanValues,

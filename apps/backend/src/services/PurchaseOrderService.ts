@@ -1051,10 +1051,7 @@ export class PurchaseOrderService {
         );
       }
       if (st === 'PENDING_PROOF_CORRECTION') {
-        await assertUserIsFinanceOrAdmin(
-          userId,
-          'Apenas o financeiro pode reenviar o comprovante para validação após correção'
-        );
+        // Permissão da aba Correção Comprovante é validada na rota (assertOcFlowStatusChange).
       }
       if (order.paymentType === 'BOLETO' && !order.paymentBoletoPhaseReleased) {
         const [meta] = await enrichOrdersParcelPlans([order]);
@@ -1662,10 +1659,7 @@ export class PurchaseOrderService {
       );
     }
     if (order.status === 'PENDING_PROOF_CORRECTION') {
-      await assertUserIsFinanceOrAdmin(
-        userId,
-        'Apenas o financeiro pode anexar ou substituir o comprovante nesta fase'
-      );
+      // Permissão da aba Correção Comprovante é validada na rota.
     }
     if (order.paymentType === 'BOLETO' && !order.paymentBoletoPhaseReleased) {
       throw new Error(

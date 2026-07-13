@@ -12,6 +12,11 @@ export type PermissionModuleDef = {
   href: string;
   /** Agrupamento na UI de permissões (ex.: mesmo bloco do menu lateral). */
   category: string;
+  /**
+   * Subtópico na aba Controle (ex.: «Ordem de Compra»).
+   * Ignorado nas demais categorias da matriz Acesso.
+   */
+  group?: string;
 };
 
 /** Ação padrão de acesso a módulo (submenu). */
@@ -222,66 +227,119 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
     name: 'Alterar permissões de funcionários',
     href: '/ponto/controle/alterar-permissoes',
     category: 'Controle',
+    group: 'Geral',
   },
   {
     key: pathToModuleKey('/ponto/controle/criar-tipos-restritos-dp'),
     name: 'Criar solicitações restritas',
     href: '/ponto/controle/criar-tipos-restritos-dp',
     category: 'Controle',
+    group: 'Geral',
   },
   {
     key: pathToModuleKey('/ponto/controle/alterar-senha-funcionarios'),
     name: 'Alterar senha de funcionários',
     href: '/ponto/controle/alterar-senha-funcionarios',
     category: 'Controle',
-  },
-  {
-    key: pathToModuleKey('/ponto/controle/aprovar-espelho-nf'),
-    name: 'Aprovar Espelho da Nota Fiscal',
-    href: '/ponto/controle/aprovar-espelho-nf',
-    category: 'Controle',
-  },
-  {
-    key: pathToModuleKey('/ponto/controle/aprovar-combustivel'),
-    name: 'Aprovar Solicitações de Combustível',
-    href: '/ponto/controle/aprovar-combustivel',
-    category: 'Controle',
-  },
-  {
-    key: pathToModuleKey('/ponto/controle/aprovar-oc-compras'),
-    name: 'Aprovar OCs — Compras',
-    href: '/ponto/controle/aprovar-oc-compras',
-    category: 'Controle',
-  },
-  {
-    key: pathToModuleKey('/ponto/controle/aprovar-oc-gestor'),
-    name: 'Aprovar OCs — Gestor',
-    href: '/ponto/controle/aprovar-oc-gestor',
-    category: 'Controle',
-  },
-  {
-    key: pathToModuleKey('/ponto/controle/aprovar-oc-diretoria'),
-    name: 'Aprovar OCs — Diretoria',
-    href: '/ponto/controle/aprovar-oc-diretoria',
-    category: 'Controle',
-  },
-  {
-    key: pathToModuleKey('/ponto/controle/aprovar-requisicoes-materiais'),
-    name: 'Aprovar Requisições de Materiais',
-    href: '/ponto/controle/aprovar-requisicoes-materiais',
-    category: 'Controle',
+    group: 'Geral',
   },
   {
     key: pathToModuleKey('/ponto/controle/ver-valores-kanban'),
     name: 'Ver valores do Kanban',
     href: '/ponto/controle/ver-valores-kanban',
     category: 'Controle',
+    group: 'Geral',
   },
   {
     key: pathToModuleKey('/ponto/controle/gerenciar-aprovadores-fluig'),
     name: 'Dar permissão na página de aprovadores',
     href: '/ponto/controle/gerenciar-aprovadores-fluig',
     category: 'Controle',
+    group: 'Geral',
+  },
+  {
+    key: pathToModuleKey('/ponto/controle/aprovar-espelho-nf'),
+    name: 'Aprovar Espelho da Nota Fiscal',
+    href: '/ponto/controle/aprovar-espelho-nf',
+    category: 'Controle',
+    group: 'Aprovações',
+  },
+  {
+    key: pathToModuleKey('/ponto/controle/aprovar-combustivel'),
+    name: 'Aprovar Solicitações de Combustível',
+    href: '/ponto/controle/aprovar-combustivel',
+    category: 'Controle',
+    group: 'Aprovações',
+  },
+  {
+    key: pathToModuleKey('/ponto/controle/aprovar-requisicoes-materiais'),
+    name: 'Aprovar Requisições de Materiais',
+    href: '/ponto/controle/aprovar-requisicoes-materiais',
+    category: 'Controle',
+    group: 'Aprovações',
+  },
+  {
+    key: pathToModuleKey('/ponto/controle/aprovar-oc-compras'),
+    name: 'Aprovar Ordem de Compra - Compras',
+    href: '/ponto/controle/aprovar-oc-compras',
+    category: 'Controle',
+    group: 'Aprovações',
+  },
+  {
+    key: pathToModuleKey('/ponto/controle/aprovar-oc-gestor'),
+    name: 'Aprovar Ordem de Compra - Gestor',
+    href: '/ponto/controle/aprovar-oc-gestor',
+    category: 'Controle',
+    group: 'Aprovações',
+  },
+  {
+    key: pathToModuleKey('/ponto/controle/aprovar-oc-diretoria'),
+    name: 'Aprovar Ordem de Compra - Diretoria',
+    href: '/ponto/controle/aprovar-oc-diretoria',
+    category: 'Controle',
+    group: 'Aprovações',
+  },
+  {
+    key: pathToModuleKey('/ponto/controle/oc-anexar-boleto'),
+    name: 'Anexar Boleto',
+    href: '/ponto/controle/oc-anexar-boleto',
+    category: 'Controle',
+    group: 'Ordem de Compra',
+  },
+  {
+    key: pathToModuleKey('/ponto/controle/oc-pagamento'),
+    name: 'Pagamento',
+    href: '/ponto/controle/oc-pagamento',
+    category: 'Controle',
+    group: 'Ordem de Compra',
+  },
+  {
+    key: pathToModuleKey('/ponto/controle/oc-validar-comprovante'),
+    name: 'Validação Comprovante',
+    href: '/ponto/controle/oc-validar-comprovante',
+    category: 'Controle',
+    group: 'Ordem de Compra',
+  },
+  {
+    key: pathToModuleKey('/ponto/controle/oc-corrigir-comprovante'),
+    name: 'Correção Comprovante',
+    href: '/ponto/controle/oc-corrigir-comprovante',
+    category: 'Controle',
+    group: 'Ordem de Compra',
+  },
+  {
+    key: pathToModuleKey('/ponto/controle/oc-anexar-nf'),
+    name: 'Anexar NF / Finalizar',
+    href: '/ponto/controle/oc-anexar-nf',
+    category: 'Controle',
+    group: 'Ordem de Compra',
+  },
+  {
+    key: pathToModuleKey('/ponto/controle/oc-correcao'),
+    name: 'Correção (editar / reenviar)',
+    href: '/ponto/controle/oc-correcao',
+    category: 'Controle',
+    group: 'Ordem de Compra',
   },
 ] as const;
 
@@ -302,3 +360,10 @@ export function isValidPermissionAction(action: string): boolean {
 
 /** Categoria reservada para o registro acima (aba Controle no editor de permissões). */
 export const PERMISSION_CONTROLE_CATEGORY = 'Controle' as const;
+
+/** Ordem dos tópicos na aba Controle. */
+export const PERMISSION_CONTROLE_GROUP_ORDER = [
+  'Geral',
+  'Aprovações',
+  'Ordem de Compra',
+] as const;

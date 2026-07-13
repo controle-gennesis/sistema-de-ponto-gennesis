@@ -966,22 +966,24 @@ function ocListShowsOrderDateColumn(tab: OcTab): boolean {
   );
 }
 
-function canUserAttachNfOnOrder(order: PurchaseOrder, _currentUserId?: string | null): boolean {
+function canUserAttachNfOnOrder(order: PurchaseOrder, canAct: boolean): boolean {
   return (
+    canAct &&
     order.status === 'PENDING_NF_ATTACHMENT' &&
     parseOcNfAttachments(order.nfAttachments).length === 0
   );
 }
 
-function canUserFinalizeOcWithNf(order: PurchaseOrder, _currentUserId?: string | null): boolean {
+function canUserFinalizeOcWithNf(order: PurchaseOrder, canAct: boolean): boolean {
   return (
+    canAct &&
     order.status === 'PENDING_NF_ATTACHMENT' &&
     parseOcNfAttachments(order.nfAttachments).length > 0
   );
 }
 
-function canUserManageNfOnOrder(order: PurchaseOrder): boolean {
-  return order.status === 'PENDING_NF_ATTACHMENT';
+function canUserManageNfOnOrder(order: PurchaseOrder, canAct: boolean): boolean {
+  return canAct && order.status === 'PENDING_NF_ATTACHMENT';
 }
 
 function OcListDownloadIconLink({
@@ -1670,8 +1672,16 @@ export function OcPurchaseOrdersPanel({
     isAdministrator,
     canApproveOcCompras,
     canApproveOcGestor,
-    canApproveOcDiretoria
+    canApproveOcDiretoria,
+    canActOcAttachBoleto,
+    canActOcPayment,
+    canActOcValidateProof,
+    canActOcProofCorrection,
+    canActOcAttachNf,
+    canActOcCorrection
   } = usePermissions();
+  /** Ações de aprovação também na página OC (não só em Aprovações). */
+  const approvalActionsEnabled = allowApprovalActions || canApproveOcCompras || canApproveOcGestor || canApproveOcDiretoria;
   const canActOnOcApproval = (status: string) =>
     canActOnOcApprovalStatus(status, {
       isAdministrator,
@@ -2477,7 +2487,7 @@ export function OcPurchaseOrdersPanel({
   }, [activeTab]);
 
   const showListApprovalActions = (status: string) =>
-    allowApprovalActions &&
+    approvalActionsEnabled &&
     isOcApprovalTab(activeTab) &&
     approvalListPhase === 'pending' &&
     showOcApprovalActions(status);
@@ -2706,18 +2716,21 @@ export function OcPurchaseOrdersPanel({
     financialEntriesByOcNumber,
   ]);
 
-  const userEmployee = userData?.data?.employee as
-    | { department?: string | null; position?: string | null }
-    | undefined;
-  const isFinanceOrAdminUser =
-    userEmployee?.position?.trim() === 'Administrador' ||
-    (userEmployee?.department?.toLowerCase().includes('financeiro') ?? false);
+  /** Pagamento / comprovante: permissão da aba (admin já incluso nas flags). */
+  const canActPaymentUi = canActOcPayment;
+  const canActProofCorrectionUi = canActOcProofCorrection;
+  const canActValidateProofUi = canActOcValidateProof;
+  const canActAttachBoletoUi = canActOcAttachBoleto;
+  const canActAttachNfUi = canActOcAttachNf;
+  const canEditOcInReview =
+    canActOcCorrection ||
+    (!!selectedOrder?.creator?.id && selectedOrder.creator.id === currentUserId);
 
   const canEditBoletoParcels =
     !!selectedOrder &&
     selectedOrder.status === 'APPROVED' &&
     selectedOrder.paymentType === 'BOLETO' &&
-    selectedOrder.creator?.id === currentUserId;
+    canActAttachBoletoUi;
 
   /** Editor de parcelas na caixa violeta (evita duplicar com Documentos). */
   const boletoParcelsEditorInAttachBox =
@@ -2962,7 +2975,7 @@ export function OcPurchaseOrdersPanel({
   const integratedListCount = displayedOrders.length;
   const showToolbarSearch =
     !hideSearch && (Boolean(onSearchChange) || activeTab === 'FINALIZADAS');
-  const showToolbarCnab = activeTab === 'APPROVED';
+  const showToolbarCnab = activeTab === 'APPROVED' && canActPaymentUi;
   const showToolbarPaymentDueFilter = activeTab === 'APPROVED';
   const showToolbarFinalizedExtras = activeTab === 'FINALIZADAS';
   const showHeaderToolbar =
@@ -3524,7 +3537,7 @@ export function OcPurchaseOrdersPanel({
                           <div className="inline-flex items-center justify-end gap-1 flex-wrap">
                             {!isIntegratedFlux && (
                               <>
-                                {o.status === 'PENDING_PROOF_VALIDATION' && (
+                                {o.status === 'PENDING_PROOF_VALIDATION' && canActValidateProofUi && (
                                   <button
                                     type="button"
                                     onClick={() => {
@@ -4107,7 +4120,7 @@ export function OcPurchaseOrdersPanel({
                     )}
                 </>
               )}
-              {selectedOrder.status === 'PENDING_PROOF_VALIDATION' && (
+              {selectedOrder.status === 'PENDING_PROOF_VALIDATION' && canActValidateProofUi && (
                 <div className="rounded-lg border border-violet-200 dark:border-violet-900/50 bg-violet-50/60 dark:bg-violet-950/25 px-3 py-3 space-y-2">
                   <p className="text-xs font-semibold text-violet-900 dark:text-violet-200 uppercase tracking-wide">
                     Validação do comprovante
@@ -4208,7 +4221,7 @@ export function OcPurchaseOrdersPanel({
                           {isStockSyncedDocumentUrl(nf.url) && (
                             <span className="text-[11px] text-teal-700 dark:text-teal-300">Estoque</span>
                           )}
-                          {canUserManageNfOnOrder(selectedOrder) && (
+                          {canUserManageNfOnOrder(selectedOrder, canActAttachNfUi) && (
                             <button
                               type="button"
                               disabled={removeNfMutation.isPending}
@@ -4224,7 +4237,7 @@ export function OcPurchaseOrdersPanel({
                   ) : (
                     <p className="text-xs text-gray-500 dark:text-gray-400">Nenhuma NF anexada ainda.</p>
                   )}
-                  {canUserManageNfOnOrder(selectedOrder) &&
+                  {canUserManageNfOnOrder(selectedOrder, canActAttachNfUi) &&
                     parseOcNfAttachments(selectedOrder.nfAttachments).length === 0 && (
                     <div className="flex flex-col sm:flex-row sm:items-center gap-2">
                       <input
@@ -4246,7 +4259,7 @@ export function OcPurchaseOrdersPanel({
                       </button>
                     </div>
                   )}
-                  {canUserManageNfOnOrder(selectedOrder) && (
+                  {canUserManageNfOnOrder(selectedOrder, canActAttachNfUi) && (
                     <button
                       type="button"
                       disabled={
@@ -4489,7 +4502,8 @@ export function OcPurchaseOrdersPanel({
                     </p>
                   )}
                 </div>
-                {selectedOrder.status === 'APPROVED' &&
+                {canActAttachBoletoUi &&
+                  selectedOrder.status === 'APPROVED' &&
                   selectedOrder.paymentType === 'BOLETO' &&
                   selectedOrder.paymentBoletoPhaseReleased &&
                   hasAnyPaymentBoletoAttachment(selectedOrder) && (
@@ -4643,11 +4657,12 @@ export function OcPurchaseOrdersPanel({
                           </span>
                           <button
                             type="button"
+                            disabled={!canActPaymentUi}
                             onClick={() => {
                               setEditingFinancialEntry(entry);
                               setFinancialEntryModalOpen(true);
                             }}
-                            className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded border border-amber-400/60 text-amber-900 dark:text-amber-200 hover:bg-amber-100/80 dark:hover:bg-amber-950/40"
+                            className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded border border-amber-400/60 text-amber-900 dark:text-amber-200 hover:bg-amber-100/80 dark:hover:bg-amber-950/40 disabled:opacity-50"
                           >
                             <Pencil className="w-3 h-3" />
                             Editar
@@ -4660,6 +4675,7 @@ export function OcPurchaseOrdersPanel({
                       Nenhum lançamento vinculado a esta OC. Clique no botão abaixo para registrar.
                     </p>
                   )}
+                  {canActPaymentUi ? (
                   <div className="flex flex-wrap gap-2">
                     <button
                       type="button"
@@ -4675,6 +4691,11 @@ export function OcPurchaseOrdersPanel({
                         : 'Registrar lançamento no Controle Financeiro'}
                     </button>
                   </div>
+                  ) : (
+                    <p className="text-xs text-amber-800/80 dark:text-amber-300/80">
+                      Sem permissão na aba Pagamento para registrar lançamentos.
+                    </p>
+                  )}
                 </div>
               )}
               {selectedOrder.status === 'APPROVED' &&
@@ -4730,7 +4751,7 @@ export function OcPurchaseOrdersPanel({
                                       icon={Receipt}
                                     />
                                   </p>
-                                ) : isFinanceOrAdminUser ? (
+                                ) : canActPaymentUi ? (
                                   <div className="flex flex-col sm:flex-row sm:items-center gap-2">
                                     <input
                                       type="file"
@@ -4777,7 +4798,7 @@ export function OcPurchaseOrdersPanel({
                         </div>
                       );
                     })()}
-                    {isFinanceOrAdminUser && (
+                    {canActPaymentUi && (
                       <>
                         <button
                           type="button"
@@ -4873,7 +4894,7 @@ export function OcPurchaseOrdersPanel({
                           : 'Anexar / substituir comprovante da parcela'}
                       </button>
                     </div>
-                    {isFinanceOrAdminUser && (
+                    {canActPaymentUi && (
                       <>
                         <button
                           type="button"
@@ -4954,7 +4975,7 @@ export function OcPurchaseOrdersPanel({
                         </p>
                       );
                     })()}
-                  {selectedOrder.status === 'PENDING_PROOF_CORRECTION' && !isFinanceOrAdminUser ? (
+                  {selectedOrder.status === 'PENDING_PROOF_CORRECTION' && !canActProofCorrectionUi ? (
                     <p className="text-xs text-amber-700 dark:text-amber-300">
                       Apenas o financeiro pode substituir o comprovante e reenviar para validação.
                     </p>
@@ -5138,7 +5159,7 @@ export function OcPurchaseOrdersPanel({
                   </button>
                 </>
               )}
-              {selectedOrder.status === 'IN_REVIEW' && selectedOrder.creator?.id === currentUserId && (
+              {selectedOrder.status === 'IN_REVIEW' && canEditOcInReview && (
                 <>
                   <button
                     type="button"
@@ -5177,7 +5198,7 @@ export function OcPurchaseOrdersPanel({
           editable={
             boletoParcelModalOrder.status === 'APPROVED' &&
             boletoParcelModalOrder.paymentType === 'BOLETO' &&
-            boletoParcelModalOrder.creator?.id === currentUserId
+            canActAttachBoletoUi
           }
           onClose={() => setBoletoParcelModalOrder(null)}
           onSaved={handleBoletoParcelsSaved}
@@ -5461,7 +5482,7 @@ export function OcPurchaseOrdersPanel({
               </button>
               {activeTab === 'ATTACH_BOLETO' &&
                 showInAttachBoletoTab(orderForActionMenu) &&
-                orderForActionMenu.creator?.id === currentUserId && (
+                canActAttachBoletoUi && (
                   <button
                     type="button"
                     role="menuitem"
@@ -5477,6 +5498,7 @@ export function OcPurchaseOrdersPanel({
                   </button>
                 )}
               {activeTab === 'ATTACH_BOLETO' &&
+                canActAttachBoletoUi &&
                 canSendCurrentBoletoToPayment(orderForActionMenu) &&
                 orderForActionMenu.paymentBoletoPhaseReleased !== true && (
                   <button
@@ -5502,7 +5524,8 @@ export function OcPurchaseOrdersPanel({
                     <span>Enviar para Pagamento</span>
                   </button>
                 )}
-              {orderForActionMenu.status === 'APPROVED' &&
+              {canActPaymentUi &&
+                orderForActionMenu.status === 'APPROVED' &&
                 activeTab !== 'ATTACH_BOLETO' &&
                 isOcInFinancialLaunchPhase(orderForActionMenu) &&
                 (() => {
@@ -5549,7 +5572,7 @@ export function OcPurchaseOrdersPanel({
                 )}
                 <span>Baixar OC</span>
               </button>
-              {canUserAttachNfOnOrder(orderForActionMenu, currentUserId) && (
+              {canUserAttachNfOnOrder(orderForActionMenu, canActAttachNfUi) && (
                 <label
                   role="menuitem"
                   className={`${OC_MENU_ITEM_CLASS} border-t border-gray-200 dark:border-gray-700 cursor-pointer`}
@@ -5581,7 +5604,7 @@ export function OcPurchaseOrdersPanel({
                   />
                 </label>
               )}
-              {canUserFinalizeOcWithNf(orderForActionMenu, currentUserId) && (
+              {canUserFinalizeOcWithNf(orderForActionMenu, canActAttachNfUi) && (
                 <button
                   type="button"
                   role="menuitem"
@@ -5608,7 +5631,7 @@ export function OcPurchaseOrdersPanel({
                   <span>Finalizar OC</span>
                 </button>
               )}
-              {orderForActionMenu.status === 'PENDING_PROOF_VALIDATION' && (
+              {orderForActionMenu.status === 'PENDING_PROOF_VALIDATION' && canActValidateProofUi && (
                 <button
                   type="button"
                   role="menuitem"
@@ -5688,8 +5711,9 @@ export function OcPurchaseOrdersPanel({
                 </>
               )}
               {orderForActionMenu.status === 'IN_REVIEW' &&
-                orderForActionMenu.creator?.id &&
-                currentUserId === orderForActionMenu.creator.id && (
+                (canActOcCorrection ||
+                  (!!orderForActionMenu.creator?.id &&
+                    currentUserId === orderForActionMenu.creator.id)) && (
                   <>
                     <button
                       type="button"
