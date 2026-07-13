@@ -42,13 +42,16 @@ export default function LoginPage() {
     try {
       const loginResponse = await authService.login(formData, rememberMe);
       persistUnbBranding(loginResponse.user?.employee?.costCenter);
+      // Limpa permissões/listas da sessão anterior (evita flash de admin → funcionário)
+      queryClient.removeQueries({ queryKey: ['me-permissions'] });
+      queryClient.removeQueries({ queryKey: ['contracts'] });
+      queryClient.removeQueries({ queryKey: ['permission-contracts-list'] });
+      queryClient.removeQueries({ queryKey: ['permission-users'] });
       // Hidrata o cache com o user do login — evita tela de loading esperando /auth/me
       queryClient.setQueryData(['user'], {
         success: true,
         data: loginResponse.user,
       });
-      // Permissões ainda precisam ser buscadas (não vêm no login)
-      void queryClient.invalidateQueries({ queryKey: ['me-permissions'] });
       toast.success('Login realizado com sucesso!');
       router.push('/ponto/home');
     } catch (error: any) {

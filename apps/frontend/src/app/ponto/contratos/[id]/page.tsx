@@ -88,7 +88,6 @@ import {
   isGeneratedPleito,
 } from '@/lib/contractHistoricoPleitos';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
-import { mapUsersToEmployeeOptions } from '@/lib/employeeSelectOptions';
 import {
   formatAjusteValorInput,
   maskAjusteValorInput,
@@ -909,8 +908,10 @@ export default function ContractDetailPage() {
   const queryClient = useQueryClient();
   const {
     isAdministrator,
+    isElevatedUser,
     can,
     canAction,
+    permissions,
     canAccessContractOrcamentoTab,
     canAccessContractRelatoriosTab,
     canAccessContractOrdemServicoTab,
@@ -923,9 +924,9 @@ export default function ContractDetailPage() {
   const canAccessRelatorios = canAccessContractRelatoriosTab(contractId);
   const canAccessOrdemServicoModulo = canAccessContractOrdemServicoTab(contractId);
   const canAccessProducaoSemanalModulo = canAccessContractProducaoSemanalTab(contractId);
-  const canCreateContrato = isAdministrator || canAction(pk('/ponto/contratos'), 'criar');
-  const canEditContrato = isAdministrator || canAction(pk('/ponto/contratos'), 'editar');
-  const canDeleteContrato = isAdministrator || canAction(pk('/ponto/contratos'), 'excluir');
+  const canCreateContrato = isElevatedUser || permissions.canCreateContracts;
+  const canEditContrato = isElevatedUser || permissions.canEditContracts;
+  const canDeleteContrato = isElevatedUser || permissions.canDeleteContracts;
 
   const containerRef = useRef<HTMLDivElement | null>(null);
 
@@ -1015,18 +1016,6 @@ export default function ContractDetailPage() {
       const res = await api.get('/auth/me');
       return res.data;
     }
-  });
-
-  const { data: productionEmployeesData, isLoading: loadingProductionEmployees } = useQuery({
-    queryKey: ['production-responsible-options'],
-    queryFn: async () => {
-      const res = await api.get('/users', {
-        params: { page: 1, limit: 10000, status: 'all' },
-      });
-      return res.data;
-    },
-    enabled: showProductionModal,
-    retry: false,
   });
 
   const { data: contractData, isLoading: loadingContract } = useQuery({
@@ -1586,26 +1575,8 @@ export default function ContractDetailPage() {
     [divSeOptions]
   );
 
-  const productionResponsibleSelectOptions = useMemo(
-    () => {
-      const list = Array.isArray(productionEmployeesData?.data) ? productionEmployeesData.data : [];
-      return labeledToSelectOptions(
-        mapUsersToEmployeeOptions(list).map((employee) => ({
-          value: employee.name,
-          label: employee.name,
-        }))
-      );
-    },
-    [productionEmployeesData]
-  );
-
   const defaultProductionResponsiblePerson = useMemo(() => {
-    const name = String(userData?.data?.name ?? '').trim();
-    if (!name) return '';
-    const position = String(userData?.data?.employee?.position ?? '').trim();
-    if (position === 'Administrador') return '';
-    if (name.localeCompare('Administrador', 'pt-BR', { sensitivity: 'accent' }) === 0) return '';
-    return name;
+    return String(userData?.data?.name ?? '').trim();
   }, [userData]);
 
   const billablePleitos = useMemo(
@@ -2648,7 +2619,9 @@ export default function ContractDetailPage() {
       return;
     }
     const value = parseCurrencyInput(productionForm.weeklyProductionValue);
-    if (!productionForm.divSe.trim() || !productionForm.responsiblePerson.trim()) {
+    const responsiblePerson =
+      productionForm.responsiblePerson.trim() || defaultProductionResponsiblePerson;
+    if (!productionForm.divSe.trim() || !responsiblePerson) {
       toast.error('Preencha todos os campos obrigatórios');
       return;
     }
@@ -2661,7 +2634,7 @@ export default function ContractDetailPage() {
       fillingDate,
       divSe: productionForm.divSe.trim(),
       weeklyProductionValue: value,
-      responsiblePerson: productionForm.responsiblePerson.trim()
+      responsiblePerson,
     });
   };
 
@@ -5539,20 +5512,6 @@ export default function ContractDetailPage() {
                       />
                     </div>
                   </div>
-                  <div>
-                    <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Responsável pelo Preenchimento *</label>
-                    <StringSingleSelectDropdown
-                      value={productionForm.responsiblePerson}
-                      onChange={(responsiblePerson) => setProductionForm({ ...productionForm, responsiblePerson })}
-                      options={productionResponsibleSelectOptions}
-                      allowEmpty={false}
-                      disabled={loadingProductionEmployees}
-                      placeholder={loadingProductionEmployees ? 'Carregando pessoas...' : 'Selecionar responsável'}
-                      searchPlaceholder="Pesquisar pessoa..."
-                      emptyOptionsMessage="Nenhuma pessoa encontrada."
-                      className="w-full"
-                    />
-                  </div>
                   <div className="flex justify-end gap-3 pt-4 border-t border-gray-200 dark:border-gray-700">
                     <button
                       type="button"
@@ -5563,7 +5522,7 @@ export default function ContractDetailPage() {
                     </button>
                     <button
                       type="submit"
-                      disabled={createProductionMutation.isPending || loadingProductionEmployees}
+                      disabled={createProductionMutation.isPending}
                       className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 disabled:opacity-50"
                     >
                       {createProductionMutation.isPending ? 'Salvando...' : 'Cadastrar'}

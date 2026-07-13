@@ -3,12 +3,12 @@
 // Página padrão de entrada para todos os usuários autenticados (home minimalista).
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { MainLayout } from '@/components/layout/MainLayout';
 import api from '@/lib/api';
 import { authService } from '@/lib/auth';
 import { useBrandingLogo } from '@/hooks/useBrandingLogo';
+import { useLogout } from '@/hooks/useLogout';
 
 function getGreeting(date: Date): string {
   const hour = date.getHours();
@@ -30,7 +30,7 @@ function getStoredUserQueryData() {
 }
 
 export default function HomePage() {
-  const router = useRouter();
+  const handleLogout = useLogout();
   const { logoSrc, logoAlt } = useBrandingLogo();
   const [now, setNow] = useState<Date>(() => new Date());
 
@@ -57,12 +57,6 @@ export default function HomePage() {
     const timer = setInterval(() => setNow(new Date()), 60_000);
     return () => clearInterval(timer);
   }, []);
-
-  const handleLogout = () => {
-    localStorage.removeItem('token');
-    sessionStorage.removeItem('token');
-    router.push('/auth/login');
-  };
 
   const user = userData?.data || authService.getUser() || { name: 'Usuário', role: 'EMPLOYEE' };
   const firstName = (user?.name || 'Usuário').split(' ')[0] || 'Usuário';

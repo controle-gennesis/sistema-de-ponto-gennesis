@@ -413,22 +413,23 @@ export function EmployeeList({
     XLSX.writeFile(wb, fileName);
   };
 
-  // Buscar funcionários - buscar todos para filtrar no frontend
-  // O interceptor do axios já trata a autenticação e redireciona para login se necessário
+  // Buscar funcionários (cap alinhado ao backend; filtros adicionais no cliente)
   const { data: employeesData, isLoading, error } = useQuery({
     queryKey: ['employees', statusFilter],
     queryFn: async () => {
       const res = await api.get('/users', {
         params: { 
           page: 1,
-          limit: 10000, // Buscar muitos para filtrar no frontend
+          limit: 500,
           status: statusFilter === 'all' ? 'all' : statusFilter
         }
       });
       return res.data;
     },
-    retry: false, // Não tentar novamente em caso de erro
-    throwOnError: false // Não lançar erro - o interceptor do axios já trata autenticação
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+    retry: false,
+    throwOnError: false,
   });
 
   // Buscar registros de ponto do funcionário selecionado

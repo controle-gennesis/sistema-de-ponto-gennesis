@@ -609,14 +609,16 @@ export function UserPermissionsEditor({
     queryKey: ['permission-contracts-list'],
     queryFn: async () => (await api.get('/permissions/contracts')).data?.data as ContractOption[],
     enabled: (isPositionMode || !!userId) && !!userPermissionData && !userPermissionData.isAdmin,
-    refetchInterval: 12_000,
-    refetchOnWindowFocus: true,
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
   });
 
   const { data: permissionUsers = [] } = useQuery({
     queryKey: ['permission-users'],
     queryFn: async () => (await api.get('/permissions/users')).data?.data as PermissionUserListItem[],
     enabled: !isPositionMode && !!userId,
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
     retry: false,
   });
   const copyableUsers = useMemo(

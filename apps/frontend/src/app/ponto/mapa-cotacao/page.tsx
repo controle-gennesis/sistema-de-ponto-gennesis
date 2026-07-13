@@ -10,12 +10,7 @@ import toast from 'react-hot-toast';
 import api from '@/lib/api';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
-import { PaymentConditionSelect, resolvePaymentConditionMeta, type PaymentConditionRow } from '@/components/oc/PaymentConditionSelect';
-import {
-  OcBoletoCreationFields,
-  resizeOcBoletoCreationSlots,
-  type OcBoletoCreationSlot
-} from '@/components/oc/OcBoletoCreationFields';
+import { PaymentConditionSelect, type PaymentConditionRow } from '@/components/oc/PaymentConditionSelect';
 import { OC_PIX_KEY_TYPE_OPTIONS } from '@/components/oc/OcPurchaseOrderFormFields';
 import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
 import { MultiSelectSearchDropdown } from '@/components/ui/MultiSelectSearchDropdown';
@@ -209,7 +204,6 @@ function emptyPaymentDraft() {
     pixKey: '',
     observations: '',
     amountToPayStr: '',
-    boletoSlots: [{ url: '', name: '' }] as OcBoletoCreationSlot[]
   };
 }
 
@@ -249,7 +243,6 @@ export default function MapaCotacaoPage() {
         pixKey: string;
         observations: string;
         amountToPayStr: string;
-        boletoSlots: OcBoletoCreationSlot[];
       }
     >
   >({});
@@ -650,14 +643,11 @@ export default function MapaCotacaoPage() {
             pixKey: '',
             observations: '',
             amountToPayStr: totals ? String(totals.amountToPay) : '',
-            boletoSlots: [{ url: '', name: '' }]
           };
 
           const draft = paymentDraftBySupplier[supplierId] ?? fallbackDraft;
           const paymentType = draft.paymentType ?? OC_TYPE_AVISTA;
           const paymentCondition = draft.paymentCondition ?? paymentConditionDefault(paymentType);
-          const boletoMeta = resolvePaymentConditionMeta(paymentCondition, boletoPaymentConditions);
-          const boletoSlots = draft.boletoSlots ?? [{ url: '', name: '' }];
 
           if (paymentType === OC_TYPE_AVISTA) {
             if (!draft.paymentDetails?.trim()) {
@@ -669,17 +659,6 @@ export default function MapaCotacaoPage() {
             if (!draft.pixKey?.trim()) {
               throw new Error(`Informe a chave PIX para "${supplierName}".`);
             }
-          } else if (boletoMeta.parcelCount > 1) {
-            if (
-              boletoSlots.length !== boletoMeta.parcelCount ||
-              !boletoSlots.every((s) => s.url.trim())
-            ) {
-              throw new Error(
-                `Anexe os ${boletoMeta.parcelCount} boletos para "${supplierName}" (um por parcela).`
-              );
-            }
-          } else if (!boletoSlots[0]?.url.trim()) {
-            throw new Error(`Anexe o boleto para "${supplierName}".`);
           }
 
           paymentBySupplierPayload.push({
@@ -691,19 +670,6 @@ export default function MapaCotacaoPage() {
             pixKey: paymentType === OC_TYPE_AVISTA ? draft.pixKey?.trim() || undefined : undefined,
             observations: draft.observations?.trim() || undefined,
             amountToPay: totals?.amountToPay,
-            ...(paymentType === OC_TYPE_BOLETO && boletoMeta.parcelCount > 1
-              ? {
-                  creationBoletoInstallments: boletoSlots.map((s) => ({
-                    boletoUrl: s.url.trim(),
-                    boletoName: s.name.trim() || undefined
-                  }))
-                }
-              : paymentType === OC_TYPE_BOLETO
-                ? {
-                    boletoAttachmentUrl: boletoSlots[0]?.url.trim() || undefined,
-                    boletoAttachmentName: boletoSlots[0]?.name.trim() || undefined
-                  }
-                : {})
           });
         }
 
@@ -1111,12 +1077,6 @@ export default function MapaCotacaoPage() {
                                 const paymentConditionValue =
                                   paymentDraftBySupplier[sid]?.paymentCondition ??
                                   paymentConditionDefault(payType);
-                                const boletoMeta = resolvePaymentConditionMeta(
-                                  paymentConditionValue,
-                                  boletoPaymentConditions
-                                );
-                                const boletoSlots =
-                                  paymentDraftBySupplier[sid]?.boletoSlots ?? [{ url: '', name: '' }];
 
                                 return (
                                   <div
@@ -1247,7 +1207,6 @@ export default function MapaCotacaoPage() {
                                                     ...(prev[sid] ?? emptyPaymentDraft()),
                                                     paymentType: OC_TYPE_AVISTA,
                                                     paymentCondition: paymentConditionDefault(OC_TYPE_AVISTA),
-                                                    boletoSlots: [{ url: '', name: '' }]
                                                   }
                                                 }));
                                               }}
@@ -1268,7 +1227,6 @@ export default function MapaCotacaoPage() {
                                                     paymentCondition: paymentConditionDefault(OC_TYPE_BOLETO),
                                                     pixKeyType: '',
                                                     pixKey: '',
-                                                    boletoSlots: [{ url: '', name: '' }]
                                                   }
                                                 }));
                                               }}
@@ -1292,16 +1250,11 @@ export default function MapaCotacaoPage() {
                                             paymentType={payType === OC_TYPE_AVISTA ? 'AVISTA' : 'BOLETO'}
                                             value={paymentConditionValue}
                                             onChange={(v) => {
-                                              const meta = resolvePaymentConditionMeta(v, boletoPaymentConditions);
                                               setPaymentDraftBySupplier((prev) => ({
                                                 ...prev,
                                                 [sid]: {
                                                   ...(prev[sid] ?? emptyPaymentDraft()),
                                                   paymentCondition: v,
-                                                  boletoSlots: resizeOcBoletoCreationSlots(
-                                                    meta.parcelCount,
-                                                    prev[sid]?.boletoSlots
-                                                  )
                                                 }
                                               }));
                                             }}
@@ -1424,23 +1377,9 @@ export default function MapaCotacaoPage() {
                                             </div>
                                           </div>
                                         ) : (
-                                          <OcBoletoCreationFields
-                                            idPrefix={`boleto-${sid}`}
-                                            labelClassName={mapLabelCls}
-                                            parcelCount={boletoMeta.parcelCount}
-                                            parcelDueDays={boletoMeta.parcelDueDays}
-                                            slots={boletoSlots}
-                                            onChange={(next) => {
-                                              setPaymentDraftBySupplier((prev) => ({
-                                                ...prev,
-                                                [sid]: {
-                                                  ...(prev[sid] ?? emptyPaymentDraft()),
-                                                  boletoSlots: next
-                                                }
-                                              }));
-                                            }}
-                                            disabled={isGenerating}
-                                          />
+                                          <p className="rounded-lg border border-dashed border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-600 dark:border-gray-600 dark:bg-gray-800/50 dark:text-gray-400">
+                                            Os boletos serão anexados depois, na Ordem de Compra.
+                                          </p>
                                         )}
 
                                         <div>

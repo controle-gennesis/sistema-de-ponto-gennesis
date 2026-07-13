@@ -40,6 +40,7 @@ import toast from 'react-hot-toast';
 import api from '@/lib/api';
 import { useCostCenters } from '@/hooks/useCostCenters';
 import { usePermissions } from '@/hooks/usePermissions';
+import { useLogout } from '@/hooks/useLogout';
 import { PERMISSION_ACCESS_ACTION, pathToModuleKey } from '@sistema-ponto/permission-modules';
 
 interface CostCenter {
@@ -186,7 +187,16 @@ function ContractAccessCheckbox({
 
 export default function ContratosPage() {
   const router = useRouter();
-  const { isAdministrator, can, canAction } = usePermissions();
+  const {
+    isAdministrator,
+    isElevatedUser,
+    isLoading: loadingPermissions,
+    can,
+    canAction,
+    permissions,
+    canAccessContract,
+    allowedContractIds,
+  } = usePermissions();
   const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState('');
   const [showForm, setShowForm] = useState(false);
@@ -216,9 +226,9 @@ export default function ContratosPage() {
     setPermissionTab('gerais');
     setShowContractsTab(false);
   };
-  const canCreateContrato = isAdministrator || canAction(pk('/ponto/contratos'), 'criar');
-  const canEditContrato = isAdministrator || canAction(pk('/ponto/contratos'), 'editar');
-  const canDeleteContrato = isAdministrator || canAction(pk('/ponto/contratos'), 'excluir');
+  const canCreateContrato = isElevatedUser || permissions.canCreateContracts;
+  const canEditContrato = isElevatedUser || permissions.canEditContracts;
+  const canDeleteContrato = isElevatedUser || permissions.canDeleteContracts;
   const canManageUserPermissions =
     isAdministrator ||
     can(pk('/ponto/controle/alterar-permissoes')) ||
@@ -238,11 +248,7 @@ export default function ContratosPage() {
   const { costCenters, isLoading: loadingCostCenters } = useCostCenters();
   const costCentersList = (Array.isArray(costCenters) ? costCenters : []) as CostCenter[];
 
-  const handleLogout = () => {
-    localStorage.removeItem('token');
-    sessionStorage.removeItem('token');
-    router.push('/auth/login');
-  };
+  const handleLogout = useLogout();
 
   const { data: userData, isLoading: loadingUser } = useQuery({
     queryKey: ['user'],
@@ -467,7 +473,14 @@ export default function ContratosPage() {
     deleteMutation.mutate(id);
   };
 
-  const contracts = contractsData?.data || [];
+  const contracts = useMemo(() => {
+    const list = (contractsData?.data || []) as Contract[];
+    if (isElevatedUser) return list;
+    // Enquanto permissões carregam, não mostrar lista (evita flash de todos os contratos)
+    if (loadingPermissions) return [];
+    if (allowedContractIds.length === 0) return [];
+    return list.filter((c) => canAccessContract(c.id));
+  }, [contractsData?.data, isElevatedUser, loadingPermissions, allowedContractIds, canAccessContract]);
   const user = userData?.data || { name: 'Usuário', role: 'EMPLOYEE' };
   const totalFiltered = contracts.length;
   const startItem = totalFiltered > 0 ? 1 : 0;

@@ -78,15 +78,16 @@ export function usePermissions() {
   const isAdministrator = userPosition === 'Administrador';
 
   const { data: permissionData, isPending: permissionsPending } = useQuery({
-    queryKey: ['me-permissions'],
+    // Isola cache por usuário — evita flash de permissões do login anterior
+    queryKey: ['me-permissions', user?.id ?? 'anonymous'],
     queryFn: async () => {
       const res = await api.get('/permissions/me');
       return res.data?.data;
     },
-    enabled: !!user,
+    enabled: !!user?.id,
   });
 
-  const isLoading = isLoadingUser || (!!user && permissionsPending);
+  const isLoading = isLoadingUser || (!!user?.id && permissionsPending);
 
   const allowedSet = new Set<string>(
     ((permissionData?.permissions || []) as PermissionItem[])
@@ -129,12 +130,14 @@ export function usePermissions() {
     fluigApproverNameKeys.length > 0;
 
   const canAccessFluigApprover = (nameKey: string) => {
-    if (permissionsPending || fluigApproverFullAccess) return true;
+    if (permissionsPending) return false;
+    if (fluigApproverFullAccess) return true;
     return fluigApproverNameKeySet.has(resolveWorkflowApproverNameKey(nameKey));
   };
 
   const filterFluigApprovers = <T extends { nameKey: string }>(items: readonly T[]): T[] => {
-    if (permissionsPending || fluigApproverFullAccess) return [...items];
+    if (permissionsPending) return [];
+    if (fluigApproverFullAccess) return [...items];
     return items.filter((item) => fluigApproverNameKeySet.has(item.nameKey));
   };
 
@@ -176,8 +179,10 @@ export function usePermissions() {
     userDepartment?.toLowerCase().includes('juridico');
 
   const employeesKey = pk('/ponto/funcionarios');
+  const contractsKey = pk('/ponto/contratos');
   /** Ações granulares persistidas além do `acesso` do módulo (matriz Ver/Criar/Editar/Excluir). */
   const EMPLOYEE_MODULE_CRUD = ['ver', 'criar', 'editar', 'excluir'] as const;
+  const CONTRACT_MODULE_CRUD = ['ver', 'criar', 'editar', 'excluir'] as const;
   const isElevatedUser = isAdministrator || !!permissionData?.isAdmin;
   const hasEmployeeAcesso = can(employeesKey);
   /**
@@ -208,6 +213,20 @@ export function usePermissions() {
   const canDeleteEmployees = hasEmployeeGranular
     ? canAction(employeesKey, 'excluir')
     : hasEmployeeAcesso;
+
+  const hasContractAcesso = can(contractsKey);
+  const hasContractGranular =
+    !isElevatedUser &&
+    CONTRACT_MODULE_CRUD.some((a) => allowedActionSet.has(`${contractsKey}:${a}`));
+  const canCreateContracts = hasContractGranular
+    ? canAction(contractsKey, 'criar')
+    : hasContractAcesso;
+  const canEditContracts = hasContractGranular
+    ? canAction(contractsKey, 'editar')
+    : hasContractAcesso;
+  const canDeleteContracts = hasContractGranular
+    ? canAction(contractsKey, 'excluir')
+    : hasContractAcesso;
 
   /** Rescisão / alteração função-salário: admin, equipe DP (gerenciar), Controle «criar solicitações restritas» ou Gestor DP no contrato. */
   const canCreateSensitiveDpRequestType = (contractId: string | null | undefined) => {
@@ -344,9 +363,9 @@ export function usePermissions() {
     canViewBirthdays: true,
     canRegisterTime: true,
     canViewDashboard: can(pk('/ponto/dashboard')),
-    canCreateContracts: canAction(pk('/ponto/contratos'), 'criar'),
-    canEditContracts: canAction(pk('/ponto/contratos'), 'editar'),
-    canDeleteContracts: canAction(pk('/ponto/contratos'), 'excluir'),
+    canCreateContracts,
+    canEditContracts,
+    canDeleteContracts,
   };
 
   return {
@@ -564,7 +583,7 @@ export function useRoutePermission(route: string) {
   };
 
   return {
-    hasAccess: routePermissions[route] ?? true,
+    hasAccess: routePermissions[route] ?? false,
     isLoading: false,
     canAccessContract,
   };
