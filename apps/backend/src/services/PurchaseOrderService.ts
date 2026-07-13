@@ -500,28 +500,36 @@ async function generateOrderNumbers(tx: Prisma.TransactionClient, count: number)
   return Array.from({ length: count }, (_, i) => `${prefix}${(n + i).toString().padStart(4, '0')}`);
 }
 
-type PreparedOcCreate = {
-  createDataBase: {
-    orderNumber?: string;
-    materialRequestId: string | null;
-    quoteMapId: string | null;
-    supplierId: string;
-    expectedDelivery: Date | null;
-    deliveryAddress: string | null;
-    paymentType: string | null;
-    paymentCondition: string | null;
-    paymentDetails: string | null;
-    pixKeyType: string | null;
-    pixKey: string | null;
-    boletoAttachmentUrl: string | null;
-    boletoAttachmentName: string | null;
-    paymentBoletoInstallments?: Prisma.InputJsonValue;
-    freightAmount: Decimal;
-    amountToPay: Decimal;
-    notes: string | null;
-    createdBy: string;
-    items: { create: Array<Record<string, unknown>> };
-  };
+type PreparedOcItemCreate = {
+  materialRequestItemId: string | null;
+  materialId: string;
+  quantity: Decimal;
+  unit: string;
+  unitPrice: Decimal;
+  totalPrice: Decimal;
+  notes: string | null;
+};
+
+type PreparedOcCreateData = {
+  orderNumber?: string;
+  materialRequestId: string | null;
+  quoteMapId: string | null;
+  supplierId: string;
+  expectedDelivery: Date | null;
+  deliveryAddress: string | null;
+  paymentType: string | null;
+  paymentCondition: string | null;
+  paymentDetails: string | null;
+  pixKeyType: string | null;
+  pixKey: string | null;
+  boletoAttachmentUrl: string | null;
+  boletoAttachmentName: string | null;
+  paymentBoletoInstallments?: Prisma.InputJsonValue;
+  freightAmount: Decimal;
+  amountToPay: Decimal;
+  notes: string | null;
+  createdBy: string;
+  items: { create: PreparedOcItemCreate[] };
 };
 
 export type CreatePurchaseOrderOptions = {
@@ -631,7 +639,7 @@ export class PurchaseOrderService {
     data: CreatePurchaseOrderData,
     userId: string,
     options?: CreatePurchaseOrderOptions,
-  ): Promise<PreparedOcCreate['createDataBase']> {
+  ): Promise<PreparedOcCreateData> {
     if (!data.supplierId || !data.items?.length) {
       throw new Error('Fornecedor e itens são obrigatórios');
     }
@@ -773,11 +781,20 @@ export class PurchaseOrderService {
 
   private async createRowInTx(
     tx: Prisma.TransactionClient,
-    createDataBase: PreparedOcCreate['createDataBase'] & { orderNumber: string },
+    createDataBase: PreparedOcCreateData & { orderNumber: string },
   ) {
+    const toUnchecked = (
+      row: PreparedOcCreateData & { orderNumber: string },
+      status: string,
+    ): Prisma.PurchaseOrderUncheckedCreateInput =>
+      ({
+        ...row,
+        status: status as any,
+      }) as Prisma.PurchaseOrderUncheckedCreateInput;
+
     try {
       return await tx.purchaseOrder.create({
-        data: { ...createDataBase, status: 'PENDING_COMPRAS' as any },
+        data: toUnchecked(createDataBase, 'PENDING_COMPRAS'),
         include: purchaseOrderIncludeCreate,
       });
     } catch (error: any) {
@@ -785,16 +802,14 @@ export class PurchaseOrderService {
       const isPrismaValidation = error?.name === 'PrismaClientValidationError' && msg;
       if (isPrismaValidation && msg.includes('PENDING_COMPRAS')) {
         return await tx.purchaseOrder.create({
-          data: { ...createDataBase, status: 'PENDING' as any },
+          data: toUnchecked(createDataBase, 'PENDING'),
           include: purchaseOrderIncludeCreate,
         });
       }
       if (isPrismaValidation && msg.includes('quoteMapId') && createDataBase.quoteMapId) {
-        const { quoteMapId: _omit, ...withoutQuote } = createDataBase as typeof createDataBase & {
-          quoteMapId?: string | null;
-        };
+        const { quoteMapId: _omit, ...withoutQuote } = createDataBase;
         return await tx.purchaseOrder.create({
-          data: { ...withoutQuote, status: 'PENDING_COMPRAS' as any },
+          data: toUnchecked({ ...withoutQuote, quoteMapId: null }, 'PENDING_COMPRAS'),
           include: purchaseOrderIncludeCreate,
         });
       }
@@ -824,7 +839,7 @@ export class PurchaseOrderService {
       return [await this.create(entries[0], userId, options)];
     }
 
-    const prepared = [];
+    const prepared: PreparedOcCreateData[] = [];
     for (const data of entries) {
       prepared.push(await this.prepareCreatePayload(data, userId, options));
     }
@@ -834,7 +849,7 @@ export class PurchaseOrderService {
         `SELECT pg_advisory_xact_lock(${PURCHASE_ORDER_NUMBER_ADVISORY_LOCK})`,
       );
       const orderNumbers = await generateOrderNumbers(tx, prepared.length);
-      const created = [];
+      const created: Awaited<ReturnType<PurchaseOrderService['createRowInTx']>>[] = [];
       for (let i = 0; i < prepared.length; i++) {
         created.push(await this.createRowInTx(tx, { ...prepared[i], orderNumber: orderNumbers[i] }));
       }
