@@ -8,6 +8,7 @@ import {
   ClipboardList,
   Eye,
   Filter,
+  Loader2,
   MoreVertical,
   Search,
   Wrench,
@@ -127,6 +128,7 @@ export function RmApprovalsSection() {
   const invalidateRmQueries = async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ['approvals', 'material-requests'] }),
+      queryClient.invalidateQueries({ queryKey: ['material-request-detail'] }),
       queryClient.invalidateQueries({ queryKey: ['material-requests-manage'], refetchType: 'all' }),
       queryClient.invalidateQueries({ queryKey: ['material-requests'], refetchType: 'all' }),
       queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] }),
@@ -181,14 +183,35 @@ export function RmApprovalsSection() {
     },
   });
 
-  const openRequestDetail = async (request: MaterialRequest) => {
-    try {
-      const res = await api.get(`/material-requests/${request.id}`);
-      setDetailRequest((res.data?.data ?? res.data) as MaterialRequest);
-    } catch {
-      toast.error('Erro ao carregar detalhes da RM');
-    }
+  /** Abre na hora com o dado da lista; itens completos entram em background (igual OC). */
+  const openRequestDetail = (request: MaterialRequest) => {
+    setDetailRequest(request);
+    void queryClient.prefetchQuery({
+      queryKey: ['material-request-detail', request.id],
+      queryFn: async () => {
+        const res = await api.get(`/material-requests/${request.id}`);
+        return (res.data?.data ?? res.data) as MaterialRequest;
+      },
+      staleTime: 60_000,
+    });
   };
+
+  const { data: detailFresh, isFetching: isFetchingDetail } = useQuery({
+    queryKey: ['material-request-detail', detailRequest?.id],
+    queryFn: async () => {
+      const res = await api.get(`/material-requests/${detailRequest!.id}`);
+      return (res.data?.data ?? res.data) as MaterialRequest;
+    },
+    enabled: !!detailRequest?.id,
+    staleTime: 60_000,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+  });
+
+  useEffect(() => {
+    if (!detailFresh || detailFresh.id !== detailRequest?.id) return;
+    setDetailRequest(detailFresh);
+  }, [detailFresh, detailRequest?.id]);
 
   if (!canApproveMaterialRequests) {
     return null;
@@ -359,12 +382,20 @@ export function RmApprovalsSection() {
       {detailRequest && (
         <Modal isOpen onClose={() => setDetailRequest(null)} title="Detalhes da Requisição" size="lg">
           <div className="space-y-4 text-sm">
-            <div>
-              <p className="text-xs text-gray-500 dark:text-gray-400">Número</p>
-              <p className="font-medium text-gray-900 dark:text-gray-100">
-                {formatRmListDisplayId(detailRequest.requestNumber) ||
-                  `#${detailRequest.id.slice(0, 8)}`}
-              </p>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs text-gray-500 dark:text-gray-400">Número</p>
+                <p className="font-medium text-gray-900 dark:text-gray-100">
+                  {formatRmListDisplayId(detailRequest.requestNumber) ||
+                    `#${detailRequest.id.slice(0, 8)}`}
+                </p>
+              </div>
+              {isFetchingDetail ? (
+                <span className="inline-flex items-center gap-1 text-xs text-gray-400">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  Atualizando…
+                </span>
+              ) : null}
             </div>
             <div>
               <p className="text-xs text-gray-500 dark:text-gray-400">Solicitante</p>
@@ -390,9 +421,15 @@ export function RmApprovalsSection() {
                     {materialItemLabel(item)} — {item.quantity} {item.unit}
                   </li>
                 ))}
-                {(!detailRequest.items || detailRequest.items.length === 0) && (
-                  <li className="text-gray-500 dark:text-gray-400">Nenhum item</li>
-                )}
+                {(!detailRequest.items || detailRequest.items.length === 0) &&
+                  (isFetchingDetail ? (
+                    <li className="inline-flex items-center gap-1.5 text-gray-500 dark:text-gray-400">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      Carregando itens…
+                    </li>
+                  ) : (
+                    <li className="text-gray-500 dark:text-gray-400">Nenhum item</li>
+                  ))}
               </ul>
             </div>
           </div>
