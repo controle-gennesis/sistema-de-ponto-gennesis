@@ -6,8 +6,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { MainLayout } from '@/components/layout/MainLayout';
-import { Loading } from '@/components/ui/Loading';
 import api from '@/lib/api';
+import { authService } from '@/lib/auth';
 import { useBrandingLogo } from '@/hooks/useBrandingLogo';
 
 function getGreeting(date: Date): string {
@@ -23,24 +23,38 @@ function capitalizeFirst(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
+function getStoredUserQueryData() {
+  const stored = authService.getUser();
+  if (!stored) return undefined;
+  return { success: true, data: stored };
+}
+
 export default function HomePage() {
   const router = useRouter();
   const { logoSrc, logoAlt } = useBrandingLogo();
   const [now, setNow] = useState<Date>(() => new Date());
 
-  const { data: userData, isLoading: loadingUser } = useQuery({
+  // Não bloqueia o shell: usa cache/storage e atualiza /auth/me em background
+  const { data: userData } = useQuery({
     queryKey: ['user'],
     queryFn: async () => {
-      const res = await api.get('/auth/me');
+      const res = await api.get('/auth/me', {
+        headers: {
+          'Cache-Control': 'no-cache',
+          Pragma: 'no-cache',
+        },
+      });
       return res.data;
     },
     staleTime: 5 * 60 * 1000,
     gcTime: 10 * 60 * 1000,
     retry: 1,
+    placeholderData: () => getStoredUserQueryData(),
   });
 
   useEffect(() => {
-    const timer = setInterval(() => setNow(new Date()), 1000);
+    // Atualiza o relógio a cada minuto (suficiente para a home)
+    const timer = setInterval(() => setNow(new Date()), 60_000);
     return () => clearInterval(timer);
   }, []);
 
@@ -50,7 +64,7 @@ export default function HomePage() {
     router.push('/auth/login');
   };
 
-  const user = userData?.data || { name: 'Usuário', role: 'EMPLOYEE' };
+  const user = userData?.data || authService.getUser() || { name: 'Usuário', role: 'EMPLOYEE' };
   const firstName = (user?.name || 'Usuário').split(' ')[0] || 'Usuário';
 
   const greeting = getGreeting(now);
@@ -68,13 +82,8 @@ export default function HomePage() {
     return now.toLocaleTimeString('pt-BR', {
       hour: '2-digit',
       minute: '2-digit',
-      second: '2-digit',
     });
   }, [now]);
-
-  if (loadingUser) {
-    return <Loading message="Carregando..." fullScreen size="lg" />;
-  }
 
   return (
     <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>

@@ -42,11 +42,13 @@ export default function LoginPage() {
     try {
       const loginResponse = await authService.login(formData, rememberMe);
       persistUnbBranding(loginResponse.user?.employee?.costCenter);
-      // Invalida só o que depende da sessão (evita limpar cache útil de outras queries)
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['user'] }),
-        queryClient.invalidateQueries({ queryKey: ['me-permissions'] }),
-      ]);
+      // Hidrata o cache com o user do login — evita tela de loading esperando /auth/me
+      queryClient.setQueryData(['user'], {
+        success: true,
+        data: loginResponse.user,
+      });
+      // Permissões ainda precisam ser buscadas (não vêm no login)
+      void queryClient.invalidateQueries({ queryKey: ['me-permissions'] });
       toast.success('Login realizado com sucesso!');
       router.push('/ponto/home');
     } catch (error: any) {

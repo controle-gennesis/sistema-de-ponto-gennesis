@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useCallback, useLayoutEffect, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { usePathname } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
 import {
@@ -8,8 +9,8 @@ import {
   shouldForceSidebarCollapsed,
   SIDEBAR_TRANSITION_CLASS,
 } from '@/lib/sidebarStorage';
+import { SHOW_CHAT_FLOAT_BUTTON } from '@/lib/chatFloatButton';
 import { Sidebar } from './Sidebar';
-import { ChatWidget } from '../chat/ChatWidget';
 import { ChangePasswordModal } from '@/components/ui/ChangePasswordModal';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useLogout } from '@/hooks/useLogout';
@@ -18,6 +19,11 @@ import { useChatSounds } from '@/hooks/useChatSounds';
 import { NativeCallOverlay } from '@/components/conversas/NativeCallOverlay';
 import { NativeCallProvider } from '@/contexts/NativeCallContext';
 import { useModalOverlayObserver } from '@/hooks/useModalOverlayObserver';
+
+const ChatWidgetLazy = dynamic(
+  () => import('../chat/ChatWidget').then((m) => ({ default: m.ChatWidget })),
+  { ssr: false },
+);
 
 interface MainLayoutProps {
   children: React.ReactNode;
@@ -32,6 +38,37 @@ function resolveInitialSidebarCollapsed(pathname: string | null): boolean {
   return readSidebarCollapsed();
 }
 
+/** Adia WebRTC/sons para não competir com first paint pós-login. */
+function useDeferredRealtimeReady(delayMs = 2500): boolean {
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    let idleId: number | undefined;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+    const enable = () => {
+      if (!cancelled) setReady(true);
+    };
+
+    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+      idleId = window.requestIdleCallback(enable, { timeout: delayMs });
+    } else {
+      timeoutId = setTimeout(enable, delayMs);
+    }
+
+    return () => {
+      cancelled = true;
+      if (idleId != null && typeof window !== 'undefined' && 'cancelIdleCallback' in window) {
+        window.cancelIdleCallback(idleId);
+      }
+      if (timeoutId != null) clearTimeout(timeoutId);
+    };
+  }, [delayMs]);
+
+  return ready;
+}
+
 export function MainLayout({ children, userRole, userName, onLogout }: MainLayoutProps) {
   const pathname = usePathname();
   const queryClient = useQueryClient();
@@ -41,8 +78,10 @@ export function MainLayout({ children, userRole, userName, onLogout }: MainLayou
   const [layoutSynced, setLayoutSynced] = useState(false);
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
   const { user } = usePermissions();
-  const nativeCall = useNativeWebRTCCall({ userId: user?.id });
-  useChatSounds({ userId: user?.id, callPhase: nativeCall.phase });
+  const realtimeReady = useDeferredRealtimeReady();
+  const realtimeUserId = realtimeReady ? user?.id : undefined;
+  const nativeCall = useNativeWebRTCCall({ userId: realtimeUserId });
+  useChatSounds({ userId: realtimeUserId, callPhase: nativeCall.phase });
   useModalOverlayObserver();
 
   useLayoutEffect(() => {
@@ -88,8 +127,8 @@ export function MainLayout({ children, userRole, userName, onLogout }: MainLayou
         </main>
       </div>
 
-      {/* Chat Widget */}
-      <ChatWidget />
+      {/* Chat flutuante só quando habilitado — evita JS/polls no boot */}
+      {SHOW_CHAT_FLOAT_BUTTON ? <ChatWidgetLazy /> : null}
 
         <NativeCallOverlay
           call={nativeCall}

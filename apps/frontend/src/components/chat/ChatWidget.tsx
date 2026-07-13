@@ -45,7 +45,7 @@ const DEPARTMENTS = [
 const departmentSelectOptions = labeledToSelectOptions(DEPARTMENTS);
 
 /** `false` = esconde só o botão flutuante na tela; modal e lógica continuam no código. Para voltar a exibir, use `true`. */
-const SHOW_CHAT_FLOAT_BUTTON = false;
+import { SHOW_CHAT_FLOAT_BUTTON } from '@/lib/chatFloatButton';
 
 interface Chat {
   id: string;
@@ -112,9 +112,9 @@ export function ChatWidget() {
       const res = await api.get('/auth/me');
       return res.data;
     },
-    enabled: hasToken, // Só executar se houver token
-    retry: false, // Não tentar novamente em caso de erro
-    throwOnError: false // Não lançar erro - silenciar erros 401 esperados
+    enabled: SHOW_CHAT_FLOAT_BUTTON && hasToken,
+    retry: false,
+    throwOnError: false,
   });
 
   const userId = userData?.data?.id;
@@ -164,18 +164,17 @@ export function ChatWidget() {
     staleTime: 3000 // Cache por 3 segundos
   });
 
-  // OTIMIZAÇÃO: Reduzir polling de contadores
   const { data: unreadCountResponse } = useQuery({
     queryKey: ['chats-unread-count'],
     queryFn: async () => {
       const res = await api.get('/chats/unread/count');
       return res.data;
     },
-    enabled: hasToken && !!userId, // Só executar se houver token e userId
-    refetchInterval: 20000, // 20 segundos (era 10s)
-    staleTime: 10000, // Cache por 10 segundos
-    retry: false, // Não tentar novamente em caso de erro
-    throwOnError: false // Não lançar erro - silenciar erros 401 esperados
+    enabled: SHOW_CHAT_FLOAT_BUTTON && hasToken && !!userId,
+    refetchInterval: 20000,
+    staleTime: 10000,
+    retry: false,
+    throwOnError: false,
   });
 
   const { data: pendingCountResponse } = useQuery({
@@ -184,11 +183,11 @@ export function ChatWidget() {
       const res = await api.get('/chats/pending/count');
       return res.data;
     },
-    enabled: hasToken && !!userId, // Só executar se houver token e userId
-    refetchInterval: 20000, // 20 segundos (era 10s)
-    staleTime: 10000, // Cache por 10 segundos
-    retry: false, // Não tentar novamente em caso de erro
-    throwOnError: false // Não lançar erro - silenciar erros 401 esperados
+    enabled: SHOW_CHAT_FLOAT_BUTTON && hasToken && !!userId,
+    refetchInterval: 20000,
+    staleTime: 10000,
+    retry: false,
+    throwOnError: false,
   });
 
   const pendingChats: Chat[] = (pendingChatsResponse?.data || []).filter((chat: Chat) => chat.status === 'PENDING');
