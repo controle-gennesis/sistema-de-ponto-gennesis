@@ -391,6 +391,36 @@ function patchOcInListSummaryCache(
   );
 }
 
+/** Só sobrescreve campos definidos — evita sumir comprovante/itens ao misturar resposta leve. */
+function pickDefinedOcPatch(source: Partial<PurchaseOrder>): Partial<PurchaseOrder> {
+  const out: Partial<PurchaseOrder> = {};
+  (Object.keys(source) as (keyof PurchaseOrder)[]).forEach((key) => {
+    const value = source[key];
+    if (value !== undefined) {
+      (out as Record<string, unknown>)[key as string] = value;
+    }
+  });
+  return out;
+}
+
+function applyOcLocalPatch(
+  queryClient: QueryClient,
+  setSelectedOrder: React.Dispatch<React.SetStateAction<PurchaseOrder | null>>,
+  id: string,
+  patch: Partial<PurchaseOrder>
+) {
+  const safe = pickDefinedOcPatch({
+    ...patch,
+    updatedAt: patch.updatedAt ?? new Date().toISOString(),
+  });
+  patchOcInListSummaryCache(queryClient, id, (order) => ({ ...order, ...safe }));
+  queryClient.setQueryData(
+    ['purchase-order-detail', id],
+    (old: PurchaseOrder | undefined) => (old ? { ...old, ...safe } : old)
+  );
+  setSelectedOrder((prev) => (prev?.id === id ? { ...prev, ...safe } : prev));
+}
+
 function approvalOptimisticPatch(
   currentStatus: string,
   userId: string | undefined
@@ -1855,9 +1885,20 @@ export function OcPurchaseOrdersPanel({
     if (!selectedOrderFresh || selectedOrderFresh.id !== selectedOrder?.id) return;
     setSelectedOrder((prev) => {
       if (!prev || prev.id !== selectedOrderFresh.id) return selectedOrderFresh;
+      // Mantém anexos/estado local mais novo se o cache de detalhe ainda estiver atrasado.
       return {
         ...selectedOrderFresh,
-        stockReceipt: prev.stockReceipt ?? selectedOrderFresh.stockReceipt
+        stockReceipt: prev.stockReceipt ?? selectedOrderFresh.stockReceipt,
+        paymentProofUrl: prev.paymentProofUrl || selectedOrderFresh.paymentProofUrl,
+        paymentProofName: prev.paymentProofName || selectedOrderFresh.paymentProofName,
+        paymentBoletoUrl: prev.paymentBoletoUrl || selectedOrderFresh.paymentBoletoUrl,
+        paymentBoletoName: prev.paymentBoletoName || selectedOrderFresh.paymentBoletoName,
+        paymentBoletoInstallments:
+          prev.paymentBoletoInstallments ?? selectedOrderFresh.paymentBoletoInstallments,
+        paymentBoletoPhaseReleased:
+          prev.paymentBoletoPhaseReleased ?? selectedOrderFresh.paymentBoletoPhaseReleased,
+        paymentParcelCount: prev.paymentParcelCount ?? selectedOrderFresh.paymentParcelCount,
+        nfAttachments: prev.nfAttachments ?? selectedOrderFresh.nfAttachments,
       };
     });
   }, [selectedOrderFresh, selectedOrder?.id]);
@@ -2091,23 +2132,22 @@ export function OcPurchaseOrdersPanel({
         paymentBoletoUrl: url,
         paymentBoletoName: originalName
       });
-      return res.data;
+      return {
+        data: res.data?.data as PurchaseOrder | undefined,
+        uploadedUrl: url,
+        uploadedName: originalName
+      };
     },
-    onSuccess: (resp: { data?: PurchaseOrder }) => {
+    onSuccess: (resp, vars) => {
       const updated = resp?.data;
-      if (updated?.id) {
-        patchOcInListSummaryCache(queryClient, updated.id, (order) => ({
-          ...order,
-          paymentBoletoUrl: updated.paymentBoletoUrl ?? order.paymentBoletoUrl,
-          paymentBoletoName: updated.paymentBoletoName ?? order.paymentBoletoName,
-          paymentBoletoInstallments:
-            updated.paymentBoletoInstallments ?? order.paymentBoletoInstallments,
-          paymentBoletoPhaseReleased:
-            updated.paymentBoletoPhaseReleased ?? order.paymentBoletoPhaseReleased,
-          updatedAt: updated.updatedAt ?? new Date().toISOString(),
-        }));
-        setSelectedOrder((prev) => (prev?.id === updated.id ? { ...prev, ...updated } : prev));
-      }
+      const id = updated?.id ?? vars.id;
+      applyOcLocalPatch(queryClient, setSelectedOrder, id, {
+        paymentBoletoUrl: updated?.paymentBoletoUrl ?? resp.uploadedUrl,
+        paymentBoletoName: updated?.paymentBoletoName ?? resp.uploadedName ?? null,
+        paymentBoletoInstallments: updated?.paymentBoletoInstallments,
+        paymentBoletoPhaseReleased: updated?.paymentBoletoPhaseReleased,
+        updatedAt: updated?.updatedAt
+      });
       toast.success('Boleto de pagamento anexado.');
     },
     onError: (error: { response?: { data?: { message?: string } }; message?: string }) =>
@@ -2126,28 +2166,28 @@ export function OcPurchaseOrdersPanel({
         paymentProofUrl: url,
         paymentProofName: originalName
       });
-      return res.data;
+      return {
+        data: res.data?.data as PurchaseOrder | undefined,
+        uploadedUrl: url,
+        uploadedName: originalName
+      };
     },
-    onSuccess: (resp: { data?: PurchaseOrder }) => {
+    onSuccess: (resp, vars) => {
       const updated = resp?.data;
-      if (updated?.id) {
-        patchOcInListSummaryCache(queryClient, updated.id, (order) => ({
-          ...order,
-          paymentProofUrl: updated.paymentProofUrl ?? order.paymentProofUrl,
-          paymentProofName: updated.paymentProofName ?? order.paymentProofName,
-          paymentBoletoInstallments:
-            updated.paymentBoletoInstallments ?? order.paymentBoletoInstallments,
-          updatedAt: updated.updatedAt ?? new Date().toISOString(),
-        }));
-        setSelectedOrder((prev) => (prev?.id === updated.id ? { ...prev, ...updated } : prev));
-      }
+      const id = updated?.id ?? vars.id;
+      // Só patcheia campos de pagamento — resposta ListSummary não pode apagar o detalhe local.
+      applyOcLocalPatch(queryClient, setSelectedOrder, id, {
+        paymentProofUrl: updated?.paymentProofUrl ?? resp.uploadedUrl,
+        paymentProofName: updated?.paymentProofName ?? resp.uploadedName ?? null,
+        paymentBoletoInstallments: updated?.paymentBoletoInstallments,
+        updatedAt: updated?.updatedAt
+      });
       setProofFileDraft(null);
       toast.success('Comprovante de pagamento anexado.');
     },
     onError: (error: { response?: { data?: { message?: string } }; message?: string }) =>
       toast.error(error.response?.data?.message || error.message || 'Erro ao anexar comprovante')
   });
-
   const reopenPaymentBoletoMutation = useMutation({
     mutationFn: async (id: string) => {
       const res = await api.patch(`/purchase-orders/${id}/reopen-payment-boleto`);
@@ -2194,13 +2234,13 @@ export function OcPurchaseOrdersPanel({
     onSuccess: (resp: { data?: PurchaseOrder }) => {
       const updated = resp?.data;
       if (updated?.id) {
-        patchOcInListSummaryCache(queryClient, updated.id, (order) => ({
-          ...order,
-          ...updated,
+        applyOcLocalPatch(queryClient, setSelectedOrder, updated.id, {
           paymentBoletoPhaseReleased: true,
-          updatedAt: updated.updatedAt ?? new Date().toISOString(),
-        }));
-        setSelectedOrder((prev) => (prev?.id === updated.id ? { ...prev, ...updated } : prev));
+          paymentBoletoInstallments: updated.paymentBoletoInstallments,
+          paymentBoletoUrl: updated.paymentBoletoUrl,
+          paymentBoletoName: updated.paymentBoletoName,
+          updatedAt: updated.updatedAt
+        });
         setBoletoParcelModalOrder((prev) => (prev?.id === updated.id ? null : prev));
       }
       toast.success('OC enviada para a fase Pagamento.');
@@ -2238,23 +2278,50 @@ export function OcPurchaseOrdersPanel({
         paymentProofName: originalName,
         installmentIndex
       });
-      return res.data;
+      return {
+        data: res.data?.data as PurchaseOrder | undefined,
+        uploadedUrl: url,
+        uploadedName: originalName
+      };
     },
-    onSuccess: (resp: { data?: PurchaseOrder }, vars) => {
+    onSuccess: (resp, vars) => {
       const updated = resp?.data;
-      if (updated?.id) {
-        patchOcInListSummaryCache(queryClient, updated.id, (order) => ({
-          ...order,
-          paymentBoletoInstallments:
-            updated.paymentBoletoInstallments ?? order.paymentBoletoInstallments,
-          paymentProofUrl: updated.paymentProofUrl ?? order.paymentProofUrl,
-          paymentProofName: updated.paymentProofName ?? order.paymentProofName,
-          paymentBoletoPhaseReleased:
-            updated.paymentBoletoPhaseReleased ?? order.paymentBoletoPhaseReleased,
-          updatedAt: updated.updatedAt ?? new Date().toISOString(),
-        }));
-        setSelectedOrder((prev) => (prev?.id === updated.id ? { ...prev, ...updated } : prev));
+      const id = updated?.id ?? vars.id;
+      const patch: Partial<PurchaseOrder> = {
+        paymentBoletoPhaseReleased:
+          updated?.paymentBoletoPhaseReleased ?? true,
+        updatedAt: updated?.updatedAt
+      };
+      if (updated?.paymentBoletoInstallments != null) {
+        patch.paymentBoletoInstallments = updated.paymentBoletoInstallments;
+      } else if (resp.uploadedUrl) {
+        // Fallback: marca o comprovante na parcela local se a resposta veio incompleta.
+        const current =
+          queryClient.getQueryData<PurchaseOrder>(['purchase-order-detail', id]) ||
+          (
+            queryClient.getQueryData<PurchaseOrdersListSummaryCache>([
+              'purchase-orders',
+              'list-summary'
+            ])?.data || []
+          ).find((o) => o.id === id);
+        if (current?.paymentBoletoInstallments) {
+          const rows = parsePaymentBoletoInstallments(current.paymentBoletoInstallments);
+          patch.paymentBoletoInstallments = rows.map((row, j) =>
+            j === vars.installmentIndex
+              ? {
+                  ...row,
+                  installmentProofUrl: resp.uploadedUrl,
+                  installmentProofName: resp.uploadedName ?? null
+                }
+              : row
+          );
+        }
       }
+      if (updated?.paymentProofUrl) {
+        patch.paymentProofUrl = updated.paymentProofUrl;
+        patch.paymentProofName = updated.paymentProofName;
+      }
+      applyOcLocalPatch(queryClient, setSelectedOrder, id, patch);
       if (vars?.installmentIndex != null) {
         setInstallmentProofDraftByIdx((prev) => {
           const next = { ...prev };
@@ -2277,12 +2344,13 @@ export function OcPurchaseOrdersPanel({
     onSuccess: (resp: { data?: PurchaseOrder }) => {
       const updated = resp?.data;
       if (updated?.id) {
-        patchOcInListSummaryCache(queryClient, updated.id, (order) => ({
-          ...order,
-          ...updated,
-          updatedAt: updated.updatedAt ?? new Date().toISOString(),
-        }));
-        setSelectedOrder((prev) => (prev?.id === updated.id ? { ...prev, ...updated } : prev));
+        applyOcLocalPatch(queryClient, setSelectedOrder, updated.id, {
+          paymentBoletoInstallments: updated.paymentBoletoInstallments,
+          paymentBoletoPhaseReleased: updated.paymentBoletoPhaseReleased,
+          paymentProofUrl: updated.paymentProofUrl,
+          paymentProofName: updated.paymentProofName,
+          updatedAt: updated.updatedAt
+        });
       }
       toast.success('Próxima parcela liberada para o comprador anexar o boleto.');
     },
@@ -2427,12 +2495,10 @@ export function OcPurchaseOrdersPanel({
       queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
       queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
       const updated = resp?.data;
-      if (updated) {
-        setSelectedOrder((prev) => (prev?.id === updated.id ? { ...prev, ...updated } : prev));
-        patchOcInListSummaryCache(queryClient, updated.id, (order) => ({
-          ...order,
-          nfAttachments: updated.nfAttachments ?? order.nfAttachments
-        }));
+      if (updated?.id) {
+        applyOcLocalPatch(queryClient, setSelectedOrder, updated.id, {
+          nfAttachments: updated.nfAttachments
+        });
       }
       setNfFileDraft(null);
       toast.success('Nota fiscal anexada.');
@@ -2450,12 +2516,10 @@ export function OcPurchaseOrdersPanel({
       queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
       queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
       const updated = resp?.data;
-      if (updated) {
-        setSelectedOrder((prev) => (prev?.id === updated.id ? { ...prev, ...updated } : prev));
-        patchOcInListSummaryCache(queryClient, updated.id, (order) => ({
-          ...order,
-          nfAttachments: updated.nfAttachments ?? order.nfAttachments
-        }));
+      if (updated?.id) {
+        applyOcLocalPatch(queryClient, setSelectedOrder, updated.id, {
+          nfAttachments: updated.nfAttachments
+        });
       }
       toast.success('Nota fiscal removida.');
     },
@@ -2815,12 +2879,14 @@ export function OcPurchaseOrdersPanel({
   const handleBoletoParcelsSaved = (payload: { data: unknown }) => {
     const updated = (payload as { data?: PurchaseOrder })?.data;
     if (updated?.id) {
-      patchOcInListSummaryCache(queryClient, updated.id, (order) => ({
-        ...order,
-        ...updated,
-        updatedAt: updated.updatedAt ?? new Date().toISOString(),
-      }));
-      setSelectedOrder((prev) => (prev?.id === updated.id ? { ...prev, ...updated } : prev));
+      applyOcLocalPatch(queryClient, setSelectedOrder, updated.id, {
+        paymentBoletoInstallments: updated.paymentBoletoInstallments,
+        paymentBoletoUrl: updated.paymentBoletoUrl,
+        paymentBoletoName: updated.paymentBoletoName,
+        paymentBoletoPhaseReleased: updated.paymentBoletoPhaseReleased,
+        paymentParcelCount: updated.paymentParcelCount,
+        updatedAt: updated.updatedAt
+      });
     }
   };
 

@@ -42,14 +42,14 @@ const cellPadTh = 'px-2 sm:px-3 py-4';
 const rmColCls = 'w-[4%] min-w-[3rem] max-w-[4.5rem]';
 const ocColCls = 'w-[5%] min-w-[3.5rem]';
 const actionColCls = 'w-[4%] min-w-[3rem] max-w-[4.5rem]';
-const thTextCls = `${cellPadTh} text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider`;
+const thTextCls = `${cellPadTh} text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider`;
 const thCenterCls = `${cellPadTh} text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap`;
 const rmThCls = `${thCenterCls} ${rmColCls} !pl-2 sm:!pl-3 !pr-1`;
 const rmTdCls = `${cadastroListClasses.tdMono} ${rmColCls} text-center !pl-2 sm:!pl-3 !pr-1`;
 const ocThCls = `${thCenterCls} ${ocColCls}`;
 const ocTdCls = `${cadastroListClasses.tdMono} ${ocColCls} text-center align-middle !px-2 sm:!px-3`;
-const tdTextCls = `${cellPad} text-center text-sm text-gray-700 dark:text-gray-300 min-w-0`;
-const tdMutedCls = `${cellPad} text-center text-sm text-gray-600 dark:text-gray-400 min-w-0`;
+const tdTextCls = `${cellPad} text-left text-sm text-gray-700 dark:text-gray-300 min-w-0`;
+const tdMutedCls = `${cellPad} text-left text-sm text-gray-600 dark:text-gray-400 min-w-0`;
 const tdCenterCls = `${cellPad} text-center text-sm min-w-0`;
 
 const LIST_ITEMS_PER_PAGE = 12;
@@ -257,13 +257,14 @@ export function MaterialRequestsRmList({
               <table className={`${cadastroListClasses.table} text-sm`}>
                 <colgroup>
                   <col className="w-[4%]" />
-                  <col className={showStatusColumn ? 'w-[12%]' : 'w-[14%]'} />
-                  <col className={showStatusColumn ? 'w-[14%]' : 'w-[16%]'} />
-                  <col className={showStatusColumn ? 'w-[28%]' : 'w-[30%]'} />
+                  <col className={showStatusColumn ? 'w-[11%]' : 'w-[13%]'} />
+                  <col className={showStatusColumn ? 'w-[22%]' : 'w-[24%]'} />
+                  <col className={showStatusColumn ? 'w-[10%]' : 'w-[12%]'} />
+                  <col className={showStatusColumn ? 'w-[13%]' : 'w-[15%]'} />
                   <col className={showStatusColumn ? 'w-[8%]' : 'w-[10%]'} />
-                  {showStatusColumn ? <col className="w-[10%]" /> : null}
+                  {showStatusColumn ? <col className="w-[9%]" /> : null}
                   <col className={ocColCls} />
-                  <col className={showStatusColumn ? 'w-[12%]' : 'w-[14%]'} />
+                  <col className={showStatusColumn ? 'w-[11%]' : 'w-[13%]'} />
                   <col className="w-[4%]" />
                 </colgroup>
                 <thead className="border-b border-gray-200 dark:border-gray-700">
@@ -272,8 +273,9 @@ export function MaterialRequestsRmList({
                       RM
                     </th>
                     <th className={thTextCls}>Solicitante</th>
-                    <th className={thTextCls}>Centro de Custo</th>
                     <th className={thTextCls}>Descrição</th>
+                    <th className={thCenterCls}>OS</th>
+                    <th className={thCenterCls}>Centro de Custo</th>
                     <th className={thCenterCls}>Prioridade</th>
                     {showStatusColumn && <th className={thCenterCls}>Status</th>}
                     <th className={ocThCls}>OC</th>
@@ -311,16 +313,16 @@ export function MaterialRequestsRmList({
                         <td className={tdTextCls}>
                           <span className="block truncate">{rmSolicitante(request)?.name || '—'}</span>
                         </td>
-                        <td className={tdTextCls} title={request.costCenter?.name}>
-                          <span className="line-clamp-2">{request.costCenter?.name || '—'}</span>
-                        </td>
                         <td className={tdMutedCls}>
                           <span className="line-clamp-2" title={request.description || ''}>
                             {request.description || '—'}
                           </span>
-                          <span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-500">
-                            {rmTitulo(request)}
-                          </span>
+                        </td>
+                        <td className={tdCenterCls} title={rmTitulo(request)}>
+                          <span className="line-clamp-2">{rmTitulo(request)}</span>
+                        </td>
+                        <td className={tdCenterCls} title={request.costCenter?.name}>
+                          <span className="line-clamp-2">{request.costCenter?.name || '—'}</span>
                         </td>
                         <td className={tdCenterCls}>
                           <span className={`text-xs font-medium whitespace-nowrap ${priorityInfo.color}`}>
