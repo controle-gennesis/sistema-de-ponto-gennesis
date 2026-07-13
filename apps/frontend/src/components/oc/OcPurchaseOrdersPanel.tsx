@@ -227,7 +227,8 @@ export interface PurchaseOrder {
   comprasApprovedBy?: string | null;
   gestorApprovedBy?: string | null;
   approvedBy?: string | null;
-  items: Array<{
+  /** Ausente na listagem `summary=1`; preenchido no GET por id. */
+  items?: Array<{
     materialId?: string;
     materialRequestItemId?: string | null;
     materialRequestItem?: { quantity?: number | string | null } | null;
@@ -722,7 +723,7 @@ function OcStockMovementHistoryList({
 
 function materialLineLabel(
   m?:
-    | PurchaseOrder['items'][number]['material']
+    | NonNullable<PurchaseOrder['items']>[number]['material']
     | {
         name?: string | null;
         description?: string | null;
@@ -742,8 +743,8 @@ function formatCurrency(v: number) {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
 }
 
-function totalOrder(items: { totalPrice: number }[]) {
-  return items.reduce((s, i) => s + Number(i.totalPrice), 0);
+function totalOrder(items?: { totalPrice: number }[] | null) {
+  return (items ?? []).reduce((s, i) => s + Number(i.totalPrice), 0);
 }
 
 function OcOrderMaterialsTable({ order }: { order: PurchaseOrder }) {
