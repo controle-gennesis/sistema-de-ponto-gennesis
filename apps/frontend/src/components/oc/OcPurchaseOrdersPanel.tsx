@@ -377,7 +377,14 @@ function patchOcInListSummaryCache(
         ...old,
         data: old.data.map((order) => {
           if (order.id !== id) return order;
-          return typeof patch === 'function' ? patch(order) : { ...order, ...patch };
+          const next =
+            typeof patch === 'function' ? patch(order) : { ...order, ...patch };
+          // Sort da lista usa updatedAt; sem bump a OC entra na fase no meio e
+          // só sobe depois do refetch (parece "pular" de posição).
+          if (next.status !== order.status) {
+            return { ...next, updatedAt: new Date().toISOString() };
+          }
+          return next;
         })
       };
     }
