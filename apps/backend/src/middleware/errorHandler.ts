@@ -5,6 +5,35 @@ export interface AppError extends Error {
   isOperational?: boolean;
 }
 
+/** Extrai causa legível de PrismaClientValidationError (sem despejar o stack no cliente). */
+function summarizePrismaValidationError(prismaMsg: string): string {
+  const unknownArg = prismaMsg.match(
+    /Unknown (?:argument|field)\s+[`']?(\w+)[`']?/i
+  );
+  if (unknownArg?.[1]) {
+    return `Campo inválido na gravação (${unknownArg[1]}). Se o erro continuar, o banco pode estar desatualizado.`;
+  }
+
+  const invalidArg = prismaMsg.match(
+    /Argument\s+[`'](\w+)[`']:\s*([^\n]+)/i
+  );
+  if (invalidArg?.[1]) {
+    const detail = (invalidArg[2] || '').replace(/\s+/g, ' ').trim().slice(0, 160);
+    return detail
+      ? `Dados inválidos no campo "${invalidArg[1]}": ${detail}`
+      : `Dados inválidos no campo "${invalidArg[1]}"`;
+  }
+
+  const missing = prismaMsg.match(
+    /Argument\s+[`'](\w+)[`']\s+is missing/i
+  );
+  if (missing?.[1]) {
+    return `Campo obrigatório ausente na gravação: ${missing[1]}`;
+  }
+
+  return 'Não foi possível gravar os dados. Verifique o preenchimento e tente novamente.';
+}
+
 export const errorHandler = (
   err: AppError,
   req: Request,
@@ -47,7 +76,7 @@ export const errorHandler = (
     const message =
       process.env.NODE_ENV === 'development'
         ? `Dados inválidos: ${prismaMsg}`
-        : 'Dados inválidos fornecidos';
+        : summarizePrismaValidationError(prismaMsg);
     error = { message, statusCode: 400 } as AppError;
   }
 

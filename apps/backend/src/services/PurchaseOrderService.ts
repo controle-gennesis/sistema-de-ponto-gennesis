@@ -607,7 +607,7 @@ const purchaseOrderIncludeCreate = {
     }
   },
   creator: { select: { id: true, name: true, email: true } },
-  items: { include: { material: { select: { id: true, name: true, description: true, code: true } } } }
+  items: { include: { material: { select: { id: true, name: true, description: true, sinapiCode: true } } } }
 } as const;
 
 const purchaseOrderIncludeDetail = {

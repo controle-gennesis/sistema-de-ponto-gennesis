@@ -670,8 +670,21 @@ export default function MapaCotacaoPage() {
             if (!draft.pixKeyType?.trim()) {
               throw new Error(`Informe o tipo de chave PIX para "${supplierName}".`);
             }
-            if (!draft.pixKey?.trim()) {
+            const pixKey = (draft.pixKey || '').trim();
+            if (!pixKey) {
               throw new Error(`Informe a chave PIX para "${supplierName}".`);
+            }
+            const pixDigits = pixKey.replace(/\D/g, '');
+            const pixType = draft.pixKeyType.trim().toUpperCase();
+            if (pixType === 'CPF' && pixDigits.length !== 11) {
+              throw new Error(
+                `Chave PIX (CPF) inválida para "${supplierName}". Informe os 11 dígitos.`
+              );
+            }
+            if (pixType === 'CNPJ' && pixDigits.length !== 14) {
+              throw new Error(
+                `Chave PIX (CNPJ) inválida para "${supplierName}". Informe os 14 dígitos.`
+              );
             }
           }
 
@@ -705,7 +718,11 @@ export default function MapaCotacaoPage() {
       toast.success('Mapa gerado e OCs criadas com sucesso!');
     },
     onError: (error: any) => {
-      toast.error(error?.response?.data?.message || error?.message || 'Erro ao gerar OCs');
+      const apiMsg =
+        error?.response?.data?.message ||
+        error?.response?.data?.error ||
+        error?.message;
+      toast.error(apiMsg || 'Erro ao gerar OCs', { duration: 8000 });
     }
   });
 

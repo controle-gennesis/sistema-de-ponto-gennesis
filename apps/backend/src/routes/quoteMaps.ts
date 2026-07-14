@@ -95,10 +95,19 @@ router.post('/:id/generate', async (req: AuthRequest, res: Response, next: NextF
 
     res.json({ success: true, data: result });
   } catch (error) {
+    const err = error as { name?: string; message?: string; statusCode?: number };
+    if (
+      error instanceof Error &&
+      !err.statusCode &&
+      err.name !== 'PrismaClientValidationError' &&
+      err.name !== 'PrismaClientKnownRequestError'
+    ) {
+      next(createError(error.message, 400));
+      return;
+    }
     next(error);
   }
 });
-
 // Baixar snapshot PDF do mapa (gera sob demanda se não existir)
 router.get('/:id/snapshot-pdf', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
