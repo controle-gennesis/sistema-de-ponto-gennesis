@@ -562,6 +562,39 @@ function buildOcListDeliveryStatusFromMovement(mov: StockMovementForOcTag): OcMo
   };
 }
 
+/** Fallback quando a listagem de movimentos ainda não carregou, mas o resumo do detalhe já veio. */
+function synthesizeListMovementFromStockReceipt(
+  receipt: NonNullable<PurchaseOrder['stockReceipt']>
+): StockMovementForOcTag | null {
+  const exitBatches = receipt.exitBatches ?? [];
+  const inBatches = receipt.batches ?? [];
+  const now = new Date().toISOString();
+
+  if (receipt.hasExits || exitBatches.length > 0) {
+    const hasTotal = exitBatches.some((b) => b.split === 'TOTAL');
+    return {
+      id: 'synth-stock-out',
+      type: 'OUT',
+      notes: `Tipo: ${hasTotal ? 'TOTAL' : 'PARCIAL'}`,
+      createdAt: exitBatches[0]?.createdAt || now
+    };
+  }
+
+  if (receipt.hasReceipts || inBatches.length > 0) {
+    const hasTotal = inBatches.some((b) => b.split === 'TOTAL');
+    const hasOpenGap = (receipt.lines || []).some((l) => Number(l.gap) > 0);
+    const isPartial = hasOpenGap || (!hasTotal && inBatches.some((b) => b.split === 'PARCIAL'));
+    return {
+      id: 'synth-stock-in',
+      type: 'IN',
+      notes: `Tipo: ${isPartial ? 'PARCIAL' : 'TOTAL'}`,
+      createdAt: inBatches[0]?.createdAt || now
+    };
+  }
+
+  return null;
+}
+
 function parseAttachmentTagFromLine(
   line: string,
   keyPrefix: string,
@@ -1949,14 +1982,13 @@ export function OcPurchaseOrdersPanel({
     });
   }, [selectedOrder?.id, selectedOrderStockReceipt]);
 
+  /** Precisa estar ativo na listagem: Status de entrega some ao fechar o detalhe se a query depender do selectedOrder. */
   const { data: stockMovementsData } = useQuery({
-    queryKey: ['stock-movements-oc-tags', selectedOrder?.id],
+    queryKey: ['stock-movements-oc-tags'],
     queryFn: async () => {
       const res = await api.get('/stock/movements', { params: { limit: 1000 } });
       return res.data;
     },
-    // Só ao abrir detalhe — evita puxar 1000 movimentos em toda listagem
-    enabled: !!selectedOrder?.id,
     staleTime: 60_000,
     refetchOnWindowFocus: false
   });
@@ -2607,8 +2639,17 @@ export function OcPurchaseOrdersPanel({
       if (picked) latestByOc.set(key, picked);
     });
 
+    // Detalhe da OC (aba Estoque) já tem o resumo — cobre atraso/falha do fetch de movimentos na lista.
+    if (selectedOrder?.orderNumber && selectedOrder.stockReceipt) {
+      const key = normalizeOcNumberKey(selectedOrder.orderNumber);
+      if (!latestByOc.has(key)) {
+        const synth = synthesizeListMovementFromStockReceipt(selectedOrder.stockReceipt);
+        if (synth) latestByOc.set(key, synth);
+      }
+    }
+
     return latestByOc;
-  }, [stockMovementsForOcTag]);
+  }, [stockMovementsForOcTag, selectedOrder?.orderNumber, selectedOrder?.stockReceipt]);
 
   const selectedOrderLatestStockMovement = useMemo(
     () =>
