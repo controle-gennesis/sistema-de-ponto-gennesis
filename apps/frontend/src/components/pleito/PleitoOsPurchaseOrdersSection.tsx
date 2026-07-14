@@ -2,7 +2,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import api from '@/lib/api';
-import { purchaseOrderPhaseLabel } from '@/components/oc/ocStatusLabels';
+import { purchaseOrderPhaseLabelForOrder } from '@/components/oc/ocStatusLabels';
 
 type PleitoOsPurchaseOrderItem = {
   quantity: number | string;
@@ -20,6 +20,13 @@ type PleitoOsPurchaseOrder = {
   orderNumber: string;
   status: string;
   orderDate?: string | null;
+  paymentType?: string | null;
+  paymentCondition?: string | null;
+  paymentBoletoUrl?: string | null;
+  boletoAttachmentUrl?: string | null;
+  paymentBoletoInstallments?: unknown;
+  paymentParcelCount?: number;
+  paymentBoletoPhaseReleased?: boolean | null;
   supplier?: { name?: string | null } | null;
   materialRequest?: { requestNumber?: string | null } | null;
   items?: PleitoOsPurchaseOrderItem[];
@@ -120,7 +127,7 @@ export function PleitoOsPurchaseOrdersSection({
                       </p>
                     </div>
                     <span className="shrink-0 rounded-full bg-gray-200 px-2 py-0.5 text-xs font-medium text-gray-700 dark:bg-gray-700 dark:text-gray-200">
-                      {purchaseOrderPhaseLabel(order.status)}
+                      {purchaseOrderPhaseLabelForOrder(order)}
                     </span>
                   </div>
                 </div>

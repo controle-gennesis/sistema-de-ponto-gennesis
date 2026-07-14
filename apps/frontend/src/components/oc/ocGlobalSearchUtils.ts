@@ -1,6 +1,9 @@
 import { formatOcListDisplayId } from '@/components/oc/ocListDisplay';
 import { showInAttachBoletoTab } from '@/components/oc/ocPaymentBoleto';
-import { purchaseOrderPhaseLabel } from '@/components/oc/ocStatusLabels';
+import {
+  purchaseOrderPhaseLabel,
+  purchaseOrderPhaseLabelForOrder
+} from '@/components/oc/ocStatusLabels';
 import type { OcTab, PurchaseOrder } from '@/components/oc/OcPurchaseOrdersPanel';
 
 export const normalizeOcSearch = (value?: string | null) =>
@@ -47,6 +50,7 @@ export function matchesPurchaseOrderGlobalSearch(
   const searchableParts = [
     order.orderNumber,
     purchaseOrderPhaseLabel(order.status),
+    purchaseOrderPhaseLabelForOrder(order),
     order.materialRequest?.requestNumber,
     order.materialRequest?.serviceOrder,
     order.materialRequest?.description,

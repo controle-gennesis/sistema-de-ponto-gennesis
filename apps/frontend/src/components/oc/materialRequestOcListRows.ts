@@ -1,6 +1,9 @@
 import { formatOcListDisplayId } from '@/components/oc/ocListDisplay';
 import { sortPurchaseOrdersByMostRecent } from '@/components/oc/ocPurchaseOrderListSort';
-import { ocStatusBadgeClass, purchaseOrderPhaseLabel } from '@/components/oc/ocStatusLabels';
+import {
+  ocStatusBadgeClassForOrder,
+  purchaseOrderPhaseLabelForOrder
+} from '@/components/oc/ocStatusLabels';
 
 export type MaterialRequestOcListPurchaseOrder = {
   id: string;
@@ -8,6 +11,13 @@ export type MaterialRequestOcListPurchaseOrder = {
   orderNumber?: string | null;
   updatedAt?: string | null;
   createdAt?: string | null;
+  paymentType?: string | null;
+  paymentCondition?: string | null;
+  paymentBoletoUrl?: string | null;
+  boletoAttachmentUrl?: string | null;
+  paymentBoletoInstallments?: unknown;
+  paymentParcelCount?: number;
+  paymentBoletoPhaseReleased?: boolean | null;
 };
 
 export type MaterialRequestOcListRow = {
@@ -24,8 +34,13 @@ const ocWaitBadgeClass =
   'inline-flex rounded-full px-2.5 py-1 text-xs font-semibold whitespace-nowrap bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300';
 
 /** Rótulo da OC sem prefixo "OC -" para caber melhor na coluna. */
-export function purchaseOrderPhaseShortLabel(status: string): string {
-  const full = purchaseOrderPhaseLabel(status);
+export function purchaseOrderPhaseShortLabel(
+  orderOrStatus: string | MaterialRequestOcListPurchaseOrder
+): string {
+  const full =
+    typeof orderOrStatus === 'string'
+      ? purchaseOrderPhaseLabelForOrder({ status: orderOrStatus })
+      : purchaseOrderPhaseLabelForOrder(orderOrStatus);
   return full.replace(/^OC\s*-\s*/i, '').trim() || full;
 }
 
@@ -65,8 +80,8 @@ export function materialRequestOcListRows(
       key: `po-${po.id}`,
       id,
       idTitle: fullNumber || undefined,
-      status: purchaseOrderPhaseShortLabel(po.status),
-      statusBadgeClassName: ocStatusBadgeClass(po.status)
+      status: purchaseOrderPhaseShortLabel(po),
+      statusBadgeClassName: ocStatusBadgeClassForOrder(po)
     };
   });
 }

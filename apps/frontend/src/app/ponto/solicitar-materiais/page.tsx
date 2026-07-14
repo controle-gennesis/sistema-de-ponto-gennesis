@@ -55,6 +55,7 @@ import {
   ocStatusTextClass,
   OC_STATUS_LABELS_PT,
 } from '@/components/oc/ocStatusLabels';
+import { showInAttachBoletoTab } from '@/components/oc/ocPaymentBoleto';
 import type { PurchaseOrder } from '@/components/oc/OcPurchaseOrdersPanel';
 import { FilterStatCard } from '@/components/ui/FilterStatCard';
 import type { MaterialRequest } from '@/app/ponto/gerenciar-materiais/_lib/types';
@@ -897,7 +898,7 @@ function SolicitarMateriaisPage() {
     }
     for (const st of OC_FASE_FILTER_ORDER) {
       if (!(st in OC_STATUS_LABELS_PT)) continue;
-      const label = purchaseOrderPhaseShortLabel(st);
+      const label = purchaseOrderPhaseLabel(st);
       options.push({ value: `oc:${st}`, label, searchText: `OC ${label}` });
     }
     return options;
@@ -2294,9 +2295,13 @@ function SolicitarMateriaisPage() {
                                       OC {num}
                                     </span>
                                     <span
-                                      className={`text-xs font-medium ${ocStatusTextClass(po.status)}`}
+                                      className={`text-xs font-medium ${
+                                        showInAttachBoletoTab(po)
+                                          ? 'text-violet-600 dark:text-violet-400'
+                                          : ocStatusTextClass(po.status)
+                                      }`}
                                     >
-                                      {purchaseOrderPhaseShortLabel(po.status)}
+                                      {purchaseOrderPhaseShortLabel(po)}
                                     </span>
                                   </li>
                                 );

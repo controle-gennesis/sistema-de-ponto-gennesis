@@ -15,6 +15,58 @@ const MATERIAL_REQUEST_CREATE_TX_OPTIONS = {
   timeout: Number(process.env.MATERIAL_REQUEST_CREATE_TX_TIMEOUT_MS) || 90_000,
 };
 
+type NestedPurchaseOrderWithCondition = {
+  paymentCondition: string | null;
+};
+
+/** Mesma lógica da listagem de OC: parcelCount vem da condição de pagamento. */
+async function enrichNestedPurchaseOrdersParcelCount<T extends NestedPurchaseOrderWithCondition>(
+  orders: T[]
+): Promise<Array<T & { paymentParcelCount: number }>> {
+  if (orders.length === 0) return [];
+  const codes = [...new Set(orders.map((o) => o.paymentCondition).filter(Boolean))] as string[];
+  const countByCode = new Map<string, number>();
+  if (codes.length > 0) {
+    const conds = await prisma.paymentCondition.findMany({
+      where: { code: { in: codes } },
+      select: { code: true, parcelCount: true }
+    });
+    for (const c of conds) {
+      countByCode.set(c.code, c.parcelCount && c.parcelCount >= 1 ? c.parcelCount : 1);
+    }
+  }
+  return orders.map((o) => ({
+    ...o,
+    paymentParcelCount: o.paymentCondition
+      ? countByCode.get(o.paymentCondition) ?? 1
+      : 1
+  }));
+}
+
+async function withEnrichedMaterialRequestPurchaseOrders<
+  T extends { purchaseOrders?: NestedPurchaseOrderWithCondition[] | null }
+>(request: T | null): Promise<T | null> {
+  if (!request?.purchaseOrders?.length) return request;
+  const purchaseOrders = await enrichNestedPurchaseOrdersParcelCount(request.purchaseOrders);
+  return { ...request, purchaseOrders };
+}
+
+async function withEnrichedMaterialRequestsPurchaseOrders<
+  T extends { purchaseOrders?: NestedPurchaseOrderWithCondition[] | null }
+>(requests: T[]): Promise<T[]> {
+  const allOrders = requests.flatMap((r) => r.purchaseOrders ?? []);
+  if (allOrders.length === 0) return requests;
+  const enrichedAll = await enrichNestedPurchaseOrdersParcelCount(allOrders);
+  let cursor = 0;
+  return requests.map((r) => {
+    const n = r.purchaseOrders?.length ?? 0;
+    if (n === 0) return r;
+    const purchaseOrders = enrichedAll.slice(cursor, cursor + n);
+    cursor += n;
+    return { ...r, purchaseOrders };
+  });
+}
+
 export interface RmDropdownMaterial {
   id: string;
   code: string;
@@ -433,7 +485,15 @@ export class MaterialRequestService {
         select: {
           id: true,
           status: true,
-          orderNumber: true
+          orderNumber: true,
+          updatedAt: true,
+          createdAt: true,
+          paymentType: true,
+          paymentCondition: true,
+          paymentBoletoUrl: true,
+          boletoAttachmentUrl: true,
+          paymentBoletoInstallments: true,
+          paymentBoletoPhaseReleased: true
         },
         orderBy: { createdAt: 'asc' as const }
       }
@@ -482,8 +542,10 @@ export class MaterialRequestService {
       prisma.materialRequest.count({ where })
     ]);
 
+    const enrichedRequests = await withEnrichedMaterialRequestsPurchaseOrders(requests);
+
     return {
-      requests,
+      requests: enrichedRequests,
       pagination: {
         page,
         limit,
@@ -497,7 +559,7 @@ export class MaterialRequestService {
    * Obtém uma requisição por ID
    */
   async getMaterialRequestById(id: string) {
-    return await prisma.materialRequest.findUnique({
+    const request = await prisma.materialRequest.findUnique({
       where: { id },
       include: {
         requester: {
@@ -543,12 +605,20 @@ export class MaterialRequestService {
             id: true,
             status: true,
             orderNumber: true,
-            createdAt: true
+            updatedAt: true,
+            createdAt: true,
+            paymentType: true,
+            paymentCondition: true,
+            paymentBoletoUrl: true,
+            boletoAttachmentUrl: true,
+            paymentBoletoInstallments: true,
+            paymentBoletoPhaseReleased: true
           },
           orderBy: { createdAt: 'asc' }
         }
       }
     });
+    return withEnrichedMaterialRequestPurchaseOrders(request);
   }
 
   /**
