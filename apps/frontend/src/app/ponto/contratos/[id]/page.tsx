@@ -364,7 +364,7 @@ const FILTER_OS_STATUS_OPTIONS = labeledToSelectOptions([
 ]);
 
 const CONTROLE_GERAL_META_AJUDA =
-  'Meta ideal = saldo ÷ meses restantes até o fim da vigência e permanece fixa até aditivo ou ajuste. Aditivos contratuais entram na data e vão até o fim da vigência. Ajuste do valor anual entra na data e só até dezembro daquele ano. Meta real = saldo no mês (base + aditivos vigentes + ajuste anual vigente no ano − faturamento) ÷ meses restantes da vigência; o ajuste anual não carrega para o ano seguinte nem altera o pendente contratual.';
+  'Meta ideal = saldo ÷ meses restantes até o fim da vigência e permanece fixa até aditivo ou ajuste. Aditivos contratuais entram na data e vão até o fim da vigência. Ajuste do valor anual entra na data e só até dezembro daquele ano. Meta real = saldo contratual (base + aditivos − faturamento) ÷ meses restantes da vigência; com ajuste do valor anual, a meta daquele ano é recalculada só do mês da data até dezembro (como a meta ideal), sem alterar os demais anos nem o pendente contratual.';
 
 /** Oculta gasto total e linha Gastos na UI; dados RM continuam sendo carregados. */
 const EXIBIR_GASTOS_CONTRATO_NA_UI = false;
@@ -1897,11 +1897,9 @@ export default function ContractDetailPage() {
   }, [contractVigenciaDates]);
 
   /**
-   * Meta real: saldo pendente ÷ meses restantes, recalculada a cada mês.
-   * - Aditivos contratuais: entram na data efetiva e seguem até o fim da vigência.
-   * - Ajuste anual: entra na data efetiva e só permanece até dezembro do ano civil;
-   *   em janeiro do ano seguinte o ajuste sai do saldo (não altera o pendente contratual).
-   * - Saldo diminui só com faturamento.
+   * Meta real: saldo contratual pendente ÷ meses restantes da vigência (aditivos + faturamento).
+   * Ajuste do valor anual NÃO entra nesse saldo global — sobrescreve só do mês efetivo até
+   * dezembro do ano civil (mesma janela da Meta Ideal), recalculando o pool anual com faturamento.
    */
   const metaRealByScheduleKey = useMemo(() => {
     const out = new Map<string, number>();
@@ -1915,43 +1913,60 @@ export default function ContractDetailPage() {
       addSumByMonth.set(k, (addSumByMonth.get(k) || 0) + a.amount);
     }
 
-    /** Início do ajuste anual no calendário (mês civil da data / ano da linha). */
-    const annualAddByMonth = new Map<string, number>();
-    /** Ao terminar dezembro do ano do ajuste, remove do saldo (não carrega p/ ano seguinte). */
-    const annualExpireAfterMonth = new Map<string, number>();
-    for (const r of annualBudgetAdjustments) {
-      const effM = annualAdjustmentEffectiveCivilMonth(r.year, r.effectiveDate);
-      if (effM === null) continue;
-      const startKey = toYearMonthKey(r.year, effM);
-      annualAddByMonth.set(startKey, (annualAddByMonth.get(startKey) || 0) + r.amount);
-      const endKey = toYearMonthKey(r.year, 12);
-      annualExpireAfterMonth.set(endKey, (annualExpireAfterMonth.get(endKey) || 0) + r.amount);
-    }
-
     const firstKey = vigenciaMonthList[0].key;
     let remaining = Number(contract.valuePlusAddenda) || 0;
     addSumByMonth.forEach((v, k) => {
       if (k < firstKey) remaining += v;
     });
-    annualAddByMonth.forEach((v, k) => {
-      if (k < firstKey) remaining += v;
-    });
 
     const n = vigenciaMonthList.length;
     for (let i = 0; i < n; i++) {
-      const { key, m } = vigenciaMonthList[i];
+      const { key } = vigenciaMonthList[i];
       remaining += addSumByMonth.get(key) || 0;
-      remaining += annualAddByMonth.get(key) || 0;
 
       const monthsLeft = n - i;
       out.set(key, monthsLeft > 0 ? Math.max(0, remaining) / monthsLeft : 0);
 
       remaining -= faturamentoPorYmKey.get(key) || 0;
-      // Em dezembro do ano do ajuste: tira o ajuste do saldo para o ano seguinte.
-      if (m === 12) {
-        remaining -= annualExpireAfterMonth.get(key) || 0;
+    }
+
+    // Overlay do ajuste anual — só meses do ano civil (eff → Dez), igual à Meta Ideal.
+    if (
+      contractVigenciaDates &&
+      valorAnualBase !== null &&
+      valorAnualBase > 0 &&
+      annualBudgetAdjustments.length > 0
+    ) {
+      const { start, end } = contractVigenciaDates;
+      for (const r of annualBudgetAdjustments) {
+        const effMonth = annualAdjustmentEffectiveCivilMonth(r.year, r.effectiveDate);
+        if (effMonth === null) continue;
+
+        const allocatedBefore = sumGlobalMetaAllocatedBeforeEffMonth(
+          globalMetaSchedule,
+          r.year,
+          effMonth,
+          start,
+          end
+        );
+        let annualRemaining = valorAnualBase - allocatedBefore + r.amount;
+
+        // Faturamento do ano antes do mês efetivo reduz o pool, sem alterar metas desses meses.
+        for (let m = 1; m < effMonth; m++) {
+          if (!calendarMonthHasMetaMensalInVigencia(r.year, m, start, end)) continue;
+          annualRemaining -= faturamentoPorYmKey.get(toYearMonthKey(r.year, m)) || 0;
+        }
+
+        for (let m = effMonth; m <= 12; m++) {
+          if (!calendarMonthHasMetaMensalInVigencia(r.year, m, start, end)) continue;
+          const monthsAfter = countVigenciaMonthsInRange(r.year, m, 12, start, end);
+          if (monthsAfter <= 0) continue;
+          out.set(toYearMonthKey(r.year, m), Math.max(0, annualRemaining) / monthsAfter);
+          annualRemaining -= faturamentoPorYmKey.get(toYearMonthKey(r.year, m)) || 0;
+        }
       }
     }
+
     return out;
   }, [
     vigenciaMonthList,
@@ -1959,6 +1974,9 @@ export default function ContractDetailPage() {
     contractAddendaForMeta,
     annualBudgetAdjustments,
     faturamentoPorYmKey,
+    contractVigenciaDates,
+    valorAnualBase,
+    globalMetaSchedule,
   ]);
 
   const metaRealPorMes = useMemo(() => {
