@@ -362,6 +362,15 @@ app.post('/api/licitacoes/planilha-regioes/manuais', authenticate, (req, res, ne
 app.delete('/api/licitacoes/planilha-regioes/manuais', authenticate, (req, res, next) =>
   licitacaoExtraCtrl.deleteManualRegiao(req as AuthRequest, res, next)
 );
+app.get('/api/licitacoes/banco-cats', authenticate, (req, res, next) =>
+  licitacaoExtraCtrl.getBancoCatsSheet(req as AuthRequest, res, next)
+);
+app.post('/api/licitacoes/banco-cats', authenticate, (req, res, next) =>
+  licitacaoExtraCtrl.createBancoCatsServico(req as AuthRequest, res, next)
+);
+app.delete('/api/licitacoes/banco-cats', authenticate, (req, res, next) =>
+  licitacaoExtraCtrl.deleteBancoCatsServico(req as AuthRequest, res, next)
+);
 app.use('/api/licitacoes', licitacoesRoutes);
 
 // Middleware de erro 404

@@ -1,0 +1,1223 @@
+'use client';
+
+import React, { useDeferredValue, useEffect, useMemo, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  ChevronDown,
+  ChevronUp,
+  Database,
+  Download,
+  ExternalLink,
+  FileSearch,
+  Loader2,
+  Plus,
+  RefreshCw,
+  Search,
+  Trash2,
+  X,
+} from 'lucide-react';
+import toast from 'react-hot-toast';
+import { Card, CardContent, CardHeader } from '@/components/ui/Card';
+import { Modal } from '@/components/ui/Modal';
+import api from '@/lib/api';
+import { exportBancoCatsSelecaoPdf } from '@/lib/exportBancoCatsSelecaoPdf';
+import {
+  buildSearchIndexText,
+  extractKeywords,
+  matchByKeywords,
+  normalizeMatchText,
+  splitHabilitacaoServicos,
+} from './bancoCatsMatch';
+
+const SPREADSHEET_URL =
+  'https://docs.google.com/spreadsheets/d/1n_AhQ9DEGmguyVTfdA41Sm2j5qXmS0Huz4IV0KlBNPE/edit?gid=818440840#gid=818440840';
+
+const CANONICAL_HEADERS = [
+  'EMPRESA',
+  'DESCRIÇÃO',
+  'UND',
+  'QUANT.',
+  'Ind. Fonte',
+  'FONTE',
+] as const;
+
+const PAGE_SIZE = 100;
+/** Pré-visualização padrão por quadrante; o usuário pode expandir para ver todos. */
+const QUADRANTE_MATCH_PREVIEW = 50;
+
+type BancoCatsSheetData = {
+  spreadsheetId: string;
+  sheetName: string;
+  headers: string[];
+  rows: string[][];
+  rowKeys?: string[];
+  manualRowKeys?: string[];
+  rowCount: number;
+  filterOptions: {
+    empresas: string[];
+    unidades: string[];
+    fontes: string[];
+  };
+  fetchedAt: string;
+};
+
+type IndexedRow = {
+  key: string;
+  rowKey: string;
+  cells: string[];
+  isManual: boolean;
+  empresa: string;
+  und: string;
+  quant: string;
+  fonte: string;
+  descricao: string;
+  searchText: string;
+};
+
+function normalizeHeaderKey(header: string): string {
+  return header
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function findColumnIndex(headers: string[], candidates: string[]): number {
+  const normalizedCandidates = candidates.map(normalizeHeaderKey);
+  return headers.findIndex((header) => {
+    const key = normalizeHeaderKey(header);
+    return normalizedCandidates.some((candidate) => key === candidate || key.includes(candidate));
+  });
+}
+
+function formatFetchedAt(iso: string): string {
+  try {
+    return new Date(iso).toLocaleString('pt-BR', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  } catch {
+    return iso;
+  }
+}
+
+function isDescricaoHeader(header: string): boolean {
+  return normalizeHeaderKey(header).includes('descricao');
+}
+
+function emptyFormFields(headers: string[]): Record<string, string> {
+  const fields: Record<string, string> = {};
+  for (const header of headers) {
+    fields[header] = normalizeHeaderKey(header) === 'empresa' ? 'GENNESIS' : '';
+  }
+  return fields;
+}
+
+function apiErrorMessage(error: unknown, fallback: string): string {
+  if (
+    error &&
+    typeof error === 'object' &&
+    'response' in error &&
+    error.response &&
+    typeof error.response === 'object' &&
+    'data' in error.response &&
+    error.response.data &&
+    typeof error.response.data === 'object' &&
+    'message' in error.response.data &&
+    typeof (error.response.data as { message?: unknown }).message === 'string'
+  ) {
+    return (error.response.data as { message: string }).message;
+  }
+  if (error instanceof Error && error.message) return error.message;
+  return fallback;
+}
+
+/** Converte quantidade no formato BR (1.064,50 / 1064,50) para número. */
+function parseQuantidadeBr(value: string): number {
+  const text = value.trim();
+  if (!text || text === '-' || text === '—' || text === '–') return 0;
+
+  let normalized = text.replace(/[^\d.,-]/g, '');
+  if (!normalized) return 0;
+
+  if (normalized.includes(',') && normalized.includes('.')) {
+    normalized = normalized.replace(/\./g, '').replace(',', '.');
+  } else if (normalized.includes(',')) {
+    normalized = normalized.replace(',', '.');
+  }
+
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function formatQuantidadeBr(value: number): string {
+  return value.toLocaleString('pt-BR', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 4,
+  });
+}
+
+function CreateServicoModal({
+  isOpen,
+  headers,
+  onClose,
+  onCreated,
+}: {
+  isOpen: boolean;
+  headers: string[];
+  onClose: () => void;
+  onCreated: () => void;
+}) {
+  const [fields, setFields] = useState<Record<string, string>>(() => emptyFormFields(headers));
+
+  useEffect(() => {
+    if (isOpen) {
+      setFields(emptyFormFields(headers));
+    }
+  }, [isOpen, headers]);
+
+  const createMutation = useMutation({
+    mutationFn: async (payload: Record<string, string>) => {
+      const res = await api.post('/licitacoes/banco-cats', { fields: payload });
+      return res.data as {
+        message?: string;
+        data?: { syncedToSheet?: boolean; writeConfigRequired?: boolean };
+      };
+    },
+    onSuccess: (data) => {
+      if (data?.data?.syncedToSheet) {
+        toast.success('Serviço gravado na planilha e disponível no sistema.');
+      } else if (data?.data?.writeConfigRequired) {
+        toast.success(
+          data.message ||
+            'Serviço incluído no sistema. Configure a gravação na planilha para sincronizar.'
+        );
+      } else {
+        toast.success(data?.message || "Serviço incluído no Banco CAT's.");
+      }
+      onCreated();
+      onClose();
+    },
+    onError: (err) => {
+      toast.error(apiErrorMessage(err, 'Não foi possível incluir o serviço.'));
+    },
+  });
+
+  return (
+    <Modal
+      isOpen={isOpen}
+      onClose={() => {
+        if (createMutation.isPending) return;
+        onClose();
+      }}
+      title="Incluir serviço no Banco CAT's"
+      size="lg"
+    >
+      <form
+        className="space-y-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          createMutation.mutate(fields);
+        }}
+      >
+        <p className="text-sm text-gray-600 dark:text-gray-400">
+          O serviço é gravado na planilha Google e passa a aparecer automaticamente na consulta
+          do sistema.
+        </p>
+
+        <div className="grid max-h-[60vh] grid-cols-1 gap-3 overflow-y-auto pr-1 sm:grid-cols-2">
+          {headers.map((header) => {
+            const label = header.trim();
+            const value = fields[header] ?? '';
+            const fieldClass =
+              'w-full rounded-lg border border-gray-300 bg-white px-3 text-sm dark:border-gray-700 dark:bg-gray-900';
+
+            if (isDescricaoHeader(header)) {
+              return (
+                <label key={header} className="block sm:col-span-2">
+                  <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                    {label} *
+                  </span>
+                  <textarea
+                    value={value}
+                    onChange={(e) =>
+                      setFields((prev) => ({ ...prev, [header]: e.target.value }))
+                    }
+                    required
+                    rows={4}
+                    disabled={createMutation.isPending}
+                    className={`${fieldClass} py-2`}
+                    placeholder="Descrição do serviço conforme a CAT"
+                  />
+                </label>
+              );
+            }
+
+            return (
+              <label key={header} className="block sm:col-span-1">
+                <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                  {label}
+                </span>
+                <input
+                  type="text"
+                  value={value}
+                  onChange={(e) =>
+                    setFields((prev) => ({ ...prev, [header]: e.target.value }))
+                  }
+                  disabled={createMutation.isPending}
+                  className={`${fieldClass} h-10`}
+                  placeholder={
+                    normalizeHeaderKey(header) === 'empresa'
+                      ? 'GENNESIS'
+                      : normalizeHeaderKey(header) === 'fonte'
+                        ? 'Nome do arquivo da CAT'
+                        : ''
+                  }
+                />
+              </label>
+            );
+          })}
+        </div>
+
+        <div className="flex flex-wrap justify-end gap-2 border-t border-gray-100 pt-4 dark:border-gray-800">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={createMutation.isPending}
+            className="inline-flex h-10 items-center rounded-lg border border-gray-300 bg-white px-4 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+          >
+            Cancelar
+          </button>
+          <button
+            type="submit"
+            disabled={createMutation.isPending}
+            className="inline-flex h-10 items-center gap-2 rounded-lg bg-red-600 px-4 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+          >
+            {createMutation.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+            ) : (
+              <Plus className="h-4 w-4" aria-hidden />
+            )}
+            Salvar serviço
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+export function BancoCatsPanel() {
+  const queryClient = useQueryClient();
+  const [searchInput, setSearchInput] = useState('');
+  const deferredSearch = useDeferredValue(searchInput);
+  const [empresa, setEmpresa] = useState('');
+  const [unidade, setUnidade] = useState('');
+  const [fonte, setFonte] = useState('');
+  const [habilitacaoDraft, setHabilitacaoDraft] = useState('');
+  const [habilitacaoConsulta, setHabilitacaoConsulta] = useState('');
+  const [page, setPage] = useState(1);
+  const [createModalOpen, setCreateModalOpen] = useState(false);
+  /** Seleção no catálogo principal (soma QUANT. + exclusão de manuais) */
+  const [selectedCatalogKeys, setSelectedCatalogKeys] = useState<Set<string>>(new Set());
+  /** Seleção para soma de QUANT. nos quadrantes: chave = `${quadranteId}::${rowKey}` */
+  const [selectedMatchKeys, setSelectedMatchKeys] = useState<Set<string>>(new Set());
+  /** Quadrantes com lista completa expandida (acima do preview de 50). */
+  const [expandedQuadrantes, setExpandedQuadrantes] = useState<Set<string>>(new Set());
+  const [exportingPdf, setExportingPdf] = useState(false);
+
+  const {
+    data: sheet,
+    isLoading,
+    isFetching,
+    error,
+    refetch,
+  } = useQuery({
+    queryKey: ['licitacoes-banco-cats'],
+    queryFn: async () => {
+      const res = await api.get('/licitacoes/banco-cats', {
+        params: { refresh: 1 },
+      });
+      return (res.data?.data ?? null) as BancoCatsSheetData | null;
+    },
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
+  });
+
+  const formHeaders = useMemo(() => {
+    if (sheet?.headers?.length) return sheet.headers;
+    return [...CANONICAL_HEADERS];
+  }, [sheet?.headers]);
+
+  const indexedRows = useMemo(() => {
+    if (!sheet) return [] as IndexedRow[];
+
+    const headers = sheet.headers;
+    const empresaIdx = findColumnIndex(headers, ['empresa']);
+    const undIdx = findColumnIndex(headers, ['und', 'unidade']);
+    const quantIdx = findColumnIndex(headers, ['quant', 'quantidade']);
+    const fonteIdx = findColumnIndex(headers, ['fonte']);
+    const descricaoIdx = findColumnIndex(headers, ['descricao', 'descrição']);
+    const manualSet = new Set(sheet.manualRowKeys ?? []);
+
+    return sheet.rows.map((cells, index) => {
+      const rowKey = sheet.rowKeys?.[index] ?? `sheet:${index}`;
+      return {
+        key: rowKey,
+        rowKey,
+        cells,
+        isManual: manualSet.has(rowKey),
+        empresa: empresaIdx >= 0 ? (cells[empresaIdx] ?? '').trim() : '',
+        und: undIdx >= 0 ? (cells[undIdx] ?? '').trim() : '',
+        quant: quantIdx >= 0 ? (cells[quantIdx] ?? '').trim() : '',
+        fonte: fonteIdx >= 0 ? (cells[fonteIdx] ?? '').trim() : '',
+        descricao: descricaoIdx >= 0 ? (cells[descricaoIdx] ?? '').trim() : '',
+        searchText: buildSearchIndexText(cells.join(' ')),
+      };
+    });
+  }, [sheet]);
+
+  const manualCount = useMemo(
+    () => indexedRows.reduce((count, row) => (row.isManual ? count + 1 : count), 0),
+    [indexedRows]
+  );
+
+  const servicoConsultas = useMemo(
+    () => splitHabilitacaoServicos(habilitacaoConsulta),
+    [habilitacaoConsulta]
+  );
+
+  const servicoQuadrantes = useMemo(() => {
+    if (!habilitacaoConsulta.trim()) return [];
+
+    return servicoConsultas.map((query, index) => {
+      const keywords = extractKeywords(query);
+      const matches = keywords.length
+        ? matchByKeywords(indexedRows, keywords, {
+            minScore: keywords.length >= 5 ? 2 : 1,
+            limit: null,
+            queryText: query,
+          })
+        : [];
+
+      return {
+        id: `servico-${index + 1}`,
+        index: index + 1,
+        query,
+        keywords,
+        matches,
+      };
+    });
+  }, [habilitacaoConsulta, servicoConsultas, indexedRows]);
+
+  const visibleRows = useMemo(() => {
+    const term = deferredSearch.trim();
+    const tokens = term
+      ? normalizeMatchText(term).split(/\s+/).filter(Boolean)
+      : [];
+
+    // Durante a consulta de habilitação, os resultados ficam nos quadrantes.
+    return indexedRows.filter((row) => {
+      if (empresa && row.empresa !== empresa) return false;
+      if (unidade && row.und !== unidade) return false;
+      if (fonte && row.fonte !== fonte) return false;
+      if (tokens.length > 0 && !tokens.every((token) => row.searchText.includes(token))) {
+        return false;
+      }
+      return true;
+    });
+  }, [indexedRows, deferredSearch, empresa, unidade, fonte]);
+
+  const totalPages = Math.max(1, Math.ceil(visibleRows.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pageRows = useMemo(() => {
+    const start = (currentPage - 1) * PAGE_SIZE;
+    return visibleRows.slice(start, start + PAGE_SIZE);
+  }, [visibleRows, currentPage]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [deferredSearch, empresa, unidade, fonte, habilitacaoConsulta]);
+
+  useEffect(() => {
+    setSelectedMatchKeys(new Set());
+    setExpandedQuadrantes(new Set());
+  }, [habilitacaoConsulta]);
+
+  const deleteMutation = useMutation({
+    mutationFn: async (rowKeys: string[]) => {
+      for (const rowKey of rowKeys) {
+        await api.delete('/licitacoes/banco-cats', {
+          data: {
+            spreadsheetId: sheet?.spreadsheetId,
+            rowKey,
+          },
+        });
+      }
+    },
+    onSuccess: async (_data, rowKeys) => {
+      toast.success(
+        rowKeys.length === 1
+          ? 'Serviço removido.'
+          : `${rowKeys.length} serviços removidos.`
+      );
+      setSelectedCatalogKeys((prev) => {
+        const next = new Set(prev);
+        for (const key of rowKeys) next.delete(key);
+        return next;
+      });
+      await queryClient.invalidateQueries({ queryKey: ['licitacoes-banco-cats'] });
+    },
+    onError: (err) => {
+      toast.error(apiErrorMessage(err, 'Não foi possível excluir o serviço.'));
+    },
+  });
+
+  const matchingActive = Boolean(habilitacaoConsulta.trim());
+  const hasActiveFilters = Boolean(searchInput.trim() || empresa || unidade || fonte);
+  const errorMessage =
+    error instanceof Error
+      ? error.message
+      : "Não foi possível carregar o Banco CAT's.";
+
+  const clearFilters = () => {
+    setSearchInput('');
+    setEmpresa('');
+    setUnidade('');
+    setFonte('');
+  };
+
+  const clearHabilitacaoConsulta = () => {
+    setHabilitacaoDraft('');
+    setHabilitacaoConsulta('');
+    setSelectedMatchKeys(new Set());
+    setExpandedQuadrantes(new Set());
+  };
+
+  const toggleQuadranteExpanded = (quadranteId: string) => {
+    setExpandedQuadrantes((prev) => {
+      const next = new Set(prev);
+      if (next.has(quadranteId)) next.delete(quadranteId);
+      else next.add(quadranteId);
+      return next;
+    });
+  };
+
+  const runHabilitacaoMatch = () => {
+    const text = habilitacaoDraft.trim();
+    if (!text) {
+      toast.error('Cole ou digite as habilitações técnicas necessárias.');
+      return;
+    }
+    const servicos = splitHabilitacaoServicos(text);
+    const hasKeywords = servicos.some((servico) => extractKeywords(servico).length > 0);
+    if (!hasKeywords) {
+      toast.error(
+        'Não foi possível extrair palavras-chave suficientes. Inclua termos técnicos do edital.'
+      );
+      return;
+    }
+    setHabilitacaoConsulta(text);
+    setSelectedMatchKeys(new Set());
+    setExpandedQuadrantes(new Set());
+    setPage(1);
+  };
+
+  const totalCompatíveisMulti = useMemo(
+    () => servicoQuadrantes.reduce((sum, q) => sum + q.matches.length, 0),
+    [servicoQuadrantes]
+  );
+
+  const somaPorQuadrante = useMemo(() => {
+    const map = new Map<string, { count: number; soma: number }>();
+    for (const quadrante of servicoQuadrantes) {
+      let count = 0;
+      let soma = 0;
+      for (const match of quadrante.matches) {
+        const key = `${quadrante.id}::${match.item.rowKey}`;
+        if (!selectedMatchKeys.has(key)) continue;
+        count += 1;
+        soma += parseQuantidadeBr(match.item.quant);
+      }
+      map.set(quadrante.id, { count, soma });
+    }
+    return map;
+  }, [servicoQuadrantes, selectedMatchKeys]);
+
+  const toggleMatchSelection = (quadranteId: string, rowKey: string) => {
+    const key = `${quadranteId}::${rowKey}`;
+    setSelectedMatchKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const selectedMatchCount = selectedMatchKeys.size;
+
+  const exportSelecaoPdf = async () => {
+    if (selectedMatchCount === 0) {
+      toast.error('Marque ao menos um serviço nos quadrantes para exportar.');
+      return;
+    }
+
+    setExportingPdf(true);
+    try {
+      const quadrantes = servicoQuadrantes
+        .map((quadrante) => {
+          const selecao = somaPorQuadrante.get(quadrante.id) ?? { count: 0, soma: 0 };
+          const servicos = quadrante.matches
+            .filter((match) =>
+              selectedMatchKeys.has(`${quadrante.id}::${match.item.rowKey}`)
+            )
+            .map((match) => ({
+              empresa: match.item.empresa,
+              descricao: match.item.descricao,
+              und: match.item.und,
+              quant: match.item.quant,
+              fonte: match.item.fonte,
+            }));
+
+          return {
+            index: quadrante.index,
+            query: quadrante.query,
+            somaQuant: selecao.soma,
+            somaQuantFormatada: formatQuantidadeBr(selecao.soma),
+            servicos,
+          };
+        })
+        .filter((q) => q.servicos.length > 0);
+
+      await exportBancoCatsSelecaoPdf({ quadrantes });
+      toast.success('PDF exportado com os serviços marcados.');
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : 'Erro ao gerar o PDF. Tente novamente.'
+      );
+    } finally {
+      setExportingPdf(false);
+    }
+  };
+
+  const selectedManualKeysList = useMemo(
+    () =>
+      Array.from(selectedCatalogKeys).filter((rowKey) =>
+        indexedRows.some((row) => row.rowKey === rowKey && row.isManual)
+      ),
+    [selectedCatalogKeys, indexedRows]
+  );
+
+  const catalogSoma = useMemo(() => {
+    let count = 0;
+    let soma = 0;
+    for (const row of indexedRows) {
+      if (!selectedCatalogKeys.has(row.rowKey)) continue;
+      count += 1;
+      soma += parseQuantidadeBr(row.quant);
+    }
+    return { count, soma };
+  }, [indexedRows, selectedCatalogKeys]);
+
+  const pageSelection = useMemo(() => {
+    if (pageRows.length === 0) return { all: false, some: false };
+    let selectedOnPage = 0;
+    for (const row of pageRows) {
+      if (selectedCatalogKeys.has(row.rowKey)) selectedOnPage += 1;
+    }
+    return {
+      all: selectedOnPage === pageRows.length,
+      some: selectedOnPage > 0 && selectedOnPage < pageRows.length,
+    };
+  }, [pageRows, selectedCatalogKeys]);
+
+  const toggleCatalogSelection = (rowKey: string) => {
+    setSelectedCatalogKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(rowKey)) next.delete(rowKey);
+      else next.add(rowKey);
+      return next;
+    });
+  };
+
+  const togglePageSelection = () => {
+    setSelectedCatalogKeys((prev) => {
+      const next = new Set(prev);
+      if (pageSelection.all) {
+        for (const row of pageRows) next.delete(row.rowKey);
+      } else {
+        for (const row of pageRows) next.add(row.rowKey);
+      }
+      return next;
+    });
+  };
+
+  const pageFrom = visibleRows.length === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
+  const pageTo = Math.min(currentPage * PAGE_SIZE, visibleRows.length);
+
+  return (
+    <div className="space-y-5">
+      <Card className="shadow-sm">
+        <CardHeader className="space-y-1 px-5 pb-0 pt-5">
+          <div className="flex items-center gap-2">
+            <FileSearch className="h-5 w-5 text-red-600" aria-hidden />
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+              Consulta de habilitação técnica
+            </h2>
+          </div>
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            Cole as exigências do edital. Para vários serviços, use uma linha (ou um bloco) por
+            item — a resposta será dividida em quadrantes.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-3 px-5 py-4">
+          <textarea
+            value={habilitacaoDraft}
+            onChange={(e) => setHabilitacaoDraft(e.target.value)}
+            rows={6}
+            placeholder={
+              'Um serviço por linha, por exemplo:\n' +
+              'CABO DE COBRE FLEXÍVEL ISOLADO, 1,5 MM², ANTI-CHAMA 0,6/1,0 KV…\n' +
+              'PISO VINÍLICO 30 X 30 CM, E=2MM…\n' +
+              'PINTURA EPOXI PARA PISO…'
+            }
+            className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm leading-relaxed dark:border-gray-700 dark:bg-gray-900"
+          />
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={runHabilitacaoMatch}
+              disabled={isLoading || !habilitacaoDraft.trim()}
+              className="inline-flex h-9 items-center gap-2 rounded-lg bg-red-600 px-4 text-sm font-semibold text-white transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <FileSearch className="h-4 w-4" aria-hidden />
+              Buscar compatíveis
+            </button>
+            {matchingActive ? (
+              <button
+                type="button"
+                onClick={clearHabilitacaoConsulta}
+                className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+              >
+                <X className="h-3.5 w-3.5" aria-hidden />
+                Limpar consulta
+              </button>
+            ) : null}
+            {matchingActive ? (
+              <button
+                type="button"
+                onClick={() => void exportSelecaoPdf()}
+                disabled={exportingPdf || selectedMatchCount === 0}
+                className="inline-flex h-9 items-center gap-2 rounded-lg border border-emerald-300 bg-emerald-50 px-3 text-sm font-semibold text-emerald-800 transition-colors hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200 dark:hover:bg-emerald-950/60"
+              >
+                {exportingPdf ? (
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                ) : (
+                  <Download className="h-4 w-4" aria-hidden />
+                )}
+                {exportingPdf
+                  ? 'Gerando PDF…'
+                  : selectedMatchCount > 0
+                    ? `Exportar PDF (${selectedMatchCount})`
+                    : 'Exportar PDF'}
+              </button>
+            ) : null}
+          </div>
+
+          {matchingActive ? (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
+              <p>
+                <span className="font-semibold">{servicoQuadrantes.length}</span>{' '}
+                {servicoQuadrantes.length === 1 ? 'serviço consultado' : 'serviços consultados'} ·{' '}
+                <span className="font-semibold">{totalCompatíveisMulti}</span> compatível(is) no
+                total. Marque os itens para somar as quantidades e exportar o PDF com a seleção de
+                cada quadrante.
+              </p>
+            </div>
+          ) : null}
+        </CardContent>
+      </Card>
+
+      {matchingActive ? (
+        <div className="flex flex-col gap-4">
+          {servicoQuadrantes.map((quadrante) => {
+            const selecao = somaPorQuadrante.get(quadrante.id) ?? { count: 0, soma: 0 };
+            const totalMatches = quadrante.matches.length;
+            const hasMoreThanPreview = totalMatches > QUADRANTE_MATCH_PREVIEW;
+            const isExpanded = expandedQuadrantes.has(quadrante.id);
+            const visibleMatches =
+              hasMoreThanPreview && !isExpanded
+                ? quadrante.matches.slice(0, QUADRANTE_MATCH_PREVIEW)
+                : quadrante.matches;
+            const hiddenCount = totalMatches - visibleMatches.length;
+
+            return (
+              <Card key={quadrante.id} className="shadow-sm" padding="none">
+                <CardHeader className="space-y-2 border-b border-gray-100 px-4 py-3 dark:border-gray-800">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                      Serviço {quadrante.index}
+                    </h3>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="shrink-0 rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">
+                        Soma QUANT.: {formatQuantidadeBr(selecao.soma)}
+                        {selecao.count > 0 ? ` (${selecao.count})` : ''}
+                      </span>
+                      <span className="shrink-0 rounded-full bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-700 dark:bg-red-950/40 dark:text-red-300">
+                        {totalMatches} compatível(is)
+                        {hasMoreThanPreview && !isExpanded
+                          ? ` · top ${QUADRANTE_MATCH_PREVIEW}`
+                          : ''}
+                      </span>
+                    </div>
+                  </div>
+                  <p className="line-clamp-3 text-xs leading-relaxed text-gray-600 dark:text-gray-400">
+                    {quadrante.query}
+                  </p>
+                  {quadrante.keywords.length > 0 ? (
+                    <p className="flex flex-wrap gap-1">
+                      {quadrante.keywords.slice(0, 12).map((keyword) => (
+                        <span
+                          key={`${quadrante.id}-${keyword}`}
+                          className="rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-900 dark:bg-amber-950/40 dark:text-amber-100"
+                        >
+                          {keyword}
+                        </span>
+                      ))}
+                      {quadrante.keywords.length > 12 ? (
+                        <span className="text-[10px] text-gray-500">
+                          +{quadrante.keywords.length - 12}
+                        </span>
+                      ) : null}
+                    </p>
+                  ) : null}
+                </CardHeader>
+                <CardContent className="max-h-[32rem] space-y-2 overflow-y-auto px-4 py-3">
+                  {totalMatches === 0 ? (
+                    <p className="py-6 text-center text-sm text-gray-500">
+                      Nenhum compatível encontrado para este serviço.
+                    </p>
+                  ) : (
+                    <>
+                      {visibleMatches.map((match) => {
+                        const selectionKey = `${quadrante.id}::${match.item.rowKey}`;
+                        const checked = selectedMatchKeys.has(selectionKey);
+                        return (
+                          <label
+                            key={selectionKey}
+                            className={`flex cursor-pointer gap-3 rounded-lg border px-3 py-2 transition-colors dark:border-gray-800 ${
+                              checked
+                                ? 'border-emerald-300 bg-emerald-50/60 dark:border-emerald-800 dark:bg-emerald-950/30'
+                                : 'border-gray-100 hover:bg-gray-50/80 dark:hover:bg-gray-900/40'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() =>
+                                toggleMatchSelection(quadrante.id, match.item.rowKey)
+                              }
+                              className="mt-1 h-4 w-4 shrink-0 rounded border-gray-300 text-red-600 focus:ring-red-500"
+                              aria-label={`Selecionar para soma: ${match.item.descricao || match.item.rowKey}`}
+                            />
+                            <div className="min-w-0 flex-1">
+                              <div className="mb-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+                                <span className="text-xs font-semibold text-emerald-700 dark:text-emerald-400">
+                                  {match.matchedKeywords.length} chave(s)
+                                </span>
+                                <span className="text-xs text-gray-500">
+                                  {match.item.empresa || '—'}
+                                </span>
+                                <span className="text-xs text-gray-500">
+                                  UND: {match.item.und || '—'}
+                                </span>
+                                <span className="text-xs font-medium text-gray-700 dark:text-gray-300">
+                                  QUANT.: {match.item.quant || '—'}
+                                </span>
+                              </div>
+                              <p className="text-sm leading-relaxed text-gray-800 dark:text-gray-200">
+                                {match.item.descricao || match.item.cells.join(' · ') || '—'}
+                              </p>
+                              {match.matchedKeywords.length > 0 ? (
+                                <p className="mt-1.5 flex flex-wrap gap-1">
+                                  {match.matchedKeywords.slice(0, 8).map((keyword) => (
+                                    <span
+                                      key={`${selectionKey}-${keyword}`}
+                                      className="rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200"
+                                    >
+                                      {keyword}
+                                    </span>
+                                  ))}
+                                </p>
+                              ) : null}
+                              {match.item.fonte ? (
+                                <p
+                                  className="mt-1 truncate text-[11px] text-gray-500"
+                                  title={match.item.fonte}
+                                >
+                                  Fonte: {match.item.fonte}
+                                </p>
+                              ) : null}
+                            </div>
+                          </label>
+                        );
+                      })}
+                      {hasMoreThanPreview ? (
+                        <button
+                          type="button"
+                          onClick={() => toggleQuadranteExpanded(quadrante.id)}
+                          className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-gray-300 bg-gray-50 px-3 py-2.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-900/50 dark:text-gray-200 dark:hover:bg-gray-900"
+                        >
+                          {isExpanded ? (
+                            <>
+                              <ChevronUp className="h-4 w-4" aria-hidden />
+                              Mostrar só os {QUADRANTE_MATCH_PREVIEW} primeiros
+                            </>
+                          ) : (
+                            <>
+                              <ChevronDown className="h-4 w-4" aria-hidden />
+                              Ver todos os {totalMatches} compatíveis
+                              {hiddenCount > 0 ? ` (+${hiddenCount})` : ''}
+                            </>
+                          )}
+                        </button>
+                      ) : null}
+                    </>
+                  )}
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
+      ) : null}
+
+      <Card className="shadow-sm">
+        <CardHeader className="space-y-4 px-5 pb-0 pt-5">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <Database className="h-5 w-5 text-red-600" aria-hidden />
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                  Banco CAT&apos;s
+                </h2>
+                {catalogSoma.count > 0 ? (
+                  <span className="rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-semibold text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">
+                    Soma QUANT.: {formatQuantidadeBr(catalogSoma.soma)} ({catalogSoma.count})
+                  </span>
+                ) : null}
+              </div>
+              <p className="mt-1 max-w-2xl text-sm text-gray-600 dark:text-gray-400">
+                {matchingActive
+                  ? 'Consulta em quadrantes acima. Abaixo, o catálogo completo do Banco CAT\'s.'
+                  : 'Consulte os serviços atestados nas CATs. Marque os itens para somar as quantidades. Inclusões no sistema vão para a planilha e inclusões na planilha aparecem aqui ao atualizar.'}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setCreateModalOpen(true)}
+                disabled={isLoading}
+                className="inline-flex h-9 items-center gap-2 rounded-lg bg-red-600 px-4 text-sm font-semibold text-white transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Plus className="h-4 w-4" aria-hidden />
+                Incluir serviço
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (
+                    window.confirm(
+                      selectedManualKeysList.length === 1
+                        ? 'Excluir este serviço incluído no sistema?'
+                        : `Excluir ${selectedManualKeysList.length} serviços incluídos no sistema?`
+                    )
+                  ) {
+                    deleteMutation.mutate(selectedManualKeysList);
+                  }
+                }}
+                disabled={
+                  selectedManualKeysList.length === 0 ||
+                  deleteMutation.isPending ||
+                  isLoading
+                }
+                className="inline-flex h-9 items-center gap-2 rounded-lg border border-red-300 bg-red-50 px-4 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-950/60"
+              >
+                {deleteMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                ) : (
+                  <Trash2 className="h-4 w-4" aria-hidden />
+                )}
+                Excluir
+                {selectedManualKeysList.length > 0
+                  ? ` (${selectedManualKeysList.length})`
+                  : ''}
+              </button>
+              <a
+                href={SPREADSHEET_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex h-9 items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-800 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
+              >
+                <ExternalLink className="h-4 w-4" aria-hidden />
+                Abrir planilha
+              </a>
+              <button
+                type="button"
+                onClick={() => {
+                  void refetch();
+                }}
+                disabled={isFetching}
+                className="inline-flex h-9 items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-800 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
+              >
+                {isFetching ? (
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                ) : (
+                  <RefreshCw className="h-4 w-4" aria-hidden />
+                )}
+                Atualizar
+              </button>
+            </div>
+          </div>
+        </CardHeader>
+
+        <CardContent className="space-y-4 px-5 py-4">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <div className="relative md:col-span-2 xl:col-span-1">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+              <input
+                type="search"
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                placeholder="Buscar serviço, unidade, fonte…"
+                className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm dark:border-gray-700 dark:bg-gray-900"
+              />
+            </div>
+
+            <select
+              value={empresa}
+              onChange={(e) => setEmpresa(e.target.value)}
+              className="h-10 rounded-lg border border-gray-300 bg-white px-3 text-sm dark:border-gray-700 dark:bg-gray-900"
+              aria-label="Filtrar por empresa"
+            >
+              <option value="">Todas as empresas</option>
+              {(sheet?.filterOptions.empresas ?? []).map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+
+            <select
+              value={unidade}
+              onChange={(e) => setUnidade(e.target.value)}
+              className="h-10 rounded-lg border border-gray-300 bg-white px-3 text-sm dark:border-gray-700 dark:bg-gray-900"
+              aria-label="Filtrar por unidade"
+            >
+              <option value="">Todas as unidades</option>
+              {(sheet?.filterOptions.unidades ?? []).map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+
+            <select
+              value={fonte}
+              onChange={(e) => setFonte(e.target.value)}
+              className="h-10 rounded-lg border border-gray-300 bg-white px-3 text-sm dark:border-gray-700 dark:bg-gray-900"
+              aria-label="Filtrar por fonte (CAT)"
+            >
+              <option value="">Todas as fontes (CATs)</option>
+              {(sheet?.filterOptions.fontes ?? []).map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm text-gray-500">
+              {isLoading
+                ? 'Carregando…'
+                : `${visibleRows.length} serviço(s)${
+                    sheet?.rowCount != null && visibleRows.length !== sheet.rowCount
+                      ? ` de ${sheet.rowCount}`
+                      : ''
+                  }`}
+              {manualCount ? ` · ${manualCount} incluído(s) no sistema` : ''}
+              {sheet?.fetchedAt ? ` · Atualizado em ${formatFetchedAt(sheet.fetchedAt)}` : ''}
+            </p>
+            {hasActiveFilters ? (
+              <button
+                type="button"
+                onClick={clearFilters}
+                className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100"
+              >
+                <X className="h-3.5 w-3.5" aria-hidden />
+                Limpar filtros
+              </button>
+            ) : null}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card padding="none" className="overflow-hidden shadow-sm">
+        {error ? (
+          <CardContent className="px-5 py-12 text-center">
+            <p className="font-medium text-red-600 dark:text-red-400">{errorMessage}</p>
+            <button
+              type="button"
+              onClick={() => void refetch()}
+              className="mt-3 text-sm text-gray-600 underline hover:text-gray-800 dark:text-gray-400"
+            >
+              Tentar novamente
+            </button>
+          </CardContent>
+        ) : isLoading ? (
+          <CardContent className="flex justify-center py-20">
+            <Loader2 className="h-8 w-8 animate-spin text-red-600" />
+          </CardContent>
+        ) : !sheet?.headers?.length ? (
+          <CardContent className="px-5 py-12 text-center text-sm text-gray-500">
+            Nenhum serviço encontrado. Use “Incluir serviço” para cadastrar o primeiro.
+          </CardContent>
+        ) : (
+          <>
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200 text-sm dark:divide-gray-800">
+                <thead className="bg-gray-50 dark:bg-gray-900/60">
+                <tr>
+                  <th scope="col" className="w-10 px-3 py-3">
+                    <input
+                      type="checkbox"
+                      aria-label="Selecionar todos da página"
+                      checked={pageSelection.all}
+                      ref={(el) => {
+                        if (el) el.indeterminate = pageSelection.some;
+                      }}
+                      onChange={togglePageSelection}
+                      disabled={pageRows.length === 0}
+                      className="h-4 w-4 rounded border-gray-300 text-red-600 focus:ring-red-500 disabled:opacity-50"
+                    />
+                  </th>
+                  {sheet.headers.map((header) => (
+                    <th
+                      key={header}
+                      scope="col"
+                      className={`whitespace-nowrap px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-400 ${
+                        isDescricaoHeader(header) ? 'min-w-[22rem]' : ''
+                      }`}
+                    >
+                      {header}
+                    </th>
+                  ))}
+                </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 bg-white dark:divide-gray-800 dark:bg-gray-950">
+                  {pageRows.length === 0 ? (
+                    <tr>
+                      <td
+                        colSpan={sheet.headers.length + 1}
+                        className="px-4 py-12 text-center text-sm text-gray-500"
+                      >
+                        {hasActiveFilters
+                          ? 'Nenhum resultado para a busca ou filtros atuais.'
+                          : 'Nenhum serviço cadastrado.'}
+                      </td>
+                    </tr>
+                  ) : (
+                    pageRows.map((row) => {
+                      const checked = selectedCatalogKeys.has(row.rowKey);
+                      return (
+                      <tr
+                        key={row.key}
+                        className={`align-top hover:bg-gray-50/80 dark:hover:bg-gray-900/40 ${
+                          checked ? 'bg-emerald-50/40 dark:bg-emerald-950/20' : ''
+                        }`}
+                      >
+                        <td className="px-3 py-3">
+                          <input
+                            type="checkbox"
+                            aria-label={`Selecionar serviço: ${row.descricao || row.rowKey}`}
+                            checked={checked}
+                            onChange={() => toggleCatalogSelection(row.rowKey)}
+                            className="h-4 w-4 rounded border-gray-300 text-red-600 focus:ring-red-500"
+                          />
+                        </td>
+                        {sheet.headers.map((header, colIndex) => {
+                          const isDescricao = isDescricaoHeader(header);
+                          return (
+                            <td
+                              key={`${row.key}-${header}`}
+                              className={`px-3 py-3 text-gray-800 dark:text-gray-200 ${
+                                isDescricao
+                                  ? 'max-w-xl whitespace-normal leading-relaxed'
+                                  : 'whitespace-nowrap'
+                              }`}
+                            >
+                              <div className="flex flex-wrap items-start gap-2">
+                                <span>{row.cells[colIndex] || '—'}</span>
+                                {row.isManual && colIndex === 0 ? (
+                                  <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800 dark:bg-amber-950/50 dark:text-amber-200">
+                                    Sistema
+                                  </span>
+                                ) : null}
+                              </div>
+                            </td>
+                          );
+                        })}
+                      </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {visibleRows.length > PAGE_SIZE ? (
+              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 px-4 py-3 dark:border-gray-800">
+                <p className="text-sm text-gray-500">
+                  Exibindo {pageFrom}–{pageTo} de {visibleRows.length}
+                </p>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    disabled={currentPage <= 1}
+                    className="h-9 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                  >
+                    Anterior
+                  </button>
+                  <span className="text-sm text-gray-600 dark:text-gray-300">
+                    Página {currentPage} de {totalPages}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={currentPage >= totalPages}
+                    className="h-9 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                  >
+                    Próxima
+                  </button>
+                </div>
+              </div>
+            ) : null}
+          </>
+        )}
+      </Card>
+
+      <CreateServicoModal
+        isOpen={createModalOpen}
+        headers={formHeaders}
+        onClose={() => setCreateModalOpen(false)}
+        onCreated={() => {
+          void queryClient.invalidateQueries({ queryKey: ['licitacoes-banco-cats'] });
+        }}
+      />
+    </div>
+  );
+}
