@@ -17,6 +17,12 @@ import {
   type KanbanLabelPresetDto,
 } from '../lib/kanbanLabelPresets';
 import { prisma } from '../lib/prisma';
+import {
+  boardToTrelloExport,
+  importTrelloIntoBoard,
+  loadBoardForTrelloTransfer,
+  type TrelloExportBoard,
+} from '../lib/kanbanTrelloTransfer';
 import { ChatService } from './ChatService';
 
 const chatUploadService = new ChatService();
@@ -816,6 +822,17 @@ export class KanbanService {
         select: boardSelect,
       });
       deptBoards.forEach(pushBoard);
+
+      // Sem quadros de setor no banco o admin ficava com lista vazia e o frontend
+      // nunca pedia /kanban/board (skeleton infinito). Garante o quadro do próprio setor.
+      if (results.length === 0 && ownKey !== KANBAN_LEGACY_DEPARTMENT_KEY) {
+        await this.getOrCreateBoardForDepartment(userId);
+        const ownBoard = await prisma.kanbanBoard.findUnique({
+          where: { departmentKey: ownKey },
+          select: boardSelect,
+        });
+        if (ownBoard) pushBoard(ownBoard);
+      }
     } else {
       const ownBoard = await prisma.kanbanBoard.findUnique({
         where: { departmentKey: ownKey },
@@ -2119,5 +2136,59 @@ export class KanbanService {
     }
 
     return this.getCardById(requesterId, att.cardId);
+  }
+
+  /** Exporta o quadro no JSON compatível com Trello. */
+  async exportBoardAsTrello(
+    userId: string,
+    departmentKeyParam?: string,
+  ): Promise<{ filename: string; payload: TrelloExportBoard }> {
+    const formatted = await this.getBoardForUser(userId, departmentKeyParam);
+    const row = await loadBoardForTrelloTransfer(formatted.id);
+    if (!row) throw new Error('Quadro não encontrado para este setor');
+    const payload = boardToTrelloExport(row);
+    const safeName = (payload.name || 'tasks')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-zA-Z0-9-_]+/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '')
+      .toLowerCase()
+      .slice(0, 60) || 'tasks';
+    return {
+      filename: `${safeName}-trello-export.json`,
+      payload,
+    };
+  }
+
+  /**
+   * Importa JSON estilo Trello no quadro atual.
+   * @param replace se true, apaga colunas/cards existentes antes.
+   */
+  async importBoardFromTrello(
+    userId: string,
+    data: unknown,
+    options: {
+      departmentKey?: string;
+      replace?: boolean;
+      memberMap?: Record<string, string>;
+    } = {},
+  ) {
+    const formatted = await this.getBoardForUser(userId, options.departmentKey);
+    if (formatted.canWrite === false) throw new Error(KANBAN_FORBIDDEN);
+
+    const boardMeta = await prisma.kanbanBoard.findUnique({
+      where: { id: formatted.id },
+      select: this.boardAccessSelect,
+    });
+    if (!boardMeta) throw new Error('Quadro não encontrado para este setor');
+    await this.assertBoardAccess(userId, boardMeta, 'write');
+
+    return importTrelloIntoBoard(data, {
+      boardId: formatted.id,
+      replace: !!options.replace,
+      importAsUserId: userId,
+      memberMap: options.memberMap || {},
+    });
   }
 }
