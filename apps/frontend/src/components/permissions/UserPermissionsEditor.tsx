@@ -240,7 +240,14 @@ function inferCategoryFromHref(href: string): string {
   ) {
     return 'Engenharia';
   }
-  if (h === '/ponto/espelho-nf' || h === '/ponto/licitacoes' || h === '/ponto/contratos/medicao') {
+  if (
+    h === '/ponto/espelho-nf' ||
+    h === '/ponto/licitacoes' ||
+    h === '/ponto/responsaveis-tecnicos' ||
+    h === '/ponto/controle-anuidade' ||
+    h === '/ponto/controle-pagamentos-art' ||
+    h === '/ponto/contratos/medicao'
+  ) {
     return 'Contratos e Licitações';
   }
   if (h === '/ponto/juridico') return 'Jurídico';

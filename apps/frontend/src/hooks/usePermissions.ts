@@ -517,6 +517,9 @@ export function useRoutePermission(route: string) {
       can(pk('/ponto/espelho-nf/codigos-tributarios')) ||
       can(pk('/ponto/espelho-nf')),
     '/ponto/licitacoes': isAdministrator || can(pk('/ponto/licitacoes')),
+    '/ponto/responsaveis-tecnicos': isAdministrator || can(pk('/ponto/responsaveis-tecnicos')),
+    '/ponto/controle-anuidade': isAdministrator || can(pk('/ponto/controle-anuidade')),
+    '/ponto/controle-pagamentos-art': isAdministrator || can(pk('/ponto/controle-pagamentos-art')),
     '/ponto/contratos/medicao': isAdministrator || can(pk('/ponto/contratos/medicao')),
     '/ponto/solicitar-materiais': isAdministrator || can(pk('/ponto/solicitar-materiais')),
     '/ponto/gerenciar-materiais': isAdministrator || isDepartmentCompras || can(pk('/ponto/gerenciar-materiais')),

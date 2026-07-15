@@ -27,7 +27,7 @@ import exec from 'k6/execution';
 import { Counter } from 'k6/metrics';
 
 import { getUserCredentials, loginJsonBody } from './carga-auth.js';
-import { p95 } from './carga-thresholds.js';
+import { p95, k6SetupTimeout } from './carga-thresholds.js';
 
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:5000/api';
 const VUS = Math.max(1, Number(__ENV.VUS || 5));
@@ -46,6 +46,7 @@ const nfAttached = new Counter('nf_attached');
 const ocFinalized = new Counter('oc_finalized');
 
 export const options = {
+  setupTimeout: k6SetupTimeout(),
   scenarios: {
     pagamento_boleto: {
       executor: 'shared-iterations',

@@ -62,6 +62,7 @@ import {
   Database,
   ClipboardList,
   ClipboardCheck,
+  BadgeCheck,
   CreditCard,
   HardDrive,
   SquareKanban,
@@ -817,6 +818,27 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
             icon: ClipboardList,
             description: 'Acompanhar processos de licitação',
             permission: isAdministrator || can(pk('/ponto/licitacoes'))
+          },
+          {
+            name: 'Responsáveis Técnicos',
+            href: '/ponto/responsaveis-tecnicos',
+            icon: BadgeCheck,
+            description: 'Cadastro de responsáveis técnicos (CREA)',
+            permission: isAdministrator || can(pk('/ponto/responsaveis-tecnicos'))
+          },
+          {
+            name: 'Controle de Anuidade',
+            href: '/ponto/controle-anuidade',
+            icon: Wallet,
+            description: 'Controle de pagamentos de anuidade CREA',
+            permission: isAdministrator || can(pk('/ponto/controle-anuidade'))
+          },
+          {
+            name: "Controle de Pagamentos ART's / Protocolos",
+            href: '/ponto/controle-pagamentos-art',
+            icon: FileCheck,
+            description: 'Controle de pagamentos de ART e protocolos',
+            permission: isAdministrator || can(pk('/ponto/controle-pagamentos-art'))
           },
           {
             name: 'Medições',

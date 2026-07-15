@@ -65,10 +65,12 @@ type RowActionMenuPortalProps = {
   menu: RowActionMenuState;
   onClose: () => void;
   onEdit: () => void;
-  onDelete: () => void;
+  onDelete?: () => void;
   editDisabled?: boolean;
   deleteDisabled?: boolean;
   deleteDisabledTitle?: string;
+  /** Oculta só a ação Excluir (mantém Editar). */
+  hideDelete?: boolean;
   extraItems?: RowActionMenuExtraItem[];
   /** Oculta Editar/Excluir — exibe só `extraItems` */
   hideDefaultActions?: boolean;
@@ -83,6 +85,7 @@ export function RowActionMenuPortal({
   editDisabled = false,
   deleteDisabled = false,
   deleteDisabledTitle,
+  hideDelete = false,
   extraItems = [],
   hideDefaultActions = false,
   zIndex = { backdrop: 1050, menu: 1051 }
@@ -146,7 +149,7 @@ export function RowActionMenuPortal({
             <span>{item.label}</span>
           </button>
         ))}
-        {!hideDefaultActions ? (
+        {!hideDefaultActions && !hideDelete && onDelete ? (
           <button
             type="button"
             role="menuitem"
