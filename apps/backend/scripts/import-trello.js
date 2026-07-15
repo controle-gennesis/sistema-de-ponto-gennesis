@@ -95,16 +95,38 @@ function q(ident) {
 
 // Cores nomeadas do Trello -> hex (#RRGGBB) usado no Kanban
 const TRELLO_COLOR_TO_HEX = {
-  green: '#61BD4F',
-  yellow: '#F2D600',
-  orange: '#FF9F1A',
-  red: '#EB5A46',
-  purple: '#C377E0',
-  blue: '#0079BF',
-  sky: '#00C2E0',
-  lime: '#51E898',
-  pink: '#FF78CB',
-  black: '#344563',
+  green: '#6FC25F',
+  yellow: '#F2D918',
+  orange: '#FEA72F',
+  red: '#EC6957',
+  purple: '#C883E2',
+  blue: '#1885C4',
+  sky: '#18C7E2',
+  lime: '#61E9A1',
+  pink: '#FE84CF',
+  black: '#486271',
+  green_light: '#B7DEB0',
+  yellow_light: '#F6EA92',
+  orange_light: '#FBD19C',
+  red_light: '#F0B3AB',
+  purple_light: '#DFC0EB',
+  blue_light: '#8CBED9',
+  sky_light: '#90DFEB',
+  lime_light: '#B3F1D0',
+  pink_light: '#F8C2E4',
+  black_light: '#506079',
+  green_dark: '#59AC44',
+  yellow_dark: '#E7C60B',
+  orange_dark: '#E79217',
+  red_dark: '#CF513D',
+  purple_dark: '#A86CC1',
+  blue_dark: '#036AA7',
+  sky_dark: '#03AECC',
+  lime_dark: '#4FD582',
+  pink_dark: '#E668AF',
+  black_dark: '#081F42',
+  gray: '#B9C3C9',
+  grey: '#B9C3C9',
   null: '#B3BAC5',
 };
 
@@ -120,8 +142,10 @@ const COLUMN_COLORS = [
 
 function trelloColorToHex(colorName) {
   if (!colorName) return TRELLO_COLOR_TO_HEX.null;
-  const key = String(colorName).toLowerCase();
-  if (key.startsWith('#')) return key.toUpperCase();
+  const raw = String(colorName).trim();
+  if (!raw) return TRELLO_COLOR_TO_HEX.null;
+  if (raw.startsWith('#')) return raw.toUpperCase();
+  const key = raw.toLowerCase().replace(/-/g, '_').replace(/\s+/g, '_');
   return TRELLO_COLOR_TO_HEX[key] || TRELLO_COLOR_TO_HEX.null;
 }
 
