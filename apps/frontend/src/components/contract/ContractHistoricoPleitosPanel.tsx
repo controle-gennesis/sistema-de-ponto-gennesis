@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Filter, Search, X, FileText, Receipt } from 'lucide-react';
+import { Filter, Search, X, FileText, Receipt, Trash2, MoreVertical } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '@/lib/api';
 import { formatOsSePastaOrDash } from '@/lib/formatOsSePasta';
@@ -10,14 +10,13 @@ import {
   HIST_ETIQUETA_FILTER_OPTIONS,
   HIST_MONTH_FILTER_OPTIONS,
   HISTORICO_ETIQUETA_FATURADO_PARCIAL,
-  billingAndamentoBadgeClass,
+  HISTORICO_ETIQUETA_PENDENTE,
   buildDisplayIdMap,
   canHistoricoFaturar,
   canHistoricoFaturar100,
   canHistoricoFaturarRestante,
   formatDisplayId,
   formatHistoricoCurrency,
-  getBillingAndamentoStatus,
   getDateMonth,
   getDateYear,
   getHistoricoEtiqueta,
@@ -27,7 +26,6 @@ import {
   historicoEtiquetaBadgeClass,
   isGeneratedPleito,
   isPleitoFullyBilled,
-  isPleitoGerado100,
   parseBudgetToNumberSafe,
   parseHistoricoCurrencyInput,
   type ContractBillingHistorico,
@@ -39,19 +37,16 @@ import { Button } from '@/components/ui/Button';
 import { TableCheckbox } from '@/components/ui/Checkbox';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { cadastroListClasses, RowActionMenuCell, RowActionMenuPortal } from '@/components/ui/RowActionMenu';
-import { listTableRowClasses } from '@/components/ui/listTableUi';
+import { listTableRowClasses, rowActionMenuButtonClass } from '@/components/ui/listTableUi';
 import { CadastroListSummary, getCadastroListRange } from '@/components/ui/CadastroListSummary';
 import { ListPagination } from '@/components/ui/ListPagination';
-import { useRowActionMenu } from '@/hooks/useRowActionMenu';
+import { ROW_ACTION_MENU_WIDTH_PX, type RowActionMenuState, useRowActionMenu } from '@/hooks/useRowActionMenu';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 
 const LIST_DISPLAY_LIMIT = 10;
 
 const LIST_SEARCH_INPUT_CLASS =
   'h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-violet-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100';
-
-const TOOLBAR_BTN =
-  'inline-flex h-10 shrink-0 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700';
 
 function billingStatusAfterFaturamento(
   pleito: ContractPleitoHistorico,
@@ -125,7 +120,9 @@ export function ContractHistoricoPleitosPanel({ contractId }: { contractId: stri
   const [batchFaturamentoMode, setBatchFaturamentoMode] = useState<'saldo' | 'parcial'>('saldo');
   const [batchPartialValue, setBatchPartialValue] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [isRemoving, setIsRemoving] = useState(false);
   const [listPage, setListPage] = useState(1);
+  const [selectionMenu, setSelectionMenu] = useState<RowActionMenuState>(null);
 
   const { data: pleitosData, isLoading: loadingPleitos } = useQuery({
     queryKey: ['contract-pleitos', contractId],
@@ -173,7 +170,11 @@ export function ContractHistoricoPleitosPanel({ contractId }: { contractId: stri
 
   const filteredPleitos = useMemo(() => {
     const searchQuery = searchTerm.trim().toLowerCase();
+    const includeFaturados100 = histEtiquetaFilter === 'faturado-100';
+
     return generatedPleitos.filter((p) => {
+      if (!includeFaturados100 && isPleitoFullyBilled(p, billings)) return false;
+
       const year = p.creationYear ?? getDateYear(p.createdAt as unknown as string);
       const monthRaw = p.creationMonth ? parseInt(String(p.creationMonth).replace(/\D/g, '') || '0', 10) : null;
       const month = monthRaw && monthRaw > 0 ? monthRaw : getDateMonth(p.createdAt as unknown as string);
@@ -187,9 +188,14 @@ export function ContractHistoricoPleitosPanel({ contractId }: { contractId: stri
           .toLowerCase();
         if (!haystack.includes(searchQuery)) return false;
       }
-      if (histEtiquetaFilter === 'gerado-100' && !isPleitoGerado100(p)) return false;
+      if (histEtiquetaFilter === 'pendente' && getHistoricoEtiqueta(p, billings) !== HISTORICO_ETIQUETA_PENDENTE) {
+        return false;
+      }
       if (histEtiquetaFilter === 'faturado-100' && !isPleitoFullyBilled(p, billings)) return false;
-      if (histEtiquetaFilter === 'faturado-parcial' && getHistoricoEtiqueta(p, billings) !== HISTORICO_ETIQUETA_FATURADO_PARCIAL) {
+      if (
+        histEtiquetaFilter === 'faturado-parcial' &&
+        getHistoricoEtiqueta(p, billings) !== HISTORICO_ETIQUETA_FATURADO_PARCIAL
+      ) {
         return false;
       }
       return true;
@@ -246,6 +252,29 @@ export function ContractHistoricoPleitosPanel({ contractId }: { contractId: stri
     await queryClient.invalidateQueries({ queryKey: ['contract-pleitos', contractId] });
     await queryClient.invalidateQueries({ queryKey: ['contract-billings', contractId] });
   };
+
+  const toggleSelectionMenu = (button: HTMLButtonElement) => {
+    setSelectionMenu((prev) => {
+      if (prev) return null;
+      const rect = button.getBoundingClientRect();
+      let left = rect.right - ROW_ACTION_MENU_WIDTH_PX;
+      left = Math.max(8, Math.min(left, window.innerWidth - ROW_ACTION_MENU_WIDTH_PX - 8));
+      return { rowId: 'pleito-selection-toolbar', top: rect.bottom + 4, left };
+    });
+  };
+
+  useEffect(() => {
+    if (selectedPleitos.size === 0) setSelectionMenu(null);
+  }, [selectedPleitos.size]);
+
+  useEffect(() => {
+    if (!selectionMenu) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setSelectionMenu(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selectionMenu]);
 
   useEffect(() => {
     setSelectedPleitos(new Set());
@@ -367,6 +396,46 @@ export function ContractHistoricoPleitosPanel({ contractId }: { contractId: stri
     closeRowActionMenu();
   };
 
+  const removePleitos = async (ids: string[]) => {
+    const uniqueIds = Array.from(new Set(ids.filter(Boolean)));
+    if (uniqueIds.length === 0) {
+      toast.error('Selecione ao menos um pleito para remover.');
+      return;
+    }
+    const label =
+      uniqueIds.length === 1
+        ? 'Remover este pleito? O valor pleiteado será desfeito. Esta ação não pode ser desfeita.'
+        : `Remover ${uniqueIds.length} pleitos selecionados? O valor pleiteado será desfeito. Esta ação não pode ser desfeita.`;
+    if (!window.confirm(label)) return;
+
+    setIsRemoving(true);
+    try {
+      await Promise.all(uniqueIds.map((id) => api.delete(`/pleitos/${id}`)));
+      setSelectedPleitos(new Set());
+      closeRowActionMenu();
+      await invalidateQueries();
+      toast.success(
+        uniqueIds.length === 1
+          ? 'Pleito removido (faturamentos vinculados também foram excluídos).'
+          : `${uniqueIds.length} pleitos removidos (faturamentos vinculados também foram excluídos).`
+      );
+    } catch (err: unknown) {
+      const ax = err as { response?: { data?: { message?: string } } };
+      toast.error(ax.response?.data?.message || 'Erro ao remover pleito');
+    } finally {
+      setIsRemoving(false);
+    }
+  };
+
+  const handleRemoverPleitosSelecionados = () => {
+    const ids = Array.from(selectedPleitos).filter((id) => filteredPleitoIds.includes(id));
+    void removePleitos(ids);
+  };
+
+  const handleRemoverPleito = (pleitoId: string) => {
+    void removePleitos([pleitoId]);
+  };
+
   const confirmBatchFaturamento = async () => {
     const pleitosAptos = selectedFaturavelPleitos;
     if (pleitosAptos.length === 0) {
@@ -479,6 +548,22 @@ export function ContractHistoricoPleitosPanel({ contractId }: { contractId: stri
             </div>
             {generatedPleitos.length > 0 ? (
               <div className={cadastroListClasses.cardToolbar}>
+                {selectedPleitos.size > 0 ? (
+                  <button
+                    type="button"
+                    onClick={(e) => toggleSelectionMenu(e.currentTarget)}
+                    className={`relative ${rowActionMenuButtonClass(selectionMenu !== null)}`}
+                    aria-label="Ações dos pleitos selecionados"
+                    aria-expanded={selectionMenu !== null}
+                    aria-haspopup="menu"
+                    title={`Ações (${selectedPleitos.size} selecionado${selectedPleitos.size === 1 ? '' : 's'})`}
+                  >
+                    <MoreVertical className="h-4 w-4" />
+                    <span className="absolute -right-1.5 -top-1.5 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-violet-600 px-1 text-[10px] font-semibold leading-none text-white">
+                      {selectedPleitos.size}
+                    </span>
+                  </button>
+                ) : null}
                 <div className="relative min-w-[240px] flex-1 sm:w-[280px] sm:flex-none">
                   <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
                   <input
@@ -515,23 +600,43 @@ export function ContractHistoricoPleitosPanel({ contractId }: { contractId: stri
                     <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-violet-500 ring-2 ring-white dark:ring-gray-900" />
                   ) : null}
                 </button>
-                <button
-                  type="button"
-                  onClick={openFaturarModal}
-                  disabled={isSaving || selectedPleitos.size === 0 || !canFaturarSelected}
-                  title={
-                    selectedPleitos.size > 0 && !canFaturarSelected
-                      ? 'Nenhum pleito selecionado possui saldo para faturar'
-                      : undefined
-                  }
-                  className={TOOLBAR_BTN}
-                >
-                  Faturar
-                </button>
               </div>
             ) : null}
           </div>
         </CardHeader>
+        {selectionMenu ? (
+          <RowActionMenuPortal
+            menu={selectionMenu}
+            onClose={() => setSelectionMenu(null)}
+            onEdit={() => {}}
+            onDelete={() => {}}
+            hideDefaultActions
+            extraItems={[
+              {
+                label: 'Faturar',
+                disabled: isSaving || isRemoving || !canFaturarSelected,
+                disabledTitle: !canFaturarSelected
+                  ? 'Nenhum pleito selecionado possui saldo para faturar'
+                  : 'Faturar selecionados',
+                onClick: () => {
+                  setSelectionMenu(null);
+                  openFaturarModal();
+                },
+                icon: <Receipt className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />,
+              },
+              {
+                label: isRemoving ? 'Excluindo...' : 'Excluir',
+                disabled: isSaving || isRemoving,
+                disabledTitle: 'Excluindo...',
+                onClick: () => {
+                  setSelectionMenu(null);
+                  handleRemoverPleitosSelecionados();
+                },
+                icon: <Trash2 className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />,
+              },
+            ]}
+          />
+        ) : null}
         <CardContent className={cadastroListClasses.cardContent}>
           {isLoading ? (
             <div className="p-8 text-center text-gray-500 dark:text-gray-400">Carregando...</div>
@@ -543,7 +648,11 @@ export function ContractHistoricoPleitosPanel({ contractId }: { contractId: stri
           ) : filteredPleitos.length === 0 ? (
             <div className="p-8 text-center">
               <FileText className="mx-auto mb-3 h-12 w-12 text-gray-300 dark:text-gray-600" />
-              <p className="text-gray-500 dark:text-gray-400">Nenhum pleito encontrado com os filtros atuais.</p>
+              <p className="text-gray-500 dark:text-gray-400">
+                {generatedPleitos.length === 0
+                  ? 'Nenhum pleito gerado até o momento.'
+                  : 'Nenhum pleito encontrado.'}
+              </p>
             </div>
           ) : (
             <>
@@ -574,12 +683,11 @@ export function ContractHistoricoPleitosPanel({ contractId }: { contractId: stri
                       <th className={`${cadastroListClasses.th} whitespace-nowrap align-middle`}>ID</th>
                       <th className={`${cadastroListClasses.th} whitespace-nowrap align-middle`}>OS / SE</th>
                       <th className={`${cadastroListClasses.th} align-middle`}>Descrição</th>
-                      <th className={`${cadastroListClasses.thCenter} whitespace-nowrap align-middle`}>Status</th>
                       <th className={`${cadastroListClasses.thNumeric} align-middle`}>Valor pleiteado</th>
                       <th className={`${cadastroListClasses.thCenter} whitespace-nowrap align-middle`}>Fat.</th>
                       <th className={`${cadastroListClasses.thNumeric} align-middle whitespace-nowrap`}>Valor faturado</th>
-                      <th className={`${cadastroListClasses.thCenter} whitespace-nowrap align-middle`}>Status Fat.</th>
                       <th className={`${cadastroListClasses.thNumeric} align-middle whitespace-nowrap`}>Restante a faturar</th>
+                      <th className={`${cadastroListClasses.thCenter} whitespace-nowrap align-middle`}>Status</th>
                       <th className={`${listTableRowClasses.actionTh} align-middle`}>Ação</th>
                     </tr>
                   </thead>
@@ -622,17 +730,6 @@ export function ContractHistoricoPleitosPanel({ contractId }: { contractId: stri
                           <td className={`${cadastroListClasses.tdTruncate} align-middle`} title={p.serviceDescription}>
                             <span className="block truncate">{p.serviceDescription || '—'}</span>
                           </td>
-                          <td className={`${cadastroListClasses.tdCenter} align-middle whitespace-nowrap`}>
-                            {etiqueta ? (
-                              <span
-                                className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${historicoEtiquetaBadgeClass(etiqueta)}`}
-                              >
-                                {etiqueta}
-                              </span>
-                            ) : (
-                              '—'
-                            )}
-                          </td>
                           <td className={`${cadastroListClasses.tdNumeric} align-middle text-gray-900 dark:text-gray-100`}>
                             {formatHistoricoCurrency(valorPleito)}
                           </td>
@@ -659,7 +756,9 @@ export function ContractHistoricoPleitosPanel({ contractId }: { contractId: stri
                           </td>
                           <td className={`${cadastroListClasses.tdNumeric} align-middle text-gray-900 dark:text-gray-100`}>
                             {linkedBillings.length === 0 ? (
-                              <span className="text-xs text-gray-400 dark:text-gray-500">—</span>
+                              <span className="whitespace-nowrap text-xs font-medium tabular-nums">
+                                {formatHistoricoCurrency(0)}
+                              </span>
                             ) : (
                               <div className="flex flex-col items-end gap-0.5">
                                 {linkedBillings.map((b) => (
@@ -678,28 +777,15 @@ export function ContractHistoricoPleitosPanel({ contractId }: { contractId: stri
                               </div>
                             )}
                           </td>
-                          <td className={`${cadastroListClasses.tdCenter} align-middle`}>
-                            {linkedBillings.length === 0 ? (
-                              <span className="text-xs text-gray-400 dark:text-gray-500">—</span>
-                            ) : (
-                              <div className="flex flex-col items-center gap-1">
-                                {linkedBillings.map((b) => {
-                                  const fatStatus = getBillingAndamentoStatus(b);
-                                  return (
-                                    <span
-                                      key={b.id}
-                                      className={billingAndamentoBadgeClass(fatStatus)}
-                                      title={b.invoiceNumber ? `NF ${b.invoiceNumber}` : fatStatus}
-                                    >
-                                      {fatStatus}
-                                    </span>
-                                  );
-                                })}
-                              </div>
-                            )}
-                          </td>
                           <td className={`${cadastroListClasses.tdNumeric} align-middle text-gray-900 dark:text-gray-100`}>
                             {totalFaturavel > 0 ? formatHistoricoCurrency(restanteFaturar) : '—'}
+                          </td>
+                          <td className={`${cadastroListClasses.tdCenter} align-middle whitespace-nowrap`}>
+                            <span
+                              className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${historicoEtiquetaBadgeClass(etiqueta)}`}
+                            >
+                              {etiqueta}
+                            </span>
                           </td>
                           <RowActionMenuCell
                             isOpen={isRowMenuOpen(p.id)}
@@ -725,6 +811,15 @@ export function ContractHistoricoPleitosPanel({ contractId }: { contractId: stri
                         onClick: () => openFaturarModalForPleito(pleitoForActionMenu.id),
                         icon: (
                           <Receipt className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
+                        ),
+                      },
+                      {
+                        label: isRemoving ? 'Removendo...' : 'Remover pleito',
+                        disabled: isRemoving,
+                        disabledTitle: 'Removendo...',
+                        onClick: () => handleRemoverPleito(pleitoForActionMenu.id),
+                        icon: (
+                          <Trash2 className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
                         ),
                       },
                     ]}

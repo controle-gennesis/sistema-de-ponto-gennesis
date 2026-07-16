@@ -89,7 +89,8 @@ const MESES_FILTRO = [
 
 const PLEITO_HISTORY_MARKER = '__PLEITO_HISTORICO__';
 const PLEITO_HISTORY_MARKER_GERADO_100 = '__PLEITO_HISTORICO__GERADO_100__';
-const HISTORICO_ETIQUETA_GERADO_100 = 'Gerado 100%';
+const HISTORICO_ETIQUETA_GERADO_100 = 'Pleiteado 100%';
+const HISTORICO_ETIQUETA_PLEITEADO_PARCIAL = 'Pleiteado parcial';
 
 const MESES_FILTRO_SELECT_OPTIONS = labeledToSelectOptions(
   MESES_FILTRO.map((m) => ({ value: String(m.value), label: m.label }))
@@ -153,6 +154,7 @@ const HIST_MONTH_FILTER_OPTIONS = labeledToSelectOptions([
 const HIST_ETIQUETA_FILTER_OPTIONS = labeledToSelectOptions([
   { value: 'all', label: 'Etiqueta: Todas' },
   { value: 'gerado-100', label: HISTORICO_ETIQUETA_GERADO_100 },
+  { value: 'pleiteado-parcial', label: HISTORICO_ETIQUETA_PLEITEADO_PARCIAL },
 ]);
 
 const BILLING_STATUS_ROW_OPTIONS = labeledToSelectOptions([
@@ -182,7 +184,8 @@ function parseBudgetToNumberSafe(v: string | null | undefined): number {
 }
 
 function isPleitoHistorico(p: ContractPleito): boolean {
-  return (p.reportsBilling || '').trim() === PLEITO_HISTORY_MARKER;
+  const marker = (p.reportsBilling || '').trim();
+  return marker === PLEITO_HISTORY_MARKER || marker.startsWith(PLEITO_HISTORY_MARKER);
 }
 
 function isPleitoGerado100(p: ContractPleito): boolean {
@@ -195,6 +198,8 @@ function isPleitoGerado100(p: ContractPleito): boolean {
 
 function getHistoricoEtiqueta(p: ContractPleito): string | null {
   if (isPleitoGerado100(p)) return HISTORICO_ETIQUETA_GERADO_100;
+  const br = p.billingRequest != null ? Number(p.billingRequest) : 0;
+  if (Number.isFinite(br) && br > 0.01) return HISTORICO_ETIQUETA_PLEITEADO_PARCIAL;
   return null;
 }
 
@@ -551,7 +556,7 @@ export default function AndamentoListPage() {
       const creationMonth = String(now.getMonth() + 1).padStart(2, '0');
       const creationYear = now.getFullYear();
       await Promise.all(
-        items.map(async ({ id, billingRequest, generatedByPleitear100 }) => {
+        items.map(async ({ id, billingRequest }) => {
           const source = pleitos.find((p) => p.id === id);
           if (!source) return;
           await api.post(`/contracts/${contractId}/pleitos`, {
@@ -578,9 +583,7 @@ export default function AndamentoListPage() {
             budgetAmount4: source.budgetAmount4,
             pv: source.pv,
             ipi: source.ipi,
-            reportsBilling: generatedByPleitear100
-              ? source.reportsBilling?.trim() || null
-              : PLEITO_HISTORY_MARKER,
+            reportsBilling: PLEITO_HISTORY_MARKER,
             engineer: source.engineer,
             supervisor: source.supervisor
           });
@@ -607,10 +610,26 @@ export default function AndamentoListPage() {
     }
   });
 
+  const getSelectedOsPleiteadas100 = (ids: string[]) =>
+    ids
+      .map((id) => pleitos.find((x) => x.id === id))
+      .filter((p): p is NonNullable<typeof p> => {
+        if (!p) return false;
+        const orcamento = p.budget ? Number(p.budget) : 0;
+        if (orcamento <= 0) return false;
+        return orcamento - sumBillingRequestSameOs(allPleitos, p.divSe) <= 0.01;
+      });
+
   const handleGerarPleito = () => {
     const ids = Array.from(selectedForPleito);
     if (ids.length === 0) {
       toast.error('Selecione ao menos uma ordem de serviço para gerar o pleito.');
+      return;
+    }
+    const jaPleiteadas = getSelectedOsPleiteadas100(ids);
+    if (jaPleiteadas.length > 0) {
+      const labels = jaPleiteadas.map((p) => p.divSe || p.id).join(', ');
+      toast.error(`OS já pleiteada(s) 100%: ${labels}. Desmarque para continuar.`);
       return;
     }
     setShowPleitoValoresModal(true);
@@ -684,6 +703,12 @@ export default function AndamentoListPage() {
     const ids = Array.from(selectedForPleito);
     if (ids.length === 0) {
       toast.error('Selecione ao menos uma ordem de serviço.');
+      return;
+    }
+    const jaPleiteadas = getSelectedOsPleiteadas100(ids);
+    if (jaPleiteadas.length > 0) {
+      const labels = jaPleiteadas.map((p) => p.divSe || p.id).join(', ');
+      toast.error(`OS já pleiteada(s) 100%: ${labels}. Desmarque para continuar.`);
       return;
     }
     if (!window.confirm(`Gerar pleito a 100% do orçamento para ${ids.length} OS(s) selecionada(s)?`)) {
@@ -780,6 +805,12 @@ export default function AndamentoListPage() {
       if (pastaQuery && !(p.folderNumber || '').toLowerCase().includes(pastaQuery)) return false;
       if (descricaoQuery && !(p.serviceDescription || '').toLowerCase().includes(descricaoQuery)) return false;
       if (histEtiquetaFilter === 'gerado-100' && getHistoricoEtiqueta(p) !== HISTORICO_ETIQUETA_GERADO_100) return false;
+      if (
+        histEtiquetaFilter === 'pleiteado-parcial' &&
+        getHistoricoEtiqueta(p) !== HISTORICO_ETIQUETA_PLEITEADO_PARCIAL
+      ) {
+        return false;
+      }
       return true;
     });
   }, [generatedPleitos, histYearFilter, histMonthFilter, histOsFilter, histPastaFilter, histDescricaoFilter, histEtiquetaFilter]);

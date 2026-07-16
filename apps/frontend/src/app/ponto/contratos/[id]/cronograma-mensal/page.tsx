@@ -196,7 +196,10 @@ export default function CronogramaMensalPage() {
   });
 
   const allPleitos = (Array.isArray(pleitosData) ? pleitosData : (pleitosData as { data?: ContractPleito[] })?.data) || [];
-  const pleitos = allPleitos.filter((p) => (p.reportsBilling || '').trim() !== PLEITO_HISTORY_MARKER);
+  const pleitos = allPleitos.filter((p) => {
+    const marker = (p.reportsBilling || '').trim();
+    return marker !== PLEITO_HISTORY_MARKER && !marker.startsWith(PLEITO_HISTORY_MARKER);
+  });
 
   const rows = useMemo(() => {
     return pleitos.filter((p) => selectedIds.has(p.id));

@@ -18,12 +18,13 @@ import {
   exportHistoricoOsPdf,
   exportPleitosOsToXlsx,
   computeHistoricoOsTotals,
-  getOsEtiquetaAbertura,
+  getOsStatus,
+  getOsStatusFaturamento,
   getOsStatusFaturamentoPct,
   getPleitoCreationMonth,
   getPleitoCreationYear,
   getPleitoOrcamentoValor,
-  getPleitoOsSituacao,
+  osStatusBadgeClass,
   type BillingForOsCheck,
   type PleitoOsExportRow,
 } from '@/lib/pleitoOsExport';
@@ -58,20 +59,6 @@ function formatCurrency(value: number) {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(value);
-}
-
-function situacaoBadgeClass(situacao: string): string {
-  if (situacao === 'Concluída') return 'bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-100';
-  if (situacao === 'Aberta') return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300';
-  if (situacao === 'Faturado') return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300';
-  if (situacao === 'Gerado 100%') return 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300';
-  if (situacao === 'Pleiteado parcial') {
-    return 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300';
-  }
-  if (situacao === 'Pleito gerado') {
-    return 'bg-violet-100 text-violet-800 dark:bg-violet-900/30 dark:text-violet-300';
-  }
-  return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300';
 }
 
 function toggleInSet<T>(set: Set<T>, value: T, checked: boolean): Set<T> {
@@ -241,9 +228,9 @@ export function ContractHistoricoOsPanel({ contractId }: ContractHistoricoOsPane
       if (!q) return true;
       const os = formatOsSePastaOrDash(p.divSe, p.folderNumber).toLowerCase();
       const desc = (p.serviceDescription || '').toLowerCase();
-      const etiqueta = getOsEtiquetaAbertura(p, billingsForOs).toLowerCase();
-      const situacao = getPleitoOsSituacao(p, billingsForOs).toLowerCase();
-      return os.includes(q) || desc.includes(q) || etiqueta.includes(q) || situacao.includes(q);
+      const status = getOsStatus(p, billingsForOs, allOs).toLowerCase();
+      const statusFat = getOsStatusFaturamento(p, billingsForOs).toLowerCase();
+      return os.includes(q) || desc.includes(q) || status.includes(q) || statusFat.includes(q);
     });
   }, [allOs, selectedYears, selectedMonths, selectedOsIds, search, billingsForOs]);
 
@@ -447,12 +434,6 @@ export function ContractHistoricoOsPanel({ contractId }: ContractHistoricoOsPane
                   <tr>
                     <th className={`${cadastroListClasses.th} whitespace-nowrap align-middle`}>OS / SE</th>
                     <th className={`${cadastroListClasses.th} align-middle`}>Descrição</th>
-                    <th className={`${cadastroListClasses.thCenter} whitespace-nowrap align-middle`}>
-                      Etiqueta
-                    </th>
-                    <th className={`${cadastroListClasses.thCenter} whitespace-nowrap align-middle`}>
-                      Situação pleito
-                    </th>
                     <th className={`${cadastroListClasses.thNumeric} align-middle`}>Orçamento</th>
                     <th className={`${cadastroListClasses.thNumeric} whitespace-nowrap align-middle`}>
                       Valor pleiteado
@@ -463,12 +444,18 @@ export function ContractHistoricoOsPanel({ contractId }: ContractHistoricoOsPane
                     <th className={`${cadastroListClasses.th} whitespace-nowrap align-middle`}>
                       Preenchimento
                     </th>
+                    <th className={`${cadastroListClasses.thCenter} whitespace-nowrap align-middle`}>
+                      Status Pleito
+                    </th>
+                    <th className={`${cadastroListClasses.thCenter} whitespace-nowrap align-middle`}>
+                      Status Faturamento
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
                   {displayedOs.map((p) => {
-                    const etiqueta = getOsEtiquetaAbertura(p, billingsForOs);
-                    const situacaoPleito = getPleitoOsSituacao(p, billingsForOs);
+                    const osStatus = getOsStatus(p, billingsForOs, allOs);
+                    const osStatusFat = getOsStatusFaturamento(p, billingsForOs);
                     const valorPleiteado = p.billingRequest ? Number(p.billingRequest) : 0;
                     const statusFatPct = getOsStatusFaturamentoPct(p, billingsForOs);
                     const orcamentoNum = getPleitoOrcamentoValor(p);
@@ -482,20 +469,6 @@ export function ContractHistoricoOsPanel({ contractId }: ContractHistoricoOsPane
                           title={p.serviceDescription || ''}
                         >
                           <span className="block truncate">{p.serviceDescription || '—'}</span>
-                        </td>
-                        <td className={`${cadastroListClasses.tdCenter} align-middle whitespace-nowrap`}>
-                          <span
-                            className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${situacaoBadgeClass(etiqueta)}`}
-                          >
-                            {etiqueta}
-                          </span>
-                        </td>
-                        <td className={`${cadastroListClasses.tdCenter} align-middle whitespace-nowrap`}>
-                          <span
-                            className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${situacaoBadgeClass(situacaoPleito)}`}
-                          >
-                            {situacaoPleito}
-                          </span>
                         </td>
                         <td
                           className={`${cadastroListClasses.tdNumeric} align-middle text-gray-900 dark:text-gray-100`}
@@ -514,6 +487,20 @@ export function ContractHistoricoOsPanel({ contractId }: ContractHistoricoOsPane
                         </td>
                         <td className={`${cadastroListClasses.tdMuted} align-middle whitespace-nowrap`}>
                           {formatDateTimeBr(p.createdAt, '—')}
+                        </td>
+                        <td className={`${cadastroListClasses.tdCenter} align-middle whitespace-nowrap`}>
+                          <span
+                            className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${osStatusBadgeClass(osStatus)}`}
+                          >
+                            {osStatus}
+                          </span>
+                        </td>
+                        <td className={`${cadastroListClasses.tdCenter} align-middle whitespace-nowrap`}>
+                          <span
+                            className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${osStatusBadgeClass(osStatusFat)}`}
+                          >
+                            {osStatusFat}
+                          </span>
                         </td>
                       </tr>
                     );

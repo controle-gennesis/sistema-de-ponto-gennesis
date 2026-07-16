@@ -8,6 +8,8 @@ import jsPDF from 'jspdf';
 import {
   ArrowLeft,
   FileText,
+  FileSpreadsheet,
+  Download,
   Plus,
   Receipt,
   X,
@@ -25,7 +27,6 @@ import {
   Eye,
   ChevronDown,
   Info,
-  History,
   Search,
   Filter,
   MoreVertical,
@@ -51,7 +52,6 @@ import {
 import { PleitoFormModal } from '@/components/pleito/PleitoFormModal';
 import { PleitoOsPurchaseOrdersSection } from '@/components/pleito/PleitoOsPurchaseOrdersSection';
 import { ContractCronogramaMensalPanel } from '@/components/contract/ContractCronogramaMensalPanel';
-import { ContractHistoricoOsPanel } from '@/components/contract/ContractHistoricoOsPanel';
 import { ContractHistoricoPleitosPanel } from '@/components/contract/ContractHistoricoPleitosPanel';
 import { ContractOsPleitoListPanel } from '@/components/contract/ContractOsPleitoListPanel';
 import { RowActionMenuCell, RowActionMenuPortal, cadastroListClasses, rowActionMenuButtonClass } from '@/components/ui/RowActionMenu';
@@ -60,8 +60,6 @@ import { CadastroListSummary, getCadastroListRange } from '@/components/ui/Cadas
 import { ListPagination } from '@/components/ui/ListPagination';
 import { ROW_ACTION_MENU_WIDTH_PX, type RowActionMenuState, useRowActionMenu } from '@/hooks/useRowActionMenu';
 import {
-  STATUS_ORCAMENTO_OPCOES,
-  STATUS_EXECUCAO_OPCOES,
   isBudgetStatusInValorOrcadoSum,
   type PleitoFormData
 } from '@/lib/pleitoForm';
@@ -77,14 +75,12 @@ import {
   type DivSeOptionRow
 } from '@/lib/formatOsSePasta';
 import { loadPdfBrandingLogoDataUrl } from '@/lib/loadPdfBrandingLogo';
-import { getOsPleiteadoPct, getOsRestantePleitear, getOsStatus, isOsConcluida, osStatusBadgeClass, sumOsPleiteadoTotal, type BillingForOsCheck } from '@/lib/pleitoOsExport';
+import { exportHistoricoOsPdf, exportPleitosOsToXlsx, getOsFaturamentoAcumulado, getOsPleiteadoPct, getOsRestantePleitear, getOsStatus, getOsStatusFaturamento, isOsConcluida, isOsPleiteada100, osStatusBadgeClass, sumOsPleiteadoTotal, type BillingForOsCheck, type PleitoOsExportRow } from '@/lib/pleitoOsExport';
 import {
   billingAndamentoBadgeClass,
   buildDisplayIdMap,
   formatDisplayId,
-  getHistoricoEtiqueta,
   getOsLinkedPleitos,
-  historicoEtiquetaBadgeClass,
   isGeneratedPleito,
 } from '@/lib/contractHistoricoPleitos';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
@@ -332,35 +328,18 @@ const MESES_FILTRO_SELECT_OPTIONS = labeledToSelectOptions(
   MESES_FILTRO.map((m) => ({ value: String(m.value), label: m.label }))
 );
 
-const FILTER_STATUS_ORCAMENTO_OPTIONS = labeledToSelectOptions([
-  { value: '', label: 'Todos' },
-  ...STATUS_ORCAMENTO_OPCOES.map((op) => ({ value: op, label: op })),
-  { value: '—', label: '— (vazio)' },
-]);
-
-const FILTER_STATUS_EXECUCAO_OPTIONS = labeledToSelectOptions([
-  { value: '', label: 'Todos' },
-  ...STATUS_EXECUCAO_OPCOES.map((op) => ({ value: op, label: op })),
-  { value: '—', label: '— (vazio)' },
-]);
-
-const FILTER_STATUS_FATURAMENTO_OPTIONS = labeledToSelectOptions([
-  { value: '', label: 'Todos' },
-  { value: '0', label: '0% (não faturado)' },
-  { value: '1-25', label: '1% a 25%' },
-  { value: '26-50', label: '26% a 50%' },
-  { value: '51-75', label: '51% a 75%' },
-  { value: '76-99', label: '76% a 99%' },
-  { value: '100', label: '100% ou mais' },
-  { value: 'sem-orcamento', label: 'Sem orçamento' },
-]);
-
 const FILTER_OS_STATUS_OPTIONS = labeledToSelectOptions([
   { value: '', label: 'Todos' },
-  { value: 'Aberta', label: 'Aberta' },
+  { value: 'Pendente', label: 'Pendente' },
   { value: 'Pleiteado parcial', label: 'Pleiteado parcial' },
-  { value: 'Pleiteado', label: 'Pleiteado' },
-  { value: 'Concluída', label: 'Concluída' },
+  { value: 'Pleiteado 100%', label: 'Pleiteado 100%' },
+]);
+
+const FILTER_OS_STATUS_FATURAMENTO_OPTIONS = labeledToSelectOptions([
+  { value: '', label: 'Todos' },
+  { value: 'Pendente', label: 'Pendente' },
+  { value: 'Faturado parcial', label: 'Faturado parcial' },
+  { value: 'Faturado 100%', label: 'Faturado 100%' },
 ]);
 
 const CONTROLE_GERAL_META_AJUDA =
@@ -886,7 +865,8 @@ function buildPleitoGerarItems(
 }
 
 function isPleitoHistorico(p: ContractPleito): boolean {
-  return (p.reportsBilling || '').trim() === PLEITO_HISTORY_MARKER;
+  const marker = (p.reportsBilling || '').trim();
+  return marker === PLEITO_HISTORY_MARKER || marker.startsWith(PLEITO_HISTORY_MARKER);
 }
 
 function totvsQueryTransportErrorMessage(err: unknown): string {
@@ -965,12 +945,12 @@ export default function ContractDetailPage() {
   });
   const [selectedPleitoId, setSelectedPleitoId] = useState<string | null>(null);
   const [pleitoToEdit, setPleitoToEdit] = useState<(PleitoFormData & { id: string }) | null>(null);
-  const [filterStatusOrcamento, setFilterStatusOrcamento] = useState('');
-  const [filterStatusExecucao, setFilterStatusExecucao] = useState('');
-  const [filterStatusFaturamento, setFilterStatusFaturamento] = useState('');
   const [filterOsStatus, setFilterOsStatus] = useState('');
+  const [filterOsStatusFat, setFilterOsStatusFat] = useState('');
   const [searchTermPleitos, setSearchTermPleitos] = useState('');
   const [showPleitosFilterModal, setShowPleitosFilterModal] = useState(false);
+  const [showOsExportModal, setShowOsExportModal] = useState(false);
+  const [exportingOsPdf, setExportingOsPdf] = useState(false);
   const [searchTermProduction, setSearchTermProduction] = useState('');
   const [showProductionFilterModal, setShowProductionFilterModal] = useState(false);
   const [filterProductionOsSe, setFilterProductionOsSe] = useState('');
@@ -981,12 +961,13 @@ export default function ContractDetailPage() {
   const [productionListPage, setProductionListPage] = useState(1);
   const [billingsListPage, setBillingsListPage] = useState(1);
   const [selectedForPleito, setSelectedForPleito] = useState<Set<string>>(new Set());
+  const [selectedForBilling, setSelectedForBilling] = useState<Set<string>>(new Set());
   const [osSelectionMenu, setOsSelectionMenu] = useState<RowActionMenuState>(null);
+  const [billingSelectionMenu, setBillingSelectionMenu] = useState<RowActionMenuState>(null);
   const [valorPleiteado, setValorPleiteado] = useState<Record<string, string>>({});
   const [pleitoValorInput, setPleitoValorInput] = useState<Record<string, string>>({});
   const [showPleitoValoresModal, setShowPleitoValoresModal] = useState(false);
   const [showPleitoResumoModal, setShowPleitoResumoModal] = useState(false);
-  const [showHistoricoOsModal, setShowHistoricoOsModal] = useState(false);
   const [showVisualizarPleitoModal, setShowVisualizarPleitoModal] = useState(false);
   const [showAndamentoTodosModal, setShowAndamentoTodosModal] = useState(false);
   const [showCronogramaMensalModal, setShowCronogramaMensalModal] = useState(false);
@@ -1249,16 +1230,26 @@ export default function ContractDetailPage() {
   });
 
   const deleteBillingMutation = useMutation({
-    mutationFn: async (id: string) => {
-      const res = await api.delete(`/contracts/${contractId}/billings/${id}`);
-      return res.data;
+    mutationFn: async (ids: string | string[]) => {
+      const list = Array.isArray(ids) ? ids : [ids];
+      await Promise.all(
+        list.map((id) => api.delete(`/contracts/${contractId}/billings/${id}`))
+      );
+      return list;
     },
-    onSuccess: () => {
+    onSuccess: (_data, ids) => {
+      const list = Array.isArray(ids) ? ids : [ids];
       queryClient.invalidateQueries({ queryKey: ['contract-billings', contractId] });
       queryClient.invalidateQueries({ queryKey: ['contract-pleitos', contractId] });
       setSelectedBilling(null);
       setEditingBilling(false);
-      toast.success('Faturamento excluído com sucesso!');
+      setSelectedForBilling(new Set());
+      setBillingSelectionMenu(null);
+      toast.success(
+        list.length === 1
+          ? 'Faturamento excluído com sucesso!'
+          : `${list.length} faturamentos excluídos com sucesso!`
+      );
     },
     onError: (err: { response?: { data?: { message?: string } } }) => {
       toast.error(err.response?.data?.message || 'Erro ao excluir faturamento');
@@ -2358,16 +2349,18 @@ export default function ContractDetailPage() {
     });
   }, [billings, isAllYears, selectedYear, selectedMonth, searchTermBillings, filterBillingOsSe, filterBillingInvoice, filterBillingGross]);
 
-  // Pleitos filtrados por ano, mês e filtros de status.
-  // OS concluídas ficam fora da lista padrão (vão para Histórico), mas entram
-  // quando o filtro pede explicitamente Concluída ou faturamento 100%.
+  // OS com faturamento 100% ficam ocultas por padrão; entram na lista quando
+  // o filtro pede explicitamente Faturado 100% ou Pleiteado 100%.
   const filteredPleitos = useMemo(() => {
     const includeConcluidas =
-      filterOsStatus === 'Concluída' || filterStatusFaturamento === '100';
+      filterOsStatusFat === 'Faturado 100%' || filterOsStatus === 'Pleiteado 100%';
 
     let result = allPleitos.filter((p) => {
       if (isPleitoHistorico(p)) return false;
       if (!includeConcluidas && isOsConcluida(p, billingsForOs)) return false;
+
+      // Com filtro de status 100%, não restringe por ano/mês (senão a OS some do resultado).
+      if (includeConcluidas) return true;
 
       const monthNum = p.creationMonth ? parseInt(String(p.creationMonth).replace(/\D/g, '') || '0', 10) : null;
       const year = p.creationYear ?? getDateYear(p.startDate);
@@ -2377,40 +2370,14 @@ export default function ContractDetailPage() {
       return monthNum === selectedMonth;
     });
 
-    if (filterStatusOrcamento) {
-      result = result.filter((p) => {
-        if (filterStatusOrcamento === '—') return !p.budgetStatus || p.budgetStatus.trim() === '';
-        return (p.budgetStatus || '') === filterStatusOrcamento;
-      });
-    }
-    if (filterStatusExecucao) {
-      result = result.filter((p) => {
-        if (filterStatusExecucao === '—') return !p.executionStatus || p.executionStatus.trim() === '';
-        return (p.executionStatus || '') === filterStatusExecucao;
-      });
-    }
-    if (filterStatusFaturamento) {
-      result = result.filter((p) => {
-        const osSe = (p.divSe || '').trim();
-        const acumulado = billings
-          .filter((b) => (b.serviceOrder || '').trim() === osSe)
-          .reduce((sum, b) => sum + b.grossValue, 0);
-        const orcamento = p.budget ? Number(p.budget) : 0;
-        const statusPct = orcamento > 0 ? (acumulado / orcamento) * 100 : null;
-
-        if (filterStatusFaturamento === '0') return statusPct !== null && statusPct === 0;
-        if (filterStatusFaturamento === '1-25') return statusPct !== null && statusPct >= 1 && statusPct <= 25;
-        if (filterStatusFaturamento === '26-50') return statusPct !== null && statusPct >= 26 && statusPct <= 50;
-        if (filterStatusFaturamento === '51-75') return statusPct !== null && statusPct >= 51 && statusPct <= 75;
-        if (filterStatusFaturamento === '76-99') return statusPct !== null && statusPct >= 76 && statusPct < 100;
-        if (filterStatusFaturamento === '100') return statusPct !== null && statusPct >= 100;
-        if (filterStatusFaturamento === 'sem-orcamento') return statusPct === null && orcamento === 0;
-        return true;
-      });
-    }
     if (filterOsStatus) {
       result = result.filter(
         (p) => getOsStatus(p, billingsForOs, allPleitos) === filterOsStatus
+      );
+    }
+    if (filterOsStatusFat) {
+      result = result.filter(
+        (p) => getOsStatusFaturamento(p, billingsForOs) === filterOsStatusFat
       );
     }
 
@@ -2425,27 +2392,39 @@ export default function ContractDetailPage() {
     isAllYears,
     selectedYear,
     selectedMonth,
-    filterStatusOrcamento,
-    filterStatusExecucao,
-    filterStatusFaturamento,
     filterOsStatus,
+    filterOsStatusFat,
     searchTermPleitos,
-    billings,
   ]);
 
-  const hasActivePleitosFilter = Boolean(
-    filterStatusOrcamento || filterStatusExecucao || filterStatusFaturamento || filterOsStatus
-  );
+  const hasActivePleitosFilter = Boolean(filterOsStatus || filterOsStatusFat);
   const hasActiveProductionFilter = Boolean(filterProductionOsSe.trim() || filterProductionResponsible.trim());
   const hasActiveBillingFilter = Boolean(
     filterBillingOsSe.trim() || filterBillingInvoice.trim() || filterBillingGross.trim()
   );
 
+  const osResumoTotals = useMemo(() => {
+    const osRows = allPleitos.filter((p) => !isPleitoHistorico(p));
+    let totalOrcado = 0;
+    let totalPleiteado = 0;
+    let totalFaturado = 0;
+    const seenOs = new Set<string>();
+
+    for (const p of osRows) {
+      totalOrcado += parseBudgetToNumberSafe(p.budget);
+      const key = (p.divSe || '').trim().toLowerCase() || p.id;
+      if (seenOs.has(key)) continue;
+      seenOs.add(key);
+      totalPleiteado += sumOsPleiteadoTotal(allPleitos, p.divSe);
+      totalFaturado += getOsFaturamentoAcumulado(p, billingsForOs);
+    }
+
+    return { totalOrcado, totalPleiteado, totalFaturado };
+  }, [allPleitos, billingsForOs]);
+
   const clearPleitosFilters = () => {
-    setFilterStatusOrcamento('');
-    setFilterStatusExecucao('');
-    setFilterStatusFaturamento('');
     setFilterOsStatus('');
+    setFilterOsStatusFat('');
   };
 
   const clearProductionFilters = () => {
@@ -2463,10 +2442,8 @@ export default function ContractDetailPage() {
     setPleitosListPage(1);
   }, [
     searchTermPleitos,
-    filterStatusOrcamento,
-    filterStatusExecucao,
-    filterStatusFaturamento,
     filterOsStatus,
+    filterOsStatusFat,
     selectedYear,
     selectedMonth,
   ]);
@@ -2550,6 +2527,50 @@ export default function ContractDetailPage() {
   const visiblePleitoIds = useMemo(() => displayedPleitos.map((p) => p.id), [displayedPleitos]);
   const allVisibleSelected = visiblePleitoIds.length > 0 && visiblePleitoIds.every((id) => selectedForPleito.has(id));
   const someVisibleSelected = visiblePleitoIds.some((id) => selectedForPleito.has(id));
+
+  const visibleBillingIds = useMemo(() => displayedBillings.map((b) => b.id), [displayedBillings]);
+  const allVisibleBillingsSelected =
+    visibleBillingIds.length > 0 && visibleBillingIds.every((id) => selectedForBilling.has(id));
+  const someVisibleBillingsSelected = visibleBillingIds.some((id) => selectedForBilling.has(id));
+
+  const toggleSelectAllVisibleBillings = (checked: boolean) => {
+    if (checked) {
+      setSelectedForBilling((prev) => {
+        const next = new Set(prev);
+        visibleBillingIds.forEach((id) => next.add(id));
+        return next;
+      });
+      return;
+    }
+    setSelectedForBilling((prev) => {
+      const next = new Set(prev);
+      visibleBillingIds.forEach((id) => next.delete(id));
+      return next;
+    });
+  };
+
+  const toggleBillingSelectionMenu = (button: HTMLButtonElement) => {
+    setBillingSelectionMenu((prev) => {
+      if (prev) return null;
+      const rect = button.getBoundingClientRect();
+      let left = rect.right - ROW_ACTION_MENU_WIDTH_PX;
+      left = Math.max(8, Math.min(left, window.innerWidth - ROW_ACTION_MENU_WIDTH_PX - 8));
+      return { rowId: 'billing-selection-toolbar', top: rect.bottom + 4, left };
+    });
+  };
+
+  useEffect(() => {
+    if (selectedForBilling.size === 0) setBillingSelectionMenu(null);
+  }, [selectedForBilling.size]);
+
+  useEffect(() => {
+    if (!billingSelectionMenu) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setBillingSelectionMenu(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [billingSelectionMenu]);
 
   const contractTablesRerenderKey = useMemo(
     () => [filteredPleitos, filteredBillings, productions],
@@ -2688,7 +2709,7 @@ export default function ContractDetailPage() {
       const creationMonth = String(now.getMonth() + 1).padStart(2, '0');
       const creationYear = now.getFullYear();
       await Promise.all(
-        items.map(async ({ id, billingRequest, generatedByPleitear100 }) => {
+        items.map(async ({ id, billingRequest }) => {
           const source = pleitos.find((p) => p.id === id);
           if (!source) return;
           await api.post(`/contracts/${contractId}/pleitos`, {
@@ -2715,9 +2736,7 @@ export default function ContractDetailPage() {
             budgetAmount4: source.budgetAmount4,
             pv: source.pv,
             ipi: source.ipi,
-            reportsBilling: generatedByPleitear100
-              ? source.reportsBilling?.trim() || null
-              : PLEITO_HISTORY_MARKER,
+            reportsBilling: PLEITO_HISTORY_MARKER,
             engineer: source.engineer,
             supervisor: source.supervisor
           });
@@ -2811,6 +2830,11 @@ export default function ContractDetailPage() {
     return () => window.removeEventListener('keydown', onKey);
   }, [osSelectionMenu]);
 
+  const getSelectedOsPleiteadas100 = (ids: string[]): ContractPleito[] =>
+    ids
+      .map((id) => pleitos.find((x) => x.id === id))
+      .filter((p): p is ContractPleito => !!p && isOsPleiteada100(p, allPleitos));
+
   const handleGerarPleito = () => {
     if (!canCreateContrato) {
       toast.error('Você não tem permissão para criar no módulo Contratos.');
@@ -2821,12 +2845,22 @@ export default function ContractDetailPage() {
       toast.error('Selecione ao menos uma ordem de serviço para gerar o pleito.');
       return;
     }
+    const jaPleiteadas = getSelectedOsPleiteadas100(ids);
+    if (jaPleiteadas.length > 0) {
+      const labels = jaPleiteadas.map((p) => p.divSe || p.id).join(', ');
+      toast.error(`OS já pleiteada(s) 100%: ${labels}. Desmarque para continuar.`);
+      return;
+    }
     setShowPleitoValoresModal(true);
   };
 
   const handleGerarPleitoParaOs = (pleitoId: string) => {
     if (!canCreateContrato) {
       toast.error('Você não tem permissão para criar no módulo Contratos.');
+      return;
+    }
+    if (getSelectedOsPleiteadas100([pleitoId]).length > 0) {
+      toast.error('Esta OS já está 100% pleiteada.');
       return;
     }
     setSelectedForPleito(new Set([pleitoId]));
@@ -2851,14 +2885,29 @@ export default function ContractDetailPage() {
 
   const handleRemoverFaturamento = (billing: ContractBilling) => {
     closeBillingRowActionMenu();
-    if (!canDeleteContrato) {
-      toast.error('Você não tem permissão para excluir no módulo Contratos.');
-      return;
-    }
     if (!window.confirm('Excluir este faturamento?')) {
       return;
     }
     deleteBillingMutation.mutate(billing.id);
+  };
+
+  const handleRemoverFaturamentosSelecionados = () => {
+    const ids = Array.from(selectedForBilling).filter((id) => billings.some((b) => b.id === id));
+    if (ids.length === 0) {
+      toast.error('Selecione ao menos um faturamento.');
+      return;
+    }
+    if (
+      !window.confirm(
+        ids.length === 1
+          ? 'Excluir o faturamento selecionado?'
+          : `Excluir ${ids.length} faturamentos selecionados?`
+      )
+    ) {
+      return;
+    }
+    setBillingSelectionMenu(null);
+    deleteBillingMutation.mutate(ids);
   };
 
   const handleEditarPleitoOs = (pleito: ContractPleito) => {
@@ -2890,8 +2939,45 @@ export default function ContractDetailPage() {
     setShowCronogramaMensalModal(true);
   };
 
-  const handleAbrirHistoricoOs = () => {
-    setShowHistoricoOsModal(true);
+  const handleExportOsExcel = () => {
+    if (filteredPleitos.length === 0) {
+      toast.error('Não há ordens de serviço para exportar.');
+      return;
+    }
+    try {
+      const contractSlug = contract?.number?.replace(/[^\w-]+/g, '_') || contractId.slice(0, 8);
+      exportPleitosOsToXlsx(
+        filteredPleitos as PleitoOsExportRow[],
+        billingsForOs,
+        `ordens-servico-${contractSlug}`
+      );
+      toast.success(`${filteredPleitos.length} ordem(ns) exportada(s) para Excel.`);
+      setShowOsExportModal(false);
+    } catch {
+      toast.error('Erro ao exportar para Excel.');
+    }
+  };
+
+  const handleExportOsPdf = async () => {
+    if (filteredPleitos.length === 0) {
+      toast.error('Não há ordens de serviço para exportar.');
+      return;
+    }
+    setExportingOsPdf(true);
+    try {
+      const contractSlug = contract?.number?.replace(/[^\w-]+/g, '_') || contractId.slice(0, 8);
+      await exportHistoricoOsPdf(filteredPleitos as PleitoOsExportRow[], billingsForOs, {
+        contractName: contract?.name,
+        contractNumber: contract?.number,
+        filenamePrefix: `ordens-servico-${contractSlug}`,
+      });
+      toast.success(`PDF gerado com ${filteredPleitos.length} ordem(ns) de serviço.`);
+      setShowOsExportModal(false);
+    } catch {
+      toast.error('Erro ao gerar PDF.');
+    } finally {
+      setExportingOsPdf(false);
+    }
   };
 
   const handleConfirmarPleito = () => {
@@ -2914,6 +3000,12 @@ export default function ContractDetailPage() {
     const ids = Array.from(selectedForPleito);
     if (ids.length === 0) {
       toast.error('Selecione ao menos uma ordem de serviço.');
+      return;
+    }
+    const jaPleiteadas = getSelectedOsPleiteadas100(ids);
+    if (jaPleiteadas.length > 0) {
+      const labels = jaPleiteadas.map((p) => p.divSe || p.id).join(', ');
+      toast.error(`OS já pleiteada(s) 100%: ${labels}. Desmarque para continuar.`);
       return;
     }
     if (
@@ -3249,17 +3341,19 @@ export default function ContractDetailPage() {
           <div className="space-y-4">
             <p className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">Contrato</p>
           {/* Resumo do contrato */}
-          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 xl:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 xl:grid-cols-3">
             <Card>
-              <CardContent className="p-4">
+              <CardContent className="p-4 sm:p-6">
                 <div className="flex items-center">
                   <div className="flex-shrink-0 rounded-lg bg-indigo-100 p-2 dark:bg-indigo-900/30 sm:p-3">
                     <CalendarDays className="h-5 w-5 text-indigo-600 dark:text-indigo-400 sm:h-6 sm:w-6" />
                   </div>
-                  <div className="ml-3 min-w-0 sm:ml-4">
-                    <p className="text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">Vigência</p>
+                  <div className="ml-3 min-w-0 flex-1 sm:ml-4">
+                    <p className="whitespace-normal text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">
+                      Vigência
+                    </p>
                     <div className="group relative mt-1 w-fit max-w-full">
-                      <p className="cursor-default text-base font-bold leading-snug text-gray-900 dark:text-gray-100 sm:text-xl">
+                      <p className="cursor-default text-xl font-bold leading-snug text-gray-900 dark:text-gray-100 sm:text-2xl">
                         {formatDate(contract.startDate)} até {formatDate(contract.endDate)}
                       </p>
                       <div
@@ -3279,16 +3373,18 @@ export default function ContractDetailPage() {
             </Card>
 
             <Card>
-              <CardContent className="p-4">
-                <div className="flex items-start justify-between gap-2 sm:items-center">
-                  <div className="flex min-w-0 flex-1 items-center">
+              <CardContent className="p-4 sm:p-6">
+                <div className="flex items-start justify-between gap-2 sm:items-center sm:gap-3">
+                  <div className="flex min-w-[120px] flex-1 items-center pr-2">
                     <div className="flex-shrink-0 rounded-lg bg-blue-100 p-2 dark:bg-blue-900/30 sm:p-3">
                       <Receipt className="h-5 w-5 text-blue-600 dark:text-blue-400 sm:h-6 sm:w-6" />
                     </div>
-                    <div className="ml-3 min-w-0 sm:ml-4">
-                      <p className="text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">Valor + Aditivos</p>
+                    <div className="ml-3 min-w-0 flex-1 overflow-hidden sm:ml-4">
+                      <p className="break-normal text-xs font-medium leading-tight text-gray-600 dark:text-gray-400 sm:text-sm">
+                        Valor + Aditivos
+                      </p>
                       <div className="group relative mt-1 w-fit max-w-full">
-                        <p className="cursor-default truncate text-lg font-bold text-gray-900 dark:text-gray-100 sm:text-2xl">
+                        <p className="cursor-default text-xl font-bold text-gray-900 dark:text-gray-100 sm:text-2xl">
                           {formatCurrency(valorMaisAditivosTotal)}
                         </p>
                         <div
@@ -3325,21 +3421,21 @@ export default function ContractDetailPage() {
             </Card>
 
             <Card>
-              <CardContent className="p-4">
-                <div className="flex items-start justify-between gap-2 sm:items-center">
-                  <div className="flex min-w-0 flex-1 items-center">
+              <CardContent className="p-4 sm:p-6">
+                <div className="flex items-start justify-between gap-2 sm:items-center sm:gap-3">
+                  <div className="flex min-w-[120px] flex-1 items-center pr-2">
                     <div className="flex-shrink-0 rounded-lg bg-sky-100 p-2 dark:bg-sky-900/30 sm:p-3">
                       <FileText className="h-5 w-5 text-sky-600 dark:text-sky-400 sm:h-6 sm:w-6" />
                     </div>
-                    <div className="ml-3 min-w-0 sm:ml-4">
-                      <p className="text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">
-                        Valor anual{!isAllYears ? ` (${safeSelectedYear})` : ''}
+                    <div className="ml-3 min-w-0 flex-1 overflow-hidden sm:ml-4">
+                      <p className="break-normal text-xs font-medium leading-tight text-gray-600 dark:text-gray-400 sm:text-sm">
+                        Valor anual
                       </p>
                       {isAllYears ? (
-                        <p className="mt-1 text-lg font-bold text-gray-900 dark:text-gray-100 sm:text-2xl">—</p>
+                        <p className="mt-1 text-xl font-bold text-gray-900 dark:text-gray-100 sm:text-2xl">—</p>
                       ) : (
                         <div className="group relative mt-1 w-fit max-w-full">
-                          <p className="cursor-default truncate text-lg font-bold text-gray-900 dark:text-gray-100 sm:text-2xl">
+                          <p className="cursor-default text-xl font-bold text-gray-900 dark:text-gray-100 sm:text-2xl">
                             {valorAnualAjustado !== null ? formatCurrency(valorAnualAjustado) : '-'}
                           </p>
                           <div
@@ -3400,18 +3496,18 @@ export default function ContractDetailPage() {
 
           <div className="space-y-4">
             <p className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">Faturamento</p>
-          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 xl:grid-cols-4">
             <Card>
-              <CardContent className="p-4">
+              <CardContent className="p-4 sm:p-6">
                 <div className="flex items-center">
-                  <div className="p-2 sm:p-3 bg-green-100 dark:bg-green-900/30 rounded-lg flex-shrink-0">
-                    <CheckCircle2 className="w-5 h-5 sm:w-6 sm:h-6 text-green-600 dark:text-green-400" />
+                  <div className="flex-shrink-0 rounded-lg bg-green-100 p-2 dark:bg-green-900/30 sm:p-3">
+                    <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400 sm:h-6 sm:w-6" />
                   </div>
-                  <div className="ml-3 sm:ml-4 min-w-0 flex-1">
-                    <p className="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400 whitespace-normal">
+                  <div className="ml-3 min-w-0 flex-1 sm:ml-4">
+                    <p className="whitespace-normal text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">
                       Saldo anual faturado
                     </p>
-                    <p className="text-lg sm:text-2xl font-bold text-gray-900 dark:text-gray-100 mt-1 truncate">
+                    <p className="mt-1 text-xl font-bold text-gray-900 dark:text-gray-100 sm:text-2xl">
                       {formatCurrency(isAllYears ? faturamentoTotalTodosAnos : faturamentoAnual)}
                     </p>
                   </div>
@@ -3419,16 +3515,16 @@ export default function ContractDetailPage() {
               </CardContent>
             </Card>
             <Card>
-              <CardContent className="p-4">
+              <CardContent className="p-4 sm:p-6">
                 <div className="flex items-center">
-                  <div className="p-2 sm:p-3 bg-amber-100 dark:bg-amber-900/30 rounded-lg flex-shrink-0">
-                    <Clock className="w-5 h-5 sm:w-6 sm:h-6 text-amber-600 dark:text-amber-400" />
+                  <div className="flex-shrink-0 rounded-lg bg-amber-100 p-2 dark:bg-amber-900/30 sm:p-3">
+                    <Clock className="h-5 w-5 text-amber-600 dark:text-amber-400 sm:h-6 sm:w-6" />
                   </div>
-                  <div className="ml-3 sm:ml-4 min-w-0 flex-1">
-                    <p className="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400 whitespace-normal">
+                  <div className="ml-3 min-w-0 flex-1 sm:ml-4">
+                    <p className="whitespace-normal text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">
                       Saldo anual pendente
                     </p>
-                    <p className="text-lg sm:text-2xl font-bold text-gray-900 dark:text-gray-100 mt-1 truncate">
+                    <p className="mt-1 text-xl font-bold text-gray-900 dark:text-gray-100 sm:text-2xl">
                       {isAllYears ? '—' : saldoAnual !== null ? formatCurrency(saldoAnual) : '-'}
                     </p>
                   </div>
@@ -3436,16 +3532,16 @@ export default function ContractDetailPage() {
               </CardContent>
             </Card>
             <Card>
-              <CardContent className="p-4">
+              <CardContent className="p-4 sm:p-6">
                 <div className="flex items-center">
-                  <div className="p-2 sm:p-3 bg-green-100 dark:bg-green-900/30 rounded-lg flex-shrink-0">
-                    <CheckCircle2 className="w-5 h-5 sm:w-6 sm:h-6 text-green-600 dark:text-green-400" />
+                  <div className="flex-shrink-0 rounded-lg bg-green-100 p-2 dark:bg-green-900/30 sm:p-3">
+                    <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400 sm:h-6 sm:w-6" />
                   </div>
-                  <div className="ml-3 sm:ml-4 min-w-0 flex-1">
-                    <p className="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400 whitespace-normal">
+                  <div className="ml-3 min-w-0 flex-1 sm:ml-4">
+                    <p className="whitespace-normal text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">
                       Saldo contratual faturado
                     </p>
-                    <p className="text-lg sm:text-2xl font-bold text-gray-900 dark:text-gray-100 mt-1 truncate">
+                    <p className="mt-1 text-xl font-bold text-gray-900 dark:text-gray-100 sm:text-2xl">
                       {formatCurrency(faturamentoTotalTodosAnos)}
                     </p>
                   </div>
@@ -3453,16 +3549,16 @@ export default function ContractDetailPage() {
               </CardContent>
             </Card>
             <Card>
-              <CardContent className="p-4">
+              <CardContent className="p-4 sm:p-6">
                 <div className="flex items-center">
-                  <div className="p-2 sm:p-3 bg-amber-100 dark:bg-amber-900/30 rounded-lg flex-shrink-0">
-                    <Clock className="w-5 h-5 sm:w-6 sm:h-6 text-amber-600 dark:text-amber-400" />
+                  <div className="flex-shrink-0 rounded-lg bg-amber-100 p-2 dark:bg-amber-900/30 sm:p-3">
+                    <Clock className="h-5 w-5 text-amber-600 dark:text-amber-400 sm:h-6 sm:w-6" />
                   </div>
-                  <div className="ml-3 sm:ml-4 min-w-0 flex-1">
-                    <p className="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400 whitespace-normal">
+                  <div className="ml-3 min-w-0 flex-1 sm:ml-4">
+                    <p className="whitespace-normal text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">
                       Saldo contratual pendente
                     </p>
-                    <p className="text-lg sm:text-2xl font-bold text-gray-900 dark:text-gray-100 mt-1 truncate">
+                    <p className="mt-1 text-xl font-bold text-gray-900 dark:text-gray-100 sm:text-2xl">
                       {pendenteParaFaturarTodosAnos !== null
                         ? formatCurrency(pendenteParaFaturarTodosAnos)
                         : '-'}
@@ -3480,24 +3576,24 @@ export default function ContractDetailPage() {
               <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
                 {canAccessOrcamento ? (
                   <Card>
-                    <CardContent className="p-4">
-                      <div className="flex items-center gap-3">
-                        <div className="flex min-w-0 flex-1 items-center">
+                    <CardContent className="p-4 sm:p-6">
+                      <div className="flex items-start justify-between gap-2 sm:items-center sm:gap-3">
+                        <div className="flex min-w-[120px] flex-1 items-center pr-2">
                           <div className="flex-shrink-0 rounded-lg bg-emerald-100 p-2 dark:bg-emerald-900/30 sm:p-3">
                             <Calculator className="h-5 w-5 text-emerald-600 dark:text-emerald-400 sm:h-6 sm:w-6" />
                           </div>
-                          <div className="ml-3 min-w-0 sm:ml-4">
-                            <p className="whitespace-normal text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">
+                          <div className="ml-3 min-w-0 flex-1 overflow-hidden sm:ml-4">
+                            <p className="break-normal text-xs font-medium leading-tight text-gray-600 dark:text-gray-400 sm:text-sm">
                               Orçamentos
                             </p>
-                            <p className="mt-1 truncate text-lg font-bold text-gray-900 dark:text-gray-100 sm:text-2xl">
+                            <p className="mt-1 text-xl font-bold text-gray-900 dark:text-gray-100 sm:text-2xl">
                               {loadingOrcamentosCount ? '…' : orcamentosCount}
                             </p>
                           </div>
                         </div>
                         <Link
                           href={`/ponto/contratos/${contractId}/orcamento`}
-                          className="flex-shrink-0 rounded-lg p-2 text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-100 sm:p-2.5"
+                          className="mt-1 flex-shrink-0 rounded-lg p-2 text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-100 sm:mt-0 sm:p-2.5"
                           aria-label="Abrir orçamentos"
                           title="Abrir orçamentos"
                         >
@@ -3509,24 +3605,24 @@ export default function ContractDetailPage() {
                 ) : null}
                 {canAccessRelatorios ? (
                   <Card>
-                    <CardContent className="p-4">
-                      <div className="flex items-center gap-3">
-                        <div className="flex min-w-0 flex-1 items-center">
+                    <CardContent className="p-4 sm:p-6">
+                      <div className="flex items-start justify-between gap-2 sm:items-center sm:gap-3">
+                        <div className="flex min-w-[120px] flex-1 items-center pr-2">
                           <div className="flex-shrink-0 rounded-lg bg-rose-100 p-2 dark:bg-rose-900/30 sm:p-3">
                             <FileImage className="h-5 w-5 text-rose-600 dark:text-rose-400 sm:h-6 sm:w-6" />
                           </div>
-                          <div className="ml-3 min-w-0 sm:ml-4">
-                            <p className="whitespace-normal text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">
+                          <div className="ml-3 min-w-0 flex-1 overflow-hidden sm:ml-4">
+                            <p className="break-normal text-xs font-medium leading-tight text-gray-600 dark:text-gray-400 sm:text-sm">
                               Relatórios
                             </p>
-                            <p className="mt-1 truncate text-lg font-bold text-gray-900 dark:text-gray-100 sm:text-2xl">
+                            <p className="mt-1 text-xl font-bold text-gray-900 dark:text-gray-100 sm:text-2xl">
                               {loadingRelatoriosCount ? '…' : relatoriosCount}
                             </p>
                           </div>
                         </div>
                         <Link
                           href={`/ponto/contratos/${contractId}/relatorios`}
-                          className="flex-shrink-0 rounded-lg p-2 text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-100 sm:p-2.5"
+                          className="mt-1 flex-shrink-0 rounded-lg p-2 text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-100 sm:mt-0 sm:p-2.5"
                           aria-label="Abrir relatórios"
                           title="Abrir relatórios"
                         >
@@ -4114,11 +4210,7 @@ export default function ContractDetailPage() {
                 <div className="p-8 text-center">
                   <BarChart3 className="w-12 h-12 mx-auto text-gray-300 dark:text-gray-600 mb-3" />
                   <p className="text-gray-500 dark:text-gray-400">
-                    {productions.length === 0
-                      ? 'Nenhuma produção semanal cadastrada.'
-                      : searchTermProduction.trim() || hasActiveProductionFilter
-                        ? 'Nenhuma produção semanal encontrada com os filtros atuais.'
-                        : 'Nenhuma produção semanal no período selecionado.'}
+                    Nenhuma produção semanal encontrada.
                   </p>
                   {productions.length === 0 && (
                   <button
@@ -4133,7 +4225,7 @@ export default function ContractDetailPage() {
                   }}
                     className="mt-3 text-amber-600 dark:text-amber-400 hover:underline text-sm font-medium"
                   >
-                    Cadastrar primeira produção semanal
+                    Cadastrar produção semanal
                   </button>
                   )}
                 </div>
@@ -4233,6 +4325,65 @@ export default function ContractDetailPage() {
 
           {canAccessOrdemServicoModulo ? (
           <>
+          <div className="space-y-4">
+            <p className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+              Resumo
+            </p>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 xl:grid-cols-3">
+              <Card>
+                <CardContent className="p-4 sm:p-6">
+                  <div className="flex items-center">
+                    <div className="flex-shrink-0 rounded-lg bg-blue-100 p-2 dark:bg-blue-900/30 sm:p-3">
+                      <Calculator className="h-5 w-5 text-blue-600 dark:text-blue-400 sm:h-6 sm:w-6" />
+                    </div>
+                    <div className="ml-3 min-w-0 flex-1 sm:ml-4">
+                      <p className="whitespace-normal text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">
+                        Total Orçado
+                      </p>
+                      <p className="mt-1 text-xl font-bold text-gray-900 dark:text-gray-100 sm:text-2xl">
+                        {formatCurrency(osResumoTotals.totalOrcado)}
+                      </p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="p-4 sm:p-6">
+                  <div className="flex items-center">
+                    <div className="flex-shrink-0 rounded-lg bg-indigo-100 p-2 dark:bg-indigo-900/30 sm:p-3">
+                      <FileText className="h-5 w-5 text-indigo-600 dark:text-indigo-400 sm:h-6 sm:w-6" />
+                    </div>
+                    <div className="ml-3 min-w-0 flex-1 sm:ml-4">
+                      <p className="whitespace-normal text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">
+                        Total Pleiteado
+                      </p>
+                      <p className="mt-1 text-xl font-bold text-gray-900 dark:text-gray-100 sm:text-2xl">
+                        {formatCurrency(osResumoTotals.totalPleiteado)}
+                      </p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="p-4 sm:p-6">
+                  <div className="flex items-center">
+                    <div className="flex-shrink-0 rounded-lg bg-green-100 p-2 dark:bg-green-900/30 sm:p-3">
+                      <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400 sm:h-6 sm:w-6" />
+                    </div>
+                    <div className="ml-3 min-w-0 flex-1 sm:ml-4">
+                      <p className="whitespace-normal text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">
+                        Total Faturado
+                      </p>
+                      <p className="mt-1 text-xl font-bold text-gray-900 dark:text-gray-100 sm:text-2xl">
+                        {formatCurrency(osResumoTotals.totalFaturado)}
+                      </p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+
           {/* Ordem de Serviço - Lista de pleitos do contrato */}
           <Card>
             <CardHeader className={cadastroListClasses.cardHeader}>
@@ -4308,18 +4459,17 @@ export default function ContractDetailPage() {
                         <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-blue-500 ring-2 ring-white dark:ring-gray-900" />
                       ) : null}
                     </button>
-                    {!loadingPleitos && allPleitos.length > 0 && (
-                      <>
-                        <button
-                          type="button"
-                          onClick={handleAbrirHistoricoOs}
-                          className={OS_TOOLBAR_BTN}
-                        >
-                          <History className={OS_TOOLBAR_BTN_ICON} />
-                          Histórico de OS
-                        </button>
-                      </>
-                    )}
+                    <button
+                      type="button"
+                      onClick={() => setShowOsExportModal(true)}
+                      disabled={filteredPleitos.length === 0 || exportingOsPdf}
+                      className={OS_TOOLBAR_BTN}
+                      title="Exportar"
+                      aria-label="Exportar"
+                    >
+                      <Download className="h-4 w-4 shrink-0" />
+                      Exportar
+                    </button>
                     <button
                       type="button"
                       onClick={() => setShowPleitoModal(true)}
@@ -4399,23 +4549,15 @@ export default function ContractDetailPage() {
                 <div className="p-8 text-center">
                   <ClipboardList className="w-12 h-12 mx-auto text-gray-300 dark:text-gray-600 mb-3" />
                   <p className="text-gray-500 dark:text-gray-400">
-                    {allPleitos.length === 0
-                      ? 'Nenhuma ordem de serviço cadastrada para este contrato.'
-                      : pleitos.length === 0
-                        ? 'Todas as ordens de serviço deste contrato foram concluídas (faturamento 100%). Consulte o Histórico de OS.'
-                        : searchTermPleitos.trim() || hasActivePleitosFilter
-                          ? 'Nenhuma ordem de serviço encontrada com os filtros atuais.'
-                          : `Nenhuma ordem de serviço no período selecionado (${selectedMonth > 0 ? MESES_FILTRO.find((m) => m.value === selectedMonth)?.label + ' ' : ''}${isAllYears ? 'todos os anos' : selectedYear}).`}
+                    Nenhuma ordem de serviço encontrada.
                   </p>
-                  {allPleitos.length === 0 && (
                   <button
                     onClick={() => setShowPleitoModal(true)}
                     disabled={!canCreateContrato}
                     className="mt-3 text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50 disabled:no-underline text-sm font-medium"
                   >
-                    Cadastrar primeira ordem de serviço
+                    Criar ordem de serviço
                   </button>
-                  )}
                 </div>
               ) : (
                 <>
@@ -4445,19 +4587,20 @@ export default function ContractDetailPage() {
                         </th>
                         <th className={`${cadastroListClasses.th} whitespace-nowrap align-middle`}>ID</th>
                         <th className={`${cadastroListClasses.th} align-middle`}>Descrição</th>
-                        <th className={`${cadastroListClasses.thCenter} align-middle whitespace-nowrap`}>Status</th>
                         <th className={`${cadastroListClasses.thCenter} align-middle whitespace-nowrap`}>% Pleiteado</th>
                         <th className={`${cadastroListClasses.thCenter} align-middle whitespace-nowrap`}>Pleito</th>
                         <th className={`${cadastroListClasses.thNumeric} align-middle whitespace-nowrap`}>Valor pleiteado</th>
-                        <th className={`${cadastroListClasses.thCenter} align-middle whitespace-nowrap`}>Status Pleito</th>
                         <th className={`${cadastroListClasses.thNumeric} align-middle whitespace-nowrap`}>Restante a pleitear</th>
                         <th className={`${cadastroListClasses.thNumeric} align-middle`}>Orçamento</th>
+                        <th className={`${cadastroListClasses.thCenter} align-middle whitespace-nowrap`}>Status Pleito</th>
+                        <th className={`${cadastroListClasses.thCenter} align-middle whitespace-nowrap`}>Status Faturamento</th>
                         <th className={`${listTableRowClasses.actionTh} align-middle`}>Ação</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
                       {displayedPleitos.map((p) => {
                         const osStatus = getOsStatus(p, billingsForOs, allPleitos);
+                        const osStatusFat = getOsStatusFaturamento(p, billingsForOs);
                         const pctPleiteado = getOsPleiteadoPct(p, allPleitos);
                         const restantePleitear = getOsRestantePleitear(p, allPleitos);
                         const isSelected = selectedForPleito.has(p.id);
@@ -4507,13 +4650,6 @@ export default function ContractDetailPage() {
                           <td className={`${cadastroListClasses.tdTruncate} align-middle`} title={p.serviceDescription}>
                             <span className="block truncate">{p.serviceDescription || '-'}</span>
                           </td>
-                          <td className={`${cadastroListClasses.tdCenter} align-middle whitespace-nowrap`}>
-                            <span
-                              className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${osStatusBadgeClass(osStatus)}`}
-                            >
-                              {osStatus}
-                            </span>
-                          </td>
                           <td className={`${cadastroListClasses.tdCenter} align-middle text-gray-900 dark:text-gray-100`}>
                             {pctPleiteado != null ? `${pctPleiteado.toFixed(1)}%` : '—'}
                           </td>
@@ -4554,31 +4690,25 @@ export default function ContractDetailPage() {
                               </div>
                             )}
                           </td>
-                          <td className={`${cadastroListClasses.tdCenter} align-middle`}>
-                            {linkedPleitos.length === 0 ? (
-                              <span className="text-xs text-gray-400 dark:text-gray-500">—</span>
-                            ) : (
-                              <div className="flex flex-col items-center gap-1">
-                                {linkedPleitos.map((lp) => {
-                                  const etiqueta = getHistoricoEtiqueta(lp, billings) || 'Pleiteado';
-                                  return (
-                                    <span
-                                      key={lp.id}
-                                      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${historicoEtiquetaBadgeClass(etiqueta)}`}
-                                      title={etiqueta}
-                                    >
-                                      {etiqueta}
-                                    </span>
-                                  );
-                                })}
-                              </div>
-                            )}
-                          </td>
                           <td className={`${cadastroListClasses.tdNumeric} align-middle text-gray-900 dark:text-gray-100`}>
                             {restantePleitear != null ? formatCurrency(restantePleitear) : '—'}
                           </td>
                           <td className={`${cadastroListClasses.tdNumeric} align-middle font-medium text-gray-900 dark:text-gray-100`}>
                             {p.budget ? formatCurrency(Number(p.budget)) : '-'}
+                          </td>
+                          <td className={`${cadastroListClasses.tdCenter} align-middle whitespace-nowrap`}>
+                            <span
+                              className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${osStatusBadgeClass(osStatus)}`}
+                            >
+                              {osStatus}
+                            </span>
+                          </td>
+                          <td className={`${cadastroListClasses.tdCenter} align-middle whitespace-nowrap`}>
+                            <span
+                              className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${osStatusBadgeClass(osStatusFat)}`}
+                            >
+                              {osStatusFat}
+                            </span>
                           </td>
                           <RowActionMenuCell
                             isOpen={isPleitoRowMenuOpen(p.id)}
@@ -4610,10 +4740,15 @@ export default function ContractDetailPage() {
                         {
                           label: 'Gerar pleito',
                           onClick: () => handleGerarPleitoParaOs(pleitoRowForActionMenu.id),
-                          disabled: !canCreateContrato || gerarPleitoMutation.isPending,
+                          disabled:
+                            !canCreateContrato ||
+                            gerarPleitoMutation.isPending ||
+                            isOsPleiteada100(pleitoRowForActionMenu, allPleitos),
                           disabledTitle: gerarPleitoMutation.isPending
                             ? 'Gerando...'
-                            : 'Sem permissão para gerar pleito',
+                            : isOsPleiteada100(pleitoRowForActionMenu, allPleitos)
+                              ? 'OS já pleiteada 100%'
+                              : 'Sem permissão para gerar pleito',
                           icon: (
                             <FileDown className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
                           ),
@@ -4683,6 +4818,22 @@ export default function ContractDetailPage() {
                   </div>
                 </div>
                 <div className={cadastroListClasses.cardToolbar}>
+                  {selectedForBilling.size > 0 ? (
+                    <button
+                      type="button"
+                      onClick={(e) => toggleBillingSelectionMenu(e.currentTarget)}
+                      className={`relative ${rowActionMenuButtonClass(billingSelectionMenu !== null)}`}
+                      aria-label="Ações dos faturamentos selecionados"
+                      aria-expanded={billingSelectionMenu !== null}
+                      aria-haspopup="menu"
+                      title={`Ações (${selectedForBilling.size} selecionado${selectedForBilling.size === 1 ? '' : 's'})`}
+                    >
+                      <MoreVertical className="h-4 w-4" />
+                      <span className="absolute -right-1.5 -top-1.5 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-green-600 px-1 text-[10px] font-semibold leading-none text-white">
+                        {selectedForBilling.size}
+                      </span>
+                    </button>
+                  ) : null}
                   <div className="relative min-w-[240px] flex-1 sm:w-[280px] sm:flex-none">
                     <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
                     <input
@@ -4731,6 +4882,24 @@ export default function ContractDetailPage() {
                 </div>
               </div>
             </CardHeader>
+            {billingSelectionMenu ? (
+              <RowActionMenuPortal
+                menu={billingSelectionMenu}
+                onClose={() => setBillingSelectionMenu(null)}
+                onEdit={() => {}}
+                onDelete={() => {}}
+                hideDefaultActions
+                extraItems={[
+                  {
+                    label: deleteBillingMutation.isPending ? 'Excluindo...' : 'Excluir',
+                    disabled: deleteBillingMutation.isPending,
+                    disabledTitle: 'Excluindo...',
+                    onClick: handleRemoverFaturamentosSelecionados,
+                    icon: <Trash2 className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />,
+                  },
+                ]}
+              />
+            ) : null}
             <CardContent className={cadastroListClasses.cardContent}>
               {loadingBillings ? (
                 <div className="p-8 text-center text-gray-500 dark:text-gray-400">
@@ -4769,33 +4938,69 @@ export default function ContractDetailPage() {
                   <table className="w-full text-sm" data-cc-skip-column-customizer="1">
                     <thead className="border-b border-gray-200 dark:border-gray-700">
                       <tr>
+                        <th className="w-12 px-3 py-3 text-center text-xs font-medium uppercase text-gray-500 dark:text-gray-400 align-middle">
+                          <div className="flex justify-center">
+                            <TableCheckbox
+                              checked={allVisibleBillingsSelected}
+                              indeterminate={someVisibleBillingsSelected && !allVisibleBillingsSelected}
+                              onChange={toggleSelectAllVisibleBillings}
+                              onClick={(e) => e.stopPropagation()}
+                              ariaLabel="Selecionar faturamentos visíveis"
+                            />
+                          </div>
+                        </th>
                         <th className={`${cadastroListClasses.th} whitespace-nowrap align-middle`}>ID</th>
                         <th className={`${cadastroListClasses.th} whitespace-nowrap align-middle`}>OS / SE</th>
+                        <th className={`${cadastroListClasses.thCenter} whitespace-nowrap align-middle`}>Pleito</th>
                         <th className={`${cadastroListClasses.th} whitespace-nowrap align-middle`}>Nº NF</th>
                         <th className={`${cadastroListClasses.thCenter} whitespace-nowrap align-middle`}>Data emissão</th>
                         <th className={`${cadastroListClasses.thNumeric} align-middle whitespace-nowrap`}>Valor bruto</th>
                         <th className={`${cadastroListClasses.thNumeric} align-middle whitespace-nowrap`}>Valor líquido</th>
                         <th className={`${cadastroListClasses.thCenter} whitespace-nowrap align-middle`}>Status</th>
-                        {canDeleteContrato ? (
-                          <th className={`${listTableRowClasses.actionTh} align-middle`}>Ação</th>
-                        ) : null}
+                        <th className={`${listTableRowClasses.actionTh} align-middle`}>Ação</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
                       {displayedBillings.map((b) => {
                         const liquidoMissing = isNetValueMissing(b);
                         const fatStatus = liquidoMissing ? 'Líquido pendente' : 'Faturado';
+                        const isSelected = selectedForBilling.has(b.id);
                         return (
                         <tr
                           key={b.id}
                           onClick={() => setSelectedBilling(b)}
-                          className={listTableRowClasses.trNavigable}
+                          className={`${listTableRowClasses.trNavigable} ${isSelected ? 'bg-green-50/50 dark:bg-green-900/10' : ''}`}
                         >
+                          <td className="px-3 py-3 align-middle" onClick={(e) => e.stopPropagation()}>
+                            <div className="flex justify-center">
+                              <TableCheckbox
+                                checked={isSelected}
+                                onChange={(checked) =>
+                                  setSelectedForBilling((prev) => {
+                                    const next = new Set(prev);
+                                    if (checked) next.add(b.id);
+                                    else next.delete(b.id);
+                                    return next;
+                                  })
+                                }
+                                ariaLabel={`Selecionar faturamento ${formatDisplayId(billingDisplayIds, b.id)}`}
+                              />
+                            </div>
+                          </td>
                           <td className={`${cadastroListClasses.tdMono} align-middle whitespace-nowrap`}>
                             {formatDisplayId(billingDisplayIds, b.id)}
                           </td>
                           <td className={`${cadastroListClasses.tdMono} align-middle whitespace-nowrap`}>
                             {formatOsSePastaOrDash(b.serviceOrder, folderForDivSe(allPleitos, b.serviceOrder))}
+                          </td>
+                          <td className={`${cadastroListClasses.tdCenter} align-middle whitespace-nowrap`}>
+                            {b.pleitoId ? (
+                              <span className="font-mono text-xs font-medium text-gray-900 dark:text-gray-100">
+                                {formatDisplayId(pleitoDisplayIds, b.pleitoId)}
+                              </span>
+                            ) : (
+                              <span className="text-xs text-gray-400 dark:text-gray-500">—</span>
+                            )}
                           </td>
                           <td className={`${cadastroListClasses.tdMono} align-middle whitespace-nowrap`}>
                             {(b.invoiceNumber || '').trim() || '—'}
@@ -4814,12 +5019,10 @@ export default function ContractDetailPage() {
                               {fatStatus}
                             </span>
                           </td>
-                          {canDeleteContrato ? (
-                            <RowActionMenuCell
-                              isOpen={isBillingRowMenuOpen(b.id)}
-                              onToggle={(e) => toggleBillingRowActionMenu(b.id, e.currentTarget)}
-                            />
-                          ) : null}
+                          <RowActionMenuCell
+                            isOpen={isBillingRowMenuOpen(b.id)}
+                            onToggle={(e) => toggleBillingRowActionMenu(b.id, e.currentTarget)}
+                          />
                         </tr>
                         );
                       })}
@@ -4834,12 +5037,10 @@ export default function ContractDetailPage() {
                       hideDefaultActions
                       extraItems={[
                         {
-                          label: 'Remover',
+                          label: deleteBillingMutation.isPending ? 'Excluindo...' : 'Excluir',
                           onClick: () => handleRemoverFaturamento(billingRowForActionMenu),
-                          disabled: !canDeleteContrato || deleteBillingMutation.isPending,
-                          disabledTitle: deleteBillingMutation.isPending
-                            ? 'Excluindo...'
-                            : 'Sem permissão para excluir',
+                          disabled: deleteBillingMutation.isPending,
+                          disabledTitle: 'Excluindo...',
                           icon: (
                             <Trash2 className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
                           ),
@@ -5072,48 +5273,24 @@ export default function ContractDetailPage() {
             <div className="space-y-4">
               <div>
                 <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Status Orçamento
-                </label>
-                <StringSingleSelectDropdown
-                  value={filterStatusOrcamento}
-                  onChange={setFilterStatusOrcamento}
-                  options={FILTER_STATUS_ORCAMENTO_OPTIONS}
-                  allowEmpty={false}
-                  className="w-full"
-                />
-              </div>
-              <div>
-                <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Status Execução
-                </label>
-                <StringSingleSelectDropdown
-                  value={filterStatusExecucao}
-                  onChange={setFilterStatusExecucao}
-                  options={FILTER_STATUS_EXECUCAO_OPTIONS}
-                  allowEmpty={false}
-                  className="w-full"
-                />
-              </div>
-              <div>
-                <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Status Faturamento (%)
-                </label>
-                <StringSingleSelectDropdown
-                  value={filterStatusFaturamento}
-                  onChange={setFilterStatusFaturamento}
-                  options={FILTER_STATUS_FATURAMENTO_OPTIONS}
-                  allowEmpty={false}
-                  className="w-full"
-                />
-              </div>
-              <div>
-                <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Status
+                  Status Pleito
                 </label>
                 <StringSingleSelectDropdown
                   value={filterOsStatus}
                   onChange={setFilterOsStatus}
                   options={FILTER_OS_STATUS_OPTIONS}
+                  allowEmpty={false}
+                  className="w-full"
+                />
+              </div>
+              <div>
+                <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Status Faturamento
+                </label>
+                <StringSingleSelectDropdown
+                  value={filterOsStatusFat}
+                  onChange={setFilterOsStatusFat}
+                  options={FILTER_OS_STATUS_FATURAMENTO_OPTIONS}
                   allowEmpty={false}
                   className="w-full"
                 />
@@ -5124,6 +5301,59 @@ export default function ContractDetailPage() {
                 </Button>
                 <Button type="button" onClick={() => setShowPleitosFilterModal(false)}>
                   Fechar
+                </Button>
+              </div>
+            </div>
+          </Modal>
+
+          {/* Modal exportar — Ordem de Serviço */}
+          <Modal
+            isOpen={showOsExportModal}
+            onClose={() => !exportingOsPdf && setShowOsExportModal(false)}
+            title="Exportar ordens de serviço"
+            size="sm"
+          >
+            <div className="space-y-3">
+              <p className="text-sm text-gray-600 dark:text-gray-400">
+                Escolha o formato de exportação
+                {filteredPleitos.length > 0
+                  ? ` (${filteredPleitos.length} ordem${filteredPleitos.length === 1 ? '' : 'ns'}).`
+                  : '.'}
+              </p>
+              <button
+                type="button"
+                onClick={handleExportOsExcel}
+                disabled={filteredPleitos.length === 0 || exportingOsPdf}
+                className="flex w-full items-center gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3 text-left transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:hover:bg-gray-700/60"
+              >
+                <FileSpreadsheet className="h-5 w-5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                <div>
+                  <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Excel</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Arquivo .xlsx</p>
+                </div>
+              </button>
+              <button
+                type="button"
+                onClick={handleExportOsPdf}
+                disabled={filteredPleitos.length === 0 || exportingOsPdf}
+                className="flex w-full items-center gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3 text-left transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:hover:bg-gray-700/60"
+              >
+                <FileDown className="h-5 w-5 shrink-0 text-red-600 dark:text-red-400" />
+                <div>
+                  <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                    {exportingOsPdf ? 'Gerando PDF…' : 'PDF'}
+                  </p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Arquivo .pdf</p>
+                </div>
+              </button>
+              <div className="flex justify-end border-t border-gray-200 pt-3 dark:border-gray-700">
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={exportingOsPdf}
+                  onClick={() => setShowOsExportModal(false)}
+                >
+                  Cancelar
                 </Button>
               </div>
             </div>
@@ -6257,15 +6487,6 @@ export default function ContractDetailPage() {
           )}
 
           <Modal
-            isOpen={showHistoricoOsModal}
-            onClose={() => setShowHistoricoOsModal(false)}
-            title="Histórico de OS"
-            size="full"
-          >
-            <ContractHistoricoOsPanel contractId={contractId} />
-          </Modal>
-
-          <Modal
             isOpen={showVisualizarPleitoModal}
             onClose={() => setShowVisualizarPleitoModal(false)}
             title="Visualizar Pleito"
@@ -6311,6 +6532,7 @@ export default function ContractDetailPage() {
                   <tr>
                     <th className={`${cadastroListClasses.th} whitespace-nowrap align-middle`}>ID</th>
                     <th className={`${cadastroListClasses.th} whitespace-nowrap align-middle`}>OS / SE</th>
+                    <th className={`${cadastroListClasses.thCenter} whitespace-nowrap align-middle`}>Pleito</th>
                     <th className={`${cadastroListClasses.th} whitespace-nowrap align-middle`}>Nº NF</th>
                     <th className={`${cadastroListClasses.thCenter} whitespace-nowrap align-middle`}>Data emissão</th>
                     <th className={`${cadastroListClasses.thNumeric} align-middle whitespace-nowrap`}>Valor bruto</th>
@@ -6336,6 +6558,15 @@ export default function ContractDetailPage() {
                         </td>
                         <td className={`${cadastroListClasses.tdMono} align-middle whitespace-nowrap`}>
                           {formatOsSePastaOrDash(b.serviceOrder, folderForDivSe(allPleitos, b.serviceOrder))}
+                        </td>
+                        <td className={`${cadastroListClasses.tdCenter} align-middle whitespace-nowrap`}>
+                          {b.pleitoId ? (
+                            <span className="font-mono text-xs font-medium text-gray-900 dark:text-gray-100">
+                              {formatDisplayId(pleitoDisplayIds, b.pleitoId)}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-gray-400 dark:text-gray-500">—</span>
+                          )}
                         </td>
                         <td className={`${cadastroListClasses.tdMono} align-middle whitespace-nowrap`}>
                           {(b.invoiceNumber || '').trim() || '—'}

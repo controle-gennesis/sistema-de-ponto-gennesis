@@ -125,7 +125,10 @@ export function ContractCronogramaMensalPanel({
       ? pleitosData
       : (pleitosData as { data?: ContractPleito[] })?.data) || [];
   const pleitos = allPleitos.filter(
-    (p) => (p as ContractPleito & { reportsBilling?: string }).reportsBilling?.trim() !== PLEITO_HISTORY_MARKER
+    (p) => {
+      const marker = ((p as ContractPleito & { reportsBilling?: string }).reportsBilling || '').trim();
+      return marker !== PLEITO_HISTORY_MARKER && !marker.startsWith(PLEITO_HISTORY_MARKER);
+    }
   );
 
   const rows = useMemo(

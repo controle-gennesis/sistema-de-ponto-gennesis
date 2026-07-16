@@ -84,35 +84,61 @@ export function getOsEtiquetaAbertura(
   return isOsConcluida(p, billings) ? 'Concluída' : 'Aberta';
 }
 
-export type OsStatus = 'Aberta' | 'Pleiteado parcial' | 'Pleiteado' | 'Concluída';
+export type OsStatusPleito = 'Pendente' | 'Pleiteado parcial' | 'Pleiteado 100%';
+export type OsStatusFaturamento = 'Pendente' | 'Faturado parcial' | 'Faturado 100%';
 
+/** @deprecated use OsStatusPleito */
+export type OsStatus = OsStatusPleito;
+
+/** Status do pleito (independente do faturamento). */
 export function getOsStatus(
   p: Pick<PleitoOsExportRow, 'divSe' | 'budget'>,
-  billings: BillingForOsCheck[],
+  _billings: BillingForOsCheck[],
   allPleitos: PleitoForOsPleiteadoSum[]
-): OsStatus {
-  if (isOsConcluida(p, billings)) return 'Concluída';
-
+): OsStatusPleito {
   const pleiteado = sumOsPleiteadoTotal(allPleitos, p.divSe);
-  if (pleiteado <= 0.01) return 'Aberta';
+  if (pleiteado <= 0.01) return 'Pendente';
 
   const pctPleiteado = getOsPleiteadoPct(p, allPleitos);
-  if (pctPleiteado !== null && pctPleiteado >= 99.99) return 'Pleiteado';
+  if (pctPleiteado !== null && pctPleiteado >= 99.99) return 'Pleiteado 100%';
 
   return 'Pleiteado parcial';
 }
 
-export function osStatusBadgeClass(status: OsStatus): string {
-  if (status === 'Concluída') {
-    return 'bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-100';
+/** Status de faturamento da OS (independente do pleito). */
+export function getOsStatusFaturamento(
+  p: Pick<PleitoOsExportRow, 'divSe' | 'budget'>,
+  billings: BillingForOsCheck[]
+): OsStatusFaturamento {
+  const orcamento = parseBudgetToNumberSafe(p.budget);
+  const acumulado = getOsFaturamentoAcumulado(p, billings);
+  if (acumulado <= 0.01) return 'Pendente';
+  if (orcamento > 0 && acumulado >= orcamento - 0.01) return 'Faturado 100%';
+  return 'Faturado parcial';
+}
+
+export function osStatusBadgeClass(status: string): string {
+  const GREEN = 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300';
+  const BLUE = 'bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-300';
+  const YELLOW = 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300';
+
+  // Completos → verde
+  if (
+    status === 'Pleiteado 100%' ||
+    status === 'Faturado 100%' ||
+    status === 'Pleiteado' ||
+    status === 'Faturado' ||
+    status === 'Concluído' ||
+    status === 'Concluída'
+  ) {
+    return GREEN;
   }
-  if (status === 'Pleiteado') {
-    return 'bg-violet-100 text-violet-800 dark:bg-violet-900/30 dark:text-violet-300';
+  // Parciais → azul
+  if (status === 'Pleiteado parcial' || status === 'Faturado parcial') {
+    return BLUE;
   }
-  if (status === 'Pleiteado parcial') {
-    return 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300';
-  }
-  return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300';
+  // Pendente → amarelo
+  return YELLOW;
 }
 
 export function getOsStatusFaturamentoPct(
@@ -163,6 +189,15 @@ export function getOsRestantePleitear(
   return Math.max(0, orcamento - sumOsPleiteadoTotal(allPleitos, p.divSe));
 }
 
+/** OS com orçamento totalmente pleiteado — não há mais nada a pleitear. */
+export function isOsPleiteada100(
+  p: Pick<PleitoOsExportRow, 'divSe' | 'budget'>,
+  allPleitos: PleitoForOsPleiteadoSum[]
+): boolean {
+  const restante = getOsRestantePleitear(p, allPleitos);
+  return restante != null && restante <= 0.01;
+}
+
 export function getOsRestanteFaturar(
   p: Pick<PleitoOsExportRow, 'divSe' | 'budget'>,
   billings: BillingForOsCheck[]
@@ -176,15 +211,15 @@ export function getPleitoOsSituacao(
   p: PleitoOsExportRow,
   billings: BillingForOsCheck[] = []
 ): string {
-  if (isOsConcluida(p, billings)) return 'Faturado';
+  void billings;
   const marker = (p.reportsBilling || '').trim();
-  if (marker === PLEITO_HISTORY_MARKER_GERADO_100) return 'Gerado 100%';
   const orc = parseBudgetToNumberSafe(p.budget);
   const br = p.billingRequest != null ? Number(p.billingRequest) : 0;
-  if (orc > 0 && br >= orc - 0.01) return 'Gerado 100%';
-  if (marker === PLEITO_HISTORY_MARKER) return 'Pleito gerado';
-  if (br > 0) return 'Pleiteado parcial';
-  return 'Ativa';
+  if (marker === PLEITO_HISTORY_MARKER_GERADO_100 || (orc > 0 && br >= orc - 0.01)) {
+    return 'Pleiteado 100%';
+  }
+  if (marker === PLEITO_HISTORY_MARKER || br > 0) return 'Pleiteado parcial';
+  return 'Pendente';
 }
 
 function formatDate(dateStr: string | null | undefined) {

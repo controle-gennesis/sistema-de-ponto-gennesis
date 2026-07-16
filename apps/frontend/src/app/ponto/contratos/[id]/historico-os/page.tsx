@@ -15,13 +15,14 @@ import {
   exportHistoricoOsPdf,
   exportPleitosOsToXlsx,
   computeHistoricoOsTotals,
-  getOsEtiquetaAbertura,
   getOsFaturamentoAcumulado,
+  getOsStatus,
+  getOsStatusFaturamento,
   getOsStatusFaturamentoPct,
   getPleitoCreationMonth,
   getPleitoCreationYear,
   getPleitoOrcamentoValor,
-  getPleitoOsSituacao,
+  osStatusBadgeClass,
   type BillingForOsCheck,
   type PleitoOsExportRow,
 } from '@/lib/pleitoOsExport';
@@ -67,28 +68,6 @@ function formatCurrency(value: number) {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(value);
-}
-
-function situacaoBadgeClass(situacao: string): string {
-  if (situacao === 'Concluída') {
-    return 'bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-100';
-  }
-  if (situacao === 'Aberta') {
-    return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300';
-  }
-  if (situacao === 'Faturado') {
-    return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300';
-  }
-  if (situacao === 'Gerado 100%') {
-    return 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300';
-  }
-  if (situacao === 'Pleiteado parcial') {
-    return 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300';
-  }
-  if (situacao === 'Pleito gerado') {
-    return 'bg-violet-100 text-violet-800 dark:bg-violet-900/30 dark:text-violet-300';
-  }
-  return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300';
 }
 
 function toggleInSet<T>(set: Set<T>, value: T, checked: boolean): Set<T> {
@@ -311,9 +290,9 @@ export default function HistoricoOsPage() {
       if (!q) return true;
       const os = formatOsSePastaOrDash(p.divSe, p.folderNumber).toLowerCase();
       const desc = (p.serviceDescription || '').toLowerCase();
-      const etiqueta = getOsEtiquetaAbertura(p, billingsForOs).toLowerCase();
-      const situacao = getPleitoOsSituacao(p, billingsForOs).toLowerCase();
-      return os.includes(q) || desc.includes(q) || etiqueta.includes(q) || situacao.includes(q);
+      const status = getOsStatus(p, billingsForOs, allOs).toLowerCase();
+      const statusFat = getOsStatusFaturamento(p, billingsForOs).toLowerCase();
+      return os.includes(q) || desc.includes(q) || status.includes(q) || statusFat.includes(q);
     });
   }, [allOs, selectedYears, selectedMonths, selectedOsIds, search, billingsForOs]);
 
@@ -497,12 +476,6 @@ export default function HistoricoOsPage() {
               <table className="w-full min-w-[1200px] text-sm">
                 <thead className="bg-gray-100 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
                   <tr>
-                    <th className="px-3 py-2 text-left font-medium text-gray-700 dark:text-gray-300 whitespace-nowrap">
-                      Etiqueta
-                    </th>
-                    <th className="px-3 py-2 text-left font-medium text-gray-700 dark:text-gray-300 whitespace-nowrap">
-                      Situação pleito
-                    </th>
                     <th className="px-3 py-2 text-left font-medium text-gray-700 dark:text-gray-300 whitespace-nowrap min-w-[10rem]">
                       OS / SE
                     </th>
@@ -535,12 +508,18 @@ export default function HistoricoOsPage() {
                     <th className="px-3 py-2 text-left font-medium text-gray-700 dark:text-gray-300 whitespace-nowrap">
                       Preenchimento
                     </th>
+                    <th className="px-3 py-2 text-center font-medium text-gray-700 dark:text-gray-300 whitespace-nowrap">
+                      Status Pleito
+                    </th>
+                    <th className="px-3 py-2 text-center font-medium text-gray-700 dark:text-gray-300 whitespace-nowrap">
+                      Status Faturamento
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
                   {filteredOs.map((p) => {
-                    const etiqueta = getOsEtiquetaAbertura(p, billingsForOs);
-                    const situacaoPleito = getPleitoOsSituacao(p, billingsForOs);
+                    const osStatus = getOsStatus(p, billingsForOs, allOs);
+                    const osStatusFat = getOsStatusFaturamento(p, billingsForOs);
                     const mesAno =
                       p.creationMonth && p.creationYear
                         ? `${String(p.creationMonth).padStart(2, '0')}/${p.creationYear}`
@@ -552,20 +531,6 @@ export default function HistoricoOsPage() {
 
                     return (
                       <tr key={p.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/40">
-                        <td className="px-3 py-2 whitespace-nowrap">
-                          <span
-                            className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${situacaoBadgeClass(etiqueta)}`}
-                          >
-                            {etiqueta}
-                          </span>
-                        </td>
-                        <td className="px-3 py-2 whitespace-nowrap">
-                          <span
-                            className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${situacaoBadgeClass(situacaoPleito)}`}
-                          >
-                            {situacaoPleito}
-                          </span>
-                        </td>
                         <td className="px-3 py-2 text-gray-900 dark:text-gray-100 font-medium whitespace-nowrap min-w-[10rem]">
                           {formatOsSePastaOrDash(p.divSe, p.folderNumber)}
                         </td>
@@ -612,6 +577,20 @@ export default function HistoricoOsPage() {
                         </td>
                         <td className="px-3 py-2 text-gray-500 dark:text-gray-400 whitespace-nowrap">
                           {formatDateTimeBr(p.createdAt)}
+                        </td>
+                        <td className="px-3 py-2 text-center whitespace-nowrap">
+                          <span
+                            className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${osStatusBadgeClass(osStatus)}`}
+                          >
+                            {osStatus}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 text-center whitespace-nowrap">
+                          <span
+                            className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${osStatusBadgeClass(osStatusFat)}`}
+                          >
+                            {osStatusFat}
+                          </span>
                         </td>
                       </tr>
                     );

@@ -51,7 +51,8 @@ const EXECUCAO_ACTIVE = new Set(['EXECUÇÃO', 'PD. EXECUÇÃO', 'PENDÊNCIA', '
 
 /** Cópia de histórico ao gerar pleito — mesma regra da tela do contrato. */
 export function isPleitoHistoricoRow(p: OsPleitoListItem): boolean {
-  return (p.reportsBilling || '').trim() === PLEITO_HISTORY_MARKER;
+  const marker = (p.reportsBilling || '').trim();
+  return marker === PLEITO_HISTORY_MARKER || marker.startsWith(PLEITO_HISTORY_MARKER);
 }
 
 /**

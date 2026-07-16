@@ -19,6 +19,16 @@ import {
 
 /** Cópia criada em "Gerar pleito"; distinta da linha principal da OS no contrato. */
 const PLEITO_HISTORICO_MARKER = '__PLEITO_HISTORICO__';
+const PLEITO_HISTORICO_MARKER_GERADO_100 = '__PLEITO_HISTORICO__GERADO_100__';
+
+function isPleitoHistoricoGerado(reportsBilling: string | null | undefined): boolean {
+  const marker = (reportsBilling || '').trim();
+  return (
+    marker === PLEITO_HISTORICO_MARKER ||
+    marker === PLEITO_HISTORICO_MARKER_GERADO_100 ||
+    marker.startsWith(PLEITO_HISTORICO_MARKER)
+  );
+}
 
 function toDec(v: unknown): number | null {
   if (v === null || v === undefined || v === '') return null;
@@ -432,18 +442,42 @@ export class PleitoController {
       const existing = await prisma.pleito.findUnique({ where: { id } });
       if (!existing) throw createError('Registro não encontrado', 404);
 
-      const isHistoricoGerado =
-        (existing.reportsBilling || '').trim() === PLEITO_HISTORICO_MARKER;
+      const isHistoricoGerado = isPleitoHistoricoGerado(existing.reportsBilling);
 
-      if (!excluirOrdemServico && !isHistoricoGerado) {
-        throw createError(
-          'Este registro é a ordem de serviço. Aqui só é possível excluir registros de pleito gerado (histórico). Para remover a OS, use a tela do contrato.',
-          400
-        );
+      const deleteLinkedBillings = async () => {
+        await prisma.contractBilling.deleteMany({ where: { pleitoId: id } });
+      };
+
+      if (excluirOrdemServico || isHistoricoGerado) {
+        await deleteLinkedBillings();
+        await prisma.pleito.delete({ where: { id } });
+        return res.json({ success: true, message: 'Excluído com sucesso' });
       }
 
-      await prisma.pleito.delete({ where: { id } });
-      res.json({ success: true, message: 'Excluído com sucesso' });
+      // OS principal com valor pleiteado acumulado: zera o pleito sem apagar a OS.
+      const billingRequest =
+        existing.billingRequest != null ? Number(existing.billingRequest) : 0;
+      if (billingRequest > 0) {
+        await deleteLinkedBillings();
+        const row = await prisma.pleito.update({
+          where: { id },
+          data: {
+            billingRequest: null,
+            billingStatus: null,
+            accumulatedBilled: null,
+          },
+        });
+        return res.json({
+          success: true,
+          data: serializePleito(row),
+          message: 'Pleito removido da ordem de serviço',
+        });
+      }
+
+      throw createError(
+        'Este registro é a ordem de serviço. Aqui só é possível excluir registros de pleito gerado (histórico). Para remover a OS, use a tela do contrato.',
+        400
+      );
     } catch (error) {
       next(error);
     }

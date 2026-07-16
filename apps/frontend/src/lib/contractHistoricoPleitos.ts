@@ -3,9 +3,12 @@ import { formatOsSePasta } from '@/lib/formatOsSePasta';
 
 export const PLEITO_HISTORY_MARKER = '__PLEITO_HISTORICO__';
 export const PLEITO_HISTORY_MARKER_GERADO_100 = '__PLEITO_HISTORICO__GERADO_100__';
-export const HISTORICO_ETIQUETA_GERADO_100 = 'Gerado 100%';
-export const HISTORICO_ETIQUETA_FATURADO_100 = 'Faturado';
+/** Antes: «Gerado 100%». Agora: pleito cobrindo 100% do orçamento (uso em OS / andamento). */
+export const HISTORICO_ETIQUETA_GERADO_100 = 'Pleiteado 100%';
+export const HISTORICO_ETIQUETA_PLEITEADO_PARCIAL = 'Pleiteado parcial';
+export const HISTORICO_ETIQUETA_FATURADO_100 = 'Faturado 100%';
 export const HISTORICO_ETIQUETA_FATURADO_PARCIAL = 'Faturado parcial';
+export const HISTORICO_ETIQUETA_PENDENTE = 'Pendente';
 
 export interface ContractPleitoHistorico {
   id: string;
@@ -61,7 +64,7 @@ export const HIST_MONTH_FILTER_OPTIONS = labeledToSelectOptions(
 
 export const HIST_ETIQUETA_FILTER_OPTIONS = labeledToSelectOptions([
   { value: 'all', label: 'Todas' },
-  { value: 'gerado-100', label: HISTORICO_ETIQUETA_GERADO_100 },
+  { value: 'pendente', label: HISTORICO_ETIQUETA_PENDENTE },
   { value: 'faturado-parcial', label: HISTORICO_ETIQUETA_FATURADO_PARCIAL },
   { value: 'faturado-100', label: HISTORICO_ETIQUETA_FATURADO_100 },
 ]);
@@ -108,7 +111,8 @@ export function getDateMonth(dateStr: string | null | undefined): number | null 
 }
 
 export function isPleitoHistorico(p: ContractPleitoHistorico): boolean {
-  return (p.reportsBilling || '').trim() === PLEITO_HISTORY_MARKER;
+  const marker = (p.reportsBilling || '').trim();
+  return marker === PLEITO_HISTORY_MARKER || marker.startsWith(PLEITO_HISTORY_MARKER);
 }
 
 export function isGeneratedPleito(p: ContractPleitoHistorico): boolean {
@@ -213,25 +217,37 @@ export function parseHistoricoCurrencyInput(value: string): number {
   return Number.isFinite(num) ? num : 0;
 }
 
+/** Status de faturamento do pleito na lista de histórico. */
 export function getHistoricoEtiqueta(
   p: ContractPleitoHistorico,
   billings: ContractBillingHistorico[]
-): string | null {
+): string {
   if (isPleitoFullyBilled(p, billings)) return HISTORICO_ETIQUETA_FATURADO_100;
   if (getPleitoBilledAmount(p, billings) > 0.01) return HISTORICO_ETIQUETA_FATURADO_PARCIAL;
-  if (isPleitoGerado100(p)) return HISTORICO_ETIQUETA_GERADO_100;
-  return null;
+  return HISTORICO_ETIQUETA_PENDENTE;
 }
 
 export function historicoEtiquetaBadgeClass(etiqueta: string): string {
-  if (etiqueta === HISTORICO_ETIQUETA_FATURADO_100) {
-    return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300';
+  const GREEN = 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300';
+  const BLUE = 'bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-300';
+  const YELLOW = 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300';
+
+  // Concluídos (faturado 100% / pleiteado 100%) → verde
+  if (
+    etiqueta === HISTORICO_ETIQUETA_FATURADO_100 ||
+    etiqueta === HISTORICO_ETIQUETA_GERADO_100 ||
+    etiqueta === 'Faturado' ||
+    etiqueta === 'Pleiteado'
+  ) {
+    return GREEN;
   }
-  if (etiqueta === HISTORICO_ETIQUETA_FATURADO_PARCIAL) {
-    return 'bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-300';
+  // Parciais → azul
+  if (etiqueta === HISTORICO_ETIQUETA_FATURADO_PARCIAL || etiqueta === HISTORICO_ETIQUETA_PLEITEADO_PARCIAL) {
+    return BLUE;
   }
-  if (etiqueta === HISTORICO_ETIQUETA_GERADO_100) {
-    return 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300';
+  // Pendente → amarelo
+  if (etiqueta === HISTORICO_ETIQUETA_PENDENTE) {
+    return YELLOW;
   }
   return 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200';
 }

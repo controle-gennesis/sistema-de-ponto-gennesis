@@ -456,9 +456,10 @@ export class ContractController {
             0
           ) ?? 0;
         const pleitosAll =
-          c.pleitos?.filter(
-            (p) => (p.reportsBilling || '').trim() !== PLEITO_HISTORICO_MARKER
-          ) ?? [];
+          c.pleitos?.filter((p) => {
+            const marker = (p.reportsBilling || '').trim();
+            return !marker.startsWith(PLEITO_HISTORICO_MARKER);
+          }) ?? [];
         const pleitosNoAno = yearValid
           ? pleitosAll.filter((p) => p.creationYear === yearParam)
           : pleitosAll;

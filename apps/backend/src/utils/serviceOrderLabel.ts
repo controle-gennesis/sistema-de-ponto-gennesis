@@ -23,7 +23,7 @@ export function pickPleitoLabelSource(
   const main = pleitos.find(
     (p) =>
       (p.divSe || '').trim() &&
-      (p.reportsBilling || '') !== PLEITO_HISTORICO_MARKER
+      !(p.reportsBilling || '').trim().startsWith(PLEITO_HISTORICO_MARKER)
   );
   if (main) return main;
   const any = pleitos.find((p) => (p.divSe || '').trim());
