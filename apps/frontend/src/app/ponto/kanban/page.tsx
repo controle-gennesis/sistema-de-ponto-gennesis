@@ -12,6 +12,7 @@ import { KanbanCreateBoardModal } from '@/components/kanban/KanbanCreateBoardMod
 import { KanbanBoardShareModal } from '@/components/kanban/KanbanBoardShareModal';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
+import { Checkbox } from '@/components/ui/Checkbox';
 import { MultiSelectSearchDropdown } from '@/components/ui/MultiSelectSearchDropdown';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import {
@@ -54,6 +55,8 @@ import {
   fetchKanbanCard,
   isOptimisticKanbanCardId,
   kanbanCardQueryKey,
+  exportKanbanBoardTrello,
+  importKanbanBoardTrello,
 } from '@/lib/kanban';
 import {
   resolveKanbanDefaultBoard,
@@ -105,6 +108,8 @@ import {
   Star,
   Minimize2,
   Maximize2,
+  Download,
+  Upload,
 } from 'lucide-react';
 import { usePermissions } from '@/hooks/usePermissions';
 import { clsx } from 'clsx';
@@ -914,8 +919,9 @@ function KanbanColumnComponent({
   onToggleCollapse,
 }: KanbanColumnProps) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [menuStyle, setMenuStyle] = useState<React.CSSProperties>({});
   const [visibleCount, setVisibleCount] = useState(KANBAN_COLUMN_VISIBLE_BATCH);
-  const menuRef = useRef<HTMLDivElement>(null);
+  const menuBtnRef = useRef<HTMLButtonElement>(null);
   const isTarget = dragState.overColumnId === column.id;
   const overIndex = isTarget ? dragState.overIndex : null;
   const cardDnDDisabled = readOnly || isColumnDragActive;
@@ -928,12 +934,38 @@ function KanbanColumnComponent({
   }, [column.id]);
 
   useEffect(() => {
+    if (!menuOpen) return;
     function handleClick(e: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+      const target = e.target as Node;
+      if (menuBtnRef.current?.contains(target)) return;
+      if (target instanceof Element && target.closest('[data-kanban-column-menu]')) return;
+      setMenuOpen(false);
     }
+    function handleReposition() {
+      const rect = menuBtnRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const menuWidth = 176;
+      const menuHeight = 148;
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const openUp = spaceBelow < menuHeight + 8 && rect.top > menuHeight + 8;
+      setMenuStyle({
+        position: 'fixed',
+        left: Math.max(8, Math.min(rect.right - menuWidth, window.innerWidth - menuWidth - 8)),
+        top: openUp ? rect.top - menuHeight - 4 : rect.bottom + 4,
+        width: menuWidth,
+        zIndex: 9999,
+      });
+    }
+    handleReposition();
     document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
-  }, []);
+    window.addEventListener('resize', handleReposition);
+    window.addEventListener('scroll', handleReposition, true);
+    return () => {
+      document.removeEventListener('mousedown', handleClick);
+      window.removeEventListener('resize', handleReposition);
+      window.removeEventListener('scroll', handleReposition, true);
+    };
+  }, [menuOpen]);
 
   if (collapsed) {
     const isCollapsedDropTarget =
@@ -1078,36 +1110,87 @@ function KanbanColumnComponent({
             </button>
           ) : null}
           {!readOnly && (
-          <div className="relative" ref={menuRef}>
+          <div className="relative">
             <button
-              onClick={() => setMenuOpen((v) => !v)}
+              ref={menuBtnRef}
+              type="button"
+              aria-label="Menu da coluna"
+              aria-expanded={menuOpen}
+              aria-haspopup="menu"
+              onClick={() => {
+                if (menuOpen) {
+                  setMenuOpen(false);
+                  return;
+                }
+                const rect = menuBtnRef.current?.getBoundingClientRect();
+                if (!rect) return;
+                const menuWidth = 176;
+                const menuHeight = 148;
+                const spaceBelow = window.innerHeight - rect.bottom;
+                const openUp = spaceBelow < menuHeight + 8 && rect.top > menuHeight + 8;
+                setMenuStyle({
+                  position: 'fixed',
+                  left: Math.max(
+                    8,
+                    Math.min(rect.right - menuWidth, window.innerWidth - menuWidth - 8),
+                  ),
+                  top: openUp ? rect.top - menuHeight - 4 : rect.bottom + 4,
+                  width: menuWidth,
+                  zIndex: 9999,
+                });
+                setMenuOpen(true);
+              }}
               className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-white/80 dark:hover:bg-gray-700 transition-colors"
             >
               <MoreHorizontal className="w-[18px] h-[18px]" />
             </button>
-            {menuOpen && (
-              <div className="absolute right-0 top-9 z-50 w-44 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg py-1">
-                <button
-                  onClick={() => { setMenuOpen(false); onAddCard(column.id, 'top'); }}
-                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+            {menuOpen &&
+              typeof document !== 'undefined' &&
+              createPortal(
+                <div
+                  data-kanban-column-menu
+                  role="menu"
+                  style={menuStyle}
+                  className="overflow-hidden rounded-xl border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-800"
+                  onMouseDown={(e) => e.stopPropagation()}
                 >
-                  <Plus className="w-4 h-4" /> Adicionar card
-                </button>
-                <button
-                  onClick={() => { setMenuOpen(false); onEditColumn(column); }}
-                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
-                >
-                  <Edit3 className="w-4 h-4" /> Editar coluna
-                </button>
-                <hr className="my-1 border-gray-200 dark:border-gray-700" />
-                <button
-                  onClick={() => { setMenuOpen(false); onDeleteColumn(column.id); }}
-                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20"
-                >
-                  <Trash2 className="w-4 h-4" /> Excluir coluna
-                </button>
-              </div>
-            )}
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onAddCard(column.id, 'top');
+                    }}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700"
+                  >
+                    <Plus className="h-4 w-4" /> Adicionar card
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onEditColumn(column);
+                    }}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700"
+                  >
+                    <Edit3 className="h-4 w-4" /> Editar coluna
+                  </button>
+                  <hr className="my-1 border-gray-200 dark:border-gray-700" />
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onDeleteColumn(column.id);
+                    }}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20"
+                  >
+                    <Trash2 className="h-4 w-4" /> Excluir coluna
+                  </button>
+                </div>,
+                document.body,
+              )}
           </div>
           )}
         </div>
@@ -1807,7 +1890,10 @@ function KanbanPage() {
   /** Chave estável do quadro — evita buscar pelo setor do usuário antes do redirect. */
   const boardScopeKey =
     departmentKeyParam ?? defaultDepartmentKey ?? quickDefaultBoardKey ?? null;
-  const kanbanBoardQueryKey = ['kanban-board', boardScopeKey] as const;
+  const boardsListReady = boardsList !== undefined && !loadingBoardsList;
+  /** Sem chave explícita, ainda busca o quadro do setor (`/kanban/board` cria se preciso). */
+  const canLoadBoard = !!meUser && (!!boardScopeKey || boardsListReady);
+  const kanbanBoardQueryKey = ['kanban-board', boardScopeKey ?? 'own'] as const;
 
   const setAsDefaultBoard = useCallback(
     (departmentKey: string) => {
@@ -1880,10 +1966,10 @@ function KanbanPage() {
     queryKey: kanbanBoardQueryKey,
     queryFn: async () => {
       const data = await fetchKanbanBoard(boardScopeKey || undefined);
-      if (boardScopeKey) writeKanbanBoardCache(boardScopeKey, data);
+      if (data.departmentKey) writeKanbanBoardCache(data.departmentKey, data);
       return data;
     },
-    enabled: !!meUser && !!boardScopeKey,
+    enabled: canLoadBoard,
     staleTime: 3 * 60 * 1000,
     gcTime: 10 * 60 * 1000,
     placeholderData: (previousData, previousQuery) => {
@@ -1898,6 +1984,24 @@ function KanbanPage() {
       return boardScopeKey ? readKanbanBoardCache(boardScopeKey) : undefined;
     },
   });
+
+  useEffect(() => {
+    if (!board?.departmentKey || departmentKeyParam || legacyListParam) return;
+    router.replace(
+      `/ponto/kanban?departmentKey=${encodeURIComponent(board.departmentKey)}`,
+    );
+    if (boardsListReady && (boardsList?.length ?? 0) === 0) {
+      void queryClient.invalidateQueries({ queryKey: ['kanban-boards'] });
+    }
+  }, [
+    board?.departmentKey,
+    departmentKeyParam,
+    legacyListParam,
+    boardsListReady,
+    boardsList?.length,
+    queryClient,
+    router,
+  ]);
 
   const boardReadOnly = board?.canWrite === false;
 
@@ -2013,6 +2117,94 @@ function KanbanPage() {
   >(null);
   const [colModal, setColModal] = useState<{ mode: 'create' | 'edit'; column?: KanbanColumn } | null>(null);
   const [labelSettingsOpen, setLabelSettingsOpen] = useState(false);
+  const [exportingBoard, setExportingBoard] = useState(false);
+  const [importModalOpen, setImportModalOpen] = useState(false);
+  const [importFileName, setImportFileName] = useState('');
+  const [importPayload, setImportPayload] = useState<unknown>(null);
+  const [importReplace, setImportReplace] = useState(true);
+  const [importingBoard, setImportingBoard] = useState(false);
+  const importFileRef = useRef<HTMLInputElement>(null);
+
+  const handleExportTrello = async () => {
+    if (!boardScopeKey && !board) {
+      toast.error('Aguarde o quadro carregar para exportar');
+      return;
+    }
+    setExportingBoard(true);
+    try {
+      const { filename, payload } = await exportKanbanBoardTrello(
+        boardScopeKey || board?.departmentKey || undefined,
+      );
+      const blob = new Blob([JSON.stringify(payload, null, 2)], {
+        type: 'application/json;charset=utf-8',
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success('Quadro exportado (JSON compatível com Trello)');
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Erro ao exportar quadro');
+    } finally {
+      setExportingBoard(false);
+    }
+  };
+
+  const handleImportFileChosen = async (file: File | null) => {
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      if (!parsed || !Array.isArray(parsed.lists) || !Array.isArray(parsed.cards)) {
+        toast.error('Arquivo inválido: precisa ser export Trello/Gennesis (lists + cards)');
+        setImportPayload(null);
+        setImportFileName('');
+        return;
+      }
+      setImportPayload(parsed);
+      setImportFileName(file.name);
+      toast.success('Arquivo carregado — confira e confirme a importação');
+    } catch {
+      toast.error('Não foi possível ler o JSON');
+      setImportPayload(null);
+      setImportFileName('');
+    }
+  };
+
+  const handleConfirmImport = async () => {
+    if (!importPayload) {
+      toast.error('Selecione um arquivo JSON');
+      return;
+    }
+    if (importReplace) {
+      const ok = window.confirm(
+        'Isso vai APAGAR todas as colunas e cards deste quadro e substituir pelo arquivo. Continuar?',
+      );
+      if (!ok) return;
+    }
+    setImportingBoard(true);
+    try {
+      const result = await importKanbanBoardTrello({
+        board: importPayload,
+        departmentKey: boardScopeKey || board?.departmentKey || undefined,
+        replace: importReplace,
+      });
+      toast.success(
+        `Importado: ${result.columnsCreated} coluna(s), ${result.cardsCreated} card(s)`,
+      );
+      setImportModalOpen(false);
+      setImportPayload(null);
+      setImportFileName('');
+      await queryClient.invalidateQueries({ queryKey: ['kanban-board'] });
+      await queryClient.invalidateQueries({ queryKey: ['kanban-boards'] });
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Erro ao importar');
+    } finally {
+      setImportingBoard(false);
+    }
+  };
   const [savingLabelPresets, setSavingLabelPresets] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<{ type: 'card'; cardId: string; columnId: string } | { type: 'column'; columnId: string } | null>(null);
   const [cardColumnAction, setCardColumnAction] = useState<
@@ -2749,8 +2941,33 @@ function KanbanPage() {
                   <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
                 )}
               </button>
+              <button
+                type="button"
+                onClick={() => void handleExportTrello()}
+                disabled={exportingBoard || showBoardSkeleton || !board}
+                className="flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-semibold text-gray-800 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
+                title="Exportar JSON compatível com Trello"
+              >
+                <Download className="h-4 w-4 shrink-0" />
+                <span>{exportingBoard ? 'Exportando...' : 'Exportar'}</span>
+              </button>
               {!boardReadOnly && (
                 <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setImportModalOpen(true);
+                      setImportPayload(null);
+                      setImportFileName('');
+                      setImportReplace(true);
+                    }}
+                    disabled={showBoardSkeleton || !board}
+                    className="flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-semibold text-gray-800 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
+                    title="Importar JSON do Trello ou export Gennesis"
+                  >
+                    <Upload className="h-4 w-4 shrink-0" />
+                    <span>Importar</span>
+                  </button>
                   <button
                     type="button"
                     onClick={() => setLabelSettingsOpen(true)}
@@ -2957,6 +3174,73 @@ function KanbanPage() {
           </div>
         </div>
       </Modal>
+
+      {importModalOpen && (
+        <Modal
+          isOpen
+          onClose={() => {
+            if (importingBoard) return;
+            setImportModalOpen(false);
+          }}
+          size="md"
+          title="Importar"
+          closeOnOverlayClick={!importingBoard}
+        >
+          <div className="space-y-4">
+            <p className="text-center text-sm text-gray-600 dark:text-gray-400">
+              Use um JSON exportado do Trello ou pelo botão Exportar deste Tasks. O arquivo é
+              portátil entre sistemas que aceitam esse formato.
+            </p>
+            <input
+              ref={importFileRef}
+              type="file"
+              accept="application/json,.json"
+              className="hidden"
+              onChange={(e) => {
+                void handleImportFileChosen(e.target.files?.[0] || null);
+                e.target.value = '';
+              }}
+            />
+            <div className="flex justify-center">
+              <button
+                type="button"
+                onClick={() => importFileRef.current?.click()}
+                disabled={importingBoard}
+                className="flex w-full max-w-sm flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-gray-300 px-6 py-8 text-center text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800"
+              >
+                <Upload className="h-5 w-5 shrink-0" />
+                <span className="break-all px-1">
+                  {importFileName || 'Selecionar arquivo .json'}
+                </span>
+              </button>
+            </div>
+            <Checkbox
+              checked={importReplace}
+              onChange={setImportReplace}
+              disabled={importingBoard}
+              label="Substituir o quadro atual (apaga colunas e cards existentes antes de importar)"
+              className="items-start !space-x-3"
+            />
+            <div className="flex justify-end gap-2 pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setImportModalOpen(false)}
+                disabled={importingBoard}
+              >
+                Cancelar
+              </Button>
+              <Button
+                type="button"
+                onClick={() => void handleConfirmImport()}
+                disabled={importingBoard || !importPayload}
+              >
+                {importingBoard ? 'Importando...' : 'Importar'}
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
 
       {labelSettingsOpen && board && (
         <Modal
