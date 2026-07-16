@@ -16,6 +16,7 @@ import {
   MapPin,
   Maximize2,
   Minimize2,
+  Info,
   Save,
   Search,
   Trash2,
@@ -1225,26 +1226,17 @@ export default function LicitacoesPage() {
     <ProtectedRoute route="/ponto/licitacoes">
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
         <div className="flex flex-col gap-5">
-          <header className="flex flex-col gap-4 border-b border-gray-200 pb-4 dark:border-gray-800 lg:flex-row lg:items-start lg:justify-between">
-            <div>
-              <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-gray-100">
-                Licitações
-              </h1>
-              <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
-                Processos, checklist de análise manual e licitações por região.
-              </p>
-            </div>
-            <div className="flex flex-col gap-1.5 sm:items-end">
-              <div className="flex flex-wrap items-center gap-2 sm:justify-end">
-                <a
-                  href={DRIVE_CATS_URL}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-800 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
-                >
-                  <ExternalLink className="h-4 w-4 shrink-0" aria-hidden />
-                  Abrir drive das CATs
-                </a>
+          <header className="flex flex-col gap-4 border-b border-gray-200 pb-4 dark:border-gray-800">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-gray-100">
+                  Licitações
+                </h1>
+                <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
+                  Processos, checklist de análise manual e licitações por região.
+                </p>
+              </div>
+              <div className="flex flex-col gap-1.5 sm:items-end">
                 <a
                   href={NOTEBOOK_LM_URL}
                   target="_blank"
@@ -1254,14 +1246,40 @@ export default function LicitacoesPage() {
                   <ExternalLink className="h-4 w-4 shrink-0" aria-hidden />
                   Abrir Notebook LM
                 </a>
+                <p className="max-w-sm text-xs leading-relaxed text-gray-600 dark:text-gray-400 sm:text-right">
+                  Acesse com o e-mail{' '}
+                  <span className="font-mono font-medium text-gray-800 dark:text-gray-200">
+                    {NOTEBOOK_LM_LOGIN_EMAIL}
+                  </span>
+                  .
+                </p>
               </div>
-              <p className="max-w-sm text-xs leading-relaxed text-gray-600 dark:text-gray-400 sm:text-right">
-                Acesse com o e-mail{' '}
-                <span className="font-mono font-medium text-gray-800 dark:text-gray-200">
-                  {NOTEBOOK_LM_LOGIN_EMAIL}
-                </span>
-                .
-              </p>
+            </div>
+
+            <div
+              role="note"
+              className="flex flex-col gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-800/60 dark:bg-amber-950/30 sm:flex-row sm:items-center sm:justify-between"
+            >
+              <div className="flex min-w-0 gap-2.5">
+                <Info
+                  className="mt-0.5 h-4 w-4 shrink-0 text-amber-700 dark:text-amber-300"
+                  aria-hidden
+                />
+                <p className="text-sm leading-relaxed text-amber-950 dark:text-amber-100">
+                  A consulta de habilitação técnica é baseada no banco de dados das CAT&apos;s. Caso
+                  sua busca não retorne o resultado desejado, complemente sua pesquisa nos PDFs
+                  disponíveis no drive do setor de contratos.
+                </p>
+              </div>
+              <a
+                href={DRIVE_CATS_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg border border-amber-300 bg-white px-4 text-sm font-semibold text-amber-950 transition-colors hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-950/50 dark:text-amber-50 dark:hover:bg-amber-950/80"
+              >
+                <ExternalLink className="h-4 w-4 shrink-0" aria-hidden />
+                Abrir drive das CATs
+              </a>
             </div>
           </header>
 

@@ -236,6 +236,7 @@ export function splitHabilitacaoServicos(text: string): string[] {
   const trimmed = text.trim();
   if (!trimmed) return [];
 
+  // Blocos separados por linha em branco (serviço com várias linhas internas).
   const byBlankLine = trimmed
     .split(/\n\s*\n+/)
     .map((block) => block.trim())
@@ -244,6 +245,7 @@ export function splitHabilitacaoServicos(text: string): string[] {
     return byBlankLine;
   }
 
+  // Cada quebra de linha = um serviço diferente (mesmo com nomes curtos).
   const lines = trimmed
     .split(/\n/)
     .map((line) => line.trim())
@@ -251,9 +253,8 @@ export function splitHabilitacaoServicos(text: string): string[] {
     .map((line) => line.replace(/^(\d+[\).\-:…]|[-•*])\s+/, '').trim())
     .filter(Boolean);
 
-  const substantialLines = lines.filter((line) => line.length >= 24);
-  if (substantialLines.length > 1) {
-    return substantialLines;
+  if (lines.length > 1) {
+    return lines;
   }
 
   return [trimmed];

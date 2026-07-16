@@ -202,7 +202,7 @@ export async function exportBancoCatsSelecaoPdf(
     let x = MARGIN + 1.5;
     doc.text('EMPRESA', x, y + 4.8);
     x += colEmpresa;
-    doc.text('DESCRIÇÃO', x, y + 4.8);
+    doc.text('DESCRIÇÃO / FONTE', x, y + 4.8);
     x += colDesc;
     doc.text('UND', x, y + 4.8);
     x += colUnd;
@@ -213,11 +213,16 @@ export async function exportBancoCatsSelecaoPdf(
       const item = quadrante.servicos[i];
       const empresaLines = doc.splitTextToSize(item.empresa || '—', colEmpresa - 2) as string[];
       const descLines = doc.splitTextToSize(item.descricao || '—', colDesc - 2) as string[];
+      const fonteLines = doc.splitTextToSize(
+        `FONTE: ${item.fonte?.trim() || '—'}`,
+        colDesc - 2
+      ) as string[];
       const undLines = doc.splitTextToSize(item.und || '—', colUnd - 2) as string[];
       const quantLines = doc.splitTextToSize(item.quant || '—', colQuant - 2) as string[];
+      const descBlockLines = [...descLines, ...fonteLines];
       const maxLines = Math.max(
         empresaLines.length,
-        descLines.length,
+        descBlockLines.length,
         undLines.length,
         quantLines.length,
         1
@@ -247,6 +252,13 @@ export async function exportBancoCatsSelecaoPdf(
       for (let li = 0; li < descLines.length; li += 1) {
         doc.text(descLines[li], cx, textTop + li * 3.8);
       }
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(...BRAND_RED);
+      for (let li = 0; li < fonteLines.length; li += 1) {
+        doc.text(fonteLines[li], cx, textTop + (descLines.length + li) * 3.8);
+      }
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(...TEXT_BLACK);
       cx += colDesc;
       for (let li = 0; li < undLines.length; li += 1) {
         doc.text(undLines[li], cx, textTop + li * 3.8);

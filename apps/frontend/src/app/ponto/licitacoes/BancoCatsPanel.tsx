@@ -85,9 +85,21 @@ function normalizeHeaderKey(header: string): string {
 
 function findColumnIndex(headers: string[], candidates: string[]): number {
   const normalizedCandidates = candidates.map(normalizeHeaderKey);
+
+  // Preferência por correspondência exata (ex.: "FONTE" e não "Ind. Fonte").
+  const exact = headers.findIndex((header) =>
+    normalizedCandidates.includes(normalizeHeaderKey(header))
+  );
+  if (exact >= 0) return exact;
+
   return headers.findIndex((header) => {
     const key = normalizeHeaderKey(header);
-    return normalizedCandidates.some((candidate) => key === candidate || key.includes(candidate));
+    return normalizedCandidates.some((candidate) => {
+      if (!key.includes(candidate)) return false;
+      // Evita mapear "Ind. Fonte" quando a coluna desejada é "FONTE".
+      if (candidate === 'fonte' && key !== 'fonte') return false;
+      return true;
+    });
   });
 }
 
@@ -159,6 +171,31 @@ function formatQuantidadeBr(value: number): string {
     minimumFractionDigits: 0,
     maximumFractionDigits: 4,
   });
+}
+
+/** Normaliza unidade para comparação (M, M., m² → M / M2). */
+function normalizeUnd(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toUpperCase()
+    .replace(/²/g, '2')
+    .replace(/³/g, '3')
+    .replace(/\.+$/g, '')
+    .replace(/\s+/g, '');
+}
+
+function alertUnidadesDiferentes(units: string[], toastId: string) {
+  const unique = Array.from(
+    new Set(units.map(normalizeUnd).filter(Boolean))
+  );
+  if (unique.length <= 1) return;
+
+  toast.error(
+    `Atenção: unidades diferentes selecionadas (${unique.join(', ')}). A soma de QUANT. pode não fazer sentido.`,
+    { id: toastId, duration: 5500 }
+  );
 }
 
 function CreateServicoModal({
@@ -532,27 +569,67 @@ export function BancoCatsPanel() {
   );
 
   const somaPorQuadrante = useMemo(() => {
-    const map = new Map<string, { count: number; soma: number }>();
+    const map = new Map<
+      string,
+      { count: number; soma: number; units: string[]; mixed: boolean }
+    >();
     for (const quadrante of servicoQuadrantes) {
       let count = 0;
       let soma = 0;
+      const unitSet = new Set<string>();
       for (const match of quadrante.matches) {
         const key = `${quadrante.id}::${match.item.rowKey}`;
         if (!selectedMatchKeys.has(key)) continue;
         count += 1;
         soma += parseQuantidadeBr(match.item.quant);
+        const und = normalizeUnd(match.item.und);
+        if (und) unitSet.add(und);
       }
-      map.set(quadrante.id, { count, soma });
+      const units = Array.from(unitSet);
+      map.set(quadrante.id, {
+        count,
+        soma,
+        units,
+        mixed: units.length > 1,
+      });
     }
     return map;
   }, [servicoQuadrantes, selectedMatchKeys]);
 
   const toggleMatchSelection = (quadranteId: string, rowKey: string) => {
     const key = `${quadranteId}::${rowKey}`;
+    if (selectedMatchKeys.has(key)) {
+      setSelectedMatchKeys((prev) => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
+      return;
+    }
+
+    const quadrante = servicoQuadrantes.find((q) => q.id === quadranteId);
+    const newItem = quadrante?.matches.find((m) => m.item.rowKey === rowKey);
+    const newUnd = normalizeUnd(newItem?.item.und ?? '');
+
+    if (newUnd && quadrante) {
+      const existingUnits: string[] = [];
+      for (const match of quadrante.matches) {
+        const matchKey = `${quadranteId}::${match.item.rowKey}`;
+        if (!selectedMatchKeys.has(matchKey)) continue;
+        const und = normalizeUnd(match.item.und);
+        if (und) existingUnits.push(und);
+      }
+      if (existingUnits.length > 0) {
+        alertUnidadesDiferentes(
+          [...existingUnits, newUnd],
+          `banco-cats-mixed-und-${quadranteId}`
+        );
+      }
+    }
+
     setSelectedMatchKeys((prev) => {
       const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
+      next.add(key);
       return next;
     });
   };
@@ -614,12 +691,16 @@ export function BancoCatsPanel() {
   const catalogSoma = useMemo(() => {
     let count = 0;
     let soma = 0;
+    const unitSet = new Set<string>();
     for (const row of indexedRows) {
       if (!selectedCatalogKeys.has(row.rowKey)) continue;
       count += 1;
       soma += parseQuantidadeBr(row.quant);
+      const und = normalizeUnd(row.und);
+      if (und) unitSet.add(und);
     }
-    return { count, soma };
+    const units = Array.from(unitSet);
+    return { count, soma, units, mixed: units.length > 1 };
   }, [indexedRows, selectedCatalogKeys]);
 
   const pageSelection = useMemo(() => {
@@ -635,22 +716,65 @@ export function BancoCatsPanel() {
   }, [pageRows, selectedCatalogKeys]);
 
   const toggleCatalogSelection = (rowKey: string) => {
+    if (selectedCatalogKeys.has(rowKey)) {
+      setSelectedCatalogKeys((prev) => {
+        const next = new Set(prev);
+        next.delete(rowKey);
+        return next;
+      });
+      return;
+    }
+
+    const newRow = indexedRows.find((row) => row.rowKey === rowKey);
+    const newUnd = normalizeUnd(newRow?.und ?? '');
+    if (newUnd) {
+      const existingUnits: string[] = [];
+      for (const row of indexedRows) {
+        if (!selectedCatalogKeys.has(row.rowKey)) continue;
+        const und = normalizeUnd(row.und);
+        if (und) existingUnits.push(und);
+      }
+      if (existingUnits.length > 0) {
+        alertUnidadesDiferentes(
+          [...existingUnits, newUnd],
+          'banco-cats-mixed-und-catalog'
+        );
+      }
+    }
+
     setSelectedCatalogKeys((prev) => {
       const next = new Set(prev);
-      if (next.has(rowKey)) next.delete(rowKey);
-      else next.add(rowKey);
+      next.add(rowKey);
       return next;
     });
   };
 
   const togglePageSelection = () => {
+    if (pageSelection.all) {
+      setSelectedCatalogKeys((prev) => {
+        const next = new Set(prev);
+        for (const row of pageRows) next.delete(row.rowKey);
+        return next;
+      });
+      return;
+    }
+
+    const unitsAfter: string[] = [];
+    for (const row of indexedRows) {
+      if (selectedCatalogKeys.has(row.rowKey)) {
+        const und = normalizeUnd(row.und);
+        if (und) unitsAfter.push(und);
+      }
+    }
+    for (const row of pageRows) {
+      const und = normalizeUnd(row.und);
+      if (und) unitsAfter.push(und);
+    }
+    alertUnidadesDiferentes(unitsAfter, 'banco-cats-mixed-und-catalog');
+
     setSelectedCatalogKeys((prev) => {
       const next = new Set(prev);
-      if (pageSelection.all) {
-        for (const row of pageRows) next.delete(row.rowKey);
-      } else {
-        for (const row of pageRows) next.add(row.rowKey);
-      }
+      for (const row of pageRows) next.add(row.rowKey);
       return next;
     });
   };
@@ -744,7 +868,12 @@ export function BancoCatsPanel() {
       {matchingActive ? (
         <div className="flex flex-col gap-4">
           {servicoQuadrantes.map((quadrante) => {
-            const selecao = somaPorQuadrante.get(quadrante.id) ?? { count: 0, soma: 0 };
+            const selecao = somaPorQuadrante.get(quadrante.id) ?? {
+              count: 0,
+              soma: 0,
+              units: [] as string[],
+              mixed: false,
+            };
             const totalMatches = quadrante.matches.length;
             const hasMoreThanPreview = totalMatches > QUADRANTE_MATCH_PREVIEW;
             const isExpanded = expandedQuadrantes.has(quadrante.id);
@@ -762,9 +891,20 @@ export function BancoCatsPanel() {
                       Serviço {quadrante.index}
                     </h3>
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="shrink-0 rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">
+                      <span
+                        className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold ${
+                          selecao.mixed
+                            ? 'bg-amber-50 text-amber-900 dark:bg-amber-950/40 dark:text-amber-200'
+                            : 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200'
+                        }`}
+                      >
                         Soma QUANT.: {formatQuantidadeBr(selecao.soma)}
                         {selecao.count > 0 ? ` (${selecao.count})` : ''}
+                        {selecao.mixed
+                          ? ` · UND mistas: ${selecao.units.join(', ')}`
+                          : selecao.units.length === 1
+                            ? ` · ${selecao.units[0]}`
+                            : ''}
                       </span>
                       <span className="shrink-0 rounded-full bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-700 dark:bg-red-950/40 dark:text-red-300">
                         {totalMatches} compatível(is)
@@ -841,6 +981,15 @@ export function BancoCatsPanel() {
                               <p className="text-sm leading-relaxed text-gray-800 dark:text-gray-200">
                                 {match.item.descricao || match.item.cells.join(' · ') || '—'}
                               </p>
+                              <p
+                                className="mt-1.5 break-words text-xs font-medium text-gray-800 dark:text-gray-200"
+                                title={match.item.fonte || undefined}
+                              >
+                                <span className="font-semibold uppercase tracking-wide text-red-700 dark:text-red-400">
+                                  Fonte:
+                                </span>{' '}
+                                {match.item.fonte || '—'}
+                              </p>
                               {match.matchedKeywords.length > 0 ? (
                                 <p className="mt-1.5 flex flex-wrap gap-1">
                                   {match.matchedKeywords.slice(0, 8).map((keyword) => (
@@ -851,14 +1000,6 @@ export function BancoCatsPanel() {
                                       {keyword}
                                     </span>
                                   ))}
-                                </p>
-                              ) : null}
-                              {match.item.fonte ? (
-                                <p
-                                  className="mt-1 truncate text-[11px] text-gray-500"
-                                  title={match.item.fonte}
-                                >
-                                  Fonte: {match.item.fonte}
                                 </p>
                               ) : null}
                             </div>
@@ -904,8 +1045,19 @@ export function BancoCatsPanel() {
                   Banco CAT&apos;s
                 </h2>
                 {catalogSoma.count > 0 ? (
-                  <span className="rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-semibold text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">
+                  <span
+                    className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+                      catalogSoma.mixed
+                        ? 'bg-amber-50 text-amber-900 dark:bg-amber-950/40 dark:text-amber-200'
+                        : 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200'
+                    }`}
+                  >
                     Soma QUANT.: {formatQuantidadeBr(catalogSoma.soma)} ({catalogSoma.count})
+                    {catalogSoma.mixed
+                      ? ` · UND mistas: ${catalogSoma.units.join(', ')}`
+                      : catalogSoma.units.length === 1
+                        ? ` · ${catalogSoma.units[0]}`
+                        : ''}
                   </span>
                 ) : null}
               </div>
