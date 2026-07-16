@@ -166,6 +166,42 @@ export async function fetchKanbanBoard(departmentKey?: string): Promise<KanbanBo
   return res.data.data;
 }
 
+/** Baixa o quadro atual como JSON compatível com Trello. */
+export async function exportKanbanBoardTrello(departmentKey?: string): Promise<{
+  filename: string;
+  payload: unknown;
+}> {
+  const res = await api.get('/kanban/board/export-trello', {
+    params: departmentKey ? { departmentKey } : undefined,
+  });
+  const disposition = String(res.headers?.['content-disposition'] || '');
+  const match = disposition.match(/filename="([^"]+)"/i);
+  const filename = match?.[1] || 'tasks-trello-export.json';
+  return { filename, payload: res.data };
+}
+
+export type KanbanTrelloImportResult = {
+  columnsCreated: number;
+  cardsCreated: number;
+  boardName: string;
+};
+
+/** Importa JSON estilo Trello no quadro atual. */
+export async function importKanbanBoardTrello(options: {
+  board: unknown;
+  departmentKey?: string;
+  replace?: boolean;
+  memberMap?: Record<string, string>;
+}): Promise<KanbanTrelloImportResult> {
+  const res = await api.post('/kanban/board/import-trello', {
+    board: options.board,
+    departmentKey: options.departmentKey,
+    replace: !!options.replace,
+    memberMap: options.memberMap,
+  });
+  return res.data.data;
+}
+
 export async function updateKanbanBoardLabelPresets(
   presets: KanbanLabelPreset[],
   departmentKey?: string,
