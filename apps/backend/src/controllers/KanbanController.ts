@@ -205,6 +205,73 @@ export class KanbanController {
     }
   }
 
+  async exportBoardTrello(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = requireUserId(req, next);
+      if (!userId) return;
+      const departmentKey =
+        typeof req.query.departmentKey === 'string' ? req.query.departmentKey : undefined;
+      const { filename, payload } = await kanbanService.exportBoardAsTrello(
+        userId,
+        departmentKey,
+      );
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="${filename}"`,
+      );
+      res.status(200).json(payload);
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : '';
+      if (msg === 'Quadro não encontrado para este setor') {
+        return next(createError(msg, 404));
+      }
+      handleKanbanError(error, next);
+    }
+  }
+
+  async importBoardTrello(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = requireUserId(req, next);
+      if (!userId) return;
+      const body = req.body || {};
+      const { departmentKey, replace, memberMap } = body;
+      const trelloData =
+        body.board && typeof body.board === 'object'
+          ? body.board
+          : Array.isArray(body.lists) && Array.isArray(body.cards)
+            ? body
+            : null;
+      if (!trelloData) {
+        return next(
+          createError(
+            'JSON inválido. Envie { board, replace } com export Trello/Gennesis (lists + cards).',
+            400,
+          ),
+        );
+      }
+
+      const result = await kanbanService.importBoardFromTrello(userId, trelloData, {
+        departmentKey: typeof departmentKey === 'string' ? departmentKey : undefined,
+        replace: !!replace,
+        memberMap:
+          memberMap && typeof memberMap === 'object' && !Array.isArray(memberMap)
+            ? (memberMap as Record<string, string>)
+            : undefined,
+      });
+      res.json({ success: true, data: result });
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : '';
+      if (msg === 'Quadro não encontrado para este setor') {
+        return next(createError(msg, 404));
+      }
+      if (msg && msg !== KANBAN_FORBIDDEN) {
+        return next(createError(msg, 400));
+      }
+      handleKanbanError(error, next);
+    }
+  }
+
   async createColumn(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const userId = requireUserId(req, next);

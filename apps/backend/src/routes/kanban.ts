@@ -21,6 +21,12 @@ router.delete('/boards/:boardId/shares/:userId', (req, res, next) =>
 );
 router.get('/picker-users', (req, res, next) => controller.listPickerUsers(req, res, next));
 router.get('/board', (req, res, next) => controller.getBoard(req, res, next));
+router.get('/board/export-trello', (req, res, next) =>
+  controller.exportBoardTrello(req, res, next),
+);
+router.post('/board/import-trello', (req, res, next) =>
+  controller.importBoardTrello(req, res, next),
+);
 router.patch('/board/label-presets', (req, res, next) =>
   controller.updateBoardLabelPresets(req, res, next),
 );
