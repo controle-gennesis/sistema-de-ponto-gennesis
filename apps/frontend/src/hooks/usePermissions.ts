@@ -530,7 +530,6 @@ export function useRoutePermission(route: string) {
       canApproveEspelhoNf ||
       can(pk('/ponto/controle/aprovar-combustivel')) ||
       can(pk('/ponto/controle/aprovar-oc-compras')) ||
-      canApproveOcGestor ||
       can(pk('/ponto/controle/aprovar-oc-diretoria')) ||
       can(pk('/ponto/controle/aprovar-requisicoes-materiais')),
     '/ponto/funcionarios':
