@@ -193,12 +193,17 @@ export async function importKanbanBoardTrello(options: {
   replace?: boolean;
   memberMap?: Record<string, string>;
 }): Promise<KanbanTrelloImportResult> {
-  const res = await api.post('/kanban/board/import-trello', {
-    board: options.board,
-    departmentKey: options.departmentKey,
-    replace: !!options.replace,
-    memberMap: options.memberMap,
-  });
+  // Quadros grandes do Trello passam fácil de 30s (timeout padrão do axios).
+  const res = await api.post(
+    '/kanban/board/import-trello',
+    {
+      board: options.board,
+      departmentKey: options.departmentKey,
+      replace: !!options.replace,
+      memberMap: options.memberMap,
+    },
+    { timeout: 10 * 60 * 1000 },
+  );
   return res.data.data;
 }
 

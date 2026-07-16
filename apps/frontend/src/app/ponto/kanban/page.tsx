@@ -2185,6 +2185,9 @@ function KanbanPage() {
       if (!ok) return;
     }
     setImportingBoard(true);
+    toast.loading('Importando… pode levar alguns minutos em arquivos grandes.', {
+      id: 'kanban-trello-import',
+    });
     try {
       const result = await importKanbanBoardTrello({
         board: importPayload,
@@ -2193,6 +2196,7 @@ function KanbanPage() {
       });
       toast.success(
         `Importado: ${result.columnsCreated} coluna(s), ${result.cardsCreated} card(s)`,
+        { id: 'kanban-trello-import' },
       );
       setImportModalOpen(false);
       setImportPayload(null);
@@ -2200,7 +2204,20 @@ function KanbanPage() {
       await queryClient.invalidateQueries({ queryKey: ['kanban-board'] });
       await queryClient.invalidateQueries({ queryKey: ['kanban-boards'] });
     } catch (err: any) {
-      toast.error(err?.response?.data?.message || 'Erro ao importar');
+      const status = err?.response?.status;
+      const apiMsg = err?.response?.data?.message;
+      let message = 'Erro ao importar';
+      if (err?.code === 'ECONNABORTED' || /timeout/i.test(String(err?.message || ''))) {
+        message =
+          'A importação demorou demais e foi interrompida. Tente de novo; arquivos muito grandes podem levar alguns minutos.';
+      } else if (status === 413) {
+        message = 'Arquivo JSON grande demais para o servidor. Tente um export menor.';
+      } else if (apiMsg) {
+        message = apiMsg;
+      } else if (err?.message) {
+        message = err.message;
+      }
+      toast.error(message, { id: 'kanban-trello-import' });
     } finally {
       setImportingBoard(false);
     }

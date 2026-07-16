@@ -47,6 +47,191 @@ function ensureSpace(doc: jsPDF, y: number, need: number): number {
   return y;
 }
 
+type InlineRun = { text: string; bold: boolean; italic: boolean; underline: boolean };
+
+function helveticaStyle(bold: boolean, italic: boolean): 'normal' | 'bold' | 'italic' | 'bolditalic' {
+  if (bold && italic) return 'bolditalic';
+  if (bold) return 'bold';
+  if (italic) return 'italic';
+  return 'normal';
+}
+
+/**
+ * Tokeniza markdown inline sem lookbehind (evita falhar com indentação do Tab).
+ * Ordem: **negrito**, __sublinhado__, *itálico*.
+ */
+function parseInlineRuns(text: string): InlineRun[] {
+  if (!text) return [{ text: '', bold: false, italic: false, underline: false }];
+
+  type Mark = { text: string; bold: boolean; italic: boolean; underline: boolean };
+  const protectedParts: Mark[] = [];
+
+  const protect = (input: string, re: RegExp, flags: Partial<Mark>): string =>
+    input.replace(re, (_full, inner: string) => {
+      const idx = protectedParts.length;
+      protectedParts.push({
+        text: String(inner),
+        bold: !!flags.bold,
+        italic: !!flags.italic,
+        underline: !!flags.underline,
+      });
+      return `\u0001${idx}\u0001`;
+    });
+
+  let s = text;
+  s = protect(s, /\*\*([^*]+)\*\*/g, { bold: true });
+  s = protect(s, /__([^_]+)__/g, { underline: true });
+  s = protect(s, /\*([^*\n]+)\*/g, { italic: true });
+
+  const runs: InlineRun[] = [];
+  const tokenRe = /\u0001(\d+)\u0001/g;
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = tokenRe.exec(s)) !== null) {
+    if (m.index > last) {
+      runs.push({
+        text: s.slice(last, m.index),
+        bold: false,
+        italic: false,
+        underline: false,
+      });
+    }
+    const mark = protectedParts[Number(m[1])];
+    if (mark) {
+      // Permite aninhamento residual no conteúdo interno
+      const innerRuns = parseInlineRunsNested(mark.text, mark);
+      runs.push(...innerRuns);
+    }
+    last = m.index + m[0].length;
+  }
+  if (last < s.length) {
+    runs.push({ text: s.slice(last), bold: false, italic: false, underline: false });
+  }
+
+  return runs.length ? runs : [{ text: '', bold: false, italic: false, underline: false }];
+}
+
+/** Aplica flags externos e ainda reconhece marcadores internos restantes. */
+function parseInlineRunsNested(
+  text: string,
+  base: { bold: boolean; italic: boolean; underline: boolean }
+): InlineRun[] {
+  let s = text;
+  let bold = base.bold;
+  let italic = base.italic;
+  let underline = base.underline;
+  let prev = '';
+  while (s !== prev) {
+    prev = s;
+    if (s.startsWith('**') && s.endsWith('**') && s.length >= 4) {
+      s = s.slice(2, -2);
+      bold = true;
+    } else if (s.startsWith('__') && s.endsWith('__') && s.length >= 4) {
+      s = s.slice(2, -2);
+      underline = true;
+    } else if (s.startsWith('*') && s.endsWith('*') && s.length >= 3 && !s.startsWith('**')) {
+      s = s.slice(1, -1);
+      italic = true;
+    }
+  }
+  return [{ text: s, bold, italic, underline }];
+}
+
+function wrapInlineRuns(doc: jsPDF, runs: InlineRun[], maxWidth: number, fontSize: number): InlineRun[][] {
+  const lines: InlineRun[][] = [];
+  let current: InlineRun[] = [];
+  let currentW = 0;
+
+  const pushLine = () => {
+    if (current.length) lines.push(current);
+    current = [];
+    currentW = 0;
+  };
+
+  for (const run of runs) {
+    const words = run.text.split(/(\s+)/);
+    for (const word of words) {
+      if (!word) continue;
+      doc.setFont('helvetica', helveticaStyle(run.bold, run.italic));
+      doc.setFontSize(fontSize);
+      const wordW = doc.getTextWidth(word);
+      if (currentW + wordW > maxWidth && current.length) {
+        pushLine();
+      }
+      current.push({
+        text: word,
+        bold: run.bold,
+        italic: run.italic,
+        underline: run.underline,
+      });
+      currentW += wordW;
+    }
+  }
+  pushLine();
+  return lines.length
+    ? lines
+    : [[{ text: '', bold: false, italic: false, underline: false }]];
+}
+
+function drawInlineLine(
+  doc: jsPDF,
+  x: number,
+  y: number,
+  runs: InlineRun[],
+  fontSize: number,
+  color: [number, number, number]
+): void {
+  let cx = x;
+  doc.setTextColor(...color);
+  doc.setFontSize(fontSize);
+  for (const run of runs) {
+    doc.setFont('helvetica', helveticaStyle(run.bold, run.italic));
+    doc.text(run.text, cx, y);
+    const w = doc.getTextWidth(run.text);
+    if (run.underline && run.text.trim()) {
+      doc.setDrawColor(...color);
+      doc.setLineWidth(0.3);
+      doc.line(cx, y + 0.8, cx + w, y + 0.8);
+    }
+    cx += w;
+  }
+}
+
+type CommentLayoutLine = { prefix: string; runs: InlineRun[] };
+
+function layoutFormattedComment(
+  doc: jsPDF,
+  text: string,
+  maxWidth: number,
+  fontSize: number
+): CommentLayoutLine[] {
+  const out: CommentLayoutLine[] = [];
+  for (const rawLine of text.split('\n')) {
+    const trimmed = rawLine.trimEnd();
+    const bullet = trimmed.match(/^[ \t]*[•\-]\s+(.*)$/);
+    const content = bullet ? bullet[1] : trimmed;
+    const prefix = bullet ? '• ' : '';
+    const contentW = maxWidth - (prefix ? doc.getTextWidth(prefix) : 0);
+    const wrapped = wrapInlineRuns(doc, parseInlineRuns(content), contentW, fontSize);
+    wrapped.forEach((runs, idx) => {
+      out.push({ prefix: idx === 0 ? prefix : prefix ? '  ' : '', runs });
+    });
+  }
+  return out.length
+    ? out
+    : [{ prefix: '', runs: [{ text: '', bold: false, italic: false, underline: false }] }];
+}
+
+function measureFormattedCommentHeight(
+  doc: jsPDF,
+  text: string,
+  maxWidth: number,
+  fontSize: number,
+  lineH: number
+): number {
+  return layoutFormattedComment(doc, text, maxWidth, fontSize).length * lineH;
+}
+
 async function loadCompanyLogo(): Promise<{
   dataUrl: string;
   wMm: number;
@@ -274,8 +459,14 @@ function measureItemBlockHeight(
   const labelLines = doc.splitTextToSize(item.label, innerW - 14) as string[];
   let h = 8 + labelLines.length * 4.2;
   if (item.comentario.trim()) {
-    const commentLines = doc.splitTextToSize(item.comentario.trim(), innerW - 8) as string[];
-    h += 3 + commentLines.length * 4;
+    const commentH = measureFormattedCommentHeight(
+      doc,
+      item.comentario.trim(),
+      innerW - 8,
+      8,
+      4
+    );
+    h += 3 + commentH;
   } else {
     h += 5;
   }
@@ -312,12 +503,22 @@ function drawChecklistItem(
   }
 
   if (item.comentario.trim()) {
-    doc.setFontSize(8);
-    doc.setTextColor(...TEXT_MUTED);
-    const commentLines = doc.splitTextToSize(item.comentario.trim(), contentW - 18) as string[];
+    const commentLines = layoutFormattedComment(
+      doc,
+      item.comentario.trim(),
+      contentW - 18,
+      8
+    );
     ly += 1;
     for (const line of commentLines) {
-      doc.text(line, MARGIN + 10, ly);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.setTextColor(...TEXT_MUTED);
+      if (line.prefix) {
+        doc.text(line.prefix, MARGIN + 10, ly);
+      }
+      const textX = MARGIN + 10 + (line.prefix ? doc.getTextWidth(line.prefix) : 0);
+      drawInlineLine(doc, textX, ly, line.runs, 8, TEXT_MUTED);
       ly += 4;
     }
   } else {

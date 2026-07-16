@@ -1658,7 +1658,7 @@ export default function LicitacoesPage() {
                           sections={checklistSections}
                           state={checklistState}
                           onChange={updateChecklistItem}
-                          disabled={saveAnaliseMutation.isPending}
+                          disabled={finalizarAnaliseMutation.isPending}
                           canManageItems={canManageChecklistItems}
                           onAddItem={handleAddChecklistItem}
                           onRemoveItem={handleRemoveChecklistItem}

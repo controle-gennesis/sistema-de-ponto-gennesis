@@ -661,46 +661,56 @@ export async function importTrelloIntoBoard(
     userNameById.set(importAsUserId, importUser.name);
   }
 
-  // Quadros grandes (Trello) estouravam o timeout padrão de 5s
-  const txTimeoutMs = 5 * 60 * 1000;
+  // Uma transação por coluna evita timeout em boards grandes (Trello com centenas de cards).
+  const colTxTimeoutMs = 3 * 60 * 1000;
 
-  return prisma.$transaction(
-    async (tx) => {
-      if (replace) {
-        await tx.kanbanColumn.deleteMany({ where: { boardId } });
-      }
+  if (replace) {
+    await prisma.kanbanColumn.deleteMany({ where: { boardId } });
+  }
 
-      let columnsCreated = 0;
-      let cardsCreated = 0;
-      const collectedLabels = new Map<string, { color: string; name: string }>();
+  let columnsCreated = 0;
+  let cardsCreated = 0;
+  const collectedLabels = new Map<string, { color: string; name: string }>();
 
-      const memberRows: Array<{ id: string; cardId: string; userId: string }> = [];
-      const checklistRows: Array<{
-        id: string;
-        cardId: string;
-        title: string;
-        isDone: boolean;
-        position: number;
-      }> = [];
-      const commentRows: Array<{
-        id: string;
-        cardId: string;
-        userId: string;
-        content: string;
-        createdAt: Date;
-        updatedAt: Date;
-      }> = [];
-      const attachmentRows: Array<{
-        id: string;
-        cardId: string;
-        userId: string;
-        fileName: string;
-        fileUrl: string;
-        fileSize: number;
-        mimeType: string;
-      }> = [];
+  const flushMany = async <T>(
+    rows: T[],
+    write: (chunk: T[]) => Promise<unknown>,
+    chunkSize = 250,
+  ) => {
+    for (let i = 0; i < rows.length; i += chunkSize) {
+      await write(rows.slice(i, i + chunkSize));
+    }
+  };
 
-      for (const list of parsed.lists) {
+  for (const list of parsed.lists) {
+    const result = await prisma.$transaction(
+      async (tx) => {
+        const memberRows: Array<{ id: string; cardId: string; userId: string }> = [];
+        const checklistRows: Array<{
+          id: string;
+          cardId: string;
+          title: string;
+          isDone: boolean;
+          position: number;
+        }> = [];
+        const commentRows: Array<{
+          id: string;
+          cardId: string;
+          userId: string;
+          content: string;
+          createdAt: Date;
+          updatedAt: Date;
+        }> = [];
+        const attachmentRows: Array<{
+          id: string;
+          cardId: string;
+          userId: string;
+          fileName: string;
+          fileUrl: string;
+          fileSize: number;
+          mimeType: string;
+        }> = [];
+
         const column = await tx.kanbanColumn.create({
           data: {
             id: newCuidLike(),
@@ -710,7 +720,8 @@ export async function importTrelloIntoBoard(
             position: list.position,
           },
         });
-        columnsCreated += 1;
+
+        let listCards = 0;
 
         for (const card of list.cards) {
           const resolvedUserIds: string[] = [];
@@ -754,7 +765,7 @@ export async function importTrelloIntoBoard(
               assigneeName: firstName,
             },
           });
-          cardsCreated += 1;
+          listCards += 1;
 
           for (const userId of resolvedUserIds) {
             memberRows.push({ id: newCuidLike(), cardId, userId });
@@ -781,7 +792,7 @@ export async function importTrelloIntoBoard(
               id: newCuidLike(),
               cardId,
               userId: authorId,
-              content: content || '(sem texto)',
+              content: (content || '(sem texto)').slice(0, 20000),
               createdAt: at,
               updatedAt: at,
             });
@@ -789,67 +800,64 @@ export async function importTrelloIntoBoard(
 
           for (const att of card.attachments) {
             if (!att.url) continue;
+            // Ignora data URI / base64 embutido (estoura payload e tempo)
+            if (/^data:/i.test(att.url)) continue;
             attachmentRows.push({
               id: newCuidLike(),
               cardId,
               userId: importAsUserId,
               fileName: (att.name || 'anexo').slice(0, 255),
-              fileUrl: att.url,
+              fileUrl: att.url.slice(0, 4000),
               fileSize: 0,
               mimeType: 'application/octet-stream',
             });
           }
         }
-      }
 
-      const flushMany = async <T>(
-        rows: T[],
-        write: (chunk: T[]) => Promise<unknown>,
-        chunkSize = 200,
-      ) => {
-        for (let i = 0; i < rows.length; i += chunkSize) {
-          await write(rows.slice(i, i + chunkSize));
-        }
-      };
+        await flushMany(memberRows, (data) =>
+          tx.kanbanCardMember.createMany({ data, skipDuplicates: true }),
+        );
+        await flushMany(checklistRows, (data) =>
+          tx.kanbanChecklistItem.createMany({ data }),
+        );
+        await flushMany(commentRows, (data) =>
+          tx.kanbanCardComment.createMany({ data }),
+        );
+        await flushMany(attachmentRows, (data) =>
+          tx.kanbanCardAttachment.createMany({ data }),
+        );
 
-      await flushMany(memberRows, (data) =>
-        tx.kanbanCardMember.createMany({ data, skipDuplicates: true }),
-      );
-      await flushMany(checklistRows, (data) =>
-        tx.kanbanChecklistItem.createMany({ data }),
-      );
-      await flushMany(commentRows, (data) =>
-        tx.kanbanCardComment.createMany({ data }),
-      );
-      await flushMany(attachmentRows, (data) =>
-        tx.kanbanCardAttachment.createMany({ data }),
-      );
+        return { listCards };
+      },
+      { maxWait: 20_000, timeout: colTxTimeoutMs },
+    );
 
-      const presetsRaw = resolveKanbanLabelPresets(replace ? [] : board.labelPresets);
-      const byColor = new Map(
-        presetsRaw.map((p) => [
-          p.color.toUpperCase(),
-          { color: p.color.toUpperCase(), name: p.name },
-        ]),
-      );
-      if (replace) byColor.clear();
-      for (const l of collectedLabels.values()) {
-        if (!byColor.has(l.color)) byColor.set(l.color, l);
-      }
-      const merged = Array.from(byColor.values()).slice(0, 24);
-      if (merged.length) {
-        await tx.kanbanBoard.update({
-          where: { id: boardId },
-          data: { labelPresets: merged as Prisma.InputJsonValue },
-        });
-      }
+    columnsCreated += 1;
+    cardsCreated += result.listCards;
+  }
 
-      return {
-        columnsCreated,
-        cardsCreated,
-        boardName: parsed.boardName,
-      };
-    },
-    { maxWait: 30_000, timeout: txTimeoutMs },
+  const presetsRaw = resolveKanbanLabelPresets(replace ? [] : board.labelPresets);
+  const byColor = new Map(
+    presetsRaw.map((p) => [
+      p.color.toUpperCase(),
+      { color: p.color.toUpperCase(), name: p.name },
+    ]),
   );
+  if (replace) byColor.clear();
+  for (const l of collectedLabels.values()) {
+    if (!byColor.has(l.color)) byColor.set(l.color, l);
+  }
+  const merged = Array.from(byColor.values()).slice(0, 24);
+  if (merged.length) {
+    await prisma.kanbanBoard.update({
+      where: { id: boardId },
+      data: { labelPresets: merged as Prisma.InputJsonValue },
+    });
+  }
+
+  return {
+    columnsCreated,
+    cardsCreated,
+    boardName: parsed.boardName,
+  };
 }

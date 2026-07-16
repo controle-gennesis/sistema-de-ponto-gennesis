@@ -190,14 +190,12 @@ function truncateText(doc: jsPDF, text: string, maxWidth: number): string {
   return `${t}…`;
 }
 
-async function loadCompanyLogo(
-  contextLabels: (string | null | undefined)[] = []
-): Promise<{
+async function loadCompanyLogo(): Promise<{
   dataUrl: string;
   wMm: number;
   hMm: number;
 } | null> {
-  return loadPdfBrandingLogo({ contextLabels, maxW: 36, maxH: 22 });
+  return loadPdfBrandingLogo({ userBrandingOnly: true, maxW: 36, maxH: 22 });
 }
 
 function drawPageHeader(
@@ -720,14 +718,9 @@ export async function exportControleGeralContratosPdf(
   const margin = 10;
   const contentW = pageWidth - margin * 2;
 
-  const brandingContext = [
-    ...input.filterLines,
-    ...input.groups.flatMap((group) => [
-      group.localityLabel,
-      ...group.rows.map((row) => row.contract),
-    ]),
-  ];
-  const logo = await loadCompanyLogo(brandingContext);
+  // Logo pelo usuário (centro de custo UNB/Predial), não pelos contratos da planilha.
+  // Admin e demais usuários veem Gennesis; Predial só quem tem só UNB no cadastro.
+  const logo = await loadCompanyLogo();
   let y = drawPageHeader(doc, margin, pageWidth, logo, generatedAt, input.sheetUpdatedAt);
   y = drawFilterBox(doc, y, margin, contentW, input.filterLines);
 

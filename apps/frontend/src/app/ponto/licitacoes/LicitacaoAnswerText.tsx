@@ -3,16 +3,41 @@
 import React from 'react';
 
 function formatInline(text: string): React.ReactNode[] {
-  const parts = text.split(/(\*\*[^*]+\*\*)/g);
+  const slots: React.ReactNode[] = [];
+  const park = (node: React.ReactNode) => {
+    const i = slots.length;
+    slots.push(node);
+    return `\u0001${i}\u0001`;
+  };
+
+  let s = text;
+  s = s.replace(/__([^_]+)__/g, (_m, inner) =>
+    park(
+      <u key={`u-${slots.length}`} className="underline">
+        {formatInline(inner)}
+      </u>
+    )
+  );
+  s = s.replace(/\*\*([^*]+)\*\*/g, (_m, inner) =>
+    park(
+      <strong key={`b-${slots.length}`} className="font-semibold text-gray-900 dark:text-gray-100">
+        {formatInline(inner)}
+      </strong>
+    )
+  );
+  s = s.replace(/\*([^*\n]+)\*/g, (_m, inner) =>
+    park(
+      <em key={`i-${slots.length}`} className="italic">
+        {inner}
+      </em>
+    )
+  );
+
+  const parts = s.split(/(\u0001\d+\u0001)/g);
   return parts.map((part, index) => {
-    if (part.startsWith('**') && part.endsWith('**')) {
-      return (
-        <strong key={index} className="font-semibold text-gray-900 dark:text-gray-100">
-          {part.slice(2, -2)}
-        </strong>
-      );
-    }
-    return part;
+    const slot = part.match(/^\u0001(\d+)\u0001$/);
+    if (slot) return <React.Fragment key={index}>{slots[Number(slot[1])]}</React.Fragment>;
+    return part ? <React.Fragment key={index}>{part}</React.Fragment> : null;
   });
 }
 

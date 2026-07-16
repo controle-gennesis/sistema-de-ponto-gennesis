@@ -1,4 +1,5 @@
 import {
+  readStoredUnbBranding,
   resolvePdfLogoCandidates,
   shouldUseUnbBranding,
 } from '@/lib/unbBranding';
@@ -11,6 +12,11 @@ export type PdfBrandingLogo = {
 
 export type LoadPdfBrandingLogoOptions = {
   contextLabels?: (string | null | undefined)[];
+  /**
+   * Se true, ignora rótulos do documento e usa só o branding do usuário
+   * (localStorage / centro de custo UNB). Relatórios multi-contrato devem usar isso.
+   */
+  userBrandingOnly?: boolean;
   maxW?: number;
   maxH?: number;
   extraCandidates?: string[];
@@ -61,8 +67,16 @@ function tryLoadImageAsDataUrl(
 export async function loadPdfBrandingLogo(
   options: LoadPdfBrandingLogoOptions = {}
 ): Promise<PdfBrandingLogo | null> {
-  const { contextLabels = [], maxW = 36, maxH = 22, extraCandidates = [] } = options;
-  const useUnb = shouldUseUnbBranding(...contextLabels);
+  const {
+    contextLabels = [],
+    userBrandingOnly = false,
+    maxW = 36,
+    maxH = 22,
+    extraCandidates = [],
+  } = options;
+  const useUnb = userBrandingOnly
+    ? readStoredUnbBranding()
+    : shouldUseUnbBranding(...contextLabels);
   const candidates = [...extraCandidates, ...resolvePdfLogoCandidates(useUnb)];
 
   for (const src of candidates) {
