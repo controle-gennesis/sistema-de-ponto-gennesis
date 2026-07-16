@@ -7,6 +7,7 @@ import {
   Archive,
   ChevronDown,
   ClipboardList,
+  Database,
   Download,
   ExternalLink,
   FileText,
@@ -36,6 +37,7 @@ import {
   type NaoSeHabilitaItem,
 } from './LicitacaoNaoSeHabilitaPanel';
 import { LicitacoesRegiaoPanel } from './LicitacoesRegiaoPanel';
+import { BancoCatsPanel } from './BancoCatsPanel';
 import { buildLicitacaoTituloDisplay } from './licitacaoDisplay';
 import {
   emptyChecklistState,
@@ -62,7 +64,7 @@ const BRASIL_UFS = [
   'PA', 'PB', 'PR', 'PE', 'PI', 'RJ', 'RN', 'RS', 'RO', 'RR', 'SC', 'SP', 'SE', 'TO',
 ] as const;
 
-type LicitacaoViewMode = 'analise' | 'arquivadas' | 'regioes';
+type LicitacaoViewMode = 'analise' | 'arquivadas' | 'regioes' | 'banco-cats';
 
 type LicitacaoArquivadaMotivo =
   | 'suspensa'
@@ -389,7 +391,7 @@ export default function LicitacoesPage() {
   const [viewMode, setViewModeState] = useState<LicitacaoViewMode>(() => {
     if (typeof window === 'undefined') return 'analise';
     const saved = sessionStorage.getItem(LICITACAO_VIEW_MODE_KEY);
-    if (saved === 'regioes' || saved === 'arquivadas') return saved;
+    if (saved === 'regioes' || saved === 'arquivadas' || saved === 'banco-cats') return saved;
     return 'analise';
   });
 
@@ -1313,10 +1315,26 @@ export default function LicitacoesPage() {
               <MapPin className="h-4 w-4" aria-hidden />
               Licitações por Região
             </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={viewMode === 'banco-cats'}
+              onClick={() => setViewMode('banco-cats')}
+              className={`inline-flex items-center gap-2 rounded-t-lg px-4 py-2.5 text-sm font-medium transition-colors ${
+                viewMode === 'banco-cats'
+                  ? 'border border-b-0 border-gray-200 bg-white text-red-700 dark:border-gray-700 dark:bg-gray-900 dark:text-red-400'
+                  : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-900/50 dark:hover:text-gray-100'
+              }`}
+            >
+              <Database className="h-4 w-4" aria-hidden />
+              Banco CAT&apos;s
+            </button>
           </div>
 
           {viewMode === 'regioes' ? (
             <LicitacoesRegiaoPanel />
+          ) : viewMode === 'banco-cats' ? (
+            <BancoCatsPanel />
           ) : (
             <div className="flex flex-col gap-5 lg:flex-row lg:items-start">
             {/* Sidebar */}

@@ -17,6 +17,9 @@ router.post('/planilha-regioes/aceites', (req, res, next) => ctrl.registrarAceit
 router.delete('/planilha-regioes/aceites', (req, res, next) => ctrl.desfazerAceiteRegiao(req, res, next));
 router.post('/planilha-regioes/manuais', (req, res, next) => ctrl.createManualRegiao(req, res, next));
 router.delete('/planilha-regioes/manuais', (req, res, next) => ctrl.deleteManualRegiao(req, res, next));
+router.get('/banco-cats', (req, res, next) => ctrl.getBancoCatsSheet(req, res, next));
+router.post('/banco-cats', (req, res, next) => ctrl.createBancoCatsServico(req, res, next));
+router.delete('/banco-cats', (req, res, next) => ctrl.deleteBancoCatsServico(req, res, next));
 
 router.get('/', (req, res, next) => ctrl.list(req, res, next));
 router.post('/', (req, res, next) => ctrl.create(req, res, next));

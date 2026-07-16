@@ -600,6 +600,40 @@ async function ensureLicitacaoRegiaoManuaisTable(prisma: PrismaClient): Promise<
   `);
 }
 
+async function ensureBancoCatsServicosTable(prisma: PrismaClient): Promise<void> {
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "banco_cats_servicos" (
+      "id" TEXT NOT NULL,
+      "spreadsheetId" TEXT NOT NULL,
+      "rowKey" TEXT NOT NULL,
+      "headers" JSONB NOT NULL,
+      "rowSnapshot" JSONB NOT NULL,
+      "createdBy" TEXT NOT NULL,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "banco_cats_servicos_pkey" PRIMARY KEY ("id")
+    );
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    CREATE UNIQUE INDEX IF NOT EXISTS "banco_cats_servicos_sheet_row_key"
+    ON "banco_cats_servicos"("spreadsheetId", "rowKey");
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "banco_cats_servicos_spreadsheetId_idx"
+    ON "banco_cats_servicos"("spreadsheetId");
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    DO $$
+    BEGIN
+      ALTER TABLE "banco_cats_servicos" ADD CONSTRAINT "banco_cats_servicos_createdBy_fkey"
+        FOREIGN KEY ("createdBy") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+    EXCEPTION WHEN duplicate_object THEN NULL;
+    END $$;
+  `);
+}
+
 async function ensureLicitacaoColumns(prisma: PrismaClient): Promise<void> {
   if (!(await tableExists(prisma, 'licitacoes'))) return;
 
@@ -680,6 +714,7 @@ export async function ensureProductionSchema(prisma: PrismaClient): Promise<void
     await ensureLicitacaoRegiaoAceitesTable(prisma);
     await ensureLicitacaoRegiaoManuaisTable(prisma);
     await ensureLicitacaoRegiaoSheetRowsTable(prisma);
+    await ensureBancoCatsServicosTable(prisma);
     await ensureLicitacaoConfigTable(prisma);
     console.log('[Schema] Verificação de tabelas/colunas críticas concluída.');
   } catch (e) {

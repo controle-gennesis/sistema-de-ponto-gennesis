@@ -20,6 +20,22 @@ import {
   listLicitacoesRegiaoTabs,
 } from '../services/LicitacoesPlanilhaSheetsService';
 import {
+  appendBancoCatsRow,
+  fetchBancoCatsSheet,
+  flushPendingBancoCatsManuaisToSheet,
+  googleSheetsWriteConfigError,
+  invalidateBancoCatsSheetCache,
+  isGoogleSheetsWriteConfigured,
+  spreadsheetId as bancoCatsSpreadsheetId,
+} from '../services/BancoCatsSheetsService';
+import {
+  createBancoCatsManual,
+  deleteBancoCatsManual,
+  getCanonicalBancoCatsHeaders,
+  normalizeBancoCatsRowSnapshot,
+  snapshotToCells,
+} from '../services/bancoCatsManualStore';
+import {
   createLicitacaoRegiaoAceites,
   clearProcessoExcluidoForAceites,
   deleteLicitacaoRegiaoAceites,
@@ -87,6 +103,160 @@ export class LicitacaoController {
       const message = error instanceof Error ? error.message : 'Erro ao consultar planilha';
       const status = message.includes('não encontrada') ? 404 : 502;
       next(createError(message, status));
+    }
+  }
+
+  async getBancoCatsSheet(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const forceRefresh =
+        req.query.refresh === '1' ||
+        req.query.refresh === 'true' ||
+        typeof req.query.t === 'string';
+      const data = await fetchBancoCatsSheet(forceRefresh);
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.json({ success: true, data });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Erro ao consultar Banco CAT\'s';
+      next(createError(message, 502));
+    }
+  }
+
+  async createBancoCatsServico(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const fieldsRaw = req.body?.fields;
+      if (!fieldsRaw || typeof fieldsRaw !== 'object' || Array.isArray(fieldsRaw)) {
+        throw createError('Informe os campos do serviço.', 400);
+      }
+
+      let headers = getCanonicalBancoCatsHeaders();
+      let spreadsheetId = bancoCatsSpreadsheetId();
+      try {
+        const sheet = await fetchBancoCatsSheet(false);
+        if (sheet.headers.length > 0) headers = sheet.headers;
+        spreadsheetId = sheet.spreadsheetId;
+      } catch {
+        // usa headers canônicos se a planilha estiver indisponível
+      }
+
+      const fields: Record<string, string> = {};
+      for (const [key, value] of Object.entries(fieldsRaw as Record<string, unknown>)) {
+        if (typeof value === 'string') fields[key] = value;
+        else if (value != null) fields[key] = String(value);
+      }
+
+      const rowSnapshot = normalizeBancoCatsRowSnapshot(headers, fields);
+      const descricao =
+        rowSnapshot['DESCRIÇÃO'] ??
+        rowSnapshot['DESCRICAO'] ??
+        Object.entries(rowSnapshot).find(([key]) =>
+          key
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .toLowerCase()
+            .includes('descricao')
+        )?.[1] ??
+        '';
+
+      if (!descricao.trim()) {
+        throw createError('Informe a descrição do serviço.', 400);
+      }
+
+      if (!rowSnapshot['EMPRESA']?.trim() && headers.includes('EMPRESA')) {
+        rowSnapshot['EMPRESA'] = 'GENNESIS';
+      }
+
+      const values = snapshotToCells(headers, rowSnapshot);
+
+      // Preferência: gravar na planilha (fonte da verdade). Fallback local só se write não estiver configurado.
+      if (isGoogleSheetsWriteConfigured()) {
+        try {
+          await flushPendingBancoCatsManuaisToSheet();
+        } catch (flushError) {
+          console.warn(
+            '[Banco CAT\'s] Falha ao sincronizar pendências locais para a planilha:',
+            flushError
+          );
+        }
+
+        const writeSource = await appendBancoCatsRow(values);
+        const sheet = await fetchBancoCatsSheet(true);
+
+        res.status(201).json({
+          success: true,
+          data: {
+            headers,
+            rowSnapshot,
+            writeSource,
+            spreadsheetId,
+            syncedToSheet: true,
+            sheetRowCount: sheet.rowCount,
+          },
+          message: 'Serviço gravado na planilha e disponível no sistema.',
+        });
+        return;
+      }
+
+      // Fallback temporário: mantém no banco local até a gravação na planilha ser configurada.
+      const created = await createBancoCatsManual({
+        spreadsheetId,
+        headers,
+        rowSnapshot,
+        createdBy: req.user!.id,
+      });
+
+      invalidateBancoCatsSheetCache();
+
+      res.status(201).json({
+        success: true,
+        data: {
+          rowKey: created.rowKey,
+          headers: created.headers,
+          rowSnapshot: created.rowSnapshot,
+          createdBy: created.createdBy,
+          createdByName: created.createdByName,
+          createdAt: created.createdAt.toISOString(),
+          syncedToSheet: false,
+          writeConfigRequired: true,
+        },
+        message:
+          'Serviço incluído só no sistema. Configure a gravação na planilha para sincronização completa. ' +
+          googleSheetsWriteConfigError(),
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Erro ao incluir serviço';
+      next(error instanceof Error && 'statusCode' in error ? error : createError(message, 400));
+    }
+  }
+
+  async deleteBancoCatsServico(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      let spreadsheetId =
+        typeof req.body?.spreadsheetId === 'string' ? req.body.spreadsheetId.trim() : '';
+      const rowKey = typeof req.body?.rowKey === 'string' ? req.body.rowKey.trim() : '';
+
+      if (!rowKey.startsWith('manual:')) {
+        throw createError('Somente serviços incluídos no sistema podem ser excluídos por aqui.', 400);
+      }
+
+      if (!spreadsheetId) {
+        spreadsheetId = bancoCatsSpreadsheetId();
+      }
+
+      const deleted = await deleteBancoCatsManual({ spreadsheetId, rowKey });
+      if (!deleted) {
+        throw createError('Serviço não encontrado.', 404);
+      }
+
+      invalidateBancoCatsSheetCache();
+
+      res.json({
+        success: true,
+        message: 'Serviço removido do Banco CAT\'s.',
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Erro ao excluir serviço';
+      next(error instanceof Error && 'statusCode' in error ? error : createError(message, 400));
     }
   }
 
