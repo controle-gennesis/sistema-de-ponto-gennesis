@@ -193,8 +193,8 @@ export async function importKanbanBoardTrello(options: {
   replace?: boolean;
   memberMap?: Record<string, string>;
 }): Promise<KanbanTrelloImportResult> {
-  // Import síncrono de quadros grandes pode passar de 30s (padrão do axios).
-  // Alinhado ao timeout da transação Prisma no backend (5 min).
+  // Quadros grandes do Trello passam fácil de 30s (timeout padrão do axios).
+  // Timeout maior alinhado ao import por coluna no backend.
   const res = await api.post(
     '/kanban/board/import-trello',
     {
@@ -203,7 +203,7 @@ export async function importKanbanBoardTrello(options: {
       replace: !!options.replace,
       memberMap: options.memberMap,
     },
-    { timeout: 5 * 60 * 1000 },
+    { timeout: 10 * 60 * 1000 },
   );
   return res.data.data;
 }

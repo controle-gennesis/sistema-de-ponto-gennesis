@@ -1,7 +1,8 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Loader2, MessageSquare, Plus, Trash2 } from 'lucide-react';
+import { LicitacaoCommentEditor, LicitacaoCommentFormatted } from './LicitacaoCommentEditor';
 import {
   type ChecklistItemState,
   type ChecklistSectionDef,
@@ -41,6 +42,32 @@ export function LicitacaoChecklistEditor({
       return next;
     });
   }, []);
+
+  const closeAllComments = useCallback(() => {
+    setOpenCommentKeys((prev) => (prev.size === 0 ? prev : new Set()));
+  }, []);
+
+  useEffect(() => {
+    if (openCommentKeys.size === 0) return;
+
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (!target) return;
+
+      const host = target.closest('[data-checklist-comment-host]');
+      if (host) {
+        const hostKey = host.getAttribute('data-checklist-comment-host');
+        if (hostKey && openCommentKeys.has(hostKey)) return;
+      }
+
+      if (target.closest('[data-checklist-comment-toggle]')) return;
+
+      closeAllComments();
+    };
+
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => document.removeEventListener('pointerdown', onPointerDown);
+  }, [openCommentKeys, closeAllComments]);
 
   const submitNewItem = async (sectionId: string) => {
     const label = newItemLabel.trim();
@@ -85,6 +112,7 @@ export function LicitacaoChecklistEditor({
               return (
                 <li
                   key={key}
+                  data-checklist-comment-host={commentOpen ? key : undefined}
                   className="rounded-md border border-gray-200 bg-gray-50/80 px-2.5 py-2 dark:border-gray-700 dark:bg-gray-900/40"
                 >
                   <div className="flex items-start gap-2">
@@ -103,6 +131,7 @@ export function LicitacaoChecklistEditor({
                     <div className="flex shrink-0 items-center gap-0.5">
                       <button
                         type="button"
+                        data-checklist-comment-toggle={key}
                         disabled={disabled}
                         onClick={() => toggleComment(key)}
                         className={`inline-flex items-center gap-1 rounded px-1.5 py-1 text-[10px] font-medium transition-colors ${
@@ -131,18 +160,20 @@ export function LicitacaoChecklistEditor({
                     </div>
                   </div>
                   {commentOpen ? (
-                    <textarea
-                      value={row.comentario}
-                      disabled={disabled}
-                      onChange={(e) => onChange(key, { comentario: e.target.value })}
-                      placeholder="Comentário…"
-                      rows={3}
-                      className="mt-1.5 min-h-[4.5rem] w-full resize-y rounded border border-gray-200 bg-white px-2 py-1.5 text-xs leading-relaxed dark:border-gray-600 dark:bg-gray-900"
-                    />
+                    <div className="mt-1.5 space-y-1">
+                      <LicitacaoCommentEditor
+                        value={row.comentario}
+                        disabled={disabled}
+                        onChange={(comentario) => onChange(key, { comentario })}
+                      />
+                      <p className="text-[10px] text-gray-400 dark:text-gray-500">
+                        Ctrl+B negrito · Ctrl+I itálico · Ctrl+U sublinhado · Tab indenta · &quot;-&quot; + espaço bolinha
+                      </p>
+                    </div>
                   ) : hasComment ? (
-                    <p className="mt-1 line-clamp-2 whitespace-pre-wrap text-[10px] italic text-amber-700 dark:text-amber-400/90">
-                      {row.comentario.trim()}
-                    </p>
+                    <div className="mt-1.5 text-xs text-gray-700 dark:text-gray-300">
+                      <LicitacaoCommentFormatted text={row.comentario} />
+                    </div>
                   ) : null}
                 </li>
               );

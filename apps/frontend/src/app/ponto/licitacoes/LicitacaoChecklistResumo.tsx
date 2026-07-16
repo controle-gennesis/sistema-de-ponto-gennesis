@@ -2,6 +2,7 @@
 
 import { CheckSquare, MessageSquare } from 'lucide-react';
 import type { ChecklistResumoSection } from './licitacaoChecklist';
+import { LicitacaoCommentFormatted } from './LicitacaoCommentEditor';
 
 type Props = {
   sections: ChecklistResumoSection[];
@@ -102,10 +103,12 @@ export function LicitacaoChecklistResumo({
                       <div className="min-w-0 flex-1">
                         <p className="text-sm text-gray-900 dark:text-gray-100">{item.label}</p>
                         {item.comentario ? (
-                          <p className="mt-1.5 flex items-start gap-1.5 text-sm text-gray-600 dark:text-gray-300">
+                          <div className="mt-1.5 flex items-start gap-1.5 text-sm text-gray-600 dark:text-gray-300">
                             <MessageSquare className="mt-0.5 h-3.5 w-3.5 shrink-0 opacity-60" />
-                            <span className="whitespace-pre-wrap">{item.comentario}</span>
-                          </p>
+                            <div className="min-w-0 flex-1">
+                              <LicitacaoCommentFormatted text={item.comentario} />
+                            </div>
+                          </div>
                         ) : (
                           <p className="mt-1 text-xs italic text-gray-400">Sem comentário</p>
                         )}

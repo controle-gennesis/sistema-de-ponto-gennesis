@@ -266,7 +266,13 @@ export class KanbanController {
         return next(createError(msg, 404));
       }
       if (msg && msg !== KANBAN_FORBIDDEN) {
-        return next(createError(msg, 400));
+        const friendly = /timeout|Transaction already closed|expired transaction/i.test(msg)
+          ? 'A importação demorou demais. Tente de novo; o arquivo é muito grande.'
+          : msg;
+        const status = /timeout|Transaction already closed|expired transaction/i.test(msg)
+          ? 408
+          : 400;
+        return next(createError(friendly, status));
       }
       handleKanbanError(error, next);
     }
