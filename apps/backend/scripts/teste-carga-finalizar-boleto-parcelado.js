@@ -46,7 +46,7 @@ import exec from 'k6/execution';
 import { Counter } from 'k6/metrics';
 
 import { getUserCredentials, loginJsonBody } from './carga-auth.js';
-import { p95 } from './carga-thresholds.js';
+import { p95, k6SetupTimeout } from './carga-thresholds.js';
 
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:5000/api';
 
@@ -73,6 +73,8 @@ const ocFinalized = new Counter('oc_finalized');
 
 
 export const options = {
+
+  setupTimeout: k6SetupTimeout(),
 
   scenarios: {
 
@@ -273,6 +275,8 @@ function fetchReadyForFinalization(token) {
   const ready = [];
 
   for (const o of candidates) {
+    // Para cedo: setup só precisa de ITERATIONS OCs (evita N GETs sob latência Railway)
+    if (ready.length >= ITERATIONS) break;
 
     const detail = fetchOrderDetail(token, o.id);
 

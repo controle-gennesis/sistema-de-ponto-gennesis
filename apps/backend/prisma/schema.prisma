@@ -3187,3 +3187,88 @@ model LicitacaoDocumento {
   @@index([licitacaoId])
   @@map("licitacao_documentos")
 }
+
+/// Cadastro de responsáveis técnicos (CREA) para o módulo de Licitações.
+model ResponsavelTecnico {
+  id             String    @id @default(cuid())
+  crea           String
+  uf             String
+  empresa        String?
+  profissional   String
+  cpf            String?
+  registro       String?
+  dataInicio     DateTime?
+  titulo         String?
+  artCargoFuncao String?
+  protocolo      String?
+  baixaEm        DateTime?
+  anuidade2026   String?
+  status         String    @default("ATIVO")
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([crea])
+  @@index([profissional])
+  @@index([cpf])
+  @@index([status])
+  @@map("responsaveis_tecnicos")
+}
+
+/// Controle de anuidade CREA para o módulo de Licitações.
+model ControleAnuidade {
+  id                 String    @id @default(cuid())
+  pagosPelo          String?
+  empresa            String?
+  profissional       String
+  porqueDesconto     String?
+  crea               String?
+  cpfCnpj            String?
+  valor              Decimal?  @db.Decimal(14, 2)
+  dataVencimento     DateTime?
+  dataParaPagamento  DateTime?
+  dataPagamento      DateTime?
+  status             String    @default("EM_ABERTA")
+  fluig              String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@index([profissional])
+  @@index([empresa])
+  @@index([crea])
+  @@index([cpfCnpj])
+  @@index([status])
+  @@map("controle_anuidades")
+}
+
+/// Controle de pagamentos de ART's / Protocolos (módulo Licitações).
+model ControlePagamentoArt {
+  id               String    @id @default(cuid())
+  empresa          String?
+  contratante      String?
+  cnpjCpf          String?
+  contrato         String?
+  observacoes      String?
+  vigenciaInicio   DateTime?
+  vigenciaTermino  DateTime?
+  renovacao        DateTime?
+  art              String?
+  valor            Decimal?  @db.Decimal(14, 2)
+  profissional     String
+  vencDoBoleto     DateTime?
+  status           String    @default("EM_ABERTA")
+  pago             String?
+  solicitaEm       DateTime?
+  pagoEm           DateTime?
+  fluig            String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([empresa])
+  @@index([contratante])
+  @@index([cnpjCpf])
+  @@index([contrato])
+  @@index([art])
+  @@index([profissional])
+  @@index([status])
+  @@map("controle_pagamentos_art")
+}

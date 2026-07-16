@@ -45,3 +45,12 @@ export function p95(localMs, prodMs) {
   const ms = isProductionLoadEnv() ? prod : local;
   return `p(95)<${ms}`;
 }
+
+/**
+ * Timeout do bloco setup() do k6 (default do k6: 60s).
+ * Produção: 180s (setup com listagem + N GETs de detalhe sob latência Railway).
+ * Local: 120s (margem acima do default).
+ */
+export function k6SetupTimeout() {
+  return isProductionLoadEnv() ? '180s' : '120s';
+}

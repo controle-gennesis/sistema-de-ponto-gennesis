@@ -35,7 +35,7 @@ import {
   formatOsContextsSummary,
 } from './carga-cc-context.js';
 import { getUserCredentials, loginJsonBody } from './carga-auth.js';
-import { p95 } from './carga-thresholds.js';
+import { p95, k6SetupTimeout } from './carga-thresholds.js';
 
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:5000/api';
 const MATERIAL_ID = __ENV.MATERIAL_ID || 'cmr0wp8qf000n47fczdmn8ybb';
@@ -49,6 +49,7 @@ const rmCreated = new Counter('rm_created');
 const USER = getUserCredentials();
 
 const seedOptions = {
+  setupTimeout: k6SetupTimeout(),
   scenarios: {
     seed_rms: {
       executor: 'shared-iterations',
@@ -66,6 +67,7 @@ const seedOptions = {
 };
 
 const loadOptions = {
+  setupTimeout: k6SetupTimeout(),
   scenarios: {
     suprimentos: {
       executor: 'ramping-vus',

@@ -125,6 +125,24 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
   },
   { key: pathToModuleKey('/ponto/licitacoes'), name: 'Licitações', href: '/ponto/licitacoes', category: 'Contratos e Licitações' },
   {
+    key: pathToModuleKey('/ponto/responsaveis-tecnicos'),
+    name: 'Responsáveis Técnicos',
+    href: '/ponto/responsaveis-tecnicos',
+    category: 'Contratos e Licitações',
+  },
+  {
+    key: pathToModuleKey('/ponto/controle-anuidade'),
+    name: 'Controle de Anuidade',
+    href: '/ponto/controle-anuidade',
+    category: 'Contratos e Licitações',
+  },
+  {
+    key: pathToModuleKey('/ponto/controle-pagamentos-art'),
+    name: "Controle de Pagamentos ART's / Protocolos",
+    href: '/ponto/controle-pagamentos-art',
+    category: 'Contratos e Licitações',
+  },
+  {
     key: pathToModuleKey('/ponto/contratos/medicao'),
     name: 'Medições',
     href: '/ponto/contratos/medicao',

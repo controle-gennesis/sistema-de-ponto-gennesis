@@ -29,7 +29,7 @@ import { check, sleep, fail } from 'k6';
 import exec from 'k6/execution';
 import { Counter } from 'k6/metrics';
 import { getUserCredentials, loginJsonBody } from './carga-auth.js';
-import { p95 } from './carga-thresholds.js';
+import { p95, k6SetupTimeout } from './carga-thresholds.js';
 
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:5000/api';
 const VUS = Math.max(1, Number(__ENV.VUS || 5));
@@ -40,6 +40,7 @@ const USER = getUserCredentials();
 const rmApproved = new Counter('rm_approved');
 
 export const options = {
+  setupTimeout: k6SetupTimeout(),
   scenarios: {
     approve_rms: {
       executor: 'shared-iterations',

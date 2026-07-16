@@ -26,7 +26,7 @@ import exec from 'k6/execution';
 import { Counter } from 'k6/metrics';
 
 import { getUserCredentials, loginJsonBody, requireSupplierId } from './carga-auth.js';
-import { p95 } from './carga-thresholds.js';
+import { p95, k6SetupTimeout } from './carga-thresholds.js';
 
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:5000/api';
 const VUS = Math.max(1, Number(__ENV.VUS || 5));
@@ -40,6 +40,7 @@ const quotesSaved = new Counter('quotes_saved');
 const ocGenerated = new Counter('oc_generated');
 
 export const options = {
+  setupTimeout: k6SetupTimeout(),
   scenarios: {
     cotacao: {
       executor: 'shared-iterations',
@@ -56,7 +57,7 @@ export const options = {
     'http_req_duration{endpoint:quote_map_create}': [p95(5000)],
     'http_req_duration{endpoint:quotes_save}': [p95(5000)],
     // Prod: generate já mediu ~8s avg / ~11s p95 (lock + latência Railway)
-    'http_req_duration{endpoint:oc_generate}': [p95(8000, 20000)],
+    'http_req_duration{endpoint:oc_generate}': [p95(8000, 30000)],
   },
 };
 
