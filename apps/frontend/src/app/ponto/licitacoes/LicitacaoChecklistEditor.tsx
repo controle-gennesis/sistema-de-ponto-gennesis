@@ -131,17 +131,17 @@ export function LicitacaoChecklistEditor({
                     </div>
                   </div>
                   {commentOpen ? (
-                    <input
-                      type="text"
+                    <textarea
                       value={row.comentario}
                       disabled={disabled}
                       onChange={(e) => onChange(key, { comentario: e.target.value })}
                       placeholder="Comentário…"
-                      className="mt-1.5 h-8 w-full rounded border border-gray-200 bg-white px-2 text-xs dark:border-gray-600 dark:bg-gray-900"
+                      rows={3}
+                      className="mt-1.5 min-h-[4.5rem] w-full resize-y rounded border border-gray-200 bg-white px-2 py-1.5 text-xs leading-relaxed dark:border-gray-600 dark:bg-gray-900"
                     />
                   ) : hasComment ? (
-                    <p className="mt-1 truncate text-[10px] italic text-amber-700 dark:text-amber-400/90">
-                      Comentário salvo — clique em Comentário para ver ou editar
+                    <p className="mt-1 line-clamp-2 whitespace-pre-wrap text-[10px] italic text-amber-700 dark:text-amber-400/90">
+                      {row.comentario.trim()}
                     </p>
                   ) : null}
                 </li>

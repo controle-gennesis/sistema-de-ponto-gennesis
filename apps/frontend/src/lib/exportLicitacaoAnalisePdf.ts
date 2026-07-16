@@ -37,6 +37,21 @@ const COMPANY = {
 const FOOTER_RESERVE = 14;
 const MARGIN = 15;
 
+/** Preserva quebras de linha do comentário e ainda envolve por largura. */
+function wrapMultilineText(doc: jsPDF, text: string, maxWidth: number): string[] {
+  const paragraphs = text.replace(/\r\n/g, '\n').split('\n');
+  const lines: string[] = [];
+  for (const paragraph of paragraphs) {
+    if (!paragraph) {
+      lines.push('');
+      continue;
+    }
+    const wrapped = doc.splitTextToSize(paragraph, maxWidth) as string[];
+    lines.push(...wrapped);
+  }
+  return lines;
+}
+
 function getPageBottom(doc: jsPDF): number {
   return doc.internal.pageSize.getHeight() - MARGIN - FOOTER_RESERVE;
 }
@@ -322,7 +337,7 @@ function measureItemBlockHeight(
   const labelLines = doc.splitTextToSize(item.label, innerW - 14) as string[];
   let h = 8 + labelLines.length * 4.2;
   if (item.comentario.trim()) {
-    const commentLines = doc.splitTextToSize(item.comentario.trim(), innerW - 8) as string[];
+    const commentLines = wrapMultilineText(doc, item.comentario.trim(), innerW - 8);
     h += 3 + commentLines.length * 4;
   } else {
     h += 5;
@@ -362,10 +377,10 @@ function drawChecklistItem(
   if (item.comentario.trim()) {
     doc.setFontSize(8);
     doc.setTextColor(...TEXT_MUTED);
-    const commentLines = doc.splitTextToSize(item.comentario.trim(), contentW - 18) as string[];
+    const commentLines = wrapMultilineText(doc, item.comentario.trim(), contentW - 18);
     ly += 1;
     for (const line of commentLines) {
-      doc.text(line, MARGIN + 10, ly);
+      doc.text(line || ' ', MARGIN + 10, ly);
       ly += 4;
     }
   } else {
