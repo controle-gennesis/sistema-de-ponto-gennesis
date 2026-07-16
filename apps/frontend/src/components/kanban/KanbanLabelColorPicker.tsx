@@ -118,53 +118,29 @@ export interface KanbanLabelColorPickerProps {
   className?: string;
 }
 
-export function KanbanLabelColorPicker({ color, onChange, className }: KanbanLabelColorPickerProps) {
+/** Mapa HSV inline (saturação/brilho + matiz), sem popover. */
+export function KanbanLabelColorMapInline({
+  color,
+  onChange,
+  className,
+}: {
+  color: string;
+  onChange: (color: string) => void;
+  className?: string;
+}) {
   const safeColor = safeLabelHex(color);
-  const popoverId = useId();
-  const rootRef = useRef<HTMLDivElement>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const [open, setOpen] = useState(false);
-  const [panelPos, setPanelPos] = useState<{ top: number; left: number } | null>(null);
   const [hsv, setHsv] = useState(() => hexToHsv(safeColor));
   const hsvRef = useRef(hsv);
   hsvRef.current = hsv;
-
   const previewHex = hsvToHex(hsv.h, hsv.s, hsv.v);
 
   useEffect(() => {
-    if (!open) setHsv(hexToHsv(safeLabelHex(color)));
-  }, [color, open]);
-
-  useLayoutEffect(() => {
-    if (!open || !triggerRef.current) {
-      setPanelPos(null);
-      return;
+    const nextHex = safeLabelHex(color);
+    const currentHex = hsvToHex(hsvRef.current.h, hsvRef.current.s, hsvRef.current.v);
+    if (nextHex !== currentHex) {
+      setHsv(hexToHsv(nextHex));
     }
-    const rect = triggerRef.current.getBoundingClientRect();
-    const panelWidth = 220;
-    const left = Math.min(rect.left, window.innerWidth - panelWidth - 12);
-    setPanelPos({ top: rect.bottom + 8, left: Math.max(12, left) });
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
-    function onDocPointer(e: PointerEvent) {
-      const t = e.target as Node;
-      if (rootRef.current?.contains(t)) return;
-      const panel = document.getElementById(popoverId);
-      if (panel?.contains(t)) return;
-      setOpen(false);
-    }
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') setOpen(false);
-    }
-    document.addEventListener('pointerdown', onDocPointer);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('pointerdown', onDocPointer);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [open]);
+  }, [color]);
 
   const applyHsv = useCallback(
     (next: { h: number; s: number; v: number }) => {
@@ -233,6 +209,89 @@ export function KanbanLabelColorPicker({ color, onChange, className }: KanbanLab
   );
 
   return (
+    <div className={clsx('w-full', className)}>
+      <div
+        className="relative h-40 w-full cursor-crosshair touch-none rounded-lg"
+        style={{ backgroundColor: hueCss(hsv.h) }}
+        onPointerDown={bindPlane}
+      >
+        <div
+          className="absolute inset-0 rounded-lg"
+          style={{ background: 'linear-gradient(to right, #fff, transparent)' }}
+        />
+        <div
+          className="absolute inset-0 rounded-lg"
+          style={{ background: 'linear-gradient(to top, #000, transparent)' }}
+        />
+        <span
+          className="pointer-events-none absolute h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white shadow-md ring-1 ring-black/20"
+          style={{
+            left: `${hsv.s * 100}%`,
+            top: `${(1 - hsv.v) * 100}%`,
+            backgroundColor: previewHex,
+          }}
+        />
+      </div>
+
+      <div
+        className="relative mt-3 h-3 w-full cursor-pointer touch-none rounded-full"
+        style={{
+          background: 'linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00)',
+        }}
+        onPointerDown={bindHue}
+      >
+        <span
+          className="pointer-events-none absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white shadow ring-1 ring-black/20"
+          style={{
+            left: `${(hsv.h / 360) * 100}%`,
+            backgroundColor: hueCss(hsv.h),
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
+export function KanbanLabelColorPicker({ color, onChange, className }: KanbanLabelColorPickerProps) {
+  const safeColor = safeLabelHex(color);
+  const popoverId = useId();
+  const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const [open, setOpen] = useState(false);
+  const [panelPos, setPanelPos] = useState<{ top: number; left: number } | null>(null);
+
+  useLayoutEffect(() => {
+    if (!open || !triggerRef.current) {
+      setPanelPos(null);
+      return;
+    }
+    const rect = triggerRef.current.getBoundingClientRect();
+    const panelWidth = 220;
+    const left = Math.min(rect.left, window.innerWidth - panelWidth - 12);
+    setPanelPos({ top: rect.bottom + 8, left: Math.max(12, left) });
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    function onDocPointer(e: PointerEvent) {
+      const t = e.target as Node;
+      if (rootRef.current?.contains(t)) return;
+      const panel = document.getElementById(popoverId);
+      if (panel?.contains(t)) return;
+      setOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setOpen(false);
+    }
+    document.addEventListener('pointerdown', onDocPointer);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('pointerdown', onDocPointer);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open, popoverId]);
+
+  return (
     <div ref={rootRef} className={clsx('relative', className)}>
       <button
         ref={triggerRef}
@@ -246,7 +305,7 @@ export function KanbanLabelColorPicker({ color, onChange, className }: KanbanLab
       >
         <span
           className="absolute inset-0 rounded-xl"
-          style={{ backgroundColor: previewHex }}
+          style={{ backgroundColor: safeColor }}
         />
       </button>
 
@@ -259,48 +318,10 @@ export function KanbanLabelColorPicker({ color, onChange, className }: KanbanLab
             role="dialog"
             aria-label="Seletor de cor"
             className="fixed w-[220px] rounded-xl border border-gray-200 bg-white p-3 shadow-xl dark:border-gray-600 dark:bg-gray-900"
-            style={{ top: panelPos.top, left: panelPos.left, zIndex: 1200 }}
+            style={{ top: panelPos.top, left: panelPos.left, zIndex: 2300 }}
             onPointerDown={(e) => e.stopPropagation()}
           >
-            <div
-              className="relative h-36 w-full cursor-crosshair touch-none rounded-lg"
-              style={{ backgroundColor: hueCss(hsv.h) }}
-              onPointerDown={bindPlane}
-            >
-              <div
-                className="absolute inset-0 rounded-lg"
-                style={{ background: 'linear-gradient(to right, #fff, transparent)' }}
-              />
-              <div
-                className="absolute inset-0 rounded-lg"
-                style={{ background: 'linear-gradient(to top, #000, transparent)' }}
-              />
-              <span
-                className="pointer-events-none absolute h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white shadow-md ring-1 ring-black/20"
-                style={{
-                  left: `${hsv.s * 100}%`,
-                  top: `${(1 - hsv.v) * 100}%`,
-                  backgroundColor: previewHex,
-                }}
-              />
-            </div>
-
-            <div
-              className="relative mt-3 h-3 w-full cursor-pointer touch-none rounded-full"
-              style={{
-                background:
-                  'linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00)',
-              }}
-              onPointerDown={bindHue}
-            >
-              <span
-                className="pointer-events-none absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white shadow ring-1 ring-black/20"
-                style={{
-                  left: `${(hsv.h / 360) * 100}%`,
-                  backgroundColor: hueCss(hsv.h),
-                }}
-              />
-            </div>
+            <KanbanLabelColorMapInline color={color} onChange={onChange} />
           </div>,
           document.body,
         )}

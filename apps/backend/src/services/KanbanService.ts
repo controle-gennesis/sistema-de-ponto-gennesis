@@ -325,9 +325,13 @@ function formatChecklistItem(item: {
 
 const memberUserSelect = { id: true, name: true, profilePhotoUrl: true } as const;
 
-/** Include leve para listagem no quadro (sem join de todos os membros). */
+/** Include da listagem do quadro (membros leves para avatares no card). */
 const boardListCardInclude = {
   assignee: { select: memberUserSelect },
+  members: {
+    orderBy: { createdAt: 'asc' as const },
+    include: { user: { select: memberUserSelect } },
+  },
   _count: { select: { comments: true, attachments: true } },
 } as const;
 

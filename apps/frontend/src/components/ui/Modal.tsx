@@ -52,6 +52,8 @@ export interface ModalProps {
   elevated?: boolean;
   /** Quando false, o corpo não rola — o filho controla o overflow (ex.: Kanban card). */
   scrollContent?: boolean;
+  /** Classes extras no wrapper interno do conteúdo (ex.: ajustar padding). */
+  contentClassName?: string;
 }
 
 export const Modal: React.FC<ModalProps> = ({
@@ -67,6 +69,7 @@ export const Modal: React.FC<ModalProps> = ({
   contentOverflowVisible = false,
   elevated = false,
   scrollContent = true,
+  contentClassName,
 }) => {
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -184,7 +187,7 @@ export const Modal: React.FC<ModalProps> = ({
             className={clsx(
               'flex-1 min-h-0',
               scrollContent
-                ? 'overflow-y-auto overscroll-contain [scrollbar-gutter:stable]'
+                ? 'overflow-y-auto overscroll-contain'
                 : 'flex min-h-0 flex-col overflow-hidden',
               contentOverflowVisible && scrollContent && 'overflow-x-visible',
             )}
@@ -193,6 +196,7 @@ export const Modal: React.FC<ModalProps> = ({
               className={clsx(
                 'p-6',
                 !scrollContent && 'flex min-h-0 flex-1 flex-col overflow-hidden',
+                contentClassName,
               )}
             >
               {children}

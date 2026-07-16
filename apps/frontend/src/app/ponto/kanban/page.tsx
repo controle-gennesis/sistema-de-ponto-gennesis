@@ -7,7 +7,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Loading } from '@/components/ui/Loading';
 import { KanbanCardModal } from '@/components/kanban/KanbanCardModal';
-import { KanbanBoardLabelSettings } from '@/components/kanban/KanbanBoardLabelSettings';
+import { KanbanCardLabelsPanel } from '@/components/kanban/KanbanCardLabelsPopover';
+import { KanbanLabelColorMapInline } from '@/components/kanban/KanbanLabelColorPicker';
 import { KanbanCreateBoardModal } from '@/components/kanban/KanbanCreateBoardModal';
 import { KanbanBoardShareModal } from '@/components/kanban/KanbanBoardShareModal';
 import { Modal } from '@/components/ui/Modal';
@@ -70,6 +71,7 @@ import { KANBAN_PRIORITY_CONFIG, KANBAN_PRIORITY_ORDER } from '@/components/kanb
 import { KanbanPriorityBars } from '@/components/kanban/KanbanPriorityBars';
 import {
   getKanbanLabelPalette,
+  getKanbanLabelTextColor,
   normalizeKanbanLabels,
   type KanbanLabelPreset,
 } from '@/components/kanban/kanbanLabels';
@@ -95,6 +97,7 @@ import {
   ArrowRightLeft,
   AlertCircle,
   ChevronDown,
+  ChevronLeft,
   Clock,
   Flag,
   Circle,
@@ -522,6 +525,150 @@ function ProgressRing({ value }: { value: number }) {
   );
 }
 
+function CardLabelPill({
+  color,
+  text,
+  expanded,
+  onToggle,
+}: {
+  color: string;
+  text: string;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  const [tooltipVisible, setTooltipVisible] = useState(false);
+  const [coords, setCoords] = useState({ top: 0, left: 0 });
+  const triggerRef = useRef<HTMLButtonElement>(null);
+
+  const showTooltip = useCallback(() => {
+    if (expanded) return;
+    const el = triggerRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    setCoords({
+      top: rect.top - 8,
+      left: rect.left + rect.width / 2,
+    });
+    setTooltipVisible(true);
+  }, [expanded]);
+
+  const hideTooltip = useCallback(() => {
+    setTooltipVisible(false);
+  }, []);
+
+  useEffect(() => {
+    if (expanded) setTooltipVisible(false);
+  }, [expanded]);
+
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          e.preventDefault();
+          onToggle();
+        }}
+        onMouseEnter={showTooltip}
+        onMouseLeave={hideTooltip}
+        onFocus={showTooltip}
+        onBlur={hideTooltip}
+        className={clsx(
+          'inline-flex shrink-0 items-center overflow-hidden rounded-sm text-left',
+          'transition-[max-width,height,padding,filter] duration-200 ease-out',
+          'hover:brightness-[0.82] hover:saturate-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40',
+          expanded ? 'h-5 max-w-[9rem] px-2' : 'h-2 max-w-[2.5rem] px-0',
+        )}
+        style={{
+          backgroundColor: color,
+          width: 'max-content',
+          minWidth: '2.5rem',
+        }}
+        aria-expanded={expanded}
+        aria-label={text || 'Etiqueta'}
+      >
+        <span
+          className={clsx(
+            'block max-w-full truncate whitespace-nowrap text-[11px] font-semibold leading-none',
+            'transition-opacity duration-200 ease-out',
+            expanded ? 'opacity-100' : 'opacity-0',
+          )}
+          style={{ color: getKanbanLabelTextColor(color) }}
+          aria-hidden={!expanded}
+        >
+          {text || 'Sem nome'}
+        </span>
+      </button>
+      {tooltipVisible &&
+        !expanded &&
+        text &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            role="tooltip"
+            style={{
+              position: 'fixed',
+              top: coords.top,
+              left: coords.left,
+              transform: 'translate(-50%, -100%)',
+              zIndex: 9999,
+            }}
+            className="pointer-events-none max-w-[14rem] whitespace-nowrap rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700 shadow-lg dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200"
+          >
+            {text}
+          </div>,
+          document.body,
+        )}
+    </>
+  );
+}
+
+function CardLabelsRow({
+  labels,
+  labelPresets,
+}: {
+  labels: KanbanCard['labels'];
+  labelPresets?: readonly KanbanLabelPreset[];
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const rowRef = useRef<HTMLDivElement>(null);
+  const normalized = normalizeKanbanLabels(labels, labelPresets);
+
+  useEffect(() => {
+    if (!expanded) return;
+    function handlePointerDown(e: MouseEvent | TouchEvent) {
+      const el = rowRef.current;
+      if (!el) return;
+      const target = e.target as Node | null;
+      if (target && el.contains(target)) return;
+      setExpanded(false);
+    }
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('touchstart', handlePointerDown);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('touchstart', handlePointerDown);
+    };
+  }, [expanded]);
+
+  if (normalized.length === 0) return null;
+
+  return (
+    <div ref={rowRef} className="mb-2 flex flex-wrap gap-1">
+      {normalized.map((l) => (
+        <CardLabelPill
+          key={`${l.color}-${l.text}`}
+          color={l.color}
+          text={l.text}
+          expanded={expanded}
+          onToggle={() => setExpanded((v) => !v)}
+        />
+      ))}
+    </div>
+  );
+}
+
 function getCardMembers(card: KanbanCard) {
   if (card.members && card.members.length > 0) return card.members;
   if (card.assignee && card.assignee !== 'Sem responsável') {
@@ -539,24 +686,51 @@ function getCardMembers(card: KanbanCard) {
 
 function CardMemberAvatars({ card }: { card: KanbanCard }) {
   const list = getCardMembers(card);
+  const [hoveredUserId, setHoveredUserId] = useState<string | null>(null);
 
   if (list.length === 0) return null;
 
+  const visible = list.slice(0, 4);
+
   return (
     <div className="flex items-center -space-x-2">
-      {list.slice(0, 4).map((m) => (
-        <KanbanUserAvatar
-          key={m.userId}
-          name={m.name}
-          profilePhotoUrl={m.profilePhotoUrl}
-          colorKey={m.userId}
-          colorClass={m.avatarColor}
-          size="sm"
-          className="ring-2 ring-white dark:ring-gray-800 shadow-sm"
-        />
-      ))}
+      {visible.map((m, index) => {
+        const isHovered = hoveredUserId === m.userId;
+        return (
+          <div
+            key={m.userId}
+            className="relative"
+            style={{
+              zIndex: isHovered ? visible.length + 10 : visible.length - index,
+            }}
+            onMouseEnter={() => setHoveredUserId(m.userId)}
+            onMouseLeave={() => setHoveredUserId(null)}
+          >
+            <KanbanUserAvatar
+              name={m.name}
+              profilePhotoUrl={m.profilePhotoUrl}
+              colorKey={m.userId}
+              colorClass={m.avatarColor}
+              size="sm"
+              showNativeTitle={false}
+              className="ring-2 ring-white shadow-sm transition-transform duration-150 dark:ring-gray-800"
+            />
+            {isHovered ? (
+              <div
+                role="tooltip"
+                className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-1.5 -translate-x-1/2 whitespace-nowrap rounded-md border border-gray-200 bg-white px-2 py-1 text-[11px] font-medium text-gray-700 shadow-lg dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200"
+              >
+                {m.name}
+              </div>
+            ) : null}
+          </div>
+        );
+      })}
       {list.length > 4 && (
-        <div className="w-7 h-7 rounded-full bg-gray-200 dark:bg-gray-600 ring-2 ring-white dark:ring-gray-800 flex items-center justify-center text-[10px] font-bold text-gray-700 dark:text-gray-200">
+        <div
+          className="relative flex h-7 w-7 items-center justify-center rounded-full bg-gray-200 text-[10px] font-bold text-gray-700 ring-2 ring-white dark:bg-gray-600 dark:text-gray-200 dark:ring-gray-800"
+          style={{ zIndex: 0 }}
+        >
           +{list.length - 4}
         </div>
       )}
@@ -669,31 +843,20 @@ function KanbanCardItem({
         'group relative rounded-2xl border border-transparent bg-white p-4 dark:bg-gray-800',
         menuOpen && 'z-30',
         'cursor-pointer select-none shadow-[0_1px_3px_rgba(0,0,0,0.08)]',
-        'transition-[transform,box-shadow,border-color] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]',
+        'transition-[background-color,box-shadow,border-color] duration-150 ease-out',
         'motion-reduce:transition-none',
         'active:cursor-grabbing',
         isDragging
           ? 'z-10 opacity-50'
           : [
-              'hover:-translate-y-1.5 hover:scale-[1.015]',
-              'hover:border-gray-200/80 hover:shadow-[0_14px_32px_-10px_rgba(0,0,0,0.14),0_8px_16px_-8px_rgba(0,0,0,0.1)]',
-              'dark:hover:border-gray-600/80 dark:hover:shadow-[0_14px_32px_-10px_rgba(0,0,0,0.5),0_8px_16px_-8px_rgba(0,0,0,0.35)]',
-              'motion-reduce:hover:translate-y-0 motion-reduce:hover:scale-100',
+              'hover:border-gray-200/70 hover:bg-gray-50/80 hover:shadow-[0_2px_8px_rgba(0,0,0,0.06)]',
+              'dark:hover:border-gray-600/60 dark:hover:bg-gray-700/40 dark:hover:shadow-none',
             ],
       )}
     >
-      <span
-        aria-hidden
-        className={clsx(
-          'pointer-events-none absolute inset-0 rounded-2xl overflow-hidden opacity-0 transition-opacity duration-300',
-          'bg-gradient-to-br from-white/50 via-white/10 to-transparent',
-          'dark:from-white/[0.07] dark:via-transparent',
-          !isDragging && 'group-hover:opacity-100',
-        )}
-      />
       {!readOnly && (
         <div
-          className="absolute top-3 right-3 z-[2] opacity-0 transition-all duration-300 group-hover:opacity-100 group-hover:translate-y-0 translate-y-0.5"
+          className="absolute top-3 right-3 z-[2] opacity-0 transition-opacity duration-150 group-hover:opacity-100"
           ref={menuRef}
         >
           <button
@@ -735,20 +898,15 @@ function KanbanCardItem({
 
       <div className="relative z-[1]">
       {card.labels.length > 0 && (
-        <div className="flex flex-wrap gap-1 mb-2">
-          {normalizeKanbanLabels(card.labels, labelPresets).map((l) => (
-            <span
-              key={`${l.color}-${l.text}`}
-              className="h-2 w-10 rounded-sm shrink-0"
-              style={{ backgroundColor: l.color }}
-              title={l.text}
-            />
-          ))}
-        </div>
+        <CardLabelsRow labels={card.labels} labelPresets={labelPresets} />
       )}
 
       <h4 className="text-[15px] font-semibold text-gray-900 dark:text-gray-100 leading-snug pr-6 mb-1.5">
-        {card.title}
+        {card.title.trim() ? (
+          card.title
+        ) : (
+          <span className="font-medium text-gray-400 dark:text-gray-500">Sem título</span>
+        )}
       </h4>
 
       {card.description && (
@@ -1330,8 +1488,6 @@ function ColumnModal({ mode, initial, onClose, onSave, saving }: ColumnModalProp
   const [color, setColor] = useState(initial?.color ?? '#6B7280');
   const [limit, setLimit] = useState<string>(initial?.limit ? String(initial.limit) : '');
 
-  const colorOptions = ['#6B7280', '#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899', '#14B8A6'];
-
   return (
     <Modal
       isOpen
@@ -1352,44 +1508,10 @@ function ColumnModal({ mode, initial, onClose, onSave, saving }: ColumnModalProp
           />
         </div>
         <div>
-          <label className={kanbanLabel}>Cor</label>
-          <div className="flex gap-2 flex-wrap [--kanban-swatch-ring-offset:#ffffff] dark:[--kanban-swatch-ring-offset:rgb(31,41,55)]">
-            {colorOptions.map((c) => {
-              const selected = color === c;
-              return (
-                <button
-                  key={c}
-                  type="button"
-                  onClick={() => setColor(c)}
-                  title={`Cor ${c}`}
-                  className={clsx(
-                    'relative w-8 h-8 rounded-full transition-all',
-                    selected ? 'scale-110 z-[1]' : 'hover:scale-105 opacity-80 hover:opacity-100',
-                  )}
-                  style={{
-                    backgroundColor: c,
-                    boxShadow: selected
-                      ? `0 0 0 2px var(--kanban-swatch-ring-offset, #fff), 0 0 0 5px ${c}`
-                      : undefined,
-                  }}
-                >
-                  {selected && (
-                    <span className="absolute inset-0 flex items-center justify-center">
-                      <svg
-                        className="w-3.5 h-3.5 text-white drop-shadow-sm"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                        strokeWidth={3}
-                      >
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                      </svg>
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
+          <p className="mb-2 text-xs font-medium text-gray-600 dark:text-gray-400">
+            Selecionar uma cor
+          </p>
+          <KanbanLabelColorMapInline color={color} onChange={setColor} />
         </div>
         <div>
           <label className={kanbanLabel}>Limite de cards (opcional)</label>
@@ -2117,6 +2239,11 @@ function KanbanPage() {
   >(null);
   const [colModal, setColModal] = useState<{ mode: 'create' | 'edit'; column?: KanbanColumn } | null>(null);
   const [labelSettingsOpen, setLabelSettingsOpen] = useState(false);
+  const [labelSettingsHeader, setLabelSettingsHeader] = useState<{
+    title: string;
+    showBack: boolean;
+    onBack?: () => void;
+  }>({ title: 'Etiquetas', showBack: false });
   const [exportingBoard, setExportingBoard] = useState(false);
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [importFileName, setImportFileName] = useState('');
@@ -2886,22 +3013,6 @@ function KanbanPage() {
             </div>
 
             <div className="flex flex-wrap items-center justify-end gap-2">
-              <KanbanBoardPicker
-                boards={boardsList ?? []}
-                currentDepartmentKey={board?.departmentKey}
-                defaultDepartmentKey={defaultDepartmentKey}
-                canCreateBoard={!isAdministrator}
-                onSelect={openBoard}
-                onSetDefault={setAsDefaultBoard}
-                onCreateBoard={() => setCreateBoardOpen(true)}
-                onShare={(b) =>
-                  setShareTarget({ boardId: b.id, boardName: b.department })
-                }
-                onEditName={(b) =>
-                  setRenameBoardTarget({ boardId: b.id, name: b.department })
-                }
-                onDeleteBoard={setBoardDeleteTarget}
-              />
               {/* Search */}
               <div className="relative min-w-[240px] flex-1 sm:w-[280px] sm:flex-none">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
@@ -2923,6 +3034,22 @@ function KanbanPage() {
                   </button>
                 ) : null}
               </div>
+              <KanbanBoardPicker
+                boards={boardsList ?? []}
+                currentDepartmentKey={board?.departmentKey}
+                defaultDepartmentKey={defaultDepartmentKey}
+                canCreateBoard={!isAdministrator}
+                onSelect={openBoard}
+                onSetDefault={setAsDefaultBoard}
+                onCreateBoard={() => setCreateBoardOpen(true)}
+                onShare={(b) =>
+                  setShareTarget({ boardId: b.id, boardName: b.department })
+                }
+                onEditName={(b) =>
+                  setRenameBoardTarget({ boardId: b.id, name: b.department })
+                }
+                onDeleteBoard={setBoardDeleteTarget}
+              />
               {/* Filter */}
               <button
                 type="button"
@@ -2945,11 +3072,11 @@ function KanbanPage() {
                 type="button"
                 onClick={() => void handleExportTrello()}
                 disabled={exportingBoard || showBoardSkeleton || !board}
-                className="flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-semibold text-gray-800 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
-                title="Exportar JSON compatível com Trello"
+                className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 transition-colors outline-none hover:bg-gray-50 focus:ring-0 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                title={exportingBoard ? 'Exportando...' : 'Exportar'}
+                aria-label={exportingBoard ? 'Exportando' : 'Exportar'}
               >
-                <Download className="h-4 w-4 shrink-0" />
-                <span>{exportingBoard ? 'Exportando...' : 'Exportar'}</span>
+                <Download className="h-4 w-4" />
               </button>
               {!boardReadOnly && (
                 <>
@@ -2962,27 +3089,23 @@ function KanbanPage() {
                       setImportReplace(true);
                     }}
                     disabled={showBoardSkeleton || !board}
-                    className="flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-semibold text-gray-800 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
-                    title="Importar JSON do Trello ou export Gennesis"
+                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 transition-colors outline-none hover:bg-gray-50 focus:ring-0 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                    title="Importar"
+                    aria-label="Importar"
                   >
-                    <Upload className="h-4 w-4 shrink-0" />
-                    <span>Importar</span>
+                    <Upload className="h-4 w-4" />
                   </button>
                   <button
                     type="button"
-                    onClick={() => setLabelSettingsOpen(true)}
-                    className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg border bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                    onClick={() => {
+                      setLabelSettingsHeader({ title: 'Etiquetas', showBack: false });
+                      setLabelSettingsOpen(true);
+                    }}
+                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 transition-colors outline-none hover:bg-gray-50 focus:ring-0 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
                     title="Configurar etiquetas deste setor"
+                    aria-label="Etiquetas"
                   >
-                    <Tag className="w-4 h-4" />
-                    Etiquetas
-                  </button>
-                  <button
-                    onClick={() => setColModal({ mode: 'create' })}
-                    className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors shadow-sm"
-                  >
-                    <Plus className="w-4 h-4" />
-                    Nova Coluna
+                    <Tag className="h-4 w-4" />
                   </button>
                 </>
               )}
@@ -3245,17 +3368,44 @@ function KanbanPage() {
       {labelSettingsOpen && board && (
         <Modal
           isOpen
-          onClose={() => !savingLabelPresets && setLabelSettingsOpen(false)}
-          size="md"
-          title="Etiquetas do setor"
+          elevated
+          onClose={() => {
+            if (savingLabelPresets) return;
+            setLabelSettingsOpen(false);
+            setLabelSettingsHeader({ title: 'Etiquetas', showBack: false });
+          }}
+          size="sm"
+          title={
+            <div className="relative flex w-full items-center justify-center">
+              {labelSettingsHeader.showBack ? (
+                <button
+                  type="button"
+                  onClick={() => labelSettingsHeader.onBack?.()}
+                  className="absolute left-0 rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+                  aria-label="Voltar"
+                >
+                  <ChevronLeft className="h-5 w-5" />
+                </button>
+              ) : null}
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                {labelSettingsHeader.title}
+              </h3>
+            </div>
+          }
           closeOnOverlayClick={!savingLabelPresets}
+          contentClassName="!pt-4"
         >
-          <KanbanBoardLabelSettings
-            initialPresets={[...boardLabelPresets]}
-            departmentLabel={board.department}
-            saving={savingLabelPresets}
-            onClose={() => setLabelSettingsOpen(false)}
-            onSave={async (presets) => {
+          <KanbanCardLabelsPanel
+            variant="board"
+            labels={[]}
+            labelPresets={boardLabelPresets}
+            onHeaderChange={setLabelSettingsHeader}
+            onClose={() => {
+              setLabelSettingsOpen(false);
+              setLabelSettingsHeader({ title: 'Etiquetas', showBack: false });
+            }}
+            onSave={() => undefined}
+            onPresetsChange={async (presets) => {
               setSavingLabelPresets(true);
               try {
                 const updated = await updateKanbanBoardLabelPresets(
@@ -3265,7 +3415,6 @@ function KanbanPage() {
                 queryClient.setQueryData<KanbanBoard>(kanbanBoardQueryKey, (prev) =>
                   prev ? { ...prev, labelPresets: updated } : prev,
                 );
-                toast.success('Etiquetas do setor atualizadas');
               } catch (err: unknown) {
                 const msg =
                   err && typeof err === 'object' && 'response' in err
@@ -3295,6 +3444,15 @@ function KanbanPage() {
           initialCard={cardModal.mode === 'detail' ? cardModal.initialCard : undefined}
           initialColumn={cardModal.mode === 'detail' ? cardModal.initialColumn : undefined}
           labelPresets={[...boardLabelPresets]}
+          onLabelPresetsChange={async (presets) => {
+            const updated = await updateKanbanBoardLabelPresets(
+              presets,
+              departmentKeyParam ?? undefined,
+            );
+            queryClient.setQueryData<KanbanBoard>(kanbanBoardQueryKey, (prev) =>
+              prev ? { ...prev, labelPresets: updated } : prev,
+            );
+          }}
           currentUserId={meUser?.id}
           currentUser={
             meUser

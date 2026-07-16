@@ -15,6 +15,7 @@ import {
 } from '@/lib/kanban';
 import { CheckboxIndicator } from '@/components/ui/Checkbox';
 import { DatePickerField } from '@/components/ui/DatePickerField';
+import { Z_MODAL_STACKED } from '@/lib/zIndex';
 import { KanbanUserAvatar } from './KanbanUserAvatar';
 import { splitDateTime } from './kanbanDateTime';
 
@@ -33,7 +34,7 @@ function isOverdue(value: string): boolean {
   return date < t;
 }
 
-const POPOVER_Z = 1100;
+const POPOVER_Z = Z_MODAL_STACKED;
 
 function useFixedPopoverStyle(
   open: boolean,

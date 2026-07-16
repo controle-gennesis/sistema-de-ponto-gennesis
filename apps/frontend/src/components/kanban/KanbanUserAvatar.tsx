@@ -12,6 +12,9 @@ export interface KanbanUserAvatarProps {
   colorClass?: string | null;
   size?: 'sm' | 'md';
   className?: string;
+  style?: React.CSSProperties;
+  /** Se false, não usa o title nativo do browser (útil com tooltip custom). */
+  showNativeTitle?: boolean;
 }
 
 const sizeClasses = {
@@ -26,6 +29,8 @@ export function KanbanUserAvatar({
   colorClass,
   size = 'md',
   className,
+  style,
+  showNativeTitle = true,
 }: KanbanUserAvatarProps) {
   const photo = resolveApiMediaUrl(profilePhotoUrl ?? null);
   const bg = resolveKanbanAvatarBg(colorClass, colorKey ?? name);
@@ -38,7 +43,8 @@ export function KanbanUserAvatar({
         photo ? '' : bg,
         className,
       )}
-      title={name}
+      style={style}
+      title={showNativeTitle ? name : undefined}
     >
       {photo ? (
         <img src={photo} alt="" className="h-full w-full object-cover" referrerPolicy="no-referrer" />

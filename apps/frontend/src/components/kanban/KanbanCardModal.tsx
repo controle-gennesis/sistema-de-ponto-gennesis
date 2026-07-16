@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Loader2,
@@ -11,6 +11,8 @@ import {
   Clock,
   Paperclip,
   Pencil,
+  ChevronLeft,
+  Sparkles,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import toast from 'react-hot-toast';
@@ -23,6 +25,7 @@ import {
   type KanbanCardMember,
   type KanbanCard,
   type KanbanCardDetail,
+  type KanbanCardComment,
   type KanbanBoardCardChecklistPatch,
   boardCardToDetailPlaceholder,
   fetchKanbanCard,
@@ -123,6 +126,59 @@ function formatRelativeTimeLong(iso: string): string {
   });
 }
 
+type CardTimelineItem =
+  | {
+      kind: 'comment';
+      id: string;
+      createdAt: string;
+      comment: KanbanCardComment;
+    }
+  | {
+      kind: 'activity';
+      id: string;
+      createdAt: string;
+      text: string;
+      icon: 'created' | 'attachment';
+    };
+
+function buildCardTimeline(card: KanbanCardDetail): CardTimelineItem[] {
+  const items: CardTimelineItem[] = [];
+
+  if (card.createdAt) {
+    items.push({
+      kind: 'activity',
+      id: `activity-created-${card.id}`,
+      createdAt: card.createdAt,
+      text: 'Card criado',
+      icon: 'created',
+    });
+  }
+
+  for (const attachment of card.attachmentsList ?? []) {
+    const who = attachment.uploader?.name?.trim() || 'Alguém';
+    items.push({
+      kind: 'activity',
+      id: `activity-attachment-${attachment.id}`,
+      createdAt: attachment.createdAt,
+      text: `${who} anexou “${attachment.fileName}”`,
+      icon: 'attachment',
+    });
+  }
+
+  for (const comment of card.commentsList ?? []) {
+    items.push({
+      kind: 'comment',
+      id: comment.id,
+      createdAt: comment.createdAt,
+      comment,
+    });
+  }
+
+  return items.sort(
+    (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+  );
+}
+
 export interface KanbanCardModalCurrentUser {
   id: string;
   name: string;
@@ -141,6 +197,8 @@ export interface KanbanCardModalProps {
   currentUser?: KanbanCardModalCurrentUser | null;
   canViewKanbanValues?: boolean;
   labelPresets?: KanbanLabelPreset[];
+  /** Persiste etiquetas do setor ao criar/editar pelo card. */
+  onLabelPresetsChange?: (presets: KanbanLabelPreset[]) => void | Promise<void>;
   createInsertAt?: 'top' | 'bottom';
   onClose: () => void;
   onBoardRefresh: () => void;
@@ -172,6 +230,7 @@ export function KanbanCardModal({
   currentUser,
   canViewKanbanValues = false,
   labelPresets,
+  onLabelPresetsChange,
   createInsertAt = 'top',
   onClose,
   onBoardRefresh,
@@ -195,6 +254,11 @@ export function KanbanCardModal({
   const [hoveringMemberId, setHoveringMemberId] = useState<string | null>(null);
   const [labels, setLabels] = useState<KanbanCardLabel[]>([]);
   const [openMenu, setOpenMenu] = useState<OpenMenu>(null);
+  const [labelsModalHeader, setLabelsModalHeader] = useState<{
+    title: string;
+    showBack: boolean;
+    onBack?: () => void;
+  }>({ title: 'Etiquetas', showBack: false });
   const [checklistEnabled, setChecklistEnabled] = useState(false);
   const [showAttachmentsModal, setShowAttachmentsModal] = useState(false);
   const [showCostModal, setShowCostModal] = useState(false);
@@ -223,6 +287,11 @@ export function KanbanCardModal({
     detail?: KanbanCardDetail;
     columnId: string;
   } | null>(null);
+  const titleSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastSavedTitleRef = useRef<string | null>(null);
+  const titleSaveGenRef = useRef(0);
+  const titleFocusedRef = useRef(false);
+  const titleLiveRef = useRef('');
   const [commentsPanelHeight, setCommentsPanelHeight] = useState<number | undefined>(undefined);
   const isCreate = mode === 'create';
   const isDetail = mode === 'detail' && !!cardId;
@@ -245,6 +314,8 @@ export function KanbanCardModal({
   useLayoutEffect(() => {
     if (!initialCard || initialCard.id !== cardId) return;
     setTitle(initialCard.title);
+    titleLiveRef.current = initialCard.title;
+    lastSavedTitleRef.current = initialCard.title.trim();
     setDescription(initialCard.description);
     setPriority(initialCard.priority);
     setStartDate(initialCard.startDate ?? '');
@@ -267,8 +338,23 @@ export function KanbanCardModal({
   }, [cardId, initialMode, initialCardId]);
 
   useEffect(() => {
+    return () => {
+      if (titleSaveTimerRef.current) clearTimeout(titleSaveTimerRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
     if (!card || card.id !== cardId) return;
-    setTitle((prev) => (prev === card.title ? prev : card.title));
+    setTitle((prev) => {
+      // Enquanto edita, nunca sobrescreve o que o usuário digitou/apagou.
+      if (titleFocusedRef.current) return prev;
+      if (prev === card.title) return prev;
+      const live = titleLiveRef.current.trim();
+      const saved = lastSavedTitleRef.current?.trim() ?? '';
+      if (live !== saved && live !== card.title.trim()) return prev;
+      lastSavedTitleRef.current = card.title.trim();
+      return card.title;
+    });
     if (!isEditingDescription) {
       setDescription((prev) => (prev === card.description ? prev : card.description));
     }
@@ -466,7 +552,7 @@ export function KanbanCardModal({
     return payload;
   }
 
-  function saveMeta(partial?: MetaPartial): boolean {
+  function saveMeta(partial?: MetaPartial, options?: { titleGen?: number }): boolean {
     if (!cardId || !partial || Object.keys(partial).length === 0) return false;
 
     const base = buildLocalBoardCard();
@@ -474,6 +560,7 @@ export function KanbanCardModal({
 
     const targetColumnId = partial.columnId ?? columnId;
     const optimistic = applyMetaPartial(base, partial);
+    const titleGen = options?.titleGen;
 
     if (isOptimisticKanbanCardId(cardId)) {
       syncCardFromApi(optimistic, targetColumnId);
@@ -492,8 +579,23 @@ export function KanbanCardModal({
         const updated = await updateKanbanCard(cardId, buildMetaApiPayload(partial), {
           timeout: 20_000,
         });
+        // Resposta antiga de título não pode sobrescrever edição mais nova.
+        if (titleGen != null && titleGen !== titleSaveGenRef.current) {
+          syncCardFromApi(
+            {
+              ...updated,
+              title: titleLiveRef.current,
+            },
+            targetColumnId,
+          );
+          return;
+        }
+        if (partial.title !== undefined) {
+          lastSavedTitleRef.current = updated.title;
+        }
         syncCardFromApi(updated, targetColumnId);
       } catch {
+        if (titleGen != null && titleGen !== titleSaveGenRef.current) return;
         const snapshot = metaSaveSnapshotRef.current;
         if (snapshot?.board) {
           syncCardFromApi(snapshot.board, snapshot.columnId);
@@ -506,6 +608,34 @@ export function KanbanCardModal({
     })();
 
     return true;
+  }
+
+  function flushTitleSave(nextTitle = titleLiveRef.current) {
+    if (titleSaveTimerRef.current) {
+      clearTimeout(titleSaveTimerRef.current);
+      titleSaveTimerRef.current = null;
+    }
+    if (!isDetail || !cardId) return;
+    const next = nextTitle;
+    if (next === lastSavedTitleRef.current) return;
+    const titleGen = ++titleSaveGenRef.current;
+    lastSavedTitleRef.current = next;
+    saveMeta({ title: next }, { titleGen });
+  }
+
+  function scheduleTitleSave(nextTitle: string) {
+    if (!isDetail || !cardId) return;
+    titleLiveRef.current = nextTitle;
+    if (titleSaveTimerRef.current) clearTimeout(titleSaveTimerRef.current);
+    titleSaveTimerRef.current = setTimeout(() => {
+      titleSaveTimerRef.current = null;
+      flushTitleSave(nextTitle);
+    }, 450);
+  }
+
+  function handleClose() {
+    flushTitleSave();
+    onClose();
   }
 
   function startDescriptionEdit() {
@@ -791,6 +921,10 @@ export function KanbanCardModal({
   const attachmentsList = card?.attachmentsList ?? [];
   const hasAttachments =
     attachmentsList.length > 0 || draftFiles.length > 0 || draftLinks.length > 0;
+  const timeline = useMemo(
+    () => (card ? buildCardTimeline(card) : []),
+    [card],
+  );
   const showChecklistPanel = checklistEnabled && isDetail;
   const draftTotal = draftTasks.length;
   const draftCompleted = draftTasks.filter((t) => t.isDone).length;
@@ -864,8 +998,24 @@ export function KanbanCardModal({
       <input
         type="text"
         value={title}
-        onChange={(e) => setTitle(e.target.value)}
-        onBlur={() => isDetail && saveMeta({ title })}
+        onFocus={() => {
+          titleFocusedRef.current = true;
+        }}
+        onChange={(e) => {
+          const nextTitle = e.target.value;
+          titleLiveRef.current = nextTitle;
+          setTitle(nextTitle);
+          if (!isDetail || !card) return;
+          onBoardCardSync?.(
+            kanbanDetailToBoardCard({ ...card, title: nextTitle }),
+            columnId,
+          );
+          scheduleTitleSave(nextTitle);
+        }}
+        onBlur={() => {
+          titleFocusedRef.current = false;
+          flushTitleSave();
+        }}
         placeholder="Título do card"
         className="w-full min-w-0 text-lg font-semibold text-gray-900 dark:text-gray-100 bg-transparent border-0 px-0 py-0.5 placeholder-gray-400 focus:outline-none focus:ring-0 focus-visible:ring-0 border-b-2 border-transparent focus:border-gray-400 dark:focus:border-gray-500 hover:border-gray-300 dark:hover:border-gray-600 transition-colors"
       />
@@ -877,15 +1027,40 @@ export function KanbanCardModal({
         <Modal
           isOpen
           elevated
-          onClose={() => setOpenMenu(null)}
+          onClose={() => {
+            setOpenMenu(null);
+            setLabelsModalHeader({ title: 'Etiquetas', showBack: false });
+          }}
           size="sm"
-          title="Etiquetas"
+          title={
+            <div className="relative flex w-full items-center justify-center">
+              {labelsModalHeader.showBack ? (
+                <button
+                  type="button"
+                  onClick={() => labelsModalHeader.onBack?.()}
+                  className="absolute left-0 rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+                  aria-label="Voltar"
+                >
+                  <ChevronLeft className="h-5 w-5" />
+                </button>
+              ) : null}
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                {labelsModalHeader.title}
+              </h3>
+            </div>
+          }
           closeOnOverlayClick={!saving}
+          contentClassName="!pt-4"
         >
           <KanbanCardLabelsPanel
             labels={labels}
             labelPresets={labelPresets}
-            onClose={() => setOpenMenu(null)}
+            onHeaderChange={setLabelsModalHeader}
+            onPresetsChange={onLabelPresetsChange}
+            onClose={() => {
+              setOpenMenu(null);
+              setLabelsModalHeader({ title: 'Etiquetas', showBack: false });
+            }}
             onSave={(next) => {
               setLabels(next);
               if (isDetail) saveMeta({ labels: next });
@@ -957,7 +1132,7 @@ export function KanbanCardModal({
     <>
     <Modal
       isOpen
-      onClose={onClose}
+      onClose={handleClose}
       size={isCreate ? 'sm' : '5xl'}
       scrollContent={!isDetail}
       title={modalTitle}
@@ -1045,8 +1220,17 @@ export function KanbanCardModal({
                 <KanbanCardActionButton
                   icon={<Tag className="w-4 h-4" />}
                   active={hasLabels}
-                  onClick={() => setOpenMenu((m) => (m === 'labels' ? null : 'labels'))}
+                  onClick={() => {
+                    if (!hasLabels) {
+                      setLabelsModalHeader({ title: 'Etiquetas', showBack: false });
+                      setOpenMenu('labels');
+                      return;
+                    }
+                    setLabels([]);
+                    if (isDetail) saveMeta({ labels: [] });
+                  }}
                   className="shrink-0"
+                  title={hasLabels ? 'Remover todas as etiquetas' : 'Adicionar etiquetas'}
                 >
                   Etiquetas
                 </KanbanCardActionButton>
@@ -1069,7 +1253,7 @@ export function KanbanCardModal({
                     saveMeta({ checklistEnabled: next });
                   }}
                 >
-                  Checklist
+                  Tarefas
                 </KanbanCardActionButton>
                 <KanbanCardActionButton
                   icon={<Paperclip className="w-4 h-4" />}
@@ -1091,9 +1275,33 @@ export function KanbanCardModal({
                 ) : null}
               </div>
 
-              {labels.length > 0 && (
-                <KanbanLabelChips labels={labels} labelPresets={labelPresets} />
-              )}
+              {hasLabels ? (
+                <div className="flex flex-col">
+                  <label className={kanbanLabel}>Etiquetas</label>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <KanbanLabelChips
+                      labels={labels}
+                      labelPresets={labelPresets}
+                      onClick={() => {
+                        setLabelsModalHeader({ title: 'Etiquetas', showBack: false });
+                        setOpenMenu('labels');
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setLabelsModalHeader({ title: 'Etiquetas', showBack: false });
+                        setOpenMenu('labels');
+                      }}
+                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-gray-300 bg-white text-gray-500 transition-colors hover:border-gray-400 hover:text-gray-700 dark:border-gray-600 dark:bg-gray-800 dark:hover:border-gray-500 dark:hover:text-gray-300"
+                      title="Adicionar etiqueta"
+                      aria-label="Adicionar etiqueta"
+                    >
+                      <Plus className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+              ) : null}
 
             <div className="space-y-4">
               {/* Membros */}
@@ -1430,13 +1638,37 @@ export function KanbanCardModal({
 
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
                 <div className="mb-3 min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
-                  {card?.commentsList.length === 0 ? (
+                  {timeline.length === 0 ? (
                     <p className="flex min-h-[8rem] items-center justify-center px-2 text-center text-sm text-gray-400">
-                      Nenhum comentário ainda.
+                      Nenhuma atividade ainda.
                     </p>
                   ) : (
                     <div className="space-y-4 pb-2">
-                    {card?.commentsList.map((comment) => {
+                    {timeline.map((item) => {
+                      if (item.kind === 'activity') {
+                        const ActivityIcon =
+                          item.icon === 'attachment' ? Paperclip : Sparkles;
+                        return (
+                          <div
+                            key={item.id}
+                            className="flex items-start gap-2.5 rounded-lg px-1.5 py-1.5"
+                          >
+                            <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+                              <ActivityIcon className="h-3.5 w-3.5" />
+                            </span>
+                            <div className="min-w-0 flex-1 pt-1">
+                              <p className="text-sm leading-snug text-gray-600 dark:text-gray-300">
+                                {item.text}
+                              </p>
+                              <span className="mt-0.5 block text-[10px] leading-none text-gray-400">
+                                {formatRelativeTime(item.createdAt)}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      }
+
+                      const comment = item.comment;
                       const canDeleteComment = currentUserId === comment.author.id;
                       const commentTimeLabel = formatRelativeTime(comment.createdAt);
                       return (
