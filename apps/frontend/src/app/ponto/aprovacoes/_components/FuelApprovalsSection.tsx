@@ -23,6 +23,11 @@ import {
   DEFAULT_APPROVAL_PHASE_CARDS,
   fetchApprovalPhaseCounts,
 } from './ApprovalPhaseStatCards';
+import {
+  APPROVAL_STATUS_COLUMN_TITLE,
+  ApprovalStatusBadge,
+  fuelToApprovalStatus,
+} from './ApprovalStatusBadge';
 
 const FUEL_PHASES = ['PENDING', 'APPROVED', 'REJECTED', 'ALL'] as const;
 type FuelPhaseFilter = (typeof FUEL_PHASES)[number];
@@ -30,14 +35,14 @@ type FuelPhaseFilter = (typeof FUEL_PHASES)[number];
 const FUEL_PHASE_FILTER_OPTIONS = labeledToSelectOptions([
   { value: 'PENDING', label: 'Aguardando aprovação' },
   { value: 'APPROVED', label: 'Aprovadas' },
-  { value: 'REJECTED', label: 'Reprovadas' },
-  { value: 'ALL', label: 'Todas' },
+  { value: 'REJECTED', label: 'Canceladas' },
+  { value: 'ALL', label: 'Todos' },
 ]);
 
 const FUEL_PHASE_SUBTITLE: Record<FuelPhaseFilter, string> = {
   PENDING: 'Aguardando aprovação do gestor',
   APPROVED: 'Já aprovadas e encaminhadas',
-  REJECTED: 'Reprovadas pelo gestor',
+  REJECTED: 'Canceladas pelo gestor',
   ALL: 'Todas as solicitações particulares',
 };
 type FuelVehicleType = 'PRIVATE' | 'COMPANY';
@@ -83,24 +88,6 @@ function fuelContractLabel(row: {
 const VEHICLE_TYPE_LABELS: Record<FuelVehicleType, string> = {
   PRIVATE: 'Particular',
   COMPANY: 'Frota / empresa',
-};
-
-const STATUS_LABELS: Record<FuelRefuelStatus, string> = {
-  PENDING_MANAGER: 'Aguardando gestor',
-  PENDING_SUPPLIES: 'Encaminhada ao Suprimentos',
-  APPROVED: 'Encaminhada ao Suprimentos',
-  REJECTED: 'Rejeitada',
-  CANCELLED: 'Cancelada',
-};
-
-const STATUS_BADGE: Record<FuelRefuelStatus, string> = {
-  PENDING_MANAGER:
-    'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200',
-  PENDING_SUPPLIES:
-    'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-200',
-  APPROVED: 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-200',
-  REJECTED: 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200',
-  CANCELLED: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300',
 };
 
 export function FuelApprovalsSection() {
@@ -203,17 +190,27 @@ export function FuelApprovalsSection() {
         <CardHeader className="border-b-0 pb-1">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center space-x-3">
-              <div className="rounded-lg bg-red-100 p-2 dark:bg-red-900/30 sm:p-3">
-                <Fuel className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6" />
-              </div>
-              <div>
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                  Solicitações de Combustível
-                </h3>
-                <p className="text-sm text-gray-600 dark:text-gray-400">
-                  {FUEL_PHASE_SUBTITLE[fuelPhase]}
-                </p>
-              </div>
+              {(() => {
+                const activeCard =
+                  DEFAULT_APPROVAL_PHASE_CARDS.find((c) => c.filter === fuelPhase) ??
+                  DEFAULT_APPROVAL_PHASE_CARDS[0];
+                const PhaseIcon = activeCard.Icon;
+                return (
+                  <>
+                    <div className={`rounded-lg p-2 sm:p-3 ${activeCard.iconBg}`}>
+                      <PhaseIcon className={`h-5 w-5 sm:h-6 sm:w-6 ${activeCard.iconColor}`} />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                        {activeCard.label}
+                      </h3>
+                      <p className="text-sm text-gray-600 dark:text-gray-400">
+                        {FUEL_PHASE_SUBTITLE[fuelPhase]}
+                      </p>
+                    </div>
+                  </>
+                );
+              })()}
             </div>
             <div className="flex flex-shrink-0 flex-wrap items-center gap-2 sm:justify-end">
               <div className="relative min-w-[240px] flex-1 sm:w-[280px] sm:flex-none">
@@ -297,7 +294,7 @@ export function FuelApprovalsSection() {
                         Solicitante
                       </th>
                       <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
-                        Status
+                        {APPROVAL_STATUS_COLUMN_TITLE}
                       </th>
                       <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
                         Ação
@@ -327,11 +324,7 @@ export function FuelApprovalsSection() {
                           {r.requester.name}
                         </td>
                         <td className="px-3 py-3 align-middle text-center sm:px-6">
-                          <span
-                            className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${STATUS_BADGE[r.status]}`}
-                          >
-                            {STATUS_LABELS[r.status]}
-                          </span>
+                          <ApprovalStatusBadge kind={fuelToApprovalStatus(r.status)} />
                         </td>
                         <td className="px-3 py-3 align-middle text-center sm:px-6">
                           <div className="flex justify-center">

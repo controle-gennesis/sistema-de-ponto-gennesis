@@ -479,7 +479,7 @@ export class PleitoController {
         400
       );
     } catch (error) {
-      next(error);
+      return next(error);
     }
   }
 }

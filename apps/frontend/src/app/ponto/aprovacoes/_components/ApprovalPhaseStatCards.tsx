@@ -13,7 +13,7 @@ export type ApprovalPhaseStatCard<T extends string> = {
   Icon: LucideIcon;
 };
 
-/** Cards padrão: Pendentes / Aprovadas / Reprovadas / Todas */
+/** Cards padrão: Pendentes / Aprovadas / Canceladas / Todas */
 export const DEFAULT_APPROVAL_PHASE_CARDS: ApprovalPhaseStatCard<
   'PENDING' | 'APPROVED' | 'REJECTED' | 'ALL'
 >[] = [
@@ -33,14 +33,14 @@ export const DEFAULT_APPROVAL_PHASE_CARDS: ApprovalPhaseStatCard<
   },
   {
     filter: 'REJECTED',
-    label: 'Reprovadas',
+    label: 'Canceladas',
     iconBg: 'bg-red-100 dark:bg-red-900/30',
     iconColor: 'text-red-600 dark:text-red-400',
     Icon: XCircle,
   },
   {
     filter: 'ALL',
-    label: 'Todas',
+    label: 'Todos',
     iconBg: 'bg-blue-100 dark:bg-blue-900/30',
     iconColor: 'text-blue-600 dark:text-blue-400',
     Icon: LayoutList,

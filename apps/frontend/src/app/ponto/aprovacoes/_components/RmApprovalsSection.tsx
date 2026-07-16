@@ -46,6 +46,11 @@ import {
   ApprovalPhaseStatCards,
   type ApprovalPhaseStatCard,
 } from './ApprovalPhaseStatCards';
+import {
+  APPROVAL_STATUS_COLUMN_TITLE,
+  ApprovalStatusBadge,
+  rmToApprovalStatus,
+} from './ApprovalStatusBadge';
 
 type RmPhaseFilter = 'PENDING' | 'APPROVED' | 'REJECTED' | 'ALL';
 
@@ -54,8 +59,8 @@ const RM_PHASES = ['PENDING', 'APPROVED', 'REJECTED', 'ALL'] as const;
 const RM_PHASE_FILTER_OPTIONS = labeledToSelectOptions([
   { value: 'PENDING', label: 'Pendentes' },
   { value: 'APPROVED', label: 'Aprovadas' },
-  { value: 'REJECTED', label: 'Reprovadas' },
-  { value: 'ALL', label: 'Todas' },
+  { value: 'REJECTED', label: 'Canceladas' },
+  { value: 'ALL', label: 'Todos' },
 ]);
 
 const RM_STAT_CARDS: ApprovalPhaseStatCard<RmPhaseFilter>[] = [
@@ -75,14 +80,14 @@ const RM_STAT_CARDS: ApprovalPhaseStatCard<RmPhaseFilter>[] = [
   },
   {
     filter: 'REJECTED',
-    label: 'Reprovadas',
+    label: 'Canceladas',
     iconBg: 'bg-red-100 dark:bg-red-900/30',
     iconColor: 'text-red-600 dark:text-red-400',
     Icon: XCircle,
   },
   {
     filter: 'ALL',
-    label: 'Todas',
+    label: 'Todos',
     iconBg: 'bg-blue-100 dark:bg-blue-900/30',
     iconColor: 'text-blue-600 dark:text-blue-400',
     Icon: LayoutList,
@@ -92,7 +97,7 @@ const RM_STAT_CARDS: ApprovalPhaseStatCard<RmPhaseFilter>[] = [
 const RM_PHASE_SUBTITLE: Record<RmPhaseFilter, string> = {
   PENDING: 'Aguardando sua aprovação',
   APPROVED: 'Requisições aprovadas',
-  REJECTED: 'Requisições reprovadas',
+  REJECTED: 'Requisições canceladas',
   ALL: 'Todas as requisições',
 };
 
@@ -301,17 +306,26 @@ export function RmApprovalsSection() {
         <CardHeader className="border-b-0 pb-1">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center space-x-3">
-              <div className="rounded-lg bg-red-100 p-2 dark:bg-red-900/30 sm:p-3">
-                <ClipboardList className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6" />
-              </div>
-              <div>
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                  Requisições de Materiais
-                </h3>
-                <p className="text-sm text-gray-600 dark:text-gray-400">
-                  {RM_PHASE_SUBTITLE[rmPhase]}
-                </p>
-              </div>
+              {(() => {
+                const activeCard =
+                  RM_STAT_CARDS.find((c) => c.filter === rmPhase) ?? RM_STAT_CARDS[0];
+                const PhaseIcon = activeCard.Icon;
+                return (
+                  <>
+                    <div className={`rounded-lg p-2 sm:p-3 ${activeCard.iconBg}`}>
+                      <PhaseIcon className={`h-5 w-5 sm:h-6 sm:w-6 ${activeCard.iconColor}`} />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                        {activeCard.label}
+                      </h3>
+                      <p className="text-sm text-gray-600 dark:text-gray-400">
+                        {RM_PHASE_SUBTITLE[rmPhase]}
+                      </p>
+                    </div>
+                  </>
+                );
+              })()}
             </div>
             <div className="flex flex-shrink-0 flex-wrap items-center gap-2 sm:justify-end">
               <div className="relative min-w-[240px] flex-1 sm:w-[280px] sm:flex-none">
@@ -365,7 +379,7 @@ export function RmApprovalsSection() {
                   : rmPhase === 'APPROVED'
                     ? 'Nenhuma requisição aprovada'
                     : rmPhase === 'REJECTED'
-                      ? 'Nenhuma requisição reprovada'
+                      ? 'Nenhuma requisição cancelada'
                       : rmPhase === 'ALL'
                         ? 'Nenhuma requisição encontrada'
                         : 'Nenhuma requisição pendente de aprovação'}
@@ -381,6 +395,7 @@ export function RmApprovalsSection() {
                   <col className="w-[14%]" />
                   <col className="w-[32%]" />
                   <col className="w-[10%]" />
+                  <col className="w-[12%]" />
                   <col className="w-[4%]" />
                 </colgroup>
                 <thead className="border-b border-gray-200 dark:border-gray-700">
@@ -393,6 +408,7 @@ export function RmApprovalsSection() {
                     <th className={thTextCls}>Contrato</th>
                     <th className={thTextCls}>Descrição</th>
                     <th className={thCenterCls}>Prioridade</th>
+                    <th className={thCenterCls}>{APPROVAL_STATUS_COLUMN_TITLE}</th>
                     <th scope="col" className={actionThCls}>
                       Ação
                     </th>
@@ -436,6 +452,9 @@ export function RmApprovalsSection() {
                           <span className={`text-xs font-medium whitespace-nowrap ${priorityInfo.color}`}>
                             {priorityInfo.label}
                           </span>
+                        </td>
+                        <td className={tdCenterCls}>
+                          <ApprovalStatusBadge kind={rmToApprovalStatus(request.status)} />
                         </td>
                         <td className={actionTdCls} onClick={(e) => e.stopPropagation()}>
                           <div className="flex justify-end">

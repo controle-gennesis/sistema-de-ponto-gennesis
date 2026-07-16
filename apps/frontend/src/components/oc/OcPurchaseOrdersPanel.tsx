@@ -106,6 +106,11 @@ import {
   type OcDeliveryStatusBadgeKey,
   purchaseOrderPhaseLabel,
 } from '@/components/oc/ocStatusLabels';
+import {
+  APPROVAL_STATUS_COLUMN_TITLE,
+  ApprovalStatusBadge,
+  ocToApprovalStatus,
+} from '@/app/ponto/aprovacoes/_components/ApprovalStatusBadge';
 import { OcAttachmentActions } from '@/components/oc/OcAttachmentActions';
 import { FinancialControlEntryFormModal } from '@/components/financeiro/FinancialControlEntryFormModal';
 import {
@@ -133,8 +138,8 @@ import {
 const OC_APPROVAL_LIST_PHASE_OPTIONS = labeledToSelectOptions([
   { value: 'pending', label: 'Pendentes de aprovação' },
   { value: 'approved_by_me', label: 'Aprovadas por mim' },
-  { value: 'rejected', label: 'Reprovadas' },
-  { value: 'all', label: 'Todas' },
+  { value: 'rejected', label: 'Canceladas' },
+  { value: 'all', label: 'Todos' },
 ]);
 
 export {
@@ -1651,7 +1656,7 @@ const EMBEDDED_OC_TAB_META: Record<OcTab, { title: string; subtitle: string }> =
   },
   outras: {
     title: 'Canceladas',
-    subtitle: 'Ordens canceladas ou reprovadas'
+    subtitle: 'Ordens canceladas'
   }
 };
 
@@ -1720,14 +1725,14 @@ const OC_APPROVAL_STAT_CARDS: ApprovalPhaseStatCard<OcApprovalListPhase>[] = [
   },
   {
     filter: 'rejected',
-    label: 'Reprovadas',
+    label: 'Canceladas',
     iconBg: 'bg-red-100 dark:bg-red-900/30',
     iconColor: 'text-red-600 dark:text-red-400',
     Icon: XCircle,
   },
   {
     filter: 'all',
-    label: 'Todas',
+    label: 'Todos',
     iconBg: 'bg-blue-100 dark:bg-blue-900/30',
     iconColor: 'text-blue-600 dark:text-blue-400',
     Icon: LayoutList,
@@ -1864,7 +1869,7 @@ function embeddedOcEmptyMessage(
     return 'Nenhuma ordem que você tenha aprovado nesta fase.';
   }
   if (approvalListPhase === 'rejected') {
-    return 'Nenhuma ordem reprovada.';
+    return 'Nenhuma ordem cancelada.';
   }
   if (approvalListPhase === 'all') {
     return 'Nenhuma ordem nesta fase.';
@@ -1883,10 +1888,10 @@ function approvalTabSubtitle(tab: OcTab, phase: OcApprovalListPhase): string {
     return 'Ordens que você já aprovou nesta fase';
   }
   if (phase === 'rejected') {
-    return 'Ordens reprovadas no fluxo de aprovação';
+    return 'Ordens canceladas no fluxo de aprovação';
   }
   if (phase === 'all') {
-    return 'Pendentes, aprovadas por você e reprovadas nesta visão';
+    return 'Pendentes, aprovadas por você e canceladas nesta visão';
   }
   return EMBEDDED_OC_TAB_META[tab].subtitle;
 }
@@ -3546,7 +3551,7 @@ export function OcPurchaseOrdersPanel({
           isIntegratedFlux && isOcApprovalTab(activeTab) ? 'space-y-6' : ''
         }`}
       >
-        {isIntegratedFlux && isOcApprovalTab(activeTab) ? (
+        {isIntegratedFlux && isOcApprovalTab(activeTab) && allowApprovalActions ? (
           <ApprovalPhaseStatCards
             cards={OC_APPROVAL_STAT_CARDS}
             activeFilter={approvalListPhase}
@@ -3566,17 +3571,43 @@ export function OcPurchaseOrdersPanel({
             <CardHeader className={`border-b-0 pb-1 ${flushInTabsCard ? 'pt-4' : ''}`}>
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                 <div className="flex items-center space-x-3">
-                  <div className="p-2 sm:p-3 bg-red-100 dark:bg-red-900/30 rounded-lg flex-shrink-0">
-                    <FileText className="w-5 h-5 sm:w-6 sm:h-6 text-red-600 dark:text-red-400" />
-                  </div>
-                  <div className="min-w-0">
-                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                      {integratedMeta.title}
-                    </h3>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">
-                      {approvalTabSubtitle(activeTab, approvalListPhase)}
-                    </p>
-                  </div>
+                  {allowApprovalActions && isOcApprovalTab(activeTab) ? (
+                    (() => {
+                      const activeCard =
+                        OC_APPROVAL_STAT_CARDS.find((c) => c.filter === approvalListPhase) ??
+                        OC_APPROVAL_STAT_CARDS[0];
+                      const PhaseIcon = activeCard.Icon;
+                      return (
+                        <>
+                          <div className={`flex-shrink-0 rounded-lg p-2 sm:p-3 ${activeCard.iconBg}`}>
+                            <PhaseIcon className={`h-5 w-5 sm:h-6 sm:w-6 ${activeCard.iconColor}`} />
+                          </div>
+                          <div className="min-w-0">
+                            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                              {activeCard.label}
+                            </h3>
+                            <p className="text-sm text-gray-600 dark:text-gray-400">
+                              {approvalTabSubtitle(activeTab, approvalListPhase)}
+                            </p>
+                          </div>
+                        </>
+                      );
+                    })()
+                  ) : (
+                    <>
+                      <div className="flex-shrink-0 rounded-lg bg-red-100 p-2 dark:bg-red-900/30 sm:p-3">
+                        <FileText className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6" />
+                      </div>
+                      <div className="min-w-0">
+                        <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                          {integratedMeta.title}
+                        </h3>
+                        <p className="text-sm text-gray-600 dark:text-gray-400">
+                          {approvalTabSubtitle(activeTab, approvalListPhase)}
+                        </p>
+                      </div>
+                    </>
+                  )}
                 </div>
                 {listHeaderToolbar}
               </div>
@@ -3756,6 +3787,11 @@ export function OcPurchaseOrdersPanel({
                       )}
                       {activeTab === 'ATTACH_NF' && (
                         <th className={ocListDocThCls}>NF</th>
+                      )}
+                      {allowApprovalActions && isOcApprovalTab(activeTab) && (
+                        <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">
+                          {APPROVAL_STATUS_COLUMN_TITLE}
+                        </th>
                       )}
                       <th className="px-3 sm:px-6 py-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                         {isIntegratedFlux ? 'Ação' : 'Ações'}
@@ -3955,6 +3991,11 @@ export function OcPurchaseOrdersPanel({
                             <div className={ocListDocCellInnerCls}>
                               <OcListNfCellContent order={o} />
                             </div>
+                          </td>
+                        )}
+                        {allowApprovalActions && isOcApprovalTab(activeTab) && (
+                          <td className="px-3 sm:px-6 py-4 text-center whitespace-nowrap">
+                            <ApprovalStatusBadge kind={ocToApprovalStatus(o.status)} />
                           </td>
                         )}
                         <td

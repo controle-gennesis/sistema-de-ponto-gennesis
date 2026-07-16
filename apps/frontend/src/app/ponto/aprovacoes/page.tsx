@@ -16,7 +16,7 @@ import { toast } from 'react-hot-toast';
 import { formatDateTimeBr } from '@/lib/dateTimeBr';
 import { useRouter } from 'next/navigation';
 import { usePermissions } from '@/hooks/usePermissions';
-import { Check, Download, Eye, FileCheck, FileText, Filter, MoreVertical, Wrench, Search, X, CheckCircle, Clock, LayoutList, XCircle, AlertTriangle } from 'lucide-react';
+import { Check, Download, Eye, FileText, Filter, MoreVertical, Wrench, Search, X, CheckCircle, Clock, LayoutList, XCircle } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import {
   exportEspelhoNfPdf,
@@ -25,7 +25,6 @@ import {
   type EspelhoFederalRates
 } from '@/lib/exportEspelhoNfLayout';
 import {
-  ESPELHO_APPROVAL_STATUS_LABELS,
   type EspelhoApprovalStatus,
   resolveEspelhoApprovalStatus,
   updateEspelhoApprovalStatus
@@ -44,6 +43,12 @@ import {
   fetchApprovalPhaseCounts,
   type ApprovalPhaseStatCard,
 } from './_components/ApprovalPhaseStatCards';
+import {
+  APPROVAL_STATUS_COLUMN_TITLE,
+  ApprovalStatusBadge,
+  dpToApprovalStatus,
+  espelhoToApprovalStatus,
+} from './_components/ApprovalStatusBadge';
 import { useApprovalNotificationCounts } from '@/hooks/useApprovalNotificationCounts';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
@@ -54,14 +59,14 @@ type DpPhaseFilter = (typeof DP_PHASES)[number];
 const DP_PHASE_FILTER_OPTIONS = labeledToSelectOptions([
   { value: 'PENDING', label: 'Pendentes' },
   { value: 'APPROVED', label: 'Aprovadas' },
-  { value: 'REJECTED', label: 'Reprovadas' },
-  { value: 'ALL', label: 'Todas' },
+  { value: 'REJECTED', label: 'Canceladas' },
+  { value: 'ALL', label: 'Todos' },
 ]);
 
 const DP_PHASE_SUBTITLE: Record<DpPhaseFilter, string> = {
   PENDING: 'Pendentes de aprovação',
   APPROVED: 'Já aprovadas pelo gestor',
-  REJECTED: 'Reprovadas pelo gestor',
+  REJECTED: 'Canceladas pelo gestor',
   ALL: 'Todas as solicitações da sua área',
 };
 
@@ -87,13 +92,6 @@ const ESPELHO_STAT_CARDS: ApprovalPhaseStatCard<EspelhoPhaseFilter>[] = [
     iconBg: 'bg-yellow-100 dark:bg-yellow-900/30',
     iconColor: 'text-yellow-600 dark:text-yellow-400',
     Icon: Clock,
-  },
-  {
-    filter: 'SENT_FOR_CORRECTION',
-    label: 'Correção',
-    iconBg: 'bg-orange-100 dark:bg-orange-900/30',
-    iconColor: 'text-orange-600 dark:text-orange-400',
-    Icon: AlertTriangle,
   },
   {
     filter: 'APPROVED',
@@ -476,21 +474,14 @@ const TYPE_LABELS: Record<DpRequestType, string> = {
   ADM_TREINAMENTOS_NR: "Treinamentos e NR's",
   ADM_ASOS: "ASO's",
 };
-const ESPELHO_BADGE_CLASS: Record<EspelhoApprovalStatus, string> = {
-  PENDING_APPROVAL:
-    'bg-amber-100 text-amber-800 border-amber-200 dark:bg-amber-900/30 dark:text-amber-200 dark:border-amber-800',
-  APPROVED:
-    'bg-emerald-100 text-emerald-800 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-200 dark:border-emerald-800',
-  SENT_FOR_CORRECTION:
-    'bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-900/30 dark:text-blue-200 dark:border-blue-800',
-  CANCELLED:
-    'bg-red-100 text-red-800 border-red-200 dark:bg-red-900/30 dark:text-red-200 dark:border-red-800'
-};
-
 const ESPELHO_ACTION_MENU_WIDTH_PX = 224;
 const ESPELHO_MENU_ITEM_CLASS =
   'w-full flex items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700';
 const ESPELHO_MENU_ITEM_BORDER_CLASS = `${ESPELHO_MENU_ITEM_CLASS} border-t border-gray-200 dark:border-gray-700`;
+const DP_ACTION_MENU_WIDTH_PX = 224;
+const DP_MENU_ITEM_CLASS =
+  'w-full flex items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700';
+const DP_MENU_ITEM_BORDER_CLASS = `${DP_MENU_ITEM_CLASS} border-t border-gray-200 dark:border-gray-700`;
 const espelhoCellPad = 'px-2 sm:px-3 py-3';
 const espelhoCellPadTh = 'px-2 sm:px-3 py-4';
 const espelhoActionColCls = 'w-[4%] min-w-[3rem] max-w-[4.5rem]';
@@ -507,7 +498,7 @@ export default function AprovacoesPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
 
-  /** Fase do bloco «Solicitações»: pendentes (padrão), aprovadas, reprovadas ou todas. */
+  /** Fase do bloco «Solicitações»: pendentes (padrão), aprovadas, canceladas ou todas. */
   const [searchDp, setSearchDp] = useState('');
   const [dpPhase, setDpPhase] = useState<DpPhaseFilter>('PENDING');
   const [isDpFiltersOpen, setIsDpFiltersOpen] = useState(false);
@@ -521,6 +512,11 @@ export default function AprovacoesPage() {
   const [espelhoPhase, setEspelhoPhase] = useState<EspelhoPhaseFilter>('PENDING_APPROVAL');
   const [espelhoActionMenu, setEspelhoActionMenu] = useState<{
     mirrorId: string;
+    top: number;
+    left: number;
+  } | null>(null);
+  const [dpActionMenu, setDpActionMenu] = useState<{
+    requestId: string;
     top: number;
     left: number;
   } | null>(null);
@@ -779,9 +775,18 @@ export default function AprovacoesPage() {
     [espelhoFiltered, espelhoActionMenu?.mirrorId]
   );
 
+  const dpForActionMenu = useMemo(
+    () => dpFiltered.find((r) => r.id === dpActionMenu?.requestId) ?? null,
+    [dpFiltered, dpActionMenu?.requestId]
+  );
+
   useEffect(() => {
     setEspelhoActionMenu(null);
   }, [activeTab, espelhoPhase, searchEspelho]);
+
+  useEffect(() => {
+    setDpActionMenu(null);
+  }, [activeTab, dpPhase, searchDp]);
 
   const approvalTabs = useMemo(() => {
     const tabs: { id: AprovacaoTabId; label: string; count: number }[] = [];
@@ -974,15 +979,27 @@ export default function AprovacoesPage() {
             <CardHeader className="border-b-0 pb-1">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                 <div className="flex items-center space-x-3">
-                  <div className="p-2 sm:p-3 bg-red-100 dark:bg-red-900/30 rounded-lg">
-                    <FileCheck className="w-5 h-5 sm:w-6 sm:h-6 text-red-600 dark:text-red-400" />
-                  </div>
-                  <div>
-                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Solicitações</h3>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">
-                      {DP_PHASE_SUBTITLE[dpPhase]}
-                    </p>
-                  </div>
+                  {(() => {
+                    const activeCard =
+                      DEFAULT_APPROVAL_PHASE_CARDS.find((c) => c.filter === dpPhase) ??
+                      DEFAULT_APPROVAL_PHASE_CARDS[0];
+                    const PhaseIcon = activeCard.Icon;
+                    return (
+                      <>
+                        <div className={`rounded-lg p-2 sm:p-3 ${activeCard.iconBg}`}>
+                          <PhaseIcon className={`h-5 w-5 sm:h-6 sm:w-6 ${activeCard.iconColor}`} />
+                        </div>
+                        <div>
+                          <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                            {activeCard.label}
+                          </h3>
+                          <p className="text-sm text-gray-600 dark:text-gray-400">
+                            {DP_PHASE_SUBTITLE[dpPhase]}
+                          </p>
+                        </div>
+                      </>
+                    );
+                  })()}
                 </div>
                 <div className="flex flex-shrink-0 flex-wrap items-center gap-2 sm:justify-end">
                   <div className="relative min-w-[240px] flex-1 sm:w-[280px] sm:flex-none">
@@ -1070,6 +1087,9 @@ export default function AprovacoesPage() {
                             Solicitante
                           </th>
                           <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                            {APPROVAL_STATUS_COLUMN_TITLE}
+                          </th>
+                          <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                             Ação
                           </th>
                         </tr>
@@ -1107,16 +1127,32 @@ export default function AprovacoesPage() {
                               <div className="font-medium text-gray-900 dark:text-gray-100">{r.solicitanteNome}</div>
                               <div className="text-xs text-gray-500 dark:text-gray-400">{r.sectorSolicitante}</div>
                             </td>
+                            <td className="px-3 sm:px-6 py-3 align-middle text-center">
+                              <ApprovalStatusBadge kind={dpToApprovalStatus(r.status)} />
+                            </td>
                             <td className="px-3 sm:px-6 py-3 align-middle text-center" onClick={(e) => e.stopPropagation()}>
                               <div className="flex justify-center">
                                 <button
                                   type="button"
-                                  onClick={() => setDetailRequest(r)}
-                                  className={rowActionMenuButtonClass(false)}
-                                  title="Ver detalhes"
-                                  aria-label="Ver detalhes da solicitação"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    const rect = e.currentTarget.getBoundingClientRect();
+                                    setDpActionMenu((prev) => {
+                                      if (prev?.requestId === r.id) return null;
+                                      let left = rect.right - DP_ACTION_MENU_WIDTH_PX;
+                                      left = Math.max(
+                                        8,
+                                        Math.min(left, window.innerWidth - DP_ACTION_MENU_WIDTH_PX - 8)
+                                      );
+                                      return { requestId: r.id, top: rect.bottom + 4, left };
+                                    });
+                                  }}
+                                  className={rowActionMenuButtonClass(dpActionMenu?.requestId === r.id)}
+                                  aria-label="Menu de ações"
+                                  aria-expanded={dpActionMenu?.requestId === r.id}
+                                  aria-haspopup="menu"
                                 >
-                                  <FileText className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden />
+                                  <MoreVertical className="h-4 w-4" />
                                 </button>
                               </div>
                             </td>
@@ -1132,6 +1168,71 @@ export default function AprovacoesPage() {
           </div>
           )}
 
+          {dpActionMenu &&
+            dpForActionMenu &&
+            typeof document !== 'undefined' &&
+            createPortal(
+              <div
+                className="fixed inset-0"
+                style={{ zIndex: 2101 }}
+                onClick={() => setDpActionMenu(null)}
+              >
+                <div
+                  role="menu"
+                  className="absolute w-56 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800"
+                  style={{ top: dpActionMenu.top, left: dpActionMenu.left }}
+                  onClick={(e) => e.stopPropagation()}
+                  onMouseDown={(e) => e.stopPropagation()}
+                >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDpActionMenu(null);
+                      setDetailRequest(dpForActionMenu);
+                    }}
+                    className={DP_MENU_ITEM_CLASS}
+                  >
+                    <Eye className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
+                    <span>Ver detalhes</span>
+                  </button>
+                  {dpForActionMenu.status === 'WAITING_MANAGER' && (
+                    <>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setDpActionMenu(null);
+                          approveMutation.mutate({ id: dpForActionMenu.id });
+                        }}
+                        className={DP_MENU_ITEM_BORDER_CLASS}
+                      >
+                        <Check className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                        <span>Aprovar solicitação</span>
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setDpActionMenu(null);
+                          setDetailRequest(dpForActionMenu);
+                          setManagerRejectingId(dpForActionMenu.id);
+                        }}
+                        className={DP_MENU_ITEM_BORDER_CLASS}
+                      >
+                        <X className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
+                        <span>Cancelar solicitação</span>
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>,
+              document.body
+            )}
+
           {canApproveEspelhoNf && activeTab === 'espelho' && (
           <div className="space-y-6">
             <ApprovalPhaseStatCards
@@ -1140,23 +1241,33 @@ export default function AprovacoesPage() {
               counts={espelhoPhaseCounts}
               loading={loadingEspelhoApprovals}
               onSelect={setEspelhoPhase}
-              columnsClassName="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-3 2xl:grid-cols-5"
+              columnsClassName="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-4"
             />
           <Card className="w-full">
             <CardHeader className="border-b-0 pb-1">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                 <div className="flex items-center space-x-3">
-                  <div className="p-2 sm:p-3 bg-red-100 dark:bg-red-900/30 rounded-lg">
-                    <FileText className="w-5 h-5 sm:w-6 sm:h-6 text-red-600 dark:text-red-400" />
-                  </div>
-                  <div>
-                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                      Espelhos da Nota Fiscal
-                    </h3>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">
-                      {ESPELHO_PHASE_SUBTITLE[espelhoPhase]}
-                    </p>
-                  </div>
+                  {(() => {
+                    const activeCard =
+                      ESPELHO_STAT_CARDS.find((c) => c.filter === espelhoPhase) ??
+                      ESPELHO_STAT_CARDS[0];
+                    const PhaseIcon = activeCard.Icon;
+                    return (
+                      <>
+                        <div className={`rounded-lg p-2 sm:p-3 ${activeCard.iconBg}`}>
+                          <PhaseIcon className={`h-5 w-5 sm:h-6 sm:w-6 ${activeCard.iconColor}`} />
+                        </div>
+                        <div>
+                          <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                            {activeCard.label}
+                          </h3>
+                          <p className="text-sm text-gray-600 dark:text-gray-400">
+                            {ESPELHO_PHASE_SUBTITLE[espelhoPhase]}
+                          </p>
+                        </div>
+                      </>
+                    );
+                  })()}
                 </div>
                 <div className="flex flex-shrink-0 flex-wrap items-center gap-2 sm:justify-end">
                   <div className="relative min-w-[240px] flex-1 sm:w-[280px] sm:flex-none">
@@ -1218,8 +1329,8 @@ export default function AprovacoesPage() {
                     <table className={`${cadastroListClasses.table} text-sm`}>
                       <colgroup>
                         <col className="w-[34%]" />
-                        <col className="w-[20%]" />
-                        <col className="w-[12%]" />
+                        <col className="w-[22%]" />
+                        <col className="w-[14%]" />
                         <col className="w-[14%]" />
                         <col className="w-[12%]" />
                         <col className="w-[4%]" />
@@ -1229,8 +1340,8 @@ export default function AprovacoesPage() {
                           <th className={espelhoThLeftCls}>Referência</th>
                           <th className={espelhoThTextCls}>Tomador</th>
                           <th className={espelhoThCenterCls}>Medição</th>
-                          <th className={espelhoThCenterCls}>Status</th>
                           <th className={espelhoThCenterCls}>Vencimento</th>
+                          <th className={espelhoThCenterCls}>{APPROVAL_STATUS_COLUMN_TITLE}</th>
                           <th scope="col" className={espelhoActionThCls}>
                             Ação
                           </th>
@@ -1259,17 +1370,11 @@ export default function AprovacoesPage() {
                                   {medTxt}
                                 </span>
                               </td>
-                              <td className={espelhoTdCenterCls}>
-                                <span
-                                  className={`inline-flex items-center justify-center rounded-full border px-2.5 py-0.5 text-[11px] font-semibold whitespace-nowrap ${
-                                    ESPELHO_BADGE_CLASS[m.status]
-                                  }`}
-                                >
-                                  {ESPELHO_APPROVAL_STATUS_LABELS[m.status]}
-                                </span>
-                              </td>
                               <td className={`${espelhoTdCenterCls} tabular-nums text-gray-700 dark:text-gray-300`}>
                                 {m.dueDate ? formatYmd(m.dueDate) : '—'}
+                              </td>
+                              <td className={espelhoTdCenterCls}>
+                                <ApprovalStatusBadge kind={espelhoToApprovalStatus(m.status)} />
                               </td>
                               <td className={espelhoActionTdCls}>
                                 <div className="flex justify-end">
