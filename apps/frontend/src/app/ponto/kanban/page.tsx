@@ -13,7 +13,7 @@ import { KanbanCreateBoardModal } from '@/components/kanban/KanbanCreateBoardMod
 import { KanbanBoardShareModal } from '@/components/kanban/KanbanBoardShareModal';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
-import { Checkbox } from '@/components/ui/Checkbox';
+import { CheckboxIndicator } from '@/components/ui/Checkbox';
 import { MultiSelectSearchDropdown } from '@/components/ui/MultiSelectSearchDropdown';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import {
@@ -487,6 +487,80 @@ function CardMetaRow({ card }: { card: KanbanCard }) {
   );
 }
 
+function KanbanBoardSkeleton() {
+  const columns = [
+    { cards: [0, 1], color: 'bg-gray-400 dark:bg-gray-500' },
+    { cards: [0, 1, 2], color: 'bg-teal-500/70' },
+    { cards: [0, 1], color: 'bg-blue-500/70' },
+  ] as const;
+
+  return (
+    <>
+      {columns.map((col, colIdx) => (
+        <div
+          key={colIdx}
+          className="relative flex w-[340px] flex-shrink-0 flex-col rounded-2xl bg-[#F9FAFB] dark:bg-gray-800/60"
+        >
+          <div className="flex items-center justify-between px-4 pb-2 pt-4">
+            <div className="flex min-w-0 items-center gap-2.5">
+              <span className={clsx('h-2 w-2 flex-shrink-0 rounded-full', col.color)} />
+              <div className="h-4 w-20 animate-pulse rounded bg-gray-200 dark:bg-gray-700" />
+              <div className="h-4 w-5 animate-pulse rounded bg-gray-200/80 dark:bg-gray-700/80" />
+            </div>
+            <div className="flex items-center gap-1">
+              <div className="h-7 w-7 animate-pulse rounded-lg bg-gray-200/80 dark:bg-gray-700/70" />
+              <div className="h-7 w-7 animate-pulse rounded-lg bg-gray-200/80 dark:bg-gray-700/70" />
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-3 px-3 pb-3">
+            {col.cards.map((cardIdx) => (
+              <div
+                key={cardIdx}
+                className="rounded-2xl border border-transparent bg-white p-4 shadow-[0_1px_3px_rgba(0,0,0,0.08)] dark:bg-gray-800"
+              >
+                <div className="mb-3 flex gap-1">
+                  <div className="h-2 w-10 animate-pulse rounded-sm bg-gray-200 dark:bg-gray-700" />
+                  {cardIdx === 0 ? (
+                    <div className="h-2 w-8 animate-pulse rounded-sm bg-gray-200/80 dark:bg-gray-700/80" />
+                  ) : null}
+                </div>
+                <div className="mb-3 space-y-2">
+                  <div className="h-3.5 w-[88%] animate-pulse rounded bg-gray-200 dark:bg-gray-700" />
+                  <div className="h-3.5 w-[62%] animate-pulse rounded bg-gray-200/80 dark:bg-gray-700/70" />
+                </div>
+                <div className="mb-3 flex items-center justify-between gap-2">
+                  <div className="h-3 w-20 animate-pulse rounded bg-gray-100 dark:bg-gray-700/60" />
+                  <div className="h-3 w-14 animate-pulse rounded bg-gray-100 dark:bg-gray-700/60" />
+                </div>
+                <div className="flex items-center justify-between border-t border-gray-100 pt-3 dark:border-gray-700/80">
+                  <div className="flex gap-3">
+                    <div className="h-3 w-8 animate-pulse rounded bg-gray-100 dark:bg-gray-700/50" />
+                    <div className="h-3 w-8 animate-pulse rounded bg-gray-100 dark:bg-gray-700/50" />
+                  </div>
+                  <div className="flex -space-x-1.5">
+                    <div className="h-7 w-7 animate-pulse rounded-full bg-gray-200 ring-2 ring-white dark:bg-gray-700 dark:ring-gray-800" />
+                    <div className="h-7 w-7 animate-pulse rounded-full bg-gray-200/80 ring-2 ring-white dark:bg-gray-700/80 dark:ring-gray-800" />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="px-3 pb-3">
+            <div className="h-10 w-full animate-pulse rounded-xl bg-gray-200/70 dark:bg-gray-700/50" />
+          </div>
+        </div>
+      ))}
+
+      <div className="flex h-[220px] w-[340px] flex-shrink-0 flex-col items-center justify-center gap-2 self-start rounded-2xl border-2 border-dashed border-gray-300/80 dark:border-gray-600">
+        <div className="h-10 w-10 animate-pulse rounded-full bg-gray-200 dark:bg-gray-700" />
+        <div className="h-3.5 w-24 animate-pulse rounded bg-gray-200 dark:bg-gray-700" />
+      </div>
+    </>
+  );
+}
+
 function ProgressRing({ value }: { value: number }) {
   const size = 22;
   const stroke = 3;
@@ -843,14 +917,14 @@ function KanbanCardItem({
         'group relative rounded-2xl border border-transparent bg-white p-4 dark:bg-gray-800',
         menuOpen && 'z-30',
         'cursor-pointer select-none shadow-[0_1px_3px_rgba(0,0,0,0.08)]',
-        'transition-[background-color,box-shadow,border-color] duration-150 ease-out',
+        'transition-[border-color,filter] duration-200 ease-out',
         'motion-reduce:transition-none',
         'active:cursor-grabbing',
         isDragging
           ? 'z-10 opacity-50'
           : [
-              'hover:border-gray-200/70 hover:bg-gray-50/80 hover:shadow-[0_2px_8px_rgba(0,0,0,0.06)]',
-              'dark:hover:border-gray-600/60 dark:hover:bg-gray-700/40 dark:hover:shadow-none',
+              'hover:border-gray-200/80 hover:brightness-[0.985]',
+              'dark:hover:border-gray-600/70 dark:hover:brightness-110',
             ],
       )}
     >
@@ -2250,6 +2324,7 @@ function KanbanPage() {
   const [importPayload, setImportPayload] = useState<unknown>(null);
   const [importReplace, setImportReplace] = useState(true);
   const [importingBoard, setImportingBoard] = useState(false);
+  const [importProgress, setImportProgress] = useState<number | null>(null);
   const importFileRef = useRef<HTMLInputElement>(null);
 
   const handleExportTrello = async () => {
@@ -2312,15 +2387,25 @@ function KanbanPage() {
       if (!ok) return;
     }
     setImportingBoard(true);
+    setImportProgress(6);
+    const tick = window.setInterval(() => {
+      setImportProgress((prev) => {
+        const current = prev ?? 0;
+        if (current >= 90) return current;
+        return Math.min(90, current + 4 + Math.random() * 8);
+      });
+    }, 350);
     try {
       const result = await importKanbanBoardTrello({
         board: importPayload,
         departmentKey: boardScopeKey || board?.departmentKey || undefined,
         replace: importReplace,
       });
+      setImportProgress(100);
       toast.success(
         `Importado: ${result.columnsCreated} coluna(s), ${result.cardsCreated} card(s)`,
       );
+      await new Promise((r) => window.setTimeout(r, 280));
       setImportModalOpen(false);
       setImportPayload(null);
       setImportFileName('');
@@ -2329,7 +2414,9 @@ function KanbanPage() {
     } catch (err: any) {
       toast.error(err?.response?.data?.message || 'Erro ao importar');
     } finally {
+      window.clearInterval(tick);
       setImportingBoard(false);
+      setImportProgress(null);
     }
   };
   const [savingLabelPresets, setSavingLabelPresets] = useState(false);
@@ -3128,21 +3215,7 @@ function KanbanPage() {
             onDrop={boardReadOnly || showBoardSkeleton ? undefined : handleBoardColumnDrop}
           >
             {showBoardSkeleton ? (
-              <>
-                {[0, 1, 2].map((i) => (
-                  <div
-                    key={i}
-                    className="w-72 shrink-0 animate-pulse rounded-xl border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800"
-                  >
-                    <div className="mb-3 h-5 w-24 rounded bg-gray-200 dark:bg-gray-700" />
-                    <div className="space-y-2">
-                      <div className="h-20 rounded-lg bg-gray-100 dark:bg-gray-700/80" />
-                      <div className="h-20 rounded-lg bg-gray-100 dark:bg-gray-700/80" />
-                      <div className="h-14 rounded-lg bg-gray-100 dark:bg-gray-700/60" />
-                    </div>
-                  </div>
-                ))}
-              </>
+              <KanbanBoardSkeleton />
             ) : (
               filteredColumns.map((column, columnIndex) => (
               <React.Fragment key={column.id}>
@@ -3305,62 +3378,119 @@ function KanbanPage() {
             if (importingBoard) return;
             setImportModalOpen(false);
           }}
-          size="md"
-          title="Importar"
+          size="sm"
+          title="Importar quadro"
           closeOnOverlayClick={!importingBoard}
         >
           <div className="space-y-4">
-            <p className="text-center text-sm text-gray-600 dark:text-gray-400">
-              Use um JSON exportado do Trello ou pelo botão Exportar deste Tasks. O arquivo é
-              portátil entre sistemas que aceitam esse formato.
-            </p>
-            <input
-              ref={importFileRef}
-              type="file"
-              accept="application/json,.json"
-              className="hidden"
-              onChange={(e) => {
-                void handleImportFileChosen(e.target.files?.[0] || null);
-                e.target.value = '';
-              }}
-            />
-            <div className="flex justify-center">
-              <button
-                type="button"
-                onClick={() => importFileRef.current?.click()}
-                disabled={importingBoard}
-                className="flex w-full max-w-sm flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-gray-300 px-6 py-8 text-center text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800"
-              >
-                <Upload className="h-5 w-5 shrink-0" />
-                <span className="break-all px-1">
-                  {importFileName || 'Selecionar arquivo .json'}
-                </span>
-              </button>
-            </div>
-            <Checkbox
-              checked={importReplace}
-              onChange={setImportReplace}
-              disabled={importingBoard}
-              label="Substituir o quadro atual (apaga colunas e cards existentes antes de importar)"
-              className="items-start !space-x-3"
-            />
-            <div className="flex justify-end gap-2 pt-2">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setImportModalOpen(false)}
-                disabled={importingBoard}
-              >
-                Cancelar
-              </Button>
-              <Button
-                type="button"
-                onClick={() => void handleConfirmImport()}
-                disabled={importingBoard || !importPayload}
-              >
-                {importingBoard ? 'Importando...' : 'Importar'}
-              </Button>
-            </div>
+            {importingBoard && importProgress != null ? (
+              <div className="space-y-5 py-6">
+                <p className="text-center text-sm font-medium text-gray-800 dark:text-gray-200">
+                  Importando quadro…
+                </p>
+                <div className="w-full space-y-2">
+                  <div className="flex justify-between text-xs text-gray-600 dark:text-gray-400">
+                    <span>Progresso</span>
+                    <span className="tabular-nums font-semibold text-gray-800 dark:text-gray-100">
+                      {Math.round(importProgress)}%
+                    </span>
+                  </div>
+                  <div className="h-3 w-full overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700">
+                    <div
+                      className="h-full rounded-full bg-red-600 transition-all duration-150 ease-out"
+                      style={{ width: `${Math.min(100, importProgress)}%` }}
+                    />
+                  </div>
+                </div>
+                <p className="text-center text-xs text-gray-500 dark:text-gray-400">
+                  Aguarde, não feche esta página.
+                </p>
+              </div>
+            ) : (
+              <>
+                <p className="text-sm leading-relaxed text-gray-600 dark:text-gray-400">
+                  Importe um JSON exportado do Trello ou pelo botão Exportar deste Tasks.
+                </p>
+
+                <input
+                  ref={importFileRef}
+                  type="file"
+                  accept="application/json,.json"
+                  className="hidden"
+                  onChange={(e) => {
+                    void handleImportFileChosen(e.target.files?.[0] || null);
+                    e.target.value = '';
+                  }}
+                />
+
+                <button
+                  type="button"
+                  onClick={() => importFileRef.current?.click()}
+                  className={clsx(
+                    'flex w-full flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed px-4 py-7 text-center transition-colors',
+                    importFileName
+                      ? 'border-red-300 bg-red-50/60 dark:border-red-800/50 dark:bg-red-950/20'
+                      : 'border-gray-300 hover:border-gray-400 hover:bg-gray-50 dark:border-gray-600 dark:hover:border-gray-500 dark:hover:bg-gray-800/60',
+                  )}
+                >
+                  <span
+                    className={clsx(
+                      'flex h-10 w-10 items-center justify-center rounded-full',
+                      importFileName
+                        ? 'bg-red-100 text-red-600 dark:bg-red-900/40 dark:text-red-300'
+                        : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400',
+                    )}
+                  >
+                    <Upload className="h-5 w-5" />
+                  </span>
+                  <span className="max-w-full break-all px-2 text-sm font-medium text-gray-800 dark:text-gray-100">
+                    {importFileName || 'Selecionar arquivo .json'}
+                  </span>
+                  <span className="text-xs text-gray-500 dark:text-gray-400">
+                    {importFileName ? 'Clique para trocar o arquivo' : 'Clique para escolher'}
+                  </span>
+                </button>
+
+                <label className="flex cursor-pointer items-center gap-3">
+                  <input
+                    type="checkbox"
+                    checked={importReplace}
+                    onChange={(e) => setImportReplace(e.target.checked)}
+                    className="sr-only"
+                  />
+                  <span className="shrink-0">
+                    <CheckboxIndicator checked={importReplace} />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-sm font-medium text-gray-800 dark:text-gray-100">
+                      Substituir o quadro atual
+                    </span>
+                    <span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">
+                      Apaga colunas e cards existentes antes de importar.
+                    </span>
+                  </span>
+                </label>
+
+                <div className="flex justify-end gap-3 border-t border-gray-200 pt-4 dark:border-gray-700">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setImportModalOpen(false)}
+                  >
+                    Cancelar
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="primary"
+                    disabled={!importPayload}
+                    className="!border-transparent !bg-red-600 !text-white hover:!bg-red-700 focus-visible:ring-red-500"
+                    onClick={() => void handleConfirmImport()}
+                  >
+                    Importar
+                  </Button>
+                </div>
+              </>
+            )}
           </div>
         </Modal>
       )}
