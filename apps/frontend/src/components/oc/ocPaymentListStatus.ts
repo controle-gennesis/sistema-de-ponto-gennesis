@@ -21,10 +21,15 @@ export function isOcPaymentCompleted(o: OrderProofValidationPick): boolean {
   return !!((o.paymentProofUrl || '').trim());
 }
 
-function isFinanceEntryMarkedPaid(
+/**
+ * Na lista da aba Pagamento da OC, "Pago" = já existe lançamento no Controle Financeiro
+ * (status LANCADO etc.), não só quando o título está como PAGO no financeiro.
+ */
+function isFinanceEntryLaunched(
   e: Pick<FinancialControlEntry, 'status' | 'paidDate'>
 ): boolean {
-  return e.status === 'PAGO' || e.status === 'PROCESSO_COMPLETO' || Boolean(e.paidDate);
+  if (e.status === 'CANCELADO') return false;
+  return true;
 }
 
 function countPaidInstallments(o: OrderProofValidationPick): number {
@@ -41,8 +46,8 @@ export function getOcPaymentListStatus(
   o: OrderProofValidationPick,
   entriesForOc: Pick<FinancialControlEntry, 'status' | 'paidDate'>[]
 ): OcPaymentListStatus {
-  const markedPaidInFinance = entriesForOc.some(isFinanceEntryMarkedPaid);
-  const paidFinanceCount = entriesForOc.filter(isFinanceEntryMarkedPaid).length;
+  const launchedEntries = entriesForOc.filter(isFinanceEntryLaunched);
+  const launchedFinanceCount = launchedEntries.length;
 
   if (o.paymentType === 'BOLETO' && (o.paymentParcelCount ?? 1) > 1) {
     const n = o.paymentParcelCount ?? 1;
@@ -54,16 +59,16 @@ export function getOcPaymentListStatus(
     const curIdx = visiblePaymentBoletoInstallmentIndex(o);
     if (curIdx != null && rowStatus(rows[curIdx]) === 'PAID') return 'pago';
 
-    if (paidFinanceCount > paidInstallments) {
+    // Um lançamento por parcela: se já lançou a parcela atual, mostra Pago.
+    if (launchedFinanceCount > paidInstallments) {
       if (curIdx == null || curIdx === paidInstallments) return 'pago';
     }
 
     return 'pendente';
   }
 
-  if (entriesForOc.length === 0) return 'pendente';
-  if (markedPaidInFinance || isOcPaymentCompleted(o)) return 'pago';
-  return 'pendente';
+  if (launchedFinanceCount === 0 && !isOcPaymentCompleted(o)) return 'pendente';
+  return 'pago';
 }
 
 export function ocPaymentListStatusLabel(status: OcPaymentListStatus): string {

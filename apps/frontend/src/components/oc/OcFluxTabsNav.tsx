@@ -1,6 +1,13 @@
 'use client';
 
+import { useEffect, useMemo } from 'react';
 import { TabCountBadge } from '@/components/ui/TabCountBadge';
+import { usePermissions } from '@/hooks/usePermissions';
+import {
+  isUnbCostCenter,
+  persistUnbBranding,
+  readStoredUnbBranding,
+} from '@/lib/unbBranding';
 import type { OcTab } from './OcPurchaseOrdersPanel';
 
 export type OcTabCounts = {
@@ -17,6 +24,10 @@ export type OcTabCounts = {
 };
 
 export const OC_FLUX_DEFAULT_TAB: OcTab = 'compras';
+export const OC_FLUX_DEFAULT_TAB_UNB: OcTab = 'gestor';
+
+/** Abas ocultas quando o centro de custo do usuário é UNB. */
+export const OC_UNB_HIDDEN_TABS: readonly OcTab[] = ['compras', 'diretoria'];
 
 const OC_FLUX_TABS: ReadonlyArray<{
   id: OcTab;
@@ -36,6 +47,27 @@ const OC_FLUX_TABS: ReadonlyArray<{
   { id: 'outras', label: 'Canceladas', countKey: 'outras' }
 ];
 
+export function isOcUnbUserCostCenter(costCenter?: string | null): boolean {
+  if (costCenter != null && costCenter !== '') {
+    return isUnbCostCenter(costCenter);
+  }
+  if (typeof window === 'undefined') return false;
+  return readStoredUnbBranding();
+}
+
+export function resolveOcFluxDefaultTab(isUnbUser: boolean): OcTab {
+  return isUnbUser ? OC_FLUX_DEFAULT_TAB_UNB : OC_FLUX_DEFAULT_TAB;
+}
+
+export function isOcFluxTabVisible(tab: OcTab, isUnbUser: boolean): boolean {
+  if (!isUnbUser) return true;
+  return !OC_UNB_HIDDEN_TABS.includes(tab);
+}
+
+export function resolveOcFluxNavigateTab(tab: OcTab, isUnbUser: boolean): OcTab {
+  return isOcFluxTabVisible(tab, isUnbUser) ? tab : OC_FLUX_DEFAULT_TAB_UNB;
+}
+
 export function OcFluxTabsNav({
   activeTab,
   onActiveTab,
@@ -47,6 +79,27 @@ export function OcFluxTabsNav({
   tabCounts: OcTabCounts;
   finalizedTotal: number;
 }) {
+  const { user } = usePermissions();
+  const costCenter = user?.employee?.costCenter as string | null | undefined;
+  const isUnbUser = isOcUnbUserCostCenter(costCenter);
+
+  useEffect(() => {
+    if (costCenter != null && costCenter !== '') {
+      persistUnbBranding(costCenter);
+    }
+  }, [costCenter]);
+
+  useEffect(() => {
+    if (!isOcFluxTabVisible(activeTab, isUnbUser)) {
+      onActiveTab(OC_FLUX_DEFAULT_TAB_UNB);
+    }
+  }, [activeTab, isUnbUser, onActiveTab]);
+
+  const visibleTabs = useMemo(
+    () => OC_FLUX_TABS.filter((tab) => isOcFluxTabVisible(tab.id, isUnbUser)),
+    [isUnbUser]
+  );
+
   const countFor = (key: keyof OcTabCounts | 'FINALIZADAS') =>
     key === 'FINALIZADAS' ? finalizedTotal : tabCounts[key];
 
@@ -54,7 +107,7 @@ export function OcFluxTabsNav({
     <div id="secao-fluxo-oc-tabs" className="scroll-mt-4">
       <div className="px-2 bg-transparent">
         <nav className="-mb-px flex flex-wrap justify-center gap-x-1 gap-y-2 overflow-x-auto py-3 sm:gap-x-2">
-          {OC_FLUX_TABS.map((tab) => (
+          {visibleTabs.map((tab) => (
             <button
               key={tab.id}
               type="button"

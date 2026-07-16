@@ -24,16 +24,16 @@ export function shouldUseUnbBranding(...labels: (string | null | undefined)[]): 
   return readStoredUnbBranding();
 }
 
+/** Logos escuras para PDF em fundo branco (evita *branco* invisível). */
 export function resolvePdfLogoCandidates(useUnbBranding: boolean): string[] {
   if (useUnbBranding) {
-    return ['/predialpreto.png', '/predialbranco.png'];
+    return ['/predialpreto.png', '/predialbranco.png', '/logopv.png'];
   }
   return [
     process.env.NEXT_PUBLIC_OC_PDF_LOGO_URL,
     '/oc-pdf-logo.png',
     '/logopv.png',
     '/logo.png',
-    '/logobranca.png',
   ].filter(Boolean) as string[];
 }
 

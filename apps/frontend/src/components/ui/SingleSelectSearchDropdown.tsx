@@ -123,8 +123,7 @@ function OptionLabelContent({ opt, noTruncate = false }: { opt: MultiSelectSearc
     <span className={labelClass}>{opt.label}</span>
   );
 
-  if (!opt.swatchColor) return label;
-  return (
+  const primary = opt.swatchColor ? (
     <span className="flex min-w-0 flex-1 items-center gap-2.5">
       <span
         className="h-5 w-5 shrink-0 rounded-md border border-black/15 shadow-sm dark:border-white/20"
@@ -132,6 +131,28 @@ function OptionLabelContent({ opt, noTruncate = false }: { opt: MultiSelectSearc
         aria-hidden
       />
       {label}
+    </span>
+  ) : (
+    label
+  );
+
+  const descriptionLines = (opt.description ?? '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (descriptionLines.length === 0) return primary;
+
+  return (
+    <span className="flex min-w-0 flex-1 flex-col gap-0.5 text-left">
+      {primary}
+      {descriptionLines.map((line) => (
+        <span
+          key={line}
+          className="truncate text-xs font-normal text-gray-500 dark:text-gray-400"
+        >
+          {line}
+        </span>
+      ))}
     </span>
   );
 }
@@ -173,7 +194,7 @@ export function SingleSelectSearchDropdown({
     const q = search.trim().toLowerCase();
     if (!q) return options;
     return options.filter((o) => {
-      const hay = `${o.label} ${o.searchText ?? ''} ${o.value}`.toLowerCase();
+      const hay = `${o.label} ${o.description ?? ''} ${o.searchText ?? ''} ${o.value}`.toLowerCase();
       return hay.includes(q);
     });
   }, [options, search]);
@@ -365,7 +386,15 @@ export function SingleSelectSearchDropdown({
                   onClick={() => pickValue(opt.value)}
                   className={optionClassName(active)}
                 >
-                  <span className={`min-w-0 flex-1 ${disableSearch ? 'whitespace-nowrap' : 'truncate'}`}>
+                  <span
+                    className={`min-w-0 flex-1 ${
+                      opt.description?.trim()
+                        ? ''
+                        : disableSearch
+                          ? 'whitespace-nowrap'
+                          : 'truncate'
+                    }`}
+                  >
                     <OptionLabelContent opt={opt} noTruncate={disableSearch} />
                   </span>
                   {active ? <Check className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" aria-hidden /> : null}

@@ -13,16 +13,23 @@ import {
   type OcTab,
   type PurchaseOrder
 } from '@/components/oc/OcPurchaseOrdersPanel';
-import { OcFluxTabsNav, OC_FLUX_DEFAULT_TAB } from '@/components/oc/OcFluxTabsNav';
+import {
+  OcFluxTabsNav,
+  isOcUnbUserCostCenter,
+  resolveOcFluxDefaultTab,
+  resolveOcFluxNavigateTab,
+} from '@/components/oc/OcFluxTabsNav';
 import { OcGlobalSearch } from '@/components/oc/OcGlobalSearch';
 import { computeOcTabCounts } from '@/components/oc/ocTabCounts';
 
 export default function OrdemDeCompraPage() {
   const router = useRouter();
-  const [ocTab, setOcTab] = useState<OcTab>(OC_FLUX_DEFAULT_TAB);
-  const [searchTerm, setSearchTerm] = useState('');
-
   const { user, isLoading: loadingUser } = usePermissions();
+  const isUnbUser = isOcUnbUserCostCenter(
+    (user?.employee?.costCenter as string | null | undefined) ?? null
+  );
+  const [ocTab, setOcTab] = useState<OcTab>(() => resolveOcFluxDefaultTab(isUnbUser));
+  const [searchTerm, setSearchTerm] = useState('');
 
   const handleLogout = () => {
     localStorage.removeItem('token');
@@ -77,7 +84,7 @@ export default function OrdemDeCompraPage() {
           <OcGlobalSearch
             searchTerm={searchTerm}
             onSearchChange={setSearchTerm}
-            onNavigate={setOcTab}
+            onNavigate={(tab) => setOcTab(resolveOcFluxNavigateTab(tab, isUnbUser))}
             orders={allOrders}
           />
 

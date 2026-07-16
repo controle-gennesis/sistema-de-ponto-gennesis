@@ -13,3 +13,22 @@ export function formatOcListDisplayId(orderNumber: string): string {
 
   return trimmed;
 }
+
+/** Observação padrão ao lançar OC no controle financeiro. */
+export function formatOcFinancialControlOriginNote(orderNumber: string): string {
+  const short = formatOcListDisplayId(orderNumber);
+  const n = short === '—' ? orderNumber.trim() : short;
+  return `Lançamento originado da Ordem de Compra ${n}`;
+}
+
+/**
+ * Exibe observação do controle financeiro com OC encurtada
+ * (`… da OC OC-2028-0009` → `… da Ordem de Compra 9`).
+ */
+export function formatFinancialControlObservationDisplay(note: string | null | undefined): string {
+  if (!note?.trim()) return '';
+  let s = note.trim();
+  s = s.replace(/\bOC-\d{4}-(\d+)\b/gi, (_, digits: string) => String(parseInt(digits, 10)));
+  s = s.replace(/Lançamento originado da OC\b/i, 'Lançamento originado da Ordem de Compra');
+  return s;
+}

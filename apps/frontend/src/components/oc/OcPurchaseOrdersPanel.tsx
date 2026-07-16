@@ -46,7 +46,7 @@ import api from '@/lib/api';
 import { normalizeCostCentersResponse } from '@/lib/costCenters';
 import { absoluteUploadUrl } from '@/lib/apiOrigin';
 import { parseLastOcCorrectionInfo } from '@/lib/ocCorrectionNotes';
-import { exportPurchaseOrderPdf } from '@/lib/exportPurchaseOrderPdf';
+import { exportPurchaseOrderPdf, type ExportPurchaseOrderPdfOptions } from '@/lib/exportPurchaseOrderPdf';
 import {
   Z_ACTION_MENU,
 } from '@/lib/zIndex';
@@ -62,6 +62,7 @@ import {
 import { BoletoParcelasModal } from '@/components/oc/BoletoParcelasModal';
 import { BoletoParcelasList } from '@/components/oc/BoletoParcelasList';
 import { canActOnOcApprovalStatus } from '@/lib/ocApprovalPermissions';
+import { isUnbRelatedLabel } from '@/lib/unbBranding';
 import { usePermissions } from '@/hooks/usePermissions';
 import {
   orderNeedsPaymentBoleto,
@@ -236,6 +237,7 @@ export interface PurchaseOrder {
     unitPrice: number;
     totalPrice: number;
     unit?: string;
+    notes?: string | null;
     material?: {
       id: string;
       name?: string | null;
@@ -346,13 +348,26 @@ const OC_PAYMENT_CONDITION_LABELS: Record<string, string> = {
   BOLETO_28: 'Boleto 28 dias'
 };
 
-function nextApprovalStatus(currentStatus: string): string {
+function isOcUnbCostCenter(order: {
+  materialRequest?: { costCenter?: { code?: string | null; name?: string | null } | null } | null;
+}): boolean {
+  const cc = order.materialRequest?.costCenter;
+  return isUnbRelatedLabel(cc?.name) || isUnbRelatedLabel(cc?.code);
+}
+
+/** UNB: só gestor (PENDING → APPROVED). Demais: compras → gestor → diretoria. */
+function nextApprovalStatus(currentStatus: string, unbOnlyGestor = false): string {
+  if (unbOnlyGestor) {
+    if (currentStatus === 'PENDING' || currentStatus === 'PENDING_DIRETORIA') return 'APPROVED';
+    return 'PENDING';
+  }
   if (currentStatus === 'PENDING_DIRETORIA') return 'APPROVED';
   if (currentStatus === 'PENDING') return 'PENDING_DIRETORIA';
   return 'PENDING';
 }
 
-function approvalLabel(currentStatus: string): string {
+function approvalLabel(currentStatus: string, unbOnlyGestor = false): string {
+  if (unbOnlyGestor && currentStatus === 'PENDING') return 'Aprovar (Gestor)';
   if (currentStatus === 'PENDING_DIRETORIA') return 'Aprovar (Diretoria)';
   if (currentStatus === 'PENDING') return 'Aprovar (Gestor)';
   return 'Aprovar (Compras)';
@@ -391,6 +406,16 @@ function patchOcInListSummaryCache(
   );
 }
 
+/** OC e RM compartilham fase na UI — precisa atualizar as listas de RM também. */
+function invalidateOcAndLinkedRmQueries(queryClient: QueryClient) {
+  void queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
+  void queryClient.invalidateQueries({ queryKey: ['material-requests'], refetchType: 'all' });
+  void queryClient.invalidateQueries({ queryKey: ['material-requests-manage'], refetchType: 'all' });
+  void queryClient.invalidateQueries({ queryKey: ['material-request-detail'] });
+  void queryClient.invalidateQueries({ queryKey: ['material-request'] });
+  void queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
+}
+
 /** Só sobrescreve campos definidos — evita sumir comprovante/itens ao misturar resposta leve. */
 function pickDefinedOcPatch(source: Partial<PurchaseOrder>): Partial<PurchaseOrder> {
   const out: Partial<PurchaseOrder> = {};
@@ -423,15 +448,17 @@ function applyOcLocalPatch(
 
 function approvalOptimisticPatch(
   currentStatus: string,
-  userId: string | undefined
+  userId: string | undefined,
+  unbOnlyGestor = false
 ): Partial<PurchaseOrder> {
-  const nextStatus = nextApprovalStatus(currentStatus);
+  const nextStatus = nextApprovalStatus(currentStatus, unbOnlyGestor);
   const patch: Partial<PurchaseOrder> = { status: nextStatus };
   if (!userId) return patch;
   if (currentStatus === 'PENDING_COMPRAS' || currentStatus === 'DRAFT') {
     patch.comprasApprovedBy = userId;
   } else if (currentStatus === 'PENDING') {
     patch.gestorApprovedBy = userId;
+    if (unbOnlyGestor) patch.approvedBy = userId;
   } else if (currentStatus === 'PENDING_DIRETORIA') {
     patch.approvedBy = userId;
   }
@@ -446,9 +473,12 @@ function isStockSyncedDocumentUrl(url: string): boolean {
   );
 }
 
-function parseOcNfAttachments(raw: unknown): Array<{ url: string; name: string | null; uploadedAt: string }> {
+function parseOcNfAttachments(
+  raw: unknown
+): Array<{ url: string; name: string | null; uploadedAt: string; number: string | null }> {
   if (!raw || !Array.isArray(raw)) return [];
-  const out: Array<{ url: string; name: string | null; uploadedAt: string }> = [];
+  const out: Array<{ url: string; name: string | null; uploadedAt: string; number: string | null }> =
+    [];
   for (const x of raw) {
     if (!x || typeof x !== 'object') continue;
     const rec = x as Record<string, unknown>;
@@ -460,7 +490,9 @@ function parseOcNfAttachments(raw: unknown): Array<{ url: string; name: string |
       typeof rec.uploadedAt === 'string' && rec.uploadedAt.trim()
         ? String(rec.uploadedAt).trim()
         : '';
-    out.push({ url: u, name, uploadedAt });
+    const number =
+      typeof rec.number === 'string' && rec.number.trim() ? String(rec.number).trim() : null;
+    out.push({ url: u, name, uploadedAt, number });
   }
   return out;
 }
@@ -886,6 +918,9 @@ function OcOrderMaterialsTable({ order }: { order: PurchaseOrder }) {
       <table className="w-full text-xs sm:text-sm">
         <thead className="bg-gray-50 dark:bg-gray-700/50">
           <tr className="text-left">
+            <th className="p-2.5 font-medium text-gray-700 dark:text-gray-300 text-center whitespace-nowrap w-12">
+              Item
+            </th>
             <th className="p-2.5 font-medium text-gray-700 dark:text-gray-300">Material</th>
             <th className="p-2.5 font-medium text-gray-700 dark:text-gray-300 text-right whitespace-nowrap">Qtd</th>
             <th className="p-2.5 font-medium text-gray-700 dark:text-gray-300 text-center whitespace-nowrap">Un.</th>
@@ -896,6 +931,9 @@ function OcOrderMaterialsTable({ order }: { order: PurchaseOrder }) {
         <tbody className="divide-y divide-gray-200 dark:divide-gray-600">
           {order.items?.map((line, idx) => (
             <tr key={idx} className="text-gray-600 dark:text-gray-400">
+              <td className="p-2.5 text-center tabular-nums align-top font-medium text-gray-800 dark:text-gray-200">
+                {idx + 1}
+              </td>
               <td className="p-2.5 align-top max-w-[220px] sm:max-w-none">{materialLineLabel(line.material)}</td>
               <td className="p-2.5 text-right whitespace-nowrap align-top">{Number(line.quantity)}</td>
               <td className="p-2.5 text-center whitespace-nowrap align-top">{line.unit || '—'}</td>
@@ -908,7 +946,7 @@ function OcOrderMaterialsTable({ order }: { order: PurchaseOrder }) {
         </tbody>
         <tfoot className="bg-gray-50 dark:bg-gray-700/30 border-t border-gray-200 dark:border-gray-600">
           <tr>
-            <td colSpan={4} className="p-2.5 text-right font-medium text-gray-700 dark:text-gray-300">
+            <td colSpan={5} className="p-2.5 text-right font-medium text-gray-700 dark:text-gray-300">
               Total dos itens
             </td>
             <td className="p-2.5 text-right font-semibold text-gray-900 dark:text-gray-100 whitespace-nowrap">
@@ -1504,7 +1542,11 @@ function OcListNfCellContent({ order }: { order: PurchaseOrder }) {
     return (
       <OcListDownloadIconLink
         url={nfs[0].url}
-        fileName={nfs[0].name?.trim() || 'Nota fiscal'}
+        fileName={
+          nfs[0].number
+            ? `NF ${nfs[0].number}`
+            : nfs[0].name?.trim() || 'Nota fiscal'
+        }
         label="Baixar NF"
       />
     );
@@ -1801,6 +1843,7 @@ export function OcPurchaseOrdersPanel({
   const [financialEntryModalOpen, setFinancialEntryModalOpen] = useState(false);
   const [editingFinancialEntry, setEditingFinancialEntry] = useState<FinancialControlEntry | null>(null);
   const [nfFileDraft, setNfFileDraft] = useState<File | null>(null);
+  const [nfNumberDraft, setNfNumberDraft] = useState('');
   const [installmentProofFileDraft, setInstallmentProofFileDraft] = useState<File | null>(null);
   const [installmentProofDraftByIdx, setInstallmentProofDraftByIdx] = useState<Record<number, File | null>>(
     {}
@@ -1866,6 +1909,7 @@ export function OcPurchaseOrdersPanel({
   useEffect(() => {
     setProofFileDraft(null);
     setNfFileDraft(null);
+    setNfNumberDraft('');
     setInstallmentProofFileDraft(null);
     setInstallmentProofDraftByIdx({});
     if (selectedOrder?.id && selectedOrder.status !== 'IN_REVIEW') {
@@ -1877,19 +1921,6 @@ export function OcPurchaseOrdersPanel({
 
   const [editOcForm, setEditOcForm] = useState<OcPurchaseOrderFormValues | null>(null);
   const [editSupplierSearch, setEditSupplierSearch] = useState('');
-
-  const handleExportPdf = async (id: string) => {
-    setPdfExportingId(id);
-    try {
-      await exportPurchaseOrderPdf(id);
-      toast.success('PDF gerado com sucesso.');
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'Erro ao gerar PDF';
-      toast.error(msg);
-    } finally {
-      setPdfExportingId(null);
-    }
-  };
 
   const toDateInputValue = (d?: string | null) => {
     if (!d) return '';
@@ -2019,22 +2050,36 @@ export function OcPurchaseOrdersPanel({
     canSubmitProofValidationWithFinancialEntry(selectedOrder, hasFinancialEntryForOc);
 
   const approveMutation = useMutation({
-    mutationFn: async ({ id, currentStatus }: { id: string; currentStatus: string }) => {
-      const nextStatus = nextApprovalStatus(currentStatus);
+    mutationFn: async ({
+      id,
+      currentStatus,
+      unbOnlyGestor
+    }: {
+      id: string;
+      currentStatus: string;
+      unbOnlyGestor?: boolean;
+    }) => {
+      const nextStatus = nextApprovalStatus(currentStatus, !!unbOnlyGestor);
       const res = await api.patch(`/purchase-orders/${id}/status`, { status: nextStatus });
       return res.data;
     },
-    onMutate: async ({ id, currentStatus }) => {
+    onMutate: async ({ id, currentStatus, unbOnlyGestor }) => {
       await queryClient.cancelQueries({ queryKey: ['purchase-orders', 'list-summary'] });
       const previous = queryClient.getQueryData<PurchaseOrdersListSummaryCache>([
         'purchase-orders',
         'list-summary'
       ]);
-      patchOcInListSummaryCache(queryClient, id, approvalOptimisticPatch(currentStatus, currentUserId));
+      patchOcInListSummaryCache(
+        queryClient,
+        id,
+        approvalOptimisticPatch(currentStatus, currentUserId, !!unbOnlyGestor)
+      );
       setSelectedOrder(null);
       setOcActionMenu(null);
       const toastId = `oc-approve-${id}`;
-      if (currentStatus === 'PENDING_DIRETORIA') {
+      if (unbOnlyGestor && currentStatus === 'PENDING') {
+        toast.success('OC UNB aprovada pelo gestor.', { id: toastId });
+      } else if (currentStatus === 'PENDING_DIRETORIA') {
         toast.success('OC aprovada pela diretoria.', { id: toastId });
       } else if (currentStatus === 'PENDING') {
         toast.success('OC enviada para aprovação da diretoria.', { id: toastId });
@@ -2054,8 +2099,7 @@ export function OcPurchaseOrdersPanel({
           approvedBy: updated.approvedBy ?? order.approvedBy
         }));
       }
-      void queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
-      void queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
+      invalidateOcAndLinkedRmQueries(queryClient);
     },
     onError: (error: { response?: { data?: { message?: string } } }, _variables, context) => {
       if (context?.previous) {
@@ -2091,8 +2135,7 @@ export function OcPurchaseOrdersPanel({
       return { previous, toastId };
     },
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
-      void queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
+      invalidateOcAndLinkedRmQueries(queryClient);
     },
     onError: (error: { response?: { data?: { message?: string } } }, _variables, context) => {
       if (context?.previous) {
@@ -2133,8 +2176,7 @@ export function OcPurchaseOrdersPanel({
       return { previous, toastId };
     },
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
-      void queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
+      invalidateOcAndLinkedRmQueries(queryClient);
     },
     onError: (error: { response?: { data?: { message?: string } } }, _variables, context) => {
       if (context?.previous) {
@@ -2147,13 +2189,16 @@ export function OcPurchaseOrdersPanel({
   });
 
   const resubmitOcMutation = useMutation({
-    mutationFn: async (id: string) => {
-      const res = await api.patch(`/purchase-orders/${id}/status`, { status: 'PENDING_COMPRAS' });
+    mutationFn: async (order: Pick<PurchaseOrder, 'id'> & {
+      materialRequest?: PurchaseOrder['materialRequest'];
+    }) => {
+      // UNB volta direto para o gestor; demais CCs para compras.
+      const status = isOcUnbCostCenter(order) ? 'PENDING' : 'PENDING_COMPRAS';
+      const res = await api.patch(`/purchase-orders/${order.id}/status`, { status });
       return res.data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
-      queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
+      invalidateOcAndLinkedRmQueries(queryClient);
       setSelectedOrder(null);
       toast.success('OC enviada para aprovação.');
     },
@@ -2167,8 +2212,7 @@ export function OcPurchaseOrdersPanel({
       return res.data;
     },
     onSuccess: (resp: any) => {
-      queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
-      queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
+      invalidateOcAndLinkedRmQueries(queryClient);
       const updatedOrder = resp?.data;
       if (updatedOrder) setSelectedOrder(updatedOrder);
       setShowEditOcModal(false);
@@ -2437,8 +2481,7 @@ export function OcPurchaseOrdersPanel({
       return { previous, toastId };
     },
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
-      void queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
+      invalidateOcAndLinkedRmQueries(queryClient);
     },
     onError: (error: { response?: { data?: { message?: string } }; message?: string }, _v, context) => {
       if (context?.previous) {
@@ -2472,8 +2515,7 @@ export function OcPurchaseOrdersPanel({
       return { previous, toastId };
     },
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
-      void queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
+      invalidateOcAndLinkedRmQueries(queryClient);
     },
     onError: (error: { response?: { data?: { message?: string } }; message?: string }, _v, context) => {
       if (context?.previous) {
@@ -2491,39 +2533,47 @@ export function OcPurchaseOrdersPanel({
       return res.data;
     },
     onMutate: async (id) => {
+      // Não alterar status no cache aqui: boleto parcelado sequencial pode voltar
+      // para APPROVED (Anexar Boleto) — um patch otimista para Anexar NF / Pagamento
+      // causa flash na aba errada até o refetch.
       await queryClient.cancelQueries({ queryKey: ['purchase-orders', 'list-summary'] });
       const previous = queryClient.getQueryData<PurchaseOrdersListSummaryCache>([
         'purchase-orders',
         'list-summary'
       ]);
-      patchOcInListSummaryCache(queryClient, id, { status: 'PENDING_NF_ATTACHMENT' });
       setSelectedOrder(null);
       setOcActionMenu(null);
-      const toastId = `oc-proof-validate-${id}`;
-      toast.success('Comprovante validado. A OC foi para a fase Anexar NF.', { id: toastId });
-      return { previous, toastId };
+      return { previous, toastId: `oc-proof-validate-${id}` };
     },
-    onSuccess: (resp: { data?: PurchaseOrder }) => {
+    onSuccess: (resp: { data?: PurchaseOrder }, id) => {
       const updated = resp?.data;
+      const toastId = `oc-proof-validate-${id}`;
       if (updated?.id) {
-        patchOcInListSummaryCache(queryClient, updated.id, (order) => ({
-          ...order,
-          status: updated.status ?? order.status
-        }));
+        applyOcLocalPatch(queryClient, setSelectedOrder, updated.id, {
+          status: updated.status,
+          paymentBoletoInstallments: updated.paymentBoletoInstallments,
+          paymentBoletoPhaseReleased: updated.paymentBoletoPhaseReleased,
+          paymentProofUrl: updated.paymentProofUrl,
+          paymentProofName: updated.paymentProofName,
+          paymentParcelCount: updated.paymentParcelCount,
+        });
         if (updated.status === 'APPROVED') {
-          const backToAttachBoleto = updated.paymentBoletoPhaseReleased !== true;
+          const backToAttachBoleto = showInAttachBoletoTab(updated);
           toast.success(
             backToAttachBoleto
               ? 'Comprovante validado. A OC voltou para a fase Anexar Boleto (próxima parcela).'
               : 'Comprovante validado. Prosiga com a próxima parcela na fase Pagamento.',
-            {
-              id: `oc-proof-validate-${updated.id}`
-            }
+            { id: toastId }
           );
+        } else if (updated.status === 'PENDING_NF_ATTACHMENT') {
+          toast.success('Comprovante validado. A OC foi para a fase Anexar NF.', { id: toastId });
+        } else {
+          toast.success('Comprovante validado.', { id: toastId });
         }
+      } else {
+        toast.success('Comprovante validado.', { id: toastId });
       }
-      void queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
-      void queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
+      invalidateOcAndLinkedRmQueries(queryClient);
     },
     onError: (error: { response?: { data?: { message?: string } }; message?: string }, _v, context) => {
       if (context?.previous) {
@@ -2536,7 +2586,15 @@ export function OcPurchaseOrdersPanel({
   });
 
   const appendNfMutation = useMutation({
-    mutationFn: async ({ id, file }: { id: string; file: File }) => {
+    mutationFn: async ({
+      id,
+      file,
+      nfNumber
+    }: {
+      id: string;
+      file: File;
+      nfNumber: string;
+    }) => {
       const fd = new FormData();
       fd.append('file', file);
       const up = await api.post('/purchase-orders/upload-nf', fd);
@@ -2545,13 +2603,13 @@ export function OcPurchaseOrdersPanel({
       if (!url) throw new Error('Resposta inválida do upload');
       const res = await api.patch(`/purchase-orders/${id}/nf-attachments`, {
         nfUrl: url,
-        nfName: originalName
+        nfName: originalName,
+        nfNumber: nfNumber.trim()
       });
       return res.data;
     },
     onSuccess: (resp: { data?: PurchaseOrder }) => {
-      queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
-      queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
+      invalidateOcAndLinkedRmQueries(queryClient);
       const updated = resp?.data;
       if (updated?.id) {
         applyOcLocalPatch(queryClient, setSelectedOrder, updated.id, {
@@ -2559,6 +2617,7 @@ export function OcPurchaseOrdersPanel({
         });
       }
       setNfFileDraft(null);
+      setNfNumberDraft('');
       toast.success('Nota fiscal anexada.');
     },
     onError: (error: { response?: { data?: { message?: string } }; message?: string }) =>
@@ -2571,8 +2630,7 @@ export function OcPurchaseOrdersPanel({
       return res.data;
     },
     onSuccess: (resp: { data?: PurchaseOrder }) => {
-      queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
-      queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
+      invalidateOcAndLinkedRmQueries(queryClient);
       const updated = resp?.data;
       if (updated?.id) {
         applyOcLocalPatch(queryClient, setSelectedOrder, updated.id, {
@@ -2604,8 +2662,7 @@ export function OcPurchaseOrdersPanel({
       return { previous, toastId };
     },
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
-      void queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
+      invalidateOcAndLinkedRmQueries(queryClient);
     },
     onError: (error: { response?: { data?: { message?: string } }; message?: string }, _v, context) => {
       if (context?.previous) {
@@ -2682,6 +2739,26 @@ export function OcPurchaseOrdersPanel({
     () => buildPaymentConditionLabelMap(paymentConditionRows, OC_PAYMENT_CONDITION_LABELS),
     [paymentConditionRows]
   );
+
+  const handleExportPdf = async (id: string) => {
+    setPdfExportingId(id);
+    try {
+      const cached =
+        selectedOrder?.id === id && selectedOrder.items && selectedOrder.items.length > 0
+          ? selectedOrder
+          : undefined;
+      await exportPurchaseOrderPdf(id, {
+        order: cached as ExportPurchaseOrderPdfOptions['order'],
+        paymentConditionLabels: paymentConditionLabelMap,
+      });
+      toast.success('PDF gerado com sucesso.');
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Erro ao gerar PDF';
+      toast.error(msg);
+    } finally {
+      setPdfExportingId(null);
+    }
+  };
 
   const showApprovalPhaseFilter = isOcApprovalTab(activeTab);
 
@@ -3773,9 +3850,15 @@ export function OcPurchaseOrdersPanel({
                                 {showListApprovalActions(o.status) && (
                                   <button
                                     type="button"
-                                    onClick={() => approveMutation.mutate({ id: o.id, currentStatus: o.status })}
+                                    onClick={() =>
+                                      approveMutation.mutate({
+                                        id: o.id,
+                                        currentStatus: o.status,
+                                        unbOnlyGestor: isOcUnbCostCenter(o)
+                                      })
+                                    }
                                     className="p-2 text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20 rounded-lg transition-colors inline-flex"
-                                    title={approvalLabel(o.status)}
+                                    title={approvalLabel(o.status, isOcUnbCostCenter(o))}
                                   >
                                     <Check className="w-4 h-4" />
                                   </button>
@@ -3822,7 +3905,7 @@ export function OcPurchaseOrdersPanel({
                                       </button>
                                       <button
                                         type="button"
-                                        onClick={() => resubmitOcMutation.mutate(o.id)}
+                                        onClick={() => resubmitOcMutation.mutate(o)}
                                         disabled={resubmitOcMutation.isPending}
                                         className="p-2 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-colors inline-flex disabled:opacity-50"
                                         title="Enviar para Aprovação"
@@ -4423,9 +4506,8 @@ export function OcPurchaseOrdersPanel({
                     Anexar nota(s) fiscal(is)
                   </p>
                   <p className="text-xs text-gray-600 dark:text-gray-400">
-                    Anexe quantas NFs forem necessárias (PDF ou imagem). Depois finalize para marcar a OC como enviada
-                    ao fornecedor. NFs anexadas no estoque são sincronizadas automaticamente — não é preciso repetir o
-                    anexo aqui.
+                    Informe o número da NF e anexe o arquivo (PDF ou imagem). O número não pode se repetir em outra
+                    OC. NFs anexadas no estoque são sincronizadas automaticamente.
                   </p>
                   {parseOcNfAttachments(selectedOrder.nfAttachments).length > 0 ? (
                     <ul className="space-y-1.5 text-sm">
@@ -4434,15 +4516,22 @@ export function OcPurchaseOrdersPanel({
                           key={`${nf.url}-${idx}`}
                           className="flex flex-wrap items-center justify-between gap-2 rounded border border-teal-100 dark:border-teal-900/40 bg-white/60 dark:bg-gray-900/30 px-2 py-1.5"
                         >
-                          <a
-                            href={absoluteUploadUrl(nf.url)}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-blue-600 dark:text-blue-400 underline inline-flex items-center gap-1"
-                          >
-                            <FileText className="w-3.5 h-3.5 shrink-0" />
-                            {nf.name || `NF ${idx + 1}`}
-                          </a>
+                          <div className="min-w-0 flex flex-col gap-0.5">
+                            {nf.number ? (
+                              <span className="text-xs font-semibold text-teal-900 dark:text-teal-200">
+                                Nº {nf.number}
+                              </span>
+                            ) : null}
+                            <a
+                              href={absoluteUploadUrl(nf.url)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-blue-600 dark:text-blue-400 underline inline-flex items-center gap-1"
+                            >
+                              <FileText className="w-3.5 h-3.5 shrink-0" />
+                              {nf.name || `NF ${idx + 1}`}
+                            </a>
+                          </div>
                           {isStockSyncedDocumentUrl(nf.url) && (
                             <span className="text-[11px] text-teal-700 dark:text-teal-300">Estoque</span>
                           )}
@@ -4462,26 +4551,47 @@ export function OcPurchaseOrdersPanel({
                   ) : (
                     <p className="text-xs text-gray-500 dark:text-gray-400">Nenhuma NF anexada ainda.</p>
                   )}
-                  {canUserManageNfOnOrder(selectedOrder, canActAttachNfUi) &&
-                    parseOcNfAttachments(selectedOrder.nfAttachments).length === 0 && (
-                    <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-                      <input
-                        type="file"
-                        accept=".pdf,image/*"
-                        onChange={(e) => setNfFileDraft(e.target.files?.[0] ?? null)}
-                        className="block w-full text-xs text-gray-600 dark:text-gray-400 file:mr-2 file:py-1.5 file:px-2 file:rounded file:border-0 file:bg-teal-100 file:text-teal-900 dark:file:bg-teal-900/40 dark:file:text-teal-100"
-                      />
-                      <button
-                        type="button"
-                        disabled={!nfFileDraft || appendNfMutation.isPending}
-                        onClick={() => {
-                          if (!nfFileDraft) return;
-                          appendNfMutation.mutate({ id: selectedOrder.id, file: nfFileDraft });
-                        }}
-                        className="shrink-0 px-3 py-2 text-sm font-medium rounded-lg bg-teal-600 text-white hover:bg-teal-700 disabled:opacity-50"
-                      >
-                        {appendNfMutation.isPending ? 'Enviando…' : 'Anexar NF'}
-                      </button>
+                  {canUserManageNfOnOrder(selectedOrder, canActAttachNfUi) && (
+                    <div className="flex flex-col gap-2">
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300">
+                          Número da nota fiscal *
+                        </label>
+                        <input
+                          type="text"
+                          value={nfNumberDraft}
+                          onChange={(e) => setNfNumberDraft(e.target.value)}
+                          placeholder="Ex.: 123456"
+                          className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                        />
+                      </div>
+                      <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                        <input
+                          type="file"
+                          accept=".pdf,image/*"
+                          onChange={(e) => setNfFileDraft(e.target.files?.[0] ?? null)}
+                          className="block w-full text-xs text-gray-600 dark:text-gray-400 file:mr-2 file:py-1.5 file:px-2 file:rounded file:border-0 file:bg-teal-100 file:text-teal-900 dark:file:bg-teal-900/40 dark:file:text-teal-100"
+                        />
+                        <button
+                          type="button"
+                          disabled={
+                            !nfFileDraft ||
+                            !nfNumberDraft.trim() ||
+                            appendNfMutation.isPending
+                          }
+                          onClick={() => {
+                            if (!nfFileDraft || !nfNumberDraft.trim()) return;
+                            appendNfMutation.mutate({
+                              id: selectedOrder.id,
+                              file: nfFileDraft,
+                              nfNumber: nfNumberDraft
+                            });
+                          }}
+                          className="shrink-0 px-3 py-2 text-sm font-medium rounded-lg bg-teal-600 text-white hover:bg-teal-700 disabled:opacity-50"
+                        >
+                          {appendNfMutation.isPending ? 'Enviando…' : 'Anexar NF'}
+                        </button>
+                      </div>
                     </div>
                   )}
                   {canUserManageNfOnOrder(selectedOrder, canActAttachNfUi) && (
@@ -4651,6 +4761,11 @@ export function OcPurchaseOrdersPanel({
                       <ul className="space-y-1">
                         {parseOcNfAttachments(selectedOrder.nfAttachments).map((nf, idx) => (
                           <li key={`${nf.url}-${idx}`} className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                            {nf.number ? (
+                              <span className="text-xs font-semibold text-gray-700 dark:text-gray-200">
+                                Nº {nf.number}
+                              </span>
+                            ) : null}
                             <OcAttachmentActions url={nf.url} fileName={nf.name || `NF ${idx + 1}`} />
                             {nf.uploadedAt ? (
                               <span className="text-xs text-gray-500 dark:text-gray-400">
@@ -5368,12 +5483,18 @@ export function OcPurchaseOrdersPanel({
               {showListApprovalActions(selectedOrder.status) && (
                 <button
                   type="button"
-                  onClick={() => approveMutation.mutate({ id: selectedOrder.id, currentStatus: selectedOrder.status })}
+                  onClick={() =>
+                    approveMutation.mutate({
+                      id: selectedOrder.id,
+                      currentStatus: selectedOrder.status,
+                      unbOnlyGestor: isOcUnbCostCenter(selectedOrder)
+                    })
+                  }
                   disabled={approveMutation.isPending}
                   className="flex-1 min-w-[120px] px-3 py-2 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 inline-flex items-center justify-center gap-1.5"
                 >
                   <Check className="w-4 h-4 shrink-0" />
-                  {approvalLabel(selectedOrder.status)}
+                  {approvalLabel(selectedOrder.status, isOcUnbCostCenter(selectedOrder))}
                 </button>
               )}
               {showListApprovalActions(selectedOrder.status) && (
@@ -5408,7 +5529,7 @@ export function OcPurchaseOrdersPanel({
                   </button>
                   <button
                     type="button"
-                    onClick={() => resubmitOcMutation.mutate(selectedOrder.id)}
+                    onClick={() => resubmitOcMutation.mutate(selectedOrder)}
                     disabled={resubmitOcMutation.isPending}
                     className="flex-1 min-w-[120px] px-3 py-2 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50"
                   >
@@ -5811,36 +5932,19 @@ export function OcPurchaseOrdersPanel({
                 <span>Baixar OC</span>
               </button>
               {canUserAttachNfOnOrder(orderForActionMenu, canActAttachNfUi) && (
-                <label
+                <button
+                  type="button"
                   role="menuitem"
-                  className={`${OC_MENU_ITEM_CLASS} border-t border-gray-200 dark:border-gray-700 cursor-pointer`}
-                  onClick={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setOcActionMenu(null);
+                    setSelectedOrder(orderForActionMenu);
+                  }}
+                  className={`${OC_MENU_ITEM_CLASS} border-t border-gray-200 dark:border-gray-700`}
                 >
-                  {appendNfMutation.isPending &&
-                  appendNfMutation.variables?.id === orderForActionMenu.id ? (
-                    <Loader2 className="h-4 w-4 shrink-0 animate-spin text-teal-600 dark:text-teal-400" />
-                  ) : (
-                    <FileText className="h-4 w-4 shrink-0 text-teal-600 dark:text-teal-400" />
-                  )}
+                  <FileText className="h-4 w-4 shrink-0 text-teal-600 dark:text-teal-400" />
                   <span>Anexar NF</span>
-                  <input
-                    type="file"
-                    accept=".pdf,image/*"
-                    className="hidden"
-                    disabled={
-                      appendNfMutation.isPending &&
-                      appendNfMutation.variables?.id === orderForActionMenu.id
-                    }
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      e.target.value = '';
-                      setOcActionMenu(null);
-                      if (file) {
-                        appendNfMutation.mutate({ id: orderForActionMenu.id, file });
-                      }
-                    }}
-                  />
-                </label>
+                </button>
               )}
               {canUserFinalizeOcWithNf(orderForActionMenu, canActAttachNfUi) && (
                 <button
@@ -5906,7 +6010,8 @@ export function OcPurchaseOrdersPanel({
                       setOcActionMenu(null);
                       approveMutation.mutate({
                         id: orderForActionMenu.id,
-                        currentStatus: orderForActionMenu.status
+                        currentStatus: orderForActionMenu.status,
+                        unbOnlyGestor: isOcUnbCostCenter(orderForActionMenu)
                       });
                     }}
                     disabled={approveMutation.isPending}
@@ -5917,7 +6022,12 @@ export function OcPurchaseOrdersPanel({
                     ) : (
                       <Check className="h-4 w-4 shrink-0 text-green-600 dark:text-green-400" />
                     )}
-                    <span>{approvalLabel(orderForActionMenu.status)}</span>
+                    <span>
+                      {approvalLabel(
+                        orderForActionMenu.status,
+                        isOcUnbCostCenter(orderForActionMenu)
+                      )}
+                    </span>
                   </button>
                   <button
                     type="button"
@@ -5977,7 +6087,7 @@ export function OcPurchaseOrdersPanel({
                       onClick={(e) => {
                         e.stopPropagation();
                         setOcActionMenu(null);
-                        resubmitOcMutation.mutate(orderForActionMenu.id);
+                        resubmitOcMutation.mutate(orderForActionMenu);
                       }}
                       disabled={resubmitOcMutation.isPending}
                       className={`${OC_MENU_ITEM_CLASS} border-t border-gray-200 dark:border-gray-700`}

@@ -79,6 +79,8 @@ export function parsePaymentSlipsFromMovementNotes(
 export type StockInvoiceParsed = {
   name: string;
   url: string;
+  /** Número da NF informado na movimentação (quando houver). */
+  number?: string | null;
 };
 
 export function parseInvoicesFromMovementNotes(
@@ -86,13 +88,17 @@ export function parseInvoicesFromMovementNotes(
 ): StockInvoiceParsed[] {
   if (!notes) return [];
   const out: StockInvoiceParsed[] = [];
-  const re = /NF:\s*(.*?)\s*\|\s*URL:\s*([^\s|]+)/gi;
+  // Formato novo: NF: name | Número: 123 | URL: ...
+  // Formato legado: NF: name | URL: ...
+  const re =
+    /NF:\s*(.*?)\s*(?:\|\s*N[uú]mero:\s*([^|]+?)\s*)?\|\s*URL:\s*([^\s|]+)/gi;
   let match: RegExpExecArray | null;
   while ((match = re.exec(notes)) !== null) {
     const name = (match[1] || '').trim() || 'Nota fiscal';
-    const url = (match[2] || '').trim();
+    const number = (match[2] || '').trim() || null;
+    const url = (match[3] || '').trim();
     if (!url) continue;
-    out.push({ name, url });
+    out.push({ name, url, number });
   }
   return out;
 }

@@ -103,6 +103,7 @@ export function FinancialControlOcQuickLaunch({
           value={form.ocNumber ? formatOcListDisplayId(form.ocNumber) : '—'}
         />
         <SummaryRow label="Fornecedor" value={form.supplierName || '—'} />
+        {form.nfNumber ? <SummaryRow label="NF" value={form.nfNumber} /> : null}
         {form.parcelNumber ? <SummaryRow label="Parcela" value={form.parcelNumber} /> : null}
         <SummaryRow label="Valor" value={baseDisplay} />
         <SummaryRow

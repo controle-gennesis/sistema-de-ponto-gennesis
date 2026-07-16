@@ -1800,7 +1800,7 @@ model PurchaseOrder {
   /// Comprovante de pagamento anexado na fase Pagamento
   paymentProofUrl            String?
   paymentProofName           String?
-  /// Notas fiscais anexadas após validação do comprovante: [{ url, name, uploadedAt }]
+  /// Notas fiscais anexadas após validação do comprovante: [{ url, name, uploadedAt, number }]
   nfAttachments              Json?
   /// Frete informado na criação (ou edição em correção). Total a pagar = soma dos itens + frete.
   freightAmount              Decimal             @default(0) @db.Decimal(15, 2)
@@ -1827,6 +1827,7 @@ model PurchaseOrder {
   stockShortfalls   StockShortfall[]
   materialDeliveries MaterialDelivery[]
   logisticsDeliveryRequests LogisticsDeliveryRequest[]
+  invoiceNumbers    PurchaseOrderInvoiceNumber[]
 
   @@index([orderNumber])
   @@index([materialRequestId])
@@ -1835,6 +1836,22 @@ model PurchaseOrder {
   @@index([status])
   @@index([orderDate])
   @@map("purchase_orders")
+}
+
+/// Número de NF vinculado à OC (unicidade global entre OCs).
+model PurchaseOrderInvoiceNumber {
+  id              String   @id @default(cuid())
+  /// Chave canonica (sem espacos/pontuacao) para unicidade
+  numberKey       String   @unique
+  /// Numero exibido como digitado
+  number          String
+  purchaseOrderId String
+  createdAt       DateTime @default(now())
+
+  purchaseOrder PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+
+  @@index([purchaseOrderId])
+  @@map("purchase_order_invoice_numbers")
 }
 
 enum PurchaseOrderStatus {
@@ -2460,6 +2477,7 @@ enum FinancialControlStatus {
   PAGO              // verde
   AGUARDAR_NOTA     // verde (pago, aguardar nota)
   AGUARDAR_PAGAMENTO // azul claro (agendado, aguardar pagamento)
+  LANCADO           // cinza/azul — lançamento criado a partir da OC (ainda nao pago)
   CANCELADO         // vermelho
 }
 
@@ -2476,7 +2494,9 @@ model FinancialControlEntry {
   osCode          String?
   /// "Código-Nome do Fornecedor".
   supplierName    String?
-  /// "Prf-Numero Parcela" (ex.: 3167883, 000391-1, 000010-1/2).
+  /// Número da nota fiscal (ex.: 556713). Na planilha antiga às vezes vinha junto da parcela (`556713-2/2`).
+  nfNumber        String?
+  /// Número da parcela (ex.: 2/2, 1). Pode vir separado ou no sufixo de `NF-parcela` na importação.
   parcelNumber    String?
   /// "Data de Emissão" da nota/título.
   emissionDate    DateTime?

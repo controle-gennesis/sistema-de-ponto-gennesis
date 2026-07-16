@@ -7,6 +7,7 @@ export type ServiceOrderOption = {
   ano: number;
   status: string;
   label: string;
+  costCenterId?: string;
   divSe: string | null;
   folderNumber: string | null;
   contractName: string | null;

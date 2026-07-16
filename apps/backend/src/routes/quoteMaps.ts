@@ -62,22 +62,25 @@ router.put('/:id/quotes', async (req: AuthRequest, res: Response, next: NextFunc
 router.post('/:id/generate', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
-    const { generateSupplierIds, paymentBySupplier, itemQuantities } = req.body as {
-      generateSupplierIds?: string[];
-      itemQuantities?: Record<string, number>;
-      paymentBySupplier?: Array<{
-        supplierId: string;
-        paymentType: string;
-        paymentCondition: string;
-        paymentDetails?: string;
-        pixKeyType?: string;
-        pixKey?: string;
-        observations?: string;
-        amountToPay?: number;
-        boletoAttachmentUrl?: string;
-        boletoAttachmentName?: string;
-      }>;
-    };
+    const { generateSupplierIds, paymentBySupplier, itemQuantities, itemNotesBySupplierItem } =
+      req.body as {
+        generateSupplierIds?: string[];
+        itemQuantities?: Record<string, number>;
+        /** Chave `supplierId:materialRequestItemId` → detalhe/nome do item no fornecedor (notes do item da OC). */
+        itemNotesBySupplierItem?: Record<string, string>;
+        paymentBySupplier?: Array<{
+          supplierId: string;
+          paymentType: string;
+          paymentCondition: string;
+          paymentDetails?: string;
+          pixKeyType?: string;
+          pixKey?: string;
+          observations?: string;
+          amountToPay?: number;
+          boletoAttachmentUrl?: string;
+          boletoAttachmentName?: string;
+        }>;
+      };
 
     if (!req.user?.id) throw createError('Usuário não autenticado', 401);
     if (!generateSupplierIds || !Array.isArray(generateSupplierIds) || generateSupplierIds.length === 0) {
@@ -90,7 +93,8 @@ router.post('/:id/generate', async (req: AuthRequest, res: Response, next: NextF
     const result = await service.generatePurchaseOrders(id, req.user.id, {
       generateSupplierIds,
       paymentBySupplier,
-      itemQuantities
+      itemQuantities,
+      itemNotesBySupplierItem,
     });
 
     res.json({ success: true, data: result });

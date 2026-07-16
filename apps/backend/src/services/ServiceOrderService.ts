@@ -1,5 +1,14 @@
 import { prisma } from '../lib/prisma';
+import { getUserUnbCostCenterScope } from '../lib/unbCostCenterScope';
 import { buildServiceOrderDisplayLabel } from '../utils/serviceOrderLabel';
+
+export type ServiceOrderContractOption = {
+  id: string;
+  number: string;
+  name: string;
+  costCenterId: string;
+  costCenter: { id: string; code: string; name: string };
+};
 
 export type ServiceOrderListItem = {
   id: string;
@@ -7,6 +16,7 @@ export type ServiceOrderListItem = {
   ano: number;
   status: string;
   label: string;
+  costCenterId: string;
   divSe: string | null;
   folderNumber: string | null;
   contractName: string | null;
@@ -100,6 +110,7 @@ export class ServiceOrderService {
         ano: so.ano,
         status: so.status,
         label,
+        costCenterId: so.costCenterId,
         divSe: src?.divSe?.trim() || null,
         folderNumber: src?.folderNumber?.trim() || null,
         contractName: contract?.name ?? null,
@@ -156,6 +167,7 @@ export class ServiceOrderService {
         ano: so.ano,
         status: so.status,
         label,
+        costCenterId: so.costCenterId,
         divSe: src?.divSe?.trim() || null,
         folderNumber: src?.folderNumber?.trim() || null,
         contractName: contractRow?.name ?? null,
@@ -164,5 +176,61 @@ export class ServiceOrderService {
     });
 
     return dedupeServiceOrderListItems(mapped);
+  }
+
+  /**
+   * Contratos para selects (RM etc.): qualquer usuário autenticado.
+   * Usuário UNB só vê contratos do próprio escopo de centro de custo.
+   */
+  async listContractOptions(
+    userId: string,
+    isAdmin: boolean,
+  ): Promise<ServiceOrderContractOption[]> {
+    const unbScope = await getUserUnbCostCenterScope(userId, isAdmin);
+    if (unbScope !== null && unbScope.length === 0) return [];
+
+    const rows = await prisma.contract.findMany({
+      where: unbScope === null ? undefined : { costCenterId: { in: unbScope } },
+      select: {
+        id: true,
+        number: true,
+        name: true,
+        costCenterId: true,
+        costCenter: { select: { id: true, code: true, name: true } },
+      },
+      orderBy: [{ name: 'asc' }, { number: 'asc' }],
+    });
+
+    return rows;
+  }
+
+  /** Resolve o contrato (pleito.updatedContractId) de uma OS — útil na edição de RM. */
+  async resolveContractForServiceOrder(serviceOrderId: string): Promise<{
+    contractId: string;
+    costCenterId: string;
+  } | null> {
+    const trimmed = serviceOrderId.trim();
+    if (!trimmed) return null;
+
+    const pleito = await prisma.pleito.findFirst({
+      where: {
+        serviceOrderId: trimmed,
+        updatedContractId: { not: null },
+      },
+      orderBy: { updatedAt: 'desc' },
+      select: {
+        updatedContractId: true,
+        updatedContract: { select: { costCenterId: true } },
+      },
+    });
+
+    if (!pleito?.updatedContractId || !pleito.updatedContract?.costCenterId) {
+      return null;
+    }
+
+    return {
+      contractId: pleito.updatedContractId,
+      costCenterId: pleito.updatedContract.costCenterId,
+    };
   }
 }

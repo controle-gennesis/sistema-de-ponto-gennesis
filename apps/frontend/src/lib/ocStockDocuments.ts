@@ -9,6 +9,7 @@ export type LinkedInvoiceDoc = {
   url: string;
   name: string;
   source: LinkedDocumentSource;
+  number?: string | null;
 };
 
 export type LinkedBoletoDoc = {
@@ -33,9 +34,11 @@ type OrderDocPick = {
   paymentBoletoInstallments?: unknown;
 };
 
-function parseNfAttachments(raw: unknown): Array<{ url: string; name: string | null }> {
+function parseNfAttachments(
+  raw: unknown
+): Array<{ url: string; name: string | null; number: string | null }> {
   if (!raw || !Array.isArray(raw)) return [];
-  const out: Array<{ url: string; name: string | null }> = [];
+  const out: Array<{ url: string; name: string | null; number: string | null }> = [];
   for (const x of raw) {
     if (!x || typeof x !== 'object') continue;
     const rec = x as Record<string, unknown>;
@@ -43,7 +46,9 @@ function parseNfAttachments(raw: unknown): Array<{ url: string; name: string | n
     if (!url) continue;
     const name =
       typeof rec.name === 'string' && rec.name.trim() ? String(rec.name).trim() : null;
-    out.push({ url, name });
+    const number =
+      typeof rec.number === 'string' && rec.number.trim() ? String(rec.number).trim() : null;
+    out.push({ url, name, number });
   }
   return out;
 }
@@ -67,13 +72,15 @@ function movementNotesMatchOc(notes: string, ocNumber: string): boolean {
 
 function parseInvoicesFromMovementNotes(notes: string): LinkedInvoiceDoc[] {
   const out: LinkedInvoiceDoc[] = [];
-  const re = /NF:\s*(.*?)\s*\|\s*URL:\s*([^\s|]+)/gi;
+  const re =
+    /NF:\s*(.*?)\s*(?:\|\s*N[uú]mero:\s*([^|]+?)\s*)?\|\s*URL:\s*([^\s|]+)/gi;
   let match: RegExpExecArray | null;
   while ((match = re.exec(notes)) !== null) {
     const name = (match[1] || '').trim() || 'Nota fiscal';
-    const url = (match[2] || '').trim();
+    const number = (match[2] || '').trim() || null;
+    const url = (match[3] || '').trim();
     if (!url) continue;
-    out.push({ url, name, source: 'estoque' });
+    out.push({ url, name, number, source: 'estoque' });
   }
   return out;
 }
@@ -107,6 +114,7 @@ export function collectLinkedDocumentsFromOrder(order: OrderDocPick): LinkedOcSt
   const invoices: LinkedInvoiceDoc[] = parseNfAttachments(order.nfAttachments).map((nf) => ({
     url: nf.url,
     name: nf.name || 'Nota fiscal',
+    number: nf.number,
     source: 'oc' as const
   }));
 

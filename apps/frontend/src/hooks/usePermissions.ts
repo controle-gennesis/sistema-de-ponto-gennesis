@@ -217,13 +217,14 @@ export function usePermissions() {
 
   const hasContractAcesso = can(contractsKey);
   /**
-   * Granular de verdade = criar/editar/excluir marcados.
-   * Só `ver` (ou só `acesso`) não deve bloquear cadastro dentro do contrato liberado.
+   * Com matriz granular (Ver/Criar/Editar/Excluir), `acesso` sozinho não libera mutações.
+   * Só `ver` → pode ver, não criar/editar/excluir (mesmo padrão de Funcionários).
+   * Cadastro legado: só `acesso`, sem linhas CRUD → mantém módulo inteiro.
    */
-  const CONTRACT_MODULE_MUTATIONS = ['criar', 'editar', 'excluir'] as const;
+  const CONTRACT_MODULE_CRUD = ['ver', 'criar', 'editar', 'excluir'] as const;
   const hasContractGranular =
     !isElevatedUser &&
-    CONTRACT_MODULE_MUTATIONS.some((a) => allowedActionSet.has(`${contractsKey}:${a}`));
+    CONTRACT_MODULE_CRUD.some((a) => allowedActionSet.has(`${contractsKey}:${a}`));
   const canCreateContracts = hasContractGranular
     ? canAction(contractsKey, 'criar')
     : hasContractAcesso;

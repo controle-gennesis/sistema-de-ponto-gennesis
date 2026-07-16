@@ -15,10 +15,30 @@ export type FluxTab =
   | 'oc_ATTACH_NF'
   | 'oc_FINALIZADAS';
 
+export interface MaterialRequestContractRef {
+  id: string;
+  name: string;
+  number: string;
+}
+
+export interface MaterialRequestServiceOrderRef {
+  id: string;
+  numero: number;
+  ano: number;
+  pleitos?: Array<{
+    divSe?: string | null;
+    folderNumber?: string | null;
+    reportsBilling?: string | null;
+    updatedContract?: MaterialRequestContractRef | null;
+  }>;
+}
+
 export interface MaterialRequest {
   id: string;
   requestNumber?: string;
+  serviceOrderId?: string | null;
   serviceOrder?: string | null;
+  service_orders?: MaterialRequestServiceOrderRef | null;
   description: string;
   status: 'PENDING' | 'IN_REVIEW' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
   priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';

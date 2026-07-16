@@ -1,7 +1,7 @@
 import type { PurchaseOrder } from '@/components/oc/OcPurchaseOrdersPanel';
 import { orderNeedsFinanceBoleto } from './flux';
 import type { FluxTab, MaterialRequest } from './types';
-import { rmSolicitante } from './display';
+import { rmContractDisplay, rmOsDisplay, rmSolicitante } from './display';
 import { formatRmListDisplayId } from './rmListDisplay';
 
 export const normalizeFluxSearch = (value?: string | null) =>
@@ -85,11 +85,13 @@ export function matchesMaterialRequestSearch(
     request.description,
     request.requestNumber,
     request.serviceOrder,
+    rmOsDisplay(request),
+    rmContractDisplay(request),
     request.costCenter?.name,
     request.costCenter?.id,
-    ...request.items.map((item) => item.material?.name || ''),
-    ...request.items.map((item) => item.material?.description || ''),
-    ...request.items.map((item) => item.material?.sinapiCode || '')
+    ...(request.items ?? []).map((item) => item.material?.name || ''),
+    ...(request.items ?? []).map((item) => item.material?.description || ''),
+    ...(request.items ?? []).map((item) => item.material?.sinapiCode || '')
   ];
   return searchableParts.some((part) =>
     normalizeFluxSearch(part).includes(normalizedSearchTerm)

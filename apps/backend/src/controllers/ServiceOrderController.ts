@@ -6,6 +6,33 @@ import { ServiceOrderService } from '../services/ServiceOrderService';
 const serviceOrderService = new ServiceOrderService();
 
 export class ServiceOrderController {
+  async listContractOptions(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.user?.id) throw createError('Usuário não autenticado', 401);
+      const data = await serviceOrderService.listContractOptions(
+        req.user.id,
+        !!req.user.isAdmin,
+      );
+      res.json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async resolveLinkedContract(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const serviceOrderId =
+        typeof req.query.serviceOrderId === 'string' ? req.query.serviceOrderId.trim() : '';
+      if (!serviceOrderId) {
+        throw createError('serviceOrderId é obrigatório', 400);
+      }
+      const data = await serviceOrderService.resolveContractForServiceOrder(serviceOrderId);
+      res.json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  }
+
   async list(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const contractId =

@@ -1,9 +1,9 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { FileSpreadsheet, FileText, Plus, Truck, X } from 'lucide-react';
+import { FileSpreadsheet, Plus, Truck, X } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Loading } from '@/components/ui/Loading';
 import toast from 'react-hot-toast';
@@ -14,9 +14,17 @@ import { PaymentConditionSelect, type PaymentConditionRow } from '@/components/o
 import { OC_PIX_KEY_TYPE_OPTIONS } from '@/components/oc/OcPurchaseOrderFormFields';
 import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
 import { MultiSelectSearchDropdown } from '@/components/ui/MultiSelectSearchDropdown';
+import { cadastroListClasses } from '@/components/ui/RowActionMenu';
+import { getListTableRowClassName } from '@/components/ui/listTableUi';
 import { maskCurrencyInputBrOrEmpty, parseCurrencyInputBr } from '@/lib/maskCurrencyBr';
-import { materialItemLabel, materialItemSubtitle } from '../gerenciar-materiais/_lib/display';
+import {
+  materialItemLabel,
+  rmContractDisplay,
+  rmOsDisplay,
+  rmSolicitante,
+} from '../gerenciar-materiais/_lib/display';
 import { formatRmListDisplayId } from '../gerenciar-materiais/_lib/rmListDisplay';
+import type { MaterialRequest as MaterialRequestBase } from '../gerenciar-materiais/_lib/types';
 
 type MaterialRequestItem = {
   id: string;
@@ -33,10 +41,7 @@ type MaterialRequestItem = {
   };
 };
 
-type MaterialRequest = {
-  id: string;
-  requestNumber?: string;
-  createdAt: string;
+type MaterialRequest = MaterialRequestBase & {
   status: 'APPROVED' | string;
   items: MaterialRequestItem[];
 };
@@ -132,10 +137,282 @@ function formatDateTimeBR(dateString: string) {
 const mapFieldCls =
   'w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm tabular-nums text-gray-900 placeholder:text-gray-400 focus:outline-none dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100';
 
-const mapThCls =
-  'px-3 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-4';
+const mapClickDisplayCls =
+  'mx-auto inline-flex h-8 min-w-[4.5rem] max-w-[8rem] items-center justify-center rounded-lg px-2 text-center text-sm font-medium tabular-nums text-gray-900 transition-colors hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 dark:text-gray-100 dark:hover:bg-gray-700/60';
 
-const mapTdCls = 'px-3 py-3 text-sm sm:px-4 align-middle';
+const mapClickInputCls = `${mapFieldCls} mx-auto block max-w-[8rem] text-center`;
+
+function MapFreightCell({
+  value,
+  onChange,
+  ariaLabel,
+  borderClassName = '',
+}: {
+  value: string;
+  onChange: (next: string) => void;
+  ariaLabel: string;
+  borderClassName?: string;
+}) {
+  const amount = parseMapUnitPrice(value);
+  const isEmpty = amount == null;
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const showInput = isEmpty || editing;
+
+  useEffect(() => {
+    if (!editing) setDraft(value);
+  }, [value, editing]);
+
+  useEffect(() => {
+    if (!editing) return;
+    const el = inputRef.current;
+    if (!el) return;
+    el.focus();
+    el.select();
+  }, [editing]);
+
+  const commit = (next = draft) => {
+    onChange(next);
+    setEditing(false);
+  };
+
+  const fillCls =
+    'absolute inset-0 flex flex-col items-center justify-center px-2 bg-transparent';
+
+  return (
+    <td className={`relative h-px p-0 align-middle ${borderClassName}`}>
+      {showInput ? (
+        <div className={fillCls}>
+          <input
+            ref={inputRef}
+            type="text"
+            inputMode="numeric"
+            aria-label={ariaLabel}
+            value={draft}
+            placeholder="R$ 0,00"
+            onChange={(e) => setDraft(maskCurrencyInputBrOrEmpty(e.target.value))}
+            onBlur={() => commit()}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                commit();
+              } else if (e.key === 'Escape') {
+                e.preventDefault();
+                setDraft(value);
+                setEditing(false);
+              }
+            }}
+            className={mapClickInputCls}
+          />
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setEditing(true)}
+          className={`${fillCls} text-sm font-medium tabular-nums text-gray-900 transition-colors hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-red-500 dark:text-gray-100 dark:hover:bg-gray-700/40`}
+          aria-label={ariaLabel}
+          title="Clique para editar"
+        >
+          {formatCurrencyBR(amount!)}
+        </button>
+      )}
+    </td>
+  );
+}
+
+function MapSupplierPriceCell({
+  value,
+  onChange,
+  ariaLabel,
+  isWinner,
+  quantity,
+  borderClassName = '',
+}: {
+  value: string;
+  onChange: (next: string) => void;
+  ariaLabel: string;
+  isWinner: boolean;
+  quantity: number;
+  borderClassName?: string;
+}) {
+  const unitPrice = parseMapUnitPrice(value);
+  const isEmpty = unitPrice == null;
+  const itemTotal = unitPrice == null ? null : unitPrice * quantity;
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const showInput = isEmpty || editing;
+
+  useEffect(() => {
+    if (!editing) setDraft(value);
+  }, [value, editing]);
+
+  useEffect(() => {
+    if (!showInput) return;
+    if (!editing && isEmpty) return;
+    const el = inputRef.current;
+    if (!el) return;
+    el.focus();
+    el.select();
+  }, [editing, showInput, isEmpty]);
+
+  const commit = (next = draft) => {
+    onChange(next);
+    setEditing(false);
+  };
+
+  const totalCls = isWinner
+    ? 'text-xs font-medium tabular-nums text-emerald-600 dark:text-emerald-400/90'
+    : 'text-xs tabular-nums text-gray-500 dark:text-gray-400';
+  const unitCls = isWinner
+    ? 'text-sm font-medium tabular-nums text-green-700 dark:text-green-300'
+    : 'text-sm font-medium tabular-nums text-gray-900 dark:text-gray-100';
+  const fillCls = `absolute inset-0 flex flex-col items-center justify-center gap-1 px-2 ${
+    isWinner ? 'bg-green-50 dark:bg-green-950/35' : 'bg-transparent'
+  }`;
+
+  return (
+    <td
+      className={`relative h-px p-0 align-middle ${borderClassName} ${
+        isWinner ? 'bg-green-50 dark:bg-green-950/35' : ''
+      }`}
+    >
+      {showInput ? (
+        <div className={fillCls}>
+          <input
+            ref={inputRef}
+            type="text"
+            inputMode="numeric"
+            aria-label={ariaLabel}
+            value={draft}
+            placeholder="R$ 0,00"
+            onChange={(e) => setDraft(maskCurrencyInputBrOrEmpty(e.target.value))}
+            onBlur={() => commit()}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                commit();
+              } else if (e.key === 'Escape') {
+                e.preventDefault();
+                setDraft(value);
+                setEditing(false);
+              }
+            }}
+            className={`${mapClickInputCls} ${
+              isWinner
+                ? 'border-green-300 text-green-800 dark:border-green-700 dark:text-green-200'
+                : ''
+            }`}
+          />
+          {(() => {
+            const draftPrice = parseMapUnitPrice(draft);
+            if (draftPrice == null) return null;
+            return (
+              <p className={totalCls}>{formatCurrencyBR(draftPrice * quantity)}</p>
+            );
+          })()}
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setEditing(true)}
+          className={`${fillCls} transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-red-500 ${
+            isWinner
+              ? 'hover:bg-green-100/60 dark:hover:bg-green-900/40'
+              : 'hover:bg-gray-50 dark:hover:bg-gray-700/40'
+          }`}
+          aria-label={ariaLabel}
+          title="Clique para editar"
+        >
+          <span className={unitCls}>
+            {unitPrice == null ? '—' : formatCurrencyBR(unitPrice)}
+          </span>
+          <span className={totalCls}>
+            {itemTotal == null ? '—' : formatCurrencyBR(itemTotal)}
+          </span>
+        </button>
+      )}
+    </td>
+  );
+}
+
+function MapClickToEditNumber({
+  value,
+  min,
+  max,
+  onChange,
+  ariaLabel,
+}: {
+  value: number;
+  min: number;
+  max: number;
+  onChange: (next: number) => void;
+  ariaLabel: string;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(String(value));
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!editing) setDraft(String(value));
+  }, [value, editing]);
+
+  useEffect(() => {
+    if (!editing) return;
+    const el = inputRef.current;
+    if (!el) return;
+    el.focus();
+    el.select();
+  }, [editing]);
+
+  const commit = () => {
+    const n = parseFloat(draft.replace(',', '.'));
+    if (!Number.isNaN(n)) {
+      onChange(Math.min(Math.max(n, min), max));
+    }
+    setEditing(false);
+  };
+
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        onClick={() => setEditing(true)}
+        className={mapClickDisplayCls}
+        aria-label={ariaLabel}
+        title="Clique para editar"
+      >
+        {value}
+      </button>
+    );
+  }
+
+  return (
+    <input
+      ref={inputRef}
+      type="number"
+      min={min}
+      max={max}
+      step="any"
+      aria-label={ariaLabel}
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          commit();
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          setDraft(String(value));
+          setEditing(false);
+        }
+      }}
+      className={`${mapClickInputCls} [appearance:textfield] [-moz-appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none`}
+    />
+  );
+}
 
 const mapPaymentSegmentCls = (active: boolean) =>
   `w-full rounded-lg border px-3 py-2.5 text-center text-sm font-medium transition-colors focus:outline-none ${
@@ -195,6 +472,57 @@ function paymentConditionDefault(paymentType: string): string {
   return 'BOLETO_30';
 }
 
+function maskCpfInput(raw: string): string {
+  const digits = raw.replace(/\D/g, '').slice(0, 11);
+  return digits
+    .replace(/(\d{3})(\d)/, '$1.$2')
+    .replace(/(\d{3})(\d)/, '$1.$2')
+    .replace(/(\d{3})(\d{1,2})$/, '$1-$2');
+}
+
+function maskCnpjInput(raw: string): string {
+  const digits = raw.replace(/\D/g, '').slice(0, 14);
+  return digits
+    .replace(/^(\d{2})(\d)/, '$1.$2')
+    .replace(/^(\d{2})\.(\d{3})(\d)/, '$1.$2.$3')
+    .replace(/\.(\d{3})(\d)/, '.$1/$2')
+    .replace(/(\d{4})(\d)/, '$1-$2');
+}
+
+/** Celular BR: (DD) 9XXXX-XXXX */
+function maskCelularInput(raw: string): string {
+  const digits = raw.replace(/\D/g, '').slice(0, 11);
+  if (digits.length <= 2) return digits.length ? `(${digits}` : '';
+  if (digits.length <= 7) {
+    return `(${digits.slice(0, 2)}) ${digits.slice(2)}`;
+  }
+  return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
+}
+
+function maskPixKeyByType(pixKeyType: string, raw: string): string {
+  const type = pixKeyType.trim().toUpperCase();
+  if (type === 'CPF') return maskCpfInput(raw);
+  if (type === 'CNPJ') return maskCnpjInput(raw);
+  if (type === 'CELULAR') return maskCelularInput(raw);
+  return raw;
+}
+
+function pixKeyInputPlaceholder(pixKeyType: string): string {
+  const type = pixKeyType.trim().toUpperCase();
+  if (type === 'CPF') return '000.000.000-00';
+  if (type === 'CNPJ') return '00.000.000/0001-00';
+  if (type === 'CELULAR') return '(00) 90000-0000';
+  return 'Informe a chave PIX';
+}
+
+function pixKeyInputMaxLength(pixKeyType: string): number | undefined {
+  const type = pixKeyType.trim().toUpperCase();
+  if (type === 'CPF') return 14;
+  if (type === 'CNPJ') return 18;
+  if (type === 'CELULAR') return 15;
+  return undefined;
+}
+
 function emptyPaymentDraft() {
   return {
     paymentType: OC_TYPE_AVISTA,
@@ -231,6 +559,9 @@ export default function MapaCotacaoPage() {
 
   /** Quantidade a comprar na OC por item da SC (≤ solicitado na SC). Afeta totais e vencedor. */
   const [ocItemQtyByItemId, setOcItemQtyByItemId] = useState<Record<string, number>>({});
+
+  /** Nome/detalhe do item para o fornecedor (`supplierId:itemId`). Vai para notes do item da OC. */
+  const [supplierItemDetailByKey, setSupplierItemDetailByKey] = useState<Record<string, string>>({});
 
   const [paymentDraftBySupplier, setPaymentDraftBySupplier] = useState<
     Record<
@@ -312,12 +643,47 @@ export default function MapaCotacaoPage() {
   const materialRequestOptions = useMemo(
     () =>
       approvedRequests.map((r) => {
-        const num = formatRmListDisplayId(r.requestNumber) || r.id.slice(0, 8);
-        const date = formatDateTimeBR(r.createdAt);
+        const rm = formatRmListDisplayId(r.requestNumber) || r.id.slice(0, 8);
+        const os = rmOsDisplay(r);
+        const contract = rmContractDisplay(r);
+        const solicitante = rmSolicitante(r)?.name?.trim() || '';
+        const costCenter = r.costCenter?.name?.trim() || '';
+        const date = r.createdAt ? formatDateTimeBR(r.createdAt) : '';
+        const summaryItemCount = (r as unknown as { _count?: { items?: number } })._count?.items;
+        const itemCount =
+          Array.isArray(r.items) && r.items.length > 0
+            ? r.items.length
+            : typeof summaryItemCount === 'number'
+              ? summaryItemCount
+              : null;
+
+        const qtyText =
+          itemCount != null
+            ? `${itemCount} ${itemCount === 1 ? 'item' : 'itens'}`
+            : null;
+        const peopleDateLine = [solicitante || null, date || null]
+          .filter(Boolean)
+          .join(' - ');
+
         return {
           value: r.id,
-          label: num,
-          searchText: `${num} ${date} ${r.id}`
+          label:
+            contract !== '—' ? `RM ${rm} - ${contract}` : `RM ${rm}`,
+          description:
+            [qtyText, peopleDateLine || null].filter(Boolean).join('\n') ||
+            undefined,
+          searchText: [
+            rm,
+            os,
+            contract,
+            solicitante,
+            costCenter,
+            date,
+            r.description,
+            r.id,
+          ]
+            .filter(Boolean)
+            .join(' '),
         };
       }),
     [approvedRequests]
@@ -342,8 +708,8 @@ export default function MapaCotacaoPage() {
     () =>
       suppliers.map((s) => ({
         value: s.id,
-        label: s.code ? `${s.name} · Cód. ${s.code}` : s.name,
-        searchText: `${s.name} ${s.code ?? ''}`
+        label: s.code ? `${s.code} - ${s.name}` : s.name,
+        searchText: `${s.code ?? ''} ${s.name}`,
       })),
     [suppliers]
   );
@@ -391,6 +757,7 @@ export default function MapaCotacaoPage() {
     setGenerateSupplierIds(new Set());
     setFreightBySupplier({});
     setUnitPriceBySupplierItem({});
+    setSupplierItemDetailByKey({});
     setPaymentDraftBySupplier({});
   }, [selectedRequestId]);
 
@@ -701,10 +1068,21 @@ export default function MapaCotacaoPage() {
         }
 
         // 4) Gerar as OCs no backend
+        const itemNotesBySupplierItem: Record<string, string> = {};
+        for (const supplierId of suppliersToGenerate) {
+          const won = wonItemsBySupplier[supplierId] ?? [];
+          for (const item of won) {
+            const key = `${supplierId}:${item.id}`;
+            const detail = (supplierItemDetailByKey[key] ?? '').trim();
+            if (detail) itemNotesBySupplierItem[key] = detail;
+          }
+        }
+
         const result = await api.post(`/quote-maps/${mapId}/generate`, {
           generateSupplierIds: suppliersToGenerate,
           paymentBySupplier: paymentBySupplierPayload,
-          itemQuantities: itemQuantitiesForSave
+          itemQuantities: itemQuantitiesForSave,
+          itemNotesBySupplierItem,
         });
 
         return result.data;
@@ -714,7 +1092,8 @@ export default function MapaCotacaoPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
-      queryClient.invalidateQueries({ queryKey: ['material-requests'] });
+      queryClient.invalidateQueries({ queryKey: ['material-requests'], refetchType: 'all' });
+      queryClient.invalidateQueries({ queryKey: ['material-requests-manage'], refetchType: 'all' });
       toast.success('Mapa gerado e OCs criadas com sucesso!');
     },
     onError: (error: any) => {
@@ -783,10 +1162,10 @@ export default function MapaCotacaoPage() {
                   </p>
                 </div>
               ) : (
-                <>
-                  <div>
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 lg:items-start">
+                  <div className="min-w-0">
                     <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                      Requisição de material *
+                      Requisição de Material *
                     </label>
                     <SingleSelectSearchDropdown
                       value={selectedRequestId}
@@ -801,50 +1180,31 @@ export default function MapaCotacaoPage() {
                       hideFocus
                     />
                   </div>
-
-                  {!selectedRequestId ? (
-                    <div className="mt-4 rounded-lg border border-dashed border-gray-300 bg-gray-50/80 px-6 py-12 text-center dark:border-gray-600 dark:bg-gray-900/30">
-                      <FileText className="mx-auto mb-3 h-10 w-10 text-gray-400 dark:text-gray-500" />
-                      <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                        Selecione uma requisição acima
-                      </p>
-                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                        Depois você poderá escolher os fornecedores para comparar preços
-                      </p>
-                    </div>
-                  ) : loadingSelectedRequest || !selectedRequest ? (
-                    <div className="mt-4 flex items-center justify-center gap-2 py-12 text-sm text-gray-500 dark:text-gray-400">
-                      <Loading message="Carregando itens da RM..." size="sm" />
-                    </div>
-                  ) : (
-                    <div className="mt-4 min-w-0">
-                      <MultiSelectSearchDropdown
-                        label="Fornecedores"
-                        options={supplierOptions}
-                        selected={Array.from(selectedSupplierIds)}
-                        onChange={(ids) => setSelectedSupplierIds(new Set(ids))}
-                        placeholder="Selecione fornecedores para comparar..."
-                        searchPlaceholder="Pesquisar..."
-                        emptyOptionsMessage="Nenhum fornecedor cadastrado."
-                        emptySearchMessage="Nenhum fornecedor encontrado."
-                        listMaxHeight={280}
-                        menuInline
-                        noFocusRing
-                        hideFocus
-                      />
-                    </div>
-                  )}
-                </>
+                  <div className="min-w-0">
+                    <MultiSelectSearchDropdown
+                      label="Fornecedores"
+                      options={supplierOptions}
+                      selected={Array.from(selectedSupplierIds)}
+                      onChange={(ids) => setSelectedSupplierIds(new Set(ids))}
+                      placeholder="Selecione fornecedores para comparar..."
+                      searchPlaceholder="Pesquisar..."
+                      emptyOptionsMessage="Nenhum fornecedor cadastrado."
+                      emptySearchMessage="Nenhum fornecedor encontrado."
+                      listMaxHeight={280}
+                      menuInline
+                      noFocusRing
+                      hideFocus
+                    />
+                  </div>
+                </div>
               )}
             </CardContent>
           </Card>
 
-          {selectedRequest && (
-            <>
-              <Card>
-                <CardHeader className="border-b-0 pb-1">
-                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="flex items-center space-x-3">
+              <Card className={cadastroListClasses.card}>
+                <CardHeader className={cadastroListClasses.cardHeader}>
+                  <div className={cadastroListClasses.cardHeaderRow}>
+                    <div className={cadastroListClasses.cardHeaderIconRow}>
                       <div className="flex-shrink-0 rounded-lg bg-green-100 p-2 sm:p-3 dark:bg-green-900/30">
                         <FileSpreadsheet className="h-5 w-5 text-green-700 sm:h-6 sm:w-6 dark:text-green-400" />
                       </div>
@@ -857,7 +1217,7 @@ export default function MapaCotacaoPage() {
                         </p>
                       </div>
                     </div>
-                    <div className="flex flex-shrink-0 flex-wrap items-center gap-2 sm:justify-end">
+                    <div className={cadastroListClasses.cardToolbar}>
                       <button
                         type="button"
                         onClick={() => {
@@ -867,6 +1227,7 @@ export default function MapaCotacaoPage() {
                           setGenerateSupplierIds(new Set());
                           setFreightBySupplier({});
                           setUnitPriceBySupplierItem({});
+                          setSupplierItemDetailByKey({});
                           setPaymentDraftBySupplier({});
                         }}
                         className="flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-800 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
@@ -886,183 +1247,137 @@ export default function MapaCotacaoPage() {
                   </div>
                 </CardHeader>
                 <CardContent>
-                  {selectedSupplierIds.size === 0 ? (
-                    <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50/80 px-6 py-12 text-center dark:border-gray-600 dark:bg-gray-900/30">
-                      <FileSpreadsheet className="mx-auto mb-3 h-10 w-10 text-gray-400 dark:text-gray-500" />
-                      <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                        Selecione pelo menos um fornecedor acima
+                  {!selectedRequestId ? (
+                    <div className="py-8 text-center">
+                      <FileSpreadsheet className="mx-auto mb-4 h-12 w-12 text-gray-400 dark:text-gray-500" />
+                      <p className="text-gray-500 dark:text-gray-400">Lista de cotações vazia</p>
+                      <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                        Escolha uma requisição de Material acima para ver os itens.
                       </p>
-                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                        A tabela de cotações será exibida aqui
-                      </p>
+                    </div>
+                  ) : loadingSelectedRequest || !selectedRequest ? (
+                    <div className="flex items-center justify-center gap-2 py-14 text-sm text-gray-500 dark:text-gray-400">
+                      <Loading message="Carregando itens da RM..." size="sm" />
                     </div>
                   ) : (
                     <>
-                      <div className="mb-4 rounded-lg border border-gray-200 bg-gray-50/60 p-4 dark:border-gray-600 dark:bg-gray-900/40">
-                        <p className="mb-3 text-sm font-medium text-gray-800 dark:text-gray-200">
-                          Frete por fornecedor
-                        </p>
-                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                          {Array.from(selectedSupplierIds).map((supplierId) => {
-                            const sup = suppliers.find((x) => x.id === supplierId);
-                            return (
-                              <div key={supplierId} className="min-w-0">
-                                <label
-                                  htmlFor={`frete-${supplierId}`}
-                                  className="mb-1 block truncate text-xs font-medium text-gray-600 dark:text-gray-400"
-                                  title={sup?.name ?? supplierId}
-                                >
-                                  {sup ? sup.name : supplierId}
-                                </label>
-                                <input
-                                  id={`frete-${supplierId}`}
-                                  type="text"
-                                  inputMode="numeric"
-                                  value={freightBySupplier[supplierId] ?? ''}
-                                  onChange={(e) => {
-                                    setFreightBySupplier((prev) => ({
-                                      ...prev,
-                                      [supplierId]: maskCurrencyInputBrOrEmpty(e.target.value)
-                                    }));
-                                  }}
-                                  placeholder="R$ 0,00"
-                                  className={`${mapFieldCls} tabular-nums`}
-                                />
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-
-                      <div className="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-600">
-                        <div className="overflow-x-auto [scrollbar-gutter:stable]">
-                          <table className="w-full min-w-[40rem] text-sm">
+                  <div className="overflow-x-auto">
+                          <table className={`${cadastroListClasses.table} min-w-[40rem] !table-auto text-sm`}>
                             <thead className="border-b border-gray-200 dark:border-gray-700">
                               <tr>
-                                <th className={`${mapThCls} min-w-[11rem]`}>Material</th>
-                                <th className={`${mapThCls} whitespace-nowrap text-center`}>Qtd. SC</th>
-                                <th className={`${mapThCls} whitespace-nowrap text-center`}>Qtd. na OC</th>
-                                {Array.from(selectedSupplierIds).map((supplierId) => {
+                                <th className={`${cadastroListClasses.thCenter} w-12`}>Item</th>
+                                <th className={cadastroListClasses.th}>Material</th>
+                                <th className={cadastroListClasses.thCenter}>Unidade</th>
+                                <th className={cadastroListClasses.thCenter}>Qtd. RM</th>
+                                <th className={cadastroListClasses.thCenter}>Qtd. OC</th>
+                                {Array.from(selectedSupplierIds).map((supplierId, supplierIndex, supplierIds) => {
                                   const sup = suppliers.find((x) => x.id === supplierId);
                                   return (
                                     <th
                                       key={supplierId}
-                                      className={`${mapThCls} min-w-[8.5rem] whitespace-nowrap text-center`}
+                                      className={`${cadastroListClasses.thCenter} min-w-[8.5rem] normal-case tracking-normal border-l border-gray-200 dark:border-gray-700 ${
+                                        supplierIndex === supplierIds.length - 1
+                                          ? 'border-r border-gray-200 dark:border-gray-700'
+                                          : ''
+                                      }`}
                                       title={sup?.name ?? supplierId}
                                     >
-                                      <span className="block truncate normal-case tracking-normal text-gray-800 dark:text-gray-200">
-                                        {sup ? sup.name : supplierId}
-                                      </span>
-                                      <span className="mt-0.5 block text-[10px] font-normal normal-case tracking-normal text-gray-500 dark:text-gray-400">
-                                        Valor unit.
+                                      <span className="block truncate text-gray-800 dark:text-gray-200">
+                                        {sup ? (sup.code ? `${sup.code} - ${sup.name}` : sup.name) : supplierId}
                                       </span>
                                     </th>
                                   );
                                 })}
-                                <th className={`${mapThCls} whitespace-nowrap text-center`}>Vencedor</th>
+                                <th className={cadastroListClasses.thCenter}>Vencedor</th>
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
-                              {ocItems.map((item) => {
+                              {ocItems.map((item, itemIndex) => {
                                 const winner = winnersByItem.find((w) => w.itemId === item.id) || null;
                                 const winnerSupplier = suppliers.find((s) => s.id === winner?.winnerSupplierId);
                                 const unitLabel = item.unit || '-';
                                 const maxQty = Number(item.quantity);
                                 const qty = ocItemQtyByItemId[item.id] ?? maxQty;
-                                const matSub = materialItemSubtitle(item);
+                                const winnerUnit =
+                                  winner?.winnerSupplierId != null
+                                    ? parseMapUnitPrice(
+                                        unitPriceBySupplierItem[`${winner.winnerSupplierId}:${item.id}`] ?? ''
+                                      )
+                                    : null;
+                                const winnerTotal =
+                                  winnerUnit == null ? null : winnerUnit * qty;
 
                                 return (
                                   <tr
                                     key={item.id}
-                                    className="transition-colors hover:bg-gray-50 dark:hover:bg-gray-700/50"
+                                    className={getListTableRowClassName(false)}
                                   >
-                                    <td className={mapTdCls}>
+                                    <td className={`${cadastroListClasses.tdCenter} tabular-nums font-medium text-gray-800 dark:text-gray-200`}>
+                                      {itemIndex + 1}
+                                    </td>
+                                    <td className={cadastroListClasses.td}>
                                       <p className="font-medium text-gray-900 dark:text-gray-100">
                                         {materialItemLabel(item)}
                                       </p>
-                                      {matSub ? (
-                                        <p className="mt-0.5 line-clamp-2 text-xs text-gray-500 dark:text-gray-400">
-                                          {matSub}
-                                        </p>
-                                      ) : null}
                                     </td>
-                                    <td className={`${mapTdCls} text-center tabular-nums font-medium text-gray-900 dark:text-gray-100`}>
-                                      {maxQty} {unitLabel}
+                                    <td className={cadastroListClasses.tdCenter}>{unitLabel}</td>
+                                    <td className={`${cadastroListClasses.tdCenter} tabular-nums font-medium`}>
+                                      {maxQty}
                                     </td>
-                                    <td className={`${mapTdCls} text-center`}>
-                                      <label htmlFor={`oc-qty-map-${item.id}`} className="sr-only">
-                                        Quantidade na OC
-                                      </label>
-                                      <input
-                                        id={`oc-qty-map-${item.id}`}
-                                        type="number"
-                                        min={0.0001}
-                                        step="any"
-                                        max={maxQty}
+                                    <td className={cadastroListClasses.tdCenter}>
+                                      <MapClickToEditNumber
                                         value={qty}
-                                        onChange={(e) => {
-                                          const n = parseFloat(e.target.value);
-                                          if (Number.isNaN(n)) return;
-                                          const q = Math.min(Math.max(n, 0.0001), maxQty);
-                                          setOcItemQtyByItemId((prev) => ({ ...prev, [item.id]: q }));
-                                        }}
-                                        className={`${mapFieldCls} mx-auto block max-w-[6.5rem] text-center [appearance:textfield] [-moz-appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none`}
+                                        min={0.0001}
+                                        max={maxQty}
+                                        ariaLabel="Quantidade na OC"
+                                        onChange={(q) =>
+                                          setOcItemQtyByItemId((prev) => ({ ...prev, [item.id]: q }))
+                                        }
                                       />
                                     </td>
 
-                                    {Array.from(selectedSupplierIds).map((supplierId) => {
+                                    {Array.from(selectedSupplierIds).map((supplierId, supplierIndex, supplierIds) => {
                                       const key = `${supplierId}:${item.id}`;
-                                      const unitPriceStr = unitPriceBySupplierItem[key] ?? '';
-                                      const unitPrice = parseMapUnitPrice(unitPriceStr);
-                                      const freightParsed = parseMapUnitPrice(freightBySupplier[supplierId] ?? '');
-                                      const freight = freightParsed ?? 0;
-                                      const itemTotal = unitPrice == null ? null : unitPrice * qty;
-                                      const score = unitPrice == null ? null : itemTotal! + freight;
                                       const isWinner = winner?.winnerSupplierId === supplierId;
+                                      const borderCls = `border-l border-gray-200 dark:border-gray-700 ${
+                                        supplierIndex === supplierIds.length - 1
+                                          ? 'border-r border-gray-200 dark:border-gray-700'
+                                          : ''
+                                      }`;
 
                                       return (
-                                        <td
+                                        <MapSupplierPriceCell
                                           key={supplierId}
-                                          className={`${mapTdCls} text-center ${
-                                            isWinner
-                                              ? 'bg-green-50/30 dark:bg-green-950/10'
-                                              : ''
-                                          }`}
-                                        >
-                                          <input
-                                            id={`unit-${key}`}
-                                            type="text"
-                                            inputMode="numeric"
-                                            aria-label={`Valor unitário ${suppliers.find((x) => x.id === supplierId)?.name ?? supplierId}`}
-                                            value={unitPriceStr}
-                                            onChange={(e) => {
-                                              setUnitPriceBySupplierItem((prev) => ({
-                                                ...prev,
-                                                [key]: maskCurrencyInputBrOrEmpty(e.target.value)
-                                              }));
-                                            }}
-                                            placeholder="R$ 0,00"
-                                            className={`${mapFieldCls} mx-auto block max-w-[8rem] tabular-nums text-center ${
-                                              isWinner
-                                                ? 'border-green-500 dark:border-green-500'
-                                                : ''
-                                            }`}
-                                          />
-                                          <p className="mt-1.5 text-center text-xs text-gray-500 dark:text-gray-400">
-                                            Custo p/ vencer:{' '}
-                                            <span className="font-medium tabular-nums text-gray-800 dark:text-gray-200">
-                                              {score == null ? '—' : formatCurrencyBR(score)}
-                                            </span>
-                                          </p>
-                                        </td>
+                                          value={unitPriceBySupplierItem[key] ?? ''}
+                                          quantity={qty}
+                                          isWinner={isWinner}
+                                          borderClassName={borderCls}
+                                          ariaLabel={`Valor unitário ${suppliers.find((x) => x.id === supplierId)?.name ?? supplierId}`}
+                                          onChange={(next) => {
+                                            setUnitPriceBySupplierItem((prev) => ({
+                                              ...prev,
+                                              [key]: next,
+                                            }));
+                                          }}
+                                        />
                                       );
                                     })}
 
-                                    <td className={`${mapTdCls} text-center`}>
+                                    <td className={cadastroListClasses.tdCenter}>
                                       {winnerSupplier && winner ? (
-                                        <div className="flex flex-col items-center gap-1">
-                                          <span className="inline-flex max-w-full rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-800 dark:bg-green-900/35 dark:text-green-300">
-                                            <span className="truncate">{winnerSupplier.name}</span>
+                                        <div className="flex min-w-0 flex-col items-center gap-0.5">
+                                          <span className="max-w-full truncate text-xs font-semibold text-green-700 dark:text-green-300">
+                                            {winnerSupplier.name}
+                                          </span>
+                                          <span className="text-sm font-medium tabular-nums text-green-700 dark:text-green-300">
+                                            {winnerUnit == null
+                                              ? '—'
+                                              : formatCurrencyBR(winnerUnit)}
+                                          </span>
+                                          <span className="text-xs tabular-nums text-emerald-600 dark:text-emerald-400/90">
+                                            {winnerTotal == null
+                                              ? '—'
+                                              : formatCurrencyBR(winnerTotal)}
                                           </span>
                                           {winner.technicalTie ? (
                                             <span className="text-xs font-medium text-amber-600 dark:text-amber-400">
@@ -1077,12 +1392,45 @@ export default function MapaCotacaoPage() {
                                   </tr>
                                 );
                               })}
+                              {selectedSupplierIds.size > 0 ? (
+                                <tr className="border-t border-gray-200 bg-gray-50/80 dark:border-gray-700 dark:bg-gray-900/40">
+                                  <td
+                                    colSpan={5}
+                                    className={`${cadastroListClasses.td} text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400`}
+                                  >
+                                    Frete
+                                  </td>
+                                  {Array.from(selectedSupplierIds).map((supplierId, supplierIndex, supplierIds) => {
+                                    const sup = suppliers.find((x) => x.id === supplierId);
+                                    const borderCls = `border-l border-gray-200 dark:border-gray-700 ${
+                                      supplierIndex === supplierIds.length - 1
+                                        ? 'border-r border-gray-200 dark:border-gray-700'
+                                        : ''
+                                    }`;
+                                    return (
+                                      <MapFreightCell
+                                        key={`frete-${supplierId}`}
+                                        value={freightBySupplier[supplierId] ?? ''}
+                                        borderClassName={borderCls}
+                                        ariaLabel={`Frete ${sup?.name ?? supplierId}`}
+                                        onChange={(next) => {
+                                          setFreightBySupplier((prev) => ({
+                                            ...prev,
+                                            [supplierId]: next,
+                                          }));
+                                        }}
+                                      />
+                                    );
+                                  })}
+                                  <td className={cadastroListClasses.tdCenter} />
+                                </tr>
+                              ) : null}
                             </tbody>
                           </table>
-                        </div>
                       </div>
 
-                      <div className="mt-6 border-t border-gray-200 pt-6 dark:border-gray-700">
+                  {selectedSupplierIds.size > 0 ? (
+                    <div className="mt-6 border-t border-gray-200 pt-6 dark:border-gray-700">
                         <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">
                           Fornecedores vencedores
                         </h3>
@@ -1167,17 +1515,23 @@ export default function MapaCotacaoPage() {
                                     </div>
 
                                     <div className="overflow-x-auto">
-                                      <table className="w-full text-sm">
+                                      <table className={`${cadastroListClasses.table} !table-auto text-sm`}>
                                         <thead className="border-b border-gray-200 dark:border-gray-700">
                                           <tr>
-                                            <th className={`${mapThCls} min-w-[9rem]`}>Material</th>
-                                            <th className={`${mapThCls} text-center`}>Qtd. SC</th>
-                                            <th className={`${mapThCls} text-center`}>Qtd. OC</th>
-                                            <th className={`${mapThCls} text-right`}>Valor unit.</th>
+                                            <th className={`${cadastroListClasses.thCenter} w-12`}>Item</th>
+                                            <th className={cadastroListClasses.th}>Material</th>
+                                            <th className={`${cadastroListClasses.th} min-w-[12rem]`}>
+                                              Detalhamento
+                                            </th>
+                                            <th className={cadastroListClasses.thCenter}>Unidade</th>
+                                            <th className={cadastroListClasses.thCenter}>Qtd. RM</th>
+                                            <th className={cadastroListClasses.thCenter}>Qtd. OC</th>
+                                            <th className={cadastroListClasses.thNumeric}>Valor unit.</th>
                                           </tr>
                                         </thead>
-                                        <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                                        <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
                                           {itemsWon.map((item) => {
+                                            const itemNo = ocItems.findIndex((i) => i.id === item.id) + 1;
                                             const unitLabel = item.unit || '-';
                                             const maxQty = Number(item.quantity);
                                             const qty = ocItemQtyByItemId[item.id] ?? maxQty;
@@ -1185,32 +1539,44 @@ export default function MapaCotacaoPage() {
                                             const unitParsed = parseMapUnitPrice(
                                               unitPriceBySupplierItem[priceKey] ?? ''
                                             );
-                                            const sub = materialItemSubtitle(item);
+                                            const detailKey = `${sid}:${item.id}`;
                                             return (
-                                              <tr key={item.id}>
-                                                <td className={mapTdCls}>
+                                              <tr
+                                                key={item.id}
+                                                className={getListTableRowClassName(false)}
+                                              >
+                                                <td className={`${cadastroListClasses.tdCenter} tabular-nums font-medium text-gray-800 dark:text-gray-200`}>
+                                                  {itemNo > 0 ? itemNo : '—'}
+                                                </td>
+                                                <td className={cadastroListClasses.td}>
                                                   <p className="font-medium text-gray-900 dark:text-gray-100">
                                                     {materialItemLabel(item)}
                                                   </p>
-                                                  {sub ? (
-                                                    <p className="mt-0.5 line-clamp-1 text-xs text-gray-500 dark:text-gray-400">
-                                                      {sub}
-                                                    </p>
-                                                  ) : null}
                                                 </td>
-                                                <td
-                                                  className={`${mapTdCls} text-center tabular-nums text-gray-700 dark:text-gray-300`}
-                                                >
-                                                  {maxQty} {unitLabel}
+                                                <td className={cadastroListClasses.td}>
+                                                  <input
+                                                    type="text"
+                                                    value={supplierItemDetailByKey[detailKey] ?? ''}
+                                                    onChange={(e) => {
+                                                      const next = e.target.value;
+                                                      setSupplierItemDetailByKey((prev) => ({
+                                                        ...prev,
+                                                        [detailKey]: next,
+                                                      }));
+                                                    }}
+                                                    placeholder="Opcional"
+                                                    className={`${mapFieldCls} min-w-[10rem]`}
+                                                    aria-label={`Detalhamento do item para ${sup?.name ?? 'fornecedor'}`}
+                                                  />
                                                 </td>
-                                                <td
-                                                  className={`${mapTdCls} text-center tabular-nums font-medium text-gray-900 dark:text-gray-100`}
-                                                >
-                                                  {qty} {unitLabel}
+                                                <td className={cadastroListClasses.tdCenter}>{unitLabel}</td>
+                                                <td className={`${cadastroListClasses.tdCenter} tabular-nums text-gray-700 dark:text-gray-300`}>
+                                                  {maxQty}
                                                 </td>
-                                                <td
-                                                  className={`${mapTdCls} text-right tabular-nums font-medium text-gray-900 dark:text-gray-100`}
-                                                >
+                                                <td className={`${cadastroListClasses.tdCenter} tabular-nums font-medium`}>
+                                                  {qty}
+                                                </td>
+                                                <td className={`${cadastroListClasses.tdNumeric} tabular-nums font-medium text-gray-900 dark:text-gray-100`}>
                                                   {unitParsed == null
                                                     ? '—'
                                                     : formatCurrencyBR(unitParsed)}
@@ -1272,31 +1638,32 @@ export default function MapaCotacaoPage() {
                                           </div>
                                         </div>
 
-                                        <div>
-                                          <label
-                                            htmlFor={`pc-${sid}`}
-                                            className={mapLabelCls}
-                                          >
-                                            Condição de pagamento *
-                                          </label>
-                                          <PaymentConditionSelect
-                                            id={`pc-${sid}`}
-                                            key={`pc-${sid}-${payType}`}
-                                            paymentType={payType === OC_TYPE_AVISTA ? 'AVISTA' : 'BOLETO'}
-                                            value={paymentConditionValue}
-                                            onChange={(v) => {
-                                              setPaymentDraftBySupplier((prev) => ({
-                                                ...prev,
-                                                [sid]: {
-                                                  ...(prev[sid] ?? emptyPaymentDraft()),
-                                                  paymentCondition: v,
-                                                }
-                                              }));
-                                            }}
-                                            disabled={payType === OC_TYPE_AVISTA}
-                                            hideFocus
-                                          />
-                                        </div>
+                                        {payType !== OC_TYPE_AVISTA ? (
+                                          <div>
+                                            <label
+                                              htmlFor={`pc-${sid}`}
+                                              className={mapLabelCls}
+                                            >
+                                              Condição de pagamento *
+                                            </label>
+                                            <PaymentConditionSelect
+                                              id={`pc-${sid}`}
+                                              key={`pc-${sid}-${payType}`}
+                                              paymentType="BOLETO"
+                                              value={paymentConditionValue}
+                                              onChange={(v) => {
+                                                setPaymentDraftBySupplier((prev) => ({
+                                                  ...prev,
+                                                  [sid]: {
+                                                    ...(prev[sid] ?? emptyPaymentDraft()),
+                                                    paymentCondition: v,
+                                                  }
+                                                }));
+                                              }}
+                                              hideFocus
+                                            />
+                                          </div>
+                                        ) : null}
 
                                         <div>
                                           <label htmlFor={`amount-${sid}`} className={mapLabelCls}>
@@ -1373,20 +1740,24 @@ export default function MapaCotacaoPage() {
                                               <SingleSelectSearchDropdown
                                                 value={paymentDraftBySupplier[sid]?.pixKeyType ?? ''}
                                                 onChange={(v) => {
-                                                  setPaymentDraftBySupplier((prev) => ({
-                                                    ...prev,
-                                                    [sid]: {
-                                                      ...(prev[sid] ?? emptyPaymentDraft()),
-                                                      pixKeyType: v
-                                                    }
-                                                  }));
+                                                  setPaymentDraftBySupplier((prev) => {
+                                                    const current = prev[sid] ?? emptyPaymentDraft();
+                                                    return {
+                                                      ...prev,
+                                                      [sid]: {
+                                                        ...current,
+                                                        pixKeyType: v,
+                                                        pixKey: maskPixKeyByType(v, current.pixKey),
+                                                      },
+                                                    };
+                                                  });
                                                 }}
                                                 options={OC_PIX_KEY_TYPE_OPTIONS}
                                                 allowEmpty
                                                 placeholder="Selecione..."
                                                 searchPlaceholder="Pesquisar..."
                                                 noFocusRing
-                      hideFocus
+                                                hideFocus
                                               />
                                             </div>
                                             <div>
@@ -1398,24 +1769,31 @@ export default function MapaCotacaoPage() {
                                                 type="text"
                                                 value={paymentDraftBySupplier[sid]?.pixKey ?? ''}
                                                 onChange={(e) => {
+                                                  const pixType =
+                                                    paymentDraftBySupplier[sid]?.pixKeyType ?? '';
+                                                  const next = maskPixKeyByType(
+                                                    pixType,
+                                                    e.target.value
+                                                  );
                                                   setPaymentDraftBySupplier((prev) => ({
                                                     ...prev,
                                                     [sid]: {
                                                       ...(prev[sid] ?? emptyPaymentDraft()),
-                                                      pixKey: e.target.value
-                                                    }
+                                                      pixKey: next,
+                                                    },
                                                   }));
                                                 }}
-                                                placeholder="Informe a chave PIX"
+                                                placeholder={pixKeyInputPlaceholder(
+                                                  paymentDraftBySupplier[sid]?.pixKeyType ?? ''
+                                                )}
+                                                maxLength={pixKeyInputMaxLength(
+                                                  paymentDraftBySupplier[sid]?.pixKeyType ?? ''
+                                                )}
                                                 className={mapFieldCls}
                                               />
                                             </div>
                                           </div>
-                                        ) : (
-                                          <p className="rounded-lg border border-dashed border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-600 dark:border-gray-600 dark:bg-gray-800/50 dark:text-gray-400">
-                                            Os boletos serão anexados depois, na Ordem de Compra.
-                                          </p>
-                                        )}
+                                        ) : null}
 
                                         <div>
                                           <label htmlFor={`obs-${sid}`} className={mapLabelCls}>
@@ -1446,13 +1824,11 @@ export default function MapaCotacaoPage() {
                           </div>
                         )}
                       </div>
-
+                  ) : null}
                     </>
                   )}
                 </CardContent>
               </Card>
-            </>
-          )}
         </div>
       </MainLayout>
     </ProtectedRoute>

@@ -3,6 +3,7 @@ export type FinancialControlStatus =
   | 'PAGO'
   | 'AGUARDAR_NOTA'
   | 'AGUARDAR_PAGAMENTO'
+  | 'LANCADO'
   | 'CANCELADO';
 
 export const FINANCIAL_CONTROL_STATUS_STYLES: Record<
@@ -41,6 +42,14 @@ export const FINANCIAL_CONTROL_STATUS_STYLES: Record<
     cardIcon: 'bg-sky-100 dark:bg-sky-900/30',
     cardIconText: 'text-sky-600 dark:text-sky-400',
   },
+  LANCADO: {
+    bg: 'bg-slate-100 dark:bg-slate-800/60',
+    text: 'text-slate-800 dark:text-slate-200',
+    label: 'Lançado',
+    dot: 'bg-slate-500',
+    cardIcon: 'bg-slate-100 dark:bg-slate-800/50',
+    cardIconText: 'text-slate-600 dark:text-slate-300',
+  },
   CANCELADO: {
     bg: 'bg-red-200 dark:bg-red-900/40',
     text: 'text-red-900 dark:text-red-200',
@@ -59,6 +68,7 @@ export const FINANCIAL_CONTROL_STATUS_OPTIONS: {
   { value: 'PAGO', label: 'Pago' },
   { value: 'AGUARDAR_NOTA', label: 'Aguardar nota' },
   { value: 'AGUARDAR_PAGAMENTO', label: 'Aguardar pagamento' },
+  { value: 'LANCADO', label: 'Lançado' },
   { value: 'CANCELADO', label: 'Cancelado' },
 ];
 
@@ -70,6 +80,7 @@ export const FINANCIAL_CONTROL_STATUS_FILTER_OPTIONS: {
   { value: 'PROCESSO_COMPLETO', label: 'Processo completo' },
   { value: 'AGUARDAR_NOTA', label: 'Aguardar nota' },
   { value: 'AGUARDAR_PAGAMENTO', label: 'Aguardar pagamento' },
+  { value: 'LANCADO', label: 'Lançado' },
   { value: 'CANCELADO', label: 'Cancelado' },
 ];
 
@@ -78,6 +89,7 @@ export const FINANCIAL_CONTROL_STATUS_EXPORT_LABELS: Record<FinancialControlStat
   PAGO: 'PAGO',
   AGUARDAR_NOTA: 'AGUARDAR A NOTA',
   AGUARDAR_PAGAMENTO: 'AGUARDAR PAGAMENTO',
+  LANCADO: 'LANÇADO',
   CANCELADO: 'CANCELADO',
 };
 
@@ -86,5 +98,5 @@ export function isFinancialControlPaidStatus(status: FinancialControlStatus): bo
 }
 
 export function isFinancialControlOpenStatus(status: FinancialControlStatus): boolean {
-  return status === 'AGUARDAR_PAGAMENTO' || status === 'AGUARDAR_NOTA';
+  return status === 'AGUARDAR_PAGAMENTO' || status === 'AGUARDAR_NOTA' || status === 'LANCADO';
 }

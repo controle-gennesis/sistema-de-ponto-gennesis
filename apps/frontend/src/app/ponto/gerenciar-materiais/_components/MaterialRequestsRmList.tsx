@@ -26,6 +26,7 @@ import type { RmCardFilter } from '../_lib/rmCardFilter';
 import {
   getPriorityInfo,
   getStatusInfo,
+  rmContractDisplay,
   rmSolicitante,
   rmTitulo
 } from '../_lib/display';
@@ -49,7 +50,6 @@ const rmTdCls = `${cadastroListClasses.tdMono} ${rmColCls} text-center !pl-2 sm:
 const ocThCls = `${thCenterCls} ${ocColCls}`;
 const ocTdCls = `${cadastroListClasses.tdMono} ${ocColCls} text-center align-middle !px-2 sm:!px-3`;
 const tdTextCls = `${cellPad} text-left text-sm text-gray-700 dark:text-gray-300 min-w-0`;
-const tdMutedCls = `${cellPad} text-left text-sm text-gray-600 dark:text-gray-400 min-w-0`;
 const tdCenterCls = `${cellPad} text-center text-sm min-w-0`;
 
 const LIST_ITEMS_PER_PAGE = 12;
@@ -201,7 +201,7 @@ export function MaterialRequestsRmList({
                 autoComplete="off"
                 value={searchTerm}
                 onChange={(e) => onSearchChange(e.target.value)}
-                placeholder="Buscar por nome, descrição ou centro de custo..."
+                placeholder="Buscar por nome, OS ou contrato..."
                 className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
               />
               {searchTerm ? (
@@ -257,14 +257,13 @@ export function MaterialRequestsRmList({
               <table className={`${cadastroListClasses.table} text-sm`}>
                 <colgroup>
                   <col className="w-[4%]" />
-                  <col className={showStatusColumn ? 'w-[11%]' : 'w-[13%]'} />
-                  <col className={showStatusColumn ? 'w-[22%]' : 'w-[24%]'} />
+                  <col className={showStatusColumn ? 'w-[14%]' : 'w-[16%]'} />
+                  <col className={showStatusColumn ? 'w-[12%]' : 'w-[14%]'} />
+                  <col className={showStatusColumn ? 'w-[16%]' : 'w-[18%]'} />
                   <col className={showStatusColumn ? 'w-[10%]' : 'w-[12%]'} />
-                  <col className={showStatusColumn ? 'w-[13%]' : 'w-[15%]'} />
-                  <col className={showStatusColumn ? 'w-[8%]' : 'w-[10%]'} />
-                  {showStatusColumn ? <col className="w-[9%]" /> : null}
+                  {showStatusColumn ? <col className="w-[10%]" /> : null}
                   <col className={ocColCls} />
-                  <col className={showStatusColumn ? 'w-[11%]' : 'w-[13%]'} />
+                  <col className={showStatusColumn ? 'w-[13%]' : 'w-[15%]'} />
                   <col className="w-[4%]" />
                 </colgroup>
                 <thead className="border-b border-gray-200 dark:border-gray-700">
@@ -273,9 +272,8 @@ export function MaterialRequestsRmList({
                       RM
                     </th>
                     <th className={thTextCls}>Solicitante</th>
-                    <th className={thTextCls}>Descrição</th>
                     <th className={thCenterCls}>OS</th>
-                    <th className={thCenterCls}>Centro de Custo</th>
+                    <th className={thCenterCls}>Contrato</th>
                     <th className={thCenterCls}>Prioridade</th>
                     {showStatusColumn && <th className={thCenterCls}>Status</th>}
                     <th className={ocThCls}>OC</th>
@@ -313,16 +311,11 @@ export function MaterialRequestsRmList({
                         <td className={tdTextCls}>
                           <span className="block truncate">{rmSolicitante(request)?.name || '—'}</span>
                         </td>
-                        <td className={tdMutedCls}>
-                          <span className="line-clamp-2" title={request.description || ''}>
-                            {request.description || '—'}
-                          </span>
-                        </td>
                         <td className={tdCenterCls} title={rmTitulo(request)}>
                           <span className="line-clamp-2">{rmTitulo(request)}</span>
                         </td>
-                        <td className={tdCenterCls} title={request.costCenter?.name}>
-                          <span className="line-clamp-2">{request.costCenter?.name || '—'}</span>
+                        <td className={tdCenterCls} title={rmContractDisplay(request)}>
+                          <span className="line-clamp-2">{rmContractDisplay(request)}</span>
                         </td>
                         <td className={tdCenterCls}>
                           <span className={`text-xs font-medium whitespace-nowrap ${priorityInfo.color}`}>

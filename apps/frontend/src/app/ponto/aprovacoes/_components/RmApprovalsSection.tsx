@@ -33,18 +33,20 @@ import type { MaterialRequest } from '@/app/ponto/gerenciar-materiais/_lib/types
 import {
   getPriorityInfo,
   materialItemLabel,
+  rmContractDisplay,
+  rmOsDisplay,
   rmSolicitante,
-  rmTitulo,
 } from '@/app/ponto/gerenciar-materiais/_lib/display';
 import { formatRmListDisplayId } from '@/app/ponto/gerenciar-materiais/_lib/rmListDisplay';
 import { matchesMaterialRequestSearch, normalizeFluxSearch } from '@/app/ponto/gerenciar-materiais/_lib/search';
 
-type RmPhaseFilter = 'PENDING' | 'IN_REVIEW' | 'ALL';
+type RmPhaseFilter = 'PENDING' | 'IN_REVIEW' | 'ALL' | 'APPROVED_BY_ME';
 
 const RM_PHASE_FILTER_OPTIONS = labeledToSelectOptions([
   { value: 'PENDING', label: 'Pendentes' },
   { value: 'IN_REVIEW', label: 'Em correção' },
   { value: 'ALL', label: 'Todas em análise' },
+  { value: 'APPROVED_BY_ME', label: 'Todos' },
 ]);
 
 const cellPad = 'px-2 sm:px-3 py-3';
@@ -67,7 +69,8 @@ const MENU_ITEM_BORDER_CLASS = `${MENU_ITEM_CLASS} border-t border-gray-200 dark
 
 export function RmApprovalsSection() {
   const queryClient = useQueryClient();
-  const { canApproveMaterialRequests, gestorScopedCostCenterIds } = usePermissions();
+  const { canApproveMaterialRequests, gestorScopedCostCenterIds, user } = usePermissions();
+  const currentUserId = user?.id ?? '';
 
   const [searchTerm, setSearchTerm] = useState('');
   const [rmPhase, setRmPhase] = useState<RmPhaseFilter>('PENDING');
@@ -83,14 +86,19 @@ export function RmApprovalsSection() {
   } | null>(null);
 
   const { data: requestsData, isLoading } = useQuery({
-    queryKey: ['approvals', 'material-requests', rmPhase],
+    queryKey: ['approvals', 'material-requests', rmPhase, currentUserId],
     queryFn: async () => {
       const params: Record<string, string> = { limit: '200', summary: '1' };
-      if (rmPhase !== 'ALL') params.status = rmPhase;
+      if (rmPhase === 'APPROVED_BY_ME') {
+        if (currentUserId) params.approvedBy = currentUserId;
+        else params.status = 'APPROVED';
+      } else if (rmPhase !== 'ALL') {
+        params.status = rmPhase;
+      }
       const res = await api.get('/material-requests', { params });
       return (res.data?.data ?? []) as MaterialRequest[];
     },
-    enabled: canApproveMaterialRequests,
+    enabled: canApproveMaterialRequests && (rmPhase !== 'APPROVED_BY_ME' || !!currentUserId),
     staleTime: 30_000,
     refetchOnWindowFocus: false,
   });
@@ -103,6 +111,17 @@ export function RmApprovalsSection() {
     if (rmPhase === 'ALL') {
       list = requests.filter((r) => r.status === 'PENDING' || r.status === 'IN_REVIEW');
     }
+    if (rmPhase === 'APPROVED_BY_ME' && currentUserId) {
+      list = list.filter((r) => {
+        const approverId =
+          typeof r.approvedBy === 'object' && r.approvedBy
+            ? r.approvedBy.id
+            : typeof (r as { approvedBy?: string }).approvedBy === 'string'
+              ? (r as { approvedBy?: string }).approvedBy
+              : null;
+        return approverId === currentUserId;
+      });
+    }
     if (gestorScopedCostCenterIds !== undefined) {
       const allowed = new Set(gestorScopedCostCenterIds);
       list = list.filter((r) => {
@@ -112,7 +131,7 @@ export function RmApprovalsSection() {
     }
     if (!normalized) return list;
     return list.filter((r) => matchesMaterialRequestSearch(r, normalized));
-  }, [requests, searchTerm, rmPhase, gestorScopedCostCenterIds]);
+  }, [requests, searchTerm, rmPhase, gestorScopedCostCenterIds, currentUserId]);
 
   const requestForMenu = useMemo(() => {
     if (!actionMenu) return null;
@@ -242,7 +261,7 @@ export function RmApprovalsSection() {
                   type="text"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  placeholder="Buscar por RM, solicitante, material..."
+                  placeholder="Buscar por RM, OS, contrato, solicitante..."
                   className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
                 />
                 {searchTerm ? (
@@ -259,10 +278,18 @@ export function RmApprovalsSection() {
               <button
                 type="button"
                 onClick={() => setIsFiltersOpen(true)}
-                className="flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-800 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
+                className={`relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition-colors ${
+                  rmPhase !== 'PENDING'
+                    ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40'
+                    : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
+                }`}
+                aria-label="Abrir filtro"
+                title={rmPhase !== 'PENDING' ? 'Filtro (status ativo)' : 'Filtro'}
               >
-                <Filter className="h-4 w-4 shrink-0" />
-                <span>Filtros</span>
+                <Filter className="h-4 w-4" />
+                {rmPhase !== 'PENDING' ? (
+                  <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
+                ) : null}
               </button>
             </div>
           </div>
@@ -276,7 +303,13 @@ export function RmApprovalsSection() {
               <p className="text-gray-500 dark:text-gray-400">
                 {searchTerm.trim()
                   ? 'Nenhuma requisição corresponde à busca'
-                  : 'Nenhuma requisição pendente de aprovação'}
+                  : rmPhase === 'APPROVED_BY_ME'
+                    ? 'Nenhuma requisição aprovada por você'
+                    : rmPhase === 'IN_REVIEW'
+                      ? 'Nenhuma requisição em correção'
+                      : rmPhase === 'ALL'
+                        ? 'Nenhuma requisição em análise'
+                        : 'Nenhuma requisição pendente de aprovação'}
               </p>
             </div>
           ) : (
@@ -284,10 +317,11 @@ export function RmApprovalsSection() {
               <table className={`${cadastroListClasses.table} text-sm`}>
                 <colgroup>
                   <col className="w-[4%]" />
-                  <col className="w-[17%]" />
-                  <col className="w-[19%]" />
-                  <col className="w-[42%]" />
                   <col className="w-[14%]" />
+                  <col className="w-[12%]" />
+                  <col className="w-[14%]" />
+                  <col className="w-[32%]" />
+                  <col className="w-[10%]" />
                   <col className="w-[4%]" />
                 </colgroup>
                 <thead className="border-b border-gray-200 dark:border-gray-700">
@@ -296,7 +330,8 @@ export function RmApprovalsSection() {
                       RM
                     </th>
                     <th className={thTextCls}>Solicitante</th>
-                    <th className={thTextCls}>Centro de Custo</th>
+                    <th className={thCenterCls}>OS</th>
+                    <th className={thTextCls}>Contrato</th>
                     <th className={thTextCls}>Descrição</th>
                     <th className={thCenterCls}>Prioridade</th>
                     <th scope="col" className={actionThCls}>
@@ -327,15 +362,15 @@ export function RmApprovalsSection() {
                             {rmSolicitante(request)?.name || '—'}
                           </span>
                         </td>
-                        <td className={tdTextCls} title={request.costCenter?.name}>
-                          <span className="line-clamp-2">{request.costCenter?.name || '—'}</span>
+                        <td className={tdTextCls} title={rmOsDisplay(request)}>
+                          <span className="block truncate">{rmOsDisplay(request)}</span>
+                        </td>
+                        <td className={tdTextCls} title={rmContractDisplay(request)}>
+                          <span className="line-clamp-2">{rmContractDisplay(request)}</span>
                         </td>
                         <td className={tdMutedCls}>
                           <span className="line-clamp-2" title={request.description || ''}>
                             {request.description || '—'}
-                          </span>
-                          <span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-500">
-                            {rmTitulo(request)}
                           </span>
                         </td>
                         <td className={tdCenterCls}>
@@ -437,9 +472,9 @@ export function RmApprovalsSection() {
       )}
 
       {approveTarget && (
-        <Modal isOpen onClose={() => setApproveTarget(null)} title="Aprovar Requisição" size="md">
+        <Modal isOpen onClose={() => setApproveTarget(null)} title="Aprovar Requisição de Material" size="md">
           <p className="mb-6 text-sm text-gray-600 dark:text-gray-400">
-            Confirmar aprovação da requisição{' '}
+            Confirmar aprovação da RM{' '}
             <strong>{formatRmListDisplayId(approveTarget.requestNumber)}</strong>?
           </p>
           <div className="flex justify-end gap-3">

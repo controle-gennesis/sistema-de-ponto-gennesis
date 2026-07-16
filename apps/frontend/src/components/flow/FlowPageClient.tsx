@@ -13,7 +13,7 @@ import { FlowEditor } from './FlowEditor';
 export function FlowPageClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const diagramId = searchParams.get('id');
+  const diagramId = searchParams?.get('id') ?? null;
   const [user, setUser] = useState<{ name: string; role: 'EMPLOYEE' } | null>(null);
 
   useEffect(() => {

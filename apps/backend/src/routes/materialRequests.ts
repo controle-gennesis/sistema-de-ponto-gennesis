@@ -16,7 +16,11 @@ import {
   getRmApproverListScopeCostCenterIds,
   isRmApproverStatusChange,
 } from '../lib/rmApprovalAccess';
-import { assertCostCenterAllowedForUnbUser } from '../lib/unbCostCenterScope';
+import {
+  applyUnbCostCenterScopeToIdFilter,
+  assertCostCenterAllowedForUnbUser,
+  getUserUnbCostCenterScope,
+} from '../lib/unbCostCenterScope';
 
 const router = Router();
 const materialRequestService = new MaterialRequestService();
@@ -118,6 +122,7 @@ router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const {
       status,
+      approvedBy,
       costCenterId,
       projectId,
       requestedBy,
@@ -138,6 +143,7 @@ router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
         ? false
         : true;
 
+    // Escopo do aprovador (quando não filtra "minhas RMs"); escopo UNB sempre.
     let scopeCostCenterIds: string[] | null = null;
     if (req.user?.id && !requestedBy) {
       scopeCostCenterIds = await getRmApproverListScopeCostCenterIds(
@@ -145,9 +151,21 @@ router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
         !!req.user.isAdmin,
       );
     }
+    if (req.user?.id) {
+      const unbScope = await getUserUnbCostCenterScope(req.user.id, !!req.user.isAdmin);
+      if (unbScope !== null) {
+        if (scopeCostCenterIds === null) {
+          scopeCostCenterIds = unbScope;
+        } else {
+          const allowed = new Set(unbScope);
+          scopeCostCenterIds = scopeCostCenterIds.filter((id) => allowed.has(id));
+        }
+      }
+    }
 
     const listFilters: Parameters<MaterialRequestService['listMaterialRequests']>[0] = {
       status: status as string,
+      approvedBy: typeof approvedBy === 'string' && approvedBy.trim() ? approvedBy.trim() : undefined,
       costCenterId: costCenterId as string,
       projectId: projectId as string,
       requestedBy: requestedBy as string,
@@ -158,7 +176,11 @@ router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
     };
 
     if (scopeCostCenterIds !== null) {
-      if (scopeCostCenterIds.length === 0) {
+      const scoped = applyUnbCostCenterScopeToIdFilter(
+        scopeCostCenterIds,
+        typeof costCenterId === 'string' ? costCenterId : undefined,
+      );
+      if (scoped.denyAll) {
         res.json({
           success: true,
           data: [],
@@ -166,17 +188,12 @@ router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
         });
         return;
       }
-      if (listFilters.costCenterId) {
-        if (!scopeCostCenterIds.includes(listFilters.costCenterId)) {
-          res.json({
-            success: true,
-            data: [],
-            pagination: { page: pageNum, limit: limitNum, total: 0, totalPages: 1 },
-          });
-          return;
-        }
-      } else {
-        listFilters.costCenterIds = scopeCostCenterIds;
+      if (scoped.costCenterId) {
+        listFilters.costCenterId = scoped.costCenterId;
+        delete listFilters.costCenterIds;
+      } else if (scoped.costCenterIds?.length) {
+        listFilters.costCenterIds = scoped.costCenterIds;
+        delete listFilters.costCenterId;
       }
     }
 

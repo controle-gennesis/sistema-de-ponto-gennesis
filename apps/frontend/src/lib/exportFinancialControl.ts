@@ -4,6 +4,11 @@ import {
   type FinancialControlStatus,
 } from '@/lib/financialControlStatus';
 import { formatDateBr, parseDateSafe } from '@/lib/dateTimeBr';
+import {
+  formatFinancialControlObservationDisplay,
+  formatOcListDisplayId,
+} from '@/components/oc/ocListDisplay';
+import { resolveNfAndParcelForDisplay } from '@/components/financeiro/financialControlEntry';
 
 const MONTHS_PT = [
   'Janeiro',
@@ -26,6 +31,7 @@ export type FinancialControlExportEntry = {
   status: string;
   osCode: string | null;
   supplierName: string | null;
+  nfNumber?: string | null;
   parcelNumber: string | null;
   emissionDate: string | null;
   boleto: string | null;
@@ -74,6 +80,7 @@ export function exportFinancialControlEntries(
 ): void {
   const rows = entries.map((entry) => {
     const monthLabel = MONTHS_PT[entry.paymentMonth - 1] ?? String(entry.paymentMonth);
+    const { nfNumber, parcelNumber } = resolveNfAndParcelForDisplay(entry);
     return {
       Mês: monthLabel,
       Ano: entry.paymentYear,
@@ -82,16 +89,17 @@ export function exportFinancialControlEntries(
         entry.status,
       'O.S.': entry.osCode ?? '',
       'Nome do Fornecedor': entry.supplierName ?? '',
-      'Número da Parcela': entry.parcelNumber ?? '',
+      'Número da NF': nfNumber ?? '',
+      Parcela: parcelNumber ?? '',
       'Data Emissão': formatDateBrExport(entry.emissionDate),
       Boleto: entry.boleto ?? '',
       'Data de Vencimento': formatDateBrExport(entry.dueDate),
       'Valor Original': toNumber(entry.originalValue),
-      'O.C.': entry.ocNumber ?? '',
+      'O.C.': entry.ocNumber ? formatOcListDisplayId(entry.ocNumber) : '',
       'Valor Final': toNumber(entry.finalValue),
       'Data de Pagamento': formatDateBrExport(entry.paidDate),
       'Diferença de Dias': resolveRemainingDays(entry),
-      Observação: entry.receivedNote ?? '',
+      Observação: formatFinancialControlObservationDisplay(entry.receivedNote),
     };
   });
 
@@ -102,7 +110,8 @@ export function exportFinancialControlEntries(
     { wch: 12 },
     { wch: 14 },
     { wch: 36 },
-    { wch: 16 },
+    { wch: 14 },
+    { wch: 10 },
     { wch: 14 },
     { wch: 8 },
     { wch: 16 },

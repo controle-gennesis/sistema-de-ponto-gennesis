@@ -19,7 +19,14 @@ const PAYMENT_CONDITION: Record<string, string> = {
   BOLETO_28: 'Boleto 28 dias'
 };
 
+const PAYMENT_LABELS_TTL_MS = 5 * 60 * 1000;
+let paymentLabelsCache: { at: number; labels: Record<string, string> } | null = null;
+
 async function paymentConditionLabelsMerged(): Promise<Record<string, string>> {
+  const now = Date.now();
+  if (paymentLabelsCache && now - paymentLabelsCache.at < PAYMENT_LABELS_TTL_MS) {
+    return paymentLabelsCache.labels;
+  }
   try {
     const res = await api.get('/payment-conditions', { params: { activeOnly: 'false' } });
     const rows = (res.data?.data || []) as PaymentConditionRow[];
@@ -27,6 +34,7 @@ async function paymentConditionLabelsMerged(): Promise<Record<string, string>> {
     for (const r of rows) {
       if (r.code && r.label) m[r.code] = formatPaymentConditionDisplay(r);
     }
+    paymentLabelsCache = { at: now, labels: m };
     return m;
   } catch {
     return PAYMENT_CONDITION;
@@ -99,6 +107,17 @@ function materialLabel(m: { name?: string | null; description?: string | null })
   return '—';
 }
 
+/** Extrai o sequencial da OC (ex.: OC-2026-0019 → "19"). */
+function purchaseOrderDisplayNumber(orderNumber: string): string {
+  const raw = (orderNumber || '').trim();
+  const match = raw.match(/(?:OC[-\s]?)?\d{4}[-\s]?(\d+)$/i) || raw.match(/(\d+)\s*$/);
+  if (match?.[1]) {
+    const n = parseInt(match[1], 10);
+    if (Number.isFinite(n)) return String(n);
+  }
+  return raw || '—';
+}
+
 type PoDetail = {
   id: string;
   orderNumber: string;
@@ -127,14 +146,16 @@ type PoDetail = {
     requestNumber?: string;
     serviceOrder?: string | null;
     description?: string | null;
-    costCenter?: { name: string };
+    costCenter?: { name?: string | null };
   } | null;
   creator?: { name?: string; email?: string };
-  items: Array<{
+  /** Opcional: listagem pode vir sem itens; o export só reaproveita se houver linhas. */
+  items?: Array<{
     quantity: unknown;
     unit?: string;
     unitPrice: unknown;
     totalPrice: unknown;
+    notes?: string | null;
     material?: {
       name?: string | null;
       description?: string | null;
@@ -144,12 +165,45 @@ type PoDetail = {
   }>;
 };
 
-export async function exportPurchaseOrderPdf(orderId: string): Promise<void> {
-  const res = await api.get(`/purchase-orders/${orderId}`);
-  const order = (res.data as { data?: PoDetail }).data;
-  if (!order) throw new Error('Ordem de compra não encontrada');
+export type ExportPurchaseOrderPdfOptions = {
+  /** Evita refetch quando a OC já está na tela (ex.: modal). */
+  order?: PoDetail;
+  /** Labels já carregados no painel (evita GET /payment-conditions). */
+  paymentConditionLabels?: Record<string, string>;
+};
 
-  const condLabels = await paymentConditionLabelsMerged();
+export async function exportPurchaseOrderPdf(
+  orderId: string,
+  options?: ExportPurchaseOrderPdfOptions,
+): Promise<void> {
+  const reusedOrder =
+    options?.order?.id === orderId && Array.isArray(options.order.items) && options.order.items.length > 0
+      ? options.order
+      : null;
+
+  const orderPromise = reusedOrder
+    ? Promise.resolve(reusedOrder)
+    : api.get(`/purchase-orders/${orderId}/pdf-data`).then((res) => {
+        const data = (res.data as { data?: PoDetail }).data;
+        if (!data) throw new Error('Ordem de compra não encontrada');
+        return data;
+      });
+
+  const labelsPromise = options?.paymentConditionLabels
+    ? Promise.resolve({ ...PAYMENT_CONDITION, ...options.paymentConditionLabels })
+    : paymentConditionLabelsMerged();
+
+  const [order, condLabels] = await Promise.all([orderPromise, labelsPromise]);
+
+  const contextLabels = [
+    order.materialRequest?.costCenter?.name,
+    order.materialRequest?.serviceOrder,
+  ];
+  const logoPromise = loadPdfBrandingLogo({
+    contextLabels,
+    maxW: 32,
+    maxH: 20,
+  });
 
   const pdf = new jsPDF('p', 'mm', 'a4');
   const pageW = pdf.internal.pageSize.getWidth();
@@ -158,20 +212,8 @@ export async function exportPurchaseOrderPdf(orderId: string): Promise<void> {
   const cw = pageW - 2 * margin;
   let y = margin;
 
-  const co = resolveOcPdfCompanyHeader(
-    shouldUseUnbBranding(
-      order.materialRequest?.costCenter?.name,
-      order.materialRequest?.serviceOrder,
-    ),
-  );
-  const logo = await loadPdfBrandingLogo({
-    contextLabels: [
-      order.materialRequest?.costCenter?.name,
-      order.materialRequest?.serviceOrder,
-    ],
-    maxW: 32,
-    maxH: 20,
-  });
+  const co = resolveOcPdfCompanyHeader(shouldUseUnbBranding(...contextLabels));
+  const logo = await logoPromise;
 
   if (logo) {
     pdf.addImage(logo.dataUrl, 'PNG', margin, margin, logo.wMm, logo.hMm);
@@ -191,7 +233,8 @@ export async function exportPurchaseOrderPdf(orderId: string): Promise<void> {
 
   pdf.setFont('helvetica', 'normal');
   pdf.setFontSize(9);
-  pdf.text(`Ordem de Compra nº: ${order.orderNumber}`, margin, y);
+  const ocDisplayNumber = purchaseOrderDisplayNumber(order.orderNumber);
+  pdf.text(`Ordem de Compra nº: ${ocDisplayNumber}`, margin, y);
   pdf.text(`Data: ${formatDate(order.orderDate)}`, margin + cw - 1, y, { align: 'right' });
   y += 5;
   pdf.setDrawColor(180, 180, 180);
@@ -221,10 +264,10 @@ export async function exportPurchaseOrderPdf(orderId: string): Promise<void> {
         y = margin;
       }
       pdf.text(ln, margin, y);
-      y += 3.8;
+      y += 4.6;
     });
   });
-  y += 3;
+  y += 4;
 
   const mr = order.materialRequest;
   if (y > pageH - 55) {
@@ -239,14 +282,14 @@ export async function exportPurchaseOrderPdf(orderId: string): Promise<void> {
   pdf.setFontSize(8);
   pdf.text(`SC nº: ${mr?.requestNumber || '—'}`, margin, y);
   pdf.text(`Ordem de serviço: ${(mr?.serviceOrder || '').trim() || '—'}`, margin + 75, y);
-  y += 4;
+  y += 5;
   pdf.text(`Centro de custo: ${mr?.costCenter?.name || '—'}`, margin, y);
-  y += 4;
+  y += 5;
   const desc = (mr?.description || '').trim();
   if (desc) {
     pdf.setFont('helvetica', 'bold');
     pdf.text('Descrição da solicitação:', margin, y);
-    y += 3.5;
+    y += 4;
     pdf.setFont('helvetica', 'normal');
     pdf.splitTextToSize(desc, cw).forEach((ln: string) => {
       if (y > pageH - 45) {
@@ -254,10 +297,10 @@ export async function exportPurchaseOrderPdf(orderId: string): Promise<void> {
         y = margin;
       }
       pdf.text(ln, margin, y);
-      y += 3.8;
+      y += 4.6;
     });
   }
-  y += 4;
+  y += 5;
 
   if (y > pageH - 50) {
     pdf.addPage();
@@ -274,9 +317,9 @@ export async function exportPurchaseOrderPdf(orderId: string): Promise<void> {
       .filter(Boolean)
       .join(' — ') || '—';
   pdf.text(`Data de entrega prevista: ${formatDate(order.expectedDelivery)}`, margin, y);
-  y += 4;
+  y += 5;
   pdf.text(`Condição / forma de pagamento: ${payCond}`, margin, y);
-  y += 4;
+  y += 5;
   if (order.paymentDetails?.trim()) {
     pdf.splitTextToSize(`Dados do pagamento: ${order.paymentDetails.trim()}`, cw).forEach((ln: string) => {
       if (y > pageH - 40) {
@@ -284,7 +327,7 @@ export async function exportPurchaseOrderPdf(orderId: string): Promise<void> {
         y = margin;
       }
       pdf.text(ln, margin, y);
-      y += 3.8;
+      y += 4.6;
     });
   }
   if (order.deliveryAddress?.trim()) {
@@ -294,14 +337,14 @@ export async function exportPurchaseOrderPdf(orderId: string): Promise<void> {
         y = margin;
       }
       pdf.text(ln, margin, y);
-      y += 3.8;
+      y += 4.6;
     });
   }
   if (order.creator?.name) {
     pdf.text(`Comprador: ${order.creator.name}`, margin, y);
-    y += 4;
+    y += 5;
   }
-  y += 3;
+  y += 4;
 
   if (y > pageH - 60) {
     pdf.addPage();
@@ -310,21 +353,31 @@ export async function exportPurchaseOrderPdf(orderId: string): Promise<void> {
 
   const items = order.items || [];
   let total = 0;
-  const col = { item: margin, desc: margin + 14, qtd: margin + 108, und: margin + 124, vu: margin + 138 };
+  const col = { desc: margin + 14, vu: margin + 138 };
+  /** Centros horizontais para ITEM / QTD / UND (colunas curtas alinhadas no meio). */
+  const colMid = {
+    item: margin + 7,
+    qtd: margin + 116,
+    und: margin + 131,
+  };
+  const descMaxW = 90;
   const rowH = 6;
   const lineGap = 3.5;
+  const detailLineGap = 3.1;
+  /** Distância baseline nome → baseline detalhamento. */
+  const nameToDetailGap = 3.6;
   /** Espaço extra após o conteúdo da linha, antes de qualquer separador (evita linha “cortando” o texto) */
-  const rowPaddingBottom = 2;
+  const rowPaddingBottom = 2.5;
   const rowTopPad = 0.5;
 
   pdf.setFillColor(240, 240, 240);
   pdf.rect(margin, y - 4, cw, rowH, 'F');
   pdf.setFont('helvetica', 'bold');
   pdf.setFontSize(7);
-  pdf.text('ITEM', col.item, y);
-  pdf.text('DESCRIÇÃO', col.desc, y);
-  pdf.text('QTD', col.qtd, y);
-  pdf.text('UND', col.und, y);
+  pdf.text('ITEM', colMid.item, y, { align: 'center' });
+  pdf.text('MATERIAL', col.desc, y);
+  pdf.text('QTD', colMid.qtd, y, { align: 'center' });
+  pdf.text('UND', colMid.und, y, { align: 'center' });
   pdf.text('V. UNIT.', col.vu, y);
   pdf.text('TOTAL', margin + cw - 1, y, { align: 'right' });
   y += rowH - 1;
@@ -339,8 +392,14 @@ export async function exportPurchaseOrderPdf(orderId: string): Promise<void> {
     const lineT = Number(it.totalPrice);
     total += lineT;
     const label = materialLabel(it.material || {});
-    const descLines = pdf.splitTextToSize(label, 90);
-    const descBlockHeight = descLines.length * lineGap;
+    const detail = typeof it.notes === 'string' ? it.notes.trim() : '';
+    const descLines = pdf.splitTextToSize(label, descMaxW);
+    const detailLines = detail ? pdf.splitTextToSize(detail, descMaxW) : [];
+    const descBlockHeight =
+      descLines.length * lineGap +
+      (detailLines.length > 0
+        ? nameToDetailGap - lineGap + detailLines.length * detailLineGap
+        : 0);
     const rowHeight = rowTopPad + descBlockHeight + rowPaddingBottom;
 
     if (y + rowHeight > pageH - 40) {
@@ -353,12 +412,27 @@ export async function exportPurchaseOrderPdf(orderId: string): Promise<void> {
     const descStartY = contentTop + lineGap * 0.85;
     const centerY = singleLineCenterY(contentTop, descBlockHeight, lineGap);
 
-    pdf.text(String(idx + 1), col.item, centerY);
+    pdf.setFont('helvetica', 'normal');
+    pdf.setFontSize(7);
+    pdf.setTextColor(0, 0, 0);
+    pdf.text(String(idx + 1), colMid.item, centerY, { align: 'center' });
     descLines.forEach((ln: string, i: number) => {
       pdf.text(ln, col.desc, descStartY + i * lineGap);
     });
-    pdf.text(qty.toLocaleString('pt-BR', { maximumFractionDigits: 2 }), col.qtd, centerY);
-    pdf.text((it.unit || '—').substring(0, 8), col.und, centerY);
+    if (detailLines.length > 0) {
+      const detailStartY = descStartY + (descLines.length - 1) * lineGap + nameToDetailGap;
+      pdf.setFontSize(6.5);
+      pdf.setTextColor(90, 90, 90);
+      detailLines.forEach((ln: string, i: number) => {
+        pdf.text(ln, col.desc, detailStartY + i * detailLineGap);
+      });
+      pdf.setFontSize(7);
+      pdf.setTextColor(0, 0, 0);
+    }
+    pdf.text(qty.toLocaleString('pt-BR', { maximumFractionDigits: 2 }), colMid.qtd, centerY, {
+      align: 'center',
+    });
+    pdf.text((it.unit || '—').substring(0, 8), colMid.und, centerY, { align: 'center' });
     pdf.text(formatCurrency(unitP), col.vu, centerY);
     pdf.text(formatCurrency(lineT), margin + cw - 1, centerY, { align: 'right' });
 
@@ -437,6 +511,5 @@ export async function exportPurchaseOrderPdf(orderId: string): Promise<void> {
     });
   });
 
-  const safeName = order.orderNumber.replace(/[^\w.-]+/g, '_');
-  pdf.save(`OC-${safeName}.pdf`);
+  pdf.save(`Ordem_de_Compra_${ocDisplayNumber}.pdf`);
 }

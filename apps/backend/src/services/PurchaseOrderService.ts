@@ -3,12 +3,14 @@ import { Prisma } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
 import { BorderService, BorderData } from './BorderService';
 import { stockShortfallService } from './StockShortfallService';
+import { isUnbCostCenterRecord } from '../lib/unbCostCenterScope';
 import {
   collectInvoicesForOrderFromMovements,
   collectLatestPaymentSlipsPerParcelFromMovements,
   extractOcNumberFromMovementNotes,
   type StockPaymentSlipParsed
 } from '../utils/stockMovementNotes';
+import { isValidNfNumber, normalizeNfNumberKey } from '../utils/nfInvoiceNumber';
 
 /** Lock distinto do requestNumber de RM (91827365) — serializa só a sequência de OC. */
 const PURCHASE_ORDER_NUMBER_ADVISORY_LOCK = 91827366;
@@ -220,6 +222,8 @@ export type NfAttachmentStored = {
   url: string;
   name: string | null;
   uploadedAt: string;
+  /** Número da nota fiscal (obrigatório em novos anexos). */
+  number?: string | null;
 };
 
 function parseNfAttachments(raw: unknown): NfAttachmentStored[] {
@@ -236,9 +240,131 @@ function parseNfAttachments(raw: unknown): NfAttachmentStored[] {
       typeof rec.uploadedAt === 'string' && rec.uploadedAt.trim()
         ? String(rec.uploadedAt).trim()
         : new Date().toISOString();
-    out.push({ url: u, name, uploadedAt });
+    const number =
+      typeof rec.number === 'string' && rec.number.trim() ? String(rec.number).trim() : null;
+    out.push({ url: u, name, uploadedAt, number });
   }
   return out;
+}
+
+async function findInvoiceNumberConflict(
+  numberRaw: string,
+  excludePurchaseOrderId?: string
+): Promise<{ orderNumber: string; purchaseOrderId: string } | null> {
+  const numberKey = normalizeNfNumberKey(numberRaw);
+  if (!numberKey) return null;
+  const existing = await prisma.purchaseOrderInvoiceNumber.findUnique({
+    where: { numberKey },
+    select: {
+      purchaseOrderId: true,
+      purchaseOrder: { select: { orderNumber: true } }
+    }
+  });
+  if (!existing) return null;
+  if (excludePurchaseOrderId && existing.purchaseOrderId === excludePurchaseOrderId) {
+    return null;
+  }
+  return {
+    purchaseOrderId: existing.purchaseOrderId,
+    orderNumber: existing.purchaseOrder.orderNumber
+  };
+}
+
+/**
+ * Preenche o número da NF nos lançamentos do Controle Financeiro da OC
+ * (quando a NF é anexada depois do lançamento na fase Pagamento).
+ */
+async function prependNfToFinancialControlParcels(
+  orderNumber: string,
+  nfNumber: string
+): Promise<void> {
+  const oc = orderNumber.trim();
+  const nf = nfNumber.trim();
+  if (!oc || !nf) return;
+  const entries = await prisma.financialControlEntry.findMany({
+    where: { ocNumber: { equals: oc, mode: 'insensitive' } },
+    select: { id: true, parcelNumber: true, nfNumber: true }
+  });
+  for (const entry of entries) {
+    const currentNf = (entry.nfNumber || '').trim();
+    let parcel = (entry.parcelNumber || '').trim();
+    // Dados legados ainda combinados em parcelNumber (ex.: 556713-2/2)
+    const combined =
+      parcel.match(/^(\d+)-(\d+\/\d+)$/) || parcel.match(/^(\d+)-(\d{1,3})$/);
+    if (combined) {
+      const legacyNf = combined[1].trim();
+      parcel = combined[2];
+      if (!currentNf || currentNf === legacyNf) {
+        await prisma.financialControlEntry.update({
+          where: { id: entry.id },
+          data: {
+            nfNumber: currentNf || legacyNf || nf,
+            parcelNumber: parcel || null
+          }
+        });
+        continue;
+      }
+    }
+    if (currentNf) continue;
+    await prisma.financialControlEntry.update({
+      where: { id: entry.id },
+      data: {
+        nfNumber: nf,
+        ...(parcel ? { parcelNumber: parcel } : {})
+      }
+    });
+  }
+}
+
+async function claimInvoiceNumberForOrder(
+  purchaseOrderId: string,
+  numberRaw: string
+): Promise<string> {
+  const display = String(numberRaw || '').trim();
+  const numberKey = normalizeNfNumberKey(display);
+  if (!numberKey) {
+    throw new Error('Número da nota fiscal é obrigatório');
+  }
+  const conflict = await findInvoiceNumberConflict(display, purchaseOrderId);
+  if (conflict) {
+    throw new Error(`Nota fiscal já existe na OC ${conflict.orderNumber}`);
+  }
+  try {
+    await prisma.purchaseOrderInvoiceNumber.upsert({
+      where: { numberKey },
+      create: {
+        numberKey,
+        number: display,
+        purchaseOrderId
+      },
+      update: {
+        number: display,
+        purchaseOrderId
+      }
+    });
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+      const raced = await findInvoiceNumberConflict(display, purchaseOrderId);
+      throw new Error(
+        raced
+          ? `Nota fiscal já existe na OC ${raced.orderNumber}`
+          : 'Nota fiscal já existe'
+      );
+    }
+    throw err;
+  }
+  return display;
+}
+
+async function releaseInvoiceNumberForOrder(
+  purchaseOrderId: string,
+  numberRaw: string | null | undefined
+): Promise<void> {
+  const numberKey = normalizeNfNumberKey(numberRaw);
+  if (!numberKey) return;
+  await prisma.purchaseOrderInvoiceNumber.deleteMany({
+    where: { purchaseOrderId, numberKey }
+  });
 }
 
 /** Departamento financeiro ou cargo Administrador (mesma regra do front em gerenciar materiais). */
@@ -634,6 +760,45 @@ const purchaseOrderIncludeDetail = {
   items: { include: { material: true, materialRequestItem: true } }
 } as const;
 
+/** PDF da OC: só campos do documento — sem quoteMap / itens da SC (getById fica pesado). */
+const purchaseOrderIncludePdf = {
+  supplier: {
+    select: {
+      code: true,
+      name: true,
+      cnpj: true,
+      email: true,
+      phone: true,
+      address: true,
+      city: true,
+      state: true,
+      zipCode: true,
+      contactName: true
+    }
+  },
+  materialRequest: {
+    select: {
+      requestNumber: true,
+      serviceOrder: true,
+      description: true,
+      costCenter: { select: { name: true } }
+    }
+  },
+  creator: { select: { name: true, email: true } },
+  items: {
+    select: {
+      quantity: true,
+      unit: true,
+      unitPrice: true,
+      totalPrice: true,
+      notes: true,
+      material: {
+        select: { name: true, description: true, sinapiCode: true }
+      }
+    }
+  }
+} as const;
+
 export class PurchaseOrderService {
   private async prepareCreatePayload(
     data: CreatePurchaseOrderData,
@@ -779,10 +944,28 @@ export class PurchaseOrderService {
     };
   }
 
+  /** UNB: só aprovação do gestor (pula compras e diretoria). Demais CCs: PENDING_COMPRAS. */
+  private async resolveInitialApprovalStatus(
+    tx: Prisma.TransactionClient,
+    materialRequestId: string | null,
+  ): Promise<'PENDING_COMPRAS' | 'PENDING'> {
+    if (!materialRequestId) return 'PENDING_COMPRAS';
+    const rm = await tx.materialRequest.findUnique({
+      where: { id: materialRequestId },
+      select: { costCenter: { select: { name: true, code: true } } },
+    });
+    return isUnbCostCenterRecord(rm?.costCenter) ? 'PENDING' : 'PENDING_COMPRAS';
+  }
+
   private async createRowInTx(
     tx: Prisma.TransactionClient,
     createDataBase: PreparedOcCreateData & { orderNumber: string },
   ) {
+    const initialStatus = await this.resolveInitialApprovalStatus(
+      tx,
+      createDataBase.materialRequestId,
+    );
+
     const toUnchecked = (
       row: PreparedOcCreateData & { orderNumber: string },
       status: string,
@@ -794,13 +977,13 @@ export class PurchaseOrderService {
 
     try {
       return await tx.purchaseOrder.create({
-        data: toUnchecked(createDataBase, 'PENDING_COMPRAS'),
+        data: toUnchecked(createDataBase, initialStatus),
         include: purchaseOrderIncludeCreate,
       });
     } catch (error: any) {
       const msg = typeof error?.message === 'string' ? error.message : '';
       const isPrismaValidation = error?.name === 'PrismaClientValidationError' && msg;
-      if (isPrismaValidation && msg.includes('PENDING_COMPRAS')) {
+      if (isPrismaValidation && msg.includes('PENDING_COMPRAS') && initialStatus === 'PENDING_COMPRAS') {
         return await tx.purchaseOrder.create({
           data: toUnchecked(createDataBase, 'PENDING'),
           include: purchaseOrderIncludeCreate,
@@ -809,7 +992,7 @@ export class PurchaseOrderService {
       if (isPrismaValidation && msg.includes('quoteMapId') && createDataBase.quoteMapId) {
         const { quoteMapId: _omit, ...withoutQuote } = createDataBase;
         return await tx.purchaseOrder.create({
-          data: toUnchecked({ ...withoutQuote, quoteMapId: null }, 'PENDING_COMPRAS'),
+          data: toUnchecked({ ...withoutQuote, quoteMapId: null }, initialStatus),
           include: purchaseOrderIncludeCreate,
         });
       }
@@ -1079,6 +1262,14 @@ export class PurchaseOrderService {
     return withPlan;
   }
 
+  /** Dados mínimos para gerar o PDF da OC no cliente (bem mais leve que getById). */
+  async getForPdf(id: string) {
+    return prisma.purchaseOrder.findUnique({
+      where: { id },
+      include: purchaseOrderIncludePdf
+    });
+  }
+
   /** Contexto leve para PATCH /status (evita getById com joins pesados só para checar permissão). */
   async getStatusChangeContext(id: string) {
     return prisma.purchaseOrder.findUnique({
@@ -1114,51 +1305,84 @@ export class PurchaseOrderService {
     userId?: string,
     options?: { rejectionReason?: string }
   ) {
-    const order = await prisma.purchaseOrder.findUnique({ where: { id } });
+    const order = await prisma.purchaseOrder.findUnique({
+      where: { id },
+      include: {
+        materialRequest: {
+          select: { costCenter: { select: { name: true, code: true } } },
+        },
+      },
+    });
     if (!order) {
       throw new Error('Ordem de compra não encontrada');
     }
 
     const st = order.status;
+    const isUnbOc = isUnbCostCenterRecord(order.materialRequest?.costCenter);
+    let requestedStatus = status;
+
+    // UNB: reenvio pós-correção volta direto para o gestor (não para compras).
+    if (requestedStatus === 'PENDING_COMPRAS' && st === 'IN_REVIEW' && isUnbOc) {
+      requestedStatus = 'PENDING';
+    }
 
     // Fase 1 (compras): PENDING_COMPRAS | DRAFT → PENDING
-    if (status === 'PENDING') {
-      if (st !== 'PENDING_COMPRAS' && st !== 'DRAFT') {
+    // UNB: também IN_REVIEW → PENDING (reenvio após correção)
+    if (requestedStatus === 'PENDING') {
+      const okFromCompras = st === 'PENDING_COMPRAS' || st === 'DRAFT';
+      const okUnbResubmit = isUnbOc && st === 'IN_REVIEW';
+      if (!okFromCompras && !okUnbResubmit) {
         throw new Error('Apenas OC em rascunho ou na fase de compras pode seguir para aprovação do gestor');
+      }
+      if (okUnbResubmit && (!userId || order.createdBy !== userId)) {
+        throw new Error('Apenas quem criou a OC pode reenviá-la após correção');
       }
     }
 
-    // Fase 2 (gestor): PENDING → PENDING_DIRETORIA
-    if (status === 'PENDING_DIRETORIA') {
+    // Fase 2 (gestor): PENDING → PENDING_DIRETORIA (não se aplica a UNB)
+    if (requestedStatus === 'PENDING_DIRETORIA') {
+      if (isUnbOc) {
+        throw new Error('OC de centro de custo UNB não passa por aprovação da diretoria');
+      }
       if (st !== 'PENDING') {
         throw new Error('Apenas OC na fase do gestor pode seguir para aprovação da diretoria');
       }
     }
 
-    // 2ª fase (diretoria): PENDING_DIRETORIA → APPROVED
-    if (status === 'APPROVED') {
-      if (st !== 'PENDING_DIRETORIA') {
-        throw new Error('A OC só pode ser aprovada após aprovação do gestor (fase diretoria)');
+    // Diretoria: PENDING_DIRETORIA → APPROVED
+    // UNB: gestor aprova direto PENDING → APPROVED
+    if (requestedStatus === 'APPROVED') {
+      const okFromDiretoria = st === 'PENDING_DIRETORIA';
+      const okUnbGestor = isUnbOc && st === 'PENDING';
+      if (!okFromDiretoria && !okUnbGestor) {
+        throw new Error(
+          isUnbOc
+            ? 'A OC UNB só pode ser aprovada na fase do gestor'
+            : 'A OC só pode ser aprovada após aprovação do gestor (fase diretoria)',
+        );
       }
     }
 
-    if (status === 'IN_REVIEW') {
+    if (requestedStatus === 'IN_REVIEW') {
       if (st !== 'PENDING_COMPRAS' && st !== 'PENDING' && st !== 'DRAFT' && st !== 'PENDING_DIRETORIA') {
         throw new Error('Apenas OC nas fases de aprovação ou rascunho pode ir para correção');
       }
     }
 
-    if (status === 'REJECTED') {
+    if (requestedStatus === 'REJECTED') {
       if (st !== 'PENDING_COMPRAS' && st !== 'PENDING' && st !== 'DRAFT' && st !== 'PENDING_DIRETORIA') {
         throw new Error('Apenas OC pendente de aprovação pode ser reprovada');
       }
     }
 
-    if (status === 'PENDING_COMPRAS' && st === 'IN_REVIEW') {
+    if (requestedStatus === 'PENDING_COMPRAS' && st === 'IN_REVIEW') {
       if (!userId || order.createdBy !== userId) {
         throw new Error('Apenas quem criou a OC pode reenviá-la após correção');
       }
     }
+
+    // A partir daqui, `status` segue o status efetivo (pode ter sido remapeado p/ UNB).
+    status = requestedStatus;
 
     let fillPaymentProofFromLastInstallment: { paymentProofUrl: string; paymentProofName: string | null } | null =
       null;
@@ -1360,6 +1584,11 @@ export class PurchaseOrderService {
     }
 
     if (status === 'APPROVED' && userId) {
+      // UNB: aprovação do gestor já finaliza (grava gestor + aprovador final).
+      if (isUnbOc && st === 'PENDING') {
+        data.gestorApprovedBy = userId;
+        data.gestorApprovedAt = new Date();
+      }
       data.approvedBy = userId;
       data.approvedAt = new Date();
       const [meta] = await enrichOrdersParcelPlans([{ paymentCondition: order.paymentCondition }]);
@@ -1369,7 +1598,11 @@ export class PurchaseOrderService {
       }
     }
 
-    if (status === 'IN_REVIEW' || (status === 'PENDING_COMPRAS' && st === 'IN_REVIEW')) {
+    if (
+      status === 'IN_REVIEW' ||
+      (status === 'PENDING_COMPRAS' && st === 'IN_REVIEW') ||
+      (status === 'PENDING' && st === 'IN_REVIEW')
+    ) {
       data.comprasApprovedBy = null;
       data.comprasApprovedAt = null;
       data.gestorApprovedBy = null;
@@ -1830,12 +2063,12 @@ export class PurchaseOrderService {
    */
   async appendNfAttachment(
     id: string,
-    data: { nfUrl: string; nfName?: string | null },
+    data: { nfUrl: string; nfName?: string | null; nfNumber?: string | null },
     userId?: string
   ) {
     const order = await prisma.purchaseOrder.findUnique({
       where: { id },
-      select: { id: true, status: true, createdBy: true, nfAttachments: true }
+      select: { id: true, orderNumber: true, status: true, createdBy: true, nfAttachments: true }
     });
     if (!order) {
       throw new Error('Ordem de compra não encontrada');
@@ -1850,12 +2083,17 @@ export class PurchaseOrderService {
     if (!url) {
       throw new Error('Arquivo da nota fiscal é obrigatório');
     }
+    if (!isValidNfNumber(data.nfNumber)) {
+      throw new Error('Número da nota fiscal é obrigatório');
+    }
+    const nfNumber = await claimInvoiceNumberForOrder(id, String(data.nfNumber));
     const name = (data.nfName || '').trim() || null;
     const list = parseNfAttachments(order.nfAttachments);
     list.push({
       url,
       name,
-      uploadedAt: new Date().toISOString()
+      uploadedAt: new Date().toISOString(),
+      number: nfNumber
     });
     const updated = await prisma.purchaseOrder.update({
       where: { id },
@@ -1865,6 +2103,7 @@ export class PurchaseOrderService {
       },
       include: purchaseOrderIncludeListSummary
     });
+    await prependNfToFinancialControlParcels(order.orderNumber, nfNumber);
     const [e] = await enrichOrdersParcelPlans([updated]);
     return e;
   }
@@ -1890,7 +2129,10 @@ export class PurchaseOrderService {
     if (!Number.isInteger(index) || index < 0 || index >= list.length) {
       throw new Error('Índice da nota fiscal inválido');
     }
-    list.splice(index, 1);
+    const [removed] = list.splice(index, 1);
+    if (removed?.number) {
+      await releaseInvoiceNumberForOrder(id, removed.number);
+    }
     const updated = await prisma.purchaseOrder.update({
       where: { id },
       data: {
@@ -1901,6 +2143,46 @@ export class PurchaseOrderService {
     });
     const [e] = await enrichOrdersParcelPlans([updated]);
     return e;
+  }
+
+  /**
+   * Valida se o número de NF pode ser usado nesta OC (ou em entrada de estoque vinculada).
+   * @throws se já existir em outra OC
+   */
+  async assertInvoiceNumberAvailable(
+    nfNumber: string,
+    options?: { excludePurchaseOrderId?: string; excludeOrderNumber?: string }
+  ): Promise<void> {
+    if (!isValidNfNumber(nfNumber)) {
+      throw new Error('Número da nota fiscal é obrigatório');
+    }
+    let excludeId = options?.excludePurchaseOrderId;
+    if (!excludeId && options?.excludeOrderNumber?.trim()) {
+      const po = await prisma.purchaseOrder.findUnique({
+        where: { orderNumber: options.excludeOrderNumber.trim() },
+        select: { id: true }
+      });
+      excludeId = po?.id;
+    }
+    const conflict = await findInvoiceNumberConflict(nfNumber, excludeId);
+    if (conflict) {
+      throw new Error(`Nota fiscal já existe na OC ${conflict.orderNumber}`);
+    }
+  }
+
+  /** Reserva o número da NF para a OC (entrada de estoque). */
+  async registerInvoiceNumberForOrderNumber(
+    orderNumber: string,
+    nfNumber: string
+  ): Promise<void> {
+    const trimmed = orderNumber.trim();
+    if (!trimmed) throw new Error('Número da OC é obrigatório');
+    const po = await prisma.purchaseOrder.findUnique({
+      where: { orderNumber: trimmed },
+      select: { id: true }
+    });
+    if (!po) throw new Error('Ordem de compra não encontrada');
+    await claimInvoiceNumberForOrder(po.id, nfNumber);
   }
 
   /**
@@ -2666,13 +2948,30 @@ export class PurchaseOrderService {
     const existing = parseNfAttachments(order.nfAttachments);
     const seen = new Set(existing.map((n) => n.url));
     let changed = false;
+    const newlyClaimedNfNumbers: string[] = [];
     for (const inv of invoices) {
       if (!inv.url || seen.has(inv.url)) continue;
+      const nfNumber = (inv.number || '').trim();
+      if (nfNumber) {
+        try {
+          await claimInvoiceNumberForOrder(order.id, nfNumber);
+          newlyClaimedNfNumbers.push(nfNumber);
+        } catch (err) {
+          console.error(
+            '[PurchaseOrder] syncNf skip (número NF em conflito)',
+            trimmed,
+            nfNumber,
+            err
+          );
+          continue;
+        }
+      }
       seen.add(inv.url);
       existing.push({
         url: inv.url,
         name: inv.name || null,
-        uploadedAt: new Date().toISOString()
+        uploadedAt: new Date().toISOString(),
+        number: nfNumber || null
       });
       changed = true;
     }
@@ -2685,6 +2984,9 @@ export class PurchaseOrderService {
         updatedAt: new Date()
       }
     });
+    for (const nfNumber of newlyClaimedNfNumbers) {
+      await prependNfToFinancialControlParcels(trimmed, nfNumber);
+    }
   }
 
   /** Sincroniza boleto e NF do estoque para a OC. */

@@ -11,6 +11,7 @@ const ALLOWED_STATUSES: FinancialControlStatus[] = [
   'PAGO',
   'AGUARDAR_NOTA',
   'AGUARDAR_PAGAMENTO',
+  'LANCADO',
   'CANCELADO',
 ];
 
@@ -40,6 +41,57 @@ function parseInteger(value: unknown): number | null {
   return isNaN(n) ? null : n;
 }
 
+/** Resolve OS real da RM vinculada à OC (evita mostrar código de contrato/CC). */
+async function resolveOsCodeByOcNumber(
+  entries: Array<{ id: string; ocNumber: string | null; osCode: string | null }>
+): Promise<Array<{ id: string; ocNumber: string | null; osCode: string | null } & Record<string, unknown>>> {
+  const ocNumbers = [
+    ...new Set(entries.map((e) => (e.ocNumber || '').trim()).filter(Boolean)),
+  ];
+  if (ocNumbers.length === 0) return entries;
+
+  const orders = await prisma.purchaseOrder.findMany({
+    where: {
+      OR: ocNumbers.map((n) => ({
+        orderNumber: { equals: n, mode: 'insensitive' as const },
+      })),
+    },
+    select: {
+      orderNumber: true,
+      materialRequest: { select: { serviceOrder: true } },
+    },
+  });
+
+  const osByOc = new Map<string, string>();
+  for (const order of orders) {
+    const so = order.materialRequest?.serviceOrder?.trim();
+    if (so) osByOc.set(order.orderNumber.trim().toLowerCase(), so);
+  }
+
+  const persistFixes: Array<{ id: string; osCode: string }> = [];
+  const enriched = entries.map((entry) => {
+    const key = (entry.ocNumber || '').trim().toLowerCase();
+    const serviceOrder = key ? osByOc.get(key) : undefined;
+    if (!serviceOrder) return entry;
+    if ((entry.osCode || '').trim() !== serviceOrder) {
+      persistFixes.push({ id: entry.id, osCode: serviceOrder });
+    }
+    return { ...entry, osCode: serviceOrder };
+  });
+
+  if (persistFixes.length > 0) {
+    void Promise.all(
+      persistFixes.map((fix) =>
+        prisma.financialControlEntry
+          .update({ where: { id: fix.id }, data: { osCode: fix.osCode } })
+          .catch(() => undefined)
+      )
+    );
+  }
+
+  return enriched;
+}
+
 function buildEntryData(body: any, userId?: string | null, isUpdate = false) {
   const data: Prisma.FinancialControlEntryUncheckedCreateInput | Prisma.FinancialControlEntryUncheckedUpdateInput =
     {} as any;
@@ -65,6 +117,7 @@ function buildEntryData(body: any, userId?: string | null, isUpdate = false) {
   }
   if (body.osCode !== undefined) (data as any).osCode = body.osCode || null;
   if (body.supplierName !== undefined) (data as any).supplierName = body.supplierName || null;
+  if (body.nfNumber !== undefined) (data as any).nfNumber = body.nfNumber || null;
   if (body.parcelNumber !== undefined) (data as any).parcelNumber = body.parcelNumber || null;
   if (body.emissionDate !== undefined) (data as any).emissionDate = parseDate(body.emissionDate);
   if (body.boleto !== undefined) (data as any).boleto = body.boleto || null;
@@ -110,6 +163,7 @@ export class FinancialControlController {
         where.OR = [
           { osCode: { contains: q, mode: 'insensitive' } },
           { supplierName: { contains: q, mode: 'insensitive' } },
+          { nfNumber: { contains: q, mode: 'insensitive' } },
           { parcelNumber: { contains: q, mode: 'insensitive' } },
           { ocNumber: { contains: q, mode: 'insensitive' } },
           { receivedNote: { contains: q, mode: 'insensitive' } },
@@ -121,12 +175,13 @@ export class FinancialControlController {
         orderBy: [
           { paymentYear: 'asc' },
           { paymentMonth: 'asc' },
-          { dueDate: 'asc' },
+          { dueDate: 'desc' },
           { createdAt: 'asc' },
         ],
       });
 
-      res.json({ success: true, data: entries });
+      const data = await resolveOsCodeByOcNumber(entries);
+      res.json({ success: true, data });
     } catch (error) {
       next(error);
     }
@@ -302,7 +357,23 @@ export class FinancialControlController {
             const batch = parsed.entries.slice(i, i + IMPORT_BATCH_SIZE);
             const insert = await tx.financialControlEntry.createMany({
               data: batch.map((entry) => ({
-                ...entry,
+                paymentMonth: entry.paymentMonth,
+                paymentYear: entry.paymentYear,
+                status: entry.status,
+                osCode: entry.osCode,
+                supplierName: entry.supplierName,
+                nfNumber: entry.nfNumber,
+                parcelNumber: entry.parcelNumber,
+                emissionDate: toSafeDate(entry.emissionDate),
+                boleto: entry.boleto,
+                dueDate: toSafeDate(entry.dueDate),
+                originalValue: entry.originalValue,
+                ocNumber: entry.ocNumber,
+                finalValue: entry.finalValue,
+                paidDate: toSafeDate(entry.paidDate),
+                remainingDays: entry.remainingDays,
+                receivedNote: entry.receivedNote,
+                notes: entry.notes,
                 createdBy: userId,
                 updatedBy: userId,
               })),
@@ -343,6 +414,7 @@ interface ParsedEntry {
   status: FinancialControlStatus;
   osCode: string | null;
   supplierName: string | null;
+  nfNumber: string | null;
   parcelNumber: string | null;
   emissionDate: Date | null;
   boleto: string | null;
@@ -360,6 +432,45 @@ interface ParseResult {
   entries: ParsedEntry[];
   warnings: string[];
   monthsDetected: { year: number; month: number; label: string }[];
+}
+
+/**
+ * Separa NF e parcela quando a planilha traz combinado (ex.: `556713-2/2`, `005510-1`).
+ * Textos/códigos (`RECIBO`, `FL-002016`) ficam inteiros na NF, sem parcela.
+ */
+function splitNfAndParcel(raw: string | null | undefined): {
+  nfNumber: string | null;
+  parcelNumber: string | null;
+} {
+  if (raw === null || raw === undefined) return { nfNumber: null, parcelNumber: null };
+  const s = String(raw).trim();
+  if (!s) return { nfNumber: null, parcelNumber: null };
+
+  // 556713-2/2 — NF só dígitos + parcela N/M
+  const withSlash = s.match(/^(\d+)-(\d+\/\d+)$/);
+  if (withSlash) {
+    return { nfNumber: withSlash[1], parcelNumber: withSlash[2] };
+  }
+
+  // 005510-1 / 027283-1 — NF só dígitos + parcela curta (não divide FL-002016)
+  const withShortParcel = s.match(/^(\d+)-(\d{1,3})$/);
+  if (withShortParcel) {
+    return { nfNumber: withShortParcel[1], parcelNumber: withShortParcel[2] };
+  }
+
+  // Só parcela: 2/2
+  if (/^\d+\/\d+$/.test(s)) {
+    return { nfNumber: null, parcelNumber: s };
+  }
+
+  // RECIBO, FL-002016, 0, etc. → tudo na NF
+  return { nfNumber: s, parcelNumber: null };
+}
+
+function cellToTrimmedString(value: unknown): string | null {
+  if (value === null || value === undefined || value === '') return null;
+  const s = String(value).trim();
+  return s || null;
 }
 
 const MONTHS_PT_TO_NUM: Record<string, number> = {
@@ -398,6 +509,7 @@ function parseStatusFromExportLabel(value: any): FinancialControlStatus | null {
   if (t.includes('AGUARDAR PAGAMENTO') || t === 'AGENDADO' || t.includes('AGENDADO')) {
     return 'AGUARDAR_PAGAMENTO';
   }
+  if (t === 'LANCADO' || t.includes('LANCADO')) return 'LANCADO';
   if (t === 'PENDENTE') return 'AGUARDAR_PAGAMENTO';
   if (t === 'CANCELADO' || t.includes('CANCEL')) return 'CANCELADO';
   return null;
@@ -436,6 +548,12 @@ function parseCellDate(value: any): Date | null {
   const year = date.getUTCFullYear();
   if (year < 1990 || year > 2100) return null;
   return date;
+}
+
+function toSafeDate(value: Date | null | undefined): Date | null {
+  if (!value) return null;
+  if (!(value instanceof Date) || Number.isNaN(value.getTime())) return null;
+  return value;
 }
 
 function inferStatus(opts: {
@@ -656,6 +774,7 @@ async function parseControleFinanceiroSpreadsheet(buffer: Buffer): Promise<Parse
     osCode: 0,
     statusColumn: 1, // coluna B: célula com cor representando status (geralmente vazia)
     supplierName: 2,
+    nfNumber: -1,
     parcelNumber: 3,
     emissionDate: 4,
     boleto: 5,
@@ -704,7 +823,20 @@ async function parseControleFinanceiroSpreadsheet(buffer: Buffer): Promise<Parse
       statusText: findCol('STATUS'),
       osCode: findCol('O.S.', 'OS'),
       supplierName: findCol('CODIGO-NOME DO FORNECEDOR', 'NOME DO FORNECEDOR', 'FORNECEDOR'),
-      parcelNumber: findCol('PRF-NUMERO PARCELA', 'NUMERO DA PARCELA', 'NUMERO PARCELA', 'PARCELA'),
+      nfNumber: findCol(
+        'NUMERO DA NF',
+        'NUMERO NF',
+        'NOTA FISCAL',
+        'Nº NF',
+        'N NF',
+        'NF'
+      ),
+      parcelNumber: findCol(
+        'PRF-NUMERO PARCELA',
+        'NUMERO DA PARCELA',
+        'NUMERO PARCELA',
+        'PARCELA'
+      ),
       emissionDate: findCol('DATA DE EMISSAO', 'EMISSAO'),
       boleto: findCol('BOLETO'),
       dueDate: findCol('DATA DE VENCTO', 'DATA DE VENCIMENTO', 'VENCTO', 'VENCIMENTO'),
@@ -751,6 +883,7 @@ async function parseControleFinanceiroSpreadsheet(buffer: Buffer): Promise<Parse
         osCode: safeFallback(m.osCode, colIdx.osCode),
         statusColumn,
         supplierName: safeFallback(m.supplierName, colIdx.supplierName),
+        nfNumber: safeFallback(m.nfNumber, colIdx.nfNumber),
         parcelNumber: safeFallback(m.parcelNumber, colIdx.parcelNumber),
         emissionDate: safeFallback(m.emissionDate, colIdx.emissionDate),
         boleto: safeFallback(m.boleto, colIdx.boleto),
@@ -841,11 +974,28 @@ async function parseControleFinanceiroSpreadsheet(buffer: Buffer): Promise<Parse
     // Linha precisa ter pelo menos O.S. ou Fornecedor para ser considerada
     if (!osCode && !supplierName) continue;
 
-    const parcelNumberRaw = row[colIdx.parcelNumber];
-    const parcelNumber =
-      parcelNumberRaw === null || parcelNumberRaw === undefined || parcelNumberRaw === ''
-        ? null
-        : String(parcelNumberRaw).trim();
+    const parcelNumberRaw = colIdx.parcelNumber >= 0 ? row[colIdx.parcelNumber] : null;
+    const nfNumberRaw = colIdx.nfNumber >= 0 ? row[colIdx.nfNumber] : null;
+    let nfNumber = cellToTrimmedString(nfNumberRaw);
+    let parcelNumber = cellToTrimmedString(parcelNumberRaw);
+
+    // Planilha legada: NF e parcela numa coluna só (ex.: 556713-2/2)
+    if (!nfNumber && parcelNumber) {
+      const split = splitNfAndParcel(parcelNumber);
+      nfNumber = split.nfNumber;
+      parcelNumber = split.parcelNumber;
+    } else if (nfNumber && parcelNumber) {
+      const split = splitNfAndParcel(parcelNumber);
+      if (split.nfNumber && split.parcelNumber) {
+        parcelNumber = split.parcelNumber;
+      }
+    } else if (nfNumber && !parcelNumber) {
+      const split = splitNfAndParcel(nfNumber);
+      if (split.parcelNumber) {
+        nfNumber = split.nfNumber;
+        parcelNumber = split.parcelNumber;
+      }
+    }
     const emissionDate = parseCellDate(row[colIdx.emissionDate]);
     const boletoRaw = row[colIdx.boleto];
     const boleto = boletoRaw === null || boletoRaw === undefined ? null : String(boletoRaw).trim();
@@ -909,6 +1059,7 @@ async function parseControleFinanceiroSpreadsheet(buffer: Buffer): Promise<Parse
       status,
       osCode,
       supplierName,
+      nfNumber,
       parcelNumber,
       emissionDate,
       boleto,

@@ -2,7 +2,8 @@ import { Response, NextFunction } from 'express';
 import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { createError } from '../middleware/errorHandler';
-import { extractOcNumberFromMovementNotes } from '../utils/stockMovementNotes';
+import { extractOcNumberFromMovementNotes, parseInvoicesFromMovementNotes } from '../utils/stockMovementNotes';
+import { isValidNfNumber } from '../utils/nfInvoiceNumber';
 import { stockShortfallService } from '../services/StockShortfallService';
 import { PurchaseOrderService } from '../services/PurchaseOrderService';
 import {
@@ -249,6 +250,32 @@ export class StockController {
         throw createError('Tipo deve ser IN (entrada) ou OUT (saída)', 400);
       }
 
+      if (type === 'IN' && notes) {
+        const notesStr = String(notes);
+        const invoices = parseInvoicesFromMovementNotes(notesStr);
+        if (invoices.length > 0) {
+          for (const inv of invoices) {
+            if (!isValidNfNumber(inv.number)) {
+              throw createError('Número da nota fiscal é obrigatório', 400);
+            }
+          }
+          const ocNum = extractOcNumberFromMovementNotes(notesStr);
+          if (!ocNum) {
+            throw createError('Informe a OC ao anexar nota fiscal na entrada', 400);
+          }
+          for (const inv of invoices) {
+            try {
+              await purchaseOrderService.assertInvoiceNumberAvailable(String(inv.number), {
+                excludeOrderNumber: ocNum
+              });
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : 'Número de NF inválido';
+              throw createError(msg, 400);
+            }
+          }
+        }
+      }
+
       const quantityNum = parseFloat(String(quantity));
       if (isNaN(quantityNum) || quantityNum <= 0) {
         throw createError('Quantidade deve ser um número positivo', 400);
@@ -334,6 +361,18 @@ export class StockController {
       if (type === 'IN' && notes) {
         const ocNum = extractOcNumberFromMovementNotes(String(notes));
         if (ocNum) {
+          const invoices = parseInvoicesFromMovementNotes(String(notes));
+          for (const inv of invoices) {
+            if (!isValidNfNumber(inv.number)) continue;
+            try {
+              await purchaseOrderService.registerInvoiceNumberForOrderNumber(
+                ocNum,
+                String(inv.number)
+              );
+            } catch (err) {
+              console.error('[PurchaseOrder] registerInvoiceNumber after stock IN', ocNum, err);
+            }
+          }
           /** Não atrasa a resposta da entrada — sync em background. */
           void Promise.all([
             stockShortfallService.syncForOrderNumber(ocNum).catch((err) => {

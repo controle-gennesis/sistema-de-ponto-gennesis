@@ -44,12 +44,15 @@ import {
   type MaterialRequestOcListPurchaseOrder,
 } from '@/components/oc/materialRequestOcListRows';
 import { useCostCenters } from '@/hooks/useCostCenters';
-import { useServiceOrdersByCostCenter } from '@/hooks/useServiceOrdersByCostCenter';
+import {
+  useServiceOrdersByContract,
+} from '@/hooks/useServiceOrdersByCostCenter';
 import { ServiceOrderSearchSelect } from '@/components/suprimentos/ServiceOrderSearchSelect';
 import { AsyncSearchSelectDropdown } from '@/components/ui/AsyncSearchSelectDropdown';
 import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
 import { getRmMaterialLabel, searchRmMaterials, type RmMaterialListItem } from '@/lib/searchRmMaterials';
 import { FORM_FIELD_INPUT_CLS, FORM_FIELD_TEXTAREA_CLS } from '@/lib/formFieldUi';
+import { isUnbRelatedLabel } from '@/lib/unbBranding';
 import {
   purchaseOrderPhaseLabel,
   ocStatusTextClass,
@@ -277,6 +280,23 @@ function rmCostCenterName(req: {
   return '—';
 }
 
+function rmContractName(req: {
+  costCenter?: { code?: string | null; name?: string | null } | null;
+  costCenterId?: string | null;
+  service_orders?: {
+    pleitos?: Array<{
+      updatedContract?: { name?: string | null; number?: string | null } | null;
+    } | null>;
+  } | null;
+}) {
+  const pleitos = req.service_orders?.pleitos ?? [];
+  const src = pleitos.find((p) => p?.updatedContract) ?? pleitos[0];
+  const contract = src?.updatedContract;
+  if (contract?.name?.trim()) return contract.name.trim();
+  if (contract?.number?.trim()) return contract.number.trim();
+  return rmCostCenterName(req);
+}
+
 const LIST_ITEMS_PER_PAGE = 12;
 
 /** YYYY-MM-DD no fuso local (para comparar com input type="date"). */
@@ -293,6 +313,7 @@ function toYmdLocal(iso: string | undefined | null): string | null {
 const EMPTY_REQUEST_LIST: unknown[] = [];
 
 const emptyNewFormData = () => ({
+  contractId: '',
   costCenterId: '',
   serviceOrderId: '',
   serviceOrder: '',
@@ -307,11 +328,45 @@ const emptyNewFormData = () => ({
 
 type NewMaterialRequestFormData = ReturnType<typeof emptyNewFormData>;
 
-function validateNewMaterialRequestForm(formData: NewMaterialRequestFormData): string | null {
-  if (!formData.costCenterId.trim()) return 'Selecione o centro de custo.';
+type RmContractOption = {
+  id: string;
+  number: string;
+  name: string;
+  costCenterId: string;
+  costCenter?: { id: string; code?: string | null; name?: string | null } | null;
+};
+
+function formatRmContractLabel(contract: Pick<RmContractOption, 'number' | 'name'>): string {
+  const name = String(contract.name ?? '').trim();
+  if (name) return name;
+  const number = String(contract.number ?? '').trim();
+  return number || 'Contrato';
+}
+
+function isUnbCostCenterOption(costCenter: {
+  name?: string | null;
+  code?: string | null;
+  label?: string | null;
+} | null | undefined): boolean {
+  if (!costCenter) return false;
+  return (
+    isUnbRelatedLabel(costCenter.name) ||
+    isUnbRelatedLabel(costCenter.code) ||
+    isUnbRelatedLabel(costCenter.label)
+  );
+}
+
+function validateNewMaterialRequestForm(
+  formData: NewMaterialRequestFormData,
+  options?: { demandSheetOptional?: boolean }
+): string | null {
+  if (!formData.contractId.trim()) return 'Selecione o contrato.';
+  if (!formData.costCenterId.trim()) return 'Contrato sem centro de custo vinculado.';
   if (!formData.serviceOrderId.trim()) return 'Selecione a ordem de serviço.';
-  if (!formData.demandSheet.trim()) return 'Informe a ficha de demanda.';
-  if (!formData.demandSheetAttachmentUrl.trim()) return 'Anexe o arquivo da ficha de demanda.';
+  if (!options?.demandSheetOptional) {
+    if (!formData.demandSheet.trim()) return 'Informe a ficha de demanda.';
+    if (!formData.demandSheetAttachmentUrl.trim()) return 'Anexe o arquivo da ficha de demanda.';
+  }
 
   const validItems = formData.items.filter((item) => item.materialId);
   if (validItems.length === 0) return 'Inclua ao menos um material.';
@@ -587,6 +642,7 @@ function SolicitarMateriaisPage() {
   const [correctionEditId, setCorrectionEditId] = useState<string | null>(null);
   const [detailViewId, setDetailViewId] = useState<string | null>(null);
   const [editFormData, setEditFormData] = useState({
+    contractId: '',
     costCenterId: '',
     serviceOrderId: '',
     serviceOrder: '',
@@ -633,31 +689,61 @@ function SolicitarMateriaisPage() {
   });
 
   const { costCenters, isLoading: loadingCostCenters } = useCostCenters();
-  const { serviceOrders: newFormServiceOrders, isLoading: loadingNewFormServiceOrders } =
-    useServiceOrdersByCostCenter(formData.costCenterId);
-  const { serviceOrders: editFormServiceOrders, isLoading: loadingEditFormServiceOrders } =
-    useServiceOrdersByCostCenter(editFormData.costCenterId);
 
-  const handleNewCostCenterChange = (costCenterId: string) => {
+  const { data: contractOptionsData, isLoading: loadingContracts } = useQuery({
+    queryKey: ['service-order-contract-options'],
+    queryFn: async () => {
+      const res = await api.get('/service-orders/contract-options');
+      return (res.data?.data || []) as RmContractOption[];
+    },
+    staleTime: 60_000,
+  });
+
+  const contractOptions = useMemo(
+    () => (Array.isArray(contractOptionsData) ? contractOptionsData : []).filter((c) => c.id),
+    [contractOptionsData]
+  );
+
+  const { serviceOrders: newFormServiceOrders, isLoading: loadingNewFormServiceOrders } =
+    useServiceOrdersByContract(formData.contractId);
+  const { serviceOrders: editFormServiceOrders, isLoading: loadingEditFormServiceOrders } =
+    useServiceOrdersByContract(editFormData.contractId);
+
+  const isNewFormUnbCostCenter = useMemo(() => {
+    const contract = contractOptions.find((c) => c.id === formData.contractId);
+    return isUnbCostCenterOption(contract?.costCenter);
+  }, [contractOptions, formData.contractId]);
+
+  const handleNewContractChange = (contractId: string) => {
+    const contract = contractOptions.find((c) => c.id === contractId);
     setFormData((prev) => ({
       ...prev,
-      costCenterId,
+      contractId,
+      costCenterId: contract?.costCenterId || contract?.costCenter?.id || '',
       serviceOrderId: '',
       serviceOrder: ''
     }));
   };
 
-  const handleEditCostCenterChange = (costCenterId: string) => {
+  const handleEditContractChange = (contractId: string) => {
+    const contract = contractOptions.find((c) => c.id === contractId);
     setEditFormData((prev) => ({
       ...prev,
-      costCenterId,
+      contractId,
+      costCenterId: contract?.costCenterId || contract?.costCenter?.id || '',
       serviceOrderId: '',
       serviceOrder: ''
     }));
   };
 
   const handleNewServiceOrderSelect = (serviceOrderId: string, serviceOrder: string) => {
-    setFormData((prev) => ({ ...prev, serviceOrderId, serviceOrder }));
+    const os = newFormServiceOrders.find((o) => o.id === serviceOrderId);
+    setFormData((prev) => ({
+      ...prev,
+      serviceOrderId,
+      serviceOrder,
+      costCenterId: os?.costCenterId || prev.costCenterId,
+    }));
   };
 
   const handleNewServiceOrderClear = () => {
@@ -665,7 +751,13 @@ function SolicitarMateriaisPage() {
   };
 
   const handleEditServiceOrderSelect = (serviceOrderId: string, serviceOrder: string) => {
-    setEditFormData((prev) => ({ ...prev, serviceOrderId, serviceOrder }));
+    const os = editFormServiceOrders.find((o) => o.id === serviceOrderId);
+    setEditFormData((prev) => ({
+      ...prev,
+      serviceOrderId,
+      serviceOrder,
+      costCenterId: os?.costCenterId || prev.costCenterId,
+    }));
   };
 
   const handleEditServiceOrderClear = () => {
@@ -681,7 +773,8 @@ function SolicitarMateriaisPage() {
       });
       return res.data;
     },
-    enabled: !!userData?.data?.id
+    enabled: !!userData?.data?.id,
+    refetchOnWindowFocus: true,
   });
 
   const { data: detailRmData, isLoading: loadingDetailRm } = useQuery({
@@ -794,18 +887,7 @@ function SolicitarMateriaisPage() {
         queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] }),
       ]);
       setActiveTab('list');
-      setFormData({
-        costCenterId: '',
-        serviceOrderId: '',
-        serviceOrder: '',
-        obra: '',
-        description: '',
-        priority: 'MEDIUM',
-        demandSheet: '',
-        demandSheetAttachmentUrl: '',
-        demandSheetAttachmentName: '',
-        items: [{ materialId: '', quantity: 1, unit: '', observation: '', attachmentUrl: '', attachmentName: '' }]
-      });
+      setFormData(emptyNewFormData());
       closeNewRequestModal();
       toast.success('Solicitação criada com sucesso!');
     },
@@ -888,6 +970,22 @@ function SolicitarMateriaisPage() {
             .join(' '),
         })),
     [costCenters]
+  );
+
+  const contractSelectOptions = useMemo(
+    () =>
+      contractOptions.map((contract) => {
+        const label = formatRmContractLabel(contract);
+        return {
+          value: contract.id,
+          label,
+          searchText: [contract.number, contract.name, contract.costCenter?.code, contract.costCenter?.name]
+            .map((part) => String(part ?? '').trim())
+            .filter(Boolean)
+            .join(' '),
+        };
+      }),
+    [contractOptions]
   );
 
   const rmListFaseOptions = useMemo(() => {
@@ -1052,6 +1150,7 @@ function SolicitarMateriaisPage() {
             )
           : '';
     setEditFormData({
+      contractId: '',
       costCenterId: (r as { costCenterId?: string }).costCenterId || (r as { costCenter?: { id?: string } }).costCenter?.id || '',
       serviceOrderId: rmServiceOrderId,
       serviceOrder: rmServiceOrderText,
@@ -1105,6 +1204,45 @@ function SolicitarMateriaisPage() {
       setEditFormData((prev) => ({ ...prev, serviceOrderId: match.id }));
     }
   }, [correctionEditId, editFormData.serviceOrder, editFormData.serviceOrderId, editFormServiceOrders]);
+
+  const { data: linkedContractForEdit } = useQuery({
+    queryKey: ['service-order-linked-contract', editFormData.serviceOrderId],
+    queryFn: async () => {
+      const res = await api.get('/service-orders/linked-contract', {
+        params: { serviceOrderId: editFormData.serviceOrderId },
+      });
+      return res.data?.data as { contractId: string; costCenterId: string } | null;
+    },
+    enabled: !!correctionEditId && !!editFormData.serviceOrderId.trim() && !editFormData.contractId.trim(),
+    staleTime: 60_000,
+  });
+
+  useEffect(() => {
+    if (!linkedContractForEdit?.contractId) return;
+    setEditFormData((prev) => {
+      if (prev.contractId) return prev;
+      return {
+        ...prev,
+        contractId: linkedContractForEdit.contractId,
+        costCenterId: linkedContractForEdit.costCenterId || prev.costCenterId,
+      };
+    });
+  }, [linkedContractForEdit]);
+
+  useEffect(() => {
+    if (!correctionEditId || editFormData.contractId || !editFormData.costCenterId) return;
+    if (editFormData.serviceOrderId) return;
+    const matches = contractOptions.filter((c) => c.costCenterId === editFormData.costCenterId);
+    if (matches.length === 1) {
+      setEditFormData((prev) => ({ ...prev, contractId: matches[0].id }));
+    }
+  }, [
+    correctionEditId,
+    editFormData.contractId,
+    editFormData.costCenterId,
+    editFormData.serviceOrderId,
+    contractOptions,
+  ]);
 
   useEffect(() => {
     if (!isNewRequestModalOpen) return;
@@ -1182,7 +1320,9 @@ function SolicitarMateriaisPage() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const validationError = validateNewMaterialRequestForm(formData);
+    const validationError = validateNewMaterialRequestForm(formData, {
+      demandSheetOptional: isNewFormUnbCostCenter
+    });
     if (validationError) {
       toast.error(validationError);
       return;
@@ -1357,8 +1497,12 @@ function SolicitarMateriaisPage() {
 
   const submitCorrectionEdit = (submitForApproval: boolean) => {
     if (!correctionEditId) return;
+    if (!editFormData.contractId) {
+      toast.error('Selecione o contrato.');
+      return;
+    }
     if (!editFormData.costCenterId) {
-      toast.error('Selecione o centro de custo.');
+      toast.error('Contrato sem centro de custo vinculado.');
       return;
     }
     if (!editFormData.serviceOrderId) {
@@ -1428,7 +1572,7 @@ function SolicitarMateriaisPage() {
                       type="search"
                       value={rmListSearch}
                       onChange={(e) => setRmListSearch(e.target.value)}
-                      placeholder="RM, OS, obra, centro de custo..."
+                      placeholder="RM, OS, obra, contrato..."
                       className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
                     />
                     {rmListSearch && (
@@ -1519,16 +1663,13 @@ function SolicitarMateriaisPage() {
                             Data
                           </th>
                           <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                            Centro de Custo
+                            Contrato
                           </th>
                           <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">
                             OS
                           </th>
                           <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">
                             Obra
-                          </th>
-                          <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                            Descrição
                           </th>
                           <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap min-w-[100px]">
                             Status
@@ -1581,10 +1722,10 @@ function SolicitarMateriaisPage() {
                               </td>
                               <td
                                 className="px-3 sm:px-6 py-3 text-center text-sm text-gray-700 dark:text-gray-300 max-w-[200px]"
-                                title={rmCostCenterName(request as Parameters<typeof rmCostCenterName>[0])}
+                                title={rmContractName(request as Parameters<typeof rmContractName>[0])}
                               >
                                 <span className="line-clamp-2">
-                                  {rmCostCenterName(request as Parameters<typeof rmCostCenterName>[0])}
+                                  {rmContractName(request as Parameters<typeof rmContractName>[0])}
                                 </span>
                               </td>
                               <td
@@ -1598,11 +1739,6 @@ function SolicitarMateriaisPage() {
                                 title={String(request.obra || '')}
                               >
                                 {request.obra ? String(request.obra) : '—'}
-                              </td>
-                              <td className="px-3 sm:px-6 py-3 text-center text-sm text-gray-600 dark:text-gray-400 max-w-[220px]">
-                                <span className="line-clamp-2" title={String(request.description || '')}>
-                                  {request.description ? String(request.description) : '—'}
-                                </span>
                               </td>
                               <td className="px-3 sm:px-6 py-3 text-center align-middle">
                                 <span className={rmFase.badgeClassName} title={rmFase.text}>
@@ -1746,7 +1882,7 @@ function SolicitarMateriaisPage() {
                     </div>
                     <div>
                       <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                        Centro de custo
+                        Contrato
                       </label>
                       {loadingCostCenters ? (
                         <div className="w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-2.5 text-sm text-gray-500 dark:border-gray-600 dark:bg-gray-800">
@@ -1759,9 +1895,9 @@ function SolicitarMateriaisPage() {
                           options={rmListCostCenterOptions}
                           allowEmpty={false}
                           placeholder="Todos"
-                          searchPlaceholder="Pesquisar centro de custo..."
+                          searchPlaceholder="Pesquisar contrato..."
                           emptyOptionLabel="Todos"
-                          emptyOptionsMessage="Nenhum centro de custo disponível."
+                          emptyOptionsMessage="Nenhum contrato disponível."
                         />
                       )}
                     </div>
@@ -1842,35 +1978,35 @@ function SolicitarMateriaisPage() {
                 <form onSubmit={handleSubmit} className="space-y-6">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                      Centro de Custo *
+                      Contrato *
                     </label>
-                    {loadingCostCenters ? (
+                    {loadingContracts ? (
                       <SingleSelectSearchDropdown
                         value=""
                         onChange={() => undefined}
                         options={[]}
                         disabled
-                        placeholder="Carregando centros de custo..."
+                        placeholder="Carregando contratos..."
                         allowEmpty={false}
                       />
                     ) : (
                       <>
                         <SingleSelectSearchDropdown
-                          value={formData.costCenterId}
-                          onChange={handleNewCostCenterChange}
-                          options={costCenterSelectOptions}
+                          value={formData.contractId}
+                          onChange={handleNewContractChange}
+                          options={contractSelectOptions}
                           allowEmpty={false}
-                          placeholder="Digite para buscar centro de custo..."
-                          searchPlaceholder="Pesquisar centro de custo..."
-                          emptyOptionsMessage="Nenhum centro de custo disponível."
-                          emptySearchMessage="Nenhum centro de custo encontrado para esta busca."
+                          placeholder="Digite para buscar contrato..."
+                          searchPlaceholder="Pesquisar contrato..."
+                          emptyOptionsMessage="Nenhum contrato disponível."
+                          emptySearchMessage="Nenhum contrato encontrado para esta busca."
                         />
-                        <input type="hidden" required value={formData.costCenterId} readOnly />
+                        <input type="hidden" required value={formData.contractId} readOnly />
                       </>
                     )}
-                    {!loadingCostCenters && costCenters.length === 0 && (
+                    {!loadingContracts && contractOptions.length === 0 && (
                       <p className="mt-1 text-xs text-yellow-600 dark:text-yellow-400">
-                        Nenhum centro de custo disponível. Execute o seed do banco de dados.
+                        Nenhum contrato disponível. Cadastre contratos em Contratos.
                       </p>
                     )}
                   </div>
@@ -1880,7 +2016,7 @@ function SolicitarMateriaisPage() {
                       Ordem de Serviço *
                     </label>
                     <ServiceOrderSearchSelect
-                      costCenterId={formData.costCenterId}
+                      contractId={formData.contractId}
                       serviceOrders={newFormServiceOrders}
                       loading={loadingNewFormServiceOrders}
                       serviceOrderId={formData.serviceOrderId}
@@ -1922,20 +2058,24 @@ function SolicitarMateriaisPage() {
                     <div className="space-y-4">
                       <div>
                         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                          Ficha de Demanda *
+                          Ficha de Demanda{isNewFormUnbCostCenter ? '' : ' *'}
                         </label>
                         <input
                           type="text"
-                          required
+                          required={!isNewFormUnbCostCenter}
                           value={formData.demandSheet}
                           onChange={(e) => setFormData({ ...formData, demandSheet: e.target.value })}
-                          className={FORM_FIELD_TEXTAREA_CLS}
-                          placeholder="Número ou referência da FD"
+                          className={FORM_FIELD_INPUT_CLS}
+                          placeholder={
+                            isNewFormUnbCostCenter
+                              ? 'Número ou referência da FD (opcional)'
+                              : 'Número ou referência da FD'
+                          }
                         />
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                          Anexar FD *
+                          Anexar FD{isNewFormUnbCostCenter ? '' : ' *'}
                         </label>
                         <RmAttachmentField
                           fileUrl={formData.demandSheetAttachmentUrl}
@@ -1945,7 +2085,9 @@ function SolicitarMateriaisPage() {
                           onFileSelect={(file) => void handleDemandSheetAttachmentFile('new', file)}
                           onRemove={() => clearDemandSheetAttachment('new')}
                         />
-                        <input type="hidden" required value={formData.demandSheetAttachmentUrl} readOnly />
+                        {!isNewFormUnbCostCenter ? (
+                          <input type="hidden" required value={formData.demandSheetAttachmentUrl} readOnly />
+                        ) : null}
                       </div>
                     </div>
                     <div>
@@ -2207,8 +2349,8 @@ function SolicitarMateriaisPage() {
                                 '—'
                               )}
                             </DetailField>
-                            <DetailField label="Centro de custo" className="sm:col-span-2">
-                              {rmCostCenterName(d as Parameters<typeof rmCostCenterName>[0])}
+                            <DetailField label="Contrato" className="sm:col-span-2">
+                              {rmContractName(d as Parameters<typeof rmContractName>[0])}
                             </DetailField>
                             <DetailField label="OS">{rmOsLine(d as Parameters<typeof rmOsLine>[0])}</DetailField>
                             <DetailField label="Obra">{d.obra ? String(d.obra) : '—'}</DetailField>
@@ -2349,19 +2491,19 @@ function SolicitarMateriaisPage() {
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Centro de Custo *
+                    Contrato *
                   </label>
                   <SingleSelectSearchDropdown
-                    value={editFormData.costCenterId}
-                    onChange={handleEditCostCenterChange}
-                    options={costCenterSelectOptions}
+                    value={editFormData.contractId}
+                    onChange={handleEditContractChange}
+                    options={contractSelectOptions}
                     allowEmpty={false}
-                    placeholder="Digite para buscar centro de custo..."
-                    searchPlaceholder="Pesquisar centro de custo..."
-                    emptyOptionsMessage="Nenhum centro de custo disponível."
-                    emptySearchMessage="Nenhum centro de custo encontrado para esta busca."
+                    placeholder="Digite para buscar contrato..."
+                    searchPlaceholder="Pesquisar contrato..."
+                    emptyOptionsMessage="Nenhum contrato disponível."
+                    emptySearchMessage="Nenhum contrato encontrado para esta busca."
                   />
-                  <input type="hidden" value={editFormData.costCenterId} readOnly />
+                  <input type="hidden" value={editFormData.contractId} readOnly />
                 </div>
 
                 <div>
@@ -2369,7 +2511,7 @@ function SolicitarMateriaisPage() {
                     Ordem de Serviço *
                   </label>
                   <ServiceOrderSearchSelect
-                    costCenterId={editFormData.costCenterId}
+                    contractId={editFormData.contractId}
                     serviceOrders={editFormServiceOrders}
                     loading={loadingEditFormServiceOrders}
                     serviceOrderId={editFormData.serviceOrderId}
@@ -2377,7 +2519,7 @@ function SolicitarMateriaisPage() {
                     onSelect={handleEditServiceOrderSelect}
                     onClear={handleEditServiceOrderClear}
                     inputSize="sm"
-                    emptyCostCenterHint="Selecione o centro de custo"
+                    emptyContractHint="Selecione o contrato"
                     required
                   />
                   <input type="hidden" required value={editFormData.serviceOrderId} readOnly />

@@ -1,5 +1,6 @@
 import { prisma } from '../lib/prisma';
 import type { EngineeringMaterial, Prisma } from '@prisma/client';
+import { isUnbCostCenterRecord } from '../lib/unbCostCenterScope';
 import { resolveRmServiceOrderFields } from '../utils/materialRequestServiceOrder';
 
 /** Lock de sessão Postgres para serializar geração de requestNumber (mesmo padrão de DpRequest). */
@@ -125,7 +126,16 @@ export interface UpdateMaterialRequestCorrectionData {
 }
 
 export class MaterialRequestService {
-  private assertCreateMaterialRequestFields(data: CreateMaterialRequestData) {
+  /** FD obrigatória exceto quando o centro de custo é UNB. */
+  private async assertCreateMaterialRequestFields(data: CreateMaterialRequestData) {
+    const costCenter = data.costCenterId
+      ? await prisma.costCenter.findUnique({
+          where: { id: data.costCenterId },
+          select: { name: true, code: true },
+        })
+      : null;
+    if (isUnbCostCenterRecord(costCenter)) return;
+
     if (!(data.demandSheet || '').trim()) {
       throw new Error('Ficha de demanda é obrigatória');
     }
@@ -331,12 +341,12 @@ export class MaterialRequestService {
       throw new Error('Ordem de serviço é obrigatória. Selecione uma OS cadastrada no centro de custo.');
     }
 
-    this.assertCreateMaterialRequestFields(data);
+    await this.assertCreateMaterialRequestFields(data);
 
     const obra = (data.obra || '').trim() || null;
-    const demandSheet = (data.demandSheet || '').trim();
-    const demandSheetAttachmentUrl = (data.demandSheetAttachmentUrl || '').trim();
-    const demandSheetAttachmentName = (data.demandSheetAttachmentName || '').trim();
+    const demandSheet = (data.demandSheet || '').trim() || null;
+    const demandSheetAttachmentUrl = (data.demandSheetAttachmentUrl || '').trim() || null;
+    const demandSheetAttachmentName = (data.demandSheetAttachmentName || '').trim() || null;
 
     // Serializa geração de requestNumber + create (evita race em UNIQUE)
     const request = await prisma.$transaction(
@@ -414,6 +424,7 @@ export class MaterialRequestService {
    */
   async listMaterialRequests(filters: {
     status?: string;
+    approvedBy?: string;
     costCenterId?: string;
     costCenterIds?: string[];
     projectId?: string;
@@ -434,6 +445,10 @@ export class MaterialRequestService {
 
     if (filters.status) {
       where.status = filters.status;
+    }
+
+    if (filters.approvedBy) {
+      where.approvedBy = filters.approvedBy;
     }
 
     if (filters.costCenterId) {
@@ -480,6 +495,26 @@ export class MaterialRequestService {
       },
       project: {
         select: { id: true, name: true, code: true }
+      },
+      service_orders: {
+        select: {
+          id: true,
+          numero: true,
+          ano: true,
+          pleitos: {
+            where: { updatedContractId: { not: null } },
+            orderBy: { updatedAt: 'desc' },
+            take: 3,
+            select: {
+              divSe: true,
+              folderNumber: true,
+              reportsBilling: true,
+              updatedContract: {
+                select: { id: true, name: true, number: true }
+              }
+            }
+          }
+        }
       },
       purchaseOrders: {
         select: {

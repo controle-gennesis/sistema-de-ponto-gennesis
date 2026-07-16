@@ -6,6 +6,8 @@ import { parseDateInput } from '../utils/dateInput';
 import {
   assertContractAccess,
   assertUserCanCreateContract,
+  assertUserCanDeleteContract,
+  assertUserCanEditContract,
   getContractAccessForUser
 } from '../lib/contractAccess';
 import { getTotvsRmRelatorioFinService } from '../services/TotvsRmRelatorioFinService';
@@ -307,6 +309,8 @@ export class ContractController {
   async updateContract(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
+      if (!req.user) throw createError('Usuário não autenticado', 401);
+      await assertUserCanEditContract(req.user.id, !!req.user.isAdmin);
       await assertContractAccess(req, id);
 
       const { name, number, startDate, endDate, costCenterId, valuePlusAddenda } = req.body;
@@ -802,7 +806,8 @@ export class ContractController {
   async deleteContract(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
-
+      if (!req.user) throw createError('Usuário não autenticado', 401);
+      await assertUserCanDeleteContract(req.user.id, !!req.user.isAdmin);
       await assertContractAccess(req, id);
 
       const existing = await prisma.contract.findUnique({

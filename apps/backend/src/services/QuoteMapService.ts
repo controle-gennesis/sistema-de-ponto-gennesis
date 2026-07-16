@@ -381,6 +381,8 @@ export class QuoteMapService {
       generateSupplierIds: string[];
       /** Quantidade a comprar por item da SC (materialRequestItemId). Se omitido, usa a quantidade solicitada. */
       itemQuantities?: Record<string, number>;
+      /** Chave `supplierId:materialRequestItemId` → detalhe/nome do item no fornecedor. */
+      itemNotesBySupplierItem?: Record<string, string>;
       paymentBySupplier: Array<{
         supplierId: string;
         paymentType: string;
@@ -435,6 +437,7 @@ export class QuoteMapService {
     );
 
     const qtyOverrides = data.itemQuantities ?? {};
+    const notesBySupplierItem = data.itemNotesBySupplierItem ?? {};
 
     const winners = await this.db.quoteMapWinnerItem.findMany({
       where: { quoteMapId, winnerSupplierId: { in: supplierIds } },
@@ -522,13 +525,15 @@ export class QuoteMapService {
         if (quantity.gt(requestedQty)) {
           throw new Error('Quantidade da OC não pode exceder a solicitada na SC');
         }
+        const detailKey = `${supplierId}:${w.materialRequestItemId}`;
+        const itemNote = String(notesBySupplierItem[detailKey] ?? '').trim();
         return {
           materialRequestItemId: w.materialRequestItemId,
           materialId: w.materialRequestItem.materialId,
           quantity: Number(quantity),
           unit: w.materialRequestItem.unit,
           unitPrice: Number(unit),
-          notes: null
+          notes: itemNote || null
         };
       });
 

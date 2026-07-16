@@ -10,6 +10,7 @@ export interface FinancialControlEntry {
   status: FinancialControlStatus;
   osCode: string | null;
   supplierName: string | null;
+  nfNumber: string | null;
   parcelNumber: string | null;
   emissionDate: string | null;
   boleto: string | null;
@@ -47,6 +48,7 @@ export interface EntryFormState {
   status: FinancialControlStatus;
   osCode: string;
   supplierName: string;
+  nfNumber: string;
   parcelNumber: string;
   emissionDate: string;
   boleto: string;
@@ -113,6 +115,7 @@ export function buildInitialForm(month: number, year: number): EntryFormState {
     status: 'AGUARDAR_PAGAMENTO',
     osCode: '',
     supplierName: '',
+    nfNumber: '',
     parcelNumber: '',
     emissionDate: '',
     boleto: 'Não',
@@ -135,6 +138,7 @@ export function entryToForm(entry: FinancialControlEntry): EntryFormState {
     status: entry.status,
     osCode: entry.osCode || '',
     supplierName: entry.supplierName || '',
+    nfNumber: entry.nfNumber || '',
     parcelNumber: entry.parcelNumber || '',
     emissionDate: dateInputValue(entry.emissionDate),
     boleto: entry.boleto || '',
@@ -165,9 +169,10 @@ export function buildInitialFormFromPurchaseOrder(order: {
   return {
     paymentMonth: Number.isNaN(orderD.getTime()) ? now.getMonth() + 1 : orderD.getMonth() + 1,
     paymentYear: Number.isNaN(orderD.getTime()) ? now.getFullYear() : orderD.getFullYear(),
-    status: 'PAGO',
+    status: 'LANCADO',
     osCode: (order.materialRequest?.serviceOrder || '').trim(),
     supplierName: (order.supplier?.name || '').trim(),
+    nfNumber: '',
     parcelNumber: '',
     emissionDate: '',
     boleto: order.paymentType === 'BOLETO' ? 'Sim' : 'Não',
@@ -190,6 +195,7 @@ export function formToPayload(form: EntryFormState) {
     status: form.status,
     osCode: form.osCode || null,
     supplierName: form.supplierName || null,
+    nfNumber: form.nfNumber || null,
     parcelNumber: form.parcelNumber || null,
     emissionDate: form.emissionDate || null,
     boleto: form.boleto || null,

@@ -283,6 +283,16 @@ router.get('/:id/stock-receipt', async (req: AuthRequest, res: Response, next: N
   }
 });
 
+router.get('/:id/pdf-data', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const order = await service.getForPdf(req.params.id);
+    if (!order) throw createError('Ordem de compra não encontrada', 404);
+    res.json({ success: true, data: order });
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.get('/:id', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const order = await service.getById(req.params.id);
@@ -330,10 +340,14 @@ router.patch('/:id/nf-attachments', async (req: AuthRequest, res: Response, next
       OC_TAB_ATTACH_NF_KEY,
       'Sem permissão na aba Anexar NF da OC'
     );
-    const { nfUrl, nfName } = req.body as { nfUrl?: string; nfName?: string };
+    const { nfUrl, nfName, nfNumber } = req.body as {
+      nfUrl?: string;
+      nfName?: string;
+      nfNumber?: string;
+    };
     const order = await service.appendNfAttachment(
       req.params.id,
-      { nfUrl: nfUrl || '', nfName },
+      { nfUrl: nfUrl || '', nfName, nfNumber },
       req.user?.id
     );
     res.json({ success: true, data: order, message: 'Nota fiscal anexada' });
@@ -344,7 +358,9 @@ router.patch('/:id/nf-attachments', async (req: AuthRequest, res: Response, next
     }
     if (
       error instanceof Error &&
-      /Ordem de compra não encontrada|Só é possível|Apenas quem criou|obrigatório|Usuário não autenticado/.test(error.message)
+      /Ordem de compra não encontrada|Só é possível|Apenas quem criou|obrigatório|já existe|Usuário não autenticado/.test(
+        error.message
+      )
     ) {
       res.status(400).json({ success: false, message: error.message });
       return;
@@ -378,7 +394,7 @@ router.patch('/:id/status', async (req: AuthRequest, res: Response, next: NextFu
     }
     if (
       error instanceof Error &&
-      /Apenas |Status atual não permite|Anexe o comprovante|Envie a OC para a fase Pagamento|Aguarde o pagamento de todas as parcelas|Registre o comprovante|validação de comprovante|validação do comprovante|Pagamento ou em correção|ao menos uma nota|marcada como enviada|marcar como enviada|Usuário não autenticado|financeiro pode reenviar|financeiro pode anexar/.test(
+      /Apenas |Status atual não permite|Anexe o comprovante|Envie a OC para a fase Pagamento|Aguarde o pagamento de todas as parcelas|Registre o comprovante|validação de comprovante|validação do comprovante|Pagamento ou em correção|ao menos uma nota|marcada como enviada|marcar como enviada|Usuário não autenticado|financeiro pode reenviar|financeiro pode anexar|OC de centro de custo UNB|A OC UNB só pode|A OC só pode ser aprovada/.test(
         error.message
       )
     ) {

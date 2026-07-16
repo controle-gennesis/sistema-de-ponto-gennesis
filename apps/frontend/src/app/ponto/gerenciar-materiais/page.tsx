@@ -24,7 +24,7 @@ import {
   type OcBoletoCreationSlot
 } from '@/components/oc/OcBoletoCreationFields';
 import type { MaterialRequest } from './_lib/types';
-import { getStatusInfo, materialItemLabel, rmSolicitante } from './_lib/display';
+import { getStatusInfo, materialItemLabel, rmContractDisplay, rmSolicitante } from './_lib/display';
 import {
   formatCurrencyBR,
   numericQuantityFromInput,
@@ -626,8 +626,8 @@ export default function GerenciarMateriaisPage() {
                   <p className="text-gray-900 dark:text-gray-100">{rmSolicitante(selectedRequest)?.name || '—'}</p>
                 </div>
                 <div>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">Centro de Custo</p>
-                  <p className="text-gray-900 dark:text-gray-100">{selectedRequest.costCenter?.name}</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Contrato</p>
+                  <p className="text-gray-900 dark:text-gray-100">{rmContractDisplay(selectedRequest)}</p>
                 </div>
                 {selectedRequest.project && (
                   <div>

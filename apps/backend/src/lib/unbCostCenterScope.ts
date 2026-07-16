@@ -7,6 +7,14 @@ export function isEmployeeUnbUser(employeeCostCenter: string | null | undefined)
   return isUnbRelatedLabel(employeeCostCenter);
 }
 
+/** CostCenter cadastrado (name/code) ligado à UNB — OC pula compras e diretoria. */
+export function isUnbCostCenterRecord(
+  costCenter: { name?: string | null; code?: string | null } | null | undefined,
+): boolean {
+  if (!costCenter) return false;
+  return isUnbRelatedLabel(costCenter.name) || isUnbRelatedLabel(costCenter.code);
+}
+
 /** IDs de CostCenter cujo name/code são UNB. */
 export async function getUnbCostCenterIds(): Promise<string[]> {
   const rows = await prisma.costCenter.findMany({

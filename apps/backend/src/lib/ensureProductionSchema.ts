@@ -298,6 +298,76 @@ async function ensureFinancialControlAguardarPagamentoStatus(prisma: PrismaClien
   `);
 }
 
+async function ensureFinancialControlLancadoStatus(prisma: PrismaClient): Promise<void> {
+  const rows = await prisma.$queryRaw<{ exists: boolean }[]>`
+    SELECT EXISTS (
+      SELECT 1
+      FROM pg_enum e
+      INNER JOIN pg_type t ON e.enumtypid = t.oid
+      WHERE t.typname = 'FinancialControlStatus'
+        AND e.enumlabel = 'LANCADO'
+    ) AS "exists"
+  `;
+  if (rows[0]?.exists) return;
+
+  console.warn(
+    '[Schema] Enum FinancialControlStatus sem LANCADO — adicionando. ' +
+      'Prefira: cd apps/backend && npx prisma migrate deploy.',
+  );
+  await prisma.$executeRawUnsafe(`
+    DO $$
+    BEGIN
+      ALTER TYPE "FinancialControlStatus" ADD VALUE 'LANCADO';
+    EXCEPTION
+      WHEN duplicate_object THEN NULL;
+    END $$;
+  `);
+}
+
+async function ensureFinancialControlNfNumberColumn(prisma: PrismaClient): Promise<void> {
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "financial_control_entries" ADD COLUMN IF NOT EXISTS "nfNumber" TEXT;
+  `);
+  await prisma.$executeRawUnsafe(`
+    UPDATE "financial_control_entries"
+    SET
+      "nfNumber" = substring("parcelNumber" from '^(\\d+)-\\d+/\\d+$'),
+      "parcelNumber" = substring("parcelNumber" from '^\\d+-(\\d+/\\d+)$')
+    WHERE "nfNumber" IS NULL
+      AND "parcelNumber" IS NOT NULL
+      AND "parcelNumber" ~ '^\\d+-\\d+/\\d+$';
+  `);
+  await prisma.$executeRawUnsafe(`
+    UPDATE "financial_control_entries"
+    SET
+      "nfNumber" = substring("parcelNumber" from '^(\\d+)-\\d{1,3}$'),
+      "parcelNumber" = substring("parcelNumber" from '^\\d+-(\\d{1,3})$')
+    WHERE "nfNumber" IS NULL
+      AND "parcelNumber" IS NOT NULL
+      AND "parcelNumber" ~ '^\\d+-\\d{1,3}$';
+  `);
+  await prisma.$executeRawUnsafe(`
+    UPDATE "financial_control_entries"
+    SET
+      "nfNumber" = "parcelNumber",
+      "parcelNumber" = NULL
+    WHERE "nfNumber" IS NULL
+      AND "parcelNumber" IS NOT NULL
+      AND "parcelNumber" !~ '^\\d+/\\d+$';
+  `);
+  await prisma.$executeRawUnsafe(`
+    UPDATE "financial_control_entries"
+    SET
+      "nfNumber" = "nfNumber" || '-' || "parcelNumber",
+      "parcelNumber" = NULL
+    WHERE "nfNumber" IS NOT NULL
+      AND "parcelNumber" IS NOT NULL
+      AND "nfNumber" !~ '^\\d+$'
+      AND "parcelNumber" ~ '^\\d+$'
+      AND "parcelNumber" !~ '/';
+  `);
+}
+
 async function ensureDpRequestTypeAdmAsos(prisma: PrismaClient): Promise<void> {
   const rows = await prisma.$queryRaw<{ exists: boolean }[]>`
     SELECT EXISTS (
@@ -602,6 +672,8 @@ export async function ensureProductionSchema(prisma: PrismaClient): Promise<void
     await ensureDemandSheetApprovals(prisma);
     await ensurePurchaseOrderStageApprovals(prisma);
     await ensureFinancialControlAguardarPagamentoStatus(prisma);
+    await ensureFinancialControlLancadoStatus(prisma);
+    await ensureFinancialControlNfNumberColumn(prisma);
     await ensureDpRequestTypeAdmAsos(prisma);
     await ensureLicitacoesTables(prisma);
     await ensureLicitacaoColumns(prisma);

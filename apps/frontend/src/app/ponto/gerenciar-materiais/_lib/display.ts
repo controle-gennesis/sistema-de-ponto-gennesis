@@ -72,6 +72,29 @@ export function rmTitulo(r: MaterialRequest): string {
   return `OS #${r.id.slice(0, 8)}`;
 }
 
+function rmLinkedContract(r: MaterialRequest) {
+  const pleitos = r.service_orders?.pleitos ?? [];
+  const src = pleitos.find((p) => p.updatedContract) ?? pleitos[0];
+  return src?.updatedContract ?? null;
+}
+
+export function rmOsDisplay(r: MaterialRequest): string {
+  const os = (r.serviceOrder || '').trim();
+  if (os) return ensureOsSePrefix(os);
+  const so = r.service_orders;
+  if (so) return `OS ${so.numero}/${so.ano}`;
+  return '—';
+}
+
+export function rmContractDisplay(r: MaterialRequest): string {
+  const contract = rmLinkedContract(r);
+  if (contract?.name?.trim()) return contract.name.trim();
+  if (contract?.number?.trim()) return contract.number.trim();
+  // Fallback: CC costuma ser o rótulo do contrato quando a OS não traz vínculo.
+  if (r.costCenter?.name?.trim()) return r.costCenter.name.trim();
+  return '—';
+}
+
 /** Item com material (SC / OC) — aceita variações de API (null em códigos). */
 export type MaterialLineItem = {
   material: {

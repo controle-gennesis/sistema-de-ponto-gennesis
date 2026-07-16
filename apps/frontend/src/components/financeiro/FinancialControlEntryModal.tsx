@@ -314,12 +314,26 @@ export function FinancialControlEntryModal({
           </div>
           <div className="sm:col-span-2">
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              Número da Parcela
+              Número da NF
+            </label>
+            <input
+              type="text"
+              value={form.nfNumber}
+              onChange={(e) => setForm({ ...form, nfNumber: e.target.value })}
+              placeholder="Ex.: 556713"
+              autoComplete="off"
+              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 dark:bg-gray-800 dark:text-white"
+            />
+          </div>
+          <div className="sm:col-span-2">
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              Parcela
             </label>
             <input
               type="text"
               value={form.parcelNumber}
               onChange={(e) => setForm({ ...form, parcelNumber: e.target.value })}
+              placeholder="Ex.: 2/2"
               autoComplete="off"
               className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 dark:bg-gray-800 dark:text-white"
             />

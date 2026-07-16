@@ -3,6 +3,7 @@ import {
   visiblePaymentBoletoInstallmentIndex,
   type OrderBoletoPhasePick,
 } from '@/components/oc/ocPaymentBoleto';
+import { formatOcFinancialControlOriginNote } from '@/components/oc/ocListDisplay';
 
 export type { FinancialControlStatus } from '@/lib/financialControlStatus';
 export {
@@ -18,6 +19,7 @@ export interface FinancialControlEntry {
   status: FinancialControlStatus;
   osCode: string | null;
   supplierName: string | null;
+  nfNumber: string | null;
   parcelNumber: string | null;
   emissionDate: string | null;
   boleto: string | null;
@@ -55,6 +57,7 @@ export interface EntryFormState {
   status: FinancialControlStatus;
   osCode: string;
   supplierName: string;
+  nfNumber: string;
   parcelNumber: string;
   emissionDate: string;
   boleto: string;
@@ -128,6 +131,7 @@ export function buildInitialForm(month: number, year: number): EntryFormState {
     status: 'AGUARDAR_PAGAMENTO',
     osCode: '',
     supplierName: '',
+    nfNumber: '',
     parcelNumber: '',
     emissionDate: '',
     boleto: 'Não',
@@ -150,6 +154,7 @@ export function entryToForm(entry: FinancialControlEntry): EntryFormState {
     status: entry.status,
     osCode: entry.osCode || '',
     supplierName: entry.supplierName || '',
+    nfNumber: entry.nfNumber || '',
     parcelNumber: entry.parcelNumber || '',
     emissionDate: dateInputValue(entry.emissionDate),
     boleto: entry.boleto || '',
@@ -173,6 +178,7 @@ export function buildFinancialEntryPayload(form: EntryFormState) {
     status: form.status,
     osCode: form.osCode || null,
     supplierName: form.supplierName || null,
+    nfNumber: form.nfNumber || null,
     parcelNumber: form.parcelNumber || null,
     emissionDate: form.emissionDate || null,
     boleto: form.boleto || null,
@@ -221,6 +227,51 @@ export function orderGrandTotalForFinancialEntry(order: {
   return Math.round(items * 100) / 100;
 }
 
+/** Separa NF e parcela de valor legado combinado (ex.: `556713-2/2`). */
+export function splitNfAndParcelDisplay(raw: string | null | undefined): {
+  nfNumber: string | null;
+  parcelNumber: string | null;
+} {
+  if (raw == null) return { nfNumber: null, parcelNumber: null };
+  const s = String(raw).trim();
+  if (!s) return { nfNumber: null, parcelNumber: null };
+
+  const withSlash = s.match(/^(\d+)-(\d+\/\d+)$/);
+  if (withSlash) return { nfNumber: withSlash[1], parcelNumber: withSlash[2] };
+
+  const withShortParcel = s.match(/^(\d+)-(\d{1,3})$/);
+  if (withShortParcel) return { nfNumber: withShortParcel[1], parcelNumber: withShortParcel[2] };
+
+  if (/^\d+\/\d+$/.test(s)) return { nfNumber: null, parcelNumber: s };
+
+  return { nfNumber: s, parcelNumber: null };
+}
+
+/** Resolve NF e parcela para exibição (campos separados ou legado combinado). */
+export function resolveNfAndParcelForDisplay(entry: {
+  nfNumber?: string | null;
+  parcelNumber?: string | null;
+}): { nfNumber: string | null; parcelNumber: string | null } {
+  const nf = (entry.nfNumber || '').trim();
+  const parcel = (entry.parcelNumber || '').trim();
+  if (nf) {
+    return { nfNumber: nf, parcelNumber: parcel || null };
+  }
+  if (!parcel) return { nfNumber: null, parcelNumber: null };
+  return splitNfAndParcelDisplay(parcel);
+}
+
+/** Prefixo de anexo NF em nfAttachments da OC. */
+export function firstNfNumberFromAttachments(raw: unknown): string | null {
+  if (!raw || !Array.isArray(raw)) return null;
+  for (const x of raw) {
+    if (!x || typeof x !== 'object') continue;
+    const number = (x as { number?: unknown }).number;
+    if (typeof number === 'string' && number.trim()) return number.trim();
+  }
+  return null;
+}
+
 /** Pré-preenche o formulário a partir de uma OC (fase pagamento). */
 export function buildFormFromPurchaseOrder(
   order: OrderBoletoPhasePick & {
@@ -236,17 +287,14 @@ export function buildFormFromPurchaseOrder(
     items?: Array<{ totalPrice: number }>;
     freightAmount?: number | string | null;
     amountToPay?: number | string | null;
+    nfAttachments?: unknown;
   }
 ): EntryFormState {
   const now = new Date();
-  const todayStr = todayDateInputValue();
   const ocTotal = orderGrandTotalForFinancialEntry(order);
 
-  const osCode =
-    order.materialRequest?.serviceOrder?.trim() ||
-    order.materialRequest?.costCenter?.code?.trim() ||
-    order.materialRequest?.costCenter?.name?.trim() ||
-    '';
+  /** Só a OS da RM — nunca usar código do contrato/centro de custo. */
+  const osCode = order.materialRequest?.serviceOrder?.trim() || '';
 
   let parcelNumber = '';
   let dueDate = '';
@@ -279,9 +327,10 @@ export function buildFormFromPurchaseOrder(
   return {
     paymentMonth: now.getMonth() + 1,
     paymentYear: now.getFullYear(),
-    status: 'PAGO',
+    status: 'LANCADO',
     osCode,
     supplierName: (order.supplier?.name || '').trim(),
+    nfNumber: firstNfNumberFromAttachments(order.nfAttachments) || '',
     parcelNumber,
     emissionDate: dateInputValue(order.orderDate),
     boleto: order.paymentType === 'BOLETO' ? 'Sim' : 'Não',
@@ -289,9 +338,9 @@ export function buildFormFromPurchaseOrder(
     originalValue: amountStr,
     ocNumber: order.orderNumber,
     finalValue: amountStr,
-    paidDate: todayStr,
+    paidDate: '',
     remainingDays: '',
-    receivedNote: `Lançamento originado da OC ${order.orderNumber}`,
+    receivedNote: formatOcFinancialControlOriginNote(order.orderNumber),
     notes: rmRef,
   };
 }

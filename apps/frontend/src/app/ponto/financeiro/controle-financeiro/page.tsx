@@ -12,6 +12,7 @@ import {
   ClipboardCheck,
   ClipboardList,
   Clock,
+  Eye,
   FileText,
   Filter,
   Loader2,
@@ -33,11 +34,16 @@ import { Modal } from '@/components/ui/Modal';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { FinancialControlEntryModal } from '@/components/financeiro/FinancialControlEntryModal';
+import { resolveNfAndParcelForDisplay } from '@/components/financeiro/financialControlEntry';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import api from '@/lib/api';
 import { formatDateBr, parseDateSafe } from '@/lib/dateTimeBr';
 import { exportFinancialControlEntries } from '@/lib/exportFinancialControl';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
+import {
+  formatFinancialControlObservationDisplay,
+  formatOcListDisplayId,
+} from '@/components/oc/ocListDisplay';
 import {
   FINANCIAL_CONTROL_STATUS_FILTER_OPTIONS,
   FINANCIAL_CONTROL_STATUS_STYLES,
@@ -55,6 +61,7 @@ type FinancialControlEntry = {
   status: FinancialControlStatus;
   osCode: string | null;
   supplierName: string | null;
+  nfNumber: string | null;
   parcelNumber: string | null;
   emissionDate: string | null;
   boleto: string | null;
@@ -194,6 +201,7 @@ interface EntryFormState {
   status: FinancialControlStatus;
   osCode: string;
   supplierName: string;
+  nfNumber: string;
   parcelNumber: string;
   emissionDate: string;
   boleto: string;
@@ -214,6 +222,7 @@ function buildInitialForm(month: number, year: number): EntryFormState {
     status: 'AGUARDAR_PAGAMENTO',
     osCode: '',
     supplierName: '',
+    nfNumber: '',
     parcelNumber: '',
     emissionDate: '',
     boleto: 'Não',
@@ -236,6 +245,7 @@ function entryToForm(entry: FinancialControlEntry): EntryFormState {
     status: entry.status,
     osCode: entry.osCode || '',
     supplierName: entry.supplierName || '',
+    nfNumber: entry.nfNumber || '',
     parcelNumber: entry.parcelNumber || '',
     emissionDate: dateInputValue(entry.emissionDate),
     boleto: entry.boleto || '',
@@ -345,9 +355,9 @@ export default function ControleFinanceiroPage() {
     const grouped = Array.from(groups.values());
     grouped.forEach((group) => {
       group.items.sort((a, b) => {
-        const dueA = a.dueDate ? (parseDateSafe(a.dueDate)?.getTime() ?? Number.POSITIVE_INFINITY) : Number.POSITIVE_INFINITY;
-        const dueB = b.dueDate ? (parseDateSafe(b.dueDate)?.getTime() ?? Number.POSITIVE_INFINITY) : Number.POSITIVE_INFINITY;
-        if (dueA !== dueB) return dueA - dueB;
+        const dueA = a.dueDate ? (parseDateSafe(a.dueDate)?.getTime() ?? Number.NEGATIVE_INFINITY) : Number.NEGATIVE_INFINITY;
+        const dueB = b.dueDate ? (parseDateSafe(b.dueDate)?.getTime() ?? Number.NEGATIVE_INFINITY) : Number.NEGATIVE_INFINITY;
+        if (dueA !== dueB) return dueB - dueA;
         return (a.supplierName || '').localeCompare(b.supplierName || '', 'pt-BR');
       });
     });
@@ -373,6 +383,7 @@ export default function ControleFinanceiroPage() {
       PAGO: { count: 0, sum: 0 },
       AGUARDAR_NOTA: { count: 0, sum: 0 },
       AGUARDAR_PAGAMENTO: { count: 0, sum: 0 },
+      LANCADO: { count: 0, sum: 0 },
       CANCELADO: { count: 0, sum: 0 },
     };
 
@@ -1120,6 +1131,49 @@ interface MonthGroupProps {
 
 const ACTION_MENU_WIDTH_PX = 192;
 
+function DetailSection({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="space-y-3">
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+        {title}
+      </h3>
+      <dl className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2">{children}</dl>
+    </section>
+  );
+}
+
+function DetailField({
+  label,
+  children,
+  className = '',
+}: {
+  label: string;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={className}>
+      <dt className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+        {label}
+      </dt>
+      <dd className="mt-1 text-sm text-gray-900 dark:text-gray-100">{children}</dd>
+    </div>
+  );
+}
+
+function getEntryRemainingDays(entry: FinancialControlEntry): number | null {
+  if (entry.dueDate && entry.paidDate) {
+    return calcRemainingDays(entry.dueDate, entry.paidDate);
+  }
+  return entry.remainingDays ?? null;
+}
+
 function MonthGroup({ year, month, items, onEdit, onDelete, deletingId }: MonthGroupProps) {
   const monthLabel = MONTHS_PT[month - 1] || '';
   const totalFinal = items.reduce((sum, it) => {
@@ -1136,6 +1190,7 @@ function MonthGroup({ year, month, items, onEdit, onDelete, deletingId }: MonthG
 
   const [listExpanded, setListExpanded] = useState(false);
   const [page, setPage] = useState(1);
+  const [detailEntry, setDetailEntry] = useState<FinancialControlEntry | null>(null);
   const [actionMenu, setActionMenu] = useState<{
     entryId: string;
     top: number;
@@ -1180,8 +1235,19 @@ function MonthGroup({ year, month, items, onEdit, onDelete, deletingId }: MonthG
   }, [actionMenu, paginatedItems]);
 
   useEffect(() => {
-    if (!listExpanded) setActionMenu(null);
+    if (!listExpanded) {
+      setActionMenu(null);
+      setDetailEntry(null);
+    }
   }, [listExpanded]);
+
+  const detailStatusStyle = detailEntry
+    ? STATUS_STYLES[detailEntry.status] ?? STATUS_STYLES.AGUARDAR_PAGAMENTO
+    : null;
+  const detailNf = detailEntry ? resolveNfAndParcelForDisplay(detailEntry) : null;
+  const detailRemainingDays = detailEntry ? getEntryRemainingDays(detailEntry) : null;
+  const detailIsOverdue =
+    detailRemainingDays !== null && detailRemainingDays !== undefined && detailRemainingDays < 0;
 
   return (
     <Card className="overflow-hidden">
@@ -1241,43 +1307,31 @@ function MonthGroup({ year, month, items, onEdit, onDelete, deletingId }: MonthG
             <thead className="border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
               <tr>
                 <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                  Status
+                  NF
                 </th>
                 <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                  O.S.
+                  Parcela
                 </th>
                 <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                  Nome do Fornecedor
+                  Fornecedor
                 </th>
                 <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                  Número da Parcela
+                  OS
                 </th>
                 <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                  Data Emissão
+                  OC
                 </th>
                 <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                  Boleto
-                </th>
-                <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                  Data de Vencimento
-                </th>
-                <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                  Valor Original
-                </th>
-                <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                  O.C.
+                  Vencimento
                 </th>
                 <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                   Valor Final
                 </th>
                 <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                  Data de Pagamento
+                  Dias
                 </th>
                 <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                  Diferença de Dias
-                </th>
-                <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                  Observação
+                  Status
                 </th>
                 <th className="px-3 sm:px-6 py-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                   Ação
@@ -1289,79 +1343,61 @@ function MonthGroup({ year, month, items, onEdit, onDelete, deletingId }: MonthG
                 const statusStyle =
                   STATUS_STYLES[entry.status] ?? STATUS_STYLES.AGUARDAR_PAGAMENTO;
                 const isDeleting = deletingId === entry.id;
+                const { nfNumber, parcelNumber } = resolveNfAndParcelForDisplay(entry);
+                const computed = getEntryRemainingDays(entry);
                 const isOverdue =
-                  entry.remainingDays !== null &&
-                  entry.remainingDays !== undefined &&
-                  entry.remainingDays < 0;
+                  computed !== null && computed !== undefined && computed < 0;
 
                 return (
                   <tr
                     key={entry.id}
-                    className={listTableRowClasses.tr}
+                    className={`${listTableRowClasses.tr} cursor-pointer`}
+                    onClick={() => setDetailEntry(entry)}
                   >
+                    <td className="px-3 sm:px-6 py-3 text-sm text-center font-medium text-gray-900 dark:text-gray-100">
+                      {nfNumber || '—'}
+                    </td>
+                    <td className="px-3 sm:px-6 py-3 text-sm text-center text-gray-700 dark:text-gray-300">
+                      {parcelNumber || '—'}
+                    </td>
+                    <td className="px-3 sm:px-6 py-3 text-sm text-left">
+                      <span className="text-sm text-gray-900 dark:text-gray-100 font-medium">
+                        {entry.supplierName || '—'}
+                      </span>
+                    </td>
+                    <td className="px-3 sm:px-6 py-3 text-sm text-center text-gray-700 dark:text-gray-300">
+                      {entry.osCode || '—'}
+                    </td>
+                    <td className="px-3 sm:px-6 py-3 text-sm text-center text-gray-700 dark:text-gray-300">
+                      {entry.ocNumber ? formatOcListDisplayId(entry.ocNumber) : '—'}
+                    </td>
+                    <td className="px-3 sm:px-6 py-3 text-sm text-center font-medium text-gray-900 dark:text-gray-100">
+                      {formatDate(entry.dueDate)}
+                    </td>
+                    <td className="px-3 sm:px-6 py-3 text-sm text-center font-semibold text-gray-900 dark:text-gray-100 tabular-nums">
+                      {formatCurrency(entry.finalValue)}
+                    </td>
+                    <td className="px-3 sm:px-6 py-3 text-sm text-center">
+                      {computed === null || computed === undefined ? (
+                        <span className="text-gray-400 dark:text-gray-500">—</span>
+                      ) : (
+                        <span
+                          className={`inline-flex items-center justify-center rounded-full px-2.5 py-1 text-xs font-medium ${
+                            isOverdue
+                              ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
+                              : 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300'
+                          }`}
+                        >
+                          {computed}
+                        </span>
+                      )}
+                    </td>
                     <td className="px-3 sm:px-6 py-3 text-center">
                       <span
                         className={`inline-flex items-center justify-center rounded-full px-2.5 py-1 text-xs font-medium whitespace-nowrap ${statusStyle.bg} ${statusStyle.text}`}
                       >
                         {statusStyle.label}
                       </span>
-                    </td>
-                    <td className="px-3 sm:px-6 py-3 text-sm text-center text-gray-700 dark:text-gray-300">
-                      {entry.osCode || '—'}
-                    </td>
-                    <td className="px-3 sm:px-6 py-3 text-sm text-left">
-                      <span className="text-sm text-gray-900 dark:text-gray-100 font-medium">{entry.supplierName || '—'}</span>
-                    </td>
-                    <td className="px-3 sm:px-6 py-3 text-sm text-center text-gray-700 dark:text-gray-300">
-                      {entry.parcelNumber || '—'}
-                    </td>
-                    <td className="px-3 sm:px-6 py-3 text-sm text-center text-gray-700 dark:text-gray-300">
-                      {formatDate(entry.emissionDate)}
-                    </td>
-                    <td className="px-3 sm:px-6 py-3 text-sm text-center text-gray-700 dark:text-gray-300">
-                      {entry.boleto || '—'}
-                    </td>
-                    <td className="px-3 sm:px-6 py-3 text-sm text-center font-medium text-gray-900 dark:text-gray-100">
-                      {formatDate(entry.dueDate)}
-                    </td>
-                    <td className="px-3 sm:px-6 py-3 text-sm text-center text-gray-700 dark:text-gray-300 tabular-nums">
-                      {formatCurrency(entry.originalValue)}
-                    </td>
-                    <td className="px-3 sm:px-6 py-3 text-sm text-center text-gray-700 dark:text-gray-300">
-                      {entry.ocNumber || '—'}
-                    </td>
-                    <td className="px-3 sm:px-6 py-3 text-sm text-center font-semibold text-gray-900 dark:text-gray-100 tabular-nums">
-                      {formatCurrency(entry.finalValue)}
-                    </td>
-                    <td className="px-3 sm:px-6 py-3 text-sm text-center text-gray-700 dark:text-gray-300">
-                      {formatDate(entry.paidDate)}
-                    </td>
-                    <td className="px-3 sm:px-6 py-3 text-sm text-center">
-                      {(() => {
-                        // Sempre recalcula a partir das datas quando ambas estão presentes,
-                        // garantindo que diferença = 0 seja exibida como "0" (e não "—").
-                        const computed =
-                          entry.dueDate && entry.paidDate
-                            ? calcRemainingDays(entry.dueDate, entry.paidDate)
-                            : entry.remainingDays;
-                        if (computed === null || computed === undefined) {
-                          return <span className="text-gray-400 dark:text-gray-500">—</span>;
-                        }
-                        return (
-                          <span
-                            className={`inline-flex items-center justify-center rounded-full px-2.5 py-1 text-xs font-medium ${
-                              isOverdue
-                                ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
-                                : 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300'
-                            }`}
-                          >
-                            {computed}
-                          </span>
-                        );
-                      })()}
-                    </td>
-                    <td className="px-3 sm:px-6 py-3 text-sm text-center text-gray-700 dark:text-gray-300">
-                      {entry.receivedNote || <span className="text-gray-400 dark:text-gray-500">—</span>}
                     </td>
                     <td className="px-3 sm:px-6 py-3 text-right">
                       <div className="flex justify-end">
@@ -1429,9 +1465,22 @@ function MonthGroup({ year, month, items, onEdit, onDelete, deletingId }: MonthG
             onClick={(e) => {
               e.stopPropagation();
               setActionMenu(null);
-              onEdit(entryForMenu);
+              setDetailEntry(entryForMenu);
             }}
             className="w-full flex items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+          >
+            <Eye className="w-4 h-4 text-gray-600 dark:text-gray-400 shrink-0" />
+            <span>Ver detalhes</span>
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={(e) => {
+              e.stopPropagation();
+              setActionMenu(null);
+              onEdit(entryForMenu);
+            }}
+            className="w-full flex items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 border-t border-gray-200 dark:border-gray-700"
           >
             <Pencil className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
             <span>Editar lançamento</span>
@@ -1451,6 +1500,108 @@ function MonthGroup({ year, month, items, onEdit, onDelete, deletingId }: MonthG
           </button>
         </ActionMenuOverlay>
       )}
+
+      <Modal
+        isOpen={Boolean(detailEntry)}
+        onClose={() => setDetailEntry(null)}
+        title={
+          detailNf?.nfNumber
+            ? `Lançamento NF ${detailNf.nfNumber}`
+            : 'Detalhes do lançamento'
+        }
+        size="lg"
+      >
+        {detailEntry && detailStatusStyle && detailNf ? (
+          <div className="space-y-6">
+            <DetailSection title="Identificação">
+              <DetailField label="Número da NF">{detailNf.nfNumber || '—'}</DetailField>
+              <DetailField label="Parcela">{detailNf.parcelNumber || '—'}</DetailField>
+              <DetailField label="Status">
+                <span
+                  className={`inline-flex items-center justify-center rounded-full px-2.5 py-1 text-xs font-medium whitespace-nowrap ${detailStatusStyle.bg} ${detailStatusStyle.text}`}
+                >
+                  {detailStatusStyle.label}
+                </span>
+              </DetailField>
+              <DetailField label="Fornecedor" className="sm:col-span-2">
+                {detailEntry.supplierName || '—'}
+              </DetailField>
+              <DetailField label="OS">{detailEntry.osCode || '—'}</DetailField>
+              <DetailField label="OC">
+                {detailEntry.ocNumber ? formatOcListDisplayId(detailEntry.ocNumber) : '—'}
+              </DetailField>
+            </DetailSection>
+
+            <DetailSection title="Datas e valores">
+              <DetailField label="Data de emissão">{formatDate(detailEntry.emissionDate)}</DetailField>
+              <DetailField label="Boleto">{detailEntry.boleto || '—'}</DetailField>
+              <DetailField label="Data de vencimento">{formatDate(detailEntry.dueDate)}</DetailField>
+              <DetailField label="Data de pagamento">{formatDate(detailEntry.paidDate)}</DetailField>
+              <DetailField label="Valor original">
+                <span className="tabular-nums">{formatCurrency(detailEntry.originalValue)}</span>
+              </DetailField>
+              <DetailField label="Valor final">
+                <span className="font-semibold tabular-nums">
+                  {formatCurrency(detailEntry.finalValue)}
+                </span>
+              </DetailField>
+              <DetailField label="Diferença de dias">
+                {detailRemainingDays === null || detailRemainingDays === undefined ? (
+                  '—'
+                ) : (
+                  <span
+                    className={`inline-flex items-center justify-center rounded-full px-2.5 py-1 text-xs font-medium ${
+                      detailIsOverdue
+                        ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
+                        : 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300'
+                    }`}
+                  >
+                    {detailRemainingDays}
+                  </span>
+                )}
+              </DetailField>
+              <DetailField label="Mês de pagamento">
+                {MONTHS_PT[detailEntry.paymentMonth - 1] || detailEntry.paymentMonth} /{' '}
+                {detailEntry.paymentYear}
+              </DetailField>
+            </DetailSection>
+
+            <DetailSection title="Observações">
+              <DetailField label="Observação" className="sm:col-span-2">
+                {detailEntry.receivedNote
+                  ? formatFinancialControlObservationDisplay(detailEntry.receivedNote)
+                  : '—'}
+              </DetailField>
+              {detailEntry.notes ? (
+                <DetailField label="Notas" className="sm:col-span-2">
+                  <span className="whitespace-pre-wrap">{detailEntry.notes}</span>
+                </DetailField>
+              ) : null}
+            </DetailSection>
+
+            <div className="flex flex-col-reverse gap-2 border-t border-gray-200 pt-4 dark:border-gray-700 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => setDetailEntry(null)}
+                className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
+              >
+                Fechar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const entry = detailEntry;
+                  setDetailEntry(null);
+                  onEdit(entry);
+                }}
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700"
+              >
+                Editar lançamento
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </Modal>
     </Card>
   );
 }

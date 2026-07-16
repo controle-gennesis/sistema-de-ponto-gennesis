@@ -233,8 +233,8 @@ export default function ContratosPage() {
     isAdministrator ||
     can(pk('/ponto/controle/alterar-permissoes')) ||
     canAction(pk('/ponto/controle/alterar-permissoes'), 'ver');
-  const canManageContrato = canEditContrato || canDeleteContrato;
-  const showActionsColumn = canManageContrato || canManageUserPermissions;
+  /** Sempre exibe a coluna (ao menos «Ver detalhes»); criar/editar/excluir só com a ação marcada. */
+  const showActionsColumn = true;
 
   const openContractDetails = useCallback(
     (contractId: string) => {
