@@ -6,13 +6,16 @@ import {
   Ban,
   CheckCircle,
   ClipboardList,
+  Clock,
   Eye,
   Filter,
+  LayoutList,
   Loader2,
   MoreVertical,
   Search,
   Wrench,
   X,
+  XCircle,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '@/lib/api';
@@ -39,15 +42,59 @@ import {
 } from '@/app/ponto/gerenciar-materiais/_lib/display';
 import { formatRmListDisplayId } from '@/app/ponto/gerenciar-materiais/_lib/rmListDisplay';
 import { matchesMaterialRequestSearch, normalizeFluxSearch } from '@/app/ponto/gerenciar-materiais/_lib/search';
+import {
+  ApprovalPhaseStatCards,
+  type ApprovalPhaseStatCard,
+} from './ApprovalPhaseStatCards';
 
-type RmPhaseFilter = 'PENDING' | 'IN_REVIEW' | 'ALL' | 'APPROVED_BY_ME';
+type RmPhaseFilter = 'PENDING' | 'APPROVED' | 'REJECTED' | 'ALL';
+
+const RM_PHASES = ['PENDING', 'APPROVED', 'REJECTED', 'ALL'] as const;
 
 const RM_PHASE_FILTER_OPTIONS = labeledToSelectOptions([
   { value: 'PENDING', label: 'Pendentes' },
-  { value: 'IN_REVIEW', label: 'Em correção' },
-  { value: 'ALL', label: 'Todas em análise' },
-  { value: 'APPROVED_BY_ME', label: 'Todos' },
+  { value: 'APPROVED', label: 'Aprovadas' },
+  { value: 'REJECTED', label: 'Reprovadas' },
+  { value: 'ALL', label: 'Todas' },
 ]);
+
+const RM_STAT_CARDS: ApprovalPhaseStatCard<RmPhaseFilter>[] = [
+  {
+    filter: 'PENDING',
+    label: 'Pendentes',
+    iconBg: 'bg-yellow-100 dark:bg-yellow-900/30',
+    iconColor: 'text-yellow-600 dark:text-yellow-400',
+    Icon: Clock,
+  },
+  {
+    filter: 'APPROVED',
+    label: 'Aprovadas',
+    iconBg: 'bg-green-100 dark:bg-green-900/30',
+    iconColor: 'text-green-600 dark:text-green-400',
+    Icon: CheckCircle,
+  },
+  {
+    filter: 'REJECTED',
+    label: 'Reprovadas',
+    iconBg: 'bg-red-100 dark:bg-red-900/30',
+    iconColor: 'text-red-600 dark:text-red-400',
+    Icon: XCircle,
+  },
+  {
+    filter: 'ALL',
+    label: 'Todas',
+    iconBg: 'bg-blue-100 dark:bg-blue-900/30',
+    iconColor: 'text-blue-600 dark:text-blue-400',
+    Icon: LayoutList,
+  },
+];
+
+const RM_PHASE_SUBTITLE: Record<RmPhaseFilter, string> = {
+  PENDING: 'Aguardando sua aprovação',
+  APPROVED: 'Requisições aprovadas',
+  REJECTED: 'Requisições reprovadas',
+  ALL: 'Todas as requisições',
+};
 
 const cellPad = 'px-2 sm:px-3 py-3';
 const cellPadTh = 'px-2 sm:px-3 py-4';
@@ -89,18 +136,36 @@ export function RmApprovalsSection() {
     queryKey: ['approvals', 'material-requests', rmPhase, currentUserId],
     queryFn: async () => {
       const params: Record<string, string> = { limit: '200', summary: '1' };
-      if (rmPhase === 'APPROVED_BY_ME') {
-        if (currentUserId) params.approvedBy = currentUserId;
-        else params.status = 'APPROVED';
-      } else if (rmPhase !== 'ALL') {
+      if (rmPhase !== 'ALL') {
         params.status = rmPhase;
       }
       const res = await api.get('/material-requests', { params });
       return (res.data?.data ?? []) as MaterialRequest[];
     },
-    enabled: canApproveMaterialRequests && (rmPhase !== 'APPROVED_BY_ME' || !!currentUserId),
+    enabled: canApproveMaterialRequests,
     staleTime: 30_000,
     refetchOnWindowFocus: false,
+  });
+
+  const { data: rmPhaseCounts, isLoading: loadingRmCounts } = useQuery({
+    queryKey: ['approvals', 'material-requests', 'phase-counts', currentUserId],
+    queryFn: async () => {
+      const results = await Promise.all(
+        RM_PHASES.map(async (phase) => {
+          const params: Record<string, string> = { limit: '200', summary: '1' };
+          if (phase !== 'ALL') {
+            params.status = phase;
+          }
+          const res = await api.get('/material-requests', { params });
+          const data = res.data?.data;
+          const list = Array.isArray(data) ? (data as MaterialRequest[]) : [];
+          return [phase, list.length] as const;
+        }),
+      );
+      return Object.fromEntries(results) as Record<RmPhaseFilter, number>;
+    },
+    enabled: canApproveMaterialRequests,
+    staleTime: 30_000,
   });
 
   const requests = requestsData ?? [];
@@ -108,20 +173,6 @@ export function RmApprovalsSection() {
   const filteredRequests = useMemo(() => {
     const normalized = normalizeFluxSearch(searchTerm);
     let list = requests;
-    if (rmPhase === 'ALL') {
-      list = requests.filter((r) => r.status === 'PENDING' || r.status === 'IN_REVIEW');
-    }
-    if (rmPhase === 'APPROVED_BY_ME' && currentUserId) {
-      list = list.filter((r) => {
-        const approverId =
-          typeof r.approvedBy === 'object' && r.approvedBy
-            ? r.approvedBy.id
-            : typeof (r as { approvedBy?: string }).approvedBy === 'string'
-              ? (r as { approvedBy?: string }).approvedBy
-              : null;
-        return approverId === currentUserId;
-      });
-    }
     if (gestorScopedCostCenterIds !== undefined) {
       const allowed = new Set(gestorScopedCostCenterIds);
       list = list.filter((r) => {
@@ -131,7 +182,7 @@ export function RmApprovalsSection() {
     }
     if (!normalized) return list;
     return list.filter((r) => matchesMaterialRequestSearch(r, normalized));
-  }, [requests, searchTerm, rmPhase, gestorScopedCostCenterIds, currentUserId]);
+  }, [requests, searchTerm, gestorScopedCostCenterIds]);
 
   const requestForMenu = useMemo(() => {
     if (!actionMenu) return null;
@@ -238,6 +289,14 @@ export function RmApprovalsSection() {
 
   return (
     <>
+      <div className="space-y-6">
+        <ApprovalPhaseStatCards
+          cards={RM_STAT_CARDS}
+          activeFilter={rmPhase}
+          counts={rmPhaseCounts ?? {}}
+          loading={loadingRmCounts}
+          onSelect={setRmPhase}
+        />
       <Card className="w-full scroll-mt-4" id="secao-rm-aprovacoes">
         <CardHeader className="border-b-0 pb-1">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -250,7 +309,7 @@ export function RmApprovalsSection() {
                   Requisições de Materiais
                 </h3>
                 <p className="text-sm text-gray-600 dark:text-gray-400">
-                  Aprove, envie para correção ou cancele solicitações pendentes
+                  {RM_PHASE_SUBTITLE[rmPhase]}
                 </p>
               </div>
             </div>
@@ -303,12 +362,12 @@ export function RmApprovalsSection() {
               <p className="text-gray-500 dark:text-gray-400">
                 {searchTerm.trim()
                   ? 'Nenhuma requisição corresponde à busca'
-                  : rmPhase === 'APPROVED_BY_ME'
-                    ? 'Nenhuma requisição aprovada por você'
-                    : rmPhase === 'IN_REVIEW'
-                      ? 'Nenhuma requisição em correção'
+                  : rmPhase === 'APPROVED'
+                    ? 'Nenhuma requisição aprovada'
+                    : rmPhase === 'REJECTED'
+                      ? 'Nenhuma requisição reprovada'
                       : rmPhase === 'ALL'
-                        ? 'Nenhuma requisição em análise'
+                        ? 'Nenhuma requisição encontrada'
                         : 'Nenhuma requisição pendente de aprovação'}
               </p>
             </div>
@@ -413,6 +472,7 @@ export function RmApprovalsSection() {
           )}
         </CardContent>
       </Card>
+      </div>
 
       {detailRequest && (
         <Modal isOpen onClose={() => setDetailRequest(null)} title="Detalhes da Requisição" size="lg">

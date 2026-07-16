@@ -5,10 +5,13 @@ import {
   isCustomKanbanBoardKey,
   KANBAN_CUSTOM_KEY_PREFIX,
   KANBAN_LEGACY_DEPARTMENT_KEY,
+  KANBAN_UNB_DEPARTMENT_KEY,
+  KANBAN_UNB_DEPARTMENT_LABEL,
   resolveKanbanBoardKeyParam,
   userIsAdministrator,
 } from '../lib/kanbanAccess';
 import { userHasKanbanValuesPermission } from '../lib/kanbanValuesAccess';
+import { isEmployeeUnbUser } from '../lib/unbCostCenterScope';
 import {
   DEFAULT_KANBAN_LABEL_PRESETS,
   resolveKanbanLabelPresets,
@@ -464,9 +467,10 @@ async function seedBoardForDepartment(
   departmentLabel: string,
   createdById?: string,
 ) {
+  const isUnbBoard = departmentKey === KANBAN_UNB_DEPARTMENT_KEY;
   return prisma.kanbanBoard.create({
     data: {
-      name: 'Tasks',
+      name: isUnbBoard ? 'Tasks UNB' : 'Tasks',
       slug: slugFromDepartmentKey(departmentKey),
       departmentKey,
       departmentLabel,
@@ -628,11 +632,24 @@ export class KanbanService {
   private async getUserDepartment(userId: string) {
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      include: { employee: { select: { department: true } } },
+      include: { employee: { select: { department: true, costCenter: true } } },
     });
     if (!user) throw new Error('Usuário não encontrado');
+
+    // Centro de custo UNB → quadro institucional próprio (não o quadro do setor).
+    if (isEmployeeUnbUser(user.employee?.costCenter)) {
+      return {
+        key: KANBAN_UNB_DEPARTMENT_KEY,
+        label: KANBAN_UNB_DEPARTMENT_LABEL,
+      };
+    }
+
     const label = user.employee?.department?.trim() || 'Sem setor';
-    const key = normalizeDepartmentKey(label);
+    let key = normalizeDepartmentKey(label);
+    // Evita colisão com o quadro institucional UNB (só quem tem CC UNB acessa).
+    if (key === KANBAN_UNB_DEPARTMENT_KEY) {
+      key = 'SETOR_UNB';
+    }
     return { key, label };
   }
 
@@ -676,6 +693,17 @@ export class KanbanService {
           canWrite: true,
           isOwner: false,
         };
+      }
+      return { canRead: false, canWrite: false, isOwner: false };
+    }
+
+    // Quadro UNB: só quem tem centro de custo UNB (ownKey === UNB) ou admin.
+    if (board.departmentKey === KANBAN_UNB_DEPARTMENT_KEY) {
+      if (key === KANBAN_UNB_DEPARTMENT_KEY) {
+        return { canRead: true, canWrite: true, isOwner: false };
+      }
+      if (await userIsAdministrator(userId)) {
+        return { canRead: true, canWrite: true, isOwner: false };
       }
       return { canRead: false, canWrite: false, isOwner: false };
     }
@@ -847,7 +875,7 @@ export class KanbanService {
       } else {
         results.push({
           id: '',
-          name: 'Tasks',
+          name: ownKey === KANBAN_UNB_DEPARTMENT_KEY ? 'Tasks UNB' : 'Tasks',
           slug: slugFromDepartmentKey(ownKey),
           departmentKey: ownKey,
           department: ownLabel,

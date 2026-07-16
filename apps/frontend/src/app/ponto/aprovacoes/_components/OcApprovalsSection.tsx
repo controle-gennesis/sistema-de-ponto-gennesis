@@ -8,7 +8,7 @@ import {
 } from '@/components/oc/OcPurchaseOrdersPanel';
 
 export function OcApprovalsSection() {
-  const { canApproveOcCompras, canApproveOcDiretoria, canApproveOcGestor, gestorScopedCostCenterIds } =
+  const { canApproveOcCompras, canApproveOcDiretoria, canApproveOcGestor, ocGestorScopedCostCenterIds } =
     usePermissions();
 
   const [searchTerm, setSearchTerm] = useState('');
@@ -40,7 +40,7 @@ export function OcApprovalsSection() {
           searchTerm={searchTerm}
           onSearchChange={setSearchTerm}
           allowApprovalActions
-          gestorCostCenterIds={tab === 'gestor' ? gestorScopedCostCenterIds : undefined}
+          gestorCostCenterIds={tab === 'gestor' ? ocGestorScopedCostCenterIds : undefined}
         />
       ))}
     </div>

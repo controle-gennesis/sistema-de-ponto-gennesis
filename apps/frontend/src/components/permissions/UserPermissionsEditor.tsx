@@ -90,10 +90,12 @@ const EMPLOYEES_MODULE_KEY = pathToModuleKey('/ponto/funcionarios');
 /** Removido da UI (gestor por contrato na aba Contratos); ainda pode existir no banco até o próximo salvamento. */
 const DEPRECATED_DP_APPROVE_CONTROLE_KEY = pathToModuleKey('/ponto/controle/aprovar-solicitacoes-dp');
 const DEPRECATED_RM_APPROVE_CONTROLE_KEY = pathToModuleKey('/ponto/controle/aprovar-requisicoes-materiais');
+const DEPRECATED_OC_GESTOR_APPROVE_CONTROLE_KEY = pathToModuleKey('/ponto/controle/aprovar-oc-gestor');
 
 const DEPRECATED_CONTROLE_KEYS = new Set([
   DEPRECATED_DP_APPROVE_CONTROLE_KEY,
   DEPRECATED_RM_APPROVE_CONTROLE_KEY,
+  DEPRECATED_OC_GESTOR_APPROVE_CONTROLE_KEY,
 ]);
 const CONTRACT_ACTIONS = ['ver', 'criar', 'editar', 'excluir'] as const;
 type ContractAction = (typeof CONTRACT_ACTIONS)[number];

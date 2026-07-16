@@ -261,18 +261,15 @@ export function usePermissions() {
     isAdministrator || !!permissionData?.isAdmin || can(pk('/ponto/controle/aprovar-oc-compras'));
   const canApproveOcDiretoria =
     isAdministrator || !!permissionData?.isAdmin || can(pk('/ponto/controle/aprovar-oc-diretoria'));
-  const hasLegacyOcGestorControle =
-    !isAdministrator && !permissionData?.isAdmin && can(pk('/ponto/controle/aprovar-oc-gestor'));
   const hasLegacyRmApproveControle =
     !isAdministrator &&
     !permissionData?.isAdmin &&
     can(pk('/ponto/controle/aprovar-requisicoes-materiais'));
-  /** Gestor por contrato (aba Contratos) ou permissão legada Controle. */
+  /** Aprovação OC fase gestor: somente gestor do contrato (coluna Gestor) ou admin. */
   const canApproveOcGestor =
     isAdministrator ||
     !!permissionData?.isAdmin ||
-    dpApprovalContractIds.length > 0 ||
-    can(pk('/ponto/controle/aprovar-oc-gestor'));
+    dpApprovalContractIds.length > 0;
   const canApproveOc = canApproveOcCompras || canApproveOcDiretoria || canApproveOcGestor;
 
   /** Ações por aba do fluxo de OC (Controle). Admin libera todas. */
@@ -301,17 +298,28 @@ export function usePermissions() {
     can(pk('/ponto/controle/aprovar-requisicoes-materiais'));
 
   /**
-   * undefined = sem filtro (admin ou legado Controle).
+   * Escopo de centros de custo do gestor de contrato.
+   * undefined = sem filtro (admin ou permissão legada Controle).
    * string[] = centros de custo dos contratos em que é gestor.
    */
-  const gestorScopedCostCenterIds: string[] | undefined =
+  const rmGestorScopedCostCenterIds: string[] | undefined =
     isAdministrator || !!permissionData?.isAdmin
       ? undefined
-      : hasLegacyOcGestorControle || hasLegacyRmApproveControle
+      : hasLegacyRmApproveControle
         ? undefined
         : dpApprovalContractIds.length > 0
           ? gestorCostCenterIds
           : undefined;
+
+  const ocGestorScopedCostCenterIds: string[] | undefined =
+    isAdministrator || !!permissionData?.isAdmin
+      ? undefined
+      : dpApprovalContractIds.length > 0
+        ? gestorCostCenterIds
+        : undefined;
+
+  /** Alias legado — mesmo escopo da RM (aprovação por contrato). */
+  const gestorScopedCostCenterIds = rmGestorScopedCostCenterIds;
 
   /** Bloco «Solicitações de Combustível» na tela de Aprovações (somente permissão Controle). */
   const canApproveFuel =
@@ -425,6 +433,7 @@ export function usePermissions() {
     isUnbUser,
     unbCostCenterIds,
     gestorScopedCostCenterIds,
+    ocGestorScopedCostCenterIds,
     canCreateSensitiveDpRequestType,
     canAccessDpApproverPages,
     canApproveEspelhoNf,
@@ -521,7 +530,7 @@ export function useRoutePermission(route: string) {
       canApproveEspelhoNf ||
       can(pk('/ponto/controle/aprovar-combustivel')) ||
       can(pk('/ponto/controle/aprovar-oc-compras')) ||
-      can(pk('/ponto/controle/aprovar-oc-gestor')) ||
+      canApproveOcGestor ||
       can(pk('/ponto/controle/aprovar-oc-diretoria')) ||
       can(pk('/ponto/controle/aprovar-requisicoes-materiais')),
     '/ponto/funcionarios':

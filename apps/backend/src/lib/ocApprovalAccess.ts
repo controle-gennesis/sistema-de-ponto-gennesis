@@ -2,11 +2,12 @@ import { pathToModuleKey, PERMISSION_ACCESS_ACTION } from '@sistema-ponto/permis
 import { prisma } from './prisma';
 import { createError } from '../middleware/errorHandler';
 import {
-  assertUserIsContractGestorForCostCenter,
+  getContractGestorCostCenterIds,
   userHasContractGestorAssignment,
 } from './contractGestorApprovalAccess';
 
 export const OC_APPROVE_COMPRAS_MODULE_KEY = pathToModuleKey('/ponto/controle/aprovar-oc-compras');
+/** Legado — oculto na UI; aprovação do gestor é só pela coluna Gestor do contrato. */
 export const OC_APPROVE_GESTOR_MODULE_KEY = pathToModuleKey('/ponto/controle/aprovar-oc-gestor');
 export const OC_APPROVE_DIRETORIA_MODULE_KEY = pathToModuleKey('/ponto/controle/aprovar-oc-diretoria');
 export const OC_TAB_ATTACH_BOLETO_KEY = pathToModuleKey('/ponto/controle/oc-anexar-boleto');
@@ -15,6 +16,18 @@ export const OC_TAB_VALIDATE_PROOF_KEY = pathToModuleKey('/ponto/controle/oc-val
 export const OC_TAB_PROOF_CORRECTION_KEY = pathToModuleKey('/ponto/controle/oc-corrigir-comprovante');
 export const OC_TAB_ATTACH_NF_KEY = pathToModuleKey('/ponto/controle/oc-anexar-nf');
 export const OC_TAB_CORRECTION_KEY = pathToModuleKey('/ponto/controle/oc-correcao');
+
+/** Módulos que liberam listagem completa de OCs (sem filtro só de gestor de contrato). */
+const OC_FULL_LIST_MODULE_KEYS = [
+  OC_APPROVE_COMPRAS_MODULE_KEY,
+  OC_APPROVE_DIRETORIA_MODULE_KEY,
+  OC_TAB_ATTACH_BOLETO_KEY,
+  OC_TAB_PAYMENT_KEY,
+  OC_TAB_VALIDATE_PROOF_KEY,
+  OC_TAB_PROOF_CORRECTION_KEY,
+  OC_TAB_ATTACH_NF_KEY,
+  OC_TAB_CORRECTION_KEY,
+] as const;
 
 export type OcApprovalPhase = 'compras' | 'gestor' | 'diretoria';
 
@@ -32,14 +45,38 @@ async function userHasModule(userId: string, module: string): Promise<boolean> {
   return !!row;
 }
 
+/** Admin ou qualquer módulo de fluxo/aprovação de OC no Controle → listagem sem filtro de gestor. */
+export async function userHasFullPurchaseOrderListAccess(
+  userId: string,
+  isAdmin: boolean,
+): Promise<boolean> {
+  if (isAdmin) return true;
+  for (const module of OC_FULL_LIST_MODULE_KEYS) {
+    if (await userHasModule(userId, module)) return true;
+  }
+  return false;
+}
+
+/**
+ * Centros de custo permitidos na listagem de OCs para aprovador gestor;
+ * null = sem filtro (admin ou outros módulos de Controle OC).
+ */
+export async function getOcGestorApproverListScopeCostCenterIds(
+  userId: string,
+  isAdmin: boolean,
+): Promise<string[] | null> {
+  if (await userHasFullPurchaseOrderListAccess(userId, isAdmin)) return null;
+  if (!(await userHasContractGestorAssignment(userId))) return null;
+  return getContractGestorCostCenterIds(userId);
+}
+
 export async function userHasOcComprasApprovePermission(userId: string): Promise<boolean> {
   return userHasModule(userId, OC_APPROVE_COMPRAS_MODULE_KEY);
 }
 
-/** Gestor por contrato ou permissão legada Controle. */
+/** Somente gestor do contrato (coluna Gestor). */
 export async function userHasOcGestorApprovePermission(userId: string): Promise<boolean> {
-  if (await userHasContractGestorAssignment(userId)) return true;
-  return userHasModule(userId, OC_APPROVE_GESTOR_MODULE_KEY);
+  return userHasContractGestorAssignment(userId);
 }
 
 export async function userHasOcDiretoriaApprovePermission(userId: string): Promise<boolean> {
@@ -77,12 +114,14 @@ export async function assertUserMayActOnOcApprovalPhase(
     if (!(await userHasOcGestorApprovePermission(userId))) {
       throw createError('Sem permissão para aprovar OCs na fase do gestor', 403);
     }
-    await assertUserIsContractGestorForCostCenter(
-      userId,
-      isAdmin,
-      OC_APPROVE_GESTOR_MODULE_KEY,
-      materialRequestCostCenterId,
-    );
+    const scopeIds = await getContractGestorCostCenterIds(userId);
+    if (
+      !materialRequestCostCenterId ||
+      scopeIds.length === 0 ||
+      !scopeIds.includes(materialRequestCostCenterId)
+    ) {
+      throw createError('Sem permissão para aprovar solicitações deste contrato', 403);
+    }
     return;
   }
 

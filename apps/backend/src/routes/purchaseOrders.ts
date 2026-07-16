@@ -11,6 +11,7 @@ import { backendUploadsRoot } from '../lib/uploads';
 import {
   assertOcFlowStatusChange,
   assertUserHasOcModule,
+  getOcGestorApproverListScopeCostCenterIds,
   OC_TAB_ATTACH_BOLETO_KEY,
   OC_TAB_ATTACH_NF_KEY,
   OC_TAB_PAYMENT_KEY,
@@ -67,8 +68,21 @@ router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
         : true;
 
     const unbScope = await getUserUnbCostCenterScope(req.user.id, !!req.user.isAdmin);
+    let scopeCostCenterIds: string[] | null = await getOcGestorApproverListScopeCostCenterIds(
+      req.user.id,
+      !!req.user.isAdmin,
+    );
+    if (unbScope !== null) {
+      if (scopeCostCenterIds === null) {
+        scopeCostCenterIds = unbScope;
+      } else {
+        const allowed = new Set(unbScope);
+        scopeCostCenterIds = scopeCostCenterIds.filter((id) => allowed.has(id));
+      }
+    }
+
     const scoped = applyUnbCostCenterScopeToIdFilter(
-      unbScope,
+      scopeCostCenterIds,
       typeof costCenterId === 'string' ? costCenterId : undefined,
     );
     if (scoped.denyAll) {
@@ -106,8 +120,20 @@ router.get('/export-finalized-csv', async (req: AuthRequest, res: Response, next
     if (!req.user?.id) throw createError('Usuário não autenticado', 401);
     const { supplierId, costCenterId, orderDateFrom, orderDateTo, q } = req.query;
     const unbScope = await getUserUnbCostCenterScope(req.user.id, !!req.user.isAdmin);
+    let scopeCostCenterIds: string[] | null = await getOcGestorApproverListScopeCostCenterIds(
+      req.user.id,
+      !!req.user.isAdmin,
+    );
+    if (unbScope !== null) {
+      if (scopeCostCenterIds === null) {
+        scopeCostCenterIds = unbScope;
+      } else {
+        const allowed = new Set(unbScope);
+        scopeCostCenterIds = scopeCostCenterIds.filter((id) => allowed.has(id));
+      }
+    }
     const scoped = applyUnbCostCenterScopeToIdFilter(
-      unbScope,
+      scopeCostCenterIds,
       typeof costCenterId === 'string' ? costCenterId : undefined,
     );
     if (scoped.denyAll) {

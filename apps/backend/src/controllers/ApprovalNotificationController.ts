@@ -11,7 +11,7 @@ import {
   userHasOcComprasApprovePermission,
   userHasOcDiretoriaApprovePermission,
   userHasOcGestorApprovePermission,
-  OC_APPROVE_GESTOR_MODULE_KEY,
+  getOcGestorApproverListScopeCostCenterIds,
 } from '../lib/ocApprovalAccess';
 import { userHasRmApprovePermission } from '../lib/rmApprovalAccess';
 import { getContractGestorListScopeCostCenterIds } from '../lib/contractGestorApprovalAccess';
@@ -94,11 +94,7 @@ export class ApprovalNotificationController {
         });
       }
       if (isAdmin || (await userHasOcGestorApprovePermission(userId))) {
-        const gestorScope = await getContractGestorListScopeCostCenterIds(
-          userId,
-          isAdmin,
-          OC_APPROVE_GESTOR_MODULE_KEY,
-        );
+        const gestorScope = await getOcGestorApproverListScopeCostCenterIds(userId, isAdmin);
         const gestorWhere: Prisma.PurchaseOrderWhereInput = { status: 'PENDING' };
         if (gestorScope !== null) {
           gestorWhere.materialRequest = { costCenterId: { in: gestorScope } };

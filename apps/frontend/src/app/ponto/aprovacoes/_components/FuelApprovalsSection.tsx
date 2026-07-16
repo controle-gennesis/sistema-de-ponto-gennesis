@@ -18,6 +18,14 @@ import { usePermissions } from '@/hooks/usePermissions';
 import { listTableRowClasses, rowActionMenuButtonClass } from '@/components/ui/listTableUi';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
+import {
+  ApprovalPhaseStatCards,
+  DEFAULT_APPROVAL_PHASE_CARDS,
+  fetchApprovalPhaseCounts,
+} from './ApprovalPhaseStatCards';
+
+const FUEL_PHASES = ['PENDING', 'APPROVED', 'REJECTED', 'ALL'] as const;
+type FuelPhaseFilter = (typeof FUEL_PHASES)[number];
 
 const FUEL_PHASE_FILTER_OPTIONS = labeledToSelectOptions([
   { value: 'PENDING', label: 'Aguardando aprovação' },
@@ -26,7 +34,12 @@ const FUEL_PHASE_FILTER_OPTIONS = labeledToSelectOptions([
   { value: 'ALL', label: 'Todas' },
 ]);
 
-type FuelPhaseFilter = 'PENDING' | 'APPROVED' | 'REJECTED' | 'ALL';
+const FUEL_PHASE_SUBTITLE: Record<FuelPhaseFilter, string> = {
+  PENDING: 'Aguardando aprovação do gestor',
+  APPROVED: 'Já aprovadas e encaminhadas',
+  REJECTED: 'Reprovadas pelo gestor',
+  ALL: 'Todas as solicitações particulares',
+};
 type FuelVehicleType = 'PRIVATE' | 'COMPANY';
 type FuelRefuelStatus =
   | 'PENDING_MANAGER'
@@ -109,6 +122,13 @@ export function FuelApprovalsSection() {
     enabled: canApproveFuel,
   });
 
+  const { data: fuelPhaseCounts, isLoading: loadingFuelCounts } = useQuery({
+    queryKey: ['approvals', 'fuel', 'phase-counts'],
+    queryFn: () => fetchApprovalPhaseCounts('/fuel-refuel-requests/aprovacoes', FUEL_PHASES),
+    enabled: canApproveFuel,
+    staleTime: 30_000,
+  });
+
   const fuelList = fuelResp ?? [];
 
   const fuelFiltered = useMemo(() => {
@@ -171,6 +191,14 @@ export function FuelApprovalsSection() {
 
   return (
     <>
+      <div className="space-y-6">
+        <ApprovalPhaseStatCards
+          cards={DEFAULT_APPROVAL_PHASE_CARDS}
+          activeFilter={fuelPhase}
+          counts={fuelPhaseCounts ?? {}}
+          loading={loadingFuelCounts}
+          onSelect={setFuelPhase}
+        />
       <Card className="w-full">
         <CardHeader className="border-b-0 pb-1">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -183,7 +211,7 @@ export function FuelApprovalsSection() {
                   Solicitações de Combustível
                 </h3>
                 <p className="text-sm text-gray-600 dark:text-gray-400">
-                  Apenas veículos particulares — frota/empresa vai direto ao Suprimentos
+                  {FUEL_PHASE_SUBTITLE[fuelPhase]}
                 </p>
               </div>
             </div>
@@ -327,6 +355,7 @@ export function FuelApprovalsSection() {
           )}
         </CardContent>
       </Card>
+      </div>
 
       <Modal
         isOpen={!!detailFuel}

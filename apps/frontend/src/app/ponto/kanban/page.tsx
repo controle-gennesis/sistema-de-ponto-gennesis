@@ -1959,7 +1959,7 @@ function KanbanBoardPicker({
         <LayoutGrid className="h-4 w-4 shrink-0" />
       </button>
       {open && (
-        <div className="absolute right-0 top-full z-50 mt-1 w-52 rounded-xl border border-gray-200 bg-white shadow-lg dark:border-gray-600 dark:bg-gray-800">
+        <div className="absolute right-0 top-full z-50 mt-1 min-w-[16rem] w-max max-w-[min(22rem,calc(100vw-2rem))] rounded-xl border border-gray-200 bg-white shadow-lg dark:border-gray-600 dark:bg-gray-800">
           <div className="max-h-72 overflow-y-auto overscroll-contain p-1.5 [scrollbar-width:thin]">
             {boards.length === 0 ? (
               <p className="px-3 py-2.5 text-sm text-gray-500 dark:text-gray-400">
@@ -1989,7 +1989,7 @@ function KanbanBoardPicker({
                         if (!active) onSelect(b.departmentKey);
                       }}
                       className={clsx(
-                        'min-w-0 flex-1 truncate py-2 pr-2 text-left text-sm',
+                        'flex-1 whitespace-nowrap py-2 pr-2 text-left text-sm',
                         active && 'font-medium',
                       )}
                     >

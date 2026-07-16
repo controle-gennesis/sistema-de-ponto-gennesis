@@ -4,6 +4,13 @@ import { prisma } from './prisma';
 /** Quadro demo antigo — não deve aparecer nem ser acessível. */
 export const KANBAN_LEGACY_DEPARTMENT_KEY = 'LEGADO';
 
+/**
+ * Quadro compartilhado só para quem tem centro de custo UNB no cadastro.
+ * Não é o setor do funcionário — chave fixa institucional.
+ */
+export const KANBAN_UNB_DEPARTMENT_KEY = 'UNB';
+export const KANBAN_UNB_DEPARTMENT_LABEL = 'UNB';
+
 /** Prefixo de departmentKey para quadros criados manualmente. */
 export const KANBAN_CUSTOM_KEY_PREFIX = 'CUSTOM_';
 

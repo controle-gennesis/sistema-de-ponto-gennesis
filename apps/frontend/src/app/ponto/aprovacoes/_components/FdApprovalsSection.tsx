@@ -16,6 +16,14 @@ import { formatCurrencyDisplay, type FichaDemandaApprovalRecord } from '@/lib/fi
 import { listTableRowClasses, rowActionMenuButtonClass } from '@/components/ui/listTableUi';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
+import {
+  ApprovalPhaseStatCards,
+  DEFAULT_APPROVAL_PHASE_CARDS,
+  fetchApprovalPhaseCounts,
+} from './ApprovalPhaseStatCards';
+
+const FD_PHASES = ['PENDING', 'APPROVED', 'REJECTED', 'ALL'] as const;
+type FdPhaseFilter = (typeof FD_PHASES)[number];
 
 const FD_PHASE_FILTER_OPTIONS = labeledToSelectOptions([
   { value: 'PENDING', label: 'Aguardando aprovação' },
@@ -24,7 +32,12 @@ const FD_PHASE_FILTER_OPTIONS = labeledToSelectOptions([
   { value: 'ALL', label: 'Todas' },
 ]);
 
-type FdPhaseFilter = 'PENDING' | 'APPROVED' | 'REJECTED' | 'ALL';
+const FD_PHASE_SUBTITLE: Record<FdPhaseFilter, string> = {
+  PENDING: 'Pendentes de decisão do gestor do contrato',
+  APPROVED: 'Fichas já aprovadas',
+  REJECTED: 'Fichas reprovadas',
+  ALL: 'Todas as fichas da sua área',
+};
 
 export function FdApprovalsSection() {
   const queryClient = useQueryClient();
@@ -44,6 +57,13 @@ export function FdApprovalsSection() {
       return (res.data?.data ?? []) as FichaDemandaApprovalRecord[];
     },
     enabled: canApproveFd,
+  });
+
+  const { data: fdPhaseCounts, isLoading: loadingFdCounts } = useQuery({
+    queryKey: ['approvals', 'fd', 'phase-counts'],
+    queryFn: () => fetchApprovalPhaseCounts('/demand-sheet-approvals/aprovacoes', FD_PHASES),
+    enabled: canApproveFd,
+    staleTime: 30_000,
   });
 
   const fdList = fdResp ?? [];
@@ -106,6 +126,14 @@ export function FdApprovalsSection() {
 
   return (
     <>
+      <div className="space-y-6">
+        <ApprovalPhaseStatCards
+          cards={DEFAULT_APPROVAL_PHASE_CARDS}
+          activeFilter={fdPhase}
+          counts={fdPhaseCounts ?? {}}
+          loading={loadingFdCounts}
+          onSelect={setFdPhase}
+        />
       <Card className="w-full">
         <CardHeader className="border-b-0 pb-1">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -118,7 +146,7 @@ export function FdApprovalsSection() {
                   Fichas de Demanda
                 </h3>
                 <p className="text-sm text-gray-600 dark:text-gray-400">
-                  Pendentes de decisão do gestor do contrato
+                  {FD_PHASE_SUBTITLE[fdPhase]}
                 </p>
               </div>
             </div>
@@ -261,6 +289,7 @@ export function FdApprovalsSection() {
           )}
         </CardContent>
       </Card>
+      </div>
 
       <Modal
         isOpen={!!detailFd}

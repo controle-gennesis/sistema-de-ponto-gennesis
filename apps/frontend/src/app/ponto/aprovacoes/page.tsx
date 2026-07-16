@@ -16,7 +16,7 @@ import { toast } from 'react-hot-toast';
 import { formatDateTimeBr } from '@/lib/dateTimeBr';
 import { useRouter } from 'next/navigation';
 import { usePermissions } from '@/hooks/usePermissions';
-import { Check, Download, Eye, FileCheck, FileText, Filter, MoreVertical, Wrench, Search, X } from 'lucide-react';
+import { Check, Download, Eye, FileCheck, FileText, Filter, MoreVertical, Wrench, Search, X, CheckCircle, Clock, LayoutList, XCircle, AlertTriangle } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import {
   exportEspelhoNfPdf,
@@ -38,9 +38,18 @@ import {
   AprovacoesTabsNav,
   type AprovacaoTabId,
 } from './_components/AprovacoesTabsNav';
+import {
+  ApprovalPhaseStatCards,
+  DEFAULT_APPROVAL_PHASE_CARDS,
+  fetchApprovalPhaseCounts,
+  type ApprovalPhaseStatCard,
+} from './_components/ApprovalPhaseStatCards';
 import { useApprovalNotificationCounts } from '@/hooks/useApprovalNotificationCounts';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
+
+const DP_PHASES = ['PENDING', 'APPROVED', 'REJECTED', 'ALL'] as const;
+type DpPhaseFilter = (typeof DP_PHASES)[number];
 
 const DP_PHASE_FILTER_OPTIONS = labeledToSelectOptions([
   { value: 'PENDING', label: 'Pendentes' },
@@ -49,6 +58,13 @@ const DP_PHASE_FILTER_OPTIONS = labeledToSelectOptions([
   { value: 'ALL', label: 'Todas' },
 ]);
 
+const DP_PHASE_SUBTITLE: Record<DpPhaseFilter, string> = {
+  PENDING: 'Pendentes de aprovação',
+  APPROVED: 'Já aprovadas pelo gestor',
+  REJECTED: 'Reprovadas pelo gestor',
+  ALL: 'Todas as solicitações da sua área',
+};
+
 const ESPELHO_PHASE_FILTER_OPTIONS = labeledToSelectOptions([
   { value: 'ALL', label: 'Todos os status' },
   { value: 'PENDING_APPROVAL', label: 'Pendentes' },
@@ -56,6 +72,59 @@ const ESPELHO_PHASE_FILTER_OPTIONS = labeledToSelectOptions([
   { value: 'APPROVED', label: 'Aprovados' },
   { value: 'CANCELLED', label: 'Cancelados' },
 ]);
+
+type EspelhoPhaseFilter =
+  | 'ALL'
+  | 'PENDING_APPROVAL'
+  | 'SENT_FOR_CORRECTION'
+  | 'APPROVED'
+  | 'CANCELLED';
+
+const ESPELHO_STAT_CARDS: ApprovalPhaseStatCard<EspelhoPhaseFilter>[] = [
+  {
+    filter: 'PENDING_APPROVAL',
+    label: 'Pendentes',
+    iconBg: 'bg-yellow-100 dark:bg-yellow-900/30',
+    iconColor: 'text-yellow-600 dark:text-yellow-400',
+    Icon: Clock,
+  },
+  {
+    filter: 'SENT_FOR_CORRECTION',
+    label: 'Correção',
+    iconBg: 'bg-orange-100 dark:bg-orange-900/30',
+    iconColor: 'text-orange-600 dark:text-orange-400',
+    Icon: AlertTriangle,
+  },
+  {
+    filter: 'APPROVED',
+    label: 'Aprovados',
+    iconBg: 'bg-green-100 dark:bg-green-900/30',
+    iconColor: 'text-green-600 dark:text-green-400',
+    Icon: CheckCircle,
+  },
+  {
+    filter: 'CANCELLED',
+    label: 'Cancelados',
+    iconBg: 'bg-red-100 dark:bg-red-900/30',
+    iconColor: 'text-red-600 dark:text-red-400',
+    Icon: XCircle,
+  },
+  {
+    filter: 'ALL',
+    label: 'Todos',
+    iconBg: 'bg-blue-100 dark:bg-blue-900/30',
+    iconColor: 'text-blue-600 dark:text-blue-400',
+    Icon: LayoutList,
+  },
+];
+
+const ESPELHO_PHASE_SUBTITLE: Record<EspelhoPhaseFilter, string> = {
+  PENDING_APPROVAL: 'Pendentes de aprovação',
+  SENT_FOR_CORRECTION: 'Enviados para correção',
+  APPROVED: 'Espelhos aprovados',
+  CANCELLED: 'Espelhos cancelados',
+  ALL: 'Todos os espelhos',
+};
 
 type DpUrgency = 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
 type DpRequestStatus =
@@ -104,12 +173,6 @@ type EspelhoApprovalsData = {
   bankAccounts: any[];
   taxCodes: any[];
 };
-type EspelhoPhaseFilter =
-  | 'ALL'
-  | 'PENDING_APPROVAL'
-  | 'SENT_FOR_CORRECTION'
-  | 'APPROVED'
-  | 'CANCELLED';
 
 type DpRequest = {
   id: string;
@@ -445,7 +508,6 @@ export default function AprovacoesPage() {
   const queryClient = useQueryClient();
 
   /** Fase do bloco «Solicitações»: pendentes (padrão), aprovadas, reprovadas ou todas. */
-  type DpPhaseFilter = 'PENDING' | 'APPROVED' | 'REJECTED' | 'ALL';
   const [searchDp, setSearchDp] = useState('');
   const [dpPhase, setDpPhase] = useState<DpPhaseFilter>('PENDING');
   const [isDpFiltersOpen, setIsDpFiltersOpen] = useState(false);
@@ -512,6 +574,13 @@ export default function AprovacoesPage() {
       return (res.data?.data ?? []) as DpRequest[];
     },
     enabled: !loadingUser && canApproveDp && activeTab === 'dp',
+  });
+
+  const { data: dpPhaseCounts, isLoading: loadingDpCounts } = useQuery({
+    queryKey: ['approvals', 'dp', 'phase-counts'],
+    queryFn: () => fetchApprovalPhaseCounts('/solicitacoes-dp/aprovacoes', DP_PHASES),
+    enabled: !loadingUser && canApproveDp && activeTab === 'dp',
+    staleTime: 30_000,
   });
   const { data: espelhoResp, isLoading: loadingEspelhoApprovals } = useQuery({
     queryKey: ['approvals', 'espelho-nf'],
@@ -691,6 +760,20 @@ export default function AprovacoesPage() {
     });
   }, [espelhoApprovals, espelhoPhase, searchEspelho]);
 
+  const espelhoPhaseCounts = useMemo(() => {
+    const counts: Record<EspelhoPhaseFilter, number> = {
+      ALL: espelhoApprovals.length,
+      PENDING_APPROVAL: 0,
+      SENT_FOR_CORRECTION: 0,
+      APPROVED: 0,
+      CANCELLED: 0,
+    };
+    for (const item of espelhoApprovals) {
+      counts[item.status] = (counts[item.status] ?? 0) + 1;
+    }
+    return counts;
+  }, [espelhoApprovals]);
+
   const espelhoForActionMenu = useMemo(
     () => espelhoFiltered.find((m) => m.id === espelhoActionMenu?.mirrorId) ?? null,
     [espelhoFiltered, espelhoActionMenu?.mirrorId]
@@ -763,7 +846,7 @@ export default function AprovacoesPage() {
     onSuccess: async (_, variables) => {
       toast.success('Solicitação aprovada');
       setDetailRequest((cur) => (cur?.id === variables.id ? null : cur));
-      await queryClient.invalidateQueries({ queryKey: ['approvals', 'dp', 'WAITING_MANAGER'] });
+      await queryClient.invalidateQueries({ queryKey: ['approvals', 'dp'] });
       await queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
     },
     onError: (err: any) => toast.error(err?.response?.data?.error || err?.message || 'Erro'),
@@ -783,7 +866,7 @@ export default function AprovacoesPage() {
         return n;
       });
       setDetailRequest((cur) => (cur?.id === variables.id ? null : cur));
-      await queryClient.invalidateQueries({ queryKey: ['approvals', 'dp', 'WAITING_MANAGER'] });
+      await queryClient.invalidateQueries({ queryKey: ['approvals', 'dp'] });
       await queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
     },
     onError: (err: any) => toast.error(err?.response?.data?.error || err?.message || 'Erro'),
@@ -879,6 +962,14 @@ export default function AprovacoesPage() {
           )}
 
           {canApproveDp && activeTab === 'dp' && (
+          <div className="space-y-6">
+            <ApprovalPhaseStatCards
+              cards={DEFAULT_APPROVAL_PHASE_CARDS}
+              activeFilter={dpPhase}
+              counts={dpPhaseCounts ?? {}}
+              loading={loadingDpCounts}
+              onSelect={setDpPhase}
+            />
           <Card className="w-full">
             <CardHeader className="border-b-0 pb-1">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -889,7 +980,7 @@ export default function AprovacoesPage() {
                   <div>
                     <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Solicitações</h3>
                     <p className="text-sm text-gray-600 dark:text-gray-400">
-                      Pendentes de aprovação
+                      {DP_PHASE_SUBTITLE[dpPhase]}
                     </p>
                   </div>
                 </div>
@@ -1038,9 +1129,19 @@ export default function AprovacoesPage() {
               )}
             </CardContent>
           </Card>
+          </div>
           )}
 
           {canApproveEspelhoNf && activeTab === 'espelho' && (
+          <div className="space-y-6">
+            <ApprovalPhaseStatCards
+              cards={ESPELHO_STAT_CARDS}
+              activeFilter={espelhoPhase}
+              counts={espelhoPhaseCounts}
+              loading={loadingEspelhoApprovals}
+              onSelect={setEspelhoPhase}
+              columnsClassName="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-3 2xl:grid-cols-5"
+            />
           <Card className="w-full">
             <CardHeader className="border-b-0 pb-1">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -1052,7 +1153,9 @@ export default function AprovacoesPage() {
                     <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
                       Espelhos da Nota Fiscal
                     </h3>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">Pendentes de aprovação/correção</p>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                      {ESPELHO_PHASE_SUBTITLE[espelhoPhase]}
+                    </p>
                   </div>
                 </div>
                 <div className="flex flex-shrink-0 flex-wrap items-center gap-2 sm:justify-end">
@@ -1204,6 +1307,7 @@ export default function AprovacoesPage() {
               )}
             </CardContent>
           </Card>
+          </div>
           )}
 
           {espelhoActionMenu &&

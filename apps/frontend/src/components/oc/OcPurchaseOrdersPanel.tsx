@@ -7,7 +7,9 @@ import {
   FileText,
   Eye,
   Check,
+  CheckCircle,
   X,
+  XCircle,
   Wrench,
   Send,
   Download,
@@ -22,7 +24,9 @@ import {
   Filter,
   RotateCcw,
   MoreVertical,
-  CircleDollarSign
+  CircleDollarSign,
+  Clock,
+  LayoutList,
 } from 'lucide-react';
 import { FinancialControlEntryModal } from '@/components/financeiro/FinancialControlEntryModal';
 import { buildFormFromPurchaseOrder } from '@/components/financeiro/financialControlEntry';
@@ -121,10 +125,16 @@ import {
 } from '@/components/oc/ocPaymentListStatus';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
+import {
+  ApprovalPhaseStatCards,
+  type ApprovalPhaseStatCard,
+} from '@/app/ponto/aprovacoes/_components/ApprovalPhaseStatCards';
 
 const OC_APPROVAL_LIST_PHASE_OPTIONS = labeledToSelectOptions([
   { value: 'pending', label: 'Pendentes de aprovação' },
   { value: 'approved_by_me', label: 'Aprovadas por mim' },
+  { value: 'rejected', label: 'Reprovadas' },
+  { value: 'all', label: 'Todas' },
 ]);
 
 export {
@@ -1691,7 +1701,38 @@ const OC_MENU_ITEM_CLASS =
 
 const OC_APPROVAL_FLOW_STATUSES = ['DRAFT', 'PENDING_COMPRAS', 'PENDING', 'PENDING_DIRETORIA'] as const;
 
-export type OcApprovalListPhase = 'pending' | 'approved_by_me';
+export type OcApprovalListPhase = 'pending' | 'approved_by_me' | 'rejected' | 'all';
+
+const OC_APPROVAL_STAT_CARDS: ApprovalPhaseStatCard<OcApprovalListPhase>[] = [
+  {
+    filter: 'pending',
+    label: 'Pendentes',
+    iconBg: 'bg-yellow-100 dark:bg-yellow-900/30',
+    iconColor: 'text-yellow-600 dark:text-yellow-400',
+    Icon: Clock,
+  },
+  {
+    filter: 'approved_by_me',
+    label: 'Aprovadas',
+    iconBg: 'bg-green-100 dark:bg-green-900/30',
+    iconColor: 'text-green-600 dark:text-green-400',
+    Icon: CheckCircle,
+  },
+  {
+    filter: 'rejected',
+    label: 'Reprovadas',
+    iconBg: 'bg-red-100 dark:bg-red-900/30',
+    iconColor: 'text-red-600 dark:text-red-400',
+    Icon: XCircle,
+  },
+  {
+    filter: 'all',
+    label: 'Todas',
+    iconBg: 'bg-blue-100 dark:bg-blue-900/30',
+    iconColor: 'text-blue-600 dark:text-blue-400',
+    Icon: LayoutList,
+  },
+];
 
 const OC_APPROVAL_TABS: OcTab[] = ['compras', 'gestor', 'diretoria'];
 
@@ -1704,6 +1745,63 @@ function orderApprovedByUserAtTab(order: PurchaseOrder, tab: OcTab, userId: stri
   if (tab === 'gestor') return order.gestorApprovedBy === userId;
   if (tab === 'diretoria') return order.approvedBy === userId;
   return false;
+}
+
+function applyOcGestorCostCenterScope(
+  list: PurchaseOrder[],
+  gestorCostCenterIds: string[] | undefined,
+): PurchaseOrder[] {
+  if (gestorCostCenterIds === undefined) return list;
+  const allowed = new Set(gestorCostCenterIds);
+  return list.filter((o) => {
+    const ccId = o.materialRequest?.costCenter?.id;
+    return ccId ? allowed.has(ccId) : false;
+  });
+}
+
+function pendingOrdersForOcApprovalTab(allOrders: PurchaseOrder[], tab: OcTab): PurchaseOrder[] {
+  if (tab === 'compras') {
+    return allOrders.filter((o) => o.status === 'PENDING_COMPRAS' || o.status === 'DRAFT');
+  }
+  if (tab === 'gestor') {
+    return allOrders.filter((o) => o.status === 'PENDING');
+  }
+  if (tab === 'diretoria') {
+    return allOrders.filter((o) => o.status === 'PENDING_DIRETORIA');
+  }
+  return [];
+}
+
+function ordersForOcApprovalListPhase(
+  allOrders: PurchaseOrder[],
+  tab: OcTab,
+  phase: OcApprovalListPhase,
+  currentUserId: string | undefined,
+  gestorCostCenterIds: string[] | undefined,
+): PurchaseOrder[] {
+  if (!isOcApprovalTab(tab)) return allOrders;
+
+  const pending = pendingOrdersForOcApprovalTab(allOrders, tab);
+  const approved =
+    currentUserId
+      ? allOrders.filter((o) => orderApprovedByUserAtTab(o, tab, currentUserId))
+      : [];
+  const rejected = allOrders.filter((o) => o.status === 'REJECTED');
+
+  let list: PurchaseOrder[];
+  if (phase === 'approved_by_me') list = approved;
+  else if (phase === 'rejected') list = rejected;
+  else if (phase === 'all') {
+    const byId = new Map<string, PurchaseOrder>();
+    for (const order of [...pending, ...approved, ...rejected]) {
+      byId.set(order.id, order);
+    }
+    list = Array.from(byId.values());
+  } else {
+    list = pending;
+  }
+
+  return tab === 'gestor' ? applyOcGestorCostCenterScope(list, gestorCostCenterIds) : list;
 }
 
 export function OcStyledCheckbox({
@@ -1765,6 +1863,12 @@ function embeddedOcEmptyMessage(
   if (approvalListPhase === 'approved_by_me') {
     return 'Nenhuma ordem que você tenha aprovado nesta fase.';
   }
+  if (approvalListPhase === 'rejected') {
+    return 'Nenhuma ordem reprovada.';
+  }
+  if (approvalListPhase === 'all') {
+    return 'Nenhuma ordem nesta fase.';
+  }
   if (tab === 'FINALIZADAS') return 'Nenhuma OC finalizada com os filtros atuais';
   if (tab === 'ATTACH_BOLETO') return 'Nenhuma OC aguardando anexo de boleto';
   if (tab === 'PROOF_VALIDATION') return 'Nenhuma OC aguardando validação do comprovante';
@@ -1777,6 +1881,12 @@ function embeddedOcEmptyMessage(
 function approvalTabSubtitle(tab: OcTab, phase: OcApprovalListPhase): string {
   if (phase === 'approved_by_me') {
     return 'Ordens que você já aprovou nesta fase';
+  }
+  if (phase === 'rejected') {
+    return 'Ordens reprovadas no fluxo de aprovação';
+  }
+  if (phase === 'all') {
+    return 'Pendentes, aprovadas por você e reprovadas nesta visão';
   }
   return EMBEDDED_OC_TAB_META[tab].subtitle;
 }
@@ -2773,33 +2883,14 @@ export function OcPurchaseOrdersPanel({
     showOcApprovalActions(status);
 
   const orders = useMemo(() => {
-    if (activeTab === 'compras') {
-      if (approvalListPhase === 'approved_by_me' && currentUserId) {
-        return allOrders.filter((o) => orderApprovedByUserAtTab(o, 'compras', currentUserId));
-      }
-      return allOrders.filter((o) => o.status === 'PENDING_COMPRAS' || o.status === 'DRAFT');
-    }
-    if (activeTab === 'gestor') {
-      let list: PurchaseOrder[];
-      if (approvalListPhase === 'approved_by_me' && currentUserId) {
-        list = allOrders.filter((o) => orderApprovedByUserAtTab(o, 'gestor', currentUserId));
-      } else {
-        list = allOrders.filter((o) => o.status === 'PENDING');
-      }
-      if (gestorCostCenterIds !== undefined) {
-        const allowed = new Set(gestorCostCenterIds);
-        list = list.filter((o) => {
-          const ccId = o.materialRequest?.costCenter?.id;
-          return ccId ? allowed.has(ccId) : false;
-        });
-      }
-      return list;
-    }
-    if (activeTab === 'diretoria') {
-      if (approvalListPhase === 'approved_by_me' && currentUserId) {
-        return allOrders.filter((o) => orderApprovedByUserAtTab(o, 'diretoria', currentUserId));
-      }
-      return allOrders.filter((o) => o.status === 'PENDING_DIRETORIA');
+    if (isOcApprovalTab(activeTab)) {
+      return ordersForOcApprovalListPhase(
+        allOrders,
+        activeTab,
+        approvalListPhase,
+        currentUserId,
+        gestorCostCenterIds,
+      );
     }
     if (activeTab === 'IN_REVIEW') {
       return allOrders.filter((o) => o.status === 'IN_REVIEW');
@@ -2824,6 +2915,42 @@ export function OcPurchaseOrdersPanel({
     }
     return allOrders;
   }, [allOrders, activeTab, gestorCostCenterIds, approvalListPhase, currentUserId]);
+
+  const ocApprovalPhaseCounts = useMemo(() => {
+    if (!isOcApprovalTab(activeTab)) {
+      return { pending: 0, approved_by_me: 0, rejected: 0, all: 0 };
+    }
+    return {
+      pending: ordersForOcApprovalListPhase(
+        allOrders,
+        activeTab,
+        'pending',
+        currentUserId,
+        gestorCostCenterIds,
+      ).length,
+      approved_by_me: ordersForOcApprovalListPhase(
+        allOrders,
+        activeTab,
+        'approved_by_me',
+        currentUserId,
+        gestorCostCenterIds,
+      ).length,
+      rejected: ordersForOcApprovalListPhase(
+        allOrders,
+        activeTab,
+        'rejected',
+        currentUserId,
+        gestorCostCenterIds,
+      ).length,
+      all: ordersForOcApprovalListPhase(
+        allOrders,
+        activeTab,
+        'all',
+        currentUserId,
+        gestorCostCenterIds,
+      ).length,
+    };
+  }, [allOrders, activeTab, currentUserId, gestorCostCenterIds]);
 
   const filteredOrdersBySearch = useMemo(() => {
     const normalizedSearchTerm = normalizeOcSearch(searchTerm);
@@ -3413,7 +3540,21 @@ export function OcPurchaseOrdersPanel({
 
   return (
     <>
-      <section id="fluxo-oc" className={flushInTabsCard ? '' : 'scroll-mt-4'}>
+      <section
+        id="fluxo-oc"
+        className={`${flushInTabsCard ? '' : 'scroll-mt-4'} ${
+          isIntegratedFlux && isOcApprovalTab(activeTab) ? 'space-y-6' : ''
+        }`}
+      >
+        {isIntegratedFlux && isOcApprovalTab(activeTab) ? (
+          <ApprovalPhaseStatCards
+            cards={OC_APPROVAL_STAT_CARDS}
+            activeFilter={approvalListPhase}
+            counts={ocApprovalPhaseCounts}
+            loading={listLoading}
+            onSelect={setApprovalListPhase}
+          />
+        ) : null}
         <Card
           className={
             isIntegratedFlux
