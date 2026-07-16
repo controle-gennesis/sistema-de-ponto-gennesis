@@ -113,6 +113,7 @@ import {
   Maximize2,
   Download,
   Upload,
+  ArrowUpDown,
 } from 'lucide-react';
 import { usePermissions } from '@/hooks/usePermissions';
 import { clsx } from 'clsx';
@@ -235,6 +236,45 @@ function moveCardInBoardCache(
       if (col.id === toColumnId) return { ...col, cards: toCards };
       return col;
     }),
+  };
+}
+
+type KanbanColumnSortMode = 'created_desc' | 'created_asc' | 'title_asc';
+
+const KANBAN_COLUMN_SORT_OPTIONS: {
+  mode: KanbanColumnSortMode;
+  label: string;
+}[] = [
+  { mode: 'created_desc', label: 'Data de criação (mais recente primeiro)' },
+  { mode: 'created_asc', label: 'Data de criação (mais antigo primeiro)' },
+  { mode: 'title_asc', label: 'Nome do cartão (em ordem alfabética)' },
+];
+
+function sortKanbanColumnCards(cards: KanbanCard[], mode: KanbanColumnSortMode): KanbanCard[] {
+  const next = [...cards];
+  if (mode === 'created_desc') {
+    next.sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    );
+  } else if (mode === 'created_asc') {
+    next.sort(
+      (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+    );
+  } else {
+    next.sort((a, b) => a.title.localeCompare(b.title, 'pt-BR', { sensitivity: 'base' }));
+  }
+  return next;
+}
+
+function replaceColumnCardsInBoardCache(
+  board: KanbanBoard | undefined,
+  columnId: string,
+  cards: KanbanCard[],
+): KanbanBoard | undefined {
+  if (!board) return board;
+  return {
+    ...board,
+    columns: board.columns.map((col) => (col.id === columnId ? { ...col, cards } : col)),
   };
 }
 
@@ -1122,6 +1162,7 @@ interface KanbanColumnProps {
   onDrop: (e: React.DragEvent, columnId: string, index?: number) => void;
   onEditColumn: (column: KanbanColumn) => void;
   onDeleteColumn: (columnId: string) => void;
+  onSortColumn: (columnId: string, mode: KanbanColumnSortMode) => void;
   collapsed?: boolean;
   onToggleCollapse?: () => void;
 }
@@ -1147,10 +1188,12 @@ function KanbanColumnComponent({
   onDrop,
   onEditColumn,
   onDeleteColumn,
+  onSortColumn,
   collapsed = false,
   onToggleCollapse,
 }: KanbanColumnProps) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [menuView, setMenuView] = useState<'main' | 'sort'>('main');
   const [menuStyle, setMenuStyle] = useState<React.CSSProperties>({});
   const [visibleCount, setVisibleCount] = useState(KANBAN_COLUMN_VISIBLE_BATCH);
   const menuBtnRef = useRef<HTMLButtonElement>(null);
@@ -1166,6 +1209,10 @@ function KanbanColumnComponent({
   }, [column.id]);
 
   useEffect(() => {
+    if (!menuOpen) setMenuView('main');
+  }, [menuOpen]);
+
+  useEffect(() => {
     if (!menuOpen) return;
     function handleClick(e: MouseEvent) {
       const target = e.target as Node;
@@ -1176,8 +1223,8 @@ function KanbanColumnComponent({
     function handleReposition() {
       const rect = menuBtnRef.current?.getBoundingClientRect();
       if (!rect) return;
-      const menuWidth = 176;
-      const menuHeight = 148;
+      const menuWidth = menuView === 'sort' ? 300 : 176;
+      const menuHeight = menuView === 'sort' ? 220 : 188;
       const spaceBelow = window.innerHeight - rect.bottom;
       const openUp = spaceBelow < menuHeight + 8 && rect.top > menuHeight + 8;
       setMenuStyle({
@@ -1197,7 +1244,7 @@ function KanbanColumnComponent({
       window.removeEventListener('resize', handleReposition);
       window.removeEventListener('scroll', handleReposition, true);
     };
-  }, [menuOpen]);
+  }, [menuOpen, menuView]);
 
   if (collapsed) {
     const isCollapsedDropTarget =
@@ -1357,9 +1404,10 @@ function KanbanColumnComponent({
                 const rect = menuBtnRef.current?.getBoundingClientRect();
                 if (!rect) return;
                 const menuWidth = 176;
-                const menuHeight = 148;
+                const menuHeight = 188;
                 const spaceBelow = window.innerHeight - rect.bottom;
                 const openUp = spaceBelow < menuHeight + 8 && rect.top > menuHeight + 8;
+                setMenuView('main');
                 setMenuStyle({
                   position: 'fixed',
                   left: Math.max(
@@ -1383,43 +1431,95 @@ function KanbanColumnComponent({
                   data-kanban-column-menu
                   role="menu"
                   style={menuStyle}
-                  className="overflow-hidden rounded-xl border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-800"
+                  className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800"
                   onMouseDown={(e) => e.stopPropagation()}
                 >
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setMenuOpen(false);
-                      onAddCard(column.id, 'top');
-                    }}
-                    className="flex w-full items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700"
-                  >
-                    <Plus className="h-4 w-4" /> Adicionar card
-                  </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setMenuOpen(false);
-                      onEditColumn(column);
-                    }}
-                    className="flex w-full items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700"
-                  >
-                    <Edit3 className="h-4 w-4" /> Editar coluna
-                  </button>
-                  <hr className="my-1 border-gray-200 dark:border-gray-700" />
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setMenuOpen(false);
-                      onDeleteColumn(column.id);
-                    }}
-                    className="flex w-full items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20"
-                  >
-                    <Trash2 className="h-4 w-4" /> Excluir coluna
-                  </button>
+                  {menuView === 'main' ? (
+                    <div className="py-1">
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setMenuOpen(false);
+                          onAddCard(column.id, 'top');
+                        }}
+                        className="flex w-full items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700"
+                      >
+                        <Plus className="h-4 w-4" /> Adicionar card
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setMenuOpen(false);
+                          onEditColumn(column);
+                        }}
+                        className="flex w-full items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700"
+                      >
+                        <Edit3 className="h-4 w-4" /> Editar coluna
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => setMenuView('sort')}
+                        className="flex w-full items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700"
+                      >
+                        <ArrowUpDown className="h-4 w-4" /> Ordenar lista
+                      </button>
+                      <hr className="my-1 border-gray-200 dark:border-gray-700" />
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setMenuOpen(false);
+                          onDeleteColumn(column.id);
+                        }}
+                        className="flex w-full items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20"
+                      >
+                        <Trash2 className="h-4 w-4" /> Excluir coluna
+                      </button>
+                    </div>
+                  ) : (
+                    <div>
+                      <div className="flex items-center gap-1 border-b border-gray-200 px-1 py-1.5 dark:border-gray-700">
+                        <button
+                          type="button"
+                          onClick={() => setMenuView('main')}
+                          className="rounded-lg p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-800 dark:hover:bg-gray-700 dark:hover:text-gray-100"
+                          aria-label="Voltar"
+                        >
+                          <ChevronLeft className="h-4 w-4" />
+                        </button>
+                        <p className="flex-1 text-center text-sm font-semibold text-gray-900 dark:text-gray-100">
+                          Ordenar lista
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => setMenuOpen(false)}
+                          className="rounded-lg p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-800 dark:hover:bg-gray-700 dark:hover:text-gray-100"
+                          aria-label="Fechar"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      </div>
+                      <div className="py-1">
+                        {KANBAN_COLUMN_SORT_OPTIONS.map((option) => (
+                          <button
+                            key={option.mode}
+                            type="button"
+                            role="menuitem"
+                            onClick={() => {
+                              setMenuOpen(false);
+                              onSortColumn(column.id, option.mode);
+                            }}
+                            className="w-full px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700"
+                          >
+                            {option.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>,
                 document.body,
               )}
@@ -2980,6 +3080,58 @@ function KanbanPage() {
     setDeleteConfirm({ type: 'column', columnId });
   }
 
+  const handleSortColumn = useCallback(
+    (columnId: string, mode: KanbanColumnSortMode) => {
+      const currentBoard = queryClient.getQueryData<KanbanBoard>(kanbanBoardQueryKey);
+      const column = currentBoard?.columns.find((col) => col.id === columnId);
+      if (!column || column.cards.length < 2) {
+        toast.success('Lista ordenada', { duration: 1500 });
+        return;
+      }
+
+      const sortedCards = sortKanbanColumnCards(column.cards, mode);
+      const unchanged = sortedCards.every((card, index) => card.id === column.cards[index]?.id);
+      if (unchanged) {
+        toast.success('Lista já está nessa ordem', { duration: 1500 });
+        return;
+      }
+
+      const previousBoard = currentBoard;
+      const beforeRects = boardCardsRef.current
+        ? captureKanbanReorderRects(boardCardsRef.current, 'data-kanban-card-id')
+        : new Map<string, DOMRect>();
+
+      queryClient.setQueryData<KanbanBoard>(kanbanBoardQueryKey, (old) =>
+        replaceColumnCardsInBoardCache(old, columnId, sortedCards),
+      );
+      scheduleKanbanReorderAnimation(
+        boardCardsRef.current,
+        beforeRects,
+        'data-kanban-card-id',
+        'kanban-card-reordering',
+      );
+      toast.success('Lista ordenada', { duration: 1500 });
+
+      void (async () => {
+        try {
+          for (let index = 0; index < sortedCards.length; index += 1) {
+            const card = sortedCards[index];
+            if (isOptimisticKanbanCardId(card.id)) continue;
+            await updateKanbanCard(card.id, { position: index });
+          }
+        } catch {
+          if (previousBoard !== undefined) {
+            queryClient.setQueryData(kanbanBoardQueryKey, previousBoard);
+          } else {
+            void refreshBoard();
+          }
+          toast.error('Não foi possível salvar a ordenação');
+        }
+      })();
+    },
+    [queryClient, kanbanBoardQueryKey, refreshBoard],
+  );
+
   function confirmDeleteColumn() {
     if (deleteConfirm?.type !== 'column') return;
     const { columnId } = deleteConfirm;
@@ -3282,6 +3434,7 @@ function KanbanPage() {
                     onDrop={handleDrop}
                     onEditColumn={(col) => setColModal({ mode: 'edit', column: col })}
                     onDeleteColumn={handleDeleteColumn}
+                    onSortColumn={handleSortColumn}
                     collapsed={collapsedColumnIds.has(column.id)}
                     onToggleCollapse={() => toggleColumnCollapsed(column.id)}
                   />

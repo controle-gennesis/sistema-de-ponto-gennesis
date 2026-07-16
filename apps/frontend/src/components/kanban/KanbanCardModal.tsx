@@ -269,6 +269,7 @@ export function KanbanCardModal({
   const [saving, setSaving] = useState(false);
   const [addingTask, setAddingTask] = useState(false);
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
+  const [togglingTaskIds, setTogglingTaskIds] = useState<string[]>([]);
   const [postingComment, setPostingComment] = useState(false);
   const [draftTasks, setDraftTasks] = useState<DraftChecklistTask[]>([]);
   const [editingDraftTaskId, setEditingDraftTaskId] = useState<string | null>(null);
@@ -292,6 +293,7 @@ export function KanbanCardModal({
   const titleSaveGenRef = useRef(0);
   const titleFocusedRef = useRef(false);
   const titleLiveRef = useRef('');
+  const checklistToggleSeqRef = useRef<Record<string, number>>({});
   const [commentsPanelHeight, setCommentsPanelHeight] = useState<number | undefined>(undefined);
   const isCreate = mode === 'create';
   const isDetail = mode === 'detail' && !!cardId;
@@ -836,15 +838,25 @@ export function KanbanCardModal({
     const nextDone = !isDone;
     const previous = card;
     const optimistic = buildOptimisticChecklistToggle(card, itemId, nextDone);
+    const nextSeq = (checklistToggleSeqRef.current[itemId] ?? 0) + 1;
+    checklistToggleSeqRef.current[itemId] = nextSeq;
+    setTogglingTaskIds((prev) => (prev.includes(itemId) ? prev : [...prev, itemId]));
+    await queryClient.cancelQueries({ queryKey: kanbanCardQueryKey(cardId) });
     applyCardDetail(optimistic);
     patchBoardCard(optimistic);
     try {
       const { card: updated } = await updateChecklistItem(itemId, { isDone: nextDone });
+      if (checklistToggleSeqRef.current[itemId] !== nextSeq) return;
       syncChecklistFromApi(updated);
     } catch {
+      if (checklistToggleSeqRef.current[itemId] !== nextSeq) return;
       applyCardDetail(previous);
       patchBoardCard(previous);
       toast.error('Erro ao atualizar tarefa');
+    } finally {
+      if (checklistToggleSeqRef.current[itemId] === nextSeq) {
+        setTogglingTaskIds((prev) => prev.filter((id) => id !== itemId));
+      }
     }
   }
 
@@ -1582,6 +1594,7 @@ export function KanbanCardModal({
                               : null
                           }
                           isDeleting={deletingTaskId === item.id}
+                          isToggling={togglingTaskIds.includes(item.id)}
                           onToggle={() => toggleTask(item.id, item.isDone)}
                           onDelete={() => handleDeleteTask(item.id)}
                           onUpdated={syncChecklistFromApi}

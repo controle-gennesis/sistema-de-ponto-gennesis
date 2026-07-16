@@ -87,6 +87,7 @@ export interface KanbanChecklistTaskRowProps {
   cardMembers: KanbanCardMember[];
   currentUser?: KanbanTaskAssigneeOption | null;
   isDeleting?: boolean;
+  isToggling?: boolean;
   onToggle: () => void;
   onDelete: () => void;
   onUpdated: (card: KanbanCardDetail) => void | Promise<void>;
@@ -97,6 +98,7 @@ function KanbanChecklistTaskRowInner({
   cardMembers,
   currentUser,
   isDeleting = false,
+  isToggling = false,
   onToggle,
   onDelete,
   onUpdated,
@@ -237,6 +239,7 @@ function KanbanChecklistTaskRowInner({
         checked={item.isDone}
         onChange={onToggle}
         asButton
+        disabled={isDeleting || isToggling || saving}
         className="shrink-0"
       />
 
@@ -357,7 +360,7 @@ function KanbanChecklistTaskRowInner({
 
           <button
             type="button"
-            disabled={isDeleting || saving}
+            disabled={isDeleting || isToggling || saving}
             onClick={(e) => {
               e.stopPropagation();
               onDelete();
@@ -374,7 +377,7 @@ function KanbanChecklistTaskRowInner({
         </div>
       </div>
 
-      {saving && (
+      {(saving || isToggling) && (
         <Loader2 className="w-3.5 h-3.5 animate-spin text-red-600 shrink-0 pointer-events-none" />
       )}
 
