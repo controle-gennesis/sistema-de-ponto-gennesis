@@ -271,8 +271,21 @@ function isAnaliseManualFinalizada(lic: Licitacao): boolean {
   return lic.analiseJson?.analiseManualFinalizada === true;
 }
 
+function parseResponsavelAnaliseIds(raw: string | null | undefined): string[] {
+  if (!raw?.trim()) return [];
+  const seen = new Set<string>();
+  const ids: string[] = [];
+  for (const part of raw.split(/[,;|]/)) {
+    const id = part.trim();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    ids.push(id);
+  }
+  return ids;
+}
+
 function isAnaliseManualAssumida(lic: Licitacao): boolean {
-  return Boolean(lic.analiseJson?.responsavelAnaliseId?.trim());
+  return parseResponsavelAnaliseIds(lic.analiseJson?.responsavelAnaliseId).length > 0;
 }
 
 function isLicitacaoEmAnaliseFinal(lic: Licitacao, inAnaliseFinalView = false): boolean {
@@ -1204,13 +1217,15 @@ export default function LicitacoesPage() {
     Boolean(userData?.data?.isAdmin) ||
     String(userData?.data?.employee?.position ?? '').toLowerCase() === 'administrador';
 
-  const claimedById = display?.analiseJson?.responsavelAnaliseId?.trim() || '';
-  const claimedByName = claimedById
+  const claimedIds = parseResponsavelAnaliseIds(display?.analiseJson?.responsavelAnaliseId);
+  const claimedByName = claimedIds.length
     ? display?.analiseJson?.responsavelAnalise?.trim() || responsavelAnalise.trim() || ''
     : '';
   // Assumida somente após clique em «Assumir tarefa» (grava responsavelAnaliseId).
-  const isClaimed = Boolean(claimedById);
-  const isClaimedByMe = Boolean(claimedById && currentUserId && claimedById === currentUserId);
+  const isClaimed = claimedIds.length > 0;
+  const isClaimedByMe = Boolean(
+    currentUserId && claimedIds.includes(currentUserId)
+  );
   const isClaimedByOther = Boolean(isClaimed && !isClaimedByMe);
   const canEditAnaliseManual =
     !isArquivadasView &&
@@ -1256,31 +1271,33 @@ export default function LicitacoesPage() {
               </div>
             </div>
 
-            <div
-              role="note"
-              className="flex flex-col gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-800/60 dark:bg-amber-950/30 sm:flex-row sm:items-center sm:justify-between"
-            >
-              <div className="flex min-w-0 gap-2.5">
-                <Info
-                  className="mt-0.5 h-4 w-4 shrink-0 text-amber-700 dark:text-amber-300"
-                  aria-hidden
-                />
-                <p className="text-sm leading-relaxed text-amber-950 dark:text-amber-100">
-                  A consulta de habilitação técnica é baseada no banco de dados das CAT&apos;s. Caso
-                  sua busca não retorne o resultado desejado, complemente sua pesquisa nos PDFs
-                  disponíveis no drive do setor de contratos.
-                </p>
-              </div>
-              <a
-                href={DRIVE_CATS_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg border border-amber-300 bg-white px-4 text-sm font-semibold text-amber-950 transition-colors hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-950/50 dark:text-amber-50 dark:hover:bg-amber-950/80"
+            {viewMode === 'banco-cats' ? (
+              <div
+                role="note"
+                className="flex flex-col gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-800/60 dark:bg-amber-950/30 sm:flex-row sm:items-center sm:justify-between"
               >
-                <ExternalLink className="h-4 w-4 shrink-0" aria-hidden />
-                Abrir drive das CATs
-              </a>
-            </div>
+                <div className="flex min-w-0 gap-2.5">
+                  <Info
+                    className="mt-0.5 h-4 w-4 shrink-0 text-amber-700 dark:text-amber-300"
+                    aria-hidden
+                  />
+                  <p className="text-sm leading-relaxed text-amber-950 dark:text-amber-100">
+                    A consulta de habilitação técnica é baseada no banco de dados das CAT&apos;s. Caso
+                    sua busca não retorne o resultado desejado, complemente sua pesquisa nos PDFs
+                    disponíveis no drive do setor de contratos.
+                  </p>
+                </div>
+                <a
+                  href={DRIVE_CATS_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg border border-amber-300 bg-white px-4 text-sm font-semibold text-amber-950 transition-colors hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-950/50 dark:text-amber-50 dark:hover:bg-amber-950/80"
+                >
+                  <ExternalLink className="h-4 w-4 shrink-0" aria-hidden />
+                  Abrir drive das CATs
+                </a>
+              </div>
+            ) : null}
           </header>
 
           <div
@@ -2013,7 +2030,7 @@ export default function LicitacoesPage() {
                           </label>
                           {!isArquivadasView && !isAnaliseManualFinalizada(display) ? (
                             <>
-                              {!isClaimed ? (
+                              {!isClaimedByMe ? (
                                 <button
                                   type="button"
                                   disabled={
@@ -2021,7 +2038,11 @@ export default function LicitacoesPage() {
                                     liberarAnaliseMutation.isPending
                                   }
                                   onClick={() => assumirAnaliseMutation.mutate()}
-                                  title="Assumir esta análise para evitar trabalho duplicado"
+                                  title={
+                                    isClaimed
+                                      ? 'Entrar nesta análise junto com os responsáveis atuais'
+                                      : 'Assumir esta análise'
+                                  }
                                   className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg bg-sky-600 px-3 text-sm font-semibold text-white transition-colors hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-50"
                                 >
                                   {assumirAnaliseMutation.isPending ? (
@@ -2029,7 +2050,7 @@ export default function LicitacoesPage() {
                                   ) : (
                                     <Hand className="h-4 w-4" aria-hidden />
                                   )}
-                                  Assumir tarefa
+                                  {isClaimed ? 'Entrar na análise' : 'Assumir tarefa'}
                                 </button>
                               ) : null}
                               {canLiberarAnalise ? (
@@ -2040,11 +2061,12 @@ export default function LicitacoesPage() {
                                     liberarAnaliseMutation.isPending
                                   }
                                   onClick={() => {
-                                    if (
-                                      window.confirm(
-                                        'Liberar esta análise para que outro usuário possa assumi-la?'
-                                      )
-                                    ) {
+                                    const confirmMsg = isClaimedByMe
+                                      ? claimedIds.length > 1
+                                        ? 'Remover seu nome desta análise? Os demais responsáveis continuam.'
+                                        : 'Liberar esta análise para que outro usuário possa assumi-la?'
+                                      : 'Liberar todos os responsáveis desta análise?';
+                                    if (window.confirm(confirmMsg)) {
                                       liberarAnaliseMutation.mutate();
                                     }
                                   }}
@@ -2063,21 +2085,23 @@ export default function LicitacoesPage() {
                         </div>
                         {isClaimedByOther && !isArquivadasView ? (
                           <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
-                            Esta análise está assumida por <strong>{claimedByName}</strong>. A edição
-                            fica bloqueada para evitar trabalho duplicado.
-                            {isAdminUser ? ' Como administrador, você pode liberar a tarefa.' : ''}
+                            Esta análise está com <strong>{claimedByName}</strong>. Clique em{' '}
+                            <strong>Entrar na análise</strong> para participar e editar, ou peça a
+                            liberação.
+                            {isAdminUser ? ' Como administrador, você também pode liberar a tarefa.' : ''}
                           </p>
                         ) : null}
                         {isClaimedByMe && !isArquivadasView ? (
                           <p className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-900 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-200">
-                            Você assumiu esta análise. Outros usuários verão que a tarefa já está em
-                            andamento.
+                            {claimedIds.length > 1
+                              ? `Você e outros estão nesta análise (${claimedByName}).`
+                              : 'Você assumiu esta análise. Outros usuários podem entrar para analisar junto.'}
                           </p>
                         ) : null}
                         {!isClaimed && !isArquivadasView && !isAnaliseManualFinalizada(display) ? (
                           <p className="text-xs text-gray-500 dark:text-gray-400">
-                            Clique em <strong>Assumir tarefa</strong> antes de analisar, para que
-                            outra pessoa não trabalhe na mesma solicitação.
+                            Clique em <strong>Assumir tarefa</strong> antes de analisar. Mais de uma
+                            pessoa pode assumir a mesma solicitação.
                           </p>
                         ) : null}
                       </div>

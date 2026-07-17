@@ -82,55 +82,7 @@ const STOP_WORDS = new Set([
   'onde',
   'qual',
   'quais',
-  'tipo',
-  'tipos',
-  'conforme',
-  'segundo',
   'via',
-  'item',
-  'itens',
-  'codigo',
-  'cod',
-  'af',
-  'und',
-  'unidade',
-  'quant',
-  'quantidade',
-  'servico',
-  'servicos',
-  'execucao',
-  'fornecimento',
-  'instalacao',
-  'inclusivo',
-  'incluso',
-  'inclusos',
-  'inclusive',
-  'deve',
-  'devera',
-  'deverao',
-  'podera',
-  'empresa',
-  'licitante',
-  'apresentar',
-  'comprovacao',
-  'comprovante',
-  'atestado',
-  'capacidade',
-  'tecnica',
-  'habilitacao',
-  'experiencia',
-  'anos',
-  'meses',
-  'minimo',
-  'maximo',
-  'exigido',
-  'exigida',
-  'exigidos',
-  'exigidas',
-  'necessario',
-  'necessaria',
-  'requisito',
-  'requisitos',
 ]);
 
 const UNIT_WORDS = new Set([
@@ -155,6 +107,11 @@ const UNIT_WORDS = new Set([
   'pol',
   'dn',
   'pn',
+  'mpa',
+  'mpas',
+  'pa',
+  'kpa',
+  'fck',
 ]);
 
 /** Normaliza texto para comparação (acentos, unidades e forma tipográfica). */
@@ -296,14 +253,14 @@ export function extractKeywords(text: string): string[] {
       continue;
     }
 
-    // Palavras textuais / compostas (anti-chama): mínimo 4 letras úteis
+    // Palavras textuais / compostas: mínimo 3 letras (aceita fck, mpa, etc.)
     const lettersOnly = token.replace(/-/g, '');
-    if (lettersOnly.length < 4) continue;
+    if (lettersOnly.length < 3) continue;
     if (/^[a-z]+(-[a-z]+)*$/.test(token)) {
       addKeyword(keywords, seen, token);
       if (token.includes('-')) {
         for (const part of token.split('-')) {
-          if (part.length >= 4 && !STOP_WORDS.has(part)) {
+          if (part.length >= 3 && !STOP_WORDS.has(part)) {
             addKeyword(keywords, seen, part);
           }
         }
