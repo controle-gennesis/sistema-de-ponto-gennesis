@@ -1667,6 +1667,7 @@ export class KanbanService {
 
     const insertAt = requestedPosition ?? 0;
 
+    // Move/reorder: include leve (sem checklist) — o board não precisa do payload completo.
     const card = await prisma.$transaction(async (tx) => {
       if (targetColumnId !== existing.columnId) {
         await moveKanbanCardToColumn(tx, id, existing.columnId, targetColumnId, insertAt);
@@ -1677,7 +1678,7 @@ export class KanbanService {
       return tx.kanbanCard.update({
         where: { id },
         data: baseUpdateData,
-        include: cardInclude,
+        include: boardListCardInclude,
       });
     });
 

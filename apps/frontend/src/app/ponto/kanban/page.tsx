@@ -39,7 +39,7 @@ import {
   createKanbanColumn,
   updateKanbanColumn,
   deleteKanbanColumn,
-  updateKanbanCard,
+  moveKanbanCard,
   deleteKanbanCard,
   duplicateKanbanCard,
   insertCardIntoBoardCache,
@@ -3036,7 +3036,7 @@ function KanbanPage() {
       void (async () => {
         try {
           // Sempre manda columnId — evita gravar só position na coluna antiga.
-          await updateKanbanCard(draggingCardId, {
+          await moveKanbanCard(draggingCardId, {
             columnId: targetColumnId,
             position: desiredPosition,
           });
@@ -3123,14 +3123,15 @@ function KanbanPage() {
         if (next && boardScopeKey) writeKanbanBoardCache(boardScopeKey, next);
         return next;
       });
-      toast.success('Card movido!', { duration: 2000 });
 
       void (async () => {
         try {
-          await updateKanbanCard(action.cardId, {
+          await moveKanbanCard(action.cardId, {
             columnId: targetColumnId,
             position: 0,
           });
+          if (cardMoveSeqRef.current[action.cardId] !== moveSeq) return;
+          toast.success('Card movido!', { duration: 2000 });
         } catch {
           if (cardMoveSeqRef.current[action.cardId] !== moveSeq) return;
           rollbackBoardMutation(mutationGen, previousBoard);
@@ -3315,7 +3316,7 @@ function KanbanPage() {
           for (let index = 0; index < sortedCards.length; index += 1) {
             const card = sortedCards[index];
             if (isOptimisticKanbanCardId(card.id)) continue;
-            await updateKanbanCard(card.id, { position: index });
+            await moveKanbanCard(card.id, { columnId, position: index });
           }
         } catch {
           rollbackBoardMutation(mutationGen, previousBoard);
