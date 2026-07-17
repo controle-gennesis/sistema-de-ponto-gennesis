@@ -260,7 +260,9 @@ export function KanbanCardModal({
     showBack: boolean;
     onBack?: () => void;
   }>({ title: 'Etiquetas', showBack: false });
-  const [checklistEnabled, setChecklistEnabled] = useState(false);
+  const [checklistEnabled, setChecklistEnabled] = useState(
+    () => Boolean(initialCard?.checklistEnabled),
+  );
   const [showAttachmentsModal, setShowAttachmentsModal] = useState(false);
   const [showCostModal, setShowCostModal] = useState(false);
 
@@ -307,7 +309,7 @@ export function KanbanCardModal({
       ? boardCardToDetailPlaceholder(initialCard, initialColumnId, initialColumn)
       : undefined;
 
-  const { data: fetchedCard, isLoading } = useQuery({
+  const { data: fetchedCard, isLoading, isFetching, isPlaceholderData } = useQuery({
     queryKey: kanbanCardQueryKey(cardId!),
     queryFn: () => fetchKanbanCard(cardId!),
     enabled: isDetail && !!cardId && !isOptimisticKanbanCardId(cardId),
@@ -337,7 +339,6 @@ export function KanbanCardModal({
 
   useEffect(() => {
     setOpenMenu(null);
-    setChecklistEnabled(false);
     setShowAttachmentsModal(false);
     setShowCostModal(false);
     setIsEditingDescription(false);
@@ -988,6 +989,17 @@ export function KanbanCardModal({
   const checklist = card?.checklistItems ?? [];
   const visibleTasks = hideDone ? checklist.filter((t) => !t.isDone) : checklist;
   const visibleDraftTasks = hideDone ? draftTasks.filter((t) => !t.isDone) : draftTasks;
+  const checklistLoading =
+    isDetail &&
+    !isCreate &&
+    isFetching &&
+    checklist.length === 0 &&
+    (isPlaceholderData || (card?.totalTasks ?? 0) > 0) &&
+    (checklistEnabled || (card?.totalTasks ?? 0) > 0);
+  const checklistSkeletonCount = Math.min(
+    8,
+    Math.max(card?.totalTasks ?? 0, checklistLoading ? 3 : 0),
+  );
   const hasLabels = labels.length > 0;
   const hasDates = !!(startDate || endDate);
   const showCostButton =
@@ -1545,11 +1557,13 @@ export function KanbanCardModal({
                 <div className="flex items-center gap-2">
                   <ListChecks className="w-4 h-4 text-red-600" />
                   <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Tarefas</h4>
-                  {taskTotal > 0 && (
-                        <span className="text-xs text-gray-500 dark:text-gray-400 tabular-nums whitespace-nowrap">
+                  {taskTotal > 0 ? (
+                    <span className="text-xs text-gray-500 dark:text-gray-400 tabular-nums whitespace-nowrap">
                       {taskCountLabel} · {progress}%
                     </span>
-                  )}
+                  ) : checklistLoading ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-gray-400" />
+                  ) : null}
                 </div>
                 {((isDetail && checklist.some((t) => t.isDone)) ||
                   (isCreate && draftTasks.some((t) => t.isDone))) && (
@@ -1563,16 +1577,31 @@ export function KanbanCardModal({
                 )}
               </div>
 
-              {taskTotal > 0 && (
+              {(taskTotal > 0 || checklistLoading) && (
                 <div className="relative h-px w-full overflow-hidden rounded-full bg-gray-200/80 dark:bg-gray-700/80">
                   <div
                     className="absolute inset-y-0 left-0 bg-red-600 transition-[width] duration-200"
-                    style={{ width: `${progress}%` }}
+                    style={{ width: `${checklistLoading && taskTotal === 0 ? 0 : progress}%` }}
                   />
                 </div>
               )}
 
-              {(isCreate ? visibleDraftTasks.length > 0 : visibleTasks.length > 0) && (
+              {checklistLoading ? (
+                <ul className="space-y-1 -mx-0.5 px-0.5" aria-busy="true" aria-label="Carregando tarefas">
+                  {Array.from({ length: checklistSkeletonCount }, (_, i) => (
+                    <li
+                      key={`checklist-skeleton-${i}`}
+                      className="flex items-center gap-2 rounded-lg px-2 py-1.5"
+                    >
+                      <div className="h-5 w-5 shrink-0 rounded border-2 border-gray-200 dark:border-gray-600 bg-gray-100 dark:bg-gray-800 animate-pulse" />
+                      <div
+                        className="h-3.5 flex-1 rounded bg-gray-200/80 dark:bg-gray-700/80 animate-pulse"
+                        style={{ maxWidth: `${60 + ((i * 17) % 30)}%` }}
+                      />
+                    </li>
+                  ))}
+                </ul>
+              ) : (isCreate ? visibleDraftTasks.length > 0 : visibleTasks.length > 0) ? (
                 <ul className="space-y-1 -mx-0.5 px-0.5">
                   {isCreate
                     ? visibleDraftTasks.map((task) => {
@@ -1664,10 +1693,12 @@ export function KanbanCardModal({
                         />
                       ))}
                 </ul>
-              )}
+              ) : null}
 
               <div className="flex flex-col gap-3 shrink-0">
-                {(isCreate ? visibleDraftTasks.length > 0 : visibleTasks.length > 0) && (
+                {(isCreate
+                  ? visibleDraftTasks.length > 0
+                  : visibleTasks.length > 0 || checklistLoading) && (
                   <div className="h-px bg-gray-200/80 dark:bg-gray-700/80" />
                 )}
                 <div className="flex items-center gap-2">

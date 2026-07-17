@@ -2669,6 +2669,7 @@ function KanbanPage() {
   );
 
   function openCreateCardDetail(card: KanbanCard, columnId: string) {
+    prefetchKanbanCard(card.id);
     const column = columns.find((col) => col.id === columnId);
     setCardModal({
       mode: 'detail',
@@ -2679,7 +2680,6 @@ function KanbanPage() {
         ? { title: column.title, color: column.color }
         : undefined,
     });
-    prefetchKanbanCard(card.id);
   }
 
   const handleDragStart = useCallback((e: React.DragEvent, cardId: string, columnId: string) => {
