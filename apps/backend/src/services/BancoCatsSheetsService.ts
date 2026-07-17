@@ -144,9 +144,19 @@ function normalizeHeaderKey(header: string): string {
 
 function findColumnIndex(headers: string[], candidates: string[]): number {
   const normalizedCandidates = candidates.map(normalizeHeaderKey);
+
+  const exact = headers.findIndex((header) =>
+    normalizedCandidates.includes(normalizeHeaderKey(header))
+  );
+  if (exact >= 0) return exact;
+
   return headers.findIndex((header) => {
     const key = normalizeHeaderKey(header);
-    return normalizedCandidates.some((candidate) => key === candidate || key.includes(candidate));
+    return normalizedCandidates.some((candidate) => {
+      if (!key.includes(candidate)) return false;
+      if (candidate === 'fonte' && key !== 'fonte') return false;
+      return true;
+    });
   });
 }
 
