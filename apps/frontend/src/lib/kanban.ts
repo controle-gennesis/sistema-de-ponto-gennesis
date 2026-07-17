@@ -444,7 +444,9 @@ export function kanbanDetailToBoardCard(detail: KanbanCardDetail): KanbanCard {
 }
 
 /**
- * Atualiza um card no cache do quadro (campos + movimento entre colunas) sem refetch.
+ * Atualiza campos de um card no cache do quadro sem refetch.
+ * Nunca repositiona/move entre colunas — isso é só via moveCardInBoardCache.
+ * (Evita que sync de título/meta com columnId stale devolva o card ao lugar antigo.)
  */
 export function syncCardOnBoardCache(
   board: KanbanBoard | undefined,
@@ -454,12 +456,9 @@ export function syncCardOnBoardCache(
   if (!board) return board;
 
   let sourceColumnId: string | null = null;
-  let sourceIndex = -1;
   for (const col of board.columns) {
-    const idx = col.cards.findIndex((c) => c.id === card.id);
-    if (idx >= 0) {
+    if (col.cards.some((c) => c.id === card.id)) {
       sourceColumnId = col.id;
-      sourceIndex = idx;
       break;
     }
   }
@@ -468,41 +467,22 @@ export function syncCardOnBoardCache(
     return insertCardIntoBoardCache(board, columnId, card, false);
   }
 
-  if (sourceColumnId === columnId) {
-    let changed = false;
-    const columns = board.columns.map((col) => {
-      if (col.id !== columnId) return col;
-      const cards = col.cards.map((c) => {
-        if (c.id !== card.id) return c;
-        changed = true;
-        return {
-          ...c,
-          ...card,
-          // Não apaga tarefas do board se a resposta da API não trouxe a lista.
-          checklistItems: card.checklistItems ?? c.checklistItems,
-        };
-      });
-      return changed ? { ...col, cards } : col;
+  let changed = false;
+  const columns = board.columns.map((col) => {
+    if (col.id !== sourceColumnId) return col;
+    const cards = col.cards.map((c) => {
+      if (c.id !== card.id) return c;
+      changed = true;
+      return {
+        ...c,
+        ...card,
+        // Não apaga tarefas do board se a resposta da API não trouxe a lista.
+        checklistItems: card.checklistItems ?? c.checklistItems,
+      };
     });
-    return changed ? { ...board, columns } : board;
-  }
-
-  const columns = board.columns
-    .map((col) => {
-      if (col.id === sourceColumnId) {
-        return { ...col, cards: col.cards.filter((c) => c.id !== card.id) };
-      }
-      return col;
-    })
-    .map((col) => {
-      if (col.id !== columnId) return col;
-      const cards = [...col.cards];
-      const insertAt = Math.min(sourceIndex, cards.length);
-      cards.splice(insertAt, 0, card);
-      return { ...col, cards };
-    });
-
-  return { ...board, columns };
+    return changed ? { ...col, cards } : col;
+  });
+  return changed ? { ...board, columns } : board;
 }
 
 export function buildOptimisticCardCopy(
@@ -634,6 +614,12 @@ export async function removeKanbanCardMember(cardId: string, userId: string) {
   return res.data.data as KanbanCardDetail;
 }
 
+const kanbanCardPatchChain = new Map<string, Promise<unknown>>();
+
+/**
+ * Serializa PATCH no mesmo card — evita race entre move (position/columnId) e
+ * update de título/meta, que fazia o card voltar ou pular de posição.
+ */
 export async function updateKanbanCard(
   id: string,
   payload: {
@@ -655,10 +641,23 @@ export async function updateKanbanCard(
   },
   options?: { timeout?: number },
 ) {
-  const res = await api.patch(`/kanban/cards/${id}`, payload, {
-    timeout: options?.timeout ?? 120_000,
-  });
-  return res.data.data as KanbanCard;
+  const previous = kanbanCardPatchChain.get(id) ?? Promise.resolve();
+  const run = previous
+    .catch(() => undefined)
+    .then(async () => {
+      const res = await api.patch(`/kanban/cards/${id}`, payload, {
+        timeout: options?.timeout ?? 120_000,
+      });
+      return res.data.data as KanbanCard;
+    });
+  kanbanCardPatchChain.set(
+    id,
+    run.then(
+      () => undefined,
+      () => undefined,
+    ),
+  );
+  return run;
 }
 
 export async function fetchKanbanCardCost(cardId: string): Promise<KanbanCardCost> {
@@ -774,28 +773,44 @@ export function seedKanbanCardCacheFromBoard(
   const boardItems = Array.isArray(card.checklistItems) ? card.checklistItems : [];
   const existing = queryClient.getQueryData<KanbanCardDetail>(key);
 
-  // Já temos a lista (de um GET anterior ou seed recente) — não sobrescreve.
-  if (existing?.checklistItems && existing.checklistItems.length > 0) {
+  // Sempre alinha columnId com a posição atual no board (cache de detalhe pode estar velho).
+  if (existing) {
+    const columnChanged = existing.columnId !== columnId;
+    const needsChecklistSeed =
+      boardItems.length > 0 &&
+      !(existing.checklistItems && existing.checklistItems.length > 0);
+    if (!columnChanged && !needsChecklistSeed) return;
+
+    const next: KanbanCardDetail = {
+      ...existing,
+      columnId,
+      ...(column
+        ? { columnTitle: column.title, columnColor: column.color }
+        : {}),
+      ...(needsChecklistSeed
+        ? {
+            checklistItems: boardItems,
+            totalTasks: card.totalTasks,
+            completedTasks: card.completedTasks,
+            checklistEnabled: card.checklistEnabled,
+            progress: card.progress,
+          }
+        : {}),
+    };
+    queryClient.setQueryData<KanbanCardDetail>(key, next, { updatedAt: 0 });
     return;
   }
+
   if (boardItems.length === 0) {
     return;
   }
 
-  const placeholder = boardCardToDetailPlaceholder(card, columnId, column);
-  const next: KanbanCardDetail = existing
-    ? {
-        ...existing,
-        checklistItems: boardItems,
-        totalTasks: card.totalTasks,
-        completedTasks: card.completedTasks,
-        checklistEnabled: card.checklistEnabled,
-        progress: card.progress,
-      }
-    : placeholder;
-
   // updatedAt: 0 → continua stale e o prefetch/fetch busca comentários/anexos.
-  queryClient.setQueryData<KanbanCardDetail>(key, next, { updatedAt: 0 });
+  queryClient.setQueryData<KanbanCardDetail>(
+    key,
+    boardCardToDetailPlaceholder(card, columnId, column),
+    { updatedAt: 0 },
+  );
 }
 
 /** Dados do board para exibir a modal antes do fetch completo (comentários, anexos). */

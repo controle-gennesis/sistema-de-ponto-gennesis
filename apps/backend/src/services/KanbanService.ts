@@ -345,16 +345,13 @@ function formatChecklistItem(item: {
 
 const memberUserSelect = { id: true, name: true, profilePhotoUrl: true } as const;
 
-/** Include da listagem do quadro (membros leves para avatares no card). */
+/** Include da listagem do quadro (membros leves para avatares no card).
+ * Checklist completa fica no GET do card — evita payload pesado no board. */
 const boardListCardInclude = {
   assignee: { select: memberUserSelect },
   members: {
     orderBy: { createdAt: 'asc' as const },
     include: { user: { select: memberUserSelect } },
-  },
-  checklistItems: {
-    orderBy: { position: 'asc' as const },
-    include: { assignee: { select: memberUserSelect } },
   },
   _count: { select: { comments: true, attachments: true } },
 } as const;

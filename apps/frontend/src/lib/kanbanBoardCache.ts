@@ -1,6 +1,9 @@
 import type { KanbanBoard } from '@/lib/kanban';
 
-const STORAGE_PREFIX = 'kanban-board-cache:v2:';
+const STORAGE_PREFIX = 'kanban-board-cache:v3:';
+
+let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+let pendingWrite: { key: string; board: KanbanBoard } | null = null;
 
 export function readKanbanBoardCache(departmentKey: string): KanbanBoard | undefined {
   if (typeof sessionStorage === 'undefined') return undefined;
@@ -20,6 +23,32 @@ export function writeKanbanBoardCache(departmentKey: string, board: KanbanBoard)
   } catch {
     /* quota ou modo privado */
   }
+}
+
+/** Evita JSON.stringify síncrono a cada tecla (ex.: título do card). */
+export function writeKanbanBoardCacheDebounced(
+  departmentKey: string,
+  board: KanbanBoard,
+  delayMs = 450,
+): void {
+  pendingWrite = { key: departmentKey, board };
+  if (debounceTimer) clearTimeout(debounceTimer);
+  debounceTimer = setTimeout(() => {
+    debounceTimer = null;
+    if (!pendingWrite) return;
+    writeKanbanBoardCache(pendingWrite.key, pendingWrite.board);
+    pendingWrite = null;
+  }, delayMs);
+}
+
+export function flushKanbanBoardCacheWrite(): void {
+  if (debounceTimer) {
+    clearTimeout(debounceTimer);
+    debounceTimer = null;
+  }
+  if (!pendingWrite) return;
+  writeKanbanBoardCache(pendingWrite.key, pendingWrite.board);
+  pendingWrite = null;
 }
 
 export function patchKanbanBoardCacheCard(

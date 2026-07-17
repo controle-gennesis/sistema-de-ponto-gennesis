@@ -52,6 +52,18 @@ function horizontalScrollStep(pointerX: number, board: HTMLElement): number {
   return 0;
 }
 
+function isPointerNearBoard(clientX: number, clientY: number, board: HTMLElement | null): boolean {
+  if (!board) return false;
+  const rect = board.getBoundingClientRect();
+  const pad = 48;
+  return (
+    clientX >= rect.left - pad &&
+    clientX <= rect.right + pad &&
+    clientY >= rect.top - pad &&
+    clientY <= rect.bottom + pad
+  );
+}
+
 /**
  * Auto-scroll vertical (janela) e horizontal (quadro) durante drag nativo do Kanban,
  * além de permitir rolar com a roda do mouse enquanto segura o card.
@@ -60,15 +72,24 @@ export function useKanbanDragScrollAssist(
   isDragging: boolean,
   boardHorizontalRef: RefObject<HTMLElement | null>,
 ) {
-  const pointerRef = useRef({ x: 0, y: 0 });
+  const pointerRef = useRef<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
-    if (!isDragging) return;
+    if (!isDragging) {
+      pointerRef.current = null;
+      return;
+    }
 
     let raf = 0;
 
     const autoScrollStep = () => {
-      const { x, y } = pointerRef.current;
+      const pointer = pointerRef.current;
+      if (!pointer) {
+        raf = requestAnimationFrame(autoScrollStep);
+        return;
+      }
+
+      const { x, y } = pointer;
 
       const verticalDelta = verticalScrollStep(y);
       if (verticalDelta !== 0) {
@@ -91,10 +112,13 @@ export function useKanbanDragScrollAssist(
     };
 
     const onWheel = (e: WheelEvent) => {
+      const board = boardHorizontalRef.current;
+      // Só captura a roda perto do quadro — fora disso o scroll da página segue normal.
+      if (!isPointerNearBoard(e.clientX, e.clientY, board)) return;
+
       e.preventDefault();
       window.scrollBy({ top: e.deltaY * 1.35, left: 0, behavior: 'auto' });
 
-      const board = boardHorizontalRef.current;
       if (!board) return;
 
       const horizontalDelta = e.deltaX !== 0 ? e.deltaX : e.shiftKey ? e.deltaY : 0;
@@ -111,6 +135,7 @@ export function useKanbanDragScrollAssist(
       document.removeEventListener('dragover', onDragOver, true);
       document.removeEventListener('wheel', onWheel, true);
       cancelAnimationFrame(raf);
+      pointerRef.current = null;
     };
   }, [isDragging, boardHorizontalRef]);
 }

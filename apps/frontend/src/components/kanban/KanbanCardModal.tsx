@@ -404,7 +404,8 @@ export function KanbanCardModal({
       const next = card.checklistEnabled ?? false;
       return prev === next ? prev : next;
     });
-    setColumnId((prev) => (prev === card.columnId ? prev : card.columnId));
+    // columnId local vem da abertura no board — não sobrescreve com detalhe stale da API
+    // (senão rename/sync devolve o card para a coluna antiga).
     if (labelsMutationInFlight.current === 0) {
       setLabels((prev) => {
         const next = Array.isArray(card.labels) ? card.labels : [];
