@@ -253,6 +253,7 @@ export function KanbanCardModal({
   const [showMemberPicker, setShowMemberPicker] = useState(false);
   const [hoveringMemberId, setHoveringMemberId] = useState<string | null>(null);
   const [labels, setLabels] = useState<KanbanCardLabel[]>([]);
+  const labelsLiveRef = useRef<KanbanCardLabel[]>([]);
   const [openMenu, setOpenMenu] = useState<OpenMenu>(null);
   const [labelsModalHeader, setLabelsModalHeader] = useState<{
     title: string;
@@ -269,7 +270,6 @@ export function KanbanCardModal({
   const [saving, setSaving] = useState(false);
   const [addingTask, setAddingTask] = useState(false);
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
-  const [togglingTaskIds, setTogglingTaskIds] = useState<string[]>([]);
   const [postingComment, setPostingComment] = useState(false);
   const [draftTasks, setDraftTasks] = useState<DraftChecklistTask[]>([]);
   const [editingDraftTaskId, setEditingDraftTaskId] = useState<string | null>(null);
@@ -282,6 +282,8 @@ export function KanbanCardModal({
   const attachmentsSectionRef = useRef<HTMLDivElement>(null);
   /** Evita que um fetch antigo do card sobrescreva membros após atribuir/remover. */
   const memberMutationInFlight = useRef(0);
+  /** Evita que fetch/resposta antiga reverta etiquetas durante save otimista. */
+  const labelsMutationInFlight = useRef(0);
   /** Snapshot para reverter save otimista de metadados se a API falhar. */
   const metaSaveSnapshotRef = useRef<{
     board: KanbanCard;
@@ -291,9 +293,11 @@ export function KanbanCardModal({
   const titleSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSavedTitleRef = useRef<string | null>(null);
   const titleSaveGenRef = useRef(0);
+  const metaSaveGenRef = useRef(0);
   const titleFocusedRef = useRef(false);
   const titleLiveRef = useRef('');
   const checklistToggleSeqRef = useRef<Record<string, number>>({});
+  const hydratedCardIdRef = useRef<string | undefined>(undefined);
   const [commentsPanelHeight, setCommentsPanelHeight] = useState<number | undefined>(undefined);
   const isCreate = mode === 'create';
   const isDetail = mode === 'detail' && !!cardId;
@@ -315,6 +319,9 @@ export function KanbanCardModal({
 
   useLayoutEffect(() => {
     if (!initialCard || initialCard.id !== cardId) return;
+    // Hidrata só na abertura do card — sync contínuo vem do `card` (query).
+    if (hydratedCardIdRef.current === cardId) return;
+    hydratedCardIdRef.current = cardId;
     setTitle(initialCard.title);
     titleLiveRef.current = initialCard.title;
     lastSavedTitleRef.current = initialCard.title.trim();
@@ -324,6 +331,7 @@ export function KanbanCardModal({
     setEndDate(initialCard.endDate ?? '');
     setMembers(Array.isArray(initialCard.members) ? initialCard.members : []);
     setLabels(Array.isArray(initialCard.labels) ? initialCard.labels : []);
+    labelsLiveRef.current = Array.isArray(initialCard.labels) ? initialCard.labels : [];
     setChecklistEnabled(initialCard.checklistEnabled ?? false);
   }, [initialCard, cardId]);
 
@@ -333,6 +341,8 @@ export function KanbanCardModal({
     setShowAttachmentsModal(false);
     setShowCostModal(false);
     setIsEditingDescription(false);
+    labelsMutationInFlight.current = 0;
+    metaSaveGenRef.current = 0;
     if (initialMode === 'create' && !initialCardId) {
       setDraftTasks([]);
       setDraftFiles([]);
@@ -391,16 +401,19 @@ export function KanbanCardModal({
       return prev === next ? prev : next;
     });
     setColumnId((prev) => (prev === card.columnId ? prev : card.columnId));
-    setLabels((prev) => {
-      const next = Array.isArray(card.labels) ? card.labels : [];
-      if (
-        prev.length === next.length &&
-        prev.every((l, i) => l.color === next[i]?.color && l.text === next[i]?.text)
-      ) {
-        return prev;
-      }
-      return next;
-    });
+    if (labelsMutationInFlight.current === 0) {
+      setLabels((prev) => {
+        const next = Array.isArray(card.labels) ? card.labels : [];
+        if (
+          prev.length === next.length &&
+          prev.every((l, i) => l.color === next[i]?.color && l.text === next[i]?.text)
+        ) {
+          return prev;
+        }
+        labelsLiveRef.current = next;
+        return next;
+      });
+    }
   }, [card, cardId]);
 
   const applyCardDetail = useCallback(
@@ -416,16 +429,31 @@ export function KanbanCardModal({
       onBoardCardSync?.(updated, targetColumnId);
       if (!cardId) return;
       queryClient.setQueryData<KanbanCardDetail>(kanbanCardQueryKey(cardId), (old) => {
-        if (!old) return old;
+        const base =
+          old ??
+          (initialCard && initialCard.id === cardId
+            ? boardCardToDetailPlaceholder(initialCard, targetColumnId, initialColumn)
+            : null);
+        if (!base) {
+          return normalizeKanbanCardDetail({
+            ...updated,
+            columnId: targetColumnId,
+            columnTitle: '',
+            columnColor: '',
+            checklistItems: [],
+            commentsList: [],
+            attachmentsList: [],
+          });
+        }
         return normalizeKanbanCardDetail({
-          ...old,
+          ...base,
           ...updated,
           columnId: targetColumnId,
         });
       });
       setColumnId((prev) => (prev === targetColumnId ? prev : targetColumnId));
     },
-    [cardId, onBoardCardSync, queryClient],
+    [cardId, initialCard, initialColumn, onBoardCardSync, queryClient],
   );
 
   const syncDetailFromApi = useCallback(
@@ -563,6 +591,8 @@ export function KanbanCardModal({
     const targetColumnId = partial.columnId ?? columnId;
     const optimistic = applyMetaPartial(base, partial);
     const titleGen = options?.titleGen;
+    const saveGen = ++metaSaveGenRef.current;
+    const touchesLabels = partial.labels !== undefined;
 
     if (isOptimisticKanbanCardId(cardId)) {
       syncCardFromApi(optimistic, targetColumnId);
@@ -574,6 +604,12 @@ export function KanbanCardModal({
       detail: card,
       columnId: targetColumnId,
     };
+    if (touchesLabels) {
+      labelsMutationInFlight.current += 1;
+      labelsLiveRef.current = partial.labels ?? [];
+      setLabels(partial.labels ?? []);
+    }
+    void queryClient.cancelQueries({ queryKey: kanbanCardQueryKey(cardId) });
     syncCardFromApi(optimistic, targetColumnId);
 
     void (async () => {
@@ -581,12 +617,16 @@ export function KanbanCardModal({
         const updated = await updateKanbanCard(cardId, buildMetaApiPayload(partial), {
           timeout: 20_000,
         });
-        // Resposta antiga de título não pode sobrescrever edição mais nova.
+        // Resposta antiga não pode sobrescrever save mais novo.
+        if (saveGen !== metaSaveGenRef.current) return;
         if (titleGen != null && titleGen !== titleSaveGenRef.current) {
           syncCardFromApi(
             {
               ...updated,
               title: titleLiveRef.current,
+              ...(labelsMutationInFlight.current > 0
+                ? { labels: labelsLiveRef.current }
+                : {}),
             },
             targetColumnId,
           );
@@ -595,8 +635,17 @@ export function KanbanCardModal({
         if (partial.title !== undefined) {
           lastSavedTitleRef.current = updated.title;
         }
-        syncCardFromApi(updated, targetColumnId);
+        const toSync =
+          !touchesLabels && labelsMutationInFlight.current > 0
+            ? { ...updated, labels: labelsLiveRef.current }
+            : updated;
+        if (touchesLabels) {
+          labelsLiveRef.current = Array.isArray(updated.labels) ? updated.labels : [];
+          setLabels(labelsLiveRef.current);
+        }
+        syncCardFromApi(toSync, targetColumnId);
       } catch {
+        if (saveGen !== metaSaveGenRef.current) return;
         if (titleGen != null && titleGen !== titleSaveGenRef.current) return;
         const snapshot = metaSaveSnapshotRef.current;
         if (snapshot?.board) {
@@ -605,7 +654,16 @@ export function KanbanCardModal({
         if (snapshot?.detail) {
           applyCardDetail(snapshot.detail);
         }
+        if (touchesLabels) {
+          const rolled = Array.isArray(snapshot?.board.labels) ? snapshot.board.labels : [];
+          labelsLiveRef.current = rolled;
+          setLabels(rolled);
+        }
         toast.error('Erro ao salvar alterações');
+      } finally {
+        if (touchesLabels) {
+          labelsMutationInFlight.current = Math.max(0, labelsMutationInFlight.current - 1);
+        }
       }
     })();
 
@@ -833,17 +891,25 @@ export function KanbanCardModal({
     setEditingDraftTaskId(null);
   }
 
-  async function toggleTask(itemId: string, isDone: boolean) {
+  async function toggleTask(itemId: string) {
     if (!card || !cardId || isOptimisticKanbanCardId(cardId)) return;
-    const nextDone = !isDone;
-    const previous = card;
-    const optimistic = buildOptimisticChecklistToggle(card, itemId, nextDone);
+    // Lê o estado mais recente do cache (já pode ter toggle otimista anterior).
+    const latest =
+      queryClient.getQueryData<KanbanCardDetail>(kanbanCardQueryKey(cardId)) ?? card;
+    const currentItem = latest.checklistItems.find((i) => i.id === itemId);
+    if (!currentItem) return;
+
+    const nextDone = !currentItem.isDone;
+    const previous = latest;
+    const optimistic = buildOptimisticChecklistToggle(latest, itemId, nextDone);
     const nextSeq = (checklistToggleSeqRef.current[itemId] ?? 0) + 1;
     checklistToggleSeqRef.current[itemId] = nextSeq;
-    setTogglingTaskIds((prev) => (prev.includes(itemId) ? prev : [...prev, itemId]));
-    await queryClient.cancelQueries({ queryKey: kanbanCardQueryKey(cardId) });
+
+    // Otimista primeiro — visual instantâneo; cancelQueries não bloqueia a UI.
     applyCardDetail(optimistic);
     patchBoardCard(optimistic);
+    void queryClient.cancelQueries({ queryKey: kanbanCardQueryKey(cardId) });
+
     try {
       const { card: updated } = await updateChecklistItem(itemId, { isDone: nextDone });
       if (checklistToggleSeqRef.current[itemId] !== nextSeq) return;
@@ -853,10 +919,6 @@ export function KanbanCardModal({
       applyCardDetail(previous);
       patchBoardCard(previous);
       toast.error('Erro ao atualizar tarefa');
-    } finally {
-      if (checklistToggleSeqRef.current[itemId] === nextSeq) {
-        setTogglingTaskIds((prev) => prev.filter((id) => id !== itemId));
-      }
     }
   }
 
@@ -1074,6 +1136,7 @@ export function KanbanCardModal({
               setLabelsModalHeader({ title: 'Etiquetas', showBack: false });
             }}
             onSave={(next) => {
+              labelsLiveRef.current = next;
               setLabels(next);
               if (isDetail) saveMeta({ labels: next });
             }}
@@ -1239,6 +1302,7 @@ export function KanbanCardModal({
                       return;
                     }
                     setLabels([]);
+                    labelsLiveRef.current = [];
                     if (isDetail) saveMeta({ labels: [] });
                   }}
                   className="shrink-0"
@@ -1594,8 +1658,7 @@ export function KanbanCardModal({
                               : null
                           }
                           isDeleting={deletingTaskId === item.id}
-                          isToggling={togglingTaskIds.includes(item.id)}
-                          onToggle={() => toggleTask(item.id, item.isDone)}
+                          onToggle={() => void toggleTask(item.id)}
                           onDelete={() => handleDeleteTask(item.id)}
                           onUpdated={syncChecklistFromApi}
                         />
