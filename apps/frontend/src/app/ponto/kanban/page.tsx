@@ -226,6 +226,30 @@ function mapFilteredDropIndexToFullIndex(
   return idx < 0 ? fullCards.length : idx;
 }
 
+/**
+ * Índice visual do drop na lista filtrada. O dragOver guarda o slot correto (overIndex);
+ * no drop o evento às vezes cai no container da coluna e o Y manda pro fim — aí preferimos overIndex.
+ */
+function resolveKanbanVisualDropIndex(
+  dropIndex: number | undefined,
+  overColumnId: string | null,
+  overIndex: number | null,
+  targetColumnId: string,
+  filteredCardCount: number,
+): number {
+  const sameColumnHover = overColumnId === targetColumnId && overIndex != null;
+  if (sameColumnHover) {
+    const boundedOver = Math.max(0, Math.min(overIndex, filteredCardCount));
+    if (dropIndex == null) return boundedOver;
+    const boundedDrop = Math.max(0, Math.min(dropIndex, filteredCardCount));
+    if (boundedDrop >= filteredCardCount && boundedOver < filteredCardCount) {
+      return boundedOver;
+    }
+    return boundedDrop;
+  }
+  return dropIndex ?? filteredCardCount;
+}
+
 /** Índice de drop a partir do Y do ponteiro — evita mandar pro fim da coluna. */
 function resolveCardDropIndexFromClientY(
   columnRoot: HTMLElement,
@@ -2953,8 +2977,8 @@ function KanbanPage() {
       e.stopPropagation();
       if (columnDragRef.current.draggingColumnId) return;
 
-      // Índice/coluna do elemento onde soltou (recalculado no drop).
-      const { draggingCardId, fromColumnId } = dragRef.current;
+      // Índice/coluna do elemento onde soltou — overIndex vem do último dragOver (slot real).
+      const { draggingCardId, fromColumnId, overColumnId, overIndex } = dragRef.current;
       setDragStateSync({
         draggingCardId: null,
         fromColumnId: null,
@@ -2987,8 +3011,13 @@ function KanbanPage() {
         return matchSearch && matchPriority && matchLabel;
       });
 
-      // Preferir o índice do drop (no momento do soltar).
-      const visualDropIndex = dropIndex ?? filteredCards.length;
+      const visualDropIndex = resolveKanbanVisualDropIndex(
+        dropIndex,
+        overColumnId,
+        overIndex,
+        targetColumnId,
+        filteredCards.length,
+      );
       const rawDropIndex = mapFilteredDropIndexToFullIndex(
         targetColumn.cards,
         filteredCards,
