@@ -53,6 +53,7 @@ import {
   patchCardInBoardCache,
   syncCardOnBoardCache,
   seedKanbanCardCacheFromBoard,
+  remapLabelsInBoardCache,
   type KanbanBoardCardChecklistPatch,
   fetchKanbanCard,
   isOptimisticKanbanCardId,
@@ -2393,6 +2394,9 @@ function KanbanPage() {
   const labelFilterAllValues = boardLabelPresets.map((p) => p.color);
 
   const [search, setSearch] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const searchExpanded = searchOpen || search.trim().length > 0;
   const [filterPriorities, setFilterPriorities] = useState<string[]>([]);
   const [filterLabelColors, setFilterLabelColors] = useState<string[]>([]);
   const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
@@ -2427,6 +2431,14 @@ function KanbanPage() {
   const [importingBoard, setImportingBoard] = useState(false);
   const [importProgress, setImportProgress] = useState<number | null>(null);
   const importFileRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!searchExpanded) return;
+    const id = window.requestAnimationFrame(() => {
+      searchInputRef.current?.focus();
+    });
+    return () => window.cancelAnimationFrame(id);
+  }, [searchExpanded]);
 
   const handleExportTrello = async () => {
     if (!boardScopeKey && !board) {
@@ -3274,26 +3286,76 @@ function KanbanPage() {
             </div>
 
             <div className="flex flex-wrap items-center justify-end gap-2">
-              {/* Search */}
-              <div className="relative min-w-[240px] flex-1 sm:w-[280px] sm:flex-none">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
-                <input
-                  type="text"
-                  value={search}
-                  onChange={e => setSearch(e.target.value)}
-                  placeholder="Pesquisar cards..."
-                  className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm font-medium text-gray-900 placeholder:text-gray-400 outline-none focus:ring-0 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-                />
-                {search ? (
-                  <button
-                    type="button"
-                    onClick={() => setSearch('')}
-                    aria-label="Limpar busca"
-                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-400 outline-none transition-colors hover:bg-gray-100 hover:text-gray-600 focus:ring-0 dark:hover:bg-gray-700 dark:hover:text-gray-300"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                ) : null}
+              {/* Search — colapsável com animação de largura */}
+              <div
+                className={clsx(
+                  'relative h-10 shrink-0 overflow-hidden rounded-lg border border-gray-300 bg-white dark:border-gray-600 dark:bg-gray-800',
+                  'transition-[width] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]',
+                  searchExpanded ? 'w-[min(100%,280px)] sm:w-[280px]' : 'w-10',
+                )}
+              >
+                <button
+                  type="button"
+                  tabIndex={searchExpanded ? -1 : 0}
+                  aria-hidden={searchExpanded}
+                  onClick={() => setSearchOpen(true)}
+                  className={clsx(
+                    'absolute inset-0 z-10 inline-flex items-center justify-center text-gray-700 outline-none transition-opacity duration-200 focus:ring-0 dark:text-gray-200',
+                    'hover:bg-gray-50 dark:hover:bg-gray-700',
+                    searchExpanded ? 'pointer-events-none opacity-0' : 'opacity-100',
+                  )}
+                  title="Pesquisar cards"
+                  aria-label="Pesquisar cards"
+                >
+                  <Search className="h-4 w-4" />
+                </button>
+
+                <div
+                  className={clsx(
+                    'absolute inset-0 transition-opacity duration-200',
+                    searchExpanded
+                      ? 'opacity-100 delay-75'
+                      : 'pointer-events-none opacity-0',
+                  )}
+                >
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
+                  <input
+                    ref={searchInputRef}
+                    type="text"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    onBlur={() => {
+                      if (!search.trim()) setSearchOpen(false);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Escape') {
+                        if (search) {
+                          setSearch('');
+                        } else {
+                          setSearchOpen(false);
+                        }
+                      }
+                    }}
+                    placeholder="Pesquisar cards..."
+                    tabIndex={searchExpanded ? 0 : -1}
+                    className="h-full w-full bg-transparent py-2 pl-9 pr-9 text-sm font-medium text-gray-900 placeholder:text-gray-400 outline-none focus:ring-0 dark:text-gray-100"
+                    aria-label="Pesquisar cards"
+                  />
+                  {search ? (
+                    <button
+                      type="button"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => {
+                        setSearch('');
+                        searchInputRef.current?.focus();
+                      }}
+                      aria-label="Limpar busca"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-400 outline-none transition-colors hover:bg-gray-100 hover:text-gray-600 focus:ring-0 dark:hover:bg-gray-700 dark:hover:text-gray-300"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  ) : null}
+                </div>
               </div>
               <KanbanBoardPicker
                 boards={boardsList ?? []}
@@ -3710,16 +3772,19 @@ function KanbanPage() {
               setLabelSettingsHeader({ title: 'Etiquetas', showBack: false });
             }}
             onSave={() => undefined}
-            onPresetsChange={async (presets) => {
+            onPresetsChange={async (presets, options) => {
               setSavingLabelPresets(true);
               try {
                 const updated = await updateKanbanBoardLabelPresets(
                   presets,
                   departmentKeyParam ?? undefined,
+                  options,
                 );
-                queryClient.setQueryData<KanbanBoard>(kanbanBoardQueryKey, (prev) =>
-                  prev ? { ...prev, labelPresets: updated } : prev,
-                );
+                queryClient.setQueryData<KanbanBoard>(kanbanBoardQueryKey, (prev) => {
+                  const next = remapLabelsInBoardCache(prev, updated, options?.colorRemaps);
+                  if (next && boardScopeKey) writeKanbanBoardCache(boardScopeKey, next);
+                  return next;
+                });
               } catch (err: unknown) {
                 const msg =
                   err && typeof err === 'object' && 'response' in err
@@ -3749,14 +3814,17 @@ function KanbanPage() {
           initialCard={cardModal.mode === 'detail' ? cardModal.initialCard : undefined}
           initialColumn={cardModal.mode === 'detail' ? cardModal.initialColumn : undefined}
           labelPresets={[...boardLabelPresets]}
-          onLabelPresetsChange={async (presets) => {
+          onLabelPresetsChange={async (presets, options) => {
             const updated = await updateKanbanBoardLabelPresets(
               presets,
               departmentKeyParam ?? undefined,
+              options,
             );
-            queryClient.setQueryData<KanbanBoard>(kanbanBoardQueryKey, (prev) =>
-              prev ? { ...prev, labelPresets: updated } : prev,
-            );
+            queryClient.setQueryData<KanbanBoard>(kanbanBoardQueryKey, (prev) => {
+              const next = remapLabelsInBoardCache(prev, updated, options?.colorRemaps);
+              if (next && boardScopeKey) writeKanbanBoardCache(boardScopeKey, next);
+              return next;
+            });
           }}
           currentUserId={meUser?.id}
           currentUser={

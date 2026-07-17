@@ -213,12 +213,75 @@ export async function importKanbanBoardTrello(options: {
 export async function updateKanbanBoardLabelPresets(
   presets: KanbanLabelPreset[],
   departmentKey?: string,
+  options?: { colorRemaps?: Array<{ from: string; to: string }> },
 ): Promise<KanbanLabelPreset[]> {
   const res = await api.patch('/kanban/board/label-presets', {
     presets,
     ...(departmentKey ? { departmentKey } : {}),
+    ...(options?.colorRemaps?.length ? { colorRemaps: options.colorRemaps } : {}),
   });
   return res.data.data;
+}
+
+/** Aplica troca de cor de etiquetas em todos os cards do cache do quadro. */
+export function remapLabelsInBoardCache(
+  board: KanbanBoard | undefined,
+  presets: KanbanLabelPreset[],
+  colorRemaps?: Array<{ from: string; to: string }>,
+): KanbanBoard | undefined {
+  if (!board) return board;
+
+  const remapMap = new Map(
+    (colorRemaps ?? []).map((r) => [r.from.trim().toLowerCase(), r.to] as const),
+  );
+  const presetByColor = new Map(
+    presets.map((p) => [p.color.trim().toLowerCase(), p] as const),
+  );
+
+  // Também detecta remaps por nome (mesmo critério do backend).
+  const oldPresets = board.labelPresets ?? [];
+  for (const old of oldPresets) {
+    const colorKept = presets.some(
+      (p) => p.color.toLowerCase() === old.color.toLowerCase(),
+    );
+    if (colorKept) continue;
+    const byName = presets.find(
+      (p) => p.name.trim().toLowerCase() === old.name.trim().toLowerCase(),
+    );
+    if (!byName) continue;
+    if (!remapMap.has(old.color.toLowerCase())) {
+      remapMap.set(old.color.toLowerCase(), byName.color);
+    }
+  }
+
+  let changed = remapMap.size > 0;
+  const columns = board.columns.map((col) => {
+    const cards = col.cards.map((card) => {
+      if (!card.labels?.length) return card;
+      let cardChanged = false;
+      const labels = card.labels.map((l) => {
+        const to = remapMap.get(l.color.trim().toLowerCase());
+        if (to) {
+          cardChanged = true;
+          const preset = presetByColor.get(to.toLowerCase());
+          return { color: to, text: preset?.name ?? l.text };
+        }
+        const preset = presetByColor.get(l.color.trim().toLowerCase());
+        if (preset && preset.name !== l.text) {
+          cardChanged = true;
+          return { color: preset.color, text: preset.name };
+        }
+        return l;
+      });
+      if (!cardChanged) return card;
+      changed = true;
+      return { ...card, labels };
+    });
+    return { ...col, cards };
+  });
+
+  if (!changed && board.labelPresets === presets) return board;
+  return { ...board, labelPresets: presets, columns };
 }
 
 export type KanbanBoardCardChecklistPatch = Pick<

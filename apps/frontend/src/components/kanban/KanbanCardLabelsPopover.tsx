@@ -27,7 +27,10 @@ export interface KanbanCardLabelsPanelProps {
   onClose: () => void;
   onSave: (labels: KanbanCardLabel[]) => void | Promise<void>;
   /** Persiste a lista de etiquetas do setor (criar/editar). */
-  onPresetsChange?: (presets: KanbanLabelPreset[]) => void | Promise<void>;
+  onPresetsChange?: (
+    presets: KanbanLabelPreset[],
+    options?: { colorRemaps?: Array<{ from: string; to: string }> },
+  ) => void | Promise<void>;
   /** Atualiza o título do Modal pai (lista / criar / editar). */
   onHeaderChange?: (header: {
     title: string;
@@ -140,7 +143,10 @@ export function KanbanCardLabelsPanel({
     });
   }
 
-  async function persistPresets(nextPresets: KanbanLabelPreset[]) {
+  async function persistPresets(
+    nextPresets: KanbanLabelPreset[],
+    options?: { colorRemaps?: Array<{ from: string; to: string }> },
+  ) {
     if (!onPresetsChange) {
       setExtraPresets(
         nextPresets.filter(
@@ -151,7 +157,7 @@ export function KanbanCardLabelsPanel({
     }
     setSavingPreset(true);
     try {
-      await onPresetsChange(nextPresets);
+      await onPresetsChange(nextPresets, options);
     } finally {
       setSavingPreset(false);
     }
@@ -209,7 +215,14 @@ export function KanbanCardLabelsPanel({
     }
 
     try {
-      await persistPresets(deduped);
+      const colorChanged =
+        nextColor.trim().toLowerCase() !== editingColor.trim().toLowerCase();
+      await persistPresets(
+        deduped,
+        colorChanged
+          ? { colorRemaps: [{ from: editingColor, to: nextColor }] }
+          : undefined,
+      );
     } catch (err) {
       toast.error(getErrorMessage(err, 'Não foi possível salvar a etiqueta no setor'));
       return;

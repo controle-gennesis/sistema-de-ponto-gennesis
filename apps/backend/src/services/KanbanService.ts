@@ -14,6 +14,10 @@ import { userHasKanbanValuesPermission } from '../lib/kanbanValuesAccess';
 import { isEmployeeUnbUser } from '../lib/unbCostCenterScope';
 import {
   DEFAULT_KANBAN_LABEL_PRESETS,
+  applyLabelColorRemaps,
+  detectLabelColorRemapsByName,
+  mergeLabelColorRemaps,
+  parseLabelColorRemapsInput,
   resolveKanbanLabelPresets,
   validateCardLabelsForBoard,
   validateKanbanLabelPresetsInput,
@@ -1236,6 +1240,7 @@ export class KanbanService {
     userId: string,
     presetsInput: unknown,
     departmentKeyParam?: string,
+    colorRemapsInput?: unknown,
   ): Promise<KanbanLabelPresetDto[]> {
     const { key: ownKey } = await this.getUserDepartment(userId);
     const targetKey = departmentKeyParam
@@ -1244,18 +1249,46 @@ export class KanbanService {
 
     const board = await prisma.kanbanBoard.findUnique({
       where: { departmentKey: targetKey },
-      select: this.boardAccessSelect,
+      select: { ...this.boardAccessSelect, labelPresets: true },
     });
     if (!board) {
       throw new Error('Quadro não encontrado para este setor');
     }
     await this.assertBoardAccess(userId, board, 'write');
 
+    const oldPresets = resolveKanbanLabelPresets(board.labelPresets);
     const presets = validateKanbanLabelPresetsInput(presetsInput);
+    const remaps = mergeLabelColorRemaps(
+      detectLabelColorRemapsByName(oldPresets, presets),
+      parseLabelColorRemapsInput(colorRemapsInput),
+    );
 
-    await prisma.kanbanBoard.update({
-      where: { id: board.id },
-      data: { labelPresets: presets as Prisma.InputJsonValue },
+    await prisma.$transaction(async (tx) => {
+      await tx.kanbanBoard.update({
+        where: { id: board.id },
+        data: { labelPresets: presets as Prisma.InputJsonValue },
+      });
+
+      // Atualiza labels dos cards: remaps de cor + sync de nome/cor via presets.
+      const cards = await tx.kanbanCard.findMany({
+        where: { column: { boardId: board.id } },
+        select: { id: true, labels: true },
+      });
+
+      for (const card of cards) {
+        const labels = parseLabels(card.labels);
+        if (labels.length === 0) continue;
+
+        const next = applyLabelColorRemaps(labels, remaps, presets);
+        const before = JSON.stringify(labelsToJson(labels));
+        const after = JSON.stringify(labelsToJson(next));
+        if (before === after) continue;
+
+        await tx.kanbanCard.update({
+          where: { id: card.id },
+          data: { labels: next as Prisma.InputJsonValue },
+        });
+      }
     });
 
     return presets;

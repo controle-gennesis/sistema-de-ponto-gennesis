@@ -186,11 +186,12 @@ export class KanbanController {
     try {
       const userId = requireUserId(req, next);
       if (!userId) return;
-      const { presets, departmentKey } = req.body;
+      const { presets, departmentKey, colorRemaps } = req.body;
       const data = await kanbanService.updateBoardLabelPresets(
         userId,
         presets,
         typeof departmentKey === 'string' ? departmentKey : undefined,
+        colorRemaps,
       );
       res.json({ success: true, data });
     } catch (error: unknown) {

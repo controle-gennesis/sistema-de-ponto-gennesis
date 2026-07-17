@@ -113,9 +113,14 @@ export function normalizeCardLabelsAgainstPresets(
     }
 
     const preset = getPresetForColor(label.color, presets);
-    if (!preset) return label;
+    if (preset) return { color: preset.color, text: preset.name };
 
-    return { color: preset.color, text: preset.name };
+    const byName = presets.find(
+      (p) => p.name.trim().toLowerCase() === label.text.trim().toLowerCase(),
+    );
+    if (byName) return { color: byName.color, text: byName.name };
+
+    return label;
   });
 }
 
@@ -135,4 +140,93 @@ export function validateCardLabelsForBoard(
   }
 
   return normalized;
+}
+
+export type KanbanLabelColorRemap = { from: string; to: string };
+
+/** Detecta troca de cor de preset pelo mesmo nome (case-insensitive). */
+export function detectLabelColorRemapsByName(
+  oldPresets: KanbanLabelPresetDto[],
+  newPresets: KanbanLabelPresetDto[],
+): KanbanLabelColorRemap[] {
+  const remaps: KanbanLabelColorRemap[] = [];
+  const newByName = new Map(
+    newPresets.map((p) => [p.name.trim().toLowerCase(), p] as const),
+  );
+
+  for (const old of oldPresets) {
+    const colorKept = newPresets.some(
+      (p) => p.color.toLowerCase() === old.color.toLowerCase(),
+    );
+    if (colorKept) continue;
+
+    const match = newByName.get(old.name.trim().toLowerCase());
+    if (!match) continue;
+    if (match.color.toLowerCase() === old.color.toLowerCase()) continue;
+
+    remaps.push({ from: old.color, to: match.color });
+  }
+
+  return remaps;
+}
+
+export function parseLabelColorRemapsInput(raw: unknown): KanbanLabelColorRemap[] {
+  if (!Array.isArray(raw)) return [];
+  const out: KanbanLabelColorRemap[] = [];
+  const seen = new Set<string>();
+
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const fromRaw = (item as { from?: unknown }).from;
+    const toRaw = (item as { to?: unknown }).to;
+    if (typeof fromRaw !== 'string' || typeof toRaw !== 'string') continue;
+
+    let from: string;
+    let to: string;
+    try {
+      from = normalizeHexColor(fromRaw);
+      to = normalizeHexColor(toRaw);
+    } catch {
+      continue;
+    }
+    if (from.toLowerCase() === to.toLowerCase()) continue;
+    const key = from.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ from, to });
+  }
+
+  return out;
+}
+
+export function mergeLabelColorRemaps(
+  ...groups: KanbanLabelColorRemap[][]
+): KanbanLabelColorRemap[] {
+  const map = new Map<string, string>();
+  for (const group of groups) {
+    for (const r of group) {
+      map.set(r.from.toLowerCase(), r.to);
+    }
+  }
+  return [...map.entries()].map(([from, to]) => ({ from, to }));
+}
+
+export function applyLabelColorRemaps(
+  labels: KanbanCardLabelDto[],
+  remaps: KanbanLabelColorRemap[],
+  presets: KanbanLabelPresetDto[],
+): KanbanCardLabelDto[] {
+  if (remaps.length === 0) {
+    return normalizeCardLabelsAgainstPresets(labels, presets);
+  }
+
+  const remapMap = new Map(remaps.map((r) => [r.from.toLowerCase(), r.to] as const));
+  const next = labels.map((label) => {
+    const to = remapMap.get(label.color.trim().toLowerCase());
+    if (!to) return label;
+    const preset = getPresetForColor(to, presets);
+    return { color: to, text: preset?.name ?? label.text };
+  });
+
+  return normalizeCardLabelsAgainstPresets(next, presets);
 }

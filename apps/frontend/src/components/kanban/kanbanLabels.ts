@@ -62,8 +62,16 @@ export function normalizeKanbanLabels(
       if (dpPreset) return { color: dpPreset.color, text: dpPreset.name };
     }
 
-    const fixedName = getKanbanLabelNameForColor(label.color, palette);
-    return fixedName ? { color: label.color, text: fixedName } : label;
+    const byColor = getKanbanLabelPreset(label.color, palette);
+    if (byColor) return { color: byColor.color, text: byColor.name };
+
+    // Preset recolorido: a cor antiga some da paleta — casa pelo nome da etiqueta.
+    const byName = palette.find(
+      (p) => p.name.trim().toLowerCase() === label.text.trim().toLowerCase(),
+    );
+    if (byName) return { color: byName.color, text: byName.name };
+
+    return label;
   });
 }
 

@@ -198,7 +198,10 @@ export interface KanbanCardModalProps {
   canViewKanbanValues?: boolean;
   labelPresets?: KanbanLabelPreset[];
   /** Persiste etiquetas do setor ao criar/editar pelo card. */
-  onLabelPresetsChange?: (presets: KanbanLabelPreset[]) => void | Promise<void>;
+  onLabelPresetsChange?: (
+    presets: KanbanLabelPreset[],
+    options?: { colorRemaps?: Array<{ from: string; to: string }> },
+  ) => void | Promise<void>;
   createInsertAt?: 'top' | 'bottom';
   onClose: () => void;
   onBoardRefresh: () => void;
