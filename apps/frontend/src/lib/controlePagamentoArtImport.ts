@@ -378,15 +378,7 @@ export async function parseControlePagamentoArtFromFile(file: File): Promise<{
       fluig: getCell(row, columnMap.fluig),
     };
 
-    if (!rowHasUsefulData(fields)) {
-      skipped.push({
-        line: i + 1,
-        reasons: ['linha vazia'],
-        preview: `Linha ${i + 1}`,
-      });
-      continue;
-    }
-
+    // Importa mesmo linha vazia / incompleta
     registros.push({
       ...fields,
       fluig: cleanText(fields.fluig),

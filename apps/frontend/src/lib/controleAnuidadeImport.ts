@@ -283,10 +283,6 @@ export async function parseControleAnuidadeFromFile(file: File): Promise<{
 
   for (let i = headerIndex + 1; i < matrix.length; i++) {
     const row = matrix[i] || [];
-    const isEmpty = row.every((cell) => cellToString(cell) === '');
-    if (isEmpty) continue;
-
-    const line = i + 1;
     const pagosPelo = getCell(row, columns.pagosPelo) || undefined;
     const empresa = getCell(row, columns.empresa) || undefined;
     let profissional = getCell(row, columns.profissional);
@@ -300,31 +296,7 @@ export async function parseControleAnuidadeFromFile(file: File): Promise<{
     const status = getCell(row, columns.status) || undefined;
     const fluig = getCell(row, columns.fluig) || undefined;
 
-    const useful = rowHasUsefulData({
-      pagosPelo,
-      empresa,
-      profissional,
-      porqueDesconto,
-      crea,
-      cpfCnpj,
-      valor,
-      dataVencimento,
-      dataParaPagamento,
-      dataPagamento,
-      status,
-      fluig,
-    });
-
-    if (!useful) {
-      skipped.push({
-        line,
-        reasons: ['linha vazia'],
-        preview: `Linha ${line}: (vazia)`,
-      });
-      continue;
-    }
-
-    // Planilha real tem linhas sem profissional — importa mesmo assim
+    // Importa mesmo linha vazia / incompleta
     if (!profissional.trim()) {
       profissional = empresa?.trim()
         ? `Não informado (${empresa.trim()})`

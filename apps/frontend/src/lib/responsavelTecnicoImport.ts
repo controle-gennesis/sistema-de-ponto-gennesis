@@ -210,12 +210,25 @@ function analyzeMappedRow(
     };
   }
 
-  // Linha só de seção (sem profissional): atualiza CREA e ignora
-  if (!profissional) {
+  // Linha que é SÓ um rótulo de seção "CREA-XX" (sem nenhum outro dado):
+  // atualiza a seção e não vira registro. Todo o resto é importado.
+  const hasOtherData = Boolean(
+    empresa ||
+      cpf ||
+      registro ||
+      dataInicio ||
+      titulo ||
+      artCargoFuncao ||
+      protocolo ||
+      baixaEm ||
+      anuidade2026 ||
+      status,
+  );
+  if (!profissional && creaRaw && isCreaSectionLabel(creaRaw) && !hasOtherData) {
     return {
       responsavel: null,
-      skipReasons: ['sem profissional'],
-      preview: `Linha ${lineNumber}: (sem profissional)`,
+      skipReasons: ['seção CREA'],
+      preview: `Linha ${lineNumber}: seção ${creaRaw}`,
       nextCreaSection,
     };
   }
@@ -232,25 +245,18 @@ function analyzeMappedRow(
     nextCreaSection.crea ||
     uf;
 
-  const skipReasons: string[] = [];
-  if (!profissional) skipReasons.push('PROFISSIONAL obrigatório');
-  if (!crea && !uf) skipReasons.push('CREA/UF não identificados');
-
   const preview = `Linha ${lineNumber}: ${profissional || '(sem nome)'} / CREA ${crea || uf || '-'}`;
 
-  if (skipReasons.length > 0) {
-    return { responsavel: null, skipReasons, preview, nextCreaSection };
-  }
-
+  // Importa mesmo sem profissional ou sem CREA/UF (traz a linha do mesmo jeito).
   const creaFinal = (extractUf(crea) || crea || uf).toUpperCase();
   const ufFinal = (uf || extractUf(creaFinal) || creaFinal).toUpperCase().slice(0, 2);
 
   return {
     responsavel: {
-      crea: creaFinal.slice(0, 2) === ufFinal ? ufFinal : creaFinal,
+      crea: creaFinal ? (creaFinal.slice(0, 2) === ufFinal ? ufFinal : creaFinal) : '',
       uf: ufFinal || creaFinal.slice(0, 2),
       empresa: empresa || undefined,
-      profissional,
+      profissional: profissional || 'Não informado',
       cpf: cpf || undefined,
       registro: registro || undefined,
       dataInicio: dataInicio || undefined,
@@ -372,18 +378,15 @@ export async function parseResponsaveisFromFile(file: File): Promise<{
 
   for (let i = headerIndex + 1; i < matrix.length; i++) {
     const row = matrix[i] || [];
-    const isEmpty = row.every((cell) => cellToString(cell) === '');
-    if (isEmpty) continue;
-
+    // Importa todas as linhas após o cabeçalho, inclusive vazias
     const line = i + 1;
     const result = analyzeMappedRow(row, columns, line, lastCreaSection);
     lastCreaSection = result.nextCreaSection;
 
     if (result.responsavel) {
       responsaveis.push(result.responsavel);
-    } else if (!result.skipReasons.includes('sem profissional')) {
-      skipped.push({ line, reasons: result.skipReasons, preview: result.preview });
     }
+    // Linhas de seção "CREA-XX" não são erros nem registros: apenas mudam a seção.
   }
 
   return { responsaveis, skipped };
