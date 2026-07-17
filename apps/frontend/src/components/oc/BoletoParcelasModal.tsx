@@ -57,6 +57,7 @@ export function BoletoParcelasModal({
 
         <BoletoParcelasList
           order={order}
+          hideAttachmentLinks
           editable={editable}
           hint={
             editable

@@ -272,6 +272,47 @@ export function firstNfNumberFromAttachments(raw: unknown): string | null {
   return null;
 }
 
+/**
+ * Verifica se existe lançamento financeiro da parcela corrente
+ * (ex.: parcela 2 só libera com lançamento "2/2", não o da parcela 1).
+ */
+export function hasFinancialEntryForOcInstallment(
+  entries: Array<{ parcelNumber?: string | null; dueDate?: string | null }>,
+  opts: {
+    installmentIndex: number;
+    parcelCount: number;
+    installmentDueDate?: string | null;
+  }
+): boolean {
+  if (!entries.length) return false;
+  const { installmentIndex, parcelCount, installmentDueDate } = opts;
+  if (parcelCount <= 1) return true;
+
+  const expected = installmentIndex + 1;
+  const fullLabel = `${expected}/${parcelCount}`;
+  const shortLabel = String(expected);
+
+  const matchedByParcel = entries.some((entry) => {
+    const raw = (entry.parcelNumber || '').trim();
+    if (!raw) return false;
+    if (raw === fullLabel || raw === shortLabel) return true;
+    const slash = raw.match(/^(\d+)\s*\/\s*\d+$/);
+    if (slash && Number(slash[1]) === expected) return true;
+    const resolved = resolveNfAndParcelForDisplay(entry).parcelNumber?.trim() || '';
+    if (resolved === fullLabel || resolved === shortLabel) return true;
+    const resolvedSlash = resolved.match(/^(\d+)\s*\/\s*\d+$/);
+    return !!(resolvedSlash && Number(resolvedSlash[1]) === expected);
+  });
+  if (matchedByParcel) return true;
+
+  const due = (installmentDueDate || '').trim().slice(0, 10);
+  if (due) {
+    return entries.some((entry) => (entry.dueDate || '').trim().slice(0, 10) === due);
+  }
+
+  return false;
+}
+
 /** Pré-preenche o formulário a partir de uma OC (fase pagamento). */
 export function buildFormFromPurchaseOrder(
   order: OrderBoletoPhasePick & {

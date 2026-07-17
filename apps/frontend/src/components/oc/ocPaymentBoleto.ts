@@ -236,17 +236,18 @@ export function isOcInFinancialLaunchPhase(o: OrderBoletoPhasePick): boolean {
 /** Exibe bloco de anexar comprovante da parcela corrente (fluxo sequencial). */
 export function showSequentialInstallmentProofSection(
   o: OrderBoletoPhasePick,
-  hasFinancialEntry: boolean
+  _hasFinancialEntry?: boolean
 ): boolean {
   const n = o.paymentParcelCount ?? 1;
   if (o.status !== 'APPROVED' || o.paymentType !== 'BOLETO' || n <= 1) return false;
   if (useParallelBoletoPaymentFlow(o)) return false;
-  if (!hasFinancialEntry) return false;
+  // Só na fase Pagamento — em Anexar Boleto o comprovante fica oculto.
+  if (o.paymentBoletoPhaseReleased !== true) return false;
   const idx = visiblePaymentBoletoInstallmentIndex(o);
   if (idx == null) return false;
   const rows = parsePaymentBoletoInstallments(o.paymentBoletoInstallments);
   const row = rows[idx];
-  if (rowStatus(row) === 'PAID') return false;
+  if (rowStatus(row) !== 'AWAITING_PAYMENT') return false;
   return !!((row?.boletoUrl || '').trim());
 }
 
@@ -275,15 +276,48 @@ export function buyerActiveInstallmentIndex(o: OrderBoletoPhasePick): number | n
 
 export function installmentStatusLabel(
   st: BoletoInstallmentPaymentStatus,
-  hasBoleto = false
+  hasBoleto = false,
+  opts?: { orderStatus?: string | null; hasProof?: boolean }
 ): string {
+  if (st === 'AWAITING_PAYMENT' && opts?.hasProof) {
+    if (opts.orderStatus === 'PENDING_PROOF_VALIDATION') return 'Pago';
+    if (opts.orderStatus === 'PENDING_PROOF_CORRECTION') return 'Correção do comprovante';
+    return 'Comprovante anexado';
+  }
   switch (st) {
     case 'PAID':
       return 'Pago';
     case 'AWAITING_PAYMENT':
       return 'Aguardando pagamento';
     default:
-      return hasBoleto ? 'Pronta p/ envio' : 'Anexar boleto';
+      return hasBoleto ? 'Pronta p/ envio' : 'Pendente';
+  }
+}
+
+export function installmentStatusBadgeClass(
+  st: BoletoInstallmentPaymentStatus,
+  hasBoleto = false,
+  opts?: { orderStatus?: string | null; hasProof?: boolean }
+): string {
+  const pill = 'inline-flex px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap';
+  if (st === 'AWAITING_PAYMENT' && opts?.hasProof) {
+    if (opts.orderStatus === 'PENDING_PROOF_VALIDATION') {
+      return `${pill} bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200`;
+    }
+    if (opts.orderStatus === 'PENDING_PROOF_CORRECTION') {
+      return `${pill} bg-amber-100 text-amber-900 dark:bg-amber-900/35 dark:text-amber-200`;
+    }
+    return `${pill} bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-300`;
+  }
+  switch (st) {
+    case 'PAID':
+      return `${pill} bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200`;
+    case 'AWAITING_PAYMENT':
+      return `${pill} bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200`;
+    default:
+      return hasBoleto
+        ? `${pill} bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-300`
+        : `${pill} bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300`;
   }
 }
 

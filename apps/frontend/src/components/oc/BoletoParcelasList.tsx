@@ -1,15 +1,16 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
-import { Banknote, Loader2, Receipt, Send } from 'lucide-react';
+import { Banknote, Check, FileUp, Loader2, Receipt } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '@/lib/api';
 import { OcAttachmentActions } from '@/components/oc/OcAttachmentActions';
+import { DatePickerField } from '@/components/ui/DatePickerField';
 import {
   buyerActiveInstallmentIndex,
-  canSendCurrentBoletoToPayment,
   hasAwaitingInstallmentPayment,
   installmentStatusLabel,
+  installmentStatusBadgeClass,
   parsePaymentBoletoInstallments,
   romanParcelLabel,
   rowStatus,
@@ -33,9 +34,15 @@ import {
 import { maskCurrencyInputBrOrEmpty } from '@/lib/maskCurrencyBr';
 
 export type BoletoParcelasListProps = {
-  order: BoletoParcelasOrderFields & { id: string; orderNumber?: string };
+  order: BoletoParcelasOrderFields & {
+    id: string;
+    orderNumber?: string;
+    status?: string | null;
+  };
   /** Exibe linha de comprovante (histórico / fase pagamento). */
   showComprovante?: boolean;
+  /** Oculta links de boleto/comprovante (uso na aba Pagamento). */
+  hideAttachmentLinks?: boolean;
   /** Permite editar valor, vencimento e anexo nas parcelas liberadas. */
   editable?: boolean;
   /** Texto auxiliar acima da lista. */
@@ -50,6 +57,7 @@ export type BoletoParcelasListProps = {
 function BoletoParcelasListInner({
   order,
   showComprovante = false,
+  hideAttachmentLinks = false,
   editable = false,
   hint,
   onSaved,
@@ -149,20 +157,8 @@ function BoletoParcelasListInner({
     return !!(active.boletoUrl || '').trim();
   }, [rows, editable, activeIdx, amountValidation.valid]);
 
-  const orderForRelease = persistedOrder ?? order;
-  const showReleaseButton =
-    !!onReleaseToPayment &&
-    canSendCurrentBoletoToPayment({
-      status: 'APPROVED',
-      paymentType: 'BOLETO',
-      paymentParcelCount: orderForRelease.paymentParcelCount,
-      paymentBoletoInstallments: orderForRelease.paymentBoletoInstallments,
-      paymentBoletoUrl: (orderForRelease as { paymentBoletoUrl?: string | null }).paymentBoletoUrl,
-      boletoAttachmentUrl: (orderForRelease as { boletoAttachmentUrl?: string | null }).boletoAttachmentUrl,
-      paymentBoletoPhaseReleased: orderForRelease.paymentBoletoPhaseReleased
-    }) &&
-    orderForRelease.paymentBoletoPhaseReleased !== true &&
-    amountValidation.valid;
+  const showSaveAndRelease =
+    !!onReleaseToPayment && order.paymentBoletoPhaseReleased !== true;
 
   const uploadForIndex = async (index: number, file: File) => {
     if (!editable) return;
@@ -195,14 +191,14 @@ function BoletoParcelasListInner({
     }
   };
 
-  const handleSave = async () => {
+  const handleSave = async (andRelease = false): Promise<boolean> => {
     if (!amountValidation.valid) {
       toast.error(amountValidation.message || 'Valores das parcelas inválidos.');
-      return;
+      return false;
     }
     if (!editable || !canSave) {
       toast.error('Preencha valor e vencimento e anexe o boleto da parcela atual.');
-      return;
+      return false;
     }
     const installments: BoletoInstallmentRow[] = rowsToInstallments(rows);
     setSaving(true);
@@ -210,111 +206,206 @@ function BoletoParcelasListInner({
       const res = await api.patch(`/purchase-orders/${order.id}/payment-boleto-installments`, {
         installments
       });
-      toast.success('Boleto da parcela atual salvo.');
       const updated = (res.data as { data?: BoletoParcelasOrderFields & { id: string } })?.data;
       if (updated) setPersistedOrder(updated);
       onSaved?.(res.data);
+      if (andRelease && onReleaseToPayment) {
+        onReleaseToPayment(order.id);
+      } else {
+        toast.success('Parcela salva.');
+      }
+      return true;
     } catch (e: unknown) {
       const msg =
         e && typeof e === 'object' && 'response' in e
           ? (e as { response?: { data?: { message?: string } } }).response?.data?.message
           : null;
       toast.error(msg || 'Erro ao salvar parcelas');
+      return false;
     } finally {
       setSaving(false);
     }
   };
 
   return (
-    <div className={`flex flex-col gap-2 ${className}`}>
-      {hint ? <p className="text-xs text-gray-500 dark:text-gray-400">{hint}</p> : null}
+    <div className={`flex flex-col gap-3 ${className}`}>
+      {hint ? <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">{hint}</p> : null}
       {editable && orderTotal > 0 ? (
         <p className="text-xs text-gray-500 dark:text-gray-400">
-          Total da OC: {formatMoneyDisplay(orderTotal)}
+          Total da OC: <span className="font-medium text-gray-700 dark:text-gray-300">{formatMoneyDisplay(orderTotal)}</span>
           {n > 1 ? ' — ao alterar uma parcela, as demais ajustam automaticamente.' : '.'}
         </p>
       ) : null}
       {!amountValidation.valid && amountValidation.message ? (
-        <p className="text-xs text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 rounded-md px-2.5 py-1.5">
+        <p className="text-xs text-red-600 dark:text-red-400 leading-relaxed">
           {amountValidation.message}
         </p>
       ) : null}
       {phaseReleased && editable && !parallelFlow && financeHasCurrentParcel ? (
-        <p className="text-xs text-amber-800 dark:text-amber-200 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-md px-2.5 py-1.5">
+        <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
           Parcela com o financeiro: só é possível editar parcelas ainda em &quot;Anexar boleto&quot;.
         </p>
       ) : null}
       {phaseReleased && parallelFlow ? (
-        <p className="text-xs text-sky-800 dark:text-sky-200 bg-sky-50 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-800 rounded-md px-2.5 py-1.5">
-          Todos os boletos já estão anexados. Anexe os comprovantes na seção &quot;Comprovantes por parcela&quot; abaixo.
+        <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
+          Todos os boletos já estão anexados. Anexe os comprovantes na seção &quot;Comprovantes&quot; abaixo.
         </p>
       ) : null}
-      {Array.from({ length: n }, (_, i) => {
-        const row = rows[i] ?? buildInitialRows(order)[i];
-        const stored = storedRows[i];
-        const instRow: BoletoInstallmentRow = stored
-          ? { ...draftToRow(row), ...stored }
-          : parsedRows[i] ?? draftToRow(row);
-        const st = rowStatus(instRow);
-        const locked = st === 'PAID' || st === 'AWAITING_PAYMENT';
-        const isActiveParcel = activeIdx === i;
-        const isFutureParcel = activeIdx != null && i > activeIdx && st === 'PENDING_BOLETO';
-        const isPendingEditable = editable && !locked && st === 'PENDING_BOLETO' && !parallelFlow;
-        const rowEditable = isPendingEditable;
-        const fileEditable = isPendingEditable;
-        const amount = parseMoneyInput(row?.amount ?? '');
-        const rowAmountInvalid =
-          rowEditable &&
-          orderTotal > 0 &&
-          (amount == null ||
-            amount < 0 ||
-            amount > orderTotal + 0.001 ||
-            !amountValidation.valid);
-        const statusClass =
-          st === 'PAID'
-            ? 'text-emerald-600 dark:text-emerald-400'
-            : st === 'AWAITING_PAYMENT'
-              ? 'text-amber-700 dark:text-amber-300'
-              : 'text-gray-600 dark:text-gray-400';
-        const proofHref =
-          (instRow?.installmentProofUrl || '').trim() ||
-          (st === 'PAID' && orderProofUrl ? orderProofUrl : '');
-        const proofName =
-          instRow?.installmentProofName?.trim() ||
-          (proofHref === orderProofUrl && orderProofName ? orderProofName : '');
-        const boletoHref = (row?.boletoUrl || instRow?.boletoUrl || '').trim();
 
-        return (
-          <div
-            key={i}
-            className="rounded-md border border-gray-200/80 dark:border-gray-600/80 bg-white/40 dark:bg-gray-950/30 px-2.5 py-2 space-y-1.5"
-          >
-            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-              <span className="font-medium text-gray-800 dark:text-gray-200">
-                {n > 1 ? `Parcela ${romanParcelLabel(i)}` : 'Boleto'}
-              </span>
-              <span className={`text-xs font-medium ${statusClass}`}>
-                {installmentStatusLabel(st, !!boletoHref)}
-              </span>
-              {editable && isActiveParcel ? (
-                <span className="text-[10px] text-violet-600 dark:text-violet-400">(obrigatória)</span>
-              ) : null}
-              {isFutureParcel ? (
-                <span className="text-[10px] text-gray-500 dark:text-gray-400">(opcional)</span>
-              ) : null}
+      {editable ? (
+        <div className="space-y-3">
+          {Array.from({ length: n }, (_, i) => {
+            const row = rows[i] ?? buildInitialRows(order)[i];
+            const stored = storedRows[i];
+            const instRow: BoletoInstallmentRow = stored
+              ? { ...draftToRow(row), ...stored }
+              : parsedRows[i] ?? draftToRow(row);
+            const st = rowStatus(instRow);
+            const locked = st === 'PAID' || st === 'AWAITING_PAYMENT';
+            const isPendingEditable = !locked && st === 'PENDING_BOLETO' && !parallelFlow;
+            return !isPendingEditable;
+          }).some(Boolean) ? (
+            <div className="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-700 px-4 sm:px-5">
+              <table className="w-full text-xs sm:text-sm">
+                <thead>
+                  <tr className="text-left border-b border-gray-200 dark:border-gray-700">
+                    <th className="pt-4 pb-3 pr-2 font-medium text-xs text-gray-500 dark:text-gray-400">
+                      Parcela
+                    </th>
+                    <th className="pt-4 pb-3 px-2 font-medium text-xs text-gray-500 dark:text-gray-400 text-center">
+                      Vencimento
+                    </th>
+                    <th className="pt-4 pb-3 px-2 font-medium text-xs text-gray-500 dark:text-gray-400 text-center">
+                      Status
+                    </th>
+                    <th className="pt-4 pb-3 pl-2 font-medium text-xs text-gray-500 dark:text-gray-400 text-center">
+                      Valor
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                  {Array.from({ length: n }, (_, i) => {
+                    const row = rows[i] ?? buildInitialRows(order)[i];
+                    const stored = storedRows[i];
+                    const instRow: BoletoInstallmentRow = stored
+                      ? { ...draftToRow(row), ...stored }
+                      : parsedRows[i] ?? draftToRow(row);
+                    const st = rowStatus(instRow);
+                    const locked = st === 'PAID' || st === 'AWAITING_PAYMENT';
+                    const isPendingEditable = !locked && st === 'PENDING_BOLETO' && !parallelFlow;
+                    if (isPendingEditable) return null;
+                    const boletoHref = (row?.boletoUrl || instRow?.boletoUrl || '').trim();
+                    const proofHref =
+                      (instRow?.installmentProofUrl || '').trim() ||
+                      ((st === 'PAID' || st === 'AWAITING_PAYMENT') && orderProofUrl
+                        ? orderProofUrl
+                        : '');
+                    const statusOpts = { orderStatus: order.status, hasProof: !!proofHref };
+                    return (
+                      <tr key={i} className="text-gray-900 dark:text-gray-100">
+                        <td className="py-3 pr-2 align-top whitespace-nowrap text-sm font-medium">
+                          {n > 1 ? `Parcela ${i + 1}` : 'Parcela única'}
+                        </td>
+                        <td className="py-3 px-2 text-center align-top whitespace-nowrap">
+                          {formatDueDateBr(row?.dueDate || instRow?.dueDate)}
+                        </td>
+                        <td className="py-3 px-2 text-center align-top whitespace-nowrap">
+                          <span className={installmentStatusBadgeClass(st, !!boletoHref, statusOpts)}>
+                            {installmentStatusLabel(st, !!boletoHref, statusOpts)}
+                          </span>
+                        </td>
+                        <td className="py-3 pl-2 text-center align-top whitespace-nowrap tabular-nums font-medium">
+                          {formatMoneyDisplay(parseMoneyInput(row?.amount ?? '') ?? instRow?.amount)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
+          ) : null}
 
-            <div className="text-xs sm:text-sm space-y-1.5 pl-0.5">
-              {rowEditable ? (
-                <>
-                  <label className="block">
-                    <span className="text-gray-500 dark:text-gray-400">Valor:</span>
+          {Array.from({ length: n }, (_, i) => {
+            const row = rows[i] ?? buildInitialRows(order)[i];
+            const stored = storedRows[i];
+            const instRow: BoletoInstallmentRow = stored
+              ? { ...draftToRow(row), ...stored }
+              : parsedRows[i] ?? draftToRow(row);
+            const st = rowStatus(instRow);
+            const locked = st === 'PAID' || st === 'AWAITING_PAYMENT';
+            const isActiveParcel = activeIdx === i;
+            const isFutureParcel = activeIdx != null && i > activeIdx && st === 'PENDING_BOLETO';
+            const isPendingEditable = !locked && st === 'PENDING_BOLETO' && !parallelFlow;
+            if (!isPendingEditable) return null;
+
+            const amount = parseMoneyInput(row?.amount ?? '');
+            const rowAmountInvalid =
+              orderTotal > 0 &&
+              (amount == null ||
+                amount < 0 ||
+                amount > orderTotal + 0.001 ||
+                !amountValidation.valid);
+            const boletoHref = (row?.boletoUrl || instRow?.boletoUrl || '').trim();
+            const boletoName =
+              row?.boletoName?.trim() ||
+              instRow?.boletoName?.trim() ||
+              `Boleto parcela ${romanParcelLabel(i)}`;
+
+            return (
+              <section
+                key={i}
+                className="space-y-3 rounded-xl border border-gray-200 p-4 dark:border-gray-700"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                      {n > 1 ? `Parcela ${i + 1}` : 'Boleto'}
+                    </p>
+                    <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                      {isActiveParcel
+                        ? 'Obrigatória · informe vencimento, valor e anexe o boleto'
+                        : isFutureParcel
+                          ? 'Opcional · pode anexar agora se quiser'
+                          : 'Informe vencimento, valor e anexe o boleto'}
+                    </p>
+                  </div>
+                  {boletoHref ? (
+                    <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700 dark:text-emerald-300 shrink-0">
+                      <Check className="w-3.5 h-3.5" />
+                      Anexado
+                    </span>
+                  ) : isActiveParcel ? (
+                    <span className="text-[10px] font-medium uppercase tracking-wide text-red-600 dark:text-red-400 shrink-0">
+                      Obrigatória
+                    </span>
+                  ) : null}
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400">
+                      Vencimento
+                    </label>
+                    <DatePickerField
+                      value={row?.dueDate ?? ''}
+                      onChange={(v) => {
+                        setRows((prev) => prev.map((r, j) => (j === i ? { ...r, dueDate: v } : r)));
+                      }}
+                      placeholder="dd/mm/aaaa"
+                      noFocusRing
+                      aria-label={`Vencimento da parcela ${i + 1}`}
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400">
+                      Valor
+                    </label>
                     <input
                       type="text"
                       inputMode="numeric"
                       value={row?.amount ?? ''}
                       onChange={(e) => handleAmountChange(i, e.target.value)}
-                      className={`mt-0.5 w-full max-w-[200px] px-2 py-1 text-sm border rounded-md bg-white dark:bg-gray-800 ${
+                      className={`w-full px-3 py-2 text-sm border rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 ${
                         rowAmountInvalid
                           ? 'border-red-500 dark:border-red-500 ring-1 ring-red-500/30'
                           : 'border-gray-300 dark:border-gray-600'
@@ -323,80 +414,74 @@ function BoletoParcelasListInner({
                       aria-invalid={rowAmountInvalid}
                     />
                     {rowAmountInvalid && amount != null && amount > orderTotal + 0.001 ? (
-                      <span className="mt-0.5 block text-[11px] text-red-600 dark:text-red-400">
+                      <span className="mt-1 block text-[11px] text-red-600 dark:text-red-400">
                         Máximo: {formatMoneyDisplay(orderTotal)}
                       </span>
                     ) : null}
-                  </label>
-                  <label className="block">
-                    <span className="text-gray-500 dark:text-gray-400">Vencimento:</span>
-                    <input
-                      type="date"
-                      value={row?.dueDate ?? ''}
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        setRows((prev) => prev.map((r, j) => (j === i ? { ...r, dueDate: v } : r)));
-                      }}
-                      className="mt-0.5 w-full max-w-[200px] px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800"
-                    />
-                  </label>
-                </>
-              ) : (
-                <>
-                  <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
-                    <span className="text-gray-500 dark:text-gray-400 shrink-0">Valor:</span>
-                    <span className="text-gray-800 dark:text-gray-200 font-medium">
-                      {formatMoneyDisplay(amount ?? instRow?.amount)}
-                    </span>
                   </div>
-                  <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
-                    <span className="text-gray-500 dark:text-gray-400 shrink-0">Vencimento:</span>
-                    <span className="text-gray-800 dark:text-gray-200">
-                      {formatDueDateBr(row?.dueDate || instRow?.dueDate)}
-                    </span>
-                  </div>
-                </>
-              )}
+                </div>
 
-              <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
-                <span className="text-gray-500 dark:text-gray-400 shrink-0">Boleto:</span>
-                {boletoHref && !fileEditable ? (
-                  <OcAttachmentActions
-                    url={boletoHref}
-                    fileName={row?.boletoName?.trim() || `Boleto parcela ${romanParcelLabel(i)}`}
-                    icon={Banknote}
-                  />
-                ) : boletoHref && fileEditable ? (
-                  <div className="flex flex-col gap-1 w-full">
-                    <OcAttachmentActions
-                      url={boletoHref}
-                      fileName={row?.boletoName?.trim() || `Boleto parcela ${romanParcelLabel(i)}`}
-                      icon={Banknote}
-                    />
-                    <label className="inline-flex items-center gap-2 text-xs text-violet-700 dark:text-violet-300 cursor-pointer w-fit">
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-violet-100 dark:bg-violet-900/40 font-medium">
-                        <Banknote className="w-3.5 h-3.5" />
-                        Substituir arquivo
+                {boletoHref ? (
+                  <div className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 px-3 py-2.5 dark:border-gray-700">
+                    <div className="min-w-0 flex items-start gap-3">
+                      <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-300">
+                        <Banknote className="h-4 w-4" />
                       </span>
-                      <input
-                        type="file"
-                        accept=".pdf,image/*"
-                        className="hidden"
-                        disabled={row?.uploading}
-                        onChange={(e) => {
-                          const file = e.target.files?.[0];
-                          e.target.value = '';
-                          if (!file) return;
-                          void uploadForIndex(i, file);
-                        }}
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
+                          {boletoName}
+                        </p>
+                        <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">Boleto anexado</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <OcAttachmentActions
+                        url={boletoHref}
+                        fileName={boletoName}
+                        variant="buttons"
                       />
-                    </label>
+                      <label className="cursor-pointer">
+                        <span className="inline-flex items-center gap-1 rounded-md px-2 py-1.5 text-xs font-medium text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100">
+                          <FileUp className="h-3.5 w-3.5" />
+                          Trocar
+                        </span>
+                        <input
+                          type="file"
+                          accept=".pdf,image/*"
+                          className="hidden"
+                          disabled={row?.uploading}
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            e.target.value = '';
+                            if (!file) return;
+                            void uploadForIndex(i, file);
+                          }}
+                        />
+                      </label>
+                    </div>
                   </div>
-                ) : fileEditable ? (
-                  <label className="inline-flex items-center gap-2 text-xs text-violet-700 dark:text-violet-300 cursor-pointer">
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-violet-100 dark:bg-violet-900/40 font-medium">
-                      <Banknote className="w-3.5 h-3.5" />
-                      Escolher arquivo
+                ) : (
+                  <label
+                    className={`flex min-h-14 items-center gap-3 rounded-lg border border-dashed px-3 py-2.5 transition-colors ${
+                      row?.uploading
+                        ? 'cursor-not-allowed border-gray-200 text-gray-400 dark:border-gray-700 dark:text-gray-500'
+                        : 'cursor-pointer border-gray-300 text-gray-700 hover:border-red-400 hover:bg-red-50/40 dark:border-gray-600 dark:text-gray-200 dark:hover:border-red-500/70 dark:hover:bg-red-950/20'
+                    }`}
+                  >
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-300">
+                      {row?.uploading ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <FileUp className="h-4 w-4" />
+                      )}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-medium">
+                        {row?.uploading ? 'Anexando…' : 'Anexar boleto'}
+                      </span>
+                      <span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">
+                        PDF ou imagem
+                      </span>
                     </span>
                     <input
                       type="file"
@@ -410,84 +495,197 @@ function BoletoParcelasListInner({
                         void uploadForIndex(i, file);
                       }}
                     />
-                    {row?.uploading ? (
-                      <span className="text-gray-500 flex items-center gap-1">
-                        <Loader2 className="w-3 h-3 animate-spin" />
-                        Enviando…
-                      </span>
-                    ) : isFutureParcel ? (
-                      <span className="text-gray-400 dark:text-gray-500">opcional</span>
-                    ) : null}
                   </label>
-                ) : (
-                  <span className="text-gray-400 dark:text-gray-500">Não anexado</span>
                 )}
-              </div>
+              </section>
+            );
+          })}
 
-              {showComprovante ? (
-                <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
-                  <span className="text-gray-500 dark:text-gray-400 shrink-0">Comprovante:</span>
-                  {proofHref ? (
-                    <OcAttachmentActions
-                      url={proofHref}
-                      fileName={proofName || `Comprovante parcela ${romanParcelLabel(i)}`}
-                      icon={Receipt}
-                    />
-                  ) : (
-                    <span className="text-gray-400 dark:text-gray-500">—</span>
-                  )}
-                </div>
-              ) : null}
-            </div>
-          </div>
-        );
-      })}
-
-      {editable ? (
-        <div className="pt-2 flex flex-col sm:flex-row sm:justify-end gap-2">
-          {showReleaseButton ? (
+          <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 pt-1">
             <button
               type="button"
-              disabled={releasePending || saving || !amountValidation.valid}
-              onClick={() => {
-                if (!amountValidation.valid) {
-                  toast.error(amountValidation.message || 'Valores das parcelas inválidos.');
-                  return;
-                }
-                onReleaseToPayment?.(order.id);
-              }}
-              className="inline-flex items-center justify-center gap-2 px-3 py-1.5 text-xs font-medium rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
+              disabled={!canSave || saving || releasePending}
+              onClick={() => void handleSave(false)}
+              className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-800 transition-colors hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-40 dark:border-gray-600 dark:text-gray-100 dark:hover:bg-gray-800"
             >
-              {releasePending ? (
+              {saving && !releasePending ? (
                 <>
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  Enviando…
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Salvando…
                 </>
               ) : (
-                <>
-                  <Send className="w-3.5 h-3.5 shrink-0" />
-                  Enviar para Pagamento
-                </>
+                'Salvar'
               )}
             </button>
-          ) : null}
-          <button
-            type="button"
-            disabled={!canSave || saving || releasePending}
-            onClick={() => void handleSave()}
-            className="inline-flex items-center justify-center gap-2 px-3 py-1.5 text-xs font-medium rounded-lg bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50"
-          >
-            {saving ? (
-              <>
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                Salvando…
-              </>
-            ) : (
-              'Salvar parcela atual'
-            )}
-          </button>
+            {showSaveAndRelease ? (
+              <button
+                type="button"
+                disabled={!canSave || saving || releasePending}
+                onClick={() => void handleSave(true)}
+                className="inline-flex items-center justify-center gap-2 rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {releasePending || saving ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    {releasePending ? 'Enviando…' : 'Salvando…'}
+                  </>
+                ) : (
+                  'Salvar e enviar'
+                )}
+              </button>
+            ) : null}
+          </div>
         </div>
-      ) : null}
+      ) : (
+      <div className="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-700 px-4 sm:px-5">
+        <table className="w-full text-xs sm:text-sm">
+          <thead>
+            <tr className="text-left border-b border-gray-200 dark:border-gray-700">
+              <th className="pt-4 pb-3 pr-2 font-medium text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">
+                Parcela
+              </th>
+              <th className="pt-4 pb-3 px-2 font-medium text-xs text-gray-500 dark:text-gray-400 text-center whitespace-nowrap">
+                Vencimento
+              </th>
+              <th className="pt-4 pb-3 px-2 font-medium text-xs text-gray-500 dark:text-gray-400 text-center whitespace-nowrap">
+                Status
+              </th>
+              {(!hideAttachmentLinks || editable) && (
+                <th className="pt-4 pb-3 px-2 font-medium text-xs text-gray-500 dark:text-gray-400 text-center whitespace-nowrap">
+                  Boleto
+                </th>
+              )}
+              {showComprovante ? (
+                <th className="pt-4 pb-3 px-2 font-medium text-xs text-gray-500 dark:text-gray-400 text-center whitespace-nowrap">
+                  Comprovante
+                </th>
+              ) : null}
+              <th className="pt-4 pb-3 pl-2 font-medium text-xs text-gray-500 dark:text-gray-400 text-center whitespace-nowrap">
+                Valor
+              </th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+      {Array.from({ length: n }, (_, i) => {
+        const row = rows[i] ?? buildInitialRows(order)[i];
+        const stored = storedRows[i];
+        const instRow: BoletoInstallmentRow = stored
+          ? { ...draftToRow(row), ...stored }
+          : parsedRows[i] ?? draftToRow(row);
+        const st = rowStatus(instRow);
+        const locked = st === 'PAID' || st === 'AWAITING_PAYMENT';
+        const isActiveParcel = activeIdx === i;
+        const isFutureParcel = activeIdx != null && i > activeIdx && st === 'PENDING_BOLETO';
+        const isWaitingPreviousParcel =
+          !parallelFlow &&
+          i > 0 &&
+          Array.from({ length: i }, (_, previousIndex) => {
+            const previousDraft = rows[previousIndex] ?? buildInitialRows(order)[previousIndex];
+            const previousStored = storedRows[previousIndex];
+            const previousRow: BoletoInstallmentRow = previousStored
+              ? { ...draftToRow(previousDraft), ...previousStored }
+              : parsedRows[previousIndex] ?? draftToRow(previousDraft);
+            return rowStatus(previousRow) !== 'PAID';
+          }).some(Boolean);
+        const isPendingEditable = editable && !locked && st === 'PENDING_BOLETO' && !parallelFlow;
+        const rowEditable = isPendingEditable;
+        const fileEditable = isPendingEditable;
+        const amount = parseMoneyInput(row?.amount ?? '');
+        const rowAmountInvalid =
+          rowEditable &&
+          orderTotal > 0 &&
+          (amount == null ||
+            amount < 0 ||
+            amount > orderTotal + 0.001 ||
+            !amountValidation.valid);
+        const boletoHref = (row?.boletoUrl || instRow?.boletoUrl || '').trim();
+        const proofHref =
+          (instRow?.installmentProofUrl || '').trim() ||
+          ((st === 'PAID' || st === 'AWAITING_PAYMENT') && orderProofUrl ? orderProofUrl : '');
+        const hasProof = !!proofHref;
+        const statusOpts = {
+          orderStatus: order.status,
+          hasProof
+        };
+        const statusClass = isWaitingPreviousParcel
+          ? 'inline-flex px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'
+          : installmentStatusBadgeClass(st, !!boletoHref, statusOpts);
+        const statusLabel = isWaitingPreviousParcel
+          ? 'Aguardando parcela anterior'
+          : installmentStatusLabel(st, !!boletoHref, statusOpts);
+        const proofName =
+          instRow?.installmentProofName?.trim() ||
+          (proofHref === orderProofUrl && orderProofName ? orderProofName : '');
+        const showBoletoLinks = !hideAttachmentLinks;
+        const showProofLinks = showComprovante && !hideAttachmentLinks;
+        const showBoletoColumn = !hideAttachmentLinks || editable;
+
+        return (
+          <tr key={i} className="text-gray-900 dark:text-gray-100">
+            <td className="py-3 pr-2 align-top whitespace-nowrap">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-sm font-medium">
+                  {n > 1 ? `Parcela ${i + 1}` : 'Parcela única'}
+                </span>
+                {editable && isActiveParcel ? (
+                  <span className="text-[10px] font-medium uppercase tracking-wide text-red-600 dark:text-red-400">
+                    Obrigatória
+                  </span>
+                ) : null}
+                {isFutureParcel ? (
+                  <span className="text-[10px] font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">
+                    Opcional
+                  </span>
+                ) : null}
+              </div>
+            </td>
+            <td className="py-3 px-2 text-center align-top whitespace-nowrap">
+              {formatDueDateBr(row?.dueDate || instRow?.dueDate)}
+            </td>
+            <td className="py-3 px-2 text-center align-top whitespace-nowrap">
+              <span className={statusClass}>{statusLabel}</span>
+            </td>
+            {showBoletoColumn ? (
+              <td className="py-3 px-2 text-center align-top">
+                {showBoletoLinks && boletoHref ? (
+                  <OcAttachmentActions
+                    url={boletoHref}
+                    fileName={row?.boletoName?.trim() || `Boleto parcela ${romanParcelLabel(i)}`}
+                    icon={Banknote}
+                  />
+                ) : (
+                  <span className="text-gray-400 dark:text-gray-500">—</span>
+                )}
+              </td>
+            ) : null}
+            {showComprovante ? (
+              <td className="py-3 px-2 text-center align-top">
+                {proofHref && showProofLinks ? (
+                  <OcAttachmentActions
+                    url={proofHref}
+                    fileName={proofName || `Comprovante parcela ${romanParcelLabel(i)}`}
+                    icon={Receipt}
+                  />
+                ) : proofHref && hideAttachmentLinks ? (
+                  <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-300 font-medium text-xs">
+                    <Check className="w-3.5 h-3.5" />
+                    Anexado
+                  </span>
+                ) : (
+                  <span className="text-gray-400 dark:text-gray-500">—</span>
+                )}
+              </td>
+            ) : null}
+            <td className="py-3 pl-2 text-center align-top whitespace-nowrap tabular-nums">
+              <span className="font-medium">{formatMoneyDisplay(amount ?? instRow?.amount)}</span>
+            </td>
+          </tr>
+        );
+      })}
+          </tbody>
+        </table>
+      </div>
+      )}
     </div>
   );
 }

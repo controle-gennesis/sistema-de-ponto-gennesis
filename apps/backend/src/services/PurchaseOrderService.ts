@@ -270,6 +270,18 @@ async function findInvoiceNumberConflict(
   };
 }
 
+/** `OC-2026-0008` → `8` (rótulo curto nas mensagens). */
+function formatOcShortLabel(orderNumber: string): string {
+  const trimmed = orderNumber.trim();
+  const match = trimmed.match(/^OC-\d{4}-(\d+)$/i);
+  if (match) return String(parseInt(match[1], 10));
+  const lastSegment = trimmed.split('-').pop();
+  if (lastSegment && /^\d+$/.test(lastSegment)) {
+    return String(parseInt(lastSegment, 10));
+  }
+  return trimmed;
+}
+
 /**
  * Preenche o número da NF nos lançamentos do Controle Financeiro da OC
  * (quando a NF é anexada depois do lançamento na fase Pagamento).
@@ -327,7 +339,7 @@ async function claimInvoiceNumberForOrder(
   }
   const conflict = await findInvoiceNumberConflict(display, purchaseOrderId);
   if (conflict) {
-    throw new Error(`Nota fiscal já existe na OC ${conflict.orderNumber}`);
+    throw new Error(`Nota fiscal já existe na OC ${formatOcShortLabel(conflict.orderNumber)}`);
   }
   try {
     await prisma.purchaseOrderInvoiceNumber.upsert({
@@ -347,7 +359,7 @@ async function claimInvoiceNumberForOrder(
       const raced = await findInvoiceNumberConflict(display, purchaseOrderId);
       throw new Error(
         raced
-          ? `Nota fiscal já existe na OC ${raced.orderNumber}`
+          ? `Nota fiscal já existe na OC ${formatOcShortLabel(raced.orderNumber)}`
           : 'Nota fiscal já existe'
       );
     }
@@ -2086,9 +2098,16 @@ export class PurchaseOrderService {
     if (!isValidNfNumber(data.nfNumber)) {
       throw new Error('Número da nota fiscal é obrigatório');
     }
+    const list = parseNfAttachments(order.nfAttachments);
+    const incomingKey = normalizeNfNumberKey(data.nfNumber);
+    const alreadyOnOrder = list.some(
+      (nf) => nf.number && normalizeNfNumberKey(nf.number) === incomingKey
+    );
+    if (alreadyOnOrder) {
+      throw new Error('Esta nota fiscal já está anexada nesta OC');
+    }
     const nfNumber = await claimInvoiceNumberForOrder(id, String(data.nfNumber));
     const name = (data.nfName || '').trim() || null;
-    const list = parseNfAttachments(order.nfAttachments);
     list.push({
       url,
       name,
@@ -2166,8 +2185,23 @@ export class PurchaseOrderService {
     }
     const conflict = await findInvoiceNumberConflict(nfNumber, excludeId);
     if (conflict) {
-      throw new Error(`Nota fiscal já existe na OC ${conflict.orderNumber}`);
+      throw new Error(`Nota fiscal já existe na OC ${formatOcShortLabel(conflict.orderNumber)}`);
     }
+  }
+
+  /** Consulta se o nº da NF já está em uso (outra OC). */
+  async checkInvoiceNumberAvailability(
+    nfNumber: string,
+    excludePurchaseOrderId?: string
+  ): Promise<{ available: boolean; conflictOrderNumber?: string }> {
+    if (!isValidNfNumber(nfNumber)) {
+      return { available: true };
+    }
+    const conflict = await findInvoiceNumberConflict(nfNumber, excludePurchaseOrderId);
+    if (conflict) {
+      return { available: false, conflictOrderNumber: conflict.orderNumber };
+    }
+    return { available: true };
   }
 
   /** Reserva o número da NF para a OC (entrada de estoque). */

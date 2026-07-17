@@ -309,6 +309,21 @@ router.get('/:id/stock-receipt', async (req: AuthRequest, res: Response, next: N
   }
 });
 
+router.get('/check-nf-number', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    if (!req.user?.id) throw createError('Usuário não autenticado', 401);
+    const nfNumber = typeof req.query.nfNumber === 'string' ? req.query.nfNumber : '';
+    const excludeId =
+      typeof req.query.excludeId === 'string' && req.query.excludeId.trim()
+        ? req.query.excludeId.trim()
+        : undefined;
+    const data = await service.checkInvoiceNumberAvailability(nfNumber, excludeId);
+    res.json({ success: true, data });
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.get('/:id/pdf-data', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const order = await service.getForPdf(req.params.id);
