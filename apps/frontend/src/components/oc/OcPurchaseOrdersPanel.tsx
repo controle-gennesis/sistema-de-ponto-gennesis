@@ -2489,7 +2489,7 @@ export function OcPurchaseOrdersPanel({
     }
     if (lastOcDetailOrderIdRef.current !== orderId) {
       lastOcDetailOrderIdRef.current = orderId;
-      setOcDetailTab(defaultOcDetailModalTab(selectedOrder.status));
+      setOcDetailTab(defaultOcDetailModalTab(selectedOrder?.status ?? ''));
     }
   }, [selectedOrder?.id]);
 
