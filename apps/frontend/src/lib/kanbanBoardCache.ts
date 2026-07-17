@@ -1,6 +1,6 @@
 import type { KanbanBoard } from '@/lib/kanban';
 
-const STORAGE_PREFIX = 'kanban-board-cache:';
+const STORAGE_PREFIX = 'kanban-board-cache:v2:';
 
 export function readKanbanBoardCache(departmentKey: string): KanbanBoard | undefined {
   if (typeof sessionStorage === 'undefined') return undefined;

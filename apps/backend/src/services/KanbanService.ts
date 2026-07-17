@@ -240,6 +240,16 @@ function formatCard(card: {
   workHours?: { toNumber?: () => number } | number | null;
   assignee?: { id: string; name: string; profilePhotoUrl: string | null } | null;
   members?: Array<{ user: { id: string; name: string; profilePhotoUrl: string | null } }>;
+  checklistItems?: Array<{
+    id: string;
+    cardId: string;
+    title: string;
+    isDone: boolean;
+    position: number;
+    dueDate: Date | null;
+    assigneeUserId: string | null;
+    assignee?: { id: string; name: string; profilePhotoUrl: string | null } | null;
+  }>;
   _count?: { comments: number; attachments: number };
 }) {
   const members = formatMembersList(card);
@@ -274,6 +284,9 @@ function formatCard(card: {
     updatedAt: card.updatedAt?.toISOString() ?? card.createdAt.toISOString(),
     completedAt: card.completedAt?.toISOString() ?? null,
     workHours: card.workHours != null ? Number(card.workHours) : null,
+    ...(card.checklistItems
+      ? { checklistItems: card.checklistItems.map((item) => formatChecklistItem(item)) }
+      : {}),
   };
 }
 
@@ -335,6 +348,10 @@ const boardListCardInclude = {
     orderBy: { createdAt: 'asc' as const },
     include: { user: { select: memberUserSelect } },
   },
+  checklistItems: {
+    orderBy: { position: 'asc' as const },
+    include: { assignee: { select: memberUserSelect } },
+  },
   _count: { select: { comments: true, attachments: true } },
 } as const;
 
@@ -343,6 +360,10 @@ const cardInclude = {
   members: {
     orderBy: { createdAt: 'asc' as const },
     include: { user: { select: memberUserSelect } },
+  },
+  checklistItems: {
+    orderBy: { position: 'asc' as const },
+    include: { assignee: { select: memberUserSelect } },
   },
   _count: { select: { comments: true, attachments: true } },
 } as const;

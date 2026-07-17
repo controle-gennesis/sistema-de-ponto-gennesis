@@ -52,6 +52,7 @@ import {
   patchColumnInBoardCache,
   patchCardInBoardCache,
   syncCardOnBoardCache,
+  seedKanbanCardCacheFromBoard,
   type KanbanBoardCardChecklistPatch,
   fetchKanbanCard,
   isOptimisticKanbanCardId,
@@ -2669,16 +2670,18 @@ function KanbanPage() {
   );
 
   function openCreateCardDetail(card: KanbanCard, columnId: string) {
-    prefetchKanbanCard(card.id);
     const column = columns.find((col) => col.id === columnId);
+    const initialColumn = column
+      ? { title: column.title, color: column.color }
+      : undefined;
+    seedKanbanCardCacheFromBoard(queryClient, card, columnId, initialColumn);
+    prefetchKanbanCard(card.id);
     setCardModal({
       mode: 'detail',
       cardId: card.id,
       columnId,
       initialCard: card,
-      initialColumn: column
-        ? { title: column.title, color: column.color }
-        : undefined,
+      initialColumn,
     });
   }
 
@@ -2893,16 +2896,18 @@ function KanbanPage() {
   }
 
   function openEditCard(card: KanbanCard, columnId: string) {
-    prefetchKanbanCard(card.id);
     const column = columns.find((col) => col.id === columnId);
+    const initialColumn = column
+      ? { title: column.title, color: column.color }
+      : undefined;
+    seedKanbanCardCacheFromBoard(queryClient, card, columnId, initialColumn);
+    prefetchKanbanCard(card.id);
     setCardModal({
       mode: 'detail',
       cardId: card.id,
       columnId,
       initialCard: card,
-      initialColumn: column
-        ? { title: column.title, color: column.color }
-        : undefined,
+      initialColumn,
     });
   }
 

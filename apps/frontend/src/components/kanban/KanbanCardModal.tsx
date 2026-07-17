@@ -477,6 +477,7 @@ export function KanbanCardModal({
         totalTasks: detail.totalTasks,
         progress: detail.progress,
         checklistEnabled: detail.checklistEnabled,
+        checklistItems: detail.checklistItems,
       });
     },
     [onBoardCardPatch],

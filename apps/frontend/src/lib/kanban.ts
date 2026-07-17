@@ -32,6 +32,8 @@ export interface KanbanCard {
   completedTasks: number;
   checklistEnabled: boolean;
   attachmentsEnabled: boolean;
+  /** Presente no payload do quadro para abrir o modal sem esperar o fetch do card. */
+  checklistItems?: KanbanChecklistItem[];
   labels: KanbanCardLabel[];
   attachments: number;
   comments: number;
@@ -222,7 +224,9 @@ export async function updateKanbanBoardLabelPresets(
 export type KanbanBoardCardChecklistPatch = Pick<
   KanbanCard,
   'completedTasks' | 'totalTasks' | 'progress' | 'checklistEnabled'
->;
+> & {
+  checklistItems?: KanbanChecklistItem[];
+};
 
 /** Atualiza contadores de checklist de um card no cache do board (sem refetch). */
 export function patchCardInBoardCache(
@@ -237,17 +241,29 @@ export function patchCardInBoardCache(
     let colChanged = false;
     const cards = col.cards.map((card) => {
       if (card.id !== cardId) return card;
+      const nextItems = patch.checklistItems ?? card.checklistItems;
+      const itemsUnchanged =
+        patch.checklistItems === undefined ||
+        (card.checklistItems === patch.checklistItems);
       if (
         card.completedTasks === patch.completedTasks &&
         card.totalTasks === patch.totalTasks &&
         card.progress === patch.progress &&
-        card.checklistEnabled === patch.checklistEnabled
+        card.checklistEnabled === patch.checklistEnabled &&
+        itemsUnchanged
       ) {
         return card;
       }
       colChanged = true;
       changed = true;
-      return { ...card, ...patch };
+      return {
+        ...card,
+        completedTasks: patch.completedTasks,
+        totalTasks: patch.totalTasks,
+        progress: patch.progress,
+        checklistEnabled: patch.checklistEnabled,
+        ...(patch.checklistItems !== undefined ? { checklistItems: nextItems } : {}),
+      };
     });
     return colChanged ? { ...col, cards } : col;
   });
@@ -353,13 +369,15 @@ export function kanbanDetailToBoardCard(detail: KanbanCardDetail): KanbanCard {
     columnId: _columnId,
     columnTitle: _columnTitle,
     columnColor: _columnColor,
-    checklistItems: _checklistItems,
     commentsList: _commentsList,
     attachmentsList: _attachmentsList,
     updatedAt: _updatedAt,
     ...card
   } = detail;
-  return card;
+  return {
+    ...card,
+    checklistItems: detail.checklistItems,
+  };
 }
 
 /**
@@ -394,7 +412,12 @@ export function syncCardOnBoardCache(
       const cards = col.cards.map((c) => {
         if (c.id !== card.id) return c;
         changed = true;
-        return { ...c, ...card };
+        return {
+          ...c,
+          ...card,
+          // Não apaga tarefas do board se a resposta da API não trouxe a lista.
+          checklistItems: card.checklistItems ?? c.checklistItems,
+        };
       });
       return changed ? { ...col, cards } : col;
     });
@@ -666,7 +689,53 @@ export function normalizeKanbanCardDetail(data: KanbanCardDetail): KanbanCardDet
 
 export const kanbanCardQueryKey = (cardId: string) => ['kanban-card', cardId] as const;
 
-/** Dados do board para exibir a modal antes do fetch completo (checklist, comentários, anexos). */
+/**
+ * Semear o cache do card com as tarefas já presentes no quadro,
+ * para o modal abrir a checklist na hora (sem esperar o GET do card).
+ * Marca o cache como stale para o fetch completo (comentários/anexos) seguir.
+ */
+export function seedKanbanCardCacheFromBoard(
+  queryClient: {
+    getQueryData: <T>(key: readonly unknown[]) => T | undefined;
+    setQueryData: <T>(
+      key: readonly unknown[],
+      updater: T | ((old: T | undefined) => T),
+      options?: { updatedAt?: number },
+    ) => void;
+  },
+  card: KanbanCard,
+  columnId: string,
+  column?: { title: string; color: string },
+): void {
+  const key = kanbanCardQueryKey(card.id);
+  const boardItems = Array.isArray(card.checklistItems) ? card.checklistItems : [];
+  const existing = queryClient.getQueryData<KanbanCardDetail>(key);
+
+  // Já temos a lista (de um GET anterior ou seed recente) — não sobrescreve.
+  if (existing?.checklistItems && existing.checklistItems.length > 0) {
+    return;
+  }
+  if (boardItems.length === 0) {
+    return;
+  }
+
+  const placeholder = boardCardToDetailPlaceholder(card, columnId, column);
+  const next: KanbanCardDetail = existing
+    ? {
+        ...existing,
+        checklistItems: boardItems,
+        totalTasks: card.totalTasks,
+        completedTasks: card.completedTasks,
+        checklistEnabled: card.checklistEnabled,
+        progress: card.progress,
+      }
+    : placeholder;
+
+  // updatedAt: 0 → continua stale e o prefetch/fetch busca comentários/anexos.
+  queryClient.setQueryData<KanbanCardDetail>(key, next, { updatedAt: 0 });
+}
+
+/** Dados do board para exibir a modal antes do fetch completo (comentários, anexos). */
 export function boardCardToDetailPlaceholder(
   card: KanbanCard,
   columnId: string,
@@ -680,7 +749,7 @@ export function boardCardToDetailPlaceholder(
     columnTitle: column?.title ?? '',
     columnColor: column?.color ?? '',
     updatedAt: card.createdAt,
-    checklistItems: [],
+    checklistItems: Array.isArray(card.checklistItems) ? card.checklistItems : [],
     commentsList: [],
     attachmentsList: [],
   });
