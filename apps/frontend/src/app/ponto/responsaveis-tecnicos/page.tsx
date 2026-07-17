@@ -96,10 +96,37 @@ const EMPTY_FORM: FormState = {
   status: 'ATIVO',
 };
 
+const UF_SIGLAS = [
+  'AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA',
+  'MT', 'MS', 'MG', 'PA', 'PB', 'PR', 'PE', 'PI', 'RJ', 'RN',
+  'RS', 'RO', 'RR', 'SC', 'SP', 'SE', 'TO',
+] as const;
+
 const STATUS_FILTER_OPTIONS = labeledToSelectOptions([
-  { value: 'all', label: 'Todos os status' },
+  { value: 'all', label: 'Todos' },
   { value: 'ATIVO', label: 'Ativos' },
   { value: 'BAIXADA', label: 'Baixadas' },
+]);
+
+const EMPRESA_FILTER_OPTIONS = labeledToSelectOptions([
+  { value: 'all', label: 'Todas' },
+  { value: 'GENNESIS', label: 'GENNESIS' },
+  { value: 'ENGPAC', label: 'ENGPAC' },
+  { value: 'ECONTECX', label: 'ECONTECX' },
+  { value: 'CONSÓRCIO UNB', label: 'CONSÓRCIO UNB' },
+  { value: 'CONSÓRCIO HUB', label: 'CONSÓRCIO HUB' },
+]);
+
+const CREA_FILTER_OPTIONS = labeledToSelectOptions([
+  { value: 'all', label: 'Todos' },
+  ...UF_SIGLAS.map((uf) => ({ value: uf, label: `CREA-${uf}` })),
+]);
+
+const ANUIDADE_FILTER_OPTIONS = labeledToSelectOptions([
+  { value: 'all', label: 'Todas' },
+  { value: 'PAGO', label: 'PAGO' },
+  { value: 'PENDENTE', label: 'PENDENTE' },
+  { value: 'VENCIDO', label: 'VENCIDO' },
 ]);
 
 const STATUS_FORM_OPTIONS = labeledToSelectOptions([
@@ -120,12 +147,6 @@ const EMPRESA_FORM_OPTIONS = labeledToSelectOptions([
   { value: 'CONSÓRCIO UNB', label: 'CONSÓRCIO UNB' },
   { value: 'CONSÓRCIO HUB', label: 'CONSÓRCIO HUB' },
 ]);
-
-const UF_SIGLAS = [
-  'AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA',
-  'MT', 'MS', 'MG', 'PA', 'PB', 'PR', 'PE', 'PI', 'RJ', 'RN',
-  'RS', 'RO', 'RR', 'SC', 'SP', 'SE', 'TO',
-] as const;
 
 const CREA_UF_FORM_OPTIONS = labeledToSelectOptions(
   UF_SIGLAS.map((uf) => ({ value: uf, label: uf })),
@@ -164,6 +185,11 @@ function ResponsaveisTecnicosContent() {
 
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [empresaFilter, setEmpresaFilter] = useState('all');
+  const [creaFilter, setCreaFilter] = useState('all');
+  const [anuidadeFilter, setAnuidadeFilter] = useState('all');
+  const [dataInicioDeFilter, setDataInicioDeFilter] = useState('');
+  const [dataInicioAteFilter, setDataInicioAteFilter] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
 
@@ -180,12 +206,44 @@ function ResponsaveisTecnicosContent() {
   const [isImportDragging, setIsImportDragging] = useState(false);
   const [importing, setImporting] = useState(false);
 
+  const hasActiveFilters =
+    statusFilter !== 'all' ||
+    empresaFilter !== 'all' ||
+    creaFilter !== 'all' ||
+    anuidadeFilter !== 'all' ||
+    !!dataInicioDeFilter ||
+    !!dataInicioAteFilter;
+
+  const clearFilters = () => {
+    setStatusFilter('all');
+    setEmpresaFilter('all');
+    setCreaFilter('all');
+    setAnuidadeFilter('all');
+    setDataInicioDeFilter('');
+    setDataInicioAteFilter('');
+    setCurrentPage(1);
+  };
+
   const { data, isLoading, isError, error } = useQuery({
-    queryKey: ['responsaveis-tecnicos', searchTerm, statusFilter],
+    queryKey: [
+      'responsaveis-tecnicos',
+      searchTerm,
+      statusFilter,
+      empresaFilter,
+      creaFilter,
+      anuidadeFilter,
+      dataInicioDeFilter,
+      dataInicioAteFilter,
+    ],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (searchTerm.trim()) params.set('q', searchTerm.trim());
       if (statusFilter && statusFilter !== 'all') params.set('status', statusFilter);
+      if (empresaFilter && empresaFilter !== 'all') params.set('empresa', empresaFilter);
+      if (creaFilter && creaFilter !== 'all') params.set('crea', creaFilter);
+      if (anuidadeFilter && anuidadeFilter !== 'all') params.set('anuidade', anuidadeFilter);
+      if (dataInicioDeFilter) params.set('dataInicioDe', dataInicioDeFilter);
+      if (dataInicioAteFilter) params.set('dataInicioAte', dataInicioAteFilter);
       const qs = params.toString();
       const res = await api.get(`/responsaveis-tecnicos${qs ? `?${qs}` : ''}`);
       return (res.data?.data || []) as ResponsavelTecnico[];
@@ -442,15 +500,15 @@ function ResponsaveisTecnicosContent() {
                 type="button"
                 onClick={() => setShowFilters(true)}
                 className={`relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition-colors ${
-                  statusFilter !== 'all'
+                  hasActiveFilters
                     ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40'
                     : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
                 }`}
                 aria-label="Abrir filtro"
-                title={statusFilter !== 'all' ? 'Filtro (status ativo)' : 'Filtro'}
+                title={hasActiveFilters ? 'Filtro ativo' : 'Filtro'}
               >
                 <Filter className="h-4 w-4" />
-                {statusFilter !== 'all' ? (
+                {hasActiveFilters ? (
                   <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
                 ) : null}
               </button>
@@ -665,10 +723,83 @@ function ResponsaveisTecnicosContent() {
                 <X className="h-4 w-4" />
               </button>
             </div>
-            <div className="space-y-4 px-5 py-4">
+            <div className="max-h-[70vh] space-y-4 overflow-y-auto px-5 py-4">
               <div>
                 <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Exibir
+                  Empresa
+                </label>
+                <StringSingleSelectDropdown
+                  value={empresaFilter}
+                  onChange={(v) => {
+                    setEmpresaFilter(v || 'all');
+                    setCurrentPage(1);
+                  }}
+                  options={EMPRESA_FILTER_OPTIONS}
+                  allowEmpty={false}
+                />
+              </div>
+              <div>
+                <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  CREA
+                </label>
+                <StringSingleSelectDropdown
+                  value={creaFilter}
+                  onChange={(v) => {
+                    setCreaFilter(v || 'all');
+                    setCurrentPage(1);
+                  }}
+                  options={CREA_FILTER_OPTIONS}
+                  allowEmpty={false}
+                />
+              </div>
+              <div>
+                <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Data de início
+                </label>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">De</span>
+                    <input
+                      type="date"
+                      className={inputClass}
+                      value={dataInicioDeFilter}
+                      onChange={(e) => {
+                        setDataInicioDeFilter(e.target.value);
+                        setCurrentPage(1);
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">Até</span>
+                    <input
+                      type="date"
+                      className={inputClass}
+                      value={dataInicioAteFilter}
+                      onChange={(e) => {
+                        setDataInicioAteFilter(e.target.value);
+                        setCurrentPage(1);
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
+              <div>
+                <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Anuidade
+                </label>
+                <StringSingleSelectDropdown
+                  value={anuidadeFilter}
+                  onChange={(v) => {
+                    setAnuidadeFilter(v || 'all');
+                    setCurrentPage(1);
+                  }}
+                  options={ANUIDADE_FILTER_OPTIONS}
+                  allowEmpty={false}
+                />
+              </div>
+              <div>
+                <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Status
                 </label>
                 <StringSingleSelectDropdown
                   value={statusFilter}
@@ -679,14 +810,16 @@ function ResponsaveisTecnicosContent() {
                   options={STATUS_FILTER_OPTIONS}
                   allowEmpty={false}
                 />
+                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  Ativos e baixadas. Use Anuidade para PAGO / PENDENTE / VENCIDO.
+                </p>
               </div>
             </div>
             <div className="flex items-center justify-between gap-2 border-t border-gray-200 px-5 py-4 dark:border-gray-700">
               <button
                 type="button"
                 onClick={() => {
-                  setStatusFilter('all');
-                  setCurrentPage(1);
+                  clearFilters();
                   setShowFilters(false);
                 }}
                 className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"

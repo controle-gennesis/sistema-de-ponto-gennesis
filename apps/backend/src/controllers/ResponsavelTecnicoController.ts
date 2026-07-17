@@ -72,13 +72,48 @@ export class ResponsavelTecnicoController {
     try {
       const q = String(req.query.q || '').trim();
       const status = String(req.query.status || '').trim();
+      const empresa = String(req.query.empresa || '').trim();
+      const crea = String(req.query.crea || '').trim();
+      const anuidade = String(req.query.anuidade || '').trim();
+      const dataInicioDe = String(req.query.dataInicioDe || '').trim();
+      const dataInicioAte = String(req.query.dataInicioAte || '').trim();
 
       const where: Prisma.ResponsavelTecnicoWhereInput = {};
       if (status && status !== 'all') {
         where.status = status.toUpperCase();
       }
-      if (q) {
+      if (empresa && empresa !== 'all') {
+        where.empresa = { equals: empresa, mode: 'insensitive' };
+      }
+      if (crea && crea !== 'all') {
+        const creaNorm = crea.toUpperCase();
         where.OR = [
+          { crea: { equals: creaNorm, mode: 'insensitive' } },
+          { uf: { equals: creaNorm.slice(0, 2), mode: 'insensitive' } },
+          { crea: { contains: creaNorm, mode: 'insensitive' } },
+        ];
+      }
+      if (anuidade && anuidade !== 'all') {
+        where.anuidade2026 = { equals: anuidade, mode: 'insensitive' };
+      }
+      if (dataInicioDe || dataInicioAte) {
+        where.dataInicio = {};
+        if (dataInicioDe) {
+          const d = parseDate(dataInicioDe);
+          if (d) where.dataInicio.gte = d;
+        }
+        if (dataInicioAte) {
+          const d = parseDate(dataInicioAte);
+          if (d) {
+            // inclui o dia inteiro
+            const end = new Date(d);
+            end.setHours(23, 59, 59, 999);
+            where.dataInicio.lte = end;
+          }
+        }
+      }
+      if (q) {
+        const textOr: Prisma.ResponsavelTecnicoWhereInput[] = [
           { crea: { contains: q, mode: 'insensitive' } },
           { profissional: { contains: q, mode: 'insensitive' } },
           { empresa: { contains: q, mode: 'insensitive' } },
@@ -87,6 +122,13 @@ export class ResponsavelTecnicoController {
           { protocolo: { contains: q, mode: 'insensitive' } },
           { titulo: { contains: q, mode: 'insensitive' } },
         ];
+        // Se já há OR de CREA, combina com AND
+        if (where.OR) {
+          where.AND = [{ OR: where.OR }, { OR: textOr }];
+          delete where.OR;
+        } else {
+          where.OR = textOr;
+        }
       }
 
       const rows = await prisma.responsavelTecnico.findMany({
