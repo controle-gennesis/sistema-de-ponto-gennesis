@@ -579,17 +579,24 @@ export class LicitacaoController {
       const current = await licitacaoService.getById(req.params.id);
       if (!current) throw createError('Licitação não encontrada', 404);
 
-      const claimedById =
+      const claimedIds =
         typeof current.analiseJson?.responsavelAnaliseId === 'string'
-          ? current.analiseJson.responsavelAnaliseId.trim()
-          : '';
-      if (claimedById && claimedById !== req.user!.id && !req.user!.isAdmin) {
+          ? current.analiseJson.responsavelAnaliseId
+              .split(/[,;|]/)
+              .map((part) => part.trim())
+              .filter(Boolean)
+          : [];
+      if (
+        claimedIds.length > 0 &&
+        !claimedIds.includes(req.user!.id) &&
+        !req.user!.isAdmin
+      ) {
         const claimedByName =
           (typeof current.analiseJson?.responsavelAnalise === 'string' &&
             current.analiseJson.responsavelAnalise.trim()) ||
           'outro usuário';
         throw createError(
-          `Esta análise está assumida por ${claimedByName}. Peça a liberação ou assuma outra solicitação.`,
+          `Esta análise está assumida por ${claimedByName}. Assuma a tarefa para editar ou peça a liberação.`,
           403
         );
       }
@@ -621,7 +628,18 @@ export class LicitacaoController {
         req.user!.id,
         user?.name ?? ''
       );
-      res.json({ success: true, data, message: 'Análise assumida com sucesso.' });
+      const names =
+        typeof data.analiseJson?.responsavelAnalise === 'string'
+          ? data.analiseJson.responsavelAnalise.trim()
+          : '';
+      const isShared = names.includes(',');
+      res.json({
+        success: true,
+        data,
+        message: isShared
+          ? 'Você entrou na análise. Responsáveis atualizados.'
+          : 'Análise assumida com sucesso.',
+      });
     } catch (error) {
       if (error instanceof Error && error.message.includes('já foi assumida')) {
         next(createError(error.message, 409));

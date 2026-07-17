@@ -329,6 +329,38 @@ function parseAnaliseJson(raw: unknown): LicitacaoAnalisePersistida {
   };
 }
 
+/** IDs de responsáveis (legado: um UUID; atual: lista separada por vírgula). */
+export function parseResponsavelAnaliseIds(raw: string | null | undefined): string[] {
+  if (!raw?.trim()) return [];
+  const seen = new Set<string>();
+  const ids: string[] = [];
+  for (const part of raw.split(/[,;|]/)) {
+    const id = part.trim();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    ids.push(id);
+  }
+  return ids;
+}
+
+/** Primeiro e segundo nome para exibição concatenada. */
+export function shortPersonName(fullName: string | null | undefined): string {
+  const parts = (fullName ?? '').trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return 'Usuário';
+  if (parts.length === 1) return parts[0];
+  return `${parts[0]} ${parts[1]}`;
+}
+
+async function resolveResponsaveisShortNames(userIds: string[]): Promise<string[]> {
+  if (userIds.length === 0) return [];
+  const users = await getPrisma().user.findMany({
+    where: { id: { in: userIds } },
+    select: { id: true, name: true },
+  });
+  const byId = new Map(users.map((u) => [u.id, shortPersonName(u.name)]));
+  return userIds.map((id) => byId.get(id) || 'Usuário');
+}
+
 function mergeAnaliseJson(
   current: unknown,
   patch: Partial<LicitacaoAnalisePersistida>
@@ -760,29 +792,44 @@ export class LicitacaoService {
     if (!current) throw new Error('Licitação não encontrada');
 
     const analise = parseAnaliseJson(current.analiseJson);
-    const claimedById = analise.responsavelAnaliseId?.trim() || null;
-    if (claimedById && claimedById !== userId) {
-      const claimedByName = analise.responsavelAnalise?.trim() || 'outro usuário';
-      throw new Error(`Esta análise já foi assumida por ${claimedByName}.`);
+    const claimedIds = parseResponsavelAnaliseIds(analise.responsavelAnaliseId);
+
+    if (claimedIds.includes(userId)) {
+      // Já está na lista — só normaliza nomes curtos se necessário.
+      const names = await resolveResponsaveisShortNames(claimedIds);
+      const joinedNames = names.join(', ');
+      if (analise.responsavelAnalise?.trim() === joinedNames) {
+        return serializeLicitacao(current);
+      }
+      const row = await licitacaoStoreUpdate(id, {
+        analiseJson: mergeAnaliseJson(current.analiseJson, {
+          responsavelAnalise: joinedNames,
+          responsavelAnaliseId: claimedIds.join(','),
+        }),
+      });
+      return serializeLicitacao(row);
     }
 
-    let name = userName?.trim() || '';
-    if (!name) {
+    const nextIds = [...claimedIds, userId];
+    let shortName = shortPersonName(userName);
+    if (!userName?.trim()) {
       const user = await getPrisma().user.findUnique({
         where: { id: userId },
         select: { name: true },
       });
-      name = user?.name?.trim() || analise.responsavelAnalise?.trim() || 'Usuário';
+      shortName = shortPersonName(user?.name);
     }
 
-    if (claimedById === userId && analise.responsavelAnalise?.trim() === name) {
-      return serializeLicitacao(current);
-    }
+    // Reconstrói a lista de nomes a partir dos IDs (e do nome recém-assumido).
+    const existingNames = claimedIds.length
+      ? await resolveResponsaveisShortNames(claimedIds)
+      : [];
+    const nextNames = [...existingNames, shortName];
 
     const row = await licitacaoStoreUpdate(id, {
       analiseJson: mergeAnaliseJson(current.analiseJson, {
-        responsavelAnalise: name,
-        responsavelAnaliseId: userId,
+        responsavelAnalise: nextNames.join(', '),
+        responsavelAnaliseId: nextIds.join(','),
         responsavelAnaliseEm: new Date().toISOString(),
       }),
     });
@@ -794,8 +841,9 @@ export class LicitacaoService {
     if (!current) throw new Error('Licitação não encontrada');
 
     const analise = parseAnaliseJson(current.analiseJson);
-    const claimedById = analise.responsavelAnaliseId?.trim() || null;
-    if (!claimedById) {
+    const claimedIds = parseResponsavelAnaliseIds(analise.responsavelAnaliseId);
+
+    if (claimedIds.length === 0) {
       // Limpa nome legado sem trava real, se ainda existir.
       if (!analise.responsavelAnalise?.trim()) {
         return serializeLicitacao(current);
@@ -809,15 +857,33 @@ export class LicitacaoService {
       });
       return serializeLicitacao(row);
     }
-    if (claimedById !== userId && !isAdmin) {
+
+    const isClaimant = claimedIds.includes(userId);
+    if (!isClaimant && !isAdmin) {
       throw new Error('Somente quem assumiu a análise (ou um administrador) pode liberá-la.');
     }
 
+    // Quem assumiu remove a si; admin que não está na lista libera todos.
+    const nextIds =
+      isClaimant ? claimedIds.filter((idItem) => idItem !== userId) : [];
+
+    if (nextIds.length === 0) {
+      const row = await licitacaoStoreUpdate(id, {
+        analiseJson: mergeAnaliseJson(current.analiseJson, {
+          responsavelAnalise: null,
+          responsavelAnaliseId: null,
+          responsavelAnaliseEm: null,
+        }),
+      });
+      return serializeLicitacao(row);
+    }
+
+    const nextNames = await resolveResponsaveisShortNames(nextIds);
     const row = await licitacaoStoreUpdate(id, {
       analiseJson: mergeAnaliseJson(current.analiseJson, {
-        responsavelAnalise: null,
-        responsavelAnaliseId: null,
-        responsavelAnaliseEm: null,
+        responsavelAnalise: nextNames.join(', '),
+        responsavelAnaliseId: nextIds.join(','),
+        responsavelAnaliseEm: analise.responsavelAnaliseEm ?? new Date().toISOString(),
       }),
     });
     return serializeLicitacao(row);
