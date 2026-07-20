@@ -643,6 +643,22 @@ async function moveKanbanCardToColumn(
   });
 }
 
+/** Garante posições contíguas 0..n-1 (evita ordem instável após race/gaps). */
+async function renumberKanbanColumnCards(tx: Prisma.TransactionClient, columnId: string) {
+  await tx.$executeRaw`
+    WITH ordered AS (
+      SELECT id, (ROW_NUMBER() OVER (ORDER BY position ASC, "createdAt" ASC) - 1)::int AS new_pos
+      FROM kanban_cards
+      WHERE "columnId" = ${columnId}
+    )
+    UPDATE kanban_cards AS c
+    SET position = ordered.new_pos
+    FROM ordered
+    WHERE c.id = ordered.id
+      AND c.position IS DISTINCT FROM ordered.new_pos
+  `;
+}
+
 export class KanbanService {
   private boardAccessSelect = {
     id: true,
@@ -1671,18 +1687,102 @@ export class KanbanService {
     const card = await prisma.$transaction(async (tx) => {
       if (targetColumnId !== existing.columnId) {
         await moveKanbanCardToColumn(tx, id, existing.columnId, targetColumnId, insertAt);
+        await renumberKanbanColumnCards(tx, existing.columnId);
+        await renumberKanbanColumnCards(tx, targetColumnId);
       } else {
         await reorderKanbanCardInColumn(tx, id, existing.columnId, insertAt);
+        await renumberKanbanColumnCards(tx, existing.columnId);
       }
+
+      // columnId/position já aplicados acima — não reenviar columnId.
+      const { columnId: _omitColumnId, ...metaWithoutColumn } = baseUpdateData;
+      void _omitColumnId;
 
       return tx.kanbanCard.update({
         where: { id },
-        data: baseUpdateData,
+        data: metaWithoutColumn,
         include: boardListCardInclude,
       });
     });
 
     return formatCard(card);
+  }
+
+  /**
+   * Move/reordena card com resposta mínima — usado pelo drag-and-drop do board.
+   * Evita o PATCH genérico (checklist/membros) que deixava o save lento.
+   */
+  async moveCard(
+    userId: string,
+    id: string,
+    data: { columnId: string; position: number },
+  ): Promise<{ id: string; columnId: string; position: number }> {
+    const existing = await prisma.kanbanCard.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        columnId: true,
+        position: true,
+        column: {
+          select: {
+            board: { select: this.boardAccessSelect },
+          },
+        },
+      },
+    });
+    if (!existing) throw new Error('Card não encontrado');
+    await this.assertBoardAccess(userId, existing.column.board, 'write');
+
+    const targetColumnId = data.columnId;
+    if (!targetColumnId) throw new Error('Coluna obrigatória');
+    const insertAt =
+      data.position != null && Number.isFinite(data.position)
+        ? Math.max(0, Math.trunc(data.position))
+        : 0;
+
+    if (targetColumnId !== existing.columnId) {
+      await this.assertColumnAccess(userId, targetColumnId);
+    }
+
+    let completedAt: Date | null | undefined;
+    if (targetColumnId !== existing.columnId) {
+      const targetColumn = await prisma.kanbanColumn.findUnique({
+        where: { id: targetColumnId },
+        select: { title: true },
+      });
+      if (targetColumn && isKanbanCompletedColumnTitle(targetColumn.title)) {
+        completedAt = new Date();
+      } else {
+        completedAt = null;
+      }
+    }
+
+    const updated = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM kanban_cards WHERE id = ${id} FOR UPDATE`;
+
+      if (targetColumnId !== existing.columnId) {
+        await moveKanbanCardToColumn(tx, id, existing.columnId, targetColumnId, insertAt);
+        await renumberKanbanColumnCards(tx, existing.columnId);
+        await renumberKanbanColumnCards(tx, targetColumnId);
+      } else if (insertAt !== existing.position) {
+        await reorderKanbanCardInColumn(tx, id, existing.columnId, insertAt);
+        await renumberKanbanColumnCards(tx, existing.columnId);
+      }
+
+      if (completedAt !== undefined) {
+        await tx.kanbanCard.update({
+          where: { id },
+          data: { completedAt },
+        });
+      }
+
+      return tx.kanbanCard.findUniqueOrThrow({
+        where: { id },
+        select: { id: true, columnId: true, position: true },
+      });
+    });
+
+    return updated;
   }
 
   async getCardCost(userId: string, cardId: string) {

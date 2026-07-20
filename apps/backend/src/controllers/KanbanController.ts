@@ -441,6 +441,32 @@ export class KanbanController {
     }
   }
 
+  async moveCard(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = requireUserId(req, next);
+      if (!userId) return;
+      const { id } = req.params;
+      const columnId = typeof req.body?.columnId === 'string' ? req.body.columnId : '';
+      const position = req.body?.position != null ? Number(req.body.position) : NaN;
+      if (!columnId || !Number.isFinite(position)) {
+        return next(createError('columnId e position são obrigatórios', 400));
+      }
+
+      const card = await kanbanService.moveCard(userId, id, {
+        columnId,
+        position,
+      });
+
+      res.json({ success: true, data: card });
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : '';
+      if (msg === 'Card não encontrado' || (error as { code?: string })?.code === 'P2025') {
+        return next(createError('Card não encontrado', 404));
+      }
+      handleKanbanError(error, next);
+    }
+  }
+
   async duplicateCard(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const userId = requireUserId(req, next);

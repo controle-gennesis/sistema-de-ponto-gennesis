@@ -618,8 +618,9 @@ const kanbanCardPatchChain = new Map<string, Promise<unknown>>();
 
 /** Fila de move: coalescida (só a última posição importa) e independente do PATCH de meta. */
 type KanbanCardMovePayload = { columnId: string; position: number };
+type KanbanCardMoveResult = { id: string; columnId: string; position: number };
 const kanbanCardMovePending = new Map<string, KanbanCardMovePayload>();
-const kanbanCardMoveInflight = new Map<string, Promise<KanbanCard>>();
+const kanbanCardMoveInflight = new Map<string, Promise<KanbanCardMoveResult>>();
 
 /**
  * Serializa PATCH no mesmo card — evita race entre move (position/columnId) e
@@ -646,6 +647,12 @@ export async function updateKanbanCard(
   },
   options?: { timeout?: number },
 ) {
+  // Meta não pode correr em paralelo com move — sobrescrevia coluna/posição.
+  const moveInflight = kanbanCardMoveInflight.get(id);
+  if (moveInflight) {
+    await moveInflight.catch(() => undefined);
+  }
+
   const previous = kanbanCardPatchChain.get(id) ?? Promise.resolve();
   const run = previous
     .catch(() => undefined)
@@ -666,14 +673,14 @@ export async function updateKanbanCard(
 }
 
 /**
- * Persiste só coluna/posição do card. Não espera PATCHes de meta do mesmo card
- * e coalescia moves em sequência (só a última posição é enviada).
+ * Persiste só coluna/posição do card via endpoint leve.
+ * Coalescia moves em sequência (só a última posição é enviada) e não espera PATCH de meta.
  */
 export async function moveKanbanCard(
   id: string,
   payload: KanbanCardMovePayload,
   options?: { timeout?: number },
-): Promise<KanbanCard> {
+): Promise<KanbanCardMoveResult> {
   kanbanCardMovePending.set(id, payload);
 
   const existing = kanbanCardMoveInflight.get(id);
@@ -681,14 +688,14 @@ export async function moveKanbanCard(
 
   const run = (async () => {
     try {
-      let last: KanbanCard | undefined;
+      let last: KanbanCardMoveResult | undefined;
       while (kanbanCardMovePending.has(id)) {
         const latest = kanbanCardMovePending.get(id)!;
         kanbanCardMovePending.delete(id);
-        const res = await api.patch(`/kanban/cards/${id}`, latest, {
-          timeout: options?.timeout ?? 20_000,
+        const res = await api.patch(`/kanban/cards/${id}/move`, latest, {
+          timeout: options?.timeout ?? 12_000,
         });
-        last = res.data.data as KanbanCard;
+        last = res.data.data as KanbanCardMoveResult;
       }
       if (!last) throw new Error('Move do card cancelado');
       return last;

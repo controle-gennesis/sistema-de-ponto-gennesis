@@ -227,8 +227,9 @@ function mapFilteredDropIndexToFullIndex(
 }
 
 /**
- * Índice visual do drop na lista filtrada. O dragOver guarda o slot correto (overIndex);
- * no drop o evento às vezes cai no container da coluna e o Y manda pro fim — aí preferimos overIndex.
+ * Índice visual do drop. Sempre preferimos o overIndex do último dragOver
+ * (é o slot da linha vermelha). O drop no container da coluna recalcula pelo Y
+ * e frequentemente manda o card pro fim da lista.
  */
 function resolveKanbanVisualDropIndex(
   dropIndex: number | undefined,
@@ -237,17 +238,10 @@ function resolveKanbanVisualDropIndex(
   targetColumnId: string,
   filteredCardCount: number,
 ): number {
-  const sameColumnHover = overColumnId === targetColumnId && overIndex != null;
-  if (sameColumnHover) {
-    const boundedOver = Math.max(0, Math.min(overIndex, filteredCardCount));
-    if (dropIndex == null) return boundedOver;
-    const boundedDrop = Math.max(0, Math.min(dropIndex, filteredCardCount));
-    if (boundedDrop >= filteredCardCount && boundedOver < filteredCardCount) {
-      return boundedOver;
-    }
-    return boundedDrop;
+  if (overColumnId === targetColumnId && overIndex != null) {
+    return Math.max(0, Math.min(overIndex, filteredCardCount));
   }
-  return dropIndex ?? filteredCardCount;
+  return Math.max(0, Math.min(dropIndex ?? filteredCardCount, filteredCardCount));
 }
 
 /** Índice de drop a partir do Y do ponteiro — evita mandar pro fim da coluna. */
@@ -1420,7 +1414,12 @@ function KanbanColumnComponent({
           : (e) => {
               e.preventDefault();
               e.stopPropagation();
-              onDrop(e, column.id, resolveColumnCardDropIndex(e.clientY));
+              // Preferir o slot da linha vermelha (overIndex); Y no container manda pro fim.
+              const fromHover =
+                dragState.overColumnId === column.id && dragState.overIndex != null
+                  ? dragState.overIndex
+                  : resolveColumnCardDropIndex(e.clientY);
+              onDrop(e, column.id, fromHover);
             }
       }
     >
@@ -2988,7 +2987,11 @@ function KanbanPage() {
       if (!draggingCardId || !fromColumnId) return;
 
       const targetColumnId = dropColumnId;
-      const targetColumn = columns.find((col) => col.id === targetColumnId);
+      // Sempre ler o board atual do cache — `columns` do render pode estar stale.
+      const boardNow =
+        queryClient.getQueryData<KanbanBoard>(kanbanBoardQueryKey) ??
+        (boardScopeKey ? readKanbanBoardCache(boardScopeKey) : undefined);
+      const targetColumn = boardNow?.columns.find((col) => col.id === targetColumnId);
       if (!targetColumn) return;
 
       // Índice vem da lista filtrada — mapeia para a coluna completa.
@@ -3079,7 +3082,6 @@ function KanbanPage() {
       })();
     },
     [
-      columns,
       search,
       filterPriorities,
       filterLabelColors,
