@@ -128,19 +128,19 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
     key: pathToModuleKey('/ponto/responsaveis-tecnicos'),
     name: 'Responsáveis Técnicos',
     href: '/ponto/responsaveis-tecnicos',
-    category: 'Contratos e Licitações',
+    category: 'Controle CREA',
   },
   {
     key: pathToModuleKey('/ponto/controle-anuidade'),
     name: 'Controle de Anuidade',
     href: '/ponto/controle-anuidade',
-    category: 'Contratos e Licitações',
+    category: 'Controle CREA',
   },
   {
     key: pathToModuleKey('/ponto/controle-pagamentos-art'),
     name: "Controle de Pagamentos ART's / Protocolos",
     href: '/ponto/controle-pagamentos-art',
-    category: 'Contratos e Licitações',
+    category: 'Controle CREA',
   },
   {
     key: pathToModuleKey('/ponto/contratos/medicao'),

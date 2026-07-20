@@ -77,7 +77,9 @@ import {
   Fuel,
   Car,
   CalendarRange,
-  Workflow
+  Workflow,
+  ChevronDown,
+  type LucideIcon,
 } from 'lucide-react';
 import { pathToModuleKey } from '@sistema-ponto/permission-modules';
 import { usePermissions } from '@/hooks/usePermissions';
@@ -175,6 +177,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
   );
   const [selectedModuleId, setSelectedModuleId] = useState('main');
   const [searchTerm, setSearchTerm] = useState('');
+  const [expandedNavGroups, setExpandedNavGroups] = useState<Record<string, boolean>>({});
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const pathname = usePathname();
   /** true quando o usuário clicou num módulo no rail sem mudar de rota */
@@ -208,6 +211,12 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
   const profileAvatarSectionRef = useRef<HTMLDivElement>(null);
   const sidebarRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
+
+  // Em dev, o Next compila cada rota ao fazer prefetch dos <Link> visíveis. Com um menu
+  // grande, isso satura o compilador (single-thread) e o clique de navegação fica preso
+  // na fila de compilações, dando a sensação de "página travada". Desativamos o prefetch
+  // apenas em desenvolvimento; em produção ele continua ativo (rotas já pré-compiladas).
+  const navLinkPrefetch = process.env.NODE_ENV === 'production' ? undefined : false;
 
   const prefetchFluigDatasets = useCallback(() => {
     router.prefetch('/ponto/fluig/aprovacoes-workflow');
@@ -388,13 +397,57 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
     return 0;
   };
 
+  type SidebarNavLeaf = {
+    name: string;
+    href: string;
+    icon: LucideIcon;
+    description?: string;
+    permission: boolean;
+  };
+
+  type SidebarNavItem = SidebarNavLeaf & {
+    /** Subpáginas (ex.: Controle CREA). */
+    children?: SidebarNavLeaf[];
+  };
+
+  const navItemIsVisible = (item: SidebarNavItem): boolean => {
+    if (item.children?.length) {
+      return item.children.some((child) => child.permission);
+    }
+    return item.permission;
+  };
+
+  const navItemHasActiveChild = (item: SidebarNavItem): boolean =>
+    Boolean(item.children?.some((child) => child.permission && isActive(child.href)));
+
+  const navItemMatchesSearch = (item: SidebarNavItem, searchLower: string): boolean => {
+    const selfMatch =
+      item.name.toLowerCase().includes(searchLower) ||
+      Boolean(item.description?.toLowerCase().includes(searchLower));
+    if (selfMatch) return true;
+    return Boolean(
+      item.children?.some(
+        (child) =>
+          child.permission &&
+          (child.name.toLowerCase().includes(searchLower) ||
+            Boolean(child.description?.toLowerCase().includes(searchLower))),
+      ),
+    );
+  };
+
   /** Soma só badges das páginas que a pessoa realmente vê nesse módulo. */
-  const moduleBadgeCountForVisibleItems = (
-    items: Array<{ href: string; permission: boolean }>,
-  ): number =>
-    items
-      .filter((item) => item.permission)
-      .reduce((sum, item) => sum + navBadgeCountForHref(item.href), 0);
+  const moduleBadgeCountForVisibleItems = (items: SidebarNavItem[]): number =>
+    items.filter(navItemIsVisible).reduce((sum, item) => {
+      if (item.children?.length) {
+        return (
+          sum +
+          item.children
+            .filter((child) => child.permission)
+            .reduce((childSum, child) => childSum + navBadgeCountForHref(child.href), 0)
+        );
+      }
+      return sum + navBadgeCountForHref(item.href);
+    }, 0);
 
   // Verificar se o funcionário precisa bater ponto
   const requiresTimeClock = user?.employee?.requiresTimeClock !== false;
@@ -813,25 +866,38 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
             permission: isAdministrator || can(pk('/ponto/licitacoes'))
           },
           {
-            name: 'Responsáveis Técnicos',
+            name: 'Controle CREA',
             href: '/ponto/responsaveis-tecnicos',
             icon: BadgeCheck,
-            description: 'Cadastro de responsáveis técnicos (CREA)',
-            permission: isAdministrator || can(pk('/ponto/responsaveis-tecnicos'))
-          },
-          {
-            name: 'Controle de Anuidade',
-            href: '/ponto/controle-anuidade',
-            icon: Wallet,
-            description: 'Controle de pagamentos de anuidade CREA',
-            permission: isAdministrator || can(pk('/ponto/controle-anuidade'))
-          },
-          {
-            name: "Controle de Pagamentos ART's / Protocolos",
-            href: '/ponto/controle-pagamentos-art',
-            icon: FileCheck,
-            description: 'Controle de pagamentos de ART e protocolos',
-            permission: isAdministrator || can(pk('/ponto/controle-pagamentos-art'))
+            description: 'Responsáveis técnicos, anuidade e pagamentos ART',
+            permission:
+              isAdministrator ||
+              can(pk('/ponto/responsaveis-tecnicos')) ||
+              can(pk('/ponto/controle-anuidade')) ||
+              can(pk('/ponto/controle-pagamentos-art')),
+            children: [
+              {
+                name: 'Responsáveis Técnicos',
+                href: '/ponto/responsaveis-tecnicos',
+                icon: BadgeCheck,
+                description: 'Cadastro de responsáveis técnicos (CREA)',
+                permission: isAdministrator || can(pk('/ponto/responsaveis-tecnicos')),
+              },
+              {
+                name: 'Controle de Anuidade',
+                href: '/ponto/controle-anuidade',
+                icon: Wallet,
+                description: 'Controle de pagamentos de anuidade CREA',
+                permission: isAdministrator || can(pk('/ponto/controle-anuidade')),
+              },
+              {
+                name: "Controle de Pagamentos ART's / Protocolos",
+                href: '/ponto/controle-pagamentos-art',
+                icon: FileCheck,
+                description: 'Controle de pagamentos de ART e protocolos',
+                permission: isAdministrator || can(pk('/ponto/controle-pagamentos-art')),
+              },
+            ],
           },
           {
             name: 'Medições',
@@ -1061,27 +1127,51 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
     ];
 
     // Filtrar categorias que têm pelo menos um item com permissão
-    let filteredCategories = menuCategories.filter(category => 
-      category.items.some(item => item.permission)
+    let filteredCategories = menuCategories.filter((category) =>
+      category.items.some((item) => navItemIsVisible(item as SidebarNavItem)),
     );
 
     // Aplicar filtro de pesquisa se houver termo de busca
     if (searchTerm.trim()) {
       const searchLower = searchTerm.toLowerCase().trim();
       filteredCategories = filteredCategories
-        .map(category => {
-          // Filtrar itens dentro da categoria
-          const filteredItems = category.items.filter(item => {
-            if (!item.permission) return false;
-            const matchesName = item.name.toLowerCase().includes(searchLower);
-            const matchesDescription = item.description?.toLowerCase().includes(searchLower) || false;
-            return matchesName || matchesDescription;
-          });
+        .map((category) => {
+          const filteredItems = category.items
+            .map((item) => {
+              const navItem = item as SidebarNavItem;
+              if (!navItemIsVisible(navItem)) return null;
+              if (!navItem.children?.length) {
+                const matchesName = navItem.name.toLowerCase().includes(searchLower);
+                const matchesDescription =
+                  navItem.description?.toLowerCase().includes(searchLower) || false;
+                return matchesName || matchesDescription ? navItem : null;
+              }
 
-          // Retornar categoria apenas se tiver itens após o filtro
+              const parentMatches = navItemMatchesSearch(
+                { ...navItem, children: undefined },
+                searchLower,
+              );
+              const matchingChildren = navItem.children.filter((child) => {
+                if (!child.permission) return false;
+                if (parentMatches) return true;
+                return (
+                  child.name.toLowerCase().includes(searchLower) ||
+                  Boolean(child.description?.toLowerCase().includes(searchLower))
+                );
+              });
+              if (matchingChildren.length === 0 && !parentMatches) return null;
+              return {
+                ...navItem,
+                children: parentMatches
+                  ? navItem.children.filter((c) => c.permission)
+                  : matchingChildren,
+              };
+            })
+            .filter((item): item is SidebarNavItem => item != null);
+
           return filteredItems.length > 0 ? { ...category, items: filteredItems } : null;
         })
-        .filter(category => category !== null) as typeof menuCategories;
+        .filter((category) => category !== null) as typeof menuCategories;
     }
 
     return filteredCategories;
@@ -1125,8 +1215,118 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
     return pathname === href;
   };
 
+  const renderSidebarNavItem = (item: SidebarNavItem, forceExpanded: boolean) => {
+    const ItemIcon = item.icon;
+    const visibleChildren = item.children?.filter((child) => child.permission) ?? [];
+    const groupKey = item.name;
+
+    if (visibleChildren.length > 0) {
+      const childActive = visibleChildren.some((child) => isActive(child.href));
+      const expanded =
+        forceExpanded || childActive || expandedNavGroups[groupKey] === true;
+      const groupBadge = visibleChildren.reduce(
+        (sum, child) => sum + navBadgeCountForHref(child.href),
+        0,
+      );
+
+      return (
+        <div key={`group-${groupKey}`} className="space-y-1">
+          <button
+            type="button"
+            onClick={() =>
+              setExpandedNavGroups((prev) => ({
+                ...prev,
+                [groupKey]: !(forceExpanded || childActive || prev[groupKey] === true),
+              }))
+            }
+            className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 transition-all duration-200 ${
+              childActive
+                ? 'bg-red-50/70 text-red-700 dark:bg-red-900/10 dark:text-red-500'
+                : 'text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-800'
+            }`}
+            aria-expanded={expanded}
+          >
+            <ItemIcon
+              className={`h-4 w-4 flex-shrink-0 ${
+                childActive ? 'text-red-600 dark:text-red-500' : 'text-gray-500 dark:text-gray-400'
+              }`}
+            />
+            <span className="min-w-0 flex-1 truncate text-left text-sm font-medium">{item.name}</span>
+            <NotificationCountBadge count={groupBadge} />
+            <ChevronDown
+              className={`h-4 w-4 flex-shrink-0 text-gray-400 transition-transform duration-200 ${
+                expanded ? 'rotate-0' : '-rotate-90'
+              }`}
+            />
+          </button>
+          {expanded ? (
+            <div className="ml-3 space-y-1 border-l border-gray-200 pl-2 dark:border-gray-700">
+              {visibleChildren.map((child) => {
+                const ChildIcon = child.icon;
+                const active = isActive(child.href);
+                const badgeCount = navBadgeCountForHref(child.href);
+                return (
+                  <Link
+                    key={child.href}
+                    href={resolveNavHref(child.href)}
+                    prefetch={navLinkPrefetch}
+                    onMouseEnter={
+                      FLUIG_PREFETCH_HREFS.has(child.href) ? prefetchFluigDatasets : undefined
+                    }
+                    className={`flex items-center gap-3 rounded-xl px-3 py-2 transition-all duration-200 ${
+                      active
+                        ? 'bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-500'
+                        : 'text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-800'
+                    }`}
+                  >
+                    <ChildIcon
+                      className={`h-4 w-4 flex-shrink-0 ${
+                        active ? 'text-red-600 dark:text-red-500' : 'text-gray-500 dark:text-gray-400'
+                      }`}
+                    />
+                    <span className="min-w-0 flex-1 truncate text-sm font-medium">{child.name}</span>
+                    <NotificationCountBadge count={badgeCount} />
+                  </Link>
+                );
+              })}
+            </div>
+          ) : null}
+        </div>
+      );
+    }
+
+    const active = isActive(item.href);
+    const badgeCount = navBadgeCountForHref(item.href);
+    return (
+      <Link
+        key={item.href}
+        href={resolveNavHref(item.href)}
+        prefetch={navLinkPrefetch}
+        onMouseEnter={FLUIG_PREFETCH_HREFS.has(item.href) ? prefetchFluigDatasets : undefined}
+        className={`flex items-center gap-3 rounded-xl px-3 py-2.5 transition-all duration-200 ${
+          active
+            ? 'bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-500'
+            : 'text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-800'
+        }`}
+      >
+        <ItemIcon
+          className={`h-4 w-4 flex-shrink-0 ${
+            active ? 'text-red-600 dark:text-red-500' : 'text-gray-500 dark:text-gray-400'
+          }`}
+        />
+        <span className="min-w-0 flex-1 truncate text-sm font-medium">{item.name}</span>
+        <NotificationCountBadge count={badgeCount} />
+      </Link>
+    );
+  };
+
   const activeModuleId = menuItems.find((category) =>
-    category.items.some((item) => item.permission && isActive(item.href))
+    category.items.some((item) => {
+      const navItem = item as SidebarNavItem;
+      if (!navItemIsVisible(navItem)) return false;
+      if (navItem.children?.length) return navItemHasActiveChild(navItem);
+      return isActive(navItem.href);
+    }),
   )?.id;
 
   const onRailFooterRoute = isRailFooterRoute(pathname);
@@ -1179,7 +1379,12 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
     }
 
     const activeCategory = menuItems.find((category) =>
-      category.items.some((item) => item.permission && isActive(item.href))
+      category.items.some((item) => {
+        const navItem = item as SidebarNavItem;
+        if (!navItemIsVisible(navItem)) return false;
+        if (navItem.children?.length) return navItemHasActiveChild(navItem);
+        return isActive(navItem.href);
+      }),
     );
     if (activeCategory) {
       setSelectedModuleId(activeCategory.id);
@@ -1268,6 +1473,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
           <div className="relative z-0 isolate flex flex-col items-center p-5 pb-3">
             <Link
               href="/ponto/home"
+              prefetch={navLinkPrefetch}
               className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl transition-all hover:scale-105"
               title="Ir para a página inicial"
               aria-label="Página inicial"
@@ -1285,7 +1491,9 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
             {sidebarHydrated && !isLoading ? menuItems.map((category) => {
               const CategoryIcon = category.icon;
               const isRailActive = category.id === railModuleActiveId;
-              const visibleItems = category.items.filter((item) => item.permission);
+              const visibleItems = category.items.filter((item) =>
+                navItemIsVisible(item as SidebarNavItem),
+              );
               const forceAsGroup = !(category as { preferDirectLink?: boolean }).preferDirectLink;
               const isSingleItem = visibleItems.length === 1 && !forceAsGroup;
               const singleItem = isSingleItem ? visibleItems[0] : null;
@@ -1298,6 +1506,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
                   <SidebarRailTooltip key={category.id} label={singleItem.name}>
                     <Link
                       href={singleItem.href}
+                      prefetch={navLinkPrefetch}
                       className={`relative z-10 w-10 h-10 overflow-visible rounded-xl transition-all duration-200 flex items-center justify-center ${
                         active
                           ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-500'
@@ -1346,6 +1555,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
               <SidebarRailTooltip label="Chat">
                 <Link
                   href="/ponto/conversas"
+                  prefetch={navLinkPrefetch}
                   aria-label={`Chat${chatUnreadCount > 0 ? `, ${chatUnreadCount} não lidas` : ''}`}
                   className={`relative z-10 w-10 h-10 overflow-visible rounded-xl transition-all duration-200 flex items-center justify-center ${
                     isFooterShortcutActive('/ponto/conversas')
@@ -1360,6 +1570,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
               <SidebarRailTooltip label="Tasks">
                 <Link
                   href="/ponto/kanban"
+                  prefetch={navLinkPrefetch}
                   aria-label="Tasks"
                   className={`w-10 h-10 rounded-xl transition-all duration-200 flex items-center justify-center ${
                     isFooterShortcutActive('/ponto/kanban')
@@ -1373,6 +1584,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
               <SidebarRailTooltip label="Drive">
                 <Link
                   href="/ponto/drive"
+                  prefetch={navLinkPrefetch}
                   aria-label="Drive"
                   className={`w-10 h-10 rounded-xl transition-all duration-200 flex items-center justify-center ${
                     isFooterShortcutActive('/ponto/drive')
@@ -1386,6 +1598,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
               <SidebarRailTooltip label="Flow">
                 <Link
                   href="/ponto/flow"
+                  prefetch={navLinkPrefetch}
                   aria-label="Flow"
                   className={`w-10 h-10 rounded-xl transition-all duration-200 flex items-center justify-center ${
                     isFooterShortcutActive('/ponto/flow')
@@ -1567,12 +1780,7 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
           <nav className="flex-1 overflow-y-auto overflow-x-hidden p-4 pt-4 space-y-3">
             {sidebarHydrated && !isLoading ? searchTerm.trim() ? (
               menuItems.map((category) => {
-                const filteredItems = category.items.filter(
-                  (item) =>
-                    item.permission &&
-                    (item.name.toLowerCase().includes(searchTerm.toLowerCase().trim()) ||
-                      item.description?.toLowerCase().includes(searchTerm.toLowerCase().trim()))
-                );
+                const filteredItems = (category.items as SidebarNavItem[]).filter(navItemIsVisible);
                 if (filteredItems.length === 0) return null;
                 return (
                   <div key={category.id} className="mb-4">
@@ -1580,63 +1788,15 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
                       {category.name}
                     </p>
                     <div className="space-y-3">
-                      {filteredItems.map((item) => {
-                        const ItemIcon = item.icon;
-                        const active = isActive(item.href);
-                        const badgeCount = navBadgeCountForHref(item.href);
-                        return (
-                          <Link
-                            key={item.href}
-                            href={resolveNavHref(item.href)}
-                            onMouseEnter={FLUIG_PREFETCH_HREFS.has(item.href) ? prefetchFluigDatasets : undefined}
-                            className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 ${
-                              active
-                                ? 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-500'
-                                : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'
-                            }`}
-                          >
-                            <ItemIcon
-                              className={`w-4 h-4 flex-shrink-0 ${
-                                active ? 'text-red-600 dark:text-red-500' : 'text-gray-500 dark:text-gray-400'
-                              }`}
-                            />
-                            <span className="min-w-0 flex-1 truncate text-sm font-medium">{item.name}</span>
-                            <NotificationCountBadge count={badgeCount} />
-                          </Link>
-                        );
-                      })}
+                      {filteredItems.map((item) => renderSidebarNavItem(item, true))}
                     </div>
                   </div>
                 );
               })
             ) : (
               selectedModule?.items
-                .filter((item) => item.permission)
-                .map((item) => {
-                  const ItemIcon = item.icon;
-                  const active = isActive(item.href);
-                  const badgeCount = navBadgeCountForHref(item.href);
-                  return (
-                    <Link
-                      key={item.href}
-                      href={resolveNavHref(item.href)}
-                      onMouseEnter={FLUIG_PREFETCH_HREFS.has(item.href) ? prefetchFluigDatasets : undefined}
-                      className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 ${
-                        active
-                          ? 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-500'
-                          : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'
-                      }`}
-                    >
-                      <ItemIcon
-                        className={`w-4 h-4 flex-shrink-0 ${
-                          active ? 'text-red-600 dark:text-red-500' : 'text-gray-500 dark:text-gray-400'
-                        }`}
-                      />
-                      <span className="min-w-0 flex-1 truncate text-sm font-medium">{item.name}</span>
-                      <NotificationCountBadge count={badgeCount} />
-                    </Link>
-                  );
-                })
+                .filter((item) => navItemIsVisible(item as SidebarNavItem))
+                .map((item) => renderSidebarNavItem(item as SidebarNavItem, false))
             ) : null}
           </nav>
 

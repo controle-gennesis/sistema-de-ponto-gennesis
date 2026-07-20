@@ -512,9 +512,13 @@ function RowSelectCheckbox({
   );
 }
 
+// Referência estável para o valor padrão: evitar `= []` inline, que cria um novo array
+// a cada render e faz memos/efeitos derivados dispararem re-render em loop.
+const EMPTY_NATUREZA_DETAIL_ROWS: QueryGastosNaturezaDetailRow[] = [];
+
 export function ControleGeralGastosOperacionaisPanel({
   detailRows,
-  naturezaDetailRows = [],
+  naturezaDetailRows = EMPTY_NATUREZA_DETAIL_ROWS,
   isLoading,
   fetchedAt,
   isError = false,
@@ -998,9 +1002,11 @@ export function ControleGeralGastosOperacionaisPanel({
   useEffect(() => {
     if (!naturezaModalContract) {
       lastInitializedNaturezaContractRef.current = null;
-      setCollapsedNaturezaSections(new Set());
-      setExpandedNaturezaBreakdownKey(null);
-      setSelectedNaturezaSolicitacao(null);
+      // Idempotente: só troca o estado se realmente houver algo a limpar. Sem isso,
+      // criar um `new Set()` a cada execução dispara re-render em loop.
+      setCollapsedNaturezaSections((prev) => (prev.size === 0 ? prev : new Set()));
+      setExpandedNaturezaBreakdownKey((prev) => (prev === null ? prev : null));
+      setSelectedNaturezaSolicitacao((prev) => (prev === null ? prev : null));
       return;
     }
     if (allNaturezaSectionKeys.size === 0) return;

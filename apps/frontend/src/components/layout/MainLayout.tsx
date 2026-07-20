@@ -19,6 +19,7 @@ import { useChatSounds } from '@/hooks/useChatSounds';
 import { NativeCallOverlay } from '@/components/conversas/NativeCallOverlay';
 import { NativeCallProvider } from '@/contexts/NativeCallContext';
 import { useModalOverlayObserver } from '@/hooks/useModalOverlayObserver';
+import { syncModalOpenClass } from '@/lib/modalBodyLock';
 
 const ChatWidgetLazy = dynamic(
   () => import('../chat/ChatWidget').then((m) => ({ default: m.ChatWidget })),
@@ -87,6 +88,8 @@ export function MainLayout({ children, userRole, userName, onLogout }: MainLayou
   useLayoutEffect(() => {
     setIsCollapsed(resolveInitialSidebarCollapsed(pathname));
     setLayoutSynced(true);
+    // Garante que a sidebar não fique bloqueada se um overlay ficou preso no DOM.
+    syncModalOpenClass();
   }, [pathname]);
 
   const handleMenuToggle = useCallback((collapsed: boolean) => {

@@ -109,7 +109,7 @@ function sanitizeMaterialDisplayText(value?: string | null): string {
   if (!value) return '';
   return value
     .replace(/\bSINAPI\b/gi, ' ')
-    .replace(/\bCM[-:\s]*[A-Za-z0-9_-]+\b/gi, ' ')
+    .replace(/\bCM[\s:-]*[A-Za-z0-9_-]+\b/gi, ' ')
     .replace(/\s{2,}/g, ' ')
     .replace(/^[\s\-:|.,;/]+|[\s\-:|.,;/]+$/g, '')
     .trim();

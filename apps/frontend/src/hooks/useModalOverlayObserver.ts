@@ -7,24 +7,33 @@ import { MODAL_OVERLAY_CLASS } from '@/lib/zIndex';
 /**
  * Observa overlays de modal no DOM e aplica `modal-open` (scroll + bloqueio da sidebar).
  * Montado uma vez no MainLayout.
+ *
+ * Só observa `childList` (montar/desmontar overlay). Observar `class` em toda a árvore
+ * travava páginas pesadas como Controle Geral e impedia navegar pelo menu.
  */
 export function useModalOverlayObserver() {
   useEffect(() => {
     syncModalOpenClass();
 
-    const observer = new MutationObserver(() => {
-      syncModalOpenClass();
-    });
+    let rafId = 0;
+    const scheduleSync = () => {
+      if (rafId) return;
+      rafId = window.requestAnimationFrame(() => {
+        rafId = 0;
+        syncModalOpenClass();
+      });
+    };
+
+    const observer = new MutationObserver(scheduleSync);
 
     observer.observe(document.body, {
       childList: true,
       subtree: true,
-      attributes: true,
-      attributeFilter: ['class'],
     });
 
     return () => {
       observer.disconnect();
+      if (rafId) window.cancelAnimationFrame(rafId);
       document.documentElement.classList.remove('modal-open');
       document.body.classList.remove('modal-open');
     };
