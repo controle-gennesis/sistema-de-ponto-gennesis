@@ -14,8 +14,10 @@
   "scripts": {
     "postinstall": "npm run build:permission-modules",
     "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:turbo": "concurrently \"npm run dev:backend\" \"npm run dev:frontend:turbo\"",
     "dev:backend": "cd apps/backend && npm run dev",
     "dev:frontend": "cd apps/frontend && npm run dev",
+    "dev:frontend:turbo": "cd apps/frontend && npm run dev:turbo",
     "build": "npm run build:backend && npm run build:frontend",
     "build:permission-modules": "npm run build -w @sistema-ponto/permission-modules",
     "build:backend": "npm run build:permission-modules && cd apps/backend && npm run db:generate && npm run build",

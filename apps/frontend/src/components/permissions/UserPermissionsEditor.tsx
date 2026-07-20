@@ -172,6 +172,7 @@ const CATEGORY_ORDER = [
   'Métricas',
   'Engenharia',
   'Contratos e Licitações',
+  'Controle CREA',
   'Jurídico',
   'Suprimentos',
   'Cadastros',
@@ -241,15 +242,15 @@ function inferCategoryFromHref(href: string): string {
   ) {
     return 'Engenharia';
   }
+  if (h === '/ponto/espelho-nf' || h === '/ponto/licitacoes' || h === '/ponto/contratos/medicao') {
+    return 'Contratos e Licitações';
+  }
   if (
-    h === '/ponto/espelho-nf' ||
-    h === '/ponto/licitacoes' ||
     h === '/ponto/responsaveis-tecnicos' ||
     h === '/ponto/controle-anuidade' ||
-    h === '/ponto/controle-pagamentos-art' ||
-    h === '/ponto/contratos/medicao'
+    h === '/ponto/controle-pagamentos-art'
   ) {
-    return 'Contratos e Licitações';
+    return 'Controle CREA';
   }
   if (h === '/ponto/juridico') return 'Jurídico';
   if (

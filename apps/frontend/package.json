@@ -5,6 +5,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:turbo": "next dev --turbo",
     "prebuild": "cd ../.. && npm run build:permission-modules",
     "build": "node --max-old-space-size=6144 ./node_modules/next/dist/bin/next build",
     "start": "next start -H 0.0.0.0",

@@ -1,4 +1,8 @@
 /** @type {import('next').NextConfig} */
+// Turbopack (`next dev --turbo`) não suporta `experimental.esmExternals`.
+// Mantemos a opção apenas no modo webpack (dev normal e build de produção).
+const isTurbopack = !!process.env.TURBOPACK;
+
 const nextConfig = {
   transpilePackages: ['recharts'],
   env: {
@@ -6,7 +10,16 @@ const nextConfig = {
     NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api',
   },
   images: { unoptimized: true },
-  experimental: { esmExternals: 'loose' },
+  experimental: {
+    ...(isTurbopack ? {} : { esmExternals: 'loose' }),
+    // Equivalente Turbopack dos aliases do webpack abaixo (usado em `next dev --turbo`).
+    turbo: {
+      resolveAlias: {
+        'victory-vendor/d3-scale': 'd3-scale',
+        'victory-vendor/d3-shape': 'd3-shape',
+      },
+    },
+  },
   compiler: { styledComponents: false },
   swcMinify: true,
   reactStrictMode: false,
