@@ -30,7 +30,7 @@ import { ListPagination } from '@/components/ui/ListPagination';
 import { Modal } from '@/components/ui/Modal';
 import { cadastroListClasses } from '@/components/ui/RowActionMenu';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
-import { CheckboxIndicator, TableCheckbox } from '@/components/ui/Checkbox';
+import { TableCheckbox } from '@/components/ui/Checkbox';
 import api from '@/lib/api';
 import { exportBancoCatsSelecaoPdf } from '@/lib/exportBancoCatsSelecaoPdf';
 import {
@@ -55,7 +55,7 @@ const CANONICAL_HEADERS = [
 
 const PAGE_SIZE = 20;
 /** Pré-visualização padrão por quadrante; o usuário pode expandir para ver todos. */
-const QUADRANTE_MATCH_PREVIEW = 50;
+const QUADRANTE_MATCH_PREVIEW = 20;
 
 type BancoCatsSheetData = {
   spreadsheetId: string;
@@ -814,121 +814,163 @@ export function BancoCatsPanel() {
 
   return (
     <div className="space-y-5">
-      <Card className="shadow-sm">
-        <CardHeader className="space-y-1 px-5 pb-0 pt-5">
-          <div className="flex items-center gap-2">
-            <FileSearch className="h-5 w-5 text-red-600" aria-hidden />
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-              Consulta de habilitação técnica
-            </h2>
+      <Card className={cadastroListClasses.card}>
+        <CardHeader className={cadastroListClasses.cardHeader}>
+          <div className={cadastroListClasses.cardHeaderRow}>
+            <div className={cadastroListClasses.cardHeaderIconRow}>
+              <div className="rounded-lg bg-red-100 p-2 sm:p-3 dark:bg-red-900/30">
+                <FileSearch
+                  className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6"
+                  aria-hidden
+                />
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                  Consulta de Habilitação Técnica
+                </h3>
+                <p className="text-sm text-gray-600 dark:text-gray-400">
+                  Busque serviços compatíveis com as exigências do edital.
+                </p>
+              </div>
+            </div>
+            <div className={cadastroListClasses.cardToolbar}>
+              {matchingActive ? (
+                <button
+                  type="button"
+                  onClick={clearHabilitacaoConsulta}
+                  aria-label="Limpar consulta"
+                  title="Limpar consulta"
+                  className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                >
+                  <X className="h-4 w-4" aria-hidden />
+                </button>
+              ) : null}
+              {matchingActive && selectedMatchCount > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => void exportSelecaoPdf()}
+                  disabled={exportingPdf}
+                  className="flex h-10 items-center gap-2 rounded-lg border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-800 transition-colors hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200 dark:hover:bg-emerald-950/60"
+                >
+                  {exportingPdf ? (
+                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                  ) : (
+                    <Download className="h-4 w-4 shrink-0" aria-hidden />
+                  )}
+                  <span>
+                    {exportingPdf ? 'Gerando PDF…' : `Exportar PDF (${selectedMatchCount})`}
+                  </span>
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={runHabilitacaoMatch}
+                disabled={isLoading || !habilitacaoDraft.trim()}
+                className="flex h-10 items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+              >
+                <FileSearch className="h-4 w-4 shrink-0" aria-hidden />
+                <span>Buscar compatíveis</span>
+              </button>
+            </div>
           </div>
-          <p className="text-sm text-gray-600 dark:text-gray-400">
-            Cole as exigências do edital. Para vários serviços, use uma linha (ou um bloco) por
-            item — a resposta será dividida em quadrantes.
-          </p>
         </CardHeader>
-        <CardContent className="space-y-3 px-5 py-4">
+        <CardContent className={`${cadastroListClasses.cardContent} space-y-4`}>
           <textarea
             value={habilitacaoDraft}
             onChange={(e) => setHabilitacaoDraft(e.target.value)}
-            rows={6}
-            placeholder={
-              'Um serviço por linha, por exemplo:\n' +
-              'CABO DE COBRE FLEXÍVEL ISOLADO, 1,5 MM², ANTI-CHAMA 0,6/1,0 KV…\n' +
-              'PISO VINÍLICO 30 X 30 CM, E=2MM…\n' +
-              'PINTURA EPOXI PARA PISO…'
-            }
-            className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm leading-relaxed dark:border-gray-700 dark:bg-gray-900"
+            rows={1}
+            placeholder="Um serviço por linha…"
+            className="h-10 min-h-10 w-full resize-y rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm leading-normal text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
           />
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={runHabilitacaoMatch}
-              disabled={isLoading || !habilitacaoDraft.trim()}
-              className="inline-flex h-9 items-center gap-2 rounded-lg bg-red-600 px-4 text-sm font-semibold text-white transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <FileSearch className="h-4 w-4" aria-hidden />
-              Buscar compatíveis
-            </button>
-            {matchingActive ? (
-              <button
-                type="button"
-                onClick={clearHabilitacaoConsulta}
-                className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-              >
-                <X className="h-3.5 w-3.5" aria-hidden />
-                Limpar consulta
-              </button>
-            ) : null}
-            {matchingActive ? (
-              <button
-                type="button"
-                onClick={() => void exportSelecaoPdf()}
-                disabled={exportingPdf || selectedMatchCount === 0}
-                className="inline-flex h-9 items-center gap-2 rounded-lg border border-emerald-300 bg-emerald-50 px-3 text-sm font-semibold text-emerald-800 transition-colors hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200 dark:hover:bg-emerald-950/60"
-              >
-                {exportingPdf ? (
-                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-                ) : (
-                  <Download className="h-4 w-4" aria-hidden />
-                )}
-                {exportingPdf
-                  ? 'Gerando PDF…'
-                  : selectedMatchCount > 0
-                    ? `Exportar PDF (${selectedMatchCount})`
-                    : 'Exportar PDF'}
-              </button>
-            ) : null}
-          </div>
+          {matchingActive ? (
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              {servicoQuadrantes.length}{' '}
+              {servicoQuadrantes.length === 1 ? 'serviço consultado' : 'serviços consultados'}
+              {' · '}
+              {totalCompatíveisMulti}{' '}
+              {totalCompatíveisMulti === 1 ? 'resultado encontrado' : 'resultados encontrados'}
+            </p>
+          ) : null}
 
           {matchingActive ? (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
-              <p>
-                <span className="font-semibold">{servicoQuadrantes.length}</span>{' '}
-                {servicoQuadrantes.length === 1 ? 'serviço consultado' : 'serviços consultados'} ·{' '}
-                <span className="font-semibold">{totalCompatíveisMulti}</span> compatível(is) no
-                total. Marque os itens para somar as quantidades e exportar o PDF com a seleção de
-                cada quadrante.
-              </p>
-            </div>
-          ) : null}
-        </CardContent>
-      </Card>
+            <div className="flex flex-col gap-6">
+              {servicoQuadrantes.map((quadrante) => {
+                const selecao = somaPorQuadrante.get(quadrante.id) ?? {
+                  count: 0,
+                  soma: 0,
+                  units: [] as string[],
+                  mixed: false,
+                };
+                const totalMatches = quadrante.matches.length;
+                const hasMoreThanPreview = totalMatches > QUADRANTE_MATCH_PREVIEW;
+                const isExpanded = expandedQuadrantes.has(quadrante.id);
+                const visibleMatches =
+                  hasMoreThanPreview && !isExpanded
+                    ? quadrante.matches.slice(0, QUADRANTE_MATCH_PREVIEW)
+                    : quadrante.matches;
+                const hiddenCount = totalMatches - visibleMatches.length;
+                const selectedOnVisible = visibleMatches.filter((match) =>
+                  selectedMatchKeys.has(`${quadrante.id}::${match.item.rowKey}`)
+                ).length;
+                const allVisibleSelected =
+                  visibleMatches.length > 0 && selectedOnVisible === visibleMatches.length;
+                const someVisibleSelected =
+                  selectedOnVisible > 0 && selectedOnVisible < visibleMatches.length;
 
-      {matchingActive ? (
-        <div className="flex flex-col gap-4">
-          {servicoQuadrantes.map((quadrante) => {
-            const selecao = somaPorQuadrante.get(quadrante.id) ?? {
-              count: 0,
-              soma: 0,
-              units: [] as string[],
-              mixed: false,
-            };
-            const totalMatches = quadrante.matches.length;
-            const hasMoreThanPreview = totalMatches > QUADRANTE_MATCH_PREVIEW;
-            const isExpanded = expandedQuadrantes.has(quadrante.id);
-            const visibleMatches =
-              hasMoreThanPreview && !isExpanded
-                ? quadrante.matches.slice(0, QUADRANTE_MATCH_PREVIEW)
-                : quadrante.matches;
-            const hiddenCount = totalMatches - visibleMatches.length;
+                const listSubtitle =
+                  totalMatches === 0
+                    ? 'Nenhum resultado compatível'
+                    : hasMoreThanPreview && !isExpanded
+                      ? `Mostrando ${visibleMatches.length} de ${totalMatches} resultados`
+                      : `${totalMatches} ${totalMatches === 1 ? 'resultado' : 'resultados'}`;
 
-            return (
-              <Card key={quadrante.id} className="shadow-sm" padding="none">
-                <CardHeader className="space-y-2 border-b border-gray-100 px-4 py-3 dark:border-gray-800">
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-                      Serviço {quadrante.index}
-                    </h3>
-                    <div className="flex flex-wrap items-center gap-2">
+                const toggleAllVisible = () => {
+                  setSelectedMatchKeys((prev) => {
+                    const next = new Set(prev);
+                    if (allVisibleSelected) {
+                      for (const match of visibleMatches) {
+                        next.delete(`${quadrante.id}::${match.item.rowKey}`);
+                      }
+                      return next;
+                    }
+
+                    const unitsAfter: string[] = [];
+                    for (const match of quadrante.matches) {
+                      const key = `${quadrante.id}::${match.item.rowKey}`;
+                      if (!next.has(key)) continue;
+                      const und = normalizeUnd(match.item.und);
+                      if (und) unitsAfter.push(und);
+                    }
+                    for (const match of visibleMatches) {
+                      const und = normalizeUnd(match.item.und);
+                      if (und) unitsAfter.push(und);
+                      next.add(`${quadrante.id}::${match.item.rowKey}`);
+                    }
+                    alertUnidadesDiferentes(unitsAfter, `banco-cats-mixed-und-${quadrante.id}`);
+                    return next;
+                  });
+                };
+
+                return (
+                  <div
+                    key={quadrante.id}
+                    className="border-t border-gray-200 pt-4 dark:border-gray-700"
+                  >
+                    <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="min-w-0">
+                        <h4 className="text-base font-semibold text-gray-900 dark:text-gray-100">
+                          Serviço {quadrante.index}
+                        </h4>
+                        <p className="text-sm text-gray-600 dark:text-gray-400">{listSubtitle}</p>
+                      </div>
                       <span
-                        className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold ${
+                        className={`inline-flex w-fit shrink-0 rounded-full px-2.5 py-0.5 text-xs font-semibold ${
                           selecao.mixed
                             ? 'bg-amber-50 text-amber-900 dark:bg-amber-950/40 dark:text-amber-200'
                             : 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200'
                         }`}
                       >
-                        Soma QUANT.: {formatQuantidadeBr(selecao.soma)}
+                        Soma quantidade: {formatQuantidadeBr(selecao.soma)}
                         {selecao.count > 0 ? ` (${selecao.count})` : ''}
                         {selecao.mixed
                           ? ` · UND mistas: ${selecao.units.join(', ')}`
@@ -936,135 +978,130 @@ export function BancoCatsPanel() {
                             ? ` · ${selecao.units[0]}`
                             : ''}
                       </span>
-                      <span className="shrink-0 rounded-full bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-700 dark:bg-red-950/40 dark:text-red-300">
-                        {totalMatches} compatível(is)
-                        {hasMoreThanPreview && !isExpanded
-                          ? ` · top ${QUADRANTE_MATCH_PREVIEW}`
-                          : ''}
-                      </span>
                     </div>
-                  </div>
-                  <p className="line-clamp-3 text-xs leading-relaxed text-gray-600 dark:text-gray-400">
-                    {quadrante.query}
-                  </p>
-                  {quadrante.keywords.length > 0 ? (
-                    <p className="flex flex-wrap gap-1">
-                      {quadrante.keywords.slice(0, 12).map((keyword) => (
-                        <span
-                          key={`${quadrante.id}-${keyword}`}
-                          className="rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-900 dark:bg-amber-950/40 dark:text-amber-100"
-                        >
-                          {keyword}
-                        </span>
-                      ))}
-                      {quadrante.keywords.length > 12 ? (
-                        <span className="text-[10px] text-gray-500">
-                          +{quadrante.keywords.length - 12}
-                        </span>
-                      ) : null}
-                    </p>
-                  ) : null}
-                </CardHeader>
-                <CardContent className="max-h-[32rem] space-y-2 overflow-y-auto px-4 py-3">
-                  {totalMatches === 0 ? (
-                    <p className="py-6 text-center text-sm text-gray-500">
-                      Nenhum compatível encontrado para este serviço.
-                    </p>
-                  ) : (
-                    <>
-                      {visibleMatches.map((match) => {
-                        const selectionKey = `${quadrante.id}::${match.item.rowKey}`;
-                        const checked = selectedMatchKeys.has(selectionKey);
-                        return (
-                          <label
-                            key={selectionKey}
-                            className={`group flex cursor-pointer gap-3 rounded-lg border px-3 py-2 transition-colors dark:border-gray-800 ${
-                              checked
-                                ? 'border-emerald-300 bg-emerald-50/60 dark:border-emerald-800 dark:bg-emerald-950/30'
-                                : 'border-gray-100 hover:bg-gray-50/80 dark:hover:bg-gray-900/40'
-                            }`}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={() =>
-                                toggleMatchSelection(quadrante.id, match.item.rowKey)
-                              }
-                              className="sr-only"
-                              aria-label={`Selecionar para soma: ${match.item.descricao || match.item.rowKey}`}
-                            />
-                            <CheckboxIndicator checked={checked} className="mt-1" />
-                            <div className="min-w-0 flex-1">
-                              <div className="mb-1 flex flex-wrap items-center gap-x-3 gap-y-1">
-                                <span className="text-xs font-semibold text-emerald-700 dark:text-emerald-400">
-                                  {match.matchedKeywords.length} chave(s)
-                                </span>
-                                <span className="text-xs text-gray-500">
-                                  {match.item.empresa || '—'}
-                                </span>
-                                <span className="text-xs text-gray-500">
-                                  UND: {match.item.und || '—'}
-                                </span>
-                                <span className="text-xs font-medium text-gray-700 dark:text-gray-300">
-                                  QUANT.: {match.item.quant || '—'}
-                                </span>
-                              </div>
-                              <p className="text-sm leading-relaxed text-gray-800 dark:text-gray-200">
-                                {match.item.descricao || match.item.cells.join(' · ') || '—'}
-                              </p>
-                              <p
-                                className="mt-1.5 break-words text-xs font-medium text-gray-800 dark:text-gray-200"
-                                title={match.item.fonte || undefined}
-                              >
-                                <span className="font-semibold uppercase tracking-wide text-red-700 dark:text-red-400">
-                                  Fonte:
-                                </span>{' '}
-                                {match.item.fonte || '—'}
-                              </p>
-                              {match.matchedKeywords.length > 0 ? (
-                                <p className="mt-1.5 flex flex-wrap gap-1">
-                                  {match.matchedKeywords.slice(0, 8).map((keyword) => (
-                                    <span
-                                      key={`${selectionKey}-${keyword}`}
-                                      className="rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200"
+
+                    {totalMatches === 0 ? (
+                      <CadastroListEmpty
+                        icon={FileSearch}
+                        title="Nenhum compatível encontrado"
+                        hint="Tente outros termos do edital para este serviço"
+                      />
+                    ) : (
+                      <>
+                        <div className="overflow-x-auto">
+                          <table className="w-full min-w-[48rem] text-sm">
+                            <thead>
+                              <tr className="border-b border-gray-200 dark:border-gray-700">
+                                <th scope="col" className={`${cadastroListClasses.thCenter} w-12`}>
+                                  <TableCheckbox
+                                    checked={allVisibleSelected}
+                                    indeterminate={someVisibleSelected}
+                                    onChange={toggleAllVisible}
+                                    ariaLabel={`Selecionar todos os compatíveis do serviço ${quadrante.index}`}
+                                  />
+                                </th>
+                                <th scope="col" className={cadastroListClasses.thCenter}>
+                                  EMPRESA
+                                </th>
+                                <th
+                                  scope="col"
+                                  className={`${cadastroListClasses.th} min-w-[18rem]`}
+                                >
+                                  DESCRIÇÃO
+                                </th>
+                                <th scope="col" className={cadastroListClasses.thCenter}>
+                                  UND
+                                </th>
+                                <th scope="col" className={cadastroListClasses.thCenter}>
+                                  QUANT.
+                                </th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                              {visibleMatches.map((match) => {
+                                const selectionKey = `${quadrante.id}::${match.item.rowKey}`;
+                                const checked = selectedMatchKeys.has(selectionKey);
+                                const descricao =
+                                  match.item.descricao ||
+                                  match.item.cells.join(' · ') ||
+                                  '—';
+                                return (
+                                  <tr
+                                    key={selectionKey}
+                                    className={`align-middle transition-colors hover:bg-gray-50/80 dark:hover:bg-gray-900/40 ${
+                                      checked ? 'bg-emerald-50/40 dark:bg-emerald-950/20' : ''
+                                    }`}
+                                  >
+                                    <td className={cadastroListClasses.tdCenter}>
+                                      <TableCheckbox
+                                        checked={checked}
+                                        onChange={() =>
+                                          toggleMatchSelection(quadrante.id, match.item.rowKey)
+                                        }
+                                        ariaLabel={`Selecionar para soma: ${descricao}`}
+                                      />
+                                    </td>
+                                    <td className={cadastroListClasses.tdCenter}>
+                                      {match.item.empresa || '—'}
+                                    </td>
+                                    <td
+                                      className={`${cadastroListClasses.td} max-w-xl whitespace-normal`}
                                     >
-                                      {keyword}
-                                    </span>
-                                  ))}
-                                </p>
-                              ) : null}
-                            </div>
-                          </label>
-                        );
-                      })}
-                      {hasMoreThanPreview ? (
-                        <button
-                          type="button"
-                          onClick={() => toggleQuadranteExpanded(quadrante.id)}
-                          className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-gray-300 bg-gray-50 px-3 py-2.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-900/50 dark:text-gray-200 dark:hover:bg-gray-900"
-                        >
-                          {isExpanded ? (
-                            <>
-                              <ChevronUp className="h-4 w-4" aria-hidden />
-                              Mostrar só os {QUADRANTE_MATCH_PREVIEW} primeiros
-                            </>
-                          ) : (
-                            <>
-                              <ChevronDown className="h-4 w-4" aria-hidden />
-                              Ver todos os {totalMatches} compatíveis
-                              {hiddenCount > 0 ? ` (+${hiddenCount})` : ''}
-                            </>
-                          )}
-                        </button>
-                      ) : null}
-                    </>
-                  )}
-                </CardContent>
-              </Card>
-            );
-          })}
-        </div>
-      ) : null}
+                                      <div className="min-w-0">
+                                        <p className="leading-relaxed text-gray-900 dark:text-gray-100">
+                                          {descricao}
+                                        </p>
+                                        <p
+                                          className="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400"
+                                          title={match.item.fonte || undefined}
+                                        >
+                                          {match.item.fonte || 'Sem fonte'}
+                                        </p>
+                                      </div>
+                                    </td>
+                                    <td className={cadastroListClasses.tdCenter}>
+                                      {match.item.und || '—'}
+                                    </td>
+                                    <td className={cadastroListClasses.tdCenter}>
+                                      {match.item.quant || '—'}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                        {hasMoreThanPreview ? (
+                          <div className="mt-3 flex justify-center">
+                            <button
+                              type="button"
+                              onClick={() => toggleQuadranteExpanded(quadrante.id)}
+                              className="flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-800 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
+                            >
+                              {isExpanded ? (
+                                <>
+                                  <ChevronUp className="h-4 w-4" aria-hidden />
+                                  Mostrar só os {QUADRANTE_MATCH_PREVIEW} primeiros
+                                </>
+                              ) : (
+                                <>
+                                  <ChevronDown className="h-4 w-4" aria-hidden />
+                                  Ver todos os {totalMatches} compatíveis
+                                  {hiddenCount > 0 ? ` (+${hiddenCount})` : ''}
+                                </>
+                              )}
+                            </button>
+                          </div>
+                        ) : null}
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ) : null}
+        </CardContent>
+      </Card>
 
       <Card className={cadastroListClasses.card}>
         <CardHeader className={cadastroListClasses.cardHeader}>
@@ -1087,7 +1124,7 @@ export function BancoCatsPanel() {
                           : 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200'
                       }`}
                     >
-                      Soma QUANT.: {formatQuantidadeBr(catalogSoma.soma)} ({catalogSoma.count})
+                      Soma quantidade: {formatQuantidadeBr(catalogSoma.soma)} ({catalogSoma.count})
                       {catalogSoma.mixed
                         ? ` · UND mistas: ${catalogSoma.units.join(', ')}`
                         : catalogSoma.units.length === 1
@@ -1286,7 +1323,7 @@ export function BancoCatsPanel() {
                       return (
                         <tr
                           key={row.key}
-                          className={`align-top transition-colors hover:bg-gray-50/80 dark:hover:bg-gray-900/40 ${
+                          className={`align-middle transition-colors hover:bg-gray-50/80 dark:hover:bg-gray-900/40 ${
                             checked ? 'bg-emerald-50/40 dark:bg-emerald-950/20' : ''
                           }`}
                         >
