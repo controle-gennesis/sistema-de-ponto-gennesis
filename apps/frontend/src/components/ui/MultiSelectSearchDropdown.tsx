@@ -252,8 +252,8 @@ function MenuPanel({
   noFocusRing,
 }: {
   panelId: string;
-  panelRef: React.RefObject<HTMLDivElement | null>;
-  listRef: React.RefObject<HTMLDivElement | null>;
+  panelRef: React.RefObject<HTMLDivElement>;
+  listRef: React.RefObject<HTMLDivElement>;
   search: string;
   setSearch: (v: string) => void;
   searchPlaceholder: string;
