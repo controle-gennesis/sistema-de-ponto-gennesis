@@ -44,6 +44,7 @@ import {
   type MaterialRequestOcListPurchaseOrder,
 } from '@/components/oc/materialRequestOcListRows';
 import { useCostCenters } from '@/hooks/useCostCenters';
+import { usePermissions } from '@/hooks/usePermissions';
 import {
   useServiceOrdersByContract,
 } from '@/hooks/useServiceOrdersByCostCenter';
@@ -689,6 +690,7 @@ function SolicitarMateriaisPage() {
   });
 
   const { costCenters, isLoading: loadingCostCenters } = useCostCenters();
+  const { isUnbUser, unbCostCenterIds } = usePermissions();
 
   const { data: contractOptionsData, isLoading: loadingContracts } = useQuery({
     queryKey: ['service-order-contract-options'],
@@ -765,15 +767,16 @@ function SolicitarMateriaisPage() {
   };
 
   // Buscar requisições do usuário
+  const userId = userData?.data?.id as string | undefined;
   const { data: requestsData, isLoading: loadingRequests, isError: hasRequestsError, error: requestsError } = useQuery({
-    queryKey: ['material-requests'],
+    queryKey: ['material-requests', userId],
     queryFn: async () => {
       const res = await api.get('/material-requests', {
-        params: { requestedBy: userData?.data?.id, limit: 200, summary: '1' }
+        params: { requestedBy: userId, limit: 200, summary: '1' }
       });
       return res.data;
     },
-    enabled: !!userData?.data?.id,
+    enabled: !!userId,
     refetchOnWindowFocus: true,
   });
 
@@ -898,10 +901,18 @@ function SolicitarMateriaisPage() {
     }
   });
 
-  const requests = useMemo(
-    () => requestsData?.data?.requests ?? requestsData?.data ?? EMPTY_REQUEST_LIST,
-    [requestsData]
-  );
+  const requests = useMemo(() => {
+    const raw = requestsData?.data?.requests ?? requestsData?.data ?? EMPTY_REQUEST_LIST;
+    const list = Array.isArray(raw) ? raw : EMPTY_REQUEST_LIST;
+    // Usuário UNB: só RMs de centros de custo UNB (reforço do filtro do backend).
+    if (!isUnbUser) return list;
+    if (unbCostCenterIds.length === 0) return EMPTY_REQUEST_LIST;
+    const allowed = new Set(unbCostCenterIds);
+    return list.filter((r: { costCenterId?: string; costCenter?: { id?: string } | null }) => {
+      const id = r.costCenterId || r.costCenter?.id;
+      return !!id && allowed.has(id);
+    });
+  }, [requestsData, isUnbUser, unbCostCenterIds]);
 
   const normalizedRequests = useMemo(
     () => (Array.isArray(requests) ? requests : []) as MaterialRequest[],

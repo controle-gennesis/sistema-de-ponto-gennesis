@@ -12,6 +12,7 @@ import { Loading } from '@/components/ui/Loading';
 import api from '@/lib/api';
 import { absoluteUploadUrl } from '@/lib/apiOrigin';
 import toast from 'react-hot-toast';
+import { usePermissions } from '@/hooks/usePermissions';
 import { OcStyledCheckbox, type PurchaseOrder } from '@/components/oc/OcPurchaseOrdersPanel';
 import {
   PaymentConditionSelect,
@@ -290,6 +291,7 @@ export default function GerenciarMateriaisPage() {
   };
   const [rmCardFilter, setRmCardFilter] = useState<RmCardFilter>(DEFAULT_RM_CARD_FILTER);
   const [searchTerm, setSearchTerm] = useState('');
+  const { isUnbUser, unbCostCenterIds } = usePermissions();
 
   const handleLogout = () => {
     localStorage.removeItem('token');
@@ -424,7 +426,17 @@ export default function GerenciarMateriaisPage() {
     }
   });
 
-  const allRequests = requestsData?.data?.requests || requestsData?.data || [];
+  const allRequests = useMemo(() => {
+    const raw = requestsData?.data?.requests || requestsData?.data || [];
+    const list = Array.isArray(raw) ? (raw as MaterialRequest[]) : [];
+    if (!isUnbUser) return list;
+    if (unbCostCenterIds.length === 0) return [];
+    const allowed = new Set(unbCostCenterIds);
+    return list.filter((r) => {
+      const id = r.costCenterId || r.costCenter?.id;
+      return !!id && allowed.has(id);
+    });
+  }, [requestsData, isUnbUser, unbCostCenterIds]);
 
   // Calcular estatísticas
   const normalizedRequests = allRequests.map((r: MaterialRequest) =>

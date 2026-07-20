@@ -282,6 +282,12 @@ router.patch('/:id/status', async (req: AuthRequest, res: Response, next: NextFu
     const existing = await prisma.materialRequest.findUnique({ where: { id } });
     if (!existing) throw createError('Requisição não encontrada', 404);
 
+    await assertCostCenterAllowedForUnbUser(
+      req.user.id,
+      !!req.user.isAdmin,
+      existing.costCenterId,
+    );
+
     if (isRmApproverStatusChange(status, existing.requestedBy, req.user.id)) {
       await assertUserCanApproveMaterialRequests(req.user.id, req.user.isAdmin);
       await assertUserCanApproveMaterialRequestForCostCenter(
@@ -366,6 +372,14 @@ router.get('/:id', async (req: AuthRequest, res: Response, next: NextFunction) =
 
     if (!request) {
       throw createError('Requisição não encontrada', 404);
+    }
+
+    if (req.user?.id) {
+      await assertCostCenterAllowedForUnbUser(
+        req.user.id,
+        !!req.user.isAdmin,
+        request.costCenterId,
+      );
     }
 
     res.json({

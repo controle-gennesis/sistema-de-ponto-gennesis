@@ -11,7 +11,10 @@ export function isUnbRelatedLabel(label: string | null | undefined): boolean {
     .replace(/[\u0300-\u036f]/g, '');
 
   if (normalized === 'UNB') return true;
-  return /^UNB(\s|$|-|\/)/.test(normalized);
+  // "UNB - DF", "UNB/Predial", "UNB Engenharia"
+  if (/^UNB(\s|$|-|\/)/.test(normalized)) return true;
+  // "Centro UNB", "CC-UNB", "Predial UNB" (token UNB, evita falso positivo tipo SUNBEAM)
+  return /(^|[^A-Z0-9])UNB([^A-Z0-9]|$)/.test(normalized);
 }
 
 export function shouldUseUnbBranding(...labels: (string | null | undefined)[]): boolean {
