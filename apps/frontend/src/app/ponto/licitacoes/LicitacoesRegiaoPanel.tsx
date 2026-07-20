@@ -739,7 +739,7 @@ export function LicitacoesRegiaoPanel() {
               </div>
               <div className="min-w-0">
                 <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                  Licitações por Região
+                  Licitações por região
                 </h3>
                 <p className="text-sm text-gray-600 dark:text-gray-400">
                   {loadingSheet

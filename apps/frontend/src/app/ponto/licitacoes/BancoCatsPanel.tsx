@@ -1083,6 +1083,15 @@ export function BancoCatsPanel() {
                                         <p className="leading-relaxed text-gray-900 dark:text-gray-100">
                                           {descricao}
                                         </p>
+                                        {match.matchedKeywords.length > 0 ? (
+                                          <p
+                                            className="mt-0.5 text-xs font-medium text-red-600 dark:text-red-400"
+                                            title={`${match.matchedKeywords.length} chave(s) encontrada(s)`}
+                                          >
+                                            {match.matchedKeywords.join(', ')}{' '}
+                                            {`{${match.matchedKeywords.length}}`}
+                                          </p>
+                                        ) : null}
                                         <p
                                           className="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400"
                                           title={match.item.fonte || undefined}
