@@ -3,9 +3,10 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { FileSpreadsheet, Plus, Truck, X } from 'lucide-react';
+import { FileSpreadsheet, RotateCcw, Truck, X } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Loading } from '@/components/ui/Loading';
+import { Modal } from '@/components/ui/Modal';
 import toast from 'react-hot-toast';
 import api from '@/lib/api';
 import { MainLayout } from '@/components/layout/MainLayout';
@@ -423,47 +424,6 @@ const mapPaymentSegmentCls = (active: boolean) =>
 
 const mapLabelCls = 'mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300';
 
-function MapStyledCheckbox({
-  checked,
-  onChange,
-  ariaLabel
-}: {
-  checked: boolean;
-  onChange: (checked: boolean) => void;
-  ariaLabel?: string;
-}) {
-  return (
-    <span className="inline-flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center group">
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={(e) => onChange(e.target.checked)}
-        aria-label={ariaLabel}
-        className="sr-only"
-      />
-      <span
-        className={`box-border flex h-5 w-5 shrink-0 items-center justify-center rounded border-2 transition-colors duration-200 ${
-          checked
-            ? 'border-red-600 bg-red-600 dark:border-red-500 dark:bg-red-500'
-            : 'border-gray-300 bg-white group-hover:border-red-500 dark:border-gray-600 dark:bg-gray-800 dark:group-hover:border-red-400'
-        }`}
-      >
-        <svg
-          className={`h-3 w-3 shrink-0 text-white transition-opacity duration-200 ${
-            checked ? 'opacity-100' : 'opacity-0'
-          }`}
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-          aria-hidden
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-        </svg>
-      </span>
-    </span>
-  );
-}
-
 const OC_TYPE_AVISTA = 'AVISTA';
 const OC_TYPE_BOLETO = 'BOLETO';
 
@@ -555,7 +515,7 @@ export default function MapaCotacaoPage() {
 
   const [quoteMapId, setQuoteMapId] = useState<string>('');
 
-  const [generateSupplierIds, setGenerateSupplierIds] = useState<Set<string>>(new Set());
+  const [ocModalSupplierId, setOcModalSupplierId] = useState<string | null>(null);
 
   /** Quantidade a comprar na OC por item da SC (≤ solicitado na SC). Afeta totais e vencedor. */
   const [ocItemQtyByItemId, setOcItemQtyByItemId] = useState<Record<string, number>>({});
@@ -754,11 +714,11 @@ export default function MapaCotacaoPage() {
   useEffect(() => {
     if (!selectedRequestId) return;
     setSelectedSupplierIds(new Set());
-    setGenerateSupplierIds(new Set());
     setFreightBySupplier({});
     setUnitPriceBySupplierItem({});
     setSupplierItemDetailByKey({});
     setPaymentDraftBySupplier({});
+    setOcModalSupplierId(null);
   }, [selectedRequestId]);
 
   useEffect(() => {
@@ -893,19 +853,6 @@ export default function MapaCotacaoPage() {
     return map;
   }, [winnersByItem, ocItems, selectedSupplierIds]);
 
-  /** Remove fornecedores que não venceram mais (ex.: após alterar preços) — nunca marca automaticamente. */
-  useEffect(() => {
-    if (!selectedRequest) return;
-    setGenerateSupplierIds((prev) => {
-      const next = new Set<string>();
-      for (const sid of Array.from(prev)) {
-        if ((wonItemsBySupplier[sid] ?? []).length > 0) next.add(sid);
-      }
-      if (next.size === prev.size && Array.from(next).every((id) => prev.has(id))) return prev;
-      return next;
-    });
-  }, [selectedRequest, wonItemsBySupplier]);
-
   const computedSupplierTotals = useMemo(() => {
     const out: Record<string, { itemsTotal: number; freight: number; amountToPay: number }> = {};
     for (const supplierId of Array.from(selectedSupplierIds)) {
@@ -927,14 +874,12 @@ export default function MapaCotacaoPage() {
   const [isGenerating, setIsGenerating] = useState(false);
 
   const generateOrdersMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (supplierId: string) => {
       if (!selectedRequest) throw new Error('Selecione uma requisição na fase RMs Aprovadas.');
-      const suppliersToGenerate = Array.from(generateSupplierIds).filter(
-        (sid) => (wonItemsBySupplier[sid] ?? []).length > 0
-      );
-      if (suppliersToGenerate.length === 0) {
-        throw new Error('Marque ao menos um fornecedor em "Gerar OC" para continuar.');
+      if ((wonItemsBySupplier[supplierId] ?? []).length === 0) {
+        throw new Error('Este fornecedor não venceu nenhum item da cotação.');
       }
+      const suppliersToGenerate = [supplierId];
       setIsGenerating(true);
 
       try {
@@ -950,19 +895,18 @@ export default function MapaCotacaoPage() {
         // 2) Salvar cotações + frete no banco (isso recalcula vencedor por item no backend)
         const selectedSupplierIdsArr = Array.from(selectedSupplierIds);
         const freightBySupplierPayload: Record<string, number> = {};
-        for (const supplierId of selectedSupplierIdsArr) {
-          const rawFrete = freightBySupplier[supplierId] ?? '';
+        for (const sid of selectedSupplierIdsArr) {
+          const rawFrete = freightBySupplier[sid] ?? '';
           const parsed = parseMapUnitPrice(rawFrete);
           // Campo vazio = sem frete (0), igual ao resumo exibido na tela
           const f = rawFrete.trim() === '' ? 0 : parsed;
           if (f == null || f < 0) {
-            const nome =
-              suppliers.find((s) => s.id === supplierId)?.name ?? 'fornecedor selecionado';
+            const nome = suppliers.find((s) => s.id === sid)?.name ?? 'fornecedor selecionado';
             throw new Error(
               `Frete inválido para "${nome}". Use um valor numérico válido (ex.: 0,00 ou 8,00).`
             );
           }
-          freightBySupplierPayload[supplierId] = f;
+          freightBySupplierPayload[sid] = f;
         }
 
         const unitPricesPayload: Array<{
@@ -971,15 +915,15 @@ export default function MapaCotacaoPage() {
           unitPrice: number;
         }> = [];
 
-        for (const supplierId of selectedSupplierIdsArr) {
+        for (const sid of selectedSupplierIdsArr) {
           for (const item of selectedRequest.items) {
-            const key = `${supplierId}:${item.id}`;
+            const key = `${sid}:${item.id}`;
             const u = parseMapUnitPrice(unitPriceBySupplierItem[key] ?? '');
             if (u == null || u < 0) continue; // se vazio, não conta para vitória
             unitPricesPayload.push({
-              supplierId,
+              supplierId: sid,
               materialRequestItemId: item.id,
-              unitPrice: u
+              unitPrice: u,
             });
           }
         }
@@ -995,67 +939,53 @@ export default function MapaCotacaoPage() {
           supplierIds: selectedSupplierIdsArr,
           freightBySupplier: freightBySupplierPayload,
           unitPrices: unitPricesPayload,
-          itemQuantities: itemQuantitiesForSave
+          itemQuantities: itemQuantitiesForSave,
         });
 
-        // 3) Preparar pagamento somente para fornecedores marcados para gerar OC
-        const paymentBySupplierPayload: Array<{
-          supplierId: string;
-          paymentType: string;
-          paymentCondition: string;
-          paymentDetails?: string;
-          pixKeyType?: string;
-          pixKey?: string;
-          observations?: string;
-          amountToPay?: number;
-          boletoAttachmentUrl?: string;
-          boletoAttachmentName?: string;
-          creationBoletoInstallments?: Array<{ boletoUrl: string; boletoName?: string }>;
-        }> = [];
+        // 3) Preparar pagamento do fornecedor da modal
+        const totals = computedSupplierTotals[supplierId];
+        const supplierName = suppliers.find((s) => s.id === supplierId)?.name ?? 'fornecedor';
+        const fallbackDraft = {
+          paymentType: OC_TYPE_AVISTA,
+          paymentCondition: paymentConditionDefault(OC_TYPE_AVISTA),
+          paymentDetails: '',
+          pixKeyType: '',
+          pixKey: '',
+          observations: '',
+          amountToPayStr: totals ? String(totals.amountToPay) : '',
+        };
 
-        for (const supplierId of suppliersToGenerate) {
-          const totals = computedSupplierTotals[supplierId];
-          const supplierName = suppliers.find((s) => s.id === supplierId)?.name ?? 'fornecedor';
-          const fallbackDraft = {
-            paymentType: OC_TYPE_AVISTA,
-            paymentCondition: paymentConditionDefault(OC_TYPE_AVISTA),
-            paymentDetails: '',
-            pixKeyType: '',
-            pixKey: '',
-            observations: '',
-            amountToPayStr: totals ? String(totals.amountToPay) : '',
-          };
+        const draft = paymentDraftBySupplier[supplierId] ?? fallbackDraft;
+        const paymentType = draft.paymentType ?? OC_TYPE_AVISTA;
+        const paymentCondition = draft.paymentCondition ?? paymentConditionDefault(paymentType);
 
-          const draft = paymentDraftBySupplier[supplierId] ?? fallbackDraft;
-          const paymentType = draft.paymentType ?? OC_TYPE_AVISTA;
-          const paymentCondition = draft.paymentCondition ?? paymentConditionDefault(paymentType);
-
-          if (paymentType === OC_TYPE_AVISTA) {
-            if (!draft.paymentDetails?.trim()) {
-              throw new Error(`Informe os dados do pagamento para "${supplierName}".`);
-            }
-            if (!draft.pixKeyType?.trim()) {
-              throw new Error(`Informe o tipo de chave PIX para "${supplierName}".`);
-            }
-            const pixKey = (draft.pixKey || '').trim();
-            if (!pixKey) {
-              throw new Error(`Informe a chave PIX para "${supplierName}".`);
-            }
-            const pixDigits = pixKey.replace(/\D/g, '');
-            const pixType = draft.pixKeyType.trim().toUpperCase();
-            if (pixType === 'CPF' && pixDigits.length !== 11) {
-              throw new Error(
-                `Chave PIX (CPF) inválida para "${supplierName}". Informe os 11 dígitos.`
-              );
-            }
-            if (pixType === 'CNPJ' && pixDigits.length !== 14) {
-              throw new Error(
-                `Chave PIX (CNPJ) inválida para "${supplierName}". Informe os 14 dígitos.`
-              );
-            }
+        if (paymentType === OC_TYPE_AVISTA) {
+          if (!draft.paymentDetails?.trim()) {
+            throw new Error(`Informe os dados do pagamento para "${supplierName}".`);
           }
+          if (!draft.pixKeyType?.trim()) {
+            throw new Error(`Informe o tipo de chave PIX para "${supplierName}".`);
+          }
+          const pixKey = (draft.pixKey || '').trim();
+          if (!pixKey) {
+            throw new Error(`Informe a chave PIX para "${supplierName}".`);
+          }
+          const pixDigits = pixKey.replace(/\D/g, '');
+          const pixType = draft.pixKeyType.trim().toUpperCase();
+          if (pixType === 'CPF' && pixDigits.length !== 11) {
+            throw new Error(
+              `Chave PIX (CPF) inválida para "${supplierName}". Informe os 11 dígitos.`
+            );
+          }
+          if (pixType === 'CNPJ' && pixDigits.length !== 14) {
+            throw new Error(
+              `Chave PIX (CNPJ) inválida para "${supplierName}". Informe os 14 dígitos.`
+            );
+          }
+        }
 
-          paymentBySupplierPayload.push({
+        const paymentBySupplierPayload = [
+          {
             supplierId,
             paymentType,
             paymentCondition,
@@ -1064,18 +994,16 @@ export default function MapaCotacaoPage() {
             pixKey: paymentType === OC_TYPE_AVISTA ? draft.pixKey?.trim() || undefined : undefined,
             observations: draft.observations?.trim() || undefined,
             amountToPay: totals?.amountToPay,
-          });
-        }
+          },
+        ];
 
-        // 4) Gerar as OCs no backend
+        // 4) Gerar a OC no backend
         const itemNotesBySupplierItem: Record<string, string> = {};
-        for (const supplierId of suppliersToGenerate) {
-          const won = wonItemsBySupplier[supplierId] ?? [];
-          for (const item of won) {
-            const key = `${supplierId}:${item.id}`;
-            const detail = (supplierItemDetailByKey[key] ?? '').trim();
-            if (detail) itemNotesBySupplierItem[key] = detail;
-          }
+        const won = wonItemsBySupplier[supplierId] ?? [];
+        for (const item of won) {
+          const key = `${supplierId}:${item.id}`;
+          const detail = (supplierItemDetailByKey[key] ?? '').trim();
+          if (detail) itemNotesBySupplierItem[key] = detail;
         }
 
         const result = await api.post(`/quote-maps/${mapId}/generate`, {
@@ -1091,18 +1019,19 @@ export default function MapaCotacaoPage() {
       }
     },
     onSuccess: () => {
+      setOcModalSupplierId(null);
       queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
       queryClient.invalidateQueries({ queryKey: ['material-requests'], refetchType: 'all' });
       queryClient.invalidateQueries({ queryKey: ['material-requests-manage'], refetchType: 'all' });
-      toast.success('Mapa gerado e OCs criadas com sucesso!');
+      toast.success('OC gerada com sucesso!');
     },
     onError: (error: any) => {
       const apiMsg =
         error?.response?.data?.message ||
         error?.response?.data?.error ||
         error?.message;
-      toast.error(apiMsg || 'Erro ao gerar OCs', { duration: 8000 });
-    }
+      toast.error(apiMsg || 'Erro ao gerar OC', { duration: 8000 });
+    },
   });
 
   if (loadingUser || loadingRequests) {
@@ -1138,17 +1067,39 @@ export default function MapaCotacaoPage() {
 
           <Card>
             <CardHeader className="border-b-0 pb-1">
-              <div className="flex items-center gap-3">
-                <div className="flex-shrink-0 rounded-lg bg-red-100 p-2 sm:p-3 dark:bg-red-950/40">
-                  <Truck className="h-5 w-5 text-red-600 sm:h-6 sm:w-6 dark:text-red-400" />
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex min-w-0 items-center gap-3">
+                  <div className="flex-shrink-0 rounded-lg bg-red-100 p-2 sm:p-3 dark:bg-red-950/40">
+                    <Truck className="h-5 w-5 text-red-600 sm:h-6 sm:w-6 dark:text-red-400" />
+                  </div>
+                  <div className="min-w-0">
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                      RM's Aprovadas
+                    </h3>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                      Escolha a requisição e os fornecedores para montar o mapa
+                    </p>
+                  </div>
                 </div>
-                <div className="min-w-0">
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                    RM's Aprovadas
-                  </h3>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">
-                    Escolha a requisição e os fornecedores para montar o mapa
-                  </p>
+                <div className={cadastroListClasses.cardToolbar}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedRequestId('');
+                      setQuoteMapId('');
+                      setSelectedSupplierIds(new Set());
+                      setOcModalSupplierId(null);
+                      setFreightBySupplier({});
+                      setUnitPriceBySupplierItem({});
+                      setSupplierItemDetailByKey({});
+                      setPaymentDraftBySupplier({});
+                    }}
+                    title="Limpar"
+                    aria-label="Limpar seleção"
+                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                  >
+                    <RotateCcw className="h-4 w-4" aria-hidden />
+                  </button>
                 </div>
               </div>
             </CardHeader>
@@ -1216,33 +1167,6 @@ export default function MapaCotacaoPage() {
                           Preços, quantidades e vencedor por item da SC
                         </p>
                       </div>
-                    </div>
-                    <div className={cadastroListClasses.cardToolbar}>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSelectedRequestId('');
-                          setQuoteMapId('');
-                          setSelectedSupplierIds(new Set());
-                          setGenerateSupplierIds(new Set());
-                          setFreightBySupplier({});
-                          setUnitPriceBySupplierItem({});
-                          setSupplierItemDetailByKey({});
-                          setPaymentDraftBySupplier({});
-                        }}
-                        className="flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-800 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
-                      >
-                        Limpar
-                      </button>
-                      <button
-                        type="button"
-                        disabled={generateSupplierIds.size === 0 || isGenerating}
-                        onClick={() => generateOrdersMutation.mutate()}
-                        className="flex h-10 items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700 transition-colors hover:bg-blue-100 disabled:opacity-50 dark:border-blue-800/60 dark:bg-blue-950/30 dark:text-blue-300 dark:hover:bg-blue-900/40"
-                      >
-                        <Plus className="h-4 w-4 shrink-0" />
-                        <span>{isGenerating ? 'Gerando…' : 'Gerar OCs selecionadas'}</span>
-                      </button>
                     </div>
                   </div>
                 </CardHeader>
@@ -1425,411 +1349,476 @@ export default function MapaCotacaoPage() {
                                   <td className={cadastroListClasses.tdCenter} />
                                 </tr>
                               ) : null}
+                              {selectedSupplierIds.size > 0 ? (
+                                <tr className="border-t border-gray-200 bg-gray-50/80 dark:border-gray-700 dark:bg-gray-900/40">
+                                  <td
+                                    colSpan={5}
+                                    className={`${cadastroListClasses.td} text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400`}
+                                  >
+                                    Valor total
+                                  </td>
+                                  {Array.from(selectedSupplierIds).map((supplierId, supplierIndex, supplierIds) => {
+                                    const wonCount = (wonItemsBySupplier[supplierId] ?? []).length;
+                                    const totals = computedSupplierTotals[supplierId];
+                                    const borderCls = `border-l border-gray-200 dark:border-gray-700 ${
+                                      supplierIndex === supplierIds.length - 1
+                                        ? 'border-r border-gray-200 dark:border-gray-700'
+                                        : ''
+                                    }`;
+                                    return (
+                                      <td
+                                        key={`total-${supplierId}`}
+                                        className={`${cadastroListClasses.tdCenter} ${borderCls}`}
+                                      >
+                                        {wonCount > 0 && totals ? (
+                                          <span className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">
+                                            {formatCurrencyBR(totals.amountToPay)}
+                                          </span>
+                                        ) : (
+                                          <span className="text-gray-400 dark:text-gray-500">—</span>
+                                        )}
+                                      </td>
+                                    );
+                                  })}
+                                  <td className={cadastroListClasses.tdCenter} />
+                                </tr>
+                              ) : null}
+                              {selectedSupplierIds.size > 0 ? (
+                                <tr className="border-t border-gray-200 dark:border-gray-700">
+                                  <td
+                                    colSpan={5}
+                                    className={`${cadastroListClasses.td} text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400`}
+                                  >
+                                    Ordem de compra
+                                  </td>
+                                  {Array.from(selectedSupplierIds).map((supplierId, supplierIndex, supplierIds) => {
+                                    const wonCount = (wonItemsBySupplier[supplierId] ?? []).length;
+                                    const totals = computedSupplierTotals[supplierId];
+                                    const borderCls = `border-l border-gray-200 dark:border-gray-700 ${
+                                      supplierIndex === supplierIds.length - 1
+                                        ? 'border-r border-gray-200 dark:border-gray-700'
+                                        : ''
+                                    }`;
+                                    return (
+                                      <td
+                                        key={`gerar-oc-${supplierId}`}
+                                        className={`${cadastroListClasses.tdCenter} ${borderCls}`}
+                                      >
+                                        {wonCount > 0 ? (
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              setPaymentDraftBySupplier((prev) => {
+                                                if (prev[supplierId]) return prev;
+                                                const suggested = totals
+                                                  ? formatCurrencyBR(totals.amountToPay)
+                                                  : '';
+                                                return {
+                                                  ...prev,
+                                                  [supplierId]: {
+                                                    ...emptyPaymentDraft(),
+                                                    amountToPayStr: suggested,
+                                                  },
+                                                };
+                                              });
+                                              setOcModalSupplierId(supplierId);
+                                            }}
+                                            className="inline-flex h-8 items-center rounded-lg border border-red-200 bg-red-50 px-2.5 text-xs font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+                                          >
+                                            Gerar OC
+                                          </button>
+                                        ) : (
+                                          <span className="text-gray-400 dark:text-gray-500">—</span>
+                                        )}
+                                      </td>
+                                    );
+                                  })}
+                                  <td className={cadastroListClasses.tdCenter} />
+                                </tr>
+                              ) : null}
                             </tbody>
                           </table>
                       </div>
-
-                  {selectedSupplierIds.size > 0 ? (
-                    <div className="mt-6 border-t border-gray-200 pt-6 dark:border-gray-700">
-                        <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">
-                          Fornecedores vencedores
-                        </h3>
-                        <p className="mt-1 mb-4 text-sm text-gray-500 dark:text-gray-400">
-                          Marque os fornecedores para gerar a OC. Quantidades e preços seguem a tabela de cotações acima.
-                        </p>
-
-                        {Array.from(selectedSupplierIds).filter(
-                          (sid) => (wonItemsBySupplier[sid] ?? []).length > 0
-                        ).length === 0 ? (
-                          <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50/80 px-6 py-10 text-center dark:border-gray-600 dark:bg-gray-900/30">
-                            <p className="text-sm text-gray-500 dark:text-gray-400">
-                              Informe os preços na tabela para definir o vencedor de cada item.
-                            </p>
-                          </div>
-                        ) : (
-                          <div className="space-y-4">
-                            {Array.from(selectedSupplierIds)
-                              .filter((sid) => (wonItemsBySupplier[sid] ?? []).length > 0)
-                              .map((sid) => {
-                                const sup = suppliers.find((s) => s.id === sid);
-                                const itemsWon = wonItemsBySupplier[sid] ?? [];
-                                const totals = computedSupplierTotals[sid];
-                                const generateOc = generateSupplierIds.has(sid);
-                                const payType =
-                                  paymentDraftBySupplier[sid]?.paymentType ?? OC_TYPE_AVISTA;
-                                const paymentConditionValue =
-                                  paymentDraftBySupplier[sid]?.paymentCondition ??
-                                  paymentConditionDefault(payType);
-
-                                return (
-                                  <div
-                                    key={sid}
-                                    className="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-600"
-                                  >
-                                    <div className="flex items-center justify-between gap-3 border-b border-gray-200 bg-gray-50/60 px-4 py-3 dark:border-gray-700 dark:bg-gray-900/40">
-                                      <div className="min-w-0">
-                                        <p
-                                          className="truncate font-semibold text-gray-900 dark:text-gray-100"
-                                          title={sup?.name ?? sid}
-                                        >
-                                          {sup ? sup.name : sid}
-                                        </p>
-                                        <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-500 dark:text-gray-400">
-                                          <span>
-                                            Frete:{' '}
-                                            <span className="font-medium text-gray-700 dark:text-gray-300">
-                                              {totals ? formatCurrencyBR(totals.freight) : '—'}
-                                            </span>
-                                          </span>
-                                          <span>
-                                            Itens:{' '}
-                                            <span className="font-medium text-gray-700 dark:text-gray-300">
-                                              {totals ? formatCurrencyBR(totals.itemsTotal) : '—'}
-                                            </span>
-                                          </span>
-                                          {totals ? (
-                                            <span>
-                                              Total OC:{' '}
-                                              <span className="font-medium text-gray-800 dark:text-gray-200">
-                                                {formatCurrencyBR(totals.amountToPay)}
-                                              </span>
-                                            </span>
-                                          ) : null}
-                                        </div>
-                                      </div>
-                                      <label className="flex shrink-0 cursor-pointer items-center gap-2.5 text-sm font-medium text-gray-700 dark:text-gray-300">
-                                        <MapStyledCheckbox
-                                          checked={generateOc}
-                                          onChange={(checked) => {
-                                            setGenerateSupplierIds((prev) => {
-                                              const next = new Set(prev);
-                                              if (checked) next.add(sid);
-                                              else next.delete(sid);
-                                              return next;
-                                            });
-                                          }}
-                                          ariaLabel={`Gerar OC para ${sup?.name ?? sid}`}
-                                        />
-                                        Gerar OC
-                                      </label>
-                                    </div>
-
-                                    <div className="overflow-x-auto">
-                                      <table className={`${cadastroListClasses.table} !table-auto text-sm`}>
-                                        <thead className="border-b border-gray-200 dark:border-gray-700">
-                                          <tr>
-                                            <th className={`${cadastroListClasses.thCenter} w-12`}>Item</th>
-                                            <th className={cadastroListClasses.th}>Material</th>
-                                            <th className={`${cadastroListClasses.th} min-w-[12rem]`}>
-                                              Detalhamento
-                                            </th>
-                                            <th className={cadastroListClasses.thCenter}>Unidade</th>
-                                            <th className={cadastroListClasses.thCenter}>Qtd. RM</th>
-                                            <th className={cadastroListClasses.thCenter}>Qtd. OC</th>
-                                            <th className={cadastroListClasses.thNumeric}>Valor unit.</th>
-                                          </tr>
-                                        </thead>
-                                        <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
-                                          {itemsWon.map((item) => {
-                                            const itemNo = ocItems.findIndex((i) => i.id === item.id) + 1;
-                                            const unitLabel = item.unit || '-';
-                                            const maxQty = Number(item.quantity);
-                                            const qty = ocItemQtyByItemId[item.id] ?? maxQty;
-                                            const priceKey = `${sid}:${item.id}`;
-                                            const unitParsed = parseMapUnitPrice(
-                                              unitPriceBySupplierItem[priceKey] ?? ''
-                                            );
-                                            const detailKey = `${sid}:${item.id}`;
-                                            return (
-                                              <tr
-                                                key={item.id}
-                                                className={getListTableRowClassName(false)}
-                                              >
-                                                <td className={`${cadastroListClasses.tdCenter} tabular-nums font-medium text-gray-800 dark:text-gray-200`}>
-                                                  {itemNo > 0 ? itemNo : '—'}
-                                                </td>
-                                                <td className={cadastroListClasses.td}>
-                                                  <p className="font-medium text-gray-900 dark:text-gray-100">
-                                                    {materialItemLabel(item)}
-                                                  </p>
-                                                </td>
-                                                <td className={cadastroListClasses.td}>
-                                                  <input
-                                                    type="text"
-                                                    value={supplierItemDetailByKey[detailKey] ?? ''}
-                                                    onChange={(e) => {
-                                                      const next = e.target.value;
-                                                      setSupplierItemDetailByKey((prev) => ({
-                                                        ...prev,
-                                                        [detailKey]: next,
-                                                      }));
-                                                    }}
-                                                    placeholder="Opcional"
-                                                    className={`${mapFieldCls} min-w-[10rem]`}
-                                                    aria-label={`Detalhamento do item para ${sup?.name ?? 'fornecedor'}`}
-                                                  />
-                                                </td>
-                                                <td className={cadastroListClasses.tdCenter}>{unitLabel}</td>
-                                                <td className={`${cadastroListClasses.tdCenter} tabular-nums text-gray-700 dark:text-gray-300`}>
-                                                  {maxQty}
-                                                </td>
-                                                <td className={`${cadastroListClasses.tdCenter} tabular-nums font-medium`}>
-                                                  {qty}
-                                                </td>
-                                                <td className={`${cadastroListClasses.tdNumeric} tabular-nums font-medium text-gray-900 dark:text-gray-100`}>
-                                                  {unitParsed == null
-                                                    ? '—'
-                                                    : formatCurrencyBR(unitParsed)}
-                                                </td>
-                                              </tr>
-                                            );
-                                          })}
-                                        </tbody>
-                                      </table>
-                                    </div>
-
-                                    {generateOc && (
-                                      <div className="space-y-4 border-t border-gray-200 p-4 dark:border-gray-700">
-                                        <div>
-                                          <span className={mapLabelCls}>Tipo de pagamento *</span>
-                                          <div
-                                            role="radiogroup"
-                                            aria-label="Tipo de pagamento"
-                                            className="grid max-w-md grid-cols-2 gap-2"
-                                          >
-                                            <button
-                                              type="button"
-                                              role="radio"
-                                              aria-checked={payType === OC_TYPE_AVISTA}
-                                              onClick={() => {
-                                                setPaymentDraftBySupplier((prev) => ({
-                                                  ...prev,
-                                                  [sid]: {
-                                                    ...(prev[sid] ?? emptyPaymentDraft()),
-                                                    paymentType: OC_TYPE_AVISTA,
-                                                    paymentCondition: paymentConditionDefault(OC_TYPE_AVISTA),
-                                                  }
-                                                }));
-                                              }}
-                                              className={mapPaymentSegmentCls(payType === OC_TYPE_AVISTA)}
-                                            >
-                                              À vista
-                                            </button>
-                                            <button
-                                              type="button"
-                                              role="radio"
-                                              aria-checked={payType === OC_TYPE_BOLETO}
-                                              onClick={() => {
-                                                setPaymentDraftBySupplier((prev) => ({
-                                                  ...prev,
-                                                  [sid]: {
-                                                    ...(prev[sid] ?? emptyPaymentDraft()),
-                                                    paymentType: OC_TYPE_BOLETO,
-                                                    paymentCondition: paymentConditionDefault(OC_TYPE_BOLETO),
-                                                    pixKeyType: '',
-                                                    pixKey: '',
-                                                  }
-                                                }));
-                                              }}
-                                              className={mapPaymentSegmentCls(payType === OC_TYPE_BOLETO)}
-                                            >
-                                              Boleto
-                                            </button>
-                                          </div>
-                                        </div>
-
-                                        {payType !== OC_TYPE_AVISTA ? (
-                                          <div>
-                                            <label
-                                              htmlFor={`pc-${sid}`}
-                                              className={mapLabelCls}
-                                            >
-                                              Condição de pagamento *
-                                            </label>
-                                            <PaymentConditionSelect
-                                              id={`pc-${sid}`}
-                                              key={`pc-${sid}-${payType}`}
-                                              paymentType="BOLETO"
-                                              value={paymentConditionValue}
-                                              onChange={(v) => {
-                                                setPaymentDraftBySupplier((prev) => ({
-                                                  ...prev,
-                                                  [sid]: {
-                                                    ...(prev[sid] ?? emptyPaymentDraft()),
-                                                    paymentCondition: v,
-                                                  }
-                                                }));
-                                              }}
-                                              hideFocus
-                                            />
-                                          </div>
-                                        ) : null}
-
-                                        <div>
-                                          <label htmlFor={`amount-${sid}`} className={mapLabelCls}>
-                                            Valor total (R$) *
-                                          </label>
-                                          <input
-                                            id={`amount-${sid}`}
-                                            type="text"
-                                            inputMode="decimal"
-                                            value={(() => {
-                                              const s = paymentDraftBySupplier[sid]?.amountToPayStr;
-                                              if (s !== undefined && s !== '') return s;
-                                              return totals ? formatCurrencyBR(totals.amountToPay) : '';
-                                            })()}
-                                            onChange={(e) => {
-                                              setPaymentDraftBySupplier((prev) => ({
-                                                ...prev,
-                                                [sid]: {
-                                                  ...(prev[sid] ?? emptyPaymentDraft()),
-                                                  amountToPayStr: e.target.value
-                                                }
-                                              }));
-                                            }}
-                                            onBlur={() => {
-                                              const raw =
-                                                paymentDraftBySupplier[sid]?.amountToPayStr ??
-                                                (totals ? String(totals.amountToPay) : '');
-                                              const formatted = formatCurrencyInputValue(raw);
-                                              setPaymentDraftBySupplier((prev) => ({
-                                                ...prev,
-                                                [sid]: {
-                                                  ...(prev[sid] ?? emptyPaymentDraft()),
-                                                  amountToPayStr: formatted
-                                                }
-                                              }));
-                                            }}
-                                            placeholder="0,00"
-                                            className={mapFieldCls}
-                                          />
-                                        </div>
-
-                                        <div>
-                                          <label htmlFor={`pay-details-${sid}`} className={mapLabelCls}>
-                                            Dados do pagamento{payType === OC_TYPE_AVISTA ? ' *' : ''}
-                                          </label>
-                                          <textarea
-                                            id={`pay-details-${sid}`}
-                                            value={paymentDraftBySupplier[sid]?.paymentDetails ?? ''}
-                                            onChange={(e) => {
-                                              setPaymentDraftBySupplier((prev) => ({
-                                                ...prev,
-                                                [sid]: {
-                                                  ...(prev[sid] ?? emptyPaymentDraft()),
-                                                  paymentDetails: e.target.value
-                                                }
-                                              }));
-                                            }}
-                                            rows={3}
-                                            placeholder={
-                                              payType === OC_TYPE_AVISTA
-                                                ? 'Conta, agência, favorecido, etc.'
-                                                : 'Conta, PIX, agência, favorecido, etc.'
-                                            }
-                                            className={`${mapFieldCls} min-h-[5rem] resize-y`}
-                                          />
-                                        </div>
-
-                                        {payType === OC_TYPE_AVISTA ? (
-                                          <div className="grid grid-cols-1 gap-4 sm:grid-cols-[minmax(10rem,1fr)_minmax(0,2.2fr)]">
-                                            <div>
-                                              <label htmlFor={`pix-type-${sid}`} className={mapLabelCls}>
-                                                Tipo de Chave Pix *
-                                              </label>
-                                              <SingleSelectSearchDropdown
-                                                value={paymentDraftBySupplier[sid]?.pixKeyType ?? ''}
-                                                onChange={(v) => {
-                                                  setPaymentDraftBySupplier((prev) => {
-                                                    const current = prev[sid] ?? emptyPaymentDraft();
-                                                    return {
-                                                      ...prev,
-                                                      [sid]: {
-                                                        ...current,
-                                                        pixKeyType: v,
-                                                        pixKey: maskPixKeyByType(v, current.pixKey),
-                                                      },
-                                                    };
-                                                  });
-                                                }}
-                                                options={OC_PIX_KEY_TYPE_OPTIONS}
-                                                allowEmpty
-                                                placeholder="Selecione..."
-                                                searchPlaceholder="Pesquisar..."
-                                                noFocusRing
-                                                hideFocus
-                                              />
-                                            </div>
-                                            <div>
-                                              <label htmlFor={`pix-key-${sid}`} className={mapLabelCls}>
-                                                Chave Pix *
-                                              </label>
-                                              <input
-                                                id={`pix-key-${sid}`}
-                                                type="text"
-                                                value={paymentDraftBySupplier[sid]?.pixKey ?? ''}
-                                                onChange={(e) => {
-                                                  const pixType =
-                                                    paymentDraftBySupplier[sid]?.pixKeyType ?? '';
-                                                  const next = maskPixKeyByType(
-                                                    pixType,
-                                                    e.target.value
-                                                  );
-                                                  setPaymentDraftBySupplier((prev) => ({
-                                                    ...prev,
-                                                    [sid]: {
-                                                      ...(prev[sid] ?? emptyPaymentDraft()),
-                                                      pixKey: next,
-                                                    },
-                                                  }));
-                                                }}
-                                                placeholder={pixKeyInputPlaceholder(
-                                                  paymentDraftBySupplier[sid]?.pixKeyType ?? ''
-                                                )}
-                                                maxLength={pixKeyInputMaxLength(
-                                                  paymentDraftBySupplier[sid]?.pixKeyType ?? ''
-                                                )}
-                                                className={mapFieldCls}
-                                              />
-                                            </div>
-                                          </div>
-                                        ) : null}
-
-                                        <div>
-                                          <label htmlFor={`obs-${sid}`} className={mapLabelCls}>
-                                            Observações
-                                          </label>
-                                          <textarea
-                                            id={`obs-${sid}`}
-                                            value={paymentDraftBySupplier[sid]?.observations ?? ''}
-                                            onChange={(e) => {
-                                              setPaymentDraftBySupplier((prev) => ({
-                                                ...prev,
-                                                [sid]: {
-                                                  ...(prev[sid] ?? emptyPaymentDraft()),
-                                                  observations: e.target.value
-                                                }
-                                              }));
-                                            }}
-                                            rows={2}
-                                            placeholder="Observações gerais da OC"
-                                            className={`${mapFieldCls} min-h-[4rem] resize-y`}
-                                          />
-                                        </div>
-                                      </div>
-                                    )}
-                                  </div>
-                                );
-                              })}
-                          </div>
-                        )}
-                      </div>
-                  ) : null}
                     </>
                   )}
                 </CardContent>
               </Card>
         </div>
+
+        {(() => {
+          const sid = ocModalSupplierId;
+          if (!sid) return null;
+          const sup = suppliers.find((s) => s.id === sid);
+          const totals = computedSupplierTotals[sid];
+          const itemsWon = wonItemsBySupplier[sid] ?? [];
+          const payType = paymentDraftBySupplier[sid]?.paymentType ?? OC_TYPE_AVISTA;
+          const paymentConditionValue =
+            paymentDraftBySupplier[sid]?.paymentCondition ?? paymentConditionDefault(payType);
+          const closeOcModal = () => {
+            if (isGenerating) return;
+            setOcModalSupplierId(null);
+          };
+
+          return (
+            <Modal
+              isOpen={Boolean(ocModalSupplierId)}
+              onClose={closeOcModal}
+              title={
+                <div className="min-w-0">
+                  <h3 className="truncate text-lg font-semibold text-gray-900 dark:text-gray-100">
+                    {`Gerar OC - ${sup?.name ?? 'Fornecedor'}`}
+                  </h3>
+                  {totals ? (
+                    <p className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-500 dark:text-gray-400">
+                      <span>
+                        Frete:{' '}
+                        <span className="font-medium text-gray-800 dark:text-gray-200">
+                          {formatCurrencyBR(totals.freight)}
+                        </span>
+                      </span>
+                      <span>
+                        Itens:{' '}
+                        <span className="font-medium text-gray-800 dark:text-gray-200">
+                          {formatCurrencyBR(totals.itemsTotal)}
+                        </span>
+                      </span>
+                      <span>
+                        Total OC:{' '}
+                        <span className="font-medium text-gray-800 dark:text-gray-200">
+                          {formatCurrencyBR(totals.amountToPay)}
+                        </span>
+                      </span>
+                    </p>
+                  ) : null}
+                </div>
+              }
+              size="xl"
+              contentOverflowVisible
+            >
+              <div className="space-y-5">
+                <div>
+                  <h4 className="mb-2 text-sm font-semibold text-gray-900 dark:text-gray-100">
+                    Itens da OC
+                  </h4>
+                  <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
+                    <table className={`${cadastroListClasses.table} !table-auto text-sm`}>
+                      <thead className="border-b border-gray-200 bg-gray-50/80 dark:border-gray-700 dark:bg-gray-900/40">
+                        <tr>
+                          <th className={`${cadastroListClasses.thCenter} w-12`}>Item</th>
+                          <th className={cadastroListClasses.th}>Material</th>
+                          <th className={`${cadastroListClasses.th} min-w-[12rem]`}>Detalhamento</th>
+                          <th className={cadastroListClasses.thCenter}>Unidade</th>
+                          <th className={cadastroListClasses.thCenter}>Qtd. OC</th>
+                          <th className={cadastroListClasses.thNumeric}>Valor unit.</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
+                        {itemsWon.map((item) => {
+                          const itemNo = ocItems.findIndex((i) => i.id === item.id) + 1;
+                          const unitLabel = item.unit || '-';
+                          const maxQty = Number(item.quantity);
+                          const qty = ocItemQtyByItemId[item.id] ?? maxQty;
+                          const priceKey = `${sid}:${item.id}`;
+                          const unitParsed = parseMapUnitPrice(
+                            unitPriceBySupplierItem[priceKey] ?? ''
+                          );
+                          const detailKey = `${sid}:${item.id}`;
+                          return (
+                            <tr key={item.id} className={getListTableRowClassName(false)}>
+                              <td
+                                className={`${cadastroListClasses.tdCenter} tabular-nums font-medium text-gray-800 dark:text-gray-200`}
+                              >
+                                {itemNo > 0 ? itemNo : '—'}
+                              </td>
+                              <td className={cadastroListClasses.td}>
+                                <p className="font-medium text-gray-900 dark:text-gray-100">
+                                  {materialItemLabel(item)}
+                                </p>
+                              </td>
+                              <td className={cadastroListClasses.td}>
+                                <input
+                                  type="text"
+                                  value={supplierItemDetailByKey[detailKey] ?? ''}
+                                  onChange={(e) => {
+                                    const next = e.target.value;
+                                    setSupplierItemDetailByKey((prev) => ({
+                                      ...prev,
+                                      [detailKey]: next,
+                                    }));
+                                  }}
+                                  placeholder="Opcional"
+                                  className={`${mapFieldCls} min-w-[10rem]`}
+                                  aria-label={`Detalhamento do item para ${sup?.name ?? 'fornecedor'}`}
+                                />
+                              </td>
+                              <td className={cadastroListClasses.tdCenter}>{unitLabel}</td>
+                              <td
+                                className={`${cadastroListClasses.tdCenter} tabular-nums font-medium`}
+                              >
+                                {qty}
+                              </td>
+                              <td
+                                className={`${cadastroListClasses.tdNumeric} tabular-nums font-medium text-gray-900 dark:text-gray-100`}
+                              >
+                                {unitParsed == null ? '—' : formatCurrencyBR(unitParsed)}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div>
+                  <h4 className="mb-3 text-sm font-semibold text-gray-900 dark:text-gray-100">
+                    Pagamento
+                  </h4>
+                  <div className="space-y-4">
+                <div>
+                  <span className={mapLabelCls}>Tipo de pagamento *</span>
+                  <div
+                    role="radiogroup"
+                    aria-label="Tipo de pagamento"
+                    className="grid max-w-md grid-cols-2 gap-2"
+                  >
+                    <button
+                      type="button"
+                      role="radio"
+                      aria-checked={payType === OC_TYPE_AVISTA}
+                      onClick={() => {
+                        setPaymentDraftBySupplier((prev) => ({
+                          ...prev,
+                          [sid]: {
+                            ...(prev[sid] ?? emptyPaymentDraft()),
+                            paymentType: OC_TYPE_AVISTA,
+                            paymentCondition: paymentConditionDefault(OC_TYPE_AVISTA),
+                          },
+                        }));
+                      }}
+                      className={mapPaymentSegmentCls(payType === OC_TYPE_AVISTA)}
+                    >
+                      À vista
+                    </button>
+                    <button
+                      type="button"
+                      role="radio"
+                      aria-checked={payType === OC_TYPE_BOLETO}
+                      onClick={() => {
+                        setPaymentDraftBySupplier((prev) => ({
+                          ...prev,
+                          [sid]: {
+                            ...(prev[sid] ?? emptyPaymentDraft()),
+                            paymentType: OC_TYPE_BOLETO,
+                            paymentCondition: paymentConditionDefault(OC_TYPE_BOLETO),
+                            pixKeyType: '',
+                            pixKey: '',
+                          },
+                        }));
+                      }}
+                      className={mapPaymentSegmentCls(payType === OC_TYPE_BOLETO)}
+                    >
+                      Boleto
+                    </button>
+                  </div>
+                </div>
+
+                {payType !== OC_TYPE_AVISTA ? (
+                  <div>
+                    <label htmlFor={`pc-modal-${sid}`} className={mapLabelCls}>
+                      Condição de pagamento *
+                    </label>
+                    <PaymentConditionSelect
+                      id={`pc-modal-${sid}`}
+                      key={`pc-modal-${sid}-${payType}`}
+                      paymentType="BOLETO"
+                      value={paymentConditionValue}
+                      onChange={(v) => {
+                        setPaymentDraftBySupplier((prev) => ({
+                          ...prev,
+                          [sid]: {
+                            ...(prev[sid] ?? emptyPaymentDraft()),
+                            paymentCondition: v,
+                          },
+                        }));
+                      }}
+                      hideFocus
+                    />
+                  </div>
+                ) : null}
+
+                <div>
+                  <label htmlFor={`amount-modal-${sid}`} className={mapLabelCls}>
+                    Valor total (R$) *
+                  </label>
+                  <input
+                    id={`amount-modal-${sid}`}
+                    type="text"
+                    inputMode="decimal"
+                    value={(() => {
+                      const s = paymentDraftBySupplier[sid]?.amountToPayStr;
+                      if (s !== undefined && s !== '') return s;
+                      return totals ? formatCurrencyBR(totals.amountToPay) : '';
+                    })()}
+                    onChange={(e) => {
+                      setPaymentDraftBySupplier((prev) => ({
+                        ...prev,
+                        [sid]: {
+                          ...(prev[sid] ?? emptyPaymentDraft()),
+                          amountToPayStr: e.target.value,
+                        },
+                      }));
+                    }}
+                    onBlur={() => {
+                      const raw =
+                        paymentDraftBySupplier[sid]?.amountToPayStr ??
+                        (totals ? String(totals.amountToPay) : '');
+                      const formatted = formatCurrencyInputValue(raw);
+                      setPaymentDraftBySupplier((prev) => ({
+                        ...prev,
+                        [sid]: {
+                          ...(prev[sid] ?? emptyPaymentDraft()),
+                          amountToPayStr: formatted,
+                        },
+                      }));
+                    }}
+                    placeholder="0,00"
+                    className={mapFieldCls}
+                  />
+                </div>
+
+                <div>
+                  <label htmlFor={`pay-details-modal-${sid}`} className={mapLabelCls}>
+                    Dados do pagamento{payType === OC_TYPE_AVISTA ? ' *' : ''}
+                  </label>
+                  <textarea
+                    id={`pay-details-modal-${sid}`}
+                    value={paymentDraftBySupplier[sid]?.paymentDetails ?? ''}
+                    onChange={(e) => {
+                      setPaymentDraftBySupplier((prev) => ({
+                        ...prev,
+                        [sid]: {
+                          ...(prev[sid] ?? emptyPaymentDraft()),
+                          paymentDetails: e.target.value,
+                        },
+                      }));
+                    }}
+                    rows={3}
+                    placeholder={
+                      payType === OC_TYPE_AVISTA
+                        ? 'Conta, agência, favorecido, etc.'
+                        : 'Conta, PIX, agência, favorecido, etc.'
+                    }
+                    className={`${mapFieldCls} min-h-[5rem] resize-y`}
+                  />
+                </div>
+
+                {payType === OC_TYPE_AVISTA ? (
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-[minmax(10rem,1fr)_minmax(0,2.2fr)]">
+                    <div>
+                      <label htmlFor={`pix-type-modal-${sid}`} className={mapLabelCls}>
+                        Tipo de Chave Pix *
+                      </label>
+                      <SingleSelectSearchDropdown
+                        value={paymentDraftBySupplier[sid]?.pixKeyType ?? ''}
+                        onChange={(v) => {
+                          setPaymentDraftBySupplier((prev) => {
+                            const current = prev[sid] ?? emptyPaymentDraft();
+                            return {
+                              ...prev,
+                              [sid]: {
+                                ...current,
+                                pixKeyType: v,
+                                pixKey: maskPixKeyByType(v, current.pixKey),
+                              },
+                            };
+                          });
+                        }}
+                        options={OC_PIX_KEY_TYPE_OPTIONS}
+                        allowEmpty
+                        placeholder="Selecione..."
+                        searchPlaceholder="Pesquisar..."
+                        noFocusRing
+                        hideFocus
+                      />
+                    </div>
+                    <div>
+                      <label htmlFor={`pix-key-modal-${sid}`} className={mapLabelCls}>
+                        Chave Pix *
+                      </label>
+                      <input
+                        id={`pix-key-modal-${sid}`}
+                        type="text"
+                        value={paymentDraftBySupplier[sid]?.pixKey ?? ''}
+                        onChange={(e) => {
+                          const pixType = paymentDraftBySupplier[sid]?.pixKeyType ?? '';
+                          const next = maskPixKeyByType(pixType, e.target.value);
+                          setPaymentDraftBySupplier((prev) => ({
+                            ...prev,
+                            [sid]: {
+                              ...(prev[sid] ?? emptyPaymentDraft()),
+                              pixKey: next,
+                            },
+                          }));
+                        }}
+                        placeholder={pixKeyInputPlaceholder(
+                          paymentDraftBySupplier[sid]?.pixKeyType ?? ''
+                        )}
+                        maxLength={pixKeyInputMaxLength(
+                          paymentDraftBySupplier[sid]?.pixKeyType ?? ''
+                        )}
+                        className={mapFieldCls}
+                      />
+                    </div>
+                  </div>
+                ) : null}
+
+                <div>
+                  <label htmlFor={`obs-modal-${sid}`} className={mapLabelCls}>
+                    Observações
+                  </label>
+                  <textarea
+                    id={`obs-modal-${sid}`}
+                    value={paymentDraftBySupplier[sid]?.observations ?? ''}
+                    onChange={(e) => {
+                      setPaymentDraftBySupplier((prev) => ({
+                        ...prev,
+                        [sid]: {
+                          ...(prev[sid] ?? emptyPaymentDraft()),
+                          observations: e.target.value,
+                        },
+                      }));
+                    }}
+                    rows={2}
+                    placeholder="Observações gerais da OC"
+                    className={`${mapFieldCls} min-h-[4rem] resize-y`}
+                  />
+                </div>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
+                  <button
+                    type="button"
+                    onClick={closeOcModal}
+                    disabled={isGenerating}
+                    className="inline-flex h-10 items-center rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isGenerating}
+                    onClick={() => generateOrdersMutation.mutate(sid)}
+                    className="inline-flex h-10 items-center rounded-lg border border-red-200 bg-red-50 px-4 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 disabled:opacity-50 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+                  >
+                    {isGenerating ? 'Gerando…' : 'Gerar OC'}
+                  </button>
+                </div>
+              </div>
+            </Modal>
+          );
+        })()}
       </MainLayout>
     </ProtectedRoute>
   );

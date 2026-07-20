@@ -400,12 +400,13 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
   type SidebarNavLeaf = {
     name: string;
     href: string;
-    icon: LucideIcon;
+    icon?: LucideIcon;
     description?: string;
     permission: boolean;
   };
 
-  type SidebarNavItem = SidebarNavLeaf & {
+  type SidebarNavItem = Omit<SidebarNavLeaf, 'icon'> & {
+    icon: LucideIcon;
     /** Subpáginas (ex.: Controle CREA). */
     children?: SidebarNavLeaf[];
   };
@@ -879,21 +880,18 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
               {
                 name: 'Responsáveis Técnicos',
                 href: '/ponto/responsaveis-tecnicos',
-                icon: BadgeCheck,
                 description: 'Cadastro de responsáveis técnicos (CREA)',
                 permission: isAdministrator || can(pk('/ponto/responsaveis-tecnicos')),
               },
               {
-                name: 'Controle de Anuidade',
+                name: 'Anuidades',
                 href: '/ponto/controle-anuidade',
-                icon: Wallet,
                 description: 'Controle de pagamentos de anuidade CREA',
                 permission: isAdministrator || can(pk('/ponto/controle-anuidade')),
               },
               {
-                name: "Controle de Pagamentos ART's / Protocolos",
+                name: "ART's / Protocolos",
                 href: '/ponto/controle-pagamentos-art',
-                icon: FileCheck,
                 description: 'Controle de pagamentos de ART e protocolos',
                 permission: isAdministrator || can(pk('/ponto/controle-pagamentos-art')),
               },
@@ -1222,8 +1220,12 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
 
     if (visibleChildren.length > 0) {
       const childActive = visibleChildren.some((child) => isActive(child.href));
-      const expanded =
-        forceExpanded || childActive || expandedNavGroups[groupKey] === true;
+      const groupState = expandedNavGroups[groupKey];
+      const expanded = forceExpanded
+        ? true
+        : groupState === false
+          ? false
+          : groupState === true || childActive;
       const groupBadge = visibleChildren.reduce(
         (sum, child) => sum + navBadgeCountForHref(child.href),
         0,
@@ -1233,12 +1235,13 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
         <div key={`group-${groupKey}`} className="space-y-1">
           <button
             type="button"
-            onClick={() =>
+            onClick={() => {
+              if (forceExpanded) return;
               setExpandedNavGroups((prev) => ({
                 ...prev,
-                [groupKey]: !(forceExpanded || childActive || prev[groupKey] === true),
-              }))
-            }
+                [groupKey]: !expanded,
+              }));
+            }}
             className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 transition-all duration-200 ${
               childActive
                 ? 'bg-red-50/70 text-red-700 dark:bg-red-900/10 dark:text-red-500'
@@ -1254,15 +1257,16 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
             <span className="min-w-0 flex-1 truncate text-left text-sm font-medium">{item.name}</span>
             <NotificationCountBadge count={groupBadge} />
             <ChevronDown
-              className={`h-4 w-4 flex-shrink-0 text-gray-400 transition-transform duration-200 ${
-                expanded ? 'rotate-0' : '-rotate-90'
+              className={`h-4 w-4 flex-shrink-0 transition-transform duration-200 ${
+                expanded ? 'rotate-180' : 'rotate-0'
+              } ${
+                childActive ? 'text-red-600 dark:text-red-500' : 'text-gray-400'
               }`}
             />
           </button>
           {expanded ? (
             <div className="ml-3 space-y-1 border-l border-gray-200 pl-2 dark:border-gray-700">
               {visibleChildren.map((child) => {
-                const ChildIcon = child.icon;
                 const active = isActive(child.href);
                 const badgeCount = navBadgeCountForHref(child.href);
                 return (
@@ -1279,11 +1283,6 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
                         : 'text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-800'
                     }`}
                   >
-                    <ChildIcon
-                      className={`h-4 w-4 flex-shrink-0 ${
-                        active ? 'text-red-600 dark:text-red-500' : 'text-gray-500 dark:text-gray-400'
-                      }`}
-                    />
                     <span className="min-w-0 flex-1 truncate text-sm font-medium">{child.name}</span>
                     <NotificationCountBadge count={badgeCount} />
                   </Link>
