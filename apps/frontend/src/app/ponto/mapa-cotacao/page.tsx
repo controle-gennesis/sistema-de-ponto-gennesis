@@ -1176,6 +1176,7 @@ export default function MapaCotacaoPage() {
                       searchPlaceholder="Pesquisar..."
                       emptyOptionsMessage="Nenhuma requisição disponível."
                       emptySearchMessage="Nenhuma requisição encontrada."
+                      listMaxHeight={320}
                       noFocusRing
                       hideFocus
                     />

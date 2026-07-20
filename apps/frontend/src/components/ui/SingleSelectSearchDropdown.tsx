@@ -30,6 +30,8 @@ export type SingleSelectSearchDropdownProps = {
   triggerClassName?: string;
   hideChevron?: boolean;
   menuInline?: boolean;
+  /** Altura máxima da lista de opções (padrão: 220). */
+  listMaxHeight?: number;
   noFocusRing?: boolean;
   hideFocus?: boolean;
   disableSearch?: boolean;
@@ -60,6 +62,7 @@ type FloatingPosOptions = {
   disableSearch?: boolean;
   optionCount?: number;
   minMenuWidth?: number;
+  listMax?: number;
 };
 
 const MENU_OPTION_CHROME_PX = 76;
@@ -79,14 +82,14 @@ function computeFloatingPos(trigger: HTMLElement, options?: FloatingPosOptions):
   const baseWidth = options?.matchTriggerWidth ? rect.width : Math.max(rect.width, 200);
   const width = options?.minMenuWidth ? Math.max(baseWidth, options.minMenuWidth) : baseWidth;
   const disableSearch = options?.disableSearch ?? false;
-  const optionCount = options?.optionCount ?? 8;
+  const listMax = options?.listMax ?? LIST_MAX;
   const listChrome = disableSearch ? 16 : 72;
-  const estimatedList = Math.min(LIST_MAX, Math.max(44, optionCount * 44 + 8));
-  const preferred = estimatedList + listChrome;
+  // Usa a altura pedida (não encolhe quando há poucas opções — evita painel “miúdo”).
+  const preferred = Math.min(listMax + listChrome, window.innerHeight - margin * 2);
 
   const spaceBelow = window.innerHeight - rect.bottom - gap - margin;
   const spaceAbove = rect.top - gap - margin;
-  const openUp = spaceBelow < preferred && spaceAbove > spaceBelow;
+  const openUp = spaceBelow < 160 && spaceAbove > spaceBelow;
 
   let left = rect.left;
   if (options?.align === 'end') {
@@ -95,7 +98,7 @@ function computeFloatingPos(trigger: HTMLElement, options?: FloatingPosOptions):
   left = Math.max(margin, Math.min(left, window.innerWidth - width - margin));
 
   if (openUp) {
-    const maxHeight = Math.max(120, Math.min(preferred, spaceAbove));
+    const maxHeight = Math.max(160, Math.min(preferred, spaceAbove));
     return {
       left,
       width,
@@ -105,12 +108,12 @@ function computeFloatingPos(trigger: HTMLElement, options?: FloatingPosOptions):
     };
   }
 
-  const maxHeight = Math.max(120, Math.min(preferred, spaceBelow));
+  // Abre para baixo sobrepondo o conteúdo; não limita à folga livre da viewport.
   return {
     left,
     width,
     top: rect.bottom + gap,
-    maxHeight,
+    maxHeight: Math.max(160, preferred),
     openUp: false,
   };
 }
@@ -172,6 +175,7 @@ export function SingleSelectSearchDropdown({
   triggerClassName,
   hideChevron = false,
   menuInline = false,
+  listMaxHeight: listMaxHeightProp,
   noFocusRing = false,
   hideFocus = false,
   disableSearch = false,
@@ -179,6 +183,7 @@ export function SingleSelectSearchDropdown({
   matchTriggerWidth = false,
   menuMinWidth,
 }: SingleSelectSearchDropdownProps) {
+  const listCap = listMaxHeightProp ?? LIST_MAX;
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [floatingPos, setFloatingPos] = useState<FloatingPos | null>(null);
@@ -223,9 +228,19 @@ export function SingleSelectSearchDropdown({
         disableSearch,
         optionCount: options.length + (allowEmpty ? 1 : 0),
         minMenuWidth: minWidth,
+        listMax: listCap,
       })
     );
-  }, [menuAlign, matchTriggerWidth, disableSearch, options, allowEmpty, emptyOptionLabel, menuMinWidth]);
+  }, [
+    menuAlign,
+    matchTriggerWidth,
+    disableSearch,
+    options,
+    allowEmpty,
+    emptyOptionLabel,
+    menuMinWidth,
+    listCap,
+  ]);
 
   useEffect(() => setMounted(true), []);
 
@@ -295,12 +310,10 @@ export function SingleSelectSearchDropdown({
   const triggerLabelClassName = hideChevron ? 'text-center' : 'block truncate';
 
   const listMaxHeight = menuInline
-    ? LIST_MAX
+    ? listCap
     : floatingPos
-      ? Math.max(80, floatingPos.maxHeight - (disableSearch ? 16 : 72))
-      : disableSearch
-        ? Math.min(LIST_MAX, Math.max(44, filtered.length * 44 + 8))
-        : LIST_MAX;
+      ? Math.min(listCap, Math.max(120, floatingPos.maxHeight - (disableSearch ? 16 : 72)))
+      : listCap;
 
   const optionClassName = singleSelectOptionClassName;
 
@@ -409,7 +422,7 @@ export function SingleSelectSearchDropdown({
 
   const inlineMenu =
     open && menuInline ? (
-      <div className="mt-2" style={{ maxHeight: LIST_MAX + 72 }}>
+      <div className="mt-2" style={{ maxHeight: listCap + 72 }}>
         {menuContent}
       </div>
     ) : null;
