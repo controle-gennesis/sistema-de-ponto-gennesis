@@ -55,6 +55,7 @@ import {
 
 interface ControlePagamentoArt {
   id: string;
+  uf?: string | null;
   empresa?: string | null;
   contratante?: string | null;
   cnpjCpf?: string | null;
@@ -75,6 +76,7 @@ interface ControlePagamentoArt {
 }
 
 type FormState = {
+  uf: string;
   empresa: string;
   contratante: string;
   cnpjCpf: string;
@@ -95,6 +97,7 @@ type FormState = {
 };
 
 const EMPTY_FORM: FormState = {
+  uf: '',
   empresa: '',
   contratante: '',
   cnpjCpf: '',
@@ -439,6 +442,7 @@ function ControlePagamentoArtContent() {
   const openEdit = (row: ControlePagamentoArt) => {
     setEditing(row);
     setFormData({
+      uf: row.uf || '',
       empresa: row.empresa || '',
       contratante: row.contratante || '',
       cnpjCpf: row.cnpjCpf || '',
@@ -463,6 +467,7 @@ function ControlePagamentoArtContent() {
   const saveMutation = useMutation({
     mutationFn: async () => {
       const payload = {
+        uf: formData.uf.trim().toUpperCase() || null,
         empresa: formData.empresa.trim() || null,
         contratante: formData.contratante.trim() || null,
         cnpjCpf: formData.cnpjCpf.trim() || null,
@@ -753,6 +758,7 @@ function ControlePagamentoArtContent() {
                         />
                       </th>
                       <th scope="col" className={cadastroListClasses.th}>ID</th>
+                      <th scope="col" className={cadastroListClasses.thCenter}>UF</th>
                       <th scope="col" className={cadastroListClasses.thCenter}>Empresa</th>
                       <th scope="col" className={cadastroListClasses.th}>Contratante</th>
                       <th scope="col" className={cadastroListClasses.th}>CNPJ/CPF</th>
@@ -798,6 +804,7 @@ function ControlePagamentoArtContent() {
                         <td className={cadastroListClasses.tdMono}>
                           {(pageSafe - 1) * PAGE_SIZE + idx + 1}
                         </td>
+                        <td className={cadastroListClasses.tdCenter}>{cell(r.uf)}</td>
                         <td className={`${cadastroListClasses.tdTruncate} text-center`}>
                           <span className="block truncate">{cell(r.empresa)}</span>
                         </td>
@@ -1065,6 +1072,18 @@ function ControlePagamentoArtContent() {
             >
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 <div>
+                  <label className={labelClass}>UF</label>
+                  <input
+                    className={inputClass}
+                    value={formData.uf}
+                    maxLength={2}
+                    placeholder="Ex.: DF"
+                    onChange={(e) =>
+                      setFormData({ ...formData, uf: e.target.value.toUpperCase() })
+                    }
+                  />
+                </div>
+                <div>
                   <label className={labelClass}>Empresa</label>
                   <StringSingleSelectDropdown
                     value={formData.empresa}
@@ -1252,6 +1271,7 @@ function ControlePagamentoArtContent() {
         >
           <div className="space-y-2 text-sm text-gray-800 dark:text-gray-200">
             {[
+              ['UF', detail.uf],
               ['Empresa', detail.empresa],
               ['Contratante', detail.contratante],
               ['CNPJ/CPF', detail.cnpjCpf],

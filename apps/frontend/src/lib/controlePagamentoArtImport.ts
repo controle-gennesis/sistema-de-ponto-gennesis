@@ -1,6 +1,7 @@
 import * as XLSX from 'xlsx';
 
 export const CONTROLE_PAGAMENTO_ART_IMPORT_COLUMNS = [
+  { name: 'UF', required: false },
   { name: 'EMPRESA', required: false },
   { name: 'CONTRATANTE', required: false },
   { name: 'CNPJ/CPF', required: false },
@@ -21,6 +22,7 @@ export const CONTROLE_PAGAMENTO_ART_IMPORT_COLUMNS = [
 ] as const;
 
 export const CONTROLE_PAGAMENTO_ART_IMPORT_TEMPLATE_HEADERS = [
+  'UF',
   'EMPRESA',
   'CONTRATANTE',
   'CNPJ/CPF',
@@ -41,6 +43,7 @@ export const CONTROLE_PAGAMENTO_ART_IMPORT_TEMPLATE_HEADERS = [
 ];
 
 export const CONTROLE_PAGAMENTO_ART_IMPORT_TEMPLATE_EXAMPLE = [
+  'DF',
   'GENNESIS',
   'Cliente Exemplo',
   '00.000.000/0001-00',
@@ -136,6 +139,7 @@ function cellToDateString(value: unknown): string {
 }
 
 type ColumnMap = {
+  uf?: number;
   empresa?: number;
   contratante?: number;
   cnpjCpf?: number;
@@ -160,7 +164,8 @@ function mapHeaderRow(cells: unknown[]): ColumnMap | null {
   cells.forEach((cell, idx) => {
     const key = normalizeHeaderKey(cellToString(cell));
     if (!key) return;
-    if (key === 'empresa') map.empresa = idx;
+    if (key === 'uf' || key === 'estado') map.uf = idx;
+    else if (key === 'empresa') map.empresa = idx;
     else if (key === 'contratante') map.contratante = idx;
     else if (
       key === 'cnpj/cpf' ||
@@ -220,6 +225,7 @@ function rowHasUsefulData(fields: Record<string, string | undefined>): boolean {
 }
 
 export type ControlePagamentoArtImportRow = {
+  uf?: string;
   empresa?: string;
   contratante?: string;
   cnpjCpf?: string;
@@ -270,6 +276,7 @@ function formatExportValor(value: string | number | null | undefined): string | 
 }
 
 export type ControlePagamentoArtExportRow = {
+  uf?: string | null;
   empresa?: string | null;
   contratante?: string | null;
   cnpjCpf?: string | null;
@@ -294,6 +301,7 @@ export function exportControlePagamentoArtEntries(
   filenameSuffix?: string
 ): void {
   const data = entries.map((r) => ({
+    UF: r.uf || '',
     EMPRESA: r.empresa || '',
     CONTRATANTE: r.contratante || '',
     'CNPJ/CPF': r.cnpjCpf || '',
@@ -359,6 +367,7 @@ export async function parseControlePagamentoArtFromFile(file: File): Promise<{
   for (let i = headerIdx + 1; i < matrix.length; i++) {
     const row = matrix[i] || [];
     const fields = {
+      uf: getCell(row, columnMap.uf),
       empresa: getCell(row, columnMap.empresa),
       contratante: getCell(row, columnMap.contratante),
       cnpjCpf: getCell(row, columnMap.cnpjCpf),
@@ -381,6 +390,7 @@ export async function parseControlePagamentoArtFromFile(file: File): Promise<{
     // Importa mesmo linha vazia / incompleta
     registros.push({
       ...fields,
+      uf: cleanText(fields.uf).toUpperCase(),
       fluig: cleanText(fields.fluig),
       valor: cleanText(fields.valor),
       profissional: fields.profissional.trim() || 'Não informado',

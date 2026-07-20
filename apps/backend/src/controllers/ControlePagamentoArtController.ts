@@ -79,6 +79,12 @@ function normalizeStatus(value: unknown): string {
   return raw.toUpperCase().replace(/\s+/g, '_');
 }
 
+function normalizeUf(value: unknown): string | null {
+  const raw = normalizeOptionalString(value);
+  if (!raw) return null;
+  return raw.toUpperCase().slice(0, 2);
+}
+
 function normalizePago(value: unknown): string | null {
   const raw = normalizeOptionalString(value);
   if (!raw) return null;
@@ -97,6 +103,7 @@ function buildControlePagamentoArtData(body: CapInput) {
   const profissional = normalizeOptionalString(body.profissional) || 'Não informado';
 
   return {
+    uf: normalizeUf(body.uf),
     empresa: normalizeOptionalString(body.empresa),
     contratante: normalizeOptionalString(body.contratante),
     cnpjCpf: normalizeOptionalString(body.cnpjCpf),
@@ -145,6 +152,7 @@ export class ControlePagamentoArtController {
         andFilters.push({
           OR: [
             { profissional: { contains: q, mode: 'insensitive' } },
+            { uf: { contains: q, mode: 'insensitive' } },
             { empresa: { contains: q, mode: 'insensitive' } },
             { contratante: { contains: q, mode: 'insensitive' } },
             { cnpjCpf: { contains: q, mode: 'insensitive' } },
