@@ -1241,17 +1241,33 @@ export default function LicitacoesPage() {
     <ProtectedRoute route="/ponto/licitacoes">
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
         <div className="flex flex-col gap-5">
-          <header className="flex flex-col gap-4 border-b border-gray-200 pb-4 dark:border-gray-800">
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-              <div>
-                <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-gray-100">
+          <header className="flex flex-col gap-4">
+            <div className="grid items-center gap-4 lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
+              <div className="text-center lg:col-start-2">
+                <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">
                   Licitações
                 </h1>
-                <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
+                <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400">
                   Processos, checklist de análise manual e licitações por região.
                 </p>
               </div>
-              <div className="flex flex-col gap-1.5 sm:items-end">
+              <div className="flex items-center justify-center gap-2 lg:col-start-3 lg:row-start-1 lg:justify-end">
+                <span className="group/notebook-info relative shrink-0">
+                  <button
+                    type="button"
+                    aria-describedby="notebook-lm-login-hint"
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+                  >
+                    <Info className="h-4 w-4" aria-hidden />
+                  </button>
+                  <span
+                    id="notebook-lm-login-hint"
+                    role="tooltip"
+                    className="pointer-events-none absolute right-0 top-full z-30 mt-2 w-max max-w-[16rem] rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-left text-xs font-normal leading-relaxed text-gray-700 opacity-0 shadow-lg transition-opacity duration-150 invisible group-hover/notebook-info:visible group-hover/notebook-info:opacity-100 group-focus-within/notebook-info:visible group-focus-within/notebook-info:opacity-100 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200"
+                  >
+                    Acesse com o e-mail {NOTEBOOK_LM_LOGIN_EMAIL}.
+                  </span>
+                </span>
                 <a
                   href={NOTEBOOK_LM_URL}
                   target="_blank"
@@ -1261,13 +1277,6 @@ export default function LicitacoesPage() {
                   <ExternalLink className="h-4 w-4 shrink-0" aria-hidden />
                   Abrir Notebook LM
                 </a>
-                <p className="max-w-sm text-xs leading-relaxed text-gray-600 dark:text-gray-400 sm:text-right">
-                  Acesse com o e-mail{' '}
-                  <span className="font-mono font-medium text-gray-800 dark:text-gray-200">
-                    {NOTEBOOK_LM_LOGIN_EMAIL}
-                  </span>
-                  .
-                </p>
               </div>
             </div>
 
@@ -1300,70 +1309,43 @@ export default function LicitacoesPage() {
             ) : null}
           </header>
 
-          <div
-            className="flex flex-wrap gap-2 border-b border-gray-200 pb-1 dark:border-gray-800"
-            role="tablist"
-            aria-label="Seções do módulo"
-          >
-            <button
-              type="button"
-              role="tab"
-              aria-selected={viewMode === 'arquivadas'}
-              onClick={() => {
-                setSelectedId(null);
-                setViewMode('arquivadas');
-              }}
-              className={`inline-flex items-center gap-2 rounded-t-lg px-4 py-2.5 text-sm font-medium transition-colors ${
-                viewMode === 'arquivadas'
-                  ? 'border border-b-0 border-gray-200 bg-white text-red-700 dark:border-gray-700 dark:bg-gray-900 dark:text-red-400'
-                  : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-900/50 dark:hover:text-gray-100'
-              }`}
+          <div className="border-b border-gray-200 dark:border-gray-700">
+            <nav
+              className="-mb-px flex flex-wrap justify-center gap-x-1 gap-y-2 overflow-x-auto sm:gap-x-2"
+              role="tablist"
+              aria-label="Seções do módulo"
             >
-              <Archive className="h-4 w-4" aria-hidden />
-              Análise final
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={viewMode === 'analise'}
-              onClick={() => setViewMode('analise')}
-              className={`inline-flex items-center gap-2 rounded-t-lg px-4 py-2.5 text-sm font-medium transition-colors ${
-                viewMode === 'analise'
-                  ? 'border border-b-0 border-gray-200 bg-white text-red-700 dark:border-gray-700 dark:bg-gray-900 dark:text-red-400'
-                  : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-900/50 dark:hover:text-gray-100'
-              }`}
-            >
-              <ClipboardList className="h-4 w-4" aria-hidden />
-              Análise manual
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={viewMode === 'regioes'}
-              onClick={() => setViewMode('regioes')}
-              className={`inline-flex items-center gap-2 rounded-t-lg px-4 py-2.5 text-sm font-medium transition-colors ${
-                viewMode === 'regioes'
-                  ? 'border border-b-0 border-gray-200 bg-white text-red-700 dark:border-gray-700 dark:bg-gray-900 dark:text-red-400'
-                  : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-900/50 dark:hover:text-gray-100'
-              }`}
-            >
-              <MapPin className="h-4 w-4" aria-hidden />
-              Licitações por Região
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={viewMode === 'banco-cats'}
-              onClick={() => setViewMode('banco-cats')}
-              className={`inline-flex items-center gap-2 rounded-t-lg px-4 py-2.5 text-sm font-medium transition-colors ${
-                viewMode === 'banco-cats'
-                  ? 'border border-b-0 border-gray-200 bg-white text-red-700 dark:border-gray-700 dark:bg-gray-900 dark:text-red-400'
-                  : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-900/50 dark:hover:text-gray-100'
-              }`}
-            >
-              <Database className="h-4 w-4" aria-hidden />
-              Banco CAT&apos;s
-            </button>
+              {(
+                [
+                  { id: 'arquivadas' as const, label: 'Análise final', Icon: Archive },
+                  { id: 'analise' as const, label: 'Análise manual', Icon: ClipboardList },
+                  { id: 'regioes' as const, label: 'Licitações por Região', Icon: MapPin },
+                  { id: 'banco-cats' as const, label: "Banco CAT's", Icon: Database },
+                ] as const
+              ).map((tab) => {
+                const active = viewMode === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    onClick={() => {
+                      if (tab.id === 'arquivadas') setSelectedId(null);
+                      setViewMode(tab.id);
+                    }}
+                    className={`flex items-center gap-2 whitespace-nowrap rounded-t-lg border-b-2 px-2 py-2.5 text-xs font-medium transition-colors sm:px-3 sm:text-sm ${
+                      active
+                        ? 'border-red-500 text-red-600 dark:border-red-400 dark:text-red-400'
+                        : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
+                    }`}
+                  >
+                    <tab.Icon className="h-4 w-4 shrink-0" aria-hidden />
+                    {tab.label}
+                  </button>
+                );
+              })}
+            </nav>
           </div>
 
           {viewMode === 'regioes' ? (

@@ -433,7 +433,7 @@ export default function GerenciarMateriaisPage() {
     if (unbCostCenterIds.length === 0) return [];
     const allowed = new Set(unbCostCenterIds);
     return list.filter((r) => {
-      const id = r.costCenterId || r.costCenter?.id;
+      const id = r.costCenter?.id;
       return !!id && allowed.has(id);
     });
   }, [requestsData, isUnbUser, unbCostCenterIds]);
