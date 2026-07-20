@@ -1191,7 +1191,6 @@ export default function MapaCotacaoPage() {
                       emptyOptionsMessage="Nenhum fornecedor cadastrado."
                       emptySearchMessage="Nenhum fornecedor encontrado."
                       listMaxHeight={280}
-                      menuInline
                       noFocusRing
                       hideFocus
                     />

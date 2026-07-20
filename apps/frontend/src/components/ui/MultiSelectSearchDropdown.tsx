@@ -76,7 +76,6 @@ function DropdownCheckbox({
   indeterminate,
   disabled,
   onToggle,
-  onChange,
   noFocusRing,
   children,
 }: {
@@ -85,7 +84,6 @@ function DropdownCheckbox({
   indeterminate?: boolean;
   disabled?: boolean;
   onToggle: () => void;
-  onChange?: (e: React.ChangeEvent<HTMLInputElement>) => void;
   noFocusRing?: boolean;
   children?: React.ReactNode;
 }) {
@@ -165,14 +163,13 @@ export type MultiSelectSearchDropdownProps = {
   closeOnOutsideClick?: boolean;
   /**
    * Menu expande no fluxo do documento, logo abaixo do campo.
-   * Em modais longos prefira menu flutuante (portal), sem menuInline.
+   * Em páginas/cards prefira o menu flutuante (portal), sem menuInline.
    */
   menuInline?: boolean;
   /** Altura máxima da área rolável de opções (padrão: 220px). */
   listMaxHeight?: number;
   /**
-   * Menu flutuante pode usar altura total solicitada e sobrepor o conteúdo da página,
-   * em vez de encolher para caber no espaço livre abaixo do campo na viewport.
+   * @deprecated Mantido por compatibilidade. O menu flutuante já sobrepõe o conteúdo.
    */
   menuOverlapContent?: boolean;
   /** Remove anéis/bordas de foco do campo, busca e checkboxes. Sem borda vermelha ao abrir. */
@@ -201,71 +198,32 @@ function estimateListMaxHeight(optionCount: number, cap: number): number {
   return Math.min(cap, Math.max(80, optionCount * LIST_ROW_ESTIMATE_PX + 8));
 }
 
-function computeFloatingPos(
-  trigger: HTMLElement,
-  listMax: number,
-  overlapContent = false
-): FloatingPos {
+function computeFloatingPos(trigger: HTMLElement, listMax: number): FloatingPos {
   const rect = trigger.getBoundingClientRect();
   const gap = 6;
   const margin = 12;
   const width = Math.max(rect.width, 200);
-  const chrome = 118;
-  const preferred = listMax + chrome;
-  const viewportMax = window.innerHeight - margin * 2;
-
-  if (overlapContent) {
-    const preferred = listMax + chrome;
-    const viewportMax = window.innerHeight - margin * 2;
-    const spaceAbove = rect.top - gap - margin;
-    const spaceBelow = window.innerHeight - rect.bottom - gap - margin;
-    const fitsBelow =
-      rect.bottom + gap + Math.min(preferred, viewportMax, spaceBelow) <=
-      window.innerHeight - margin;
-    const openUp = !fitsBelow && spaceAbove > spaceBelow;
-
-    if (openUp) {
-      const maxHeight = Math.max(160, Math.min(preferred, viewportMax, spaceAbove));
-      return {
-        left: rect.left,
-        width,
-        bottom: window.innerHeight - rect.top + gap,
-        maxHeight,
-        openUp: true,
-      };
-    }
-
-    const maxHeight = Math.max(160, Math.min(preferred, viewportMax, spaceBelow));
-    return {
-      left: rect.left,
-      width,
-      top: rect.bottom + gap,
-      maxHeight,
-      openUp: false,
-    };
-  }
-
+  const preferred = Math.min(listMax + PANEL_CHROME_PX, window.innerHeight - margin * 2);
   const spaceBelow = window.innerHeight - rect.bottom - gap - margin;
   const spaceAbove = rect.top - gap - margin;
-  const openUp = spaceBelow < preferred && spaceAbove > spaceBelow;
+  // Prefere abrir para baixo e sobrepor o conteúdo; só sobe se quase não houver espaço.
+  const openUp = spaceBelow < 160 && spaceAbove > spaceBelow;
 
   if (openUp) {
-    const maxHeight = Math.max(160, Math.min(preferred, spaceAbove));
     return {
       left: rect.left,
       width,
       bottom: window.innerHeight - rect.top + gap,
-      maxHeight,
+      maxHeight: Math.max(160, Math.min(preferred, spaceAbove)),
       openUp: true,
     };
   }
 
-  const maxHeight = Math.max(160, Math.min(preferred, spaceBelow));
   return {
     left: rect.left,
     width,
     top: rect.bottom + gap,
-    maxHeight,
+    maxHeight: Math.max(160, Math.min(preferred, Math.max(spaceBelow, preferred))),
     openUp: false,
   };
 }
@@ -279,7 +237,6 @@ function MenuPanel({
   searchPlaceholder,
   options,
   filtered,
-  allValues,
   allSelected,
   someSelected,
   allFilteredSelected,
@@ -287,25 +244,21 @@ function MenuPanel({
   selectedSet,
   emptyOptionsMessage,
   emptySearchMessage,
-  onChange,
   selectAllFiltered,
   deselectAllFiltered,
   toggleValue,
   toggleSelectAll,
   listMaxHeight,
   noFocusRing,
-  className,
-  style,
 }: {
   panelId: string;
-  panelRef: React.RefObject<HTMLDivElement>;
-  listRef: React.RefObject<HTMLDivElement>;
+  panelRef: React.RefObject<HTMLDivElement | null>;
+  listRef: React.RefObject<HTMLDivElement | null>;
   search: string;
   setSearch: (v: string) => void;
   searchPlaceholder: string;
   options: MultiSelectSearchOption[];
   filtered: MultiSelectSearchOption[];
-  allValues: string[];
   allSelected: boolean;
   someSelected: boolean;
   allFilteredSelected: boolean;
@@ -313,26 +266,19 @@ function MenuPanel({
   selectedSet: Set<string>;
   emptyOptionsMessage: string;
   emptySearchMessage: string;
-  onChange: (selected: string[]) => void;
   selectAllFiltered: () => void;
   deselectAllFiltered: () => void;
   toggleValue: (value: string) => void;
   toggleSelectAll: (checked: boolean) => void;
   listMaxHeight: number;
   noFocusRing?: boolean;
-  className?: string;
-  style?: React.CSSProperties;
 }) {
   return (
     <div
       id={panelId}
       ref={panelRef}
       role="listbox"
-      style={style}
-      className={
-        className ??
-        `flex flex-col overflow-hidden ${SINGLE_SELECT_PANEL_CLS}`
-      }
+      className={`flex flex-col overflow-hidden ${SINGLE_SELECT_PANEL_CLS}`}
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
@@ -377,9 +323,7 @@ function MenuPanel({
                 : someSelected && !allSelected
             }
             onToggle={() => {
-              const nextChecked = search.trim()
-                ? !allFilteredSelected
-                : !allSelected;
+              const nextChecked = search.trim() ? !allFilteredSelected : !allSelected;
               if (search.trim()) {
                 if (nextChecked) selectAllFiltered();
                 else deselectAllFiltered();
@@ -397,8 +341,8 @@ function MenuPanel({
 
       <div
         ref={listRef}
-        className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-1.5 py-1"
-        style={listMaxHeight > 0 ? { maxHeight: listMaxHeight } : undefined}
+        className="overflow-y-auto overflow-x-hidden px-1.5 py-1"
+        style={{ maxHeight: listMaxHeight }}
       >
         {options.length === 0 ? (
           <p className="py-4 text-center text-sm text-gray-500 dark:text-gray-400">{emptyOptionsMessage}</p>
@@ -439,12 +383,13 @@ export function MultiSelectSearchDropdown({
   closeOnOutsideClick = true,
   menuInline = false,
   listMaxHeight: listMaxHeightProp,
-  menuOverlapContent = false,
+  menuOverlapContent: _menuOverlapContent = false,
   noFocusRing = false,
   hideFocus = false,
   open: openControlled,
   onOpenChange,
 }: MultiSelectSearchDropdownProps) {
+  void _menuOverlapContent;
   const effectiveListMax = listMaxHeightProp ?? LIST_MAX;
   const [openInternal, setOpenInternal] = useState(false);
   const open = openControlled ?? openInternal;
@@ -465,6 +410,7 @@ export function MultiSelectSearchDropdown({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const listScrollTopRef = useRef(0);
 
   const selectedSet = useMemo(() => new Set(selected), [selected]);
 
@@ -493,10 +439,8 @@ export function MultiSelectSearchDropdown({
 
   const syncFloatingPos = useCallback(() => {
     if (!triggerRef.current) return;
-    setFloatingPos(
-      computeFloatingPos(triggerRef.current, estimatedListMax, menuOverlapContent)
-    );
-  }, [estimatedListMax, menuOverlapContent]);
+    setFloatingPos(computeFloatingPos(triggerRef.current, estimatedListMax));
+  }, [estimatedListMax]);
 
   useEffect(() => setMounted(true), []);
 
@@ -504,27 +448,54 @@ export function MultiSelectSearchDropdown({
     if (!open || menuInline) return;
 
     syncFloatingPos();
-    if (listRef.current) listRef.current.scrollTop = 0;
 
-    const onScroll = (e: Event) => {
-      if (panelRef.current?.contains(e.target as Node)) return;
+    const onScrollOrResize = (e: Event) => {
+      if (e.type === 'scroll' && panelRef.current?.contains(e.target as Node)) return;
       syncFloatingPos();
     };
 
-    window.addEventListener('resize', syncFloatingPos);
-    window.addEventListener('scroll', onScroll, true);
+    window.addEventListener('resize', onScrollOrResize);
+    window.addEventListener('scroll', onScrollOrResize, true);
     return () => {
-      window.removeEventListener('resize', syncFloatingPos);
-      window.removeEventListener('scroll', onScroll, true);
+      window.removeEventListener('resize', onScrollOrResize);
+      window.removeEventListener('scroll', onScrollOrResize, true);
     };
-  }, [open, menuInline, syncFloatingPos, filtered.length, search, selected.length]);
+  }, [open, menuInline, syncFloatingPos]);
+
+  // Reset de scroll só ao abrir / mudar busca — nunca ao marcar item.
+  useLayoutEffect(() => {
+    if (!open) {
+      listScrollTopRef.current = 0;
+      return;
+    }
+    if (menuInline) return;
+    listScrollTopRef.current = 0;
+    if (listRef.current) listRef.current.scrollTop = 0;
+  }, [open, menuInline, search]);
+
+  // Preserva a posição ao marcar/desmarcar (re-render do pai).
+  useLayoutEffect(() => {
+    if (!open || menuInline || !listRef.current) return;
+    listRef.current.scrollTop = listScrollTopRef.current;
+  }, [open, menuInline, selected]);
+
+  useEffect(() => {
+    if (!open || menuInline) return;
+    const list = listRef.current;
+    if (!list) return;
+    const onListScroll = () => {
+      listScrollTopRef.current = list.scrollTop;
+    };
+    list.addEventListener('scroll', onListScroll, { passive: true });
+    return () => list.removeEventListener('scroll', onListScroll);
+  }, [open, menuInline, floatingPos]);
 
   useEffect(() => {
     if (disabled && open) {
       setOpen(false);
       setSearch('');
     }
-  }, [disabled, open]);
+  }, [disabled, open, setOpen]);
 
   useEffect(() => {
     if (!open || !closeOnOutsideClick) return;
@@ -536,26 +507,36 @@ export function MultiSelectSearchDropdown({
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
-  }, [open, closeOnOutsideClick]);
+  }, [open, closeOnOutsideClick, setOpen]);
 
   const closePanel = () => {
     setOpen(false);
     setSearch('');
   };
 
+  const rememberScroll = () => {
+    if (listRef.current) listScrollTopRef.current = listRef.current.scrollTop;
+  };
+
   const toggleValue = (value: string) => {
+    rememberScroll();
     onChange(selectedSet.has(value) ? selected.filter((v) => v !== value) : [...selected, value]);
     if (closeOnSelect) closePanel();
   };
 
-  const selectAllFiltered = () => onChange(Array.from(new Set([...selected, ...allFilteredValues])));
+  const selectAllFiltered = () => {
+    rememberScroll();
+    onChange(Array.from(new Set([...selected, ...allFilteredValues])));
+  };
 
   const deselectAllFiltered = () => {
+    rememberScroll();
     const remove = new Set(allFilteredValues);
     onChange(selected.filter((v) => !remove.has(v)));
   };
 
   const toggleSelectAll = (checked: boolean) => {
+    rememberScroll();
     onChange(checked ? [...allValues] : []);
   };
 
@@ -583,7 +564,6 @@ export function MultiSelectSearchDropdown({
     searchPlaceholder,
     options,
     filtered,
-    allValues,
     allSelected,
     someSelected,
     allFilteredSelected,
@@ -591,7 +571,6 @@ export function MultiSelectSearchDropdown({
     selectedSet,
     emptyOptionsMessage,
     emptySearchMessage,
-    onChange,
     selectAllFiltered,
     deselectAllFiltered,
     toggleValue,
@@ -605,29 +584,25 @@ export function MultiSelectSearchDropdown({
 
   const inlineMenu =
     open && menuInline ? (
-      <MenuPanel
-        {...menuProps}
-        className={`mt-2 flex flex-col overflow-hidden ${SINGLE_SELECT_PANEL_CLS}`}
-        style={{ maxHeight: estimatedListMax + PANEL_CHROME_PX }}
-      />
+      <div className="mt-2" style={{ maxHeight: estimatedListMax + PANEL_CHROME_PX }}>
+        <MenuPanel {...menuProps} />
+      </div>
     ) : null;
 
   const floatingMenu =
     open && !menuInline && floatingPos ? (
-      <MenuPanel
-        {...menuProps}
+      <div
         style={{
           position: 'fixed',
           zIndex: 99999,
           left: floatingPos.left,
           width: floatingPos.width,
           maxHeight: floatingPos.maxHeight,
-          ...(floatingPos.openUp
-            ? { bottom: floatingPos.bottom }
-            : { top: floatingPos.top }),
+          ...(floatingPos.openUp ? { bottom: floatingPos.bottom } : { top: floatingPos.top }),
         }}
-        className={`flex flex-col overflow-hidden ${SINGLE_SELECT_PANEL_CLS}`}
-      />
+      >
+        <MenuPanel {...menuProps} />
+      </div>
     ) : null;
 
   return (
