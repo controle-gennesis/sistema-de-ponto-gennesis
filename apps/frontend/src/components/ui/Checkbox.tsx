@@ -34,19 +34,32 @@ export function CheckboxIndicator({
   const box = (
     <div
       className={clsx(
-        'w-5 h-5 rounded border-2 transition-all duration-200 flex items-center justify-center shrink-0',
+        'box-border flex size-5 shrink-0 items-center justify-center overflow-hidden rounded border-2 transition-colors duration-200',
         active
-          ? 'bg-red-600 dark:bg-red-500 border-red-600 dark:border-red-500'
-          : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 group-hover:border-red-500 dark:group-hover:border-red-400',
+          ? 'border-red-600 bg-red-600 dark:border-red-500 dark:bg-red-500'
+          : 'border-gray-300 bg-white group-hover:border-red-500 dark:border-gray-600 dark:bg-gray-800 dark:group-hover:border-red-400',
       )}
     >
-      {indeterminate ? (
-        <span className="block h-0.5 w-2.5 rounded-full bg-white" aria-hidden />
-      ) : checked ? (
-        <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-        </svg>
-      ) : null}
+      {/* Espaço reservado sempre — evita salto de altura ao marcar */}
+      <span className="flex size-3 items-center justify-center" aria-hidden>
+        {indeterminate ? (
+          <span className="block h-0.5 w-2.5 rounded-full bg-white" />
+        ) : (
+          <svg
+            className={clsx('size-3 text-white', checked ? 'opacity-100' : 'opacity-0')}
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={3}
+              d="M5 13l4 4L19 7"
+            />
+          </svg>
+        )}
+      </span>
     </div>
   );
 
@@ -59,8 +72,8 @@ export function CheckboxIndicator({
         disabled={disabled}
         onClick={onChange}
         className={clsx(
-          'group shrink-0 rounded focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0',
-          disabled && 'opacity-50 cursor-not-allowed',
+          'group size-5 shrink-0 rounded focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0',
+          disabled && 'cursor-not-allowed opacity-50',
           className,
         )}
       >
@@ -69,7 +82,7 @@ export function CheckboxIndicator({
     );
   }
 
-  return <div className={clsx('relative shrink-0', className)}>{box}</div>;
+  return <div className={clsx('relative size-5 shrink-0', className)}>{box}</div>;
 }
 
 /** Checkbox compacto para tabelas — mesmo visual da página de login. */
@@ -99,7 +112,7 @@ export function TableCheckbox({
   return (
     <label
       className={clsx(
-        'inline-flex h-5 w-5 shrink-0 items-center justify-center group',
+        'inline-flex size-5 shrink-0 items-center justify-center group',
         disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer',
       )}
       onClick={onClick}

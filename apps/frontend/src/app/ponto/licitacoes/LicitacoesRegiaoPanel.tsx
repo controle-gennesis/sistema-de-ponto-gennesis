@@ -993,7 +993,7 @@ export function LicitacoesRegiaoPanel() {
                       </th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                  <tbody>
                     {pageRows.map((row) => {
                       const aceite = row.rowKey ? aceitesByRowKey.get(row.rowKey) : undefined;
                       const isAccepted = Boolean(aceite);
@@ -1009,12 +1009,12 @@ export function LicitacoesRegiaoPanel() {
                       return (
                         <tr
                           key={`${row.sourceIndex}-${row.rowKey}`}
-                          className={`align-middle transition-colors hover:bg-gray-50/80 dark:hover:bg-gray-900/40 ${
+                          className={`border-b border-gray-200 align-middle dark:border-gray-700 ${
                             isAccepted
-                              ? 'bg-emerald-50/40 dark:bg-emerald-950/20'
+                              ? 'shadow-[inset_0_0_0_9999px_rgba(209,250,229,0.45)] dark:shadow-[inset_0_0_0_9999px_rgba(6,78,59,0.2)]'
                               : isSelected
-                                ? 'bg-red-50/40 dark:bg-red-950/10'
-                                : ''
+                                ? 'shadow-[inset_0_0_0_9999px_rgba(254,226,226,0.55)] dark:shadow-[inset_0_0_0_9999px_rgba(127,29,29,0.22)]'
+                                : 'hover:shadow-[inset_0_0_0_9999px_rgba(249,250,251,0.8)] dark:hover:shadow-[inset_0_0_0_9999px_rgba(17,24,39,0.35)]'
                           }`}
                         >
                           <td className={cadastroListClasses.tdCenter}>

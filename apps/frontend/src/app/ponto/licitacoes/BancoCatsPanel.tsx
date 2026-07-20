@@ -395,6 +395,7 @@ export function BancoCatsPanel() {
   const [selectedMatchKeys, setSelectedMatchKeys] = useState<Set<string>>(new Set());
   /** Quadrantes com lista completa expandida (acima do preview de 50). */
   const [expandedQuadrantes, setExpandedQuadrantes] = useState<Set<string>>(new Set());
+  const [activeServicoTabId, setActiveServicoTabId] = useState('');
   const [exportingPdf, setExportingPdf] = useState(false);
 
   const {
@@ -513,7 +514,24 @@ export function BancoCatsPanel() {
   useEffect(() => {
     setSelectedMatchKeys(new Set());
     setExpandedQuadrantes(new Set());
+    setActiveServicoTabId('');
   }, [habilitacaoConsulta]);
+
+  useEffect(() => {
+    if (servicoQuadrantes.length === 0) {
+      setActiveServicoTabId('');
+      return;
+    }
+    setActiveServicoTabId((prev) =>
+      servicoQuadrantes.some((q) => q.id === prev) ? prev : servicoQuadrantes[0].id
+    );
+  }, [servicoQuadrantes]);
+
+  const activeServicoQuadrante = useMemo(
+    () =>
+      servicoQuadrantes.find((q) => q.id === activeServicoTabId) ?? servicoQuadrantes[0] ?? null,
+    [servicoQuadrantes, activeServicoTabId]
+  );
 
   const deleteMutation = useMutation({
     mutationFn: async (rowKeys: string[]) => {
@@ -563,6 +581,7 @@ export function BancoCatsPanel() {
     setHabilitacaoConsulta('');
     setSelectedMatchKeys(new Set());
     setExpandedQuadrantes(new Set());
+    setActiveServicoTabId('');
   };
 
   const toggleQuadranteExpanded = (quadranteId: string) => {
@@ -593,11 +612,6 @@ export function BancoCatsPanel() {
     setExpandedQuadrantes(new Set());
     setPage(1);
   };
-
-  const totalCompatíveisMulti = useMemo(
-    () => servicoQuadrantes.reduce((sum, q) => sum + q.matches.length, 0),
-    [servicoQuadrantes]
-  );
 
   const somaPorQuadrante = useMemo(() => {
     const map = new Map<
@@ -878,29 +892,79 @@ export function BancoCatsPanel() {
           <textarea
             value={habilitacaoDraft}
             onChange={(e) => setHabilitacaoDraft(e.target.value)}
-            rows={1}
+            rows={3}
             placeholder="Um serviço por linha…"
-            className="h-10 min-h-10 w-full resize-y rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm leading-normal text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+            className="min-h-[4.75rem] w-full resize-y rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm leading-normal text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
           />
-          {matchingActive ? (
-            <p className="text-sm text-gray-600 dark:text-gray-400">
-              {servicoQuadrantes.length}{' '}
-              {servicoQuadrantes.length === 1 ? 'serviço consultado' : 'serviços consultados'}
-              {' · '}
-              {totalCompatíveisMulti}{' '}
-              {totalCompatíveisMulti === 1 ? 'resultado encontrado' : 'resultados encontrados'}
-            </p>
-          ) : null}
+          {matchingActive && activeServicoQuadrante ? (
+            <div className="space-y-4">
+              <div className="flex flex-col gap-2 border-b border-gray-200 dark:border-gray-700 sm:flex-row sm:items-end sm:justify-between">
+                <nav
+                  className="-mb-px flex flex-wrap gap-x-1 gap-y-1 overflow-x-auto"
+                  role="tablist"
+                  aria-label="Serviços consultados"
+                >
+                  {servicoQuadrantes.map((tab) => {
+                    const active = tab.id === activeServicoQuadrante.id;
+                    return (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        role="tab"
+                        aria-selected={active}
+                        title={tab.query}
+                        onClick={() => setActiveServicoTabId(tab.id)}
+                        className={`inline-flex max-w-[16rem] items-center rounded-t-lg border-b-2 px-2 py-2.5 text-xs font-medium transition-colors sm:max-w-[20rem] sm:px-3 sm:text-sm ${
+                          active
+                            ? 'border-red-500 text-red-600 dark:border-red-400 dark:text-red-400'
+                            : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
+                        }`}
+                      >
+                        <span className="min-w-0 truncate">
+                          {tab.query.trim() || `Serviço ${tab.index}`}
+                        </span>
+                        <span
+                          className={`ml-1.5 shrink-0 tabular-nums ${
+                            active
+                              ? 'text-red-500/80 dark:text-red-400/80'
+                              : 'text-gray-400 dark:text-gray-500'
+                          }`}
+                        >
+                          ({tab.matches.length})
+                        </span>
+                      </button>
+                    );
+                  })}
+                </nav>
+                {(() => {
+                  const selecao = somaPorQuadrante.get(activeServicoQuadrante.id) ?? {
+                    count: 0,
+                    soma: 0,
+                    units: [] as string[],
+                    mixed: false,
+                  };
+                  return (
+                    <span
+                      className={`mb-2 inline-flex w-fit shrink-0 rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+                        selecao.mixed
+                          ? 'bg-amber-50 text-amber-900 dark:bg-amber-950/40 dark:text-amber-200'
+                          : 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200'
+                      }`}
+                    >
+                      Soma quantidade: {formatQuantidadeBr(selecao.soma)}
+                      {selecao.count > 0 ? ` (${selecao.count})` : ''}
+                      {selecao.mixed
+                        ? ` · UND mistas: ${selecao.units.join(', ')}`
+                        : selecao.units.length === 1
+                          ? ` · ${selecao.units[0]}`
+                          : ''}
+                    </span>
+                  );
+                })()}
+              </div>
 
-          {matchingActive ? (
-            <div className="flex flex-col gap-6">
-              {servicoQuadrantes.map((quadrante) => {
-                const selecao = somaPorQuadrante.get(quadrante.id) ?? {
-                  count: 0,
-                  soma: 0,
-                  units: [] as string[],
-                  mixed: false,
-                };
+              {(() => {
+                const quadrante = activeServicoQuadrante;
                 const totalMatches = quadrante.matches.length;
                 const hasMoreThanPreview = totalMatches > QUADRANTE_MATCH_PREVIEW;
                 const isExpanded = expandedQuadrantes.has(quadrante.id);
@@ -916,13 +980,6 @@ export function BancoCatsPanel() {
                   visibleMatches.length > 0 && selectedOnVisible === visibleMatches.length;
                 const someVisibleSelected =
                   selectedOnVisible > 0 && selectedOnVisible < visibleMatches.length;
-
-                const listSubtitle =
-                  totalMatches === 0
-                    ? 'Nenhum resultado compatível'
-                    : hasMoreThanPreview && !isExpanded
-                      ? `Mostrando ${visibleMatches.length} de ${totalMatches} resultados`
-                      : `${totalMatches} ${totalMatches === 1 ? 'resultado' : 'resultados'}`;
 
                 const toggleAllVisible = () => {
                   setSelectedMatchKeys((prev) => {
@@ -952,34 +1009,7 @@ export function BancoCatsPanel() {
                 };
 
                 return (
-                  <div
-                    key={quadrante.id}
-                    className="border-t border-gray-200 pt-4 dark:border-gray-700"
-                  >
-                    <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                      <div className="min-w-0">
-                        <h4 className="text-base font-semibold text-gray-900 dark:text-gray-100">
-                          Serviço {quadrante.index}
-                        </h4>
-                        <p className="text-sm text-gray-600 dark:text-gray-400">{listSubtitle}</p>
-                      </div>
-                      <span
-                        className={`inline-flex w-fit shrink-0 rounded-full px-2.5 py-0.5 text-xs font-semibold ${
-                          selecao.mixed
-                            ? 'bg-amber-50 text-amber-900 dark:bg-amber-950/40 dark:text-amber-200'
-                            : 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200'
-                        }`}
-                      >
-                        Soma quantidade: {formatQuantidadeBr(selecao.soma)}
-                        {selecao.count > 0 ? ` (${selecao.count})` : ''}
-                        {selecao.mixed
-                          ? ` · UND mistas: ${selecao.units.join(', ')}`
-                          : selecao.units.length === 1
-                            ? ` · ${selecao.units[0]}`
-                            : ''}
-                      </span>
-                    </div>
-
+                  <div key={quadrante.id}>
                     {totalMatches === 0 ? (
                       <CadastroListEmpty
                         icon={FileSearch}
@@ -1017,7 +1047,7 @@ export function BancoCatsPanel() {
                                 </th>
                               </tr>
                             </thead>
-                            <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                            <tbody>
                               {visibleMatches.map((match) => {
                                 const selectionKey = `${quadrante.id}::${match.item.rowKey}`;
                                 const checked = selectedMatchKeys.has(selectionKey);
@@ -1028,8 +1058,10 @@ export function BancoCatsPanel() {
                                 return (
                                   <tr
                                     key={selectionKey}
-                                    className={`align-middle transition-colors hover:bg-gray-50/80 dark:hover:bg-gray-900/40 ${
-                                      checked ? 'bg-emerald-50/40 dark:bg-emerald-950/20' : ''
+                                    className={`border-b border-gray-200 align-middle dark:border-gray-700 ${
+                                      checked
+                                        ? 'shadow-[inset_0_0_0_9999px_rgba(254,226,226,0.55)] dark:shadow-[inset_0_0_0_9999px_rgba(127,29,29,0.22)]'
+                                        : 'hover:shadow-[inset_0_0_0_9999px_rgba(249,250,251,0.8)] dark:hover:shadow-[inset_0_0_0_9999px_rgba(17,24,39,0.35)]'
                                     }`}
                                   >
                                     <td className={cadastroListClasses.tdCenter}>
@@ -1097,7 +1129,7 @@ export function BancoCatsPanel() {
                     )}
                   </div>
                 );
-              })}
+              })()}
             </div>
           ) : null}
         </CardContent>
@@ -1317,14 +1349,16 @@ export function BancoCatsPanel() {
                       })}
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                  <tbody>
                     {pageRows.map((row) => {
                       const checked = selectedCatalogKeys.has(row.rowKey);
                       return (
                         <tr
                           key={row.key}
-                          className={`align-middle transition-colors hover:bg-gray-50/80 dark:hover:bg-gray-900/40 ${
-                            checked ? 'bg-emerald-50/40 dark:bg-emerald-950/20' : ''
+                          className={`border-b border-gray-200 align-middle dark:border-gray-700 ${
+                            checked
+                              ? 'shadow-[inset_0_0_0_9999px_rgba(254,226,226,0.55)] dark:shadow-[inset_0_0_0_9999px_rgba(127,29,29,0.22)]'
+                              : 'hover:shadow-[inset_0_0_0_9999px_rgba(249,250,251,0.8)] dark:hover:shadow-[inset_0_0_0_9999px_rgba(17,24,39,0.35)]'
                           }`}
                         >
                           <td className={cadastroListClasses.tdCenter}>
@@ -1353,7 +1387,7 @@ export function BancoCatsPanel() {
                                   className={`flex flex-wrap gap-2 ${
                                     isCentered
                                       ? 'items-center justify-center'
-                                      : 'items-start justify-start'
+                                      : 'items-center justify-start'
                                   }`}
                                 >
                                   <span>{row.cells[colIndex] || '—'}</span>
