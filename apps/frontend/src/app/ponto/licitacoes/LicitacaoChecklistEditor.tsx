@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { Loader2, MessageSquare, Plus, Trash2 } from 'lucide-react';
+import { CheckboxIndicator } from '@/components/ui/Checkbox';
 import { LicitacaoCommentEditor, LicitacaoCommentFormatted } from './LicitacaoCommentEditor';
 import {
   type ChecklistItemState,
@@ -116,13 +117,22 @@ export function LicitacaoChecklistEditor({
                   className="rounded-md border border-gray-200 bg-gray-50/80 px-2.5 py-2 dark:border-gray-700 dark:bg-gray-900/40"
                 >
                   <div className="flex items-start gap-2">
-                    <label className="flex min-w-0 flex-1 cursor-pointer items-start gap-2">
+                    <label
+                      className={`group flex min-w-0 flex-1 items-start gap-2 ${
+                        disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'
+                      }`}
+                    >
                       <input
                         type="checkbox"
                         checked={row.checked}
                         disabled={disabled}
                         onChange={(e) => onChange(key, { checked: e.target.checked })}
-                        className="mt-0.5 h-4 w-4 shrink-0 rounded border-gray-300 text-red-600 focus:ring-red-500"
+                        className="sr-only"
+                      />
+                      <CheckboxIndicator
+                        checked={row.checked}
+                        disabled={disabled}
+                        className="mt-0.5"
                       />
                       <span className="text-xs leading-snug text-gray-800 dark:text-gray-200">
                         {item.label}

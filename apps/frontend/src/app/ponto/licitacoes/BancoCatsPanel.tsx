@@ -9,16 +9,28 @@ import {
   Download,
   ExternalLink,
   FileSearch,
+  Filter,
   Loader2,
   Plus,
   RefreshCw,
+  RotateCcw,
   Search,
   Trash2,
   X,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
+import {
+  CadastroListEmpty,
+  CadastroListLoading,
+  CadastroListSummary,
+  getCadastroListRange,
+} from '@/components/ui/CadastroListSummary';
+import { ListPagination } from '@/components/ui/ListPagination';
 import { Modal } from '@/components/ui/Modal';
+import { cadastroListClasses } from '@/components/ui/RowActionMenu';
+import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { CheckboxIndicator, TableCheckbox } from '@/components/ui/Checkbox';
 import api from '@/lib/api';
 import { exportBancoCatsSelecaoPdf } from '@/lib/exportBancoCatsSelecaoPdf';
 import {
@@ -41,7 +53,7 @@ const CANONICAL_HEADERS = [
   'FONTE',
 ] as const;
 
-const PAGE_SIZE = 100;
+const PAGE_SIZE = 20;
 /** Pré-visualização padrão por quadrante; o usuário pode expandir para ver todos. */
 const QUADRANTE_MATCH_PREVIEW = 50;
 
@@ -119,6 +131,24 @@ function formatFetchedAt(iso: string): string {
 
 function isDescricaoHeader(header: string): boolean {
   return normalizeHeaderKey(header).includes('descricao');
+}
+
+/** Colunas curtas do catálogo — alinhamento central (exceto descrição). */
+function isCenteredCatalogHeader(header: string): boolean {
+  const key = normalizeHeaderKey(header);
+  if (key.includes('descricao')) return false;
+  return (
+    key === 'empresa' ||
+    key === 'und' ||
+    key === 'unidade' ||
+    key === 'quant' ||
+    key === 'quantidade' ||
+    key === 'fonte'
+  );
+}
+
+function isIndFonteHeader(header: string): boolean {
+  return normalizeHeaderKey(header) === 'ind fonte';
 }
 
 function emptyFormFields(headers: string[]): Record<string, string> {
@@ -358,6 +388,7 @@ export function BancoCatsPanel() {
   const [habilitacaoConsulta, setHabilitacaoConsulta] = useState('');
   const [page, setPage] = useState(1);
   const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [showFilters, setShowFilters] = useState(false);
   /** Seleção no catálogo principal (soma QUANT. + exclusão de manuais) */
   const [selectedCatalogKeys, setSelectedCatalogKeys] = useState<Set<string>>(new Set());
   /** Seleção para soma de QUANT. nos quadrantes: chave = `${quadranteId}::${rowKey}` */
@@ -514,17 +545,17 @@ export function BancoCatsPanel() {
   });
 
   const matchingActive = Boolean(habilitacaoConsulta.trim());
-  const hasActiveFilters = Boolean(searchInput.trim() || empresa || unidade || fonte);
+  const hasActiveFilters = Boolean(empresa || unidade || fonte);
   const errorMessage =
     error instanceof Error
       ? error.message
       : "Não foi possível carregar o Banco CAT's.";
 
   const clearFilters = () => {
-    setSearchInput('');
     setEmpresa('');
     setUnidade('');
     setFonte('');
+    setPage(1);
   };
 
   const clearHabilitacaoConsulta = () => {
@@ -779,8 +810,7 @@ export function BancoCatsPanel() {
     });
   };
 
-  const pageFrom = visibleRows.length === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
-  const pageTo = Math.min(currentPage * PAGE_SIZE, visibleRows.length);
+  const listRange = getCadastroListRange(currentPage, PAGE_SIZE, visibleRows.length);
 
   return (
     <div className="space-y-5">
@@ -948,7 +978,7 @@ export function BancoCatsPanel() {
                         return (
                           <label
                             key={selectionKey}
-                            className={`flex cursor-pointer gap-3 rounded-lg border px-3 py-2 transition-colors dark:border-gray-800 ${
+                            className={`group flex cursor-pointer gap-3 rounded-lg border px-3 py-2 transition-colors dark:border-gray-800 ${
                               checked
                                 ? 'border-emerald-300 bg-emerald-50/60 dark:border-emerald-800 dark:bg-emerald-950/30'
                                 : 'border-gray-100 hover:bg-gray-50/80 dark:hover:bg-gray-900/40'
@@ -960,9 +990,10 @@ export function BancoCatsPanel() {
                               onChange={() =>
                                 toggleMatchSelection(quadrante.id, match.item.rowKey)
                               }
-                              className="mt-1 h-4 w-4 shrink-0 rounded border-gray-300 text-red-600 focus:ring-red-500"
+                              className="sr-only"
                               aria-label={`Selecionar para soma: ${match.item.descricao || match.item.rowKey}`}
                             />
+                            <CheckboxIndicator checked={checked} className="mt-1" />
                             <div className="min-w-0 flex-1">
                               <div className="mb-1 flex flex-wrap items-center gap-x-3 gap-y-1">
                                 <span className="text-xs font-semibold text-emerald-700 dark:text-emerald-400">
@@ -1035,86 +1066,95 @@ export function BancoCatsPanel() {
         </div>
       ) : null}
 
-      <Card className="shadow-sm">
-        <CardHeader className="space-y-4 px-5 pb-0 pt-5">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <Database className="h-5 w-5 text-red-600" aria-hidden />
-                <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+      <Card className={cadastroListClasses.card}>
+        <CardHeader className={cadastroListClasses.cardHeader}>
+          <div className={cadastroListClasses.cardHeaderRow}>
+            <div className={cadastroListClasses.cardHeaderIconRow}>
+              <div className="rounded-lg bg-red-100 p-2 sm:p-3 dark:bg-red-900/30">
+                <Database
+                  className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6"
+                  aria-hidden
+                />
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
                   Banco CAT&apos;s
-                </h2>
-                {catalogSoma.count > 0 ? (
-                  <span
-                    className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${
-                      catalogSoma.mixed
-                        ? 'bg-amber-50 text-amber-900 dark:bg-amber-950/40 dark:text-amber-200'
-                        : 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200'
-                    }`}
+                  {catalogSoma.count > 0 ? (
+                    <span
+                      className={`ml-2 inline-flex align-middle rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+                        catalogSoma.mixed
+                          ? 'bg-amber-50 text-amber-900 dark:bg-amber-950/40 dark:text-amber-200'
+                          : 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200'
+                      }`}
+                    >
+                      Soma QUANT.: {formatQuantidadeBr(catalogSoma.soma)} ({catalogSoma.count})
+                      {catalogSoma.mixed
+                        ? ` · UND mistas: ${catalogSoma.units.join(', ')}`
+                        : catalogSoma.units.length === 1
+                          ? ` · ${catalogSoma.units[0]}`
+                          : ''}
+                    </span>
+                  ) : null}
+                </h3>
+                <p className="text-sm text-gray-600 dark:text-gray-400">
+                  {isLoading
+                    ? 'Carregando…'
+                    : `${visibleRows.length} serviço(s)${
+                        sheet?.rowCount != null && visibleRows.length !== sheet.rowCount
+                          ? ` de ${sheet.rowCount}`
+                          : ''
+                      }`}
+                  {manualCount ? ` · ${manualCount} incluído(s) no sistema` : ''}
+                  {sheet?.fetchedAt ? ` · Atualizado em ${formatFetchedAt(sheet.fetchedAt)}` : ''}
+                </p>
+              </div>
+            </div>
+            <div className={cadastroListClasses.cardToolbar}>
+              <div className="relative min-w-[200px] flex-1 sm:w-[260px] sm:flex-none">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
+                <input
+                  type="text"
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value)}
+                  placeholder="Buscar serviço, unidade, fonte…"
+                  className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                />
+                {searchInput ? (
+                  <button
+                    type="button"
+                    onClick={() => setSearchInput('')}
+                    aria-label="Limpar busca"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-300"
                   >
-                    Soma QUANT.: {formatQuantidadeBr(catalogSoma.soma)} ({catalogSoma.count})
-                    {catalogSoma.mixed
-                      ? ` · UND mistas: ${catalogSoma.units.join(', ')}`
-                      : catalogSoma.units.length === 1
-                        ? ` · ${catalogSoma.units[0]}`
-                        : ''}
-                  </span>
+                    <X className="h-4 w-4" />
+                  </button>
                 ) : null}
               </div>
-              <p className="mt-1 max-w-2xl text-sm text-gray-600 dark:text-gray-400">
-                {matchingActive
-                  ? 'Consulta em quadrantes acima. Abaixo, o catálogo completo do Banco CAT\'s.'
-                  : 'Consulte os serviços atestados nas CATs. Marque os itens para somar as quantidades. Inclusões no sistema vão para a planilha e inclusões na planilha aparecem aqui ao atualizar.'}
-              </p>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
-                onClick={() => setCreateModalOpen(true)}
-                disabled={isLoading}
-                className="inline-flex h-9 items-center gap-2 rounded-lg bg-red-600 px-4 text-sm font-semibold text-white transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+                onClick={() => setShowFilters(true)}
+                className={`relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition-colors ${
+                  hasActiveFilters
+                    ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40'
+                    : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
+                }`}
+                aria-label="Abrir filtro"
+                title={hasActiveFilters ? 'Filtro ativo' : 'Filtro'}
               >
-                <Plus className="h-4 w-4" aria-hidden />
-                Incluir serviço
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  if (
-                    window.confirm(
-                      selectedManualKeysList.length === 1
-                        ? 'Excluir este serviço incluído no sistema?'
-                        : `Excluir ${selectedManualKeysList.length} serviços incluídos no sistema?`
-                    )
-                  ) {
-                    deleteMutation.mutate(selectedManualKeysList);
-                  }
-                }}
-                disabled={
-                  selectedManualKeysList.length === 0 ||
-                  deleteMutation.isPending ||
-                  isLoading
-                }
-                className="inline-flex h-9 items-center gap-2 rounded-lg border border-red-300 bg-red-50 px-4 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-950/60"
-              >
-                {deleteMutation.isPending ? (
-                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-                ) : (
-                  <Trash2 className="h-4 w-4" aria-hidden />
-                )}
-                Excluir
-                {selectedManualKeysList.length > 0
-                  ? ` (${selectedManualKeysList.length})`
-                  : ''}
+                <Filter className="h-4 w-4" />
+                {hasActiveFilters ? (
+                  <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
+                ) : null}
               </button>
               <a
                 href={SPREADSHEET_URL}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex h-9 items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-800 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
+                aria-label="Abrir planilha"
+                title="Abrir planilha"
+                className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-800 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
               >
                 <ExternalLink className="h-4 w-4" aria-hidden />
-                Abrir planilha
               </a>
               <button
                 type="button"
@@ -1122,245 +1162,273 @@ export function BancoCatsPanel() {
                   void refetch();
                 }}
                 disabled={isFetching}
-                className="inline-flex h-9 items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-800 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
+                aria-label="Atualizar"
+                title="Atualizar"
+                className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-800 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
               >
                 {isFetching ? (
                   <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
                 ) : (
                   <RefreshCw className="h-4 w-4" aria-hidden />
                 )}
-                Atualizar
               </button>
+              <button
+                type="button"
+                onClick={() => setCreateModalOpen(true)}
+                disabled={isLoading}
+                className="flex h-10 items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+              >
+                <Plus className="h-4 w-4 shrink-0" aria-hidden />
+                <span>Incluir serviço</span>
+              </button>
+              {selectedManualKeysList.length > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (
+                      window.confirm(
+                        selectedManualKeysList.length === 1
+                          ? 'Excluir este serviço incluído no sistema?'
+                          : `Excluir ${selectedManualKeysList.length} serviços incluídos no sistema?`
+                      )
+                    ) {
+                      deleteMutation.mutate(selectedManualKeysList);
+                    }
+                  }}
+                  disabled={deleteMutation.isPending || isLoading}
+                  className="flex h-10 items-center gap-2 rounded-lg border border-red-300 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-950/60"
+                >
+                  {deleteMutation.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                  ) : (
+                    <Trash2 className="h-4 w-4 shrink-0" aria-hidden />
+                  )}
+                  <span>Excluir ({selectedManualKeysList.length})</span>
+                </button>
+              ) : null}
             </div>
           </div>
         </CardHeader>
 
-        <CardContent className="space-y-4 px-5 py-4">
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            <div className="relative md:col-span-2 xl:col-span-1">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-              <input
-                type="search"
-                value={searchInput}
-                onChange={(e) => setSearchInput(e.target.value)}
-                placeholder="Buscar serviço, unidade, fonte…"
-                className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm dark:border-gray-700 dark:bg-gray-900"
-              />
-            </div>
-
-            <select
-              value={empresa}
-              onChange={(e) => setEmpresa(e.target.value)}
-              className="h-10 rounded-lg border border-gray-300 bg-white px-3 text-sm dark:border-gray-700 dark:bg-gray-900"
-              aria-label="Filtrar por empresa"
-            >
-              <option value="">Todas as empresas</option>
-              {(sheet?.filterOptions.empresas ?? []).map((option) => (
-                <option key={option} value={option}>
-                  {option}
-                </option>
-              ))}
-            </select>
-
-            <select
-              value={unidade}
-              onChange={(e) => setUnidade(e.target.value)}
-              className="h-10 rounded-lg border border-gray-300 bg-white px-3 text-sm dark:border-gray-700 dark:bg-gray-900"
-              aria-label="Filtrar por unidade"
-            >
-              <option value="">Todas as unidades</option>
-              {(sheet?.filterOptions.unidades ?? []).map((option) => (
-                <option key={option} value={option}>
-                  {option}
-                </option>
-              ))}
-            </select>
-
-            <select
-              value={fonte}
-              onChange={(e) => setFonte(e.target.value)}
-              className="h-10 rounded-lg border border-gray-300 bg-white px-3 text-sm dark:border-gray-700 dark:bg-gray-900"
-              aria-label="Filtrar por fonte (CAT)"
-            >
-              <option value="">Todas as fontes (CATs)</option>
-              {(sheet?.filterOptions.fontes ?? []).map((option) => (
-                <option key={option} value={option}>
-                  {option}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-sm text-gray-500">
-              {isLoading
-                ? 'Carregando…'
-                : `${visibleRows.length} serviço(s)${
-                    sheet?.rowCount != null && visibleRows.length !== sheet.rowCount
-                      ? ` de ${sheet.rowCount}`
-                      : ''
-                  }`}
-              {manualCount ? ` · ${manualCount} incluído(s) no sistema` : ''}
-              {sheet?.fetchedAt ? ` · Atualizado em ${formatFetchedAt(sheet.fetchedAt)}` : ''}
-            </p>
-            {hasActiveFilters ? (
+        <CardContent className={cadastroListClasses.cardContent}>
+          {error ? (
+            <div className="flex flex-col items-center gap-3 px-6 py-10 text-center">
+              <p className="max-w-md font-medium text-red-600 dark:text-red-400">{errorMessage}</p>
               <button
                 type="button"
-                onClick={clearFilters}
-                className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100"
+                onClick={() => void refetch()}
+                className="text-sm text-gray-600 underline hover:text-gray-800 dark:text-gray-400"
               >
-                <X className="h-3.5 w-3.5" aria-hidden />
-                Limpar filtros
+                Tentar novamente
               </button>
-            ) : null}
-          </div>
+            </div>
+          ) : isLoading ? (
+            <CadastroListLoading message="Carregando Banco CAT's..." />
+          ) : !sheet?.headers?.length || visibleRows.length === 0 ? (
+            <CadastroListEmpty
+              icon={Database}
+              title={
+                searchInput.trim() || hasActiveFilters
+                  ? 'Nenhum resultado para a busca ou filtros atuais'
+                  : 'Nenhum serviço encontrado'
+              }
+              hint={
+                searchInput.trim() || hasActiveFilters
+                  ? 'Tente ajustar a busca ou os filtros'
+                  : 'Use “Incluir serviço” para cadastrar o primeiro'
+              }
+            />
+          ) : (
+            <>
+              <CadastroListSummary
+                startItem={listRange.startItem}
+                endItem={listRange.endItem}
+                total={visibleRows.length}
+                itemLabel="serviço"
+                itemLabelPlural="serviços"
+                currentPage={currentPage}
+                totalPages={listRange.totalPages}
+              />
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[56rem] text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-200 dark:border-gray-700">
+                      <th scope="col" className={`${cadastroListClasses.thCenter} w-12`}>
+                        <TableCheckbox
+                          checked={pageSelection.all}
+                          indeterminate={pageSelection.some && !pageSelection.all}
+                          onChange={() => togglePageSelection()}
+                          disabled={pageRows.length === 0}
+                          ariaLabel="Selecionar todos da página"
+                        />
+                      </th>
+                      {sheet.headers.map((header) => {
+                        if (isIndFonteHeader(header)) return null;
+                        const isDescricao = isDescricaoHeader(header);
+                        const isCentered = isCenteredCatalogHeader(header);
+                        return (
+                          <th
+                            key={header}
+                            scope="col"
+                            className={`${
+                              isCentered ? cadastroListClasses.thCenter : cadastroListClasses.th
+                            } ${isDescricao ? 'min-w-[18rem]' : 'whitespace-nowrap'}`}
+                          >
+                            {header}
+                          </th>
+                        );
+                      })}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                    {pageRows.map((row) => {
+                      const checked = selectedCatalogKeys.has(row.rowKey);
+                      return (
+                        <tr
+                          key={row.key}
+                          className={`align-top transition-colors hover:bg-gray-50/80 dark:hover:bg-gray-900/40 ${
+                            checked ? 'bg-emerald-50/40 dark:bg-emerald-950/20' : ''
+                          }`}
+                        >
+                          <td className={cadastroListClasses.tdCenter}>
+                            <TableCheckbox
+                              checked={checked}
+                              onChange={() => toggleCatalogSelection(row.rowKey)}
+                              ariaLabel={`Selecionar serviço: ${row.descricao || row.rowKey}`}
+                            />
+                          </td>
+                          {sheet.headers.map((header, colIndex) => {
+                            if (isIndFonteHeader(header)) return null;
+                            const isDescricao = isDescricaoHeader(header);
+                            const isCentered = isCenteredCatalogHeader(header);
+                            return (
+                              <td
+                                key={`${row.key}-${header}`}
+                                className={`${
+                                  isCentered ? cadastroListClasses.tdCenter : cadastroListClasses.td
+                                } ${
+                                  isDescricao
+                                    ? 'max-w-xl whitespace-normal leading-relaxed'
+                                    : 'whitespace-nowrap'
+                                }`}
+                              >
+                                <div
+                                  className={`flex flex-wrap gap-2 ${
+                                    isCentered
+                                      ? 'items-center justify-center'
+                                      : 'items-start justify-start'
+                                  }`}
+                                >
+                                  <span>{row.cells[colIndex] || '—'}</span>
+                                  {row.isManual && colIndex === 0 ? (
+                                    <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800 dark:bg-amber-950/50 dark:text-amber-200">
+                                      Sistema
+                                    </span>
+                                  ) : null}
+                                </div>
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              <ListPagination
+                currentPage={currentPage}
+                totalPages={listRange.totalPages}
+                onPageChange={setPage}
+              />
+            </>
+          )}
         </CardContent>
       </Card>
 
-      <Card padding="none" className="overflow-hidden shadow-sm">
-        {error ? (
-          <CardContent className="px-5 py-12 text-center">
-            <p className="font-medium text-red-600 dark:text-red-400">{errorMessage}</p>
-            <button
-              type="button"
-              onClick={() => void refetch()}
-              className="mt-3 text-sm text-gray-600 underline hover:text-gray-800 dark:text-gray-400"
-            >
-              Tentar novamente
-            </button>
-          </CardContent>
-        ) : isLoading ? (
-          <CardContent className="flex justify-center py-20">
-            <Loader2 className="h-8 w-8 animate-spin text-red-600" />
-          </CardContent>
-        ) : !sheet?.headers?.length ? (
-          <CardContent className="px-5 py-12 text-center text-sm text-gray-500">
-            Nenhum serviço encontrado. Use “Incluir serviço” para cadastrar o primeiro.
-          </CardContent>
-        ) : (
-          <>
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200 text-sm dark:divide-gray-800">
-                <thead className="bg-gray-50 dark:bg-gray-900/60">
-                <tr>
-                  <th scope="col" className="w-10 px-3 py-3">
-                    <input
-                      type="checkbox"
-                      aria-label="Selecionar todos da página"
-                      checked={pageSelection.all}
-                      ref={(el) => {
-                        if (el) el.indeterminate = pageSelection.some;
-                      }}
-                      onChange={togglePageSelection}
-                      disabled={pageRows.length === 0}
-                      className="h-4 w-4 rounded border-gray-300 text-red-600 focus:ring-red-500 disabled:opacity-50"
-                    />
-                  </th>
-                  {sheet.headers.map((header) => (
-                    <th
-                      key={header}
-                      scope="col"
-                      className={`whitespace-nowrap px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-400 ${
-                        isDescricaoHeader(header) ? 'min-w-[22rem]' : ''
-                      }`}
-                    >
-                      {header}
-                    </th>
-                  ))}
-                </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100 bg-white dark:divide-gray-800 dark:bg-gray-950">
-                  {pageRows.length === 0 ? (
-                    <tr>
-                      <td
-                        colSpan={sheet.headers.length + 1}
-                        className="px-4 py-12 text-center text-sm text-gray-500"
-                      >
-                        {hasActiveFilters
-                          ? 'Nenhum resultado para a busca ou filtros atuais.'
-                          : 'Nenhum serviço cadastrado.'}
-                      </td>
-                    </tr>
-                  ) : (
-                    pageRows.map((row) => {
-                      const checked = selectedCatalogKeys.has(row.rowKey);
-                      return (
-                      <tr
-                        key={row.key}
-                        className={`align-top hover:bg-gray-50/80 dark:hover:bg-gray-900/40 ${
-                          checked ? 'bg-emerald-50/40 dark:bg-emerald-950/20' : ''
-                        }`}
-                      >
-                        <td className="px-3 py-3">
-                          <input
-                            type="checkbox"
-                            aria-label={`Selecionar serviço: ${row.descricao || row.rowKey}`}
-                            checked={checked}
-                            onChange={() => toggleCatalogSelection(row.rowKey)}
-                            className="h-4 w-4 rounded border-gray-300 text-red-600 focus:ring-red-500"
-                          />
-                        </td>
-                        {sheet.headers.map((header, colIndex) => {
-                          const isDescricao = isDescricaoHeader(header);
-                          return (
-                            <td
-                              key={`${row.key}-${header}`}
-                              className={`px-3 py-3 text-gray-800 dark:text-gray-200 ${
-                                isDescricao
-                                  ? 'max-w-xl whitespace-normal leading-relaxed'
-                                  : 'whitespace-nowrap'
-                              }`}
-                            >
-                              <div className="flex flex-wrap items-start gap-2">
-                                <span>{row.cells[colIndex] || '—'}</span>
-                                {row.isManual && colIndex === 0 ? (
-                                  <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800 dark:bg-amber-950/50 dark:text-amber-200">
-                                    Sistema
-                                  </span>
-                                ) : null}
-                              </div>
-                            </td>
-                          );
-                        })}
-                      </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
+      {showFilters ? (
+        <div className="app-modal-overlay fixed inset-0 z-[2100] flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/40"
+            onClick={() => setShowFilters(false)}
+            aria-hidden
+          />
+          <div className="relative mx-4 w-full max-w-md rounded-xl bg-white shadow-2xl dark:bg-gray-800">
+            <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4 dark:border-gray-700">
+              <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">Filtros</h3>
+              <button
+                type="button"
+                onClick={() => setShowFilters(false)}
+                className="rounded-md p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+                aria-label="Fechar filtros"
+              >
+                <X className="h-4 w-4" />
+              </button>
             </div>
-
-            {visibleRows.length > PAGE_SIZE ? (
-              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 px-4 py-3 dark:border-gray-800">
-                <p className="text-sm text-gray-500">
-                  Exibindo {pageFrom}–{pageTo} de {visibleRows.length}
-                </p>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setPage((p) => Math.max(1, p - 1))}
-                    disabled={currentPage <= 1}
-                    className="h-9 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-                  >
-                    Anterior
-                  </button>
-                  <span className="text-sm text-gray-600 dark:text-gray-300">
-                    Página {currentPage} de {totalPages}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                    disabled={currentPage >= totalPages}
-                    className="h-9 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-                  >
-                    Próxima
-                  </button>
-                </div>
+            <div className="max-h-[70vh] space-y-4 overflow-y-auto px-5 py-4">
+              <div>
+                <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Empresa
+                </label>
+                <StringSingleSelectDropdown
+                  value={empresa}
+                  onChange={setEmpresa}
+                  options={sheet?.filterOptions.empresas ?? []}
+                  allowEmpty
+                  emptyOptionLabel="Todas as empresas"
+                  placeholder="Todas as empresas"
+                />
               </div>
-            ) : null}
-          </>
-        )}
-      </Card>
+              <div>
+                <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Unidade
+                </label>
+                <StringSingleSelectDropdown
+                  value={unidade}
+                  onChange={setUnidade}
+                  options={sheet?.filterOptions.unidades ?? []}
+                  allowEmpty
+                  emptyOptionLabel="Todas as unidades"
+                  placeholder="Todas as unidades"
+                />
+              </div>
+              <div>
+                <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Fonte (CAT)
+                </label>
+                <StringSingleSelectDropdown
+                  value={fonte}
+                  onChange={setFonte}
+                  options={sheet?.filterOptions.fontes ?? []}
+                  allowEmpty
+                  emptyOptionLabel="Todas as fontes"
+                  placeholder="Todas as fontes"
+                />
+              </div>
+            </div>
+            <div className="flex items-center justify-between gap-2 border-t border-gray-200 px-5 py-4 dark:border-gray-700">
+              <button
+                type="button"
+                onClick={() => {
+                  clearFilters();
+                  setShowFilters(false);
+                }}
+                className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+              >
+                <RotateCcw className="h-4 w-4" />
+                Limpar filtros
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowFilters(false)}
+                className="rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+              >
+                Aplicar
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <CreateServicoModal
         isOpen={createModalOpen}

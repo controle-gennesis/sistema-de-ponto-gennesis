@@ -16,6 +16,7 @@ import {
 import toast from 'react-hot-toast';
 import api from '@/lib/api';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
+import { TableCheckbox } from '@/components/ui/Checkbox';
 import { Modal } from '@/components/ui/Modal';
 import { currencyDigitsToFormatted } from '@/lib/fichaDemandaApproval';
 
@@ -785,13 +786,11 @@ export function LicitacoesRegiaoPanel() {
               <thead className="bg-gray-50 dark:bg-gray-900/60">
                 <tr>
                   <th scope="col" className="w-10 px-3 py-3">
-                    <input
-                      type="checkbox"
-                      aria-label="Selecionar todas as licitações visíveis"
+                    <TableCheckbox
                       checked={allVisibleSelected}
+                      onChange={() => toggleSelectAllVisible()}
                       disabled={selectableVisibleRowKeys.length === 0}
-                      onChange={toggleSelectAllVisible}
-                      className="h-4 w-4 rounded border-gray-300 text-red-600 focus:ring-red-500"
+                      ariaLabel="Selecionar todas as licitações visíveis"
                     />
                   </th>
                   <th
@@ -855,13 +854,11 @@ export function LicitacoesRegiaoPanel() {
                         }`}
                       >
                         <td className="px-3 py-2.5">
-                          <input
-                            type="checkbox"
-                            aria-label="Selecionar licitação"
+                          <TableCheckbox
                             checked={isSelected}
-                            disabled={!row.rowKey || isAceiteBusy}
                             onChange={() => toggleRowSelection(row.rowKey)}
-                            className="h-4 w-4 rounded border-gray-300 text-red-600 focus:ring-red-500 disabled:opacity-40"
+                            disabled={!row.rowKey || isAceiteBusy}
+                            ariaLabel="Selecionar licitação"
                           />
                         </td>
                         <td className="whitespace-nowrap px-3 py-2.5">
