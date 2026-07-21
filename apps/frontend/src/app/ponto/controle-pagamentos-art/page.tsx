@@ -318,11 +318,36 @@ function ControlePagamentoArtContent() {
     [costCenters]
   );
 
+  // Lista de profissionais para o filtro (distintos, sem depender dos filtros ativos).
+  const { data: profissionaisData } = useQuery({
+    queryKey: ['controle-pagamentos-art-profissionais'],
+    queryFn: async () => {
+      const res = await api.get('/controle-pagamentos-art');
+      const list = (res.data?.data || []) as ControlePagamentoArt[];
+      const set = new Set<string>();
+      list.forEach((r) => {
+        const p = (r.profissional || '').trim();
+        if (p) set.add(p);
+      });
+      return Array.from(set).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const profissionalOptions = useMemo(
+    () =>
+      labeledToSelectOptions(
+        (profissionaisData || []).map((p) => ({ value: p, label: p }))
+      ),
+    [profissionaisData]
+  );
+
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [ufFilter, setUfFilter] = useState('all');
   const [empresaFilter, setEmpresaFilter] = useState('all');
   const [contratanteFilter, setContratanteFilter] = useState('');
+  const [profissionalFilter, setProfissionalFilter] = useState('');
   const [pagoFilter, setPagoFilter] = useState('all');
   const [vencDeFilter, setVencDeFilter] = useState('');
   const [vencAteFilter, setVencAteFilter] = useState('');
@@ -351,6 +376,7 @@ function ControlePagamentoArtContent() {
     ufFilter !== 'all' ||
     empresaFilter !== 'all' ||
     !!contratanteFilter.trim() ||
+    !!profissionalFilter.trim() ||
     pagoFilter !== 'all' ||
     !!vencDeFilter ||
     !!vencAteFilter;
@@ -360,6 +386,7 @@ function ControlePagamentoArtContent() {
     setUfFilter('all');
     setEmpresaFilter('all');
     setContratanteFilter('');
+    setProfissionalFilter('');
     setPagoFilter('all');
     setVencDeFilter('');
     setVencAteFilter('');
@@ -375,6 +402,7 @@ function ControlePagamentoArtContent() {
       ufFilter,
       empresaFilter,
       contratanteFilter,
+      profissionalFilter,
       pagoFilter,
       vencDeFilter,
       vencAteFilter,
@@ -388,6 +416,7 @@ function ControlePagamentoArtContent() {
       if (ufFilter && ufFilter !== 'all') params.set('uf', ufFilter);
       if (empresaFilter && empresaFilter !== 'all') params.set('empresa', empresaFilter);
       if (contratanteFilter.trim()) params.set('contratante', contratanteFilter.trim());
+      if (profissionalFilter.trim()) params.set('profissional', profissionalFilter.trim());
       if (pagoFilter && pagoFilter !== 'all') params.set('pago', pagoFilter);
       if (vencDeFilter) params.set('vencDe', vencDeFilter);
       if (vencAteFilter) params.set('vencAte', vencAteFilter);
@@ -974,6 +1003,22 @@ function ControlePagamentoArtContent() {
                   placeholder={
                     loadingCostCenters ? 'Carregando centros de custo...' : 'Selecionar...'
                   }
+                  allowEmpty
+                  emptyOptionLabel="Todos"
+                />
+              </div>
+              <div>
+                <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Profissional
+                </label>
+                <StringSingleSelectDropdown
+                  value={profissionalFilter}
+                  onChange={(v) => {
+                    setProfissionalFilter(v);
+                    setCurrentPage(1);
+                  }}
+                  options={profissionalOptions}
+                  placeholder="Selecionar..."
                   allowEmpty
                   emptyOptionLabel="Todos"
                 />

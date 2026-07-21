@@ -133,6 +133,7 @@ export class ControlePagamentoArtController {
       const uf = String(req.query.uf || '').trim();
       const empresa = String(req.query.empresa || '').trim();
       const contratante = String(req.query.contratante || '').trim();
+      const profissional = String(req.query.profissional || '').trim();
       const pago = String(req.query.pago || '').trim().toUpperCase();
       const vencDe = parseDate(req.query.vencDe);
       const vencAteRaw = parseDate(req.query.vencAte);
@@ -172,6 +173,9 @@ export class ControlePagamentoArtController {
       }
       if (contratante) {
         andFilters.push({ contratante: { equals: contratante, mode: 'insensitive' } });
+      }
+      if (profissional) {
+        andFilters.push({ profissional: { equals: profissional, mode: 'insensitive' } });
       }
       if (pago === 'SIM' || pago === 'NAO') {
         andFilters.push({ pago });
