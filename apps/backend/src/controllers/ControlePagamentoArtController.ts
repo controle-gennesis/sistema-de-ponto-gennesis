@@ -130,6 +130,7 @@ export class ControlePagamentoArtController {
       const q = String(req.query.q || '').trim();
       const status = String(req.query.status || '').trim();
       const card = String(req.query.card || '').trim().toLowerCase();
+      const uf = String(req.query.uf || '').trim();
       const empresa = String(req.query.empresa || '').trim();
       const contratante = String(req.query.contratante || '').trim();
       const pago = String(req.query.pago || '').trim().toUpperCase();
@@ -162,6 +163,9 @@ export class ControlePagamentoArtController {
             { observacoes: { contains: q, mode: 'insensitive' } },
           ],
         });
+      }
+      if (uf) {
+        andFilters.push({ uf: { equals: uf, mode: 'insensitive' } });
       }
       if (empresa) {
         andFilters.push({ empresa: { equals: empresa, mode: 'insensitive' } });
