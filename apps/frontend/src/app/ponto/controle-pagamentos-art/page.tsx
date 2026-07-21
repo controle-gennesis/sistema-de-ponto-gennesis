@@ -139,6 +139,14 @@ const EMPRESA_FILTER_OPTIONS = labeledToSelectOptions([
   { value: 'CONSÓRCIO HUB', label: 'CONSÓRCIO HUB' },
 ]);
 
+const UF_FILTER_OPTIONS = labeledToSelectOptions([
+  { value: 'all', label: 'Todas' },
+  ...[
+    'AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 'MT', 'MS', 'MG',
+    'PA', 'PB', 'PR', 'PE', 'PI', 'RJ', 'RN', 'RS', 'RO', 'RR', 'SC', 'SP', 'SE', 'TO',
+  ].map((uf) => ({ value: uf, label: uf })),
+]);
+
 const STATUS_FORM_OPTIONS = labeledToSelectOptions([
   { value: 'EM_ABERTA', label: 'EM ABERTA' },
   { value: 'PAGO', label: 'PAGO' },
@@ -312,6 +320,7 @@ function ControlePagamentoArtContent() {
 
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [ufFilter, setUfFilter] = useState('all');
   const [empresaFilter, setEmpresaFilter] = useState('all');
   const [contratanteFilter, setContratanteFilter] = useState('');
   const [pagoFilter, setPagoFilter] = useState('all');
@@ -339,6 +348,7 @@ function ControlePagamentoArtContent() {
 
   const hasActiveFilters =
     statusFilter !== 'all' ||
+    ufFilter !== 'all' ||
     empresaFilter !== 'all' ||
     !!contratanteFilter.trim() ||
     pagoFilter !== 'all' ||
@@ -347,6 +357,7 @@ function ControlePagamentoArtContent() {
 
   const clearFilters = () => {
     setStatusFilter('all');
+    setUfFilter('all');
     setEmpresaFilter('all');
     setContratanteFilter('');
     setPagoFilter('all');
@@ -361,6 +372,7 @@ function ControlePagamentoArtContent() {
       'controle-pagamentos-art',
       searchTerm,
       statusFilter,
+      ufFilter,
       empresaFilter,
       contratanteFilter,
       pagoFilter,
@@ -373,6 +385,7 @@ function ControlePagamentoArtContent() {
       if (searchTerm.trim()) params.set('q', searchTerm.trim());
       if (statusFilter && statusFilter !== 'all') params.set('status', statusFilter);
       else if (cardFilter !== 'all') params.set('card', cardFilter);
+      if (ufFilter && ufFilter !== 'all') params.set('uf', ufFilter);
       if (empresaFilter && empresaFilter !== 'all') params.set('empresa', empresaFilter);
       if (contratanteFilter.trim()) params.set('contratante', contratanteFilter.trim());
       if (pagoFilter && pagoFilter !== 'all') params.set('pago', pagoFilter);
@@ -919,6 +932,20 @@ function ControlePagamentoArtContent() {
               </button>
             </div>
             <div className="max-h-[70vh] space-y-4 overflow-y-auto px-5 py-4">
+              <div>
+                <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  UF
+                </label>
+                <StringSingleSelectDropdown
+                  value={ufFilter}
+                  onChange={(v) => {
+                    setUfFilter(v || 'all');
+                    setCurrentPage(1);
+                  }}
+                  options={UF_FILTER_OPTIONS}
+                  allowEmpty={false}
+                />
+              </div>
               <div>
                 <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                   Empresa
