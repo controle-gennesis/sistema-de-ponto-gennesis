@@ -3243,6 +3243,7 @@ model ControleAnuidade {
 /// Controle de pagamentos de ART's / Protocolos (módulo Licitações).
 model ControlePagamentoArt {
   id               String    @id @default(cuid())
+  uf               String?
   empresa          String?
   contratante      String?
   cnpjCpf          String?
@@ -3263,6 +3264,7 @@ model ControlePagamentoArt {
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
+  @@index([uf])
   @@index([empresa])
   @@index([contratante])
   @@index([cnpjCpf])

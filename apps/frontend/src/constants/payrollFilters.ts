@@ -70,6 +70,7 @@ export const COST_CENTERS_LIST = [
 
 // Lista de polos
 export const POLOS_LIST = [
+  'BAHIA',
   'BRASÍLIA',
   'GOIÁS'
 ];
