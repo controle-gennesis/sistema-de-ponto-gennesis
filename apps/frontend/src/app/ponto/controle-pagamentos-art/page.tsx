@@ -1096,15 +1096,10 @@ function ControlePagamentoArtContent() {
                 </div>
                 <div>
                   <label className={labelClass}>Contratante</label>
-                  <StringSingleSelectDropdown
+                  <input
+                    className={inputClass}
                     value={formData.contratante}
-                    onChange={(v) => setFormData({ ...formData, contratante: v })}
-                    options={contratanteOptions}
-                    placeholder={
-                      loadingCostCenters ? 'Carregando centros de custo...' : 'Selecionar...'
-                    }
-                    allowEmpty
-                    emptyOptionLabel="—"
+                    onChange={(e) => setFormData({ ...formData, contratante: e.target.value })}
                   />
                 </div>
                 <div>
