@@ -228,11 +228,12 @@ export class ControlePagamentoArtController {
         where = vencidasWhere;
       }
 
-      const [rows, pagos, aVencer, vencidas] = await Promise.all([
+      const [rows, total, pagos, aVencer, vencidas] = await Promise.all([
         prisma.controlePagamentoArt.findMany({
           where,
           orderBy: [{ vencDoBoleto: 'asc' }, { profissional: 'asc' }],
         }),
+        prisma.controlePagamentoArt.count({ where: searchWhere }),
         prisma.controlePagamentoArt.count({
           where: { ...searchWhere, status: 'PAGO' },
         }),
@@ -243,7 +244,7 @@ export class ControlePagamentoArtController {
       res.json({
         success: true,
         data: rows,
-        meta: { pagos, aVencer, vencidas },
+        meta: { total, pagos, aVencer, vencidas },
       });
     } catch (error) {
       next(error);
