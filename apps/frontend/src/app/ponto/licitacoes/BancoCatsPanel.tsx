@@ -3,6 +3,9 @@
 import React, { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
   ChevronDown,
   ChevronUp,
   Database,
@@ -56,6 +59,8 @@ const CANONICAL_HEADERS = [
 const PAGE_SIZE = 20;
 /** Pré-visualização padrão por quadrante; o usuário pode expandir para ver todos. */
 const QUADRANTE_MATCH_PREVIEW = 20;
+
+type QuantSortDir = 'none' | 'asc' | 'desc';
 
 type BancoCatsSheetData = {
   spreadsheetId: string;
@@ -397,6 +402,11 @@ export function BancoCatsPanel() {
   const [expandedQuadrantes, setExpandedQuadrantes] = useState<Set<string>>(new Set());
   const [activeServicoTabId, setActiveServicoTabId] = useState('');
   const [exportingPdf, setExportingPdf] = useState(false);
+  /** Filtros / ordenação nas abas de serviços encontrados. */
+  const [matchUnidade, setMatchUnidade] = useState('');
+  const [matchKeywordsInput, setMatchKeywordsInput] = useState('');
+  const deferredMatchKeywords = useDeferredValue(matchKeywordsInput);
+  const [quantSortDir, setQuantSortDir] = useState<QuantSortDir>('none');
 
   const {
     data: sheet,
@@ -466,7 +476,9 @@ export function BancoCatsPanel() {
       const keywords = extractKeywords(query);
       const matches = keywords.length
         ? matchByKeywords(indexedRows, keywords, {
-            minScore: keywords.length >= 5 ? 2 : 1,
+            // 1 = conta/exibe todos os que batem em ao menos uma chave;
+            // o ranking (nº de chaves + score) já coloca os melhores no topo.
+            minScore: 1,
             limit: null,
             queryText: query,
           })
@@ -515,6 +527,9 @@ export function BancoCatsPanel() {
     setSelectedMatchKeys(new Set());
     setExpandedQuadrantes(new Set());
     setActiveServicoTabId('');
+    setMatchUnidade('');
+    setMatchKeywordsInput('');
+    setQuantSortDir('none');
   }, [habilitacaoConsulta]);
 
   useEffect(() => {
@@ -532,6 +547,80 @@ export function BancoCatsPanel() {
       servicoQuadrantes.find((q) => q.id === activeServicoTabId) ?? servicoQuadrantes[0] ?? null,
     [servicoQuadrantes, activeServicoTabId]
   );
+
+  const matchUnidadeOptions = useMemo(() => {
+    if (!activeServicoQuadrante) return [] as string[];
+    const units = new Set<string>();
+    for (const match of activeServicoQuadrante.matches) {
+      const und = match.item.und.trim();
+      if (und) units.add(und);
+    }
+    return Array.from(units).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  }, [activeServicoQuadrante]);
+
+  useEffect(() => {
+    if (matchUnidade && !matchUnidadeOptions.includes(matchUnidade)) {
+      setMatchUnidade('');
+    }
+  }, [matchUnidade, matchUnidadeOptions]);
+
+  const filteredSortedMatches = useMemo(() => {
+    if (!activeServicoQuadrante) return [];
+
+    const keywordTokens = deferredMatchKeywords
+      .trim()
+      .split(/[\s,;|/]+/)
+      .map((token) => normalizeMatchText(token))
+      .filter(Boolean);
+
+    let rows = activeServicoQuadrante.matches.filter((match) => {
+      if (matchUnidade && match.item.und !== matchUnidade) return false;
+      if (keywordTokens.length > 0) {
+        const haystack = buildSearchIndexText(
+          [
+            match.item.descricao,
+            match.item.searchText,
+            match.matchedKeywords.join(' '),
+            match.item.fonte,
+            match.item.empresa,
+            match.item.und,
+          ].join(' ')
+        );
+        if (!keywordTokens.every((token) => haystack.includes(token))) return false;
+      }
+      return true;
+    });
+
+    if (quantSortDir !== 'none') {
+      rows = [...rows].sort((a, b) => {
+        const qa = parseQuantidadeBr(a.item.quant);
+        const qb = parseQuantidadeBr(b.item.quant);
+        return quantSortDir === 'asc' ? qa - qb : qb - qa;
+      });
+    }
+
+    return rows;
+  }, [
+    activeServicoQuadrante,
+    matchUnidade,
+    deferredMatchKeywords,
+    quantSortDir,
+  ]);
+
+  const hasActiveMatchFilters = Boolean(matchUnidade || matchKeywordsInput.trim());
+  const clearMatchFilters = () => {
+    setMatchUnidade('');
+    setMatchKeywordsInput('');
+    setQuantSortDir('none');
+  };
+
+  const cycleQuantSort = () => {
+    setQuantSortDir((prev) => {
+      if (prev === 'none') return 'desc';
+      if (prev === 'desc') return 'asc';
+      return 'none';
+    });
+  };
 
   const deleteMutation = useMutation({
     mutationFn: async (rowKeys: string[]) => {
@@ -582,6 +671,9 @@ export function BancoCatsPanel() {
     setSelectedMatchKeys(new Set());
     setExpandedQuadrantes(new Set());
     setActiveServicoTabId('');
+    setMatchUnidade('');
+    setMatchKeywordsInput('');
+    setQuantSortDir('none');
   };
 
   const toggleQuadranteExpanded = (quadranteId: string) => {
@@ -610,6 +702,9 @@ export function BancoCatsPanel() {
     setHabilitacaoConsulta(text);
     setSelectedMatchKeys(new Set());
     setExpandedQuadrantes(new Set());
+    setMatchUnidade('');
+    setMatchKeywordsInput('');
+    setQuantSortDir('none');
     setPage(1);
   };
 
@@ -966,13 +1061,15 @@ export function BancoCatsPanel() {
               {(() => {
                 const quadrante = activeServicoQuadrante;
                 const totalMatches = quadrante.matches.length;
-                const hasMoreThanPreview = totalMatches > QUADRANTE_MATCH_PREVIEW;
+                const filteredMatches = filteredSortedMatches;
+                const filteredCount = filteredMatches.length;
+                const hasMoreThanPreview = filteredCount > QUADRANTE_MATCH_PREVIEW;
                 const isExpanded = expandedQuadrantes.has(quadrante.id);
                 const visibleMatches =
                   hasMoreThanPreview && !isExpanded
-                    ? quadrante.matches.slice(0, QUADRANTE_MATCH_PREVIEW)
-                    : quadrante.matches;
-                const hiddenCount = totalMatches - visibleMatches.length;
+                    ? filteredMatches.slice(0, QUADRANTE_MATCH_PREVIEW)
+                    : filteredMatches;
+                const hiddenCount = filteredCount - visibleMatches.length;
                 const selectedOnVisible = visibleMatches.filter((match) =>
                   selectedMatchKeys.has(`${quadrante.id}::${match.item.rowKey}`)
                 ).length;
@@ -1008,13 +1105,87 @@ export function BancoCatsPanel() {
                   });
                 };
 
+                const quantSortLabel =
+                  quantSortDir === 'desc'
+                    ? 'Ordenado: maior quantidade'
+                    : quantSortDir === 'asc'
+                      ? 'Ordenado: menor quantidade'
+                      : 'Ordenar por quantidade';
+
                 return (
-                  <div key={quadrante.id}>
+                  <div key={quadrante.id} className="space-y-3">
+                    <div className="flex flex-col gap-3 rounded-lg border border-gray-200 bg-gray-50/80 p-3 dark:border-gray-700 dark:bg-gray-900/40 sm:flex-row sm:flex-wrap sm:items-end">
+                      <label className="block min-w-[10rem] flex-1 sm:max-w-[14rem]">
+                        <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                          Unidade de medida
+                        </span>
+                        <StringSingleSelectDropdown
+                          value={matchUnidade}
+                          onChange={setMatchUnidade}
+                          options={matchUnidadeOptions}
+                          allowEmpty
+                          emptyOptionLabel="Todas as unidades"
+                          placeholder="Todas as unidades"
+                          searchPlaceholder="Buscar unidade…"
+                          emptyOptionsMessage="Nenhuma unidade nesta lista."
+                        />
+                      </label>
+                      <label className="block min-w-0 flex-[2]">
+                        <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                          Palavras-chave
+                        </span>
+                        <div className="relative">
+                          <Search
+                            className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400"
+                            aria-hidden
+                          />
+                          <input
+                            type="search"
+                            value={matchKeywordsInput}
+                            onChange={(e) => setMatchKeywordsInput(e.target.value)}
+                            placeholder="Filtrar por palavras-chave…"
+                            className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+                          />
+                        </div>
+                      </label>
+                      {hasActiveMatchFilters || quantSortDir !== 'none' ? (
+                        <button
+                          type="button"
+                          onClick={clearMatchFilters}
+                          className="inline-flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                        >
+                          <RotateCcw className="h-4 w-4" aria-hidden />
+                          Limpar
+                        </button>
+                      ) : null}
+                    </div>
+
+                    {totalMatches > 0 ? (
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        {hasActiveMatchFilters
+                          ? `Exibindo ${filteredCount} de ${totalMatches} compatíveis`
+                          : `${totalMatches} compatíveis encontrados`}
+                        {quantSortDir !== 'none'
+                          ? ` · ${
+                              quantSortDir === 'desc'
+                                ? 'maior → menor quantidade'
+                                : 'menor → maior quantidade'
+                            }`
+                          : ''}
+                      </p>
+                    ) : null}
+
                     {totalMatches === 0 ? (
                       <CadastroListEmpty
                         icon={FileSearch}
                         title="Nenhum compatível encontrado"
                         hint="Tente outros termos do edital para este serviço"
+                      />
+                    ) : filteredCount === 0 ? (
+                      <CadastroListEmpty
+                        icon={Filter}
+                        title="Nenhum resultado com estes filtros"
+                        hint="Ajuste a unidade ou as palavras-chave, ou limpe os filtros"
                       />
                     ) : (
                       <>
@@ -1043,7 +1214,22 @@ export function BancoCatsPanel() {
                                   UND
                                 </th>
                                 <th scope="col" className={cadastroListClasses.thCenter}>
-                                  QUANT.
+                                  <button
+                                    type="button"
+                                    onClick={cycleQuantSort}
+                                    title={quantSortLabel}
+                                    aria-label={quantSortLabel}
+                                    className="inline-flex items-center justify-center gap-1 rounded-md px-1 py-0.5 font-semibold uppercase tracking-wide text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-gray-100"
+                                  >
+                                    QUANT.
+                                    {quantSortDir === 'desc' ? (
+                                      <ArrowDown className="h-3.5 w-3.5 text-red-600 dark:text-red-400" aria-hidden />
+                                    ) : quantSortDir === 'asc' ? (
+                                      <ArrowUp className="h-3.5 w-3.5 text-red-600 dark:text-red-400" aria-hidden />
+                                    ) : (
+                                      <ArrowUpDown className="h-3.5 w-3.5 opacity-60" aria-hidden />
+                                    )}
+                                  </button>
                                 </th>
                               </tr>
                             </thead>
@@ -1127,8 +1313,10 @@ export function BancoCatsPanel() {
                               ) : (
                                 <>
                                   <ChevronDown className="h-4 w-4" aria-hidden />
-                                  Ver todos os {totalMatches} compatíveis
-                                  {hiddenCount > 0 ? ` (+${hiddenCount})` : ''}
+                                  Ver todos os {filteredCount} compatíveis
+                                  {hiddenCount > 0
+                                    ? ` (${hiddenCount} ocultos na prévia)`
+                                    : ''}
                                 </>
                               )}
                             </button>

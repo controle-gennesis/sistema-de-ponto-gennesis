@@ -1325,15 +1325,12 @@ export function ControleGeralGastosOperacionaisPanel({
     if (filters.contracts.length) {
       lines.push(`Contratos: ${filters.contracts.join(', ')}`);
     }
-    if (excludedContractLabels.length) {
-      lines.push(`Ocultos da visualização: ${excludedContractLabels.join(', ')}`);
-    }
     if (hasActiveFilters) {
       lines.push(`Total filtrado: ${formatCurrency(totalGastos)}`);
     }
 
     return lines;
-  }, [filters, hasActiveFilters, totalGastos, excludedContractLabels, readOnlyPoloColumn]);
+  }, [filters, hasActiveFilters, totalGastos, readOnlyPoloColumn]);
 
   const canExportPdf =
     visibleRows.length > 0 || (overviewForExport?.contracts.length ?? 0) > 0;

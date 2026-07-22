@@ -1772,7 +1772,7 @@ export default function LicitacoesPage() {
                                   Restaurando…
                                 </span>
                               ) : (
-                                'Restaurar para Processos'
+                                'Reabrir análise'
                               )}
                             </button>
                           </>

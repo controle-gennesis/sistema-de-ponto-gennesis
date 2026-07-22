@@ -172,7 +172,22 @@ export function normalizeContractOrderKey(name: string): string {
 
 /** Variações da planilha que devem ser exibidas sob um único nome canônico. */
 const GASTOS_OPERACIONAIS_CONTRACT_ALIASES: Readonly<Record<string, string>> = {
-  [normalizeContractOrderKey('TJGO MANUTENÇÃO LOTE 02')]: 'TJ MANUTENÇÃO RIO VERDE - CORRETIVA'
+  [normalizeContractOrderKey('TJGO MANUTENÇÃO LOTE 02')]: 'TJ MANUTENÇÃO RIO VERDE - CORRETIVA',
+  // Cadastro do contrato usa o nome sem o sufixo de localidade; unifica com o catálogo.
+  [normalizeContractOrderKey('SENAC')]: 'SENAC - DF',
+  [normalizeContractOrderKey('MINISTÉRIO DA CULTURA')]: 'MINISTÉRIO DA CULTURA - DF',
+  [normalizeContractOrderKey('FHE')]: 'FHE - DF',
+  // Cadastro usa "LOTE 01/04/05"; o catálogo/planilha usa o nome base / "R5 - LOTE 4/5".
+  [normalizeContractOrderKey('TJGO RETROFIT - LOTE 01')]: 'TJGO RETROFIT',
+  [normalizeContractOrderKey('TJGO RETROFIT - LOTE 1')]: 'TJGO RETROFIT',
+  [normalizeContractOrderKey('TJGO RETROFIT - LOTE 04')]: 'TJGO RETROFIT R5 - LOTE 4',
+  [normalizeContractOrderKey('TJGO RETROFIT - LOTE 05')]: 'TJGO RETROFIT R5 - LOTE 5',
+  [normalizeContractOrderKey('UFGO')]: 'UFG',
+  // TOTVS usa "SES GDF - LOTE X"; o catálogo do Controle Geral usa "SES - LOTE X".
+  [normalizeContractOrderKey('SES GDF - LOTE 10')]: 'SES - LOTE 10',
+  [normalizeContractOrderKey('SES GDF - LOTE 12')]: 'SES - LOTE 12',
+  [normalizeContractOrderKey('SES GDF - LOTE 14')]: 'SES - LOTE 14',
+  [normalizeContractOrderKey('SES GDF - LOTE 17')]: 'SES - LOTE 17'
 };
 
 /** Unifica aliases da planilha no nome exibido no painel de gastos operacionais. */
@@ -306,6 +321,25 @@ export const GASTOS_OPERACIONAIS_CONTRACT_ORDER = [
   'UFRN - IMPERMEABILIZAÇÃO',
   'UFRN - PINTURA'
 ] as const;
+
+const catalogDisplayNameByKey = new Map<string, string>(
+  GASTOS_OPERACIONAIS_CONTRACT_ORDER.map((name) => [normalizeContractOrderKey(name), name])
+);
+
+/**
+ * Nome canônico para exibição/agregação: aplica aliases e, quando a chave
+ * normalizada existe no catálogo, usa o nome oficial do catálogo.
+ */
+export function resolveCanonicalGastosContractName(contract: string): string {
+  const aliased = normalizeGastosOperacionaisContractName(contract);
+  if (!aliased) return aliased;
+  return catalogDisplayNameByKey.get(normalizeContractOrderKey(aliased)) ?? aliased;
+}
+
+/** Chave estável para somar o mesmo centro de custo apesar de acentos/hífens. */
+export function getGastosContractAggregateKey(contract: string): string {
+  return normalizeContractOrderKey(resolveCanonicalGastosContractName(contract));
+}
 
 const orderIndexByKey = new Map<string, number>(
   GASTOS_OPERACIONAIS_CONTRACT_ORDER.map((name, index) => [normalizeContractOrderKey(name), index])

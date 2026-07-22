@@ -810,7 +810,8 @@ export class LicitacaoService {
       return serializeLicitacao(row);
     }
 
-    const nextIds = [...claimedIds, userId];
+    // O último a assumir a tarefa deve vir em primeiro na lista.
+    const nextIds = [userId, ...claimedIds];
     let shortName = shortPersonName(userName);
     if (!userName?.trim()) {
       const user = await getPrisma().user.findUnique({
@@ -824,7 +825,7 @@ export class LicitacaoService {
     const existingNames = claimedIds.length
       ? await resolveResponsaveisShortNames(claimedIds)
       : [];
-    const nextNames = [...existingNames, shortName];
+    const nextNames = [shortName, ...existingNames];
 
     const row = await licitacaoStoreUpdate(id, {
       analiseJson: mergeAnaliseJson(current.analiseJson, {
