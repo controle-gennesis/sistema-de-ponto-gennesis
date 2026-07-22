@@ -11,6 +11,7 @@ import {
   FileCheck,
   FileSpreadsheet,
   Filter,
+  List,
   Plus,
   RotateCcw,
   Search,
@@ -36,7 +37,6 @@ import {
 } from '@/components/ui/RowActionMenu';
 import { getListTableRowClassName, ListRowNavigableLabel } from '@/components/ui/listTableUi';
 import { useRowActionMenu } from '@/hooks/useRowActionMenu';
-import { useCostCenters } from '@/hooks/useCostCenters';
 import { Modal } from '@/components/ui/Modal';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { TableCheckbox } from '@/components/ui/Checkbox';
@@ -167,8 +167,16 @@ const ART_STAT_CARDS: {
   iconBg: string;
   iconColor: string;
   Icon: LucideIcon;
-  countKey: 'pagos' | 'aVencer' | 'vencidas';
+  countKey: 'total' | 'pagos' | 'aVencer' | 'vencidas';
 }[] = [
+  {
+    filter: 'all',
+    label: 'Total',
+    iconBg: 'bg-blue-100 dark:bg-blue-900/30',
+    iconColor: 'text-blue-600 dark:text-blue-400',
+    Icon: List,
+    countKey: 'total',
+  },
   {
     filter: 'pagos',
     label: 'Pagos',
@@ -305,41 +313,43 @@ function formatHoje(vencDoBoleto?: string | null, status?: string): string {
 function ControlePagamentoArtContent() {
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { costCenters, isLoading: loadingCostCenters } = useCostCenters();
 
-  const contratanteOptions = useMemo(
-    () =>
-      labeledToSelectOptions(
-        costCenters.map((cc) => {
-          const name = (cc.label || cc.name || String(cc.code || '')).trim();
-          return { value: name, label: name };
-        }).filter((o) => o.value)
-      ),
-    [costCenters]
-  );
-
-  // Lista de profissionais para o filtro (distintos, sem depender dos filtros ativos).
-  const { data: profissionaisData } = useQuery({
-    queryKey: ['controle-pagamentos-art-profissionais'],
+  // Opções dos filtros Contratante/Profissional: valores distintos da própria coluna da tabela.
+  const { data: filterOptionsData, isLoading: loadingFilterOptions } = useQuery({
+    queryKey: ['controle-pagamentos-art', 'filter-options'],
     queryFn: async () => {
       const res = await api.get('/controle-pagamentos-art');
       const list = (res.data?.data || []) as ControlePagamentoArt[];
-      const set = new Set<string>();
+      const contratantes = new Set<string>();
+      const profissionais = new Set<string>();
       list.forEach((r) => {
+        const c = (r.contratante || '').trim();
         const p = (r.profissional || '').trim();
-        if (p) set.add(p);
+        if (c) contratantes.add(c);
+        if (p) profissionais.add(p);
       });
-      return Array.from(set).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+      return {
+        contratantes: Array.from(contratantes).sort((a, b) => a.localeCompare(b, 'pt-BR')),
+        profissionais: Array.from(profissionais).sort((a, b) => a.localeCompare(b, 'pt-BR')),
+      };
     },
     staleTime: 5 * 60 * 1000,
   });
 
+  const contratanteOptions = useMemo(
+    () =>
+      labeledToSelectOptions(
+        (filterOptionsData?.contratantes || []).map((c) => ({ value: c, label: c }))
+      ),
+    [filterOptionsData]
+  );
+
   const profissionalOptions = useMemo(
     () =>
       labeledToSelectOptions(
-        (profissionaisData || []).map((p) => ({ value: p, label: p }))
+        (filterOptionsData?.profissionais || []).map((p) => ({ value: p, label: p }))
       ),
-    [profissionaisData]
+    [filterOptionsData]
   );
 
   const [searchTerm, setSearchTerm] = useState('');
@@ -425,6 +435,7 @@ function ControlePagamentoArtContent() {
       return {
         rows: (res.data?.data || []) as ControlePagamentoArt[],
         meta: {
+          total: Number(res.data?.meta?.total || 0),
           pagos: Number(res.data?.meta?.pagos || 0),
           aVencer: Number(res.data?.meta?.aVencer || 0),
           vencidas: Number(res.data?.meta?.vencidas || 0),
@@ -434,7 +445,7 @@ function ControlePagamentoArtContent() {
   });
 
   const rows = data?.rows || [];
-  const stats = data?.meta || { pagos: 0, aVencer: 0, vencidas: 0 };
+  const stats = data?.meta || { total: 0, pagos: 0, aVencer: 0, vencidas: 0 };
   const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
   const pageSafe = Math.min(currentPage, totalPages);
   const pageRows = rows.slice((pageSafe - 1) * PAGE_SIZE, pageSafe * PAGE_SIZE);
@@ -634,7 +645,7 @@ function ControlePagamentoArtContent() {
         </p>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 sm:gap-6">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 sm:gap-6">
         {ART_STAT_CARDS.map((card) => (
           <FilterStatCard
             key={card.filter}
@@ -646,7 +657,12 @@ function ControlePagamentoArtContent() {
             isActive={cardFilter === card.filter}
             loading={isLoading}
             onClick={() => {
-              setCardFilter((prev) => (prev === card.filter ? 'all' : card.filter));
+              // Total (all) sempre mostra todos; os demais cards alternam o filtro.
+              if (card.filter === 'all') {
+                setCardFilter('all');
+              } else {
+                setCardFilter((prev) => (prev === card.filter ? 'all' : card.filter));
+              }
               setStatusFilter('all');
               setCurrentPage(1);
             }}
@@ -1001,7 +1017,7 @@ function ControlePagamentoArtContent() {
                   }}
                   options={contratanteOptions}
                   placeholder={
-                    loadingCostCenters ? 'Carregando centros de custo...' : 'Selecionar...'
+                    loadingFilterOptions ? 'Carregando...' : 'Selecionar...'
                   }
                   allowEmpty
                   emptyOptionLabel="Todos"
@@ -1018,7 +1034,9 @@ function ControlePagamentoArtContent() {
                     setCurrentPage(1);
                   }}
                   options={profissionalOptions}
-                  placeholder="Selecionar..."
+                  placeholder={
+                    loadingFilterOptions ? 'Carregando...' : 'Selecionar...'
+                  }
                   allowEmpty
                   emptyOptionLabel="Todos"
                 />
