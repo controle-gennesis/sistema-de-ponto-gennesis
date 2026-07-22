@@ -3274,3 +3274,45 @@ model ControlePagamentoArt {
   @@index([status])
   @@map("controle_pagamentos_art")
 }
+
+/// Receitas dos consórcios BSB/HUB (página Financeiro → Receitas).
+model ReceitaFinanceira {
+  id                 String   @id @default(cuid())
+  consorcio          String // bsb | hub
+  mes                String
+  nf                 String
+  faturamento        Decimal? @db.Decimal(15, 2)
+  recebimentoLiquido Decimal? @db.Decimal(15, 2)
+  status             String
+  statusData         String?
+  sortOrder          Int      @default(0)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([consorcio])
+  @@index([consorcio, mes])
+  @@index([status])
+  @@map("receitas_financeiras")
+}
+
+/// Repasses Gennesis por consórcio (seção BSB/HUB na planilha).
+model RepasseFinanceiro {
+  id            String   @id @default(cuid())
+  consorcio     String // bsb | hub
+  fornecedor    String
+  parcela       String
+  dataEmissao   String?
+  boleto        String?
+  data          String?
+  valorOriginal Decimal  @db.Decimal(15, 2)
+  oc            String?
+  valorFinal    Decimal  @db.Decimal(15, 2)
+  pagamento     String?
+  sortOrder     Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([consorcio])
+  @@index([fornecedor])
+  @@map("repasses_financeiros")
+}

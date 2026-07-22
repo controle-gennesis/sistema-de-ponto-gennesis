@@ -629,6 +629,8 @@ export function useRoutePermission(route: string) {
       isAdministrator || isDepartmentJuridico || can(pk('/ponto/juridico')),
     '/ponto/financeiro/controle-financeiro':
       isAdministrator || isDepartmentFinanceiro || can(pk('/ponto/financeiro/controle-financeiro')),
+    '/ponto/financeiro/receitas':
+      isAdministrator || isDepartmentFinanceiro || can(pk('/ponto/financeiro/receitas')),
     '/ponto/financeiro/controle-nfs':
       isAdministrator ||
       isDepartmentFinanceiro ||

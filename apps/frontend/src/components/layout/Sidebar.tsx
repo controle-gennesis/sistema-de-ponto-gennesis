@@ -51,6 +51,7 @@ import {
   MessagesSquare,
   FileCheck,
   DollarSign,
+  CircleDollarSign,
   Package,
   PackageCheck,
   PackageX,
@@ -748,6 +749,13 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
             icon: ClipboardList,
             description: 'Controle de Material/Serviço Aplicado por mês e ano',
             permission: isAdministrator || isDepartmentFinanceiro || can(pk('/ponto/financeiro/controle-financeiro'))
+          },
+          {
+            name: 'Receitas',
+            href: '/ponto/financeiro/receitas',
+            icon: CircleDollarSign,
+            description: 'Receitas e repasses dos consórcios BSB e HUB',
+            permission: isAdministrator || isDepartmentFinanceiro || can(pk('/ponto/financeiro/receitas'))
           },
           {
             name: 'Pagamento da Folha',
