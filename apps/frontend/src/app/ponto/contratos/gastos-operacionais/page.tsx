@@ -8,24 +8,10 @@ import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import api from '@/lib/api';
 import { ControleGeralGastosOperacionaisPanel } from '../controle-geral/ControleGeralGastosOperacionaisPanel';
-import type {
-  QueryGastosDetailRow,
-  QueryGastosNaturezaDetailRow
-} from '../controle-geral/buildQueryGastosRows';
-import { normalizeGastosOperacionaisContractName } from '../controle-geral/gastosOperacionaisContractOrder';
-import { resolveGastosPoloFromContractName } from '@/lib/extratoCaixaPolo';
-
-type GastosOperacionaisApi = {
-  success: boolean;
-  message?: string;
-  data: {
-    configured: boolean;
-    detailRows?: QueryGastosDetailRow[];
-    naturezaDetailRows?: QueryGastosNaturezaDetailRow[];
-    fetchedAt?: string;
-    message?: string;
-  };
-};
+import {
+  fetchGastosOperacionaisTotvs,
+  GASTOS_OPERACIONAIS_TOTVS_QUERY_KEY
+} from '../controle-geral/fetchGastosOperacionaisTotvs';
 
 export default function GastosOperacionaisPage() {
   const router = useRouter();
@@ -52,49 +38,14 @@ export default function GastosOperacionaisPage() {
     isFetching: fetchingGastos,
     refetch: refetchGastos
   } = useQuery({
-    queryKey: ['gastos-operacionais-module-totvs-v34-adiantamento-predial'],
-    queryFn: async () => {
-      const res = await api.get<GastosOperacionaisApi>('/contracts/gastos-operacionais', {
-        timeout: 180_000
-      });
-      const payload = res.data;
-
-      if (payload?.data?.configured === false) {
-        throw new Error(
-          payload.data.message ??
-            'Integração TOTVS RM não configurada. Defina TOTVS_RM_* no servidor.'
-        );
-      }
-
-      if (payload?.success === false) {
-        throw new Error(payload.message ?? 'Não foi possível carregar os gastos no TOTVS RM.');
-      }
-
-      const detailRows = (payload.data?.detailRows ?? []).map((row) => {
-        const contract = normalizeGastosOperacionaisContractName(row.contract);
-        const polo = resolveGastosPoloFromContractName(contract, row.polo);
-        return { ...row, contract, polo };
-      });
-
-      const naturezaDetailRows = (payload.data?.naturezaDetailRows ?? []).map((row) => ({
-        ...row,
-        contract: normalizeGastosOperacionaisContractName(row.contract)
-      }));
-
-      return {
-        gastosOperacionais: {
-          detailRows,
-          naturezaDetailRows,
-          fetchedAt: payload.data?.fetchedAt ?? new Date().toISOString()
-        }
-      };
-    },
+    queryKey: GASTOS_OPERACIONAIS_TOTVS_QUERY_KEY,
+    queryFn: fetchGastosOperacionaisTotvs,
     staleTime: 5 * 60 * 1000,
     retry: 1
   });
 
-  const gastosDetailRows = gastosData?.gastosOperacionais?.detailRows ?? [];
-  const gastosNaturezaDetailRows = gastosData?.gastosOperacionais?.naturezaDetailRows ?? [];
+  const gastosDetailRows = gastosData?.detailRows ?? [];
+  const gastosNaturezaDetailRows = gastosData?.naturezaDetailRows ?? [];
   const gastosErrorMessage = (() => {
     const err = gastosErrorObj as {
       response?: { data?: { message?: string } };

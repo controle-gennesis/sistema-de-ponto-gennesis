@@ -1,11 +1,12 @@
 import type { GastosOperacionaisRow } from './ControleGeralGastosOperacionaisPanel';
 import {
-  GASTOS_OPERACIONAIS_LOCALITIES,
+  getGastosContractAggregateKey,
   inferContractLocalityFromHints,
   isContractExcludedFromPresentation,
   listContractsForLocalities,
   normalizeContractOrderKey,
   normalizeGastosOperacionaisContractName,
+  resolveCanonicalGastosContractName,
   resolveVisibleLocalityItems,
   sortContractNamesByCustomOrder,
   sortContractsByCustomOrder,
@@ -421,11 +422,66 @@ function isHeaderContract(contract: string): boolean {
   return !key || key === 'contrato' || key.includes('mes de apuracao');
 }
 
+/**
+ * A QUERY BASE DE GASTOS (planilha) vale até 31/12/2024.
+ * A partir de 01/01/2025 a coluna Gastos usa a mesma fonte do módulo
+ * Gastos Operacionais (TOTVS RM).
+ */
+export const LEGACY_GASTOS_SHEET_LAST_YEAR = 2024;
+export const LEGACY_GASTOS_SHEET_LAST_MONTH = 12;
+export const TOTVS_GASTOS_FIRST_YEAR = 2025;
+export const TOTVS_GASTOS_FIRST_DATE_ISO = '2025-01-01';
+
+/** Linhas da planilha legado com apuração após 31/12/2024 são ignoradas. */
+export function isLegacyGastosSheetPeriod(month: number, year: number): boolean {
+  if (!Number.isFinite(year) || !Number.isFinite(month)) return false;
+  if (year < LEGACY_GASTOS_SHEET_LAST_YEAR) return true;
+  if (year > LEGACY_GASTOS_SHEET_LAST_YEAR) return false;
+  return month <= LEGACY_GASTOS_SHEET_LAST_MONTH;
+}
+
+/** Linhas TOTVS (Gastos Operacionais) entram na coluna Gastos a partir de 01/01/2025. */
+export function isTotvsGastosPeriod(
+  row: Pick<QueryGastosDetailRow, 'dateISO' | 'month' | 'year'>
+): boolean {
+  if (row.dateISO) {
+    return row.dateISO >= TOTVS_GASTOS_FIRST_DATE_ISO;
+  }
+  if (!Number.isFinite(row.year) || !Number.isFinite(row.month)) return false;
+  return !isLegacyGastosSheetPeriod(row.month, row.year);
+}
+
+/** Filtra linhas TOTVS para o período a partir de 01/01/2025. */
+export function filterTotvsGastosDetailRowsForControleGeral<
+  T extends Pick<QueryGastosDetailRow, 'dateISO' | 'month' | 'year'>
+>(rows: readonly T[]): T[] {
+  return rows.filter((row) => isTotvsGastosPeriod(row));
+}
+
+/** Une planilha legado (≤2024) com TOTVS (≥2025) na coluna Gastos. */
+export function mergeControleGeralGastosDetailRows(
+  legacySheetRows: readonly QueryGastosDetailRow[],
+  totvsRows: readonly QueryGastosDetailRow[]
+): QueryGastosDetailRow[] {
+  const totvsFrom2025 = filterTotvsGastosDetailRowsForControleGeral(totvsRows).map((row) => ({
+    ...row,
+    contract: resolveCanonicalGastosContractName(row.contract)
+  }));
+
+  return [
+    ...legacySheetRows.map((row) => ({
+      ...row,
+      contract: resolveCanonicalGastosContractName(row.contract)
+    })),
+    ...totvsFrom2025
+  ];
+}
+
 export function buildGastosDetailRowsFromSheetRows(rows: string[][]): QueryGastosDetailRow[] {
   const parsed: QueryGastosDetailRow[] = [];
 
   for (const row of rows) {
-    const contract = normalizeGastosOperacionaisContractName((row[2] ?? '').trim());
+    const contract = resolveCanonicalGastosContractName((row[2] ?? '').trim());
     if (!contract || isHeaderContract(contract) || isContractExcludedFromPresentation(contract)) {
       continue;
     }
@@ -435,6 +491,7 @@ export function buildGastosDetailRowsFromSheetRows(rows: string[][]): QueryGasto
     const total = parseSheetCurrency(row[3] ?? '');
     if (!Number.isFinite(month) || month < 1 || month > 12) continue;
     if (!Number.isFinite(year) || year < 1900 || year > 2100) continue;
+    if (!isLegacyGastosSheetPeriod(month, year)) continue;
     if (total === 0) continue;
 
     parsed.push({ month, year, contract, total });
@@ -546,11 +603,20 @@ export function filterGastosDetailRows(
 export function aggregateGastosDetailRows(detailRows: QueryGastosDetailRow[]): GastosOperacionaisRow[] {
   const aggregates = new Map<
     string,
-    { totalAcumulado: number; months: Set<string>; years: Set<number>; polo: string | null }
+    {
+      contract: string;
+      totalAcumulado: number;
+      months: Set<string>;
+      years: Set<number>;
+      polo: string | null;
+    }
   >();
 
   for (const row of detailRows) {
-    const current = aggregates.get(row.contract) ?? {
+    const contract = resolveCanonicalGastosContractName(row.contract);
+    const key = getGastosContractAggregateKey(contract);
+    const current = aggregates.get(key) ?? {
+      contract,
       totalAcumulado: 0,
       months: new Set<string>(),
       years: new Set<number>(),
@@ -562,15 +628,15 @@ export function aggregateGastosDetailRows(detailRows: QueryGastosDetailRow[]): G
     if (!current.polo && row.polo?.trim()) {
       current.polo = row.polo.trim();
     }
-    aggregates.set(row.contract, current);
+    aggregates.set(key, current);
   }
 
-  const result = Array.from(aggregates.entries())
-    .map(([contract, data]) => {
+  const result = Array.from(aggregates.values())
+    .map((data) => {
       const years = Array.from(data.years).sort((a, b) => a - b);
       return {
-        rowKey: contract,
-        contract,
+        rowKey: data.contract,
+        contract: data.contract,
         mesesApuracao: data.months.size,
         anoMin: years[0] ?? 0,
         anoMax: years[years.length - 1] ?? 0,

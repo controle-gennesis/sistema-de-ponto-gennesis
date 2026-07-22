@@ -27,6 +27,9 @@ export function buildGastosContractDetailLookup(
 
   for (const contract of contracts) {
     register(contract.name, contract.id);
+    // Também registra o nome canônico (com alias) para manter o link quando o
+    // cadastro usa uma variação do nome unificada no painel (ex.: SENAC → SENAC - DF).
+    register(normalizeGastosOperacionaisContractName(contract.name), contract.id);
     register(contract.costCenter?.name, contract.id);
     register(contract.costCenter?.code, contract.id);
   }

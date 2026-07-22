@@ -12,8 +12,16 @@ import { Loading } from '@/components/ui/Loading';
 import api from '@/lib/api';
 import { listTableRowClasses } from '@/components/ui/listTableUi';
 import { ControleGeralGastosOperacionaisPanel } from './ControleGeralGastosOperacionaisPanel';
-import { buildGastosDetailRowsFromSheetRows } from './buildQueryGastosRows';
+import {
+  buildGastosDetailRowsFromSheetRows,
+  filterTotvsGastosDetailRowsForControleGeral,
+  mergeControleGeralGastosDetailRows
+} from './buildQueryGastosRows';
 import { CONTROLE_GERAL_GASTOS_VISIBLE_LOCALITIES } from './gastosOperacionaisContractOrder';
+import {
+  fetchGastosOperacionaisTotvs,
+  GASTOS_OPERACIONAIS_TOTVS_QUERY_KEY
+} from './fetchGastosOperacionaisTotvs';
 
 const ITEMS_PER_PAGE = 20;
 
@@ -86,18 +94,31 @@ export default function ControleGeralContratosPage() {
     }
   });
 
+  /** Mesma query-key/processamento do módulo Gastos Operacionais (fonte TOTVS). */
   const {
-    data: gastosData,
-    isLoading: loadingGastos,
-    isError: gastosError,
-    error: gastosErrorObj,
-    refetch: refetchGastos,
-    isFetching: fetchingGastos
+    data: totvsGastosData,
+    isLoading: loadingTotvsGastos,
+    isError: totvsGastosError,
+    error: totvsGastosErrorObj,
+    isFetching: fetchingTotvsGastos,
+    refetch: refetchTotvsGastos
   } = useQuery({
-    queryKey: ['controle-geral-gastos-operacionais-v16-emissao-filter', dataRefreshNonce],
+    queryKey: GASTOS_OPERACIONAIS_TOTVS_QUERY_KEY,
+    queryFn: fetchGastosOperacionaisTotvs,
+    staleTime: 5 * 60 * 1000,
+    retry: 1
+  });
+
+  const {
+    data: legacySheetData,
+    isLoading: loadingLegacySheet,
+    isError: legacySheetError,
+    error: legacySheetErrorObj,
+    isFetching: fetchingLegacySheet
+  } = useQuery({
+    queryKey: ['controle-geral-gastos-legacy-sheet-v19', dataRefreshNonce],
     queryFn: async () => {
       const refreshParams = dataRefreshNonce > 0 ? { refresh: 1 } : {};
-
       const sheetRes = await api.get<{
         success: boolean;
         data?: { rows?: string[][]; fetchedAt?: string };
@@ -106,32 +127,84 @@ export default function ControleGeralContratosPage() {
         timeout: 120_000
       });
 
-      const detailRows = buildGastosDetailRowsFromSheetRows(sheetRes.data?.data?.rows ?? []);
-
       return {
-        gastosOperacionais: {
-          detailRows,
-          fetchedAt: sheetRes.data?.data?.fetchedAt ?? new Date().toISOString()
-        }
+        detailRows: buildGastosDetailRowsFromSheetRows(sheetRes.data?.data?.rows ?? []),
+        fetchedAt: sheetRes.data?.data?.fetchedAt ?? new Date().toISOString()
       };
     },
     staleTime: 5 * 60 * 1000,
     retry: 1
   });
 
-  const gastosDetailRows = gastosData?.gastosOperacionais?.detailRows ?? [];
-  const gastosFetchedAt = gastosData?.gastosOperacionais?.fetchedAt;
+  const gastosDetailRows = useMemo(
+    () =>
+      mergeControleGeralGastosDetailRows(
+        legacySheetData?.detailRows ?? [],
+        totvsGastosData?.detailRows ?? []
+      ),
+    [legacySheetData?.detailRows, totvsGastosData?.detailRows]
+  );
+
+  const gastosNaturezaDetailRows = useMemo(
+    () => filterTotvsGastosDetailRowsForControleGeral(totvsGastosData?.naturezaDetailRows ?? []),
+    [totvsGastosData?.naturezaDetailRows]
+  );
+
+  const loadingGastos = loadingLegacySheet || loadingTotvsGastos;
+  const fetchingGastos = fetchingLegacySheet || fetchingTotvsGastos;
+  /** Só bloqueia o painel se as duas fontes falharem; aviso parcial vai na descrição. */
+  const gastosError = Boolean(legacySheetError && totvsGastosError);
+  const gastosFetchedAt = totvsGastosData?.fetchedAt ?? legacySheetData?.fetchedAt;
   const gastosErrorMessage = (() => {
-    const err = gastosErrorObj as {
-      response?: { data?: { message?: string } };
-      message?: string;
-    } | null;
-    return (
-      err?.response?.data?.message ??
-      err?.message ??
-      'Não foi possível carregar os gastos da planilha.'
-    );
+    if (legacySheetError) {
+      const err = legacySheetErrorObj as {
+        response?: { data?: { message?: string } };
+        message?: string;
+      } | null;
+      return (
+        err?.response?.data?.message ??
+        err?.message ??
+        'Não foi possível carregar a planilha de gastos (até 2024).'
+      );
+    }
+    if (totvsGastosError) {
+      const err = totvsGastosErrorObj as {
+        response?: { data?: { message?: string } };
+        message?: string;
+      } | null;
+      return (
+        err?.response?.data?.message ??
+        err?.message ??
+        'Não foi possível carregar os gastos TOTVS (a partir de 2025).'
+      );
+    }
+    return 'Não foi possível carregar os gastos.';
   })();
+  const gastosTotvsWarning = totvsGastosError
+    ? (() => {
+        const err = totvsGastosErrorObj as {
+          response?: { data?: { message?: string } };
+          message?: string;
+        } | null;
+        return (
+          err?.response?.data?.message ??
+          err?.message ??
+          'Falha ao carregar TOTVS — gastos a partir de 2025 podem ficar zerados.'
+        );
+      })()
+    : legacySheetError
+      ? (() => {
+          const err = legacySheetErrorObj as {
+            response?: { data?: { message?: string } };
+            message?: string;
+          } | null;
+          return (
+            err?.response?.data?.message ??
+            err?.message ??
+            'Falha ao carregar a planilha — gastos até 2024 podem ficar zerados.'
+          );
+        })()
+      : undefined;
 
   const rawList = (overviewData?.data ?? []) as ContractOverview[];
   const filterYear = overviewData?.filterYear ?? null;
@@ -214,16 +287,25 @@ export default function ControleGeralContratosPage() {
 
           <ControleGeralGastosOperacionaisPanel
             detailRows={gastosDetailRows}
+            naturezaDetailRows={gastosNaturezaDetailRows}
             isLoading={loadingGastos || fetchingGastos}
             fetchedAt={gastosFetchedAt}
             isError={gastosError}
             errorMessage={gastosErrorMessage}
-            onRetry={() => setDataRefreshNonce((n) => n + 1)}
+            onRetry={() => {
+              setDataRefreshNonce((n) => n + 1);
+              void refetchTotvsGastos();
+            }}
             dataRefreshNonce={dataRefreshNonce}
             visibleLocalities={CONTROLE_GERAL_GASTOS_VISIBLE_LOCALITIES}
             enableRowExclusion
             hideLocalityColumn
             panelTitle="Controle de Contratos"
+            panelDescription={
+              gastosTotvsWarning
+                ? `Gastos: planilha até 2024 · TOTVS a partir de 2025 (${gastosTotvsWarning})`
+                : 'Gastos: QUERY BASE DE GASTOS até 31/12/2024 · mesma fonte do módulo Gastos Operacionais (TOTVS RM) a partir de 01/01/2025'
+            }
             totalColumnLabel="Gastos"
             showFaturamentoColumn
             showPdfExport

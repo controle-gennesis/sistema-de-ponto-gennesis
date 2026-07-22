@@ -306,8 +306,8 @@ export function matchByKeywords<T extends { searchText: string }>(
 ): KeywordMatchResult<T>[] {
   if (keywords.length === 0) return [];
 
-  const minScore = options?.minScore ?? (keywords.length >= 4 ? 2 : 1);
-  /** `null` / omitido = sem corte; número positivo limita o retorno. */
+  const minScore = options?.minScore ?? 1;
+  /** `null` = sem corte. Se `limit` for omitido, usa 80 (legado). Número positivo limita. */
   const limit =
     options && 'limit' in options
       ? options.limit
