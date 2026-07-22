@@ -553,7 +553,8 @@ export default function ReceitasPage() {
   const pageRepasses = repassesFiltrados.slice(startItem - 1, endItem || 0);
   const pageResumo = resumoFiltrado.slice(startItem - 1, endItem || 0);
 
-  const actionRows = tipo === 'receitas' ? pageReceitas : pageRepasses;
+  const actionRows: Array<ReceitaRow | RepasseRow> =
+    tipo === 'receitas' ? pageReceitas : pageRepasses;
   const {
     rowActionMenu,
     rowForActionMenu,
