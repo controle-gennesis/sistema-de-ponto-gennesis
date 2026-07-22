@@ -10,6 +10,11 @@ import {
   notifyFuelRequesterWaitingManager,
   notifyFuelRequesterWaitingSupplies,
 } from '../lib/fuelRefuelChatNotify';
+import {
+  buildFuelFlowStartMessage,
+  formatFuelAttendanceHoursShort,
+  formatFuelOutsideHoursWarning,
+} from '../lib/fuelAttendanceHours';
 import { getPhotoAttachmentFromMessage, hasStoredPhoto } from '../lib/flowMedia';
 import { fuelRefuelRequestService } from './FuelRefuelRequestService';
 
@@ -208,6 +213,9 @@ export const GENNECY_FUEL_MENU_MESSAGE = [
   '3 — Outra pergunta',
   '4 — Informar abastecimento (após aprovação do Suprimentos)',
   '',
+  '⏰ Atendimento das solicitações: 7h–8h30 e 13h–14h30.',
+  'Após 14h30 → dia seguinte. Urgências: contate o setor responsável.',
+  '',
   'A qualquer momento, digite «cancelar» para sair de um fluxo.',
 ].join('\n');
 
@@ -264,7 +272,9 @@ export class GennecyFuelFlowService {
       await upsertSession(params.chatId, params.userId, 'ASK_REFUEL_DATE', {});
       return {
         handled: true,
-        reply: `Vamos solicitar o abastecimento! ⛽\n\nQual a data para abastecer? (ex.: ${formatBrDate(todayIso())})`,
+        reply: buildFuelFlowStartMessage(
+          `Qual a data para abastecer? (ex.: ${formatBrDate(todayIso())})`
+        ),
       };
     }
 
@@ -481,11 +491,15 @@ export class GennecyFuelFlowService {
           await notifyFuelRequesterWaitingSupplies(created.sourceChatId, created.displayNumber);
         }
 
+        const outsideWarn = formatFuelOutsideHoursWarning();
         return {
           handled: true,
           reply: [
             `✅ Solicitação #${created.displayNumber} registrada com sucesso!`,
             'Você receberá atualizações aqui conforme a solicitação avançar.',
+            '',
+            formatFuelAttendanceHoursShort(),
+            ...(outsideWarn ? ['', outsideWarn] : []),
             '',
             'Precisa de mais alguma coisa?',
           ].join('\n'),

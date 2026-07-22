@@ -7,6 +7,10 @@ import {
   formatBrDateTime,
   getFuelSuppliesSlaHours,
 } from './fuelSuppliesSla';
+import {
+  formatFuelAttendanceHoursShort,
+  formatFuelOutsideHoursWarning,
+} from './fuelAttendanceHours';
 
 function stripMarkdown(text: string): string {
   return text.replace(/\*\*/g, '');
@@ -65,6 +69,7 @@ export async function notifyFuelRequesterWaitingManager(
   sourceWhatsAppPhone?: string | null,
 ) {
   const slaHours = await getFuelSuppliesSlaHours();
+  const outsideWarn = formatFuelOutsideHoursWarning();
   await notifyFuelRequester(
     sourceChatId,
     sourceWhatsAppPhone,
@@ -73,6 +78,9 @@ export async function notifyFuelRequesterWaitingManager(
       'Aguardando aprovação do gestor.',
       '',
       `Após o gestor, o Suprimentos terá até ${slaHours}h para atender.`,
+      formatFuelAttendanceHoursShort(),
+      ...(outsideWarn ? ['', outsideWarn] : []),
+      '',
       'Você receberá uma mensagem quando for encaminhada ao Suprimentos.',
     ].join('\n'),
   );
@@ -85,6 +93,7 @@ export async function notifyFuelRequesterWaitingSupplies(
 ) {
   const slaHours = await getFuelSuppliesSlaHours();
   const slaLine = formatFuelSuppliesSlaMessage(slaHours);
+  const outsideWarn = formatFuelOutsideHoursWarning();
   await notifyFuelRequester(
     sourceChatId,
     sourceWhatsAppPhone,
@@ -93,6 +102,8 @@ export async function notifyFuelRequesterWaitingSupplies(
       'Aguardando aprovação do Suprimentos.',
       '',
       slaLine,
+      formatFuelAttendanceHoursShort(),
+      ...(outsideWarn ? ['', outsideWarn] : []),
       '',
       'Você receberá uma mensagem aqui quando for liberada para abastecer.',
     ].join('\n'),

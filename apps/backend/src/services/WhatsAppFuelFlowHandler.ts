@@ -13,6 +13,11 @@ import {
 } from '../lib/fuelAdministrativeRegions';
 import { getFuelSatelliteCityByCode } from '../constants/fuelSatelliteCities';
 import { buildFuelSubmissionSlaLine } from '../lib/fuelRefuelChatNotify';
+import {
+  buildFuelFlowStartMessage,
+  formatFuelAttendanceHoursShort,
+  formatFuelOutsideHoursWarning,
+} from '../lib/fuelAttendanceHours';
 import { hasStoredPhoto, isWhatsAppSavedMediaReady } from '../lib/flowMedia';
 import {
   findActiveVehiclesByPlateSuffix,
@@ -329,7 +334,9 @@ export async function processWhatsAppFuelFlow(params: {
   if (startingFromMenu) {
     return {
       sendAction: waButtons(
-        `Vamos solicitar o abastecimento!\n\nQual a data para abastecer? (DD/MM/AAAA)\nEx.: ${formatBrDate(todayIso())}`,
+        buildFuelFlowStartMessage(
+          `Qual a data para abastecer? (DD/MM/AAAA)\nEx.: ${formatBrDate(todayIso())}`
+        )
       ),
       newStatus: 'FUEL_ASK_REFUEL_DATE',
       newPayload,
@@ -660,6 +667,7 @@ export async function processWhatsAppFuelFlow(params: {
         created.status === FuelRefuelRequestStatus.PENDING_MANAGER
           ? 'Aguardando aprovação do gestor. Em seguida seguirá ao Suprimentos.'
           : 'Aguardando aprovação do Suprimentos.';
+      const outsideWarn = formatFuelOutsideHoursWarning();
 
       return {
         sendAction: {
@@ -669,6 +677,8 @@ export async function processWhatsAppFuelFlow(params: {
             statusLine,
             '',
             slaLine,
+            formatFuelAttendanceHoursShort(),
+            ...(outsideWarn ? ['', outsideWarn] : []),
             '',
             'Você receberá uma mensagem aqui quando for liberada para abastecer.',
           ].join('\n'),
@@ -688,7 +698,9 @@ export async function processWhatsAppFuelFlow(params: {
       if (isWhatsAppFuelMenuSelection(content)) {
         return {
           sendAction: waButtons(
-            `Vamos solicitar o abastecimento!\n\nQual a data para abastecer? (DD/MM/AAAA)\nEx.: ${formatBrDate(todayIso())}`,
+            buildFuelFlowStartMessage(
+              `Qual a data para abastecer? (DD/MM/AAAA)\nEx.: ${formatBrDate(todayIso())}`,
+            ),
           ),
           newStatus: 'FUEL_ASK_REFUEL_DATE',
           newPayload: { flow: 'FUEL' },

@@ -776,11 +776,13 @@ export class WhatsAppBotService {
 
     const menu = (): SendAction => ({
       type: 'list',
-      body: pick([
-        'Olá! 😊 Eu sou a Gennecy, assistente virtual da Gennesis.\nEstou por aqui pra te ajudar — como posso te atender hoje?',
-        'Oi! Tudo bem? 😊\nSou a Gennecy, da Gennesis. Me conta como posso te ajudar!',
-        'Olá! Seja bem-vindo(a) à Gennesis.\nEu sou a Gennecy, assistente virtual, e estou à disposição para ajudar no que precisar.'
-      ]),
+      body:
+        pick([
+          'Olá! 😊 Eu sou a Gennecy, assistente virtual da Gennesis.\nEstou por aqui pra te ajudar — como posso te atender hoje?',
+          'Oi! Tudo bem? 😊\nSou a Gennecy, da Gennesis. Me conta como posso te ajudar!',
+          'Olá! Seja bem-vindo(a) à Gennesis.\nEu sou a Gennecy, assistente virtual, e estou à disposição para ajudar no que precisar.',
+        ]) +
+        '\n\n⏰ Combustível: atendimento 7h–8h30 e 13h–14h30. Após 14h30 → dia seguinte. Urgências: contate o setor.',
       buttonText: 'Escolher opção',
       sections: [
         {
