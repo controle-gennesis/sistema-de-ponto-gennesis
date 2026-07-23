@@ -1,7 +1,9 @@
-// Carregar variáveis de ambiente PRIMEIRO, antes de qualquer importação
-import dotenv from 'dotenv';
+// Carregar variáveis de ambiente PRIMEIRO (antes de qualquer outro import do app).
+import './loadEnv';
 import path from 'path';
+import dotenv from 'dotenv';
 
+// Mantém path explícito (compatível com execuções que não passam por loadEnv).
 dotenv.config({ path: path.join(__dirname, '../.env') });
 
 // Log de configuração das variáveis de ambiente

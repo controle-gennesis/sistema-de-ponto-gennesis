@@ -1,4 +1,9 @@
 import { PrismaClient, Prisma } from '@prisma/client';
+import dotenv from 'dotenv';
+import path from 'path';
+
+// Garante .env antes de montar o client (imports do index são hoisted e rodam antes do dotenv.config).
+dotenv.config({ path: path.join(__dirname, '../.env') });
 
 /** Default seguro sob carga (ex.: 30 logins simultâneos). Override: PRISMA_CONNECTION_LIMIT */
 const DEFAULT_CONNECTION_LIMIT = 12;
@@ -43,10 +48,16 @@ const prismaLogLevels: Prisma.LogLevel[] = process.env.PRISMA_LOG_QUERIES === 't
   : ['error', 'warn'];
 
 function buildPrismaClient(): PrismaClient {
+  const url = databaseUrl || process.env.DATABASE_URL;
+  if (!url) {
+    throw new Error(
+      'DATABASE_URL não configurada. Verifique o arquivo apps/backend/.env e reinicie o backend.'
+    );
+  }
   return new PrismaClient({
     datasources: {
       db: {
-        url: databaseUrl || process.env.DATABASE_URL,
+        url,
       },
     },
     log: prismaLogLevels,

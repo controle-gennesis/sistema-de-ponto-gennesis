@@ -1569,20 +1569,6 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
           {/* Rodapé: atalhos, divisor e perfil */}
           <div className="flex-shrink-0 relative z-20 overflow-visible px-2 pb-4 flex flex-col items-center">
             <div className="flex flex-col items-center gap-2">
-              <SidebarRailTooltip label="Agenda">
-                <Link
-                  href="/ponto/agenda"
-                  prefetch={navLinkPrefetch}
-                  aria-label="Agenda"
-                  className={`w-10 h-10 rounded-xl transition-all duration-200 flex items-center justify-center ${
-                    isFooterShortcutActive('/ponto/agenda')
-                      ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-500'
-                      : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
-                  }`}
-                >
-                  <CalendarRange className="w-5 h-5" />
-                </Link>
-              </SidebarRailTooltip>
               <SidebarRailTooltip label="Chat">
                 <Link
                   href="/ponto/conversas"
@@ -1612,18 +1598,18 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
                   <SquareKanban className="w-5 h-5" />
                 </Link>
               </SidebarRailTooltip>
-              <SidebarRailTooltip label="Drive">
+              <SidebarRailTooltip label="Agenda">
                 <Link
-                  href="/ponto/drive"
+                  href="/ponto/agenda"
                   prefetch={navLinkPrefetch}
-                  aria-label="Drive"
+                  aria-label="Agenda"
                   className={`w-10 h-10 rounded-xl transition-all duration-200 flex items-center justify-center ${
-                    isFooterShortcutActive('/ponto/drive')
+                    isFooterShortcutActive('/ponto/agenda')
                       ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-500'
                       : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
                   }`}
                 >
-                  <HardDrive className="w-5 h-5" />
+                  <CalendarRange className="w-5 h-5" />
                 </Link>
               </SidebarRailTooltip>
               <SidebarRailTooltip label="Flow">
@@ -1638,6 +1624,20 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
                   }`}
                 >
                   <Workflow className="w-5 h-5" />
+                </Link>
+              </SidebarRailTooltip>
+              <SidebarRailTooltip label="Drive">
+                <Link
+                  href="/ponto/drive"
+                  prefetch={navLinkPrefetch}
+                  aria-label="Drive"
+                  className={`w-10 h-10 rounded-xl transition-all duration-200 flex items-center justify-center ${
+                    isFooterShortcutActive('/ponto/drive')
+                      ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-500'
+                      : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
+                  }`}
+                >
+                  <HardDrive className="w-5 h-5" />
                 </Link>
               </SidebarRailTooltip>
             </div>
