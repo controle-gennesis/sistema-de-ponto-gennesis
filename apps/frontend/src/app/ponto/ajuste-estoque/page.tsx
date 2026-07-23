@@ -28,6 +28,8 @@ import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import { ConstructionMaterialSearchDropdown } from '@/components/suprimentos/ConstructionMaterialSearchDropdown';
 import type { ConstructionMaterialListItem } from '@/lib/fetchAllConstructionMaterials';
 import toast from 'react-hot-toast';
+import { usePermissions } from '@/hooks/usePermissions';
+import { resolveLockedUnbCostCenterId } from '@/lib/unbBranding';
 
 interface Material {
   id: string;
@@ -192,9 +194,9 @@ function AdjustmentQuantityInput({
   );
 }
 
-const emptyForm = (): MovementFormData => ({
+const emptyForm = (lockedCostCenterId = ''): MovementFormData => ({
   materialId: '',
-  costCenterId: '',
+  costCenterId: lockedCostCenterId,
   type: '',
   quantity: '',
   notes: ''
@@ -203,6 +205,7 @@ const emptyForm = (): MovementFormData => ({
 export default function AjusteEstoquePage() {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const { isUnbUser, unbCostCenterIds } = usePermissions();
   const [isAdjustmentModalOpen, setIsAdjustmentModalOpen] = useState(false);
 
   const [formData, setFormData] = useState<MovementFormData>(emptyForm());
@@ -240,6 +243,22 @@ export default function AjusteEstoquePage() {
     },
   });
 
+  const costCenters = Array.isArray(costCentersData?.data)
+    ? costCentersData.data
+    : Array.isArray(costCentersData)
+      ? costCentersData
+      : [];
+
+  const lockedUnbCostCenterId = useMemo(() => {
+    if (!isUnbUser) return null;
+    return resolveLockedUnbCostCenterId(costCenters, unbCostCenterIds);
+  }, [isUnbUser, costCenters, unbCostCenterIds]);
+
+  useEffect(() => {
+    if (!lockedUnbCostCenterId) return;
+    setFiltersCostCenterId(lockedUnbCostCenterId);
+  }, [lockedUnbCostCenterId]);
+
   const { data: movementsData, isLoading: loadingMovements } = useQuery({
     queryKey: ['stock-adjustment-movements'],
     queryFn: async () => {
@@ -250,7 +269,7 @@ export default function AjusteEstoquePage() {
 
   const closeAdjustmentModal = () => {
     setIsAdjustmentModalOpen(false);
-    setFormData(emptyForm());
+    setFormData(emptyForm(lockedUnbCostCenterId || ''));
     setSelectedMaterial(null);
   };
 
@@ -295,28 +314,24 @@ export default function AjusteEstoquePage() {
     });
   };
 
-  const costCenters = Array.isArray(costCentersData?.data)
-    ? costCentersData.data
-    : Array.isArray(costCentersData)
-      ? costCentersData
-      : [];
+  const costCenterOptions = useMemo(() => {
+    const mapped = costCenters.map((cc: { id: string; name: string }) => ({
+      value: cc.id,
+      label: cc.name,
+    }));
+    if (!lockedUnbCostCenterId) return mapped;
+    return mapped.filter((opt: { value: string }) => opt.value === lockedUnbCostCenterId);
+  }, [costCenters, lockedUnbCostCenterId]);
 
-  const costCenterOptions = useMemo(
-    () =>
-      costCenters.map((cc: { id: string; name: string }) => ({
-        value: cc.id,
-        label: cc.name,
-      })),
-    [costCenters]
-  );
-
-  const costCenterFilterOptions = useMemo(
-    () => [
+  const costCenterFilterOptions = useMemo(() => {
+    if (lockedUnbCostCenterId) {
+      return costCenterOptions;
+    }
+    return [
       { value: '', label: 'Todos', searchText: 'Todos' },
       ...costCenterOptions,
-    ],
-    [costCenterOptions]
-  );
+    ];
+  }, [costCenterOptions, lockedUnbCostCenterId]);
 
   const historyYearFilterOptions = useMemo(
     () =>
@@ -364,7 +379,7 @@ export default function AjusteEstoquePage() {
   const historyEndItem = Math.min(historyEndIndex, historyTotal);
 
   const clearHistoryFilters = () => {
-    setFiltersCostCenterId('');
+    setFiltersCostCenterId(lockedUnbCostCenterId || '');
     setFiltersMonth('');
     setFiltersYear(String(new Date().getFullYear()));
     setTypeFilter('ALL');
@@ -465,7 +480,10 @@ export default function AjusteEstoquePage() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => setIsAdjustmentModalOpen(true)}
+                      onClick={() => {
+                        setFormData(emptyForm(lockedUnbCostCenterId || ''));
+                        setIsAdjustmentModalOpen(true);
+                      }}
                       className="flex h-10 items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
                     >
                       <ArrowLeftRight className="h-4 w-4 shrink-0" />
@@ -632,6 +650,7 @@ export default function AjusteEstoquePage() {
                             onChange={setFiltersCostCenterId}
                             options={costCenterFilterOptions}
                             allowEmpty={false}
+                            disabled={Boolean(lockedUnbCostCenterId)}
                           />
                         </div>
                         <div>
@@ -778,8 +797,8 @@ export default function AjusteEstoquePage() {
                           setFormData((prev) => ({ ...prev, costCenterId }))
                         }
                         options={costCenterOptions}
-                        disabled={loadingCostCenters}
-                        allowEmpty
+                        disabled={Boolean(lockedUnbCostCenterId) || loadingCostCenters}
+                        allowEmpty={!lockedUnbCostCenterId}
                         emptyOptionLabel="Não especificado"
                         placeholder={
                           loadingCostCenters

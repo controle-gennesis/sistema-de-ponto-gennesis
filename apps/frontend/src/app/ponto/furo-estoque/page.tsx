@@ -14,6 +14,9 @@ import toast from 'react-hot-toast';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import { formatRmListDisplayId } from '@/app/ponto/gerenciar-materiais/_lib/rmListDisplay';
+import { formatOcListDisplayId } from '@/components/oc/ocListDisplay';
+import { usePermissions } from '@/hooks/usePermissions';
+import { resolveLockedUnbCostCenterId } from '@/lib/unbBranding';
 
 const FURO_STATUS_FILTER_OPTIONS = labeledToSelectOptions([
   { value: 'ABERTO', label: 'Aberto' },
@@ -100,6 +103,7 @@ function shortfallCostCenterName(row: ShortfallRow): string {
 export default function FuroEstoquePage() {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const { isUnbUser, unbCostCenterIds } = usePermissions();
   const [filtersCostCenterId, setFiltersCostCenterId] = useState('');
   const [filtersCategory, setFiltersCategory] = useState('');
   const [filtersMonth, setFiltersMonth] = useState('');
@@ -138,6 +142,22 @@ export default function FuroEstoquePage() {
       return res.data;
     }
   });
+
+  const costCenters = Array.isArray(costCentersData?.data)
+    ? costCentersData.data
+    : Array.isArray(costCentersData)
+      ? costCentersData
+      : [];
+
+  const lockedUnbCostCenterId = useMemo(() => {
+    if (!isUnbUser) return null;
+    return resolveLockedUnbCostCenterId(costCenters, unbCostCenterIds);
+  }, [isUnbUser, costCenters, unbCostCenterIds]);
+
+  useEffect(() => {
+    if (!lockedUnbCostCenterId) return;
+    setFiltersCostCenterId(lockedUnbCostCenterId);
+  }, [lockedUnbCostCenterId]);
 
   const { data: shortfallsRes, isLoading: loadingShortfalls } = useQuery({
     queryKey: [
@@ -181,23 +201,18 @@ export default function FuroEstoquePage() {
   });
 
   const user = userData?.data || { name: 'Usuário', role: 'EMPLOYEE' };
-  const costCenters = Array.isArray(costCentersData?.data)
-    ? costCentersData.data
-    : Array.isArray(costCentersData)
-      ? costCentersData
-      : [];
 
-  const costCenterFilterOptions = useMemo(
-    () => [
-      { value: '', label: 'Todos', searchText: 'Todos' },
-      ...costCenters.map((cc: { id: string; name: string }) => ({
-        value: cc.id,
-        label: cc.name,
-        searchText: cc.name,
-      })),
-    ],
-    [costCenters]
-  );
+  const costCenterFilterOptions = useMemo(() => {
+    const mapped = costCenters.map((cc: { id: string; name: string }) => ({
+      value: cc.id,
+      label: cc.name,
+      searchText: cc.name,
+    }));
+    if (lockedUnbCostCenterId) {
+      return mapped.filter((opt: { value: string }) => opt.value === lockedUnbCostCenterId);
+    }
+    return [{ value: '', label: 'Todos', searchText: 'Todos' }, ...mapped];
+  }, [costCenters, lockedUnbCostCenterId]);
 
   const categoryFilterOptions = useMemo(
     () => [
@@ -229,7 +244,7 @@ export default function FuroEstoquePage() {
   const endItem = Math.min(endIndex, totalRows);
 
   const clearFilters = () => {
-    setFiltersCostCenterId('');
+    setFiltersCostCenterId(lockedUnbCostCenterId || '');
     setFiltersCategory('');
     setFiltersMonth('');
     setFiltersYear(String(new Date().getFullYear()));
@@ -288,7 +303,7 @@ export default function FuroEstoquePage() {
                     <button
                       type="button"
                       onClick={() => {
-                        setFiltersCostCenterId('');
+                        setFiltersCostCenterId(lockedUnbCostCenterId || '');
                         setFiltersCategory('');
                         setFiltersMonth('');
                         setFiltersYear('');
@@ -402,7 +417,9 @@ export default function FuroEstoquePage() {
                             className={getListTableRowClassName(true)}
                           >
                             <td className="px-3 sm:px-6 py-3 text-sm whitespace-nowrap">
-                              <ListRowNavigableLabel className="font-medium">{row.orderNumber}</ListRowNavigableLabel>
+                              <ListRowNavigableLabel className="font-medium">
+                                {formatOcListDisplayId(row.orderNumber)}
+                              </ListRowNavigableLabel>
                             </td>
                             <td className="px-3 sm:px-6 py-3 text-sm text-gray-700 dark:text-gray-300">
                               {row.constructionMaterial.name}
@@ -501,6 +518,7 @@ export default function FuroEstoquePage() {
                           onChange={setFiltersCostCenterId}
                           options={costCenterFilterOptions}
                           allowEmpty={false}
+                          disabled={Boolean(lockedUnbCostCenterId)}
                         />
                       </div>
                       <div>
@@ -586,7 +604,7 @@ export default function FuroEstoquePage() {
               <div className="relative z-10 w-full max-w-lg max-h-[min(90vh,32rem)] overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-900">
                 <div className="flex items-center justify-between border-b border-gray-200 dark:border-gray-700 px-4 py-3">
                   <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100 pr-2">
-                    Detalhe do furo — {detail.orderNumber}
+                    Detalhe do furo — {formatOcListDisplayId(detail.orderNumber)}
                   </h2>
                   <button
                     type="button"

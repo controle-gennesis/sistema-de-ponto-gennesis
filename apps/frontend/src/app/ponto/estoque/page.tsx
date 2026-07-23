@@ -52,6 +52,8 @@ import {
   type RowDraft
 } from '@/components/oc/boletoParcelasUtils';
 import { maskCurrencyInputBrOrEmpty } from '@/lib/maskCurrencyBr';
+import { resolveLockedUnbCostCenterId } from '@/lib/unbBranding';
+import { usePermissions } from '@/hooks/usePermissions';
 import toast from 'react-hot-toast';
 import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
@@ -550,6 +552,7 @@ function MovementSegButton({
 export default function EstoquePage() {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const { isUnbUser, unbCostCenterIds } = usePermissions();
   const [activeTab, setActiveTab] = useState<'balance' | 'movements'>('balance');
   const [isMovementModalOpen, setIsMovementModalOpen] = useState(false);
   const [filtersCostCenterId, setFiltersCostCenterId] = useState('');
@@ -634,6 +637,22 @@ export default function EstoquePage() {
     }
   });
 
+  const costCenters = normalizeCostCentersResponse(costCentersData) as Array<{
+    id: string;
+    code: string;
+    name: string;
+  }>;
+
+  const lockedUnbCostCenterId = useMemo(() => {
+    if (!isUnbUser) return null;
+    return resolveLockedUnbCostCenterId(costCenters, unbCostCenterIds);
+  }, [isUnbUser, costCenters, unbCostCenterIds]);
+
+  useEffect(() => {
+    if (!lockedUnbCostCenterId) return;
+    setFiltersCostCenterId(lockedUnbCostCenterId);
+  }, [lockedUnbCostCenterId]);
+
   const { data: balanceData, isLoading: loadingBalance } = useQuery({
     queryKey: ['stock-balance', filtersCostCenterId, filtersCategory, filtersSearch],
     queryFn: async () => {
@@ -705,7 +724,7 @@ export default function EstoquePage() {
 
   const resetMovementForm = () => {
     setFormData({
-      costCenterId: '',
+      costCenterId: lockedUnbCostCenterId || '',
       type: '',
       ocNumber: '',
       movementSplit: '',
@@ -973,23 +992,27 @@ export default function EstoquePage() {
     createMovementMutation.mutate(payloads);
   };
 
-  const costCenters = normalizeCostCentersResponse(costCentersData) as Array<{
-    id: string;
-    code: string;
-    name: string;
-  }>;
+  const costCenterFilterOptions = useMemo(() => {
+    const lockedOptions = lockedUnbCostCenterId
+      ? costCenters
+          .filter((cc) => cc.id === lockedUnbCostCenterId)
+          .map((cc) => ({
+            value: cc.id,
+            label: cc.name,
+            searchText: cc.name,
+          }))
+      : null;
+    if (lockedOptions && lockedOptions.length > 0) return lockedOptions;
 
-  const costCenterFilterOptions = useMemo(
-    () => [
+    return [
       { value: '', label: 'Todos', searchText: 'Todos' },
       ...costCenters.map((cc) => ({
         value: cc.id,
         label: cc.name,
         searchText: cc.name,
       })),
-    ],
-    [costCenters]
-  );
+    ];
+  }, [costCenters, lockedUnbCostCenterId]);
 
   const categoryFilterOptions = useMemo(
     () => [
@@ -1075,14 +1098,14 @@ export default function EstoquePage() {
   const movements: StockMovement[] = movementsData?.data ?? EMPTY_STOCK_MOVEMENTS;
 
   const clearBalanceFilters = () => {
-    setFiltersCostCenterId('');
+    setFiltersCostCenterId(lockedUnbCostCenterId || '');
     setFiltersCategory('');
     setFiltersSearch('');
     setBalanceCurrentPage(1);
   };
 
   const clearHistoryFilters = () => {
-    setFiltersCostCenterId('');
+    setFiltersCostCenterId(lockedUnbCostCenterId || '');
     setFiltersCategory('');
     setFiltersMonth('');
     setFiltersYear(String(new Date().getFullYear()));
@@ -1301,8 +1324,22 @@ export default function EstoquePage() {
         });
       }
     }
-    return Array.from(byId.values()).sort((a, b) => a.label.localeCompare(b.label, 'pt-BR'));
-  }, [availableOcOptions, costCenters]);
+    const options = Array.from(byId.values()).sort((a, b) =>
+      a.label.localeCompare(b.label, 'pt-BR')
+    );
+    if (!lockedUnbCostCenterId) return options;
+
+    const locked = options.find((opt) => opt.value === lockedUnbCostCenterId);
+    if (locked) return [locked];
+
+    const fromCatalog = costCenters.find((item) => item.id === lockedUnbCostCenterId);
+    return [
+      {
+        value: lockedUnbCostCenterId,
+        label: fromCatalog?.name || fromCatalog?.code || 'UNB',
+      },
+    ];
+  }, [availableOcOptions, costCenters, lockedUnbCostCenterId]);
 
   const ocOptionsForSelectedContract = useMemo(() => {
     if (!formData.costCenterId) return [];
@@ -1765,7 +1802,15 @@ export default function EstoquePage() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => setIsMovementModalOpen(true)}
+                      onClick={() => {
+                        if (lockedUnbCostCenterId) {
+                          setFormData((prev) => ({
+                            ...prev,
+                            costCenterId: lockedUnbCostCenterId,
+                          }));
+                        }
+                        setIsMovementModalOpen(true);
+                      }}
                       className="flex h-10 items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
                     >
                       <ArrowLeftRight className="h-4 w-4 shrink-0" />
@@ -1911,6 +1956,7 @@ export default function EstoquePage() {
                             onChange={setFiltersCostCenterId}
                             options={costCenterFilterOptions}
                             allowEmpty={false}
+                            disabled={Boolean(lockedUnbCostCenterId)}
                           />
                         </div>
                         <div>
@@ -2054,7 +2100,8 @@ export default function EstoquePage() {
                         </thead>
                         <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
                           {paginatedMovements.map((mov) => {
-                            const ocNumber = extractOcNumberFromNotes(mov.notes) || '—';
+                            const ocRaw = extractOcNumberFromNotes(mov.notes);
+                            const ocNumber = ocRaw ? formatOcShortNumber(ocRaw) : '—';
                             return (
                               <tr
                                 key={mov.id}
@@ -2164,6 +2211,7 @@ export default function EstoquePage() {
                             onChange={setFiltersCostCenterId}
                             options={costCenterFilterOptions}
                             allowEmpty={false}
+                            disabled={Boolean(lockedUnbCostCenterId)}
                           />
                         </div>
                         <div>
@@ -2348,7 +2396,9 @@ export default function EstoquePage() {
                   </p>
                   <p>
                     <span className="text-xs text-gray-500 dark:text-gray-400 block">OC</span>
-                    <span>{extractOcNumberFromNotes(historyDetail.notes) || '—'}</span>
+                    <span>
+                      {formatOcShortNumber(extractOcNumberFromNotes(historyDetail.notes) || '') || '—'}
+                    </span>
                   </p>
                   <p>
                     <span className="text-xs text-gray-500 dark:text-gray-400 block">Movimento</span>
@@ -2429,7 +2479,11 @@ export default function EstoquePage() {
                     value={formData.costCenterId}
                     onChange={handleContractChange}
                     options={contractDropdownOptions}
-                    disabled={loadingPurchaseOrders || loadingCostCenters}
+                    disabled={
+                      Boolean(lockedUnbCostCenterId) ||
+                      loadingPurchaseOrders ||
+                      loadingCostCenters
+                    }
                     allowEmpty={false}
                     placeholder={
                       loadingPurchaseOrders || loadingCostCenters
@@ -2821,6 +2875,7 @@ export default function EstoquePage() {
                     </p>
                   </div>
 
+                  {isOcBoletoPaymentType(selectedOrderDetail?.paymentType) && (
                   <div className="space-y-2 border-t border-gray-200 pt-5 dark:border-gray-700">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -2978,6 +3033,7 @@ export default function EstoquePage() {
                       </div>
                     )}
                   </div>
+                  )}
                 </div>
               )}
               <div className="flex justify-end gap-3">

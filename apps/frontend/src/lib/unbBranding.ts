@@ -1,24 +1,63 @@
 const UNB_BRANDING_STORAGE_KEY = 'gennesis-unb-branding';
 
+function normalizeUnbLabel(label: string): string {
+  return label
+    .trim()
+    .toUpperCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
+
 /** Centro de custo da UNB (nome ou código no cadastro do funcionário). */
 export function isUnbCostCenter(costCenter: string | null | undefined): boolean {
   return isUnbRelatedLabel(costCenter);
 }
 
+/** Rótulo exatamente "UNB" (não "UNB - CAR", etc.). */
+export function isExactUnbCostCenterLabel(label: string | null | undefined): boolean {
+  if (!label?.trim()) return false;
+  return normalizeUnbLabel(label) === 'UNB';
+}
+
 /** Contrato, centro de custo, polo ou qualquer rótulo ligado à UNB. */
 export function isUnbRelatedLabel(label: string | null | undefined): boolean {
   if (!label?.trim()) return false;
-  const normalized = label
-    .trim()
-    .toUpperCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '');
+  const normalized = normalizeUnbLabel(label);
 
   if (normalized === 'UNB') return true;
   // "UNB - DF", "UNB/Predial", "UNB Engenharia"
   if (/^UNB(\s|$|-|\/)/.test(normalized)) return true;
   // "Centro UNB", "CC-UNB", "Predial UNB" (token UNB, evita falso positivo tipo SUNBEAM)
   return /(^|[^A-Z0-9])UNB([^A-Z0-9]|$)/.test(normalized);
+}
+
+/**
+ * ID do centro de custo "UNB" para travar filtros/formulários de usuário UNB.
+ * Prefere o CC com nome/código exatamente "UNB".
+ */
+export function resolveLockedUnbCostCenterId(
+  costCenters: Array<{ id: string; name?: string | null; code?: string | null }>,
+  preferredIds: string[] = []
+): string | null {
+  if (costCenters.length === 0 && preferredIds.length === 0) return null;
+
+  const preferredSet = preferredIds.length > 0 ? new Set(preferredIds) : null;
+  const pool = preferredSet
+    ? costCenters.filter((cc) => preferredSet.has(cc.id))
+    : costCenters;
+  const searchPool = pool.length > 0 ? pool : costCenters;
+
+  const exact = searchPool.find(
+    (cc) => isExactUnbCostCenterLabel(cc.name) || isExactUnbCostCenterLabel(cc.code)
+  );
+  if (exact) return exact.id;
+
+  if (preferredIds[0]) return preferredIds[0];
+
+  const related = searchPool.find(
+    (cc) => isUnbRelatedLabel(cc.name) || isUnbRelatedLabel(cc.code)
+  );
+  return related?.id ?? null;
 }
 
 /** Usuário UNB (localStorage) ou contexto do documento (contrato/CC/OS). */
