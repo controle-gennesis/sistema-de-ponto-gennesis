@@ -126,6 +126,12 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
   },
   { key: pathToModuleKey('/ponto/licitacoes'), name: 'Licitações', href: '/ponto/licitacoes', category: 'Contratos e Licitações' },
   {
+    key: pathToModuleKey('/ponto/licitacoes-pncp'),
+    name: 'Licitações PNCP',
+    href: '/ponto/licitacoes-pncp',
+    category: 'Contratos e Licitações',
+  },
+  {
     key: pathToModuleKey('/ponto/responsaveis-tecnicos'),
     name: 'Responsáveis Técnicos',
     href: '/ponto/responsaveis-tecnicos',

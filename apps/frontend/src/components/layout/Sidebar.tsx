@@ -875,6 +875,16 @@ export function Sidebar({ userRole, userName, onLogout, onMenuToggle, onOpenChan
             permission: isAdministrator || can(pk('/ponto/licitacoes'))
           },
           {
+            name: 'Licitações PNCP',
+            href: '/ponto/licitacoes-pncp',
+            icon: Search,
+            description: 'Consultar publicações no Portal Nacional de Contratações',
+            permission:
+              isAdministrator ||
+              can(pk('/ponto/licitacoes-pncp')) ||
+              can(pk('/ponto/licitacoes')),
+          },
+          {
             name: 'Controle CREA',
             href: '/ponto/responsaveis-tecnicos',
             icon: BadgeCheck,

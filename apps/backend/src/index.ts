@@ -91,6 +91,7 @@ import fuelGasStationRoutes from './routes/fuelGasStations';
 import logisticsDeliveryRequestRoutes from './routes/logisticsDeliveryRequests';
 import approvalsRoutes from './routes/approvals';
 import licitacoesRoutes from './routes/licitacoes';
+import pncpRoutes from './routes/pncp';
 import { LicitacaoController } from './controllers/LicitacaoController';
 import { authenticate, AuthRequest } from './middleware/auth';
 import { removeOrphanUserPermissions } from './lib/permissionRegistrySync';
@@ -415,6 +416,7 @@ app.delete('/api/licitacoes/banco-cats', authenticate, (req, res, next) =>
   licitacaoExtraCtrl.deleteBancoCatsServico(req as AuthRequest, res, next)
 );
 app.use('/api/licitacoes', licitacoesRoutes);
+app.use('/api/pncp', pncpRoutes);
 
 // Middleware de erro 404
 app.use(notFound);
