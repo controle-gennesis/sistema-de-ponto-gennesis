@@ -166,6 +166,8 @@ interface PurchaseOrderOption {
   orderNumber: string;
   amountToPay?: number | string | null;
   freightAmount?: number | string | null;
+  paymentType?: string | null;
+  paymentParcelCount?: number | null;
   supplier?: {
     name?: string | null;
   } | null;
@@ -279,11 +281,6 @@ function getOcMaterialMovementAvailability(
     remaining: Math.max(0, orderedQuantity - qtyIn),
   };
 }
-
-type OcMovementDropdownStatus = {
-  label: string;
-  labelClassName: string;
-};
 
 function formatOcShortNumber(orderNumber: string): string {
   const trimmed = orderNumber.trim();
@@ -439,52 +436,117 @@ function isOcOutboundComplete(
   return tracked > 0;
 }
 
+type OcMovementStatusTone = 'complete' | 'partial' | 'pending';
+
+type OcMovementDropdownStatus = {
+  label: string;
+  labelClassName: string;
+  description?: string;
+  statusSegments: Array<{ text: string; className: string }>;
+};
+
+const OC_STATUS_TONE_CLASS: Record<OcMovementStatusTone, string> = {
+  // Completa e pendente em vermelho; parcial em amarelo (pedido do fluxo de estoque).
+  complete: 'text-red-600 dark:text-red-400',
+  partial: 'text-amber-500 dark:text-amber-400',
+  pending: 'text-red-600 dark:text-red-400',
+};
+
+function getOcInboundStatusTone(
+  movements: StockMovement[],
+  ocNumber: string,
+  items?: Array<{ materialId?: string; quantity?: number | string | null }>
+): OcMovementStatusTone {
+  const hasIn = ocHasAnyMovementOfType(movements, ocNumber, 'IN');
+  if (!hasIn) return 'pending';
+  if (isOcInboundComplete(movements, ocNumber, items)) return 'complete';
+  return 'partial';
+}
+
+function getOcOutboundStatusTone(
+  movements: StockMovement[],
+  ocNumber: string,
+  items?: Array<{ materialId?: string; quantity?: number | string | null }>
+): OcMovementStatusTone {
+  const hasIn = ocHasAnyMovementOfType(movements, ocNumber, 'IN');
+  const hasOut = ocHasAnyMovementOfType(movements, ocNumber, 'OUT');
+  if (!hasIn || !hasOut) return 'pending';
+  if (isOcOutboundComplete(movements, ocNumber, items)) return 'complete';
+  return 'partial';
+}
+
+function formatOcPaymentTypeLabel(
+  paymentType?: string | null,
+  paymentParcelCount?: number | null
+): string {
+  if (paymentType === 'BOLETO') {
+    const parcels = Number(paymentParcelCount) || 0;
+    return parcels > 1 ? `Boleto (${parcels}x)` : 'Boleto';
+  }
+  if (paymentType === 'AVISTA') return 'À vista';
+  if (paymentType?.trim()) return paymentType.trim();
+  return 'Pagamento não informado';
+}
+
+function getOcInboundStatusText(
+  movements: StockMovement[],
+  ocNumber: string,
+  items?: Array<{ materialId?: string; quantity?: number | string | null }>
+): string {
+  const hasIn = ocHasAnyMovementOfType(movements, ocNumber, 'IN');
+  if (!hasIn) return 'Entrada pendente';
+  if (isOcInboundComplete(movements, ocNumber, items)) return 'Entrada concluída';
+  return 'Entrada parcial';
+}
+
+function getOcOutboundStatusText(
+  movements: StockMovement[],
+  ocNumber: string,
+  items?: Array<{ materialId?: string; quantity?: number | string | null }>
+): string {
+  const hasIn = ocHasAnyMovementOfType(movements, ocNumber, 'IN');
+  const hasOut = ocHasAnyMovementOfType(movements, ocNumber, 'OUT');
+  if (!hasIn || !hasOut) return 'Saída pendente';
+  if (isOcOutboundComplete(movements, ocNumber, items)) return 'Saída concluída';
+  return 'Saída parcial';
+}
+
 function getOcMovementDropdownStatus(
   movements: StockMovement[],
   ocNumber: string,
-  movementType: '' | 'IN' | 'OUT',
-  items?: Array<{ materialId?: string; quantity?: number | string | null }>
+  _movementType: '' | 'IN' | 'OUT',
+  items?: Array<{ materialId?: string; quantity?: number | string | null }>,
+  meta?: {
+    contractLabel?: string | null;
+    itemCount?: number;
+    paymentType?: string | null;
+    paymentParcelCount?: number | null;
+    supplierName?: string | null;
+  }
 ): OcMovementDropdownStatus {
-  const hasIn = ocHasAnyMovementOfType(movements, ocNumber, 'IN');
-  const hasOut = ocHasAnyMovementOfType(movements, ocNumber, 'OUT');
-  const inboundComplete = isOcInboundComplete(movements, ocNumber, items);
-  const outboundComplete = isOcOutboundComplete(movements, ocNumber, items);
+  const inboundText = getOcInboundStatusText(movements, ocNumber, items);
+  const outboundText = getOcOutboundStatusText(movements, ocNumber, items);
+  const inboundTone = getOcInboundStatusTone(movements, ocNumber, items);
+  const outboundTone = getOcOutboundStatusTone(movements, ocNumber, items);
 
-  const partialStatus = {
-    labelClassName: 'text-amber-600 dark:text-amber-400',
+  const itemCount = meta?.itemCount ?? items?.length ?? 0;
+  const itemLabel = itemCount === 1 ? '1 item' : `${itemCount} itens`;
+  const contractLabel = (meta?.contractLabel || '').trim() || 'Sem contrato';
+  const paymentLabel = formatOcPaymentTypeLabel(meta?.paymentType, meta?.paymentParcelCount);
+  const supplierLabel = (meta?.supplierName || '').trim();
+
+  const detailParts = [contractLabel, itemLabel, paymentLabel];
+  if (supplierLabel) detailParts.push(supplierLabel);
+
+  return {
+    label: `${inboundText} · ${outboundText}`,
+    labelClassName: OC_STATUS_TONE_CLASS[inboundTone],
+    description: detailParts.join('  ·  '),
+    statusSegments: [
+      { text: inboundText, className: OC_STATUS_TONE_CLASS[inboundTone] },
+      { text: outboundText, className: OC_STATUS_TONE_CLASS[outboundTone] },
+    ],
   };
-  const completeStatus = {
-    labelClassName: 'text-emerald-600 dark:text-emerald-400',
-  };
-  const noneStatus = {
-    labelClassName: 'text-gray-500 dark:text-gray-400',
-  };
-
-  if (movementType === 'IN') {
-    if (!hasIn) return { label: 'Não movimentada', ...noneStatus };
-    if (inboundComplete) return { label: 'Entrada concluída', ...completeStatus };
-    return { label: 'Entrada parcial', ...partialStatus };
-  }
-
-  if (movementType === 'OUT') {
-    if (!hasIn) return { label: 'Sem entrada', ...noneStatus };
-    if (outboundComplete) return { label: 'Saída concluída', ...completeStatus };
-    if (hasOut) return { label: 'Saída parcial', ...partialStatus };
-    return {
-      label: 'Disponível para saída',
-      labelClassName: 'text-sky-600 dark:text-sky-400',
-    };
-  }
-
-  if (!hasIn && !hasOut) return { label: 'Não movimentada', ...noneStatus };
-  // Exigir saída real para não acusar "saída concluída" só por mismatch de itens.
-  if (inboundComplete && outboundComplete && hasOut) {
-    return { label: 'Entrada e saída concluídas', ...completeStatus };
-  }
-  if (hasIn && hasOut) return { label: 'Entrada e saída parciais', ...partialStatus };
-  if (hasIn && inboundComplete) return { label: 'Entrada concluída', ...completeStatus };
-  if (hasIn) return { label: 'Entrada parcial', ...partialStatus };
-  return { label: 'Movimentada', ...partialStatus };
 }
 
 function ocMovementItemsEqual(a: OcMovementItemState[], b: OcMovementItemState[]): boolean {
@@ -807,6 +869,18 @@ export default function EstoquePage() {
     }
     if (totalMovementAlreadyDoneForSameType) {
       toast.error('Movimento já realizado');
+      return;
+    }
+
+    if (
+      formData.type === 'IN' &&
+      isOcInboundComplete(
+        movementsForOc,
+        trimmedOcNumber,
+        selectedOrderDetail?.items || selectedPurchaseOrder?.items
+      )
+    ) {
+      toast.error('Entrada já concluída para esta OC. Use apenas saída.');
       return;
     }
 
@@ -1195,6 +1269,26 @@ export default function EstoquePage() {
 
   const selectedOrderDetail: PurchaseOrderDetail | null = selectedPurchaseOrderData?.data || null;
 
+  const selectedOcInboundComplete = useMemo(() => {
+    if (!formData.ocNumber.trim()) return false;
+    const items = selectedOrderDetail?.items || selectedPurchaseOrder?.items;
+    return isOcInboundComplete(movementsForOc, formData.ocNumber, items);
+  }, [
+    formData.ocNumber,
+    movementsForOc,
+    selectedOrderDetail?.items,
+    selectedPurchaseOrder?.items,
+  ]);
+
+  useEffect(() => {
+    if (!selectedOcInboundComplete) return;
+    if (formData.type === 'OUT') return;
+    setFormData((prev) => ({ ...prev, type: 'OUT' }));
+    setInvoiceFile(null);
+    setInvoiceNumber('');
+    setPaymentSlips([]);
+  }, [selectedOcInboundComplete, formData.type]);
+
   const linkedOcStockDocuments = useMemo(
     () =>
       buildLinkedOcStockDocuments(
@@ -1290,25 +1384,23 @@ export default function EstoquePage() {
   }, [resolvedMaterialsByName]);
 
   const availableOcOptions = useMemo(() => {
-    const ocWithTotalOut = new Set<string>();
-
-    movementsForOc.forEach((movement) => {
-      if (movement.type !== 'OUT' || !movement.notes) return;
-      const ocMatch = movement.notes.match(/Nº OC:\s*([^\n|]+)/i);
-      const splitMatch = movement.notes.match(/Tipo:\s*(TOTAL|PARCIAL)/i);
-      if (!ocMatch?.[1]) return;
-
-      const ocNumber = ocMatch[1].trim();
-      const split = splitMatch?.[1]?.toUpperCase();
-      if (split === 'TOTAL') {
-        ocWithTotalOut.add(ocNumber);
-      }
-    });
-
     return purchaseOrders
       .filter((order) => Boolean(order.orderNumber))
       .filter((order, index, arr) => arr.findIndex((x) => x.orderNumber === order.orderNumber) === index)
-      .filter((order) => !ocWithTotalOut.has(order.orderNumber))
+      .filter((order) => {
+        const inboundComplete = isOcInboundComplete(
+          movementsForOc,
+          order.orderNumber,
+          order.items
+        );
+        const outboundComplete = isOcOutboundComplete(
+          movementsForOc,
+          order.orderNumber,
+          order.items
+        );
+        // Entrada + saída totais → some da lista do estoque
+        return !(inboundComplete && outboundComplete);
+      })
       .sort((a, b) => b.orderNumber.localeCompare(a.orderNumber, 'pt-BR'));
   }, [movementsForOc, purchaseOrders]);
   const contractDropdownOptions = useMemo(() => {
@@ -1351,20 +1443,45 @@ export default function EstoquePage() {
   const ocDropdownOptions = useMemo(
     () =>
       ocOptionsForSelectedContract.map((order) => {
+        const cc = order.materialRequest?.costCenter;
+        const fromCatalog = cc?.id
+          ? costCenters.find((item) => item.id === cc.id)
+          : undefined;
+        const contractLabel =
+          fromCatalog?.name || cc?.name || cc?.code || '';
         const status = getOcMovementDropdownStatus(
           movementsForOc,
           order.orderNumber,
-          formData.type as '' | 'IN' | 'OUT',
-          order.items
+          '',
+          order.items,
+          {
+            contractLabel,
+            itemCount: order.items?.length ?? 0,
+            paymentType: order.paymentType,
+            paymentParcelCount: order.paymentParcelCount,
+            supplierName: order.supplier?.name,
+          }
         );
+        const shortNumber = formatOcShortNumber(order.orderNumber);
         return {
           value: order.orderNumber,
-          label: `${formatOcShortNumber(order.orderNumber)} · ${status.label}`,
-          searchText: `${order.orderNumber} ${formatOcShortNumber(order.orderNumber)} ${status.label}`,
-          labelClassName: status.labelClassName,
+          label: `OC ${shortNumber}`,
+          triggerLabel: `OC ${shortNumber} · ${status.label}`,
+          description: status.description,
+          statusSegments: status.statusSegments,
+          searchText: [
+            order.orderNumber,
+            shortNumber,
+            status.label,
+            status.description,
+            order.supplier?.name,
+            order.paymentType,
+          ]
+            .filter(Boolean)
+            .join(' '),
         };
       }),
-    [ocOptionsForSelectedContract, movementsForOc, formData.type]
+    [ocOptionsForSelectedContract, movementsForOc, costCenters]
   );
 
   const handleContractChange = (costCenterId: string) => {
@@ -1395,9 +1512,18 @@ export default function EstoquePage() {
   const handleOcNumberChange = (ocNumber: string) => {
     paymentSlipsSeedRef.current = '';
     setPaymentSlips([]);
+    const order = purchaseOrders.find((item) => item.orderNumber === ocNumber);
+    const inboundComplete = order
+      ? isOcInboundComplete(movementsForOc, ocNumber, order.items)
+      : false;
+    if (inboundComplete) {
+      setInvoiceFile(null);
+      setInvoiceNumber('');
+    }
     setFormData((prev) => ({
       ...prev,
       ocNumber,
+      ...(inboundComplete ? { type: 'OUT' as const } : {}),
     }));
   };
 
@@ -1511,7 +1637,7 @@ export default function EstoquePage() {
         }))
       );
       const workbook = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(workbook, worksheet, 'Saldo Atual');
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Lista de estoque');
       XLSX.writeFile(workbook, buildExportFilename('xlsx'));
       toast.success('Saldo atual exportado para Excel');
     } catch (error) {
@@ -1528,7 +1654,7 @@ export default function EstoquePage() {
       const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
 
       doc.setFontSize(14);
-      doc.text('Saldo Atual de Estoque', 40, 40);
+      doc.text('Lista de estoque', 40, 40);
       doc.setFontSize(9);
       doc.text(`Gerado em: ${new Date().toLocaleString('pt-BR')}`, 40, 58);
 
@@ -1721,7 +1847,7 @@ export default function EstoquePage() {
                 }`}
               >
                 <Box className="w-4 h-4" />
-                Saldo Atual
+                Lista de estoque
               </button>
               <button
                 onClick={() => setActiveTab('movements')}
@@ -1746,7 +1872,7 @@ export default function EstoquePage() {
                       <Box className="w-5 h-5 sm:w-6 sm:h-6 text-red-600 dark:text-red-400" />
                     </div>
                     <div>
-                      <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Saldo Atual</h3>
+                      <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Lista de estoque</h3>
                       <p className="text-sm text-gray-600 dark:text-gray-400">
                         Consulte materiais e quantidades em estoque por contrato
                       </p>
@@ -2495,8 +2621,8 @@ export default function EstoquePage() {
                   />
                   {!loadingPurchaseOrders && contractDropdownOptions.length === 0 && (
                     <p className="mt-1 text-xs text-yellow-600 dark:text-yellow-500">
-                      Nenhum contrato com OC disponível. Todas já tiveram saída total ou não há OCs
-                      cadastradas.
+                      Nenhum contrato com OC disponível. Todas já tiveram entrada e saída
+                      concluídas ou não há OCs cadastradas.
                     </p>
                   )}
                 </div>
@@ -2534,16 +2660,18 @@ export default function EstoquePage() {
                   Movimento *
                 </label>
                 <div className="flex gap-2">
-                  <MovementSegButton
-                    active={formData.type === 'IN'}
-                    variant="in"
-                    icon={ArrowDownCircle}
-                    onClick={() => {
-                      setFormData((prev) => ({ ...prev, type: 'IN' }));
-                      setWithdrawalSheetFile(null);
-                    }}
-                    label="Entrada"
-                  />
+                  {!selectedOcInboundComplete ? (
+                    <MovementSegButton
+                      active={formData.type === 'IN'}
+                      variant="in"
+                      icon={ArrowDownCircle}
+                      onClick={() => {
+                        setFormData((prev) => ({ ...prev, type: 'IN' }));
+                        setWithdrawalSheetFile(null);
+                      }}
+                      label="Entrada"
+                    />
+                  ) : null}
                   <MovementSegButton
                     active={formData.type === 'OUT'}
                     variant="out"
@@ -2557,6 +2685,11 @@ export default function EstoquePage() {
                     label="Saída"
                   />
                 </div>
+                {selectedOcInboundComplete ? (
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    Entrada já concluída — disponível apenas saída.
+                  </p>
+                ) : null}
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">

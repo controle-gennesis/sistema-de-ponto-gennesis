@@ -22,13 +22,17 @@ export type MultiSelectSearchOption = {
   swatchColor?: string;
   /** Classe CSS aplicada ao texto do rótulo (ex.: cor do status). */
   labelClassName?: string;
+  /** Rótulo compacto no trigger fechado (fallback: label). */
+  triggerLabel?: string;
+  /** Segmentos da 2ª linha (ex.: status coloridos). */
+  statusSegments?: Array<{ text: string; className?: string }>;
 };
 
 function OptionLabelContent({ opt }: { opt: MultiSelectSearchOption }) {
   const label = opt.labelClassName ? (
-    <span className={`truncate ${opt.labelClassName}`}>{opt.label}</span>
+    <span className={`truncate font-semibold tracking-tight ${opt.labelClassName}`}>{opt.label}</span>
   ) : (
-    <span className="truncate">{opt.label}</span>
+    <span className="truncate font-semibold tracking-tight text-gray-900 dark:text-gray-100">{opt.label}</span>
   );
 
   const primary = opt.swatchColor ? (
@@ -44,19 +48,37 @@ function OptionLabelContent({ opt }: { opt: MultiSelectSearchOption }) {
     label
   );
 
+  const statusSegments = opt.statusSegments?.filter((s) => s.text.trim()) ?? [];
   const descriptionLines = (opt.description ?? '')
     .split('\n')
     .map((line) => line.trim())
     .filter(Boolean);
-  if (descriptionLines.length === 0) return primary;
+
+  if (statusSegments.length === 0 && descriptionLines.length === 0) return primary;
 
   return (
-    <span className="flex min-w-0 flex-1 flex-col gap-0.5 text-left">
+    <span className="flex min-w-0 flex-1 flex-col gap-1 text-left">
       {primary}
+      {statusSegments.length > 0 ? (
+        <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] font-medium leading-tight">
+          {statusSegments.map((segment, index) => (
+            <span key={`${segment.text}-${index}`} className="inline-flex min-w-0 items-center gap-x-1.5">
+              {index > 0 ? (
+                <span className="text-gray-400 dark:text-gray-500" aria-hidden>
+                  ·
+                </span>
+              ) : null}
+              <span className={`truncate ${segment.className || 'text-gray-600 dark:text-gray-300'}`}>
+                {segment.text}
+              </span>
+            </span>
+          ))}
+        </span>
+      ) : null}
       {descriptionLines.map((line) => (
         <span
           key={line}
-          className="truncate text-xs font-normal text-gray-500 dark:text-gray-400"
+          className="truncate text-[11px] font-normal leading-tight text-gray-500 dark:text-gray-400"
         >
           {line}
         </span>

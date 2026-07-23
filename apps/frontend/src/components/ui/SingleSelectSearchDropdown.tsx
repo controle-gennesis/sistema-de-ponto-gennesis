@@ -121,9 +121,11 @@ function computeFloatingPos(trigger: HTMLElement, options?: FloatingPosOptions):
 function OptionLabelContent({ opt, noTruncate = false }: { opt: MultiSelectSearchOption; noTruncate?: boolean }) {
   const labelClass = noTruncate ? 'whitespace-nowrap' : 'truncate';
   const label = opt.labelClassName ? (
-    <span className={`${labelClass} ${opt.labelClassName}`}>{opt.label}</span>
+    <span className={`${labelClass} font-semibold tracking-tight ${opt.labelClassName}`}>{opt.label}</span>
   ) : (
-    <span className={labelClass}>{opt.label}</span>
+    <span className={`${labelClass} font-semibold tracking-tight text-gray-900 dark:text-gray-100`}>
+      {opt.label}
+    </span>
   );
 
   const primary = opt.swatchColor ? (
@@ -139,19 +141,37 @@ function OptionLabelContent({ opt, noTruncate = false }: { opt: MultiSelectSearc
     label
   );
 
+  const statusSegments = opt.statusSegments?.filter((s) => s.text.trim()) ?? [];
   const descriptionLines = (opt.description ?? '')
     .split('\n')
     .map((line) => line.trim())
     .filter(Boolean);
-  if (descriptionLines.length === 0) return primary;
+
+  if (statusSegments.length === 0 && descriptionLines.length === 0) return primary;
 
   return (
-    <span className="flex min-w-0 flex-1 flex-col gap-0.5 text-left">
+    <span className="flex min-w-0 flex-1 flex-col gap-1 py-0.5 text-left">
       {primary}
+      {statusSegments.length > 0 ? (
+        <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] font-medium leading-tight">
+          {statusSegments.map((segment, index) => (
+            <span key={`${segment.text}-${index}`} className="inline-flex min-w-0 items-center gap-x-1.5">
+              {index > 0 ? (
+                <span className="text-gray-400 dark:text-gray-500" aria-hidden>
+                  ·
+                </span>
+              ) : null}
+              <span className={`${noTruncate ? 'whitespace-nowrap' : 'truncate'} ${segment.className || 'text-gray-600 dark:text-gray-300'}`}>
+                {segment.text}
+              </span>
+            </span>
+          ))}
+        </span>
+      ) : null}
       {descriptionLines.map((line) => (
         <span
           key={line}
-          className="truncate text-xs font-normal text-gray-500 dark:text-gray-400"
+          className={`${noTruncate ? 'whitespace-nowrap' : 'truncate'} text-[11px] font-normal leading-tight text-gray-500 dark:text-gray-400`}
         >
           {line}
         </span>
@@ -199,14 +219,17 @@ export function SingleSelectSearchDropdown({
     const q = search.trim().toLowerCase();
     if (!q) return options;
     return options.filter((o) => {
-      const hay = `${o.label} ${o.description ?? ''} ${o.searchText ?? ''} ${o.value}`.toLowerCase();
+      const statusText = (o.statusSegments ?? []).map((s) => s.text).join(' ');
+      const hay = `${o.label} ${o.triggerLabel ?? ''} ${statusText} ${o.description ?? ''} ${o.searchText ?? ''} ${o.value}`.toLowerCase();
       return hay.includes(q);
     });
   }, [options, search]);
 
   const selectedLabel = useMemo(() => {
     if (!value) return '';
-    return options.find((o) => o.value === value)?.label ?? '';
+    const selected = options.find((o) => o.value === value);
+    if (!selected) return '';
+    return selected.triggerLabel || selected.label;
   }, [options, value]);
 
   const syncFloatingPos = useCallback(() => {
@@ -401,7 +424,7 @@ export function SingleSelectSearchDropdown({
                 >
                   <span
                     className={`min-w-0 flex-1 ${
-                      opt.description?.trim()
+                      opt.description?.trim() || (opt.statusSegments?.length ?? 0) > 0
                         ? ''
                         : disableSearch
                           ? 'whitespace-nowrap'
@@ -410,7 +433,9 @@ export function SingleSelectSearchDropdown({
                   >
                     <OptionLabelContent opt={opt} noTruncate={disableSearch} />
                   </span>
-                  {active ? <Check className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" aria-hidden /> : null}
+                  {active ? (
+                    <Check className="mt-0.5 h-4 w-4 shrink-0 self-start text-red-600 dark:text-red-400" aria-hidden />
+                  ) : null}
                 </button>
               );
             })}

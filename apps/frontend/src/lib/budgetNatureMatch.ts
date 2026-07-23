@@ -1,8 +1,34 @@
+import { normalizeNaturezaLabel } from '@/lib/contractPaidNaturezaExclusions';
+
 export type BudgetNatureMatchTarget = {
   id?: string;
   code?: string | null;
   name: string;
 };
+
+/**
+ * Naturezas de categoria física de material (além de INSUMOS* / MATERIAL*).
+ * Alinhado ao resumo "Gastos com Materiais" e ao bloco DFC Material Aplicado.
+ */
+const MATERIAL_CADASTRO_EXTRA_NATUREZAS = new Set(
+  [
+    'LOUCAS E METAIS',
+    'SINALIZACAO',
+    'COBERTURA/CALHA',
+    'MARMORE/GRANITO',
+    'ESQUADRIAS (EXCETO FERRO)',
+    'PAVIMENTACAO'
+  ].map((n) => normalizeNaturezaLabel(n))
+);
+
+/** Naturezas adequadas ao cadastro de Materiais e Serviços (insumos / materiais). */
+export function isMaterialCadastroBudgetNature(name: string): boolean {
+  const key = normalizeNaturezaLabel(name).replace(/ - SV$/i, '').trim();
+  if (!key) return false;
+  if (key.startsWith('INSUMOS')) return true;
+  if (key.startsWith('MATERIAL')) return true;
+  return MATERIAL_CADASTRO_EXTRA_NATUREZAS.has(key);
+}
 
 /** Filtro por um ou mais códigos de natureza (OR). Sem seleção = todas. */
 export function extratoMatchesAnyNatureCodes(
