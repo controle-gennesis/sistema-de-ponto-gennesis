@@ -13,7 +13,7 @@ export function AgendaModeSwitcher({
 }) {
   return (
     <div
-      className="inline-flex items-center overflow-hidden rounded-full border border-gray-300 bg-white dark:border-gray-600 dark:bg-gray-900"
+      className="inline-flex shrink-0 items-center rounded-md bg-gray-100 p-0.5 dark:bg-gray-700"
       role="group"
       aria-label="Alternar Agenda e Tarefas"
     >
@@ -23,10 +23,10 @@ export function AgendaModeSwitcher({
         title="Agenda"
         aria-label="Agenda"
         aria-pressed={mode === 'planner'}
-        className={`inline-flex h-9 w-9 items-center justify-center transition-colors ${
+        className={`rounded p-1.5 transition-colors ${
           mode === 'planner'
-            ? 'bg-sky-100 text-sky-800 dark:bg-sky-900/50 dark:text-sky-200'
-            : 'text-gray-600 hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-gray-800'
+            ? 'bg-white text-red-600 shadow dark:bg-gray-600 dark:text-red-400'
+            : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
         }`}
       >
         <svg
@@ -51,10 +51,10 @@ export function AgendaModeSwitcher({
         title="Tarefas"
         aria-label="Tarefas"
         aria-pressed={mode === 'tasks'}
-        className={`inline-flex h-9 w-9 items-center justify-center transition-colors ${
+        className={`rounded p-1.5 transition-colors ${
           mode === 'tasks'
-            ? 'bg-sky-100 text-sky-800 dark:bg-sky-900/50 dark:text-sky-200'
-            : 'text-gray-600 hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-gray-800'
+            ? 'bg-white text-red-600 shadow dark:bg-gray-600 dark:text-red-400'
+            : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
         }`}
       >
         <svg
