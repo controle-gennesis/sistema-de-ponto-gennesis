@@ -52,7 +52,6 @@ const CANONICAL_HEADERS = [
   'DESCRIÇÃO',
   'UND',
   'QUANT.',
-  'Ind. Fonte',
   'FONTE',
 ] as const;
 
@@ -148,6 +147,8 @@ function isCenteredCatalogHeader(header: string): boolean {
     key === 'unidade' ||
     key === 'quant' ||
     key === 'quantidade' ||
+    key === 'qtd' ||
+    key === 'qtde' ||
     key === 'fonte'
   );
 }
@@ -303,6 +304,7 @@ function CreateServicoModal({
 
         <div className="grid max-h-[60vh] grid-cols-1 gap-3 overflow-y-auto pr-1 sm:grid-cols-2">
           {headers.map((header) => {
+            if (isIndFonteHeader(header)) return null;
             const label = header.trim();
             const value = fields[header] ?? '';
             const fieldClass =
@@ -427,8 +429,8 @@ export function BancoCatsPanel() {
   });
 
   const formHeaders = useMemo(() => {
-    if (sheet?.headers?.length) return sheet.headers;
-    return [...CANONICAL_HEADERS];
+    const headers = sheet?.headers?.length ? sheet.headers : [...CANONICAL_HEADERS];
+    return headers.filter((header) => !isIndFonteHeader(header));
   }, [sheet?.headers]);
 
   const indexedRows = useMemo(() => {
@@ -437,7 +439,13 @@ export function BancoCatsPanel() {
     const headers = sheet.headers;
     const empresaIdx = findColumnIndex(headers, ['empresa']);
     const undIdx = findColumnIndex(headers, ['und', 'unidade']);
-    const quantIdx = findColumnIndex(headers, ['quant', 'quantidade']);
+    const quantIdx = findColumnIndex(headers, [
+      'quant',
+      'quantidade',
+      'qtd',
+      'qtde',
+      'quant.',
+    ]);
     const fonteIdx = findColumnIndex(headers, ['fonte']);
     const descricaoIdx = findColumnIndex(headers, ['descricao', 'descrição']);
     const manualSet = new Set(sheet.manualRowKeys ?? []);
@@ -1514,6 +1522,7 @@ export function BancoCatsPanel() {
                 itemLabelPlural="serviços"
                 currentPage={currentPage}
                 totalPages={listRange.totalPages}
+                centerPageLabel
               />
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[56rem] text-sm">
@@ -1608,6 +1617,7 @@ export function BancoCatsPanel() {
                 currentPage={currentPage}
                 totalPages={listRange.totalPages}
                 onPageChange={setPage}
+                className={`${cadastroListClasses.pagination} w-full`}
               />
             </>
           )}

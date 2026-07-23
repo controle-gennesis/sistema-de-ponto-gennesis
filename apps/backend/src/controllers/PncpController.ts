@@ -1,23 +1,32 @@
 import { Response, NextFunction } from 'express';
 import { AuthRequest } from '../middleware/auth';
 import { createError } from '../middleware/errorHandler';
+import { PNCP_KEYWORDS_OBJETO_PADRAO, PNCP_MODALIDADES } from '../services/PncpConsultaService';
+import { consultarContratacoesLocais } from '../services/PncpLocalConsultaService';
 import {
-  consultarContratacoesPublicacao,
-  PNCP_MODALIDADES,
-} from '../services/PncpConsultaService';
+  getPncpSyncStatus,
+  startPncpIngestBackground,
+} from '../services/PncpIngestService';
 
 function parseModalidade(raw: unknown): number | null {
-  if (raw == null || raw === '') return 6;
+  if (raw == null || raw === '') return null;
   const s = String(raw).trim().toLowerCase();
   if (s === 'all' || s === 'todos' || s === '0') return null;
   const n = Number(s);
-  if (!Number.isInteger(n) || n <= 0) return 6;
+  if (!Number.isInteger(n) || n <= 0) return null;
   return n;
 }
 
 export class PncpController {
   listModalidades(_req: AuthRequest, res: Response) {
     res.json({ success: true, data: PNCP_MODALIDADES });
+  }
+
+  listKeywords(_req: AuthRequest, res: Response) {
+    const unique = Array.from(
+      new Set(PNCP_KEYWORDS_OBJETO_PADRAO.map((k) => k.trim()).filter(Boolean))
+    ).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+    res.json({ success: true, data: unique });
   }
 
   async listContratacoes(req: AuthRequest, res: Response, next: NextFunction) {
@@ -34,7 +43,8 @@ export class PncpController {
         throw createError('Informe dataInicial, dataFinal e uf.', 400);
       }
 
-      const result = await consultarContratacoesPublicacao({
+      // Espelho local (já filtrado por keywords na ingestão).
+      const result = await consultarContratacoesLocais({
         dataInicial,
         dataFinal,
         uf,
@@ -55,11 +65,38 @@ export class PncpController {
         next(createError(message, 400));
         return;
       }
-      if (/limite de requisi/i.test(message)) {
-        next(createError(message, 429));
+      next(createError(message, 500));
+    }
+  }
+
+  async syncStatus(_req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const status = await getPncpSyncStatus();
+      res.json({ success: true, data: status });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async startSync(_req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const result = startPncpIngestBackground('manual');
+      const status = await getPncpSyncStatus();
+      if (result.alreadyRunning) {
+        res.status(202).json({
+          success: true,
+          data: status,
+          message: 'Sincronização já em andamento.',
+        });
         return;
       }
-      next(createError(message, 502));
+      res.status(202).json({
+        success: true,
+        data: status,
+        message: 'Sincronização iniciada em segundo plano.',
+      });
+    } catch (err) {
+      next(err);
     }
   }
 }

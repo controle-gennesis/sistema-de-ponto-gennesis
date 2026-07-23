@@ -1,16 +1,16 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import {
   AlertCircle,
   ChevronDown,
   ChevronUp,
   ClipboardList,
+  DownloadCloud,
   ExternalLink,
   Filter,
-  RefreshCw,
   RotateCcw,
   Search,
   X,
@@ -31,6 +31,46 @@ import { Loading } from '@/components/ui/Loading';
 import { cadastroListClasses } from '@/components/ui/RowActionMenu';
 import { getListTableRowClassName } from '@/components/ui/listTableUi';
 import api from '@/lib/api';
+
+type PncpUfProgress = {
+  uf: string;
+  status: 'pending' | 'running' | 'done' | 'error';
+  upsertedThisRun: number;
+};
+
+type PncpSyncStatus = {
+  running: boolean;
+  currentUf?: string | null;
+  currentModalidade?: string | null;
+  progress?: {
+    totalUfs: number;
+    doneUfs: number;
+    pendingUfs: number;
+    pagesFetched: number;
+    upserted: number;
+    rateLimitHits: number;
+    lookbackDays: number;
+    startedAt: string | null;
+    ufs: PncpUfProgress[];
+  } | null;
+  mirror?: {
+    total: number;
+    byUf: { uf: string; count: number }[];
+  };
+  lastRun: {
+    id: string;
+    status: string;
+    trigger: string;
+    startedAt: string;
+    finishedAt: string | null;
+    lookbackDays: number;
+    pagesFetched: number;
+    upserted: number;
+    pruned: number;
+    rateLimitHits: number;
+    errorMessage: string | null;
+  } | null;
+};
 
 const BRASIL_UFS = [
   'AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 'MT', 'MS', 'MG',
@@ -124,7 +164,98 @@ function DateTimeStacked({ iso }: { iso: string | null }) {
   );
 }
 
-function ObjetoExpandable({ text }: { text: string | null }) {
+function foldWithIndexMap(text: string): { folded: string; map: number[] } {
+  let folded = '';
+  const map: number[] = [];
+  for (let i = 0; i < text.length; i++) {
+    const base = text[i]
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase();
+    for (const ch of base) {
+      folded += ch;
+      map.push(i);
+    }
+  }
+  return { folded, map };
+}
+
+type HighlightRange = { start: number; end: number };
+
+function findKeywordRanges(text: string, keywords: string[]): HighlightRange[] {
+  if (!text || keywords.length === 0) return [];
+  const { folded, map } = foldWithIndexMap(text);
+  const sorted = Array.from(
+    new Set(
+      keywords
+        .map((k) =>
+          k
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .toLowerCase()
+            .trim()
+        )
+        .filter((k) => k.length >= 3)
+    )
+  ).sort((a, b) => b.length - a.length);
+
+  const taken = new Array(folded.length).fill(false);
+  const ranges: HighlightRange[] = [];
+
+  for (const kw of sorted) {
+    let from = 0;
+    while (from < folded.length) {
+      const idx = folded.indexOf(kw, from);
+      if (idx < 0) break;
+      const endFold = idx + kw.length;
+      let overlap = false;
+      for (let i = idx; i < endFold; i++) {
+        if (taken[i]) {
+          overlap = true;
+          break;
+        }
+      }
+      if (!overlap) {
+        for (let i = idx; i < endFold; i++) taken[i] = true;
+        const start = map[idx];
+        const end = map[endFold - 1] + 1;
+        ranges.push({ start, end });
+      }
+      from = idx + 1;
+    }
+  }
+
+  return ranges.sort((a, b) => a.start - b.start);
+}
+
+function highlightObjetoText(text: string, keywords: string[]): React.ReactNode {
+  const ranges = findKeywordRanges(text, keywords);
+  if (ranges.length === 0) return text;
+
+  const nodes: React.ReactNode[] = [];
+  let cursor = 0;
+  ranges.forEach((range, i) => {
+    if (range.start > cursor) {
+      nodes.push(text.slice(cursor, range.start));
+    }
+    nodes.push(
+      <strong key={`kw-${i}-${range.start}`} className="font-semibold text-gray-950 dark:text-white">
+        {text.slice(range.start, range.end)}
+      </strong>
+    );
+    cursor = range.end;
+  });
+  if (cursor < text.length) nodes.push(text.slice(cursor));
+  return nodes;
+}
+
+function ObjetoExpandable({
+  text,
+  keywords = [],
+}: {
+  text: string | null;
+  keywords?: string[];
+}) {
   const [expanded, setExpanded] = useState(false);
   const [needsToggle, setNeedsToggle] = useState(false);
   const textRef = useRef<HTMLParagraphElement>(null);
@@ -142,7 +273,7 @@ function ObjetoExpandable({ text }: { text: string | null }) {
     }
     if (expanded) return;
     setNeedsToggle(el.scrollHeight > el.clientHeight + 2);
-  }, [value, expanded]);
+  }, [value, expanded, keywords]);
 
   if (!value) {
     return <p className="text-sm text-gray-800 dark:text-gray-200">—</p>;
@@ -156,7 +287,7 @@ function ObjetoExpandable({ text }: { text: string | null }) {
           expanded ? '' : 'line-clamp-3'
         }`}
       >
-        {value}
+        {highlightObjetoText(value, keywords)}
       </p>
       {needsToggle || expanded ? (
         <button
@@ -186,30 +317,56 @@ function formatCurrency(value: number | null): string {
   return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
+/** Id PNCP `CNPJ-1-SEQ/ANO` → https://pncp.gov.br/app/editais/{CNPJ}/{ANO}/{SEQ} */
+function buildPncpEditalUrl(numeroControlePNCP: string | null | undefined): string | null {
+  const m = String(numeroControlePNCP || '')
+    .trim()
+    .match(/^(\d{14})-\d+-(\d+)\s*\/\s*(\d{4})$/);
+  if (!m) return null;
+  const [, cnpj, seq, ano] = m;
+  return `https://pncp.gov.br/app/editais/${cnpj}/${ano}/${seq}`;
+}
+
 function defaultRange() {
   const end = new Date();
   const start = new Date();
-  start.setDate(start.getDate() - 7);
+  start.setMonth(start.getMonth() - 1);
   return { dataInicial: toDateInputValue(start), dataFinal: toDateInputValue(end) };
 }
 
 function modalidadeOptionLabel(codigo: string): string {
   const found = MODALIDADE_OPTIONS.find((m) => String(m.codigo) === String(codigo));
   if (!found) return codigo;
-  return found.codigo === 'all' ? found.nome : `${found.codigo} — ${found.nome}`;
+  return found.nome;
+}
+
+function formatSyncLabel(iso: string | null | undefined): string {
+  if (!iso) return 'nunca';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return 'nunca';
+  return d.toLocaleString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 }
 
 function LicitacoesPncpPageContent() {
+  const queryClient = useQueryClient();
   const defaults = useMemo(() => defaultRange(), []);
   const [uf, setUf] = useState('DF');
-  const [modalidadeCodigo, setModalidadeCodigo] = useState('6');
+  const [modalidadeCodigo, setModalidadeCodigo] = useState('all');
   const [dataInicial, setDataInicial] = useState(defaults.dataInicial);
   const [dataFinal, setDataFinal] = useState(defaults.dataFinal);
   const [q, setQ] = useState('');
   const [showFilters, setShowFilters] = useState(false);
+  const [showKeywordsList, setShowKeywordsList] = useState(false);
+  const [showSyncModal, setShowSyncModal] = useState(false);
   const [applied, setApplied] = useState({
     uf: 'DF',
-    modalidadeCodigo: '6',
+    modalidadeCodigo: 'all',
     dataInicial: defaults.dataInicial,
     dataFinal: defaults.dataFinal,
     q: '',
@@ -219,10 +376,7 @@ function LicitacoesPncpPageContent() {
   const MIN_SEARCH_LEN = 3;
 
   const modalidadeOptions = useMemo(
-    () =>
-      MODALIDADE_OPTIONS.map((m) =>
-        m.codigo === 'all' ? m.nome : `${m.codigo} — ${m.nome}`
-      ),
+    () => MODALIDADE_OPTIONS.map((m) => m.nome),
     []
   );
 
@@ -233,13 +387,59 @@ function LicitacoesPncpPageContent() {
 
   const hasActiveFilters =
     applied.uf !== 'DF' ||
-    applied.modalidadeCodigo !== '6' ||
+    applied.modalidadeCodigo !== 'all' ||
     applied.dataInicial !== defaults.dataInicial ||
     applied.dataFinal !== defaults.dataFinal ||
     hasSearch;
 
+  const keywordsQuery = useQuery({
+    queryKey: ['pncp-keywords'],
+    queryFn: async () => {
+      const res = await api.get('/pncp/keywords');
+      return (res.data?.data ?? res.data) as string[];
+    },
+    staleTime: 60 * 60_000,
+  });
+
+  const keywords = keywordsQuery.data ?? [];
+
+  const syncStatusQuery = useQuery({
+    queryKey: ['pncp-sync-status'],
+    queryFn: async () => {
+      const res = await api.get('/pncp/sync/status');
+      return (res.data?.data ?? res.data) as PncpSyncStatus;
+    },
+    refetchInterval: (q) => (q.state.data?.running ? 3_000 : 60_000),
+    staleTime: 2_000,
+  });
+
+  const syncMutation = useMutation({
+    mutationFn: async () => {
+      const res = await api.post('/pncp/sync');
+      return (res.data?.data ?? res.data) as PncpSyncStatus;
+    },
+    onSuccess: (data) => {
+      void queryClient.invalidateQueries({ queryKey: ['pncp-sync-status'] });
+      setShowSyncModal(true);
+      if (data.running) {
+        toast.success('Sincronização iniciada (DF primeiro). Pode demorar vários minutos.');
+      }
+    },
+    onError: (err: { response?: { data?: { message?: string } }; message?: string }) => {
+      toast.error(
+        err?.response?.data?.message || err?.message || 'Não foi possível iniciar a sincronização.'
+      );
+    },
+  });
+
+  const syncRunning =
+    Boolean(syncStatusQuery.data?.running) || syncMutation.isPending;
+
   const query = useQuery({
-    queryKey: ['pncp-contratacoes', { ...applied, q: hasSearch ? searchTerm : '' }],
+    queryKey: [
+      'pncp-contratacoes',
+      { ...applied, q: hasSearch ? searchTerm : '' },
+    ],
     queryFn: async () => {
       const res = await api.get('/pncp/contratacoes', {
         params: {
@@ -251,23 +451,64 @@ function LicitacoesPncpPageContent() {
           tamanhoPagina: 20,
           ...(hasSearch ? { q: searchTerm } : {}),
         },
-        timeout:
-          applied.modalidadeCodigo === 'all' ? 180_000 : hasSearch ? 120_000 : 60_000,
+        timeout: 30_000,
       });
       return (res.data?.data ?? res.data) as PncpListResult;
     },
-    staleTime: 5 * 60_000,
+    staleTime: 30_000,
+    placeholderData: (previousData) => previousData,
     retry: false,
   });
 
+  // Enquanto sincroniza, atualiza a lista (dados vão entrando) e ao terminar avisa.
+  const wasSyncRunning = useRef(false);
+  useEffect(() => {
+    const running = Boolean(syncStatusQuery.data?.running);
+    if (running) {
+      void queryClient.invalidateQueries({ queryKey: ['pncp-contratacoes'] });
+    }
+    if (wasSyncRunning.current && !running) {
+      void queryClient.invalidateQueries({ queryKey: ['pncp-contratacoes'] });
+      const last = syncStatusQuery.data?.lastRun;
+      if (last?.status === 'failed') {
+        toast.error(last.errorMessage || 'Sincronização falhou.');
+      } else {
+        toast.success(
+          `Sync concluída: ${last?.upserted?.toLocaleString('pt-BR') ?? 0} itens no espelho.`
+        );
+      }
+    }
+    wasSyncRunning.current = running;
+  }, [
+    syncStatusQuery.data?.running,
+    syncStatusQuery.data?.lastRun?.status,
+    syncStatusQuery.data?.lastRun?.upserted,
+    syncStatusQuery.data?.lastRun?.errorMessage,
+    queryClient,
+  ]);
+
   const items = query.data?.items ?? [];
-  const totalRegistros = query.data?.totalRegistros ?? items.length;
   const totalPaginas = Math.max(1, query.data?.totalPaginas ?? 1);
-  const currentPage = query.data?.pagina ?? applied.pagina;
+  const currentPage = applied.pagina;
   const pageSize = query.data?.tamanhoPagina ?? 20;
-  const startItem = totalRegistros === 0 ? 0 : (currentPage - 1) * pageSize + 1;
+  const totalRegistros = query.data?.totalRegistros ?? items.length;
+  const startItem =
+    items.length === 0 ? 0 : (currentPage - 1) * pageSize + 1;
   const endItem =
-    totalRegistros === 0 ? 0 : Math.min(currentPage * pageSize, totalRegistros);
+    items.length === 0 ? 0 : Math.min(currentPage * pageSize, totalRegistros);
+  const showInitialLoading = query.isLoading && !query.data;
+
+  const lastSyncAt =
+    syncStatusQuery.data?.lastRun?.finishedAt ||
+    syncStatusQuery.data?.lastRun?.startedAt ||
+    null;
+  const syncProgress = syncStatusQuery.data?.lastRun;
+  const progress = syncStatusQuery.data?.progress;
+  const mirror = syncStatusQuery.data?.mirror;
+  const syncPct =
+    progress && progress.totalUfs > 0
+      ? Math.round((progress.doneUfs / progress.totalUfs) * 100)
+      : 0;
 
   const commitFilters = (next: {
     uf: string;
@@ -309,13 +550,13 @@ function LicitacoesPncpPageContent() {
 
   const clearFilters = () => {
     setUf('DF');
-    setModalidadeCodigo('6');
+    setModalidadeCodigo('all');
     setDataInicial(defaults.dataInicial);
     setDataFinal(defaults.dataFinal);
     setApplied((prev) => ({
       ...prev,
       uf: 'DF',
-      modalidadeCodigo: '6',
+      modalidadeCodigo: 'all',
       dataInicial: defaults.dataInicial,
       dataFinal: defaults.dataFinal,
       pagina: 1,
@@ -344,21 +585,28 @@ function LicitacoesPncpPageContent() {
     return raw;
   })();
 
-  const listSubtitle =
-    query.isLoading || query.isFetching
-      ? 'Carregando...'
+  const listSubtitle = showInitialLoading
+    ? 'Carregando...'
+    : query.isFetching
+      ? `Atualizando página ${currentPage}…`
       : totalRegistros === 1
-        ? '1 licitação encontrada'
-        : `${totalRegistros.toLocaleString('pt-BR')} licitações encontradas`;
+        ? '1 licitação no espelho local'
+        : `${totalRegistros.toLocaleString('pt-BR')} licitações no espelho local`;
+
+  const syncSubtitle = syncRunning
+    ? `Sincronizando${
+        syncStatusQuery.data?.currentUf ? ` ${syncStatusQuery.data.currentUf}` : ''
+      }… ${syncProgress?.upserted ?? 0} salvos · ${syncProgress?.pagesFetched ?? 0} págs`
+    : `Última sync: ${formatSyncLabel(lastSyncAt)}`;
 
   return (
     <div className="space-y-6">
       <div className="text-center">
         <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">
-          Licitações PNCP
+          Portal Nacional de Contratações Públicas
         </h1>
         <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400">
-          Consulta pública de contratações publicadas no Portal Nacional de Contratações Públicas.
+          Consulta pública de contratações publicadas no PNCP.
         </p>
       </div>
 
@@ -371,12 +619,20 @@ function LicitacoesPncpPageContent() {
               </div>
               <div className="min-w-0">
                 <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 sm:text-xl">
-                  Publicações PNCP
+                  Licitações
                 </h2>
                 <p className="text-sm text-gray-500 dark:text-gray-400">
                   {listSubtitle}
                   {hasActiveFilters ? ' (filtrados)' : ''}
                 </p>
+                <button
+                  type="button"
+                  onClick={() => setShowSyncModal(true)}
+                  className="mt-0.5 text-left text-xs text-gray-400 underline-offset-2 hover:text-red-600 hover:underline dark:text-gray-500 dark:hover:text-red-400"
+                  title="Ver progresso da sincronização"
+                >
+                  {syncSubtitle}
+                </button>
               </div>
             </div>
 
@@ -421,32 +677,53 @@ function LicitacoesPncpPageContent() {
 
               <button
                 type="button"
-                onClick={() => query.refetch()}
-                disabled={query.isFetching}
+                onClick={() => syncMutation.mutate()}
+                disabled={syncRunning}
                 className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
-                aria-label="Atualizar"
-                title="Atualizar"
+                aria-label="Sincronizar PNCP"
+                title={
+                  syncRunning
+                    ? 'Sincronização em andamento'
+                    : 'Sincronizar agora com o PNCP'
+                }
               >
-                <RefreshCw className={`h-4 w-4 ${query.isFetching ? 'animate-spin' : ''}`} />
+                <DownloadCloud
+                  className={`h-4 w-4 ${syncRunning ? 'animate-pulse text-red-600' : ''}`}
+                />
               </button>
             </div>
           </div>
         </CardHeader>
 
         <CardContent className={cadastroListClasses.cardContent}>
-          {query.isError ? (
+          {query.isError && !query.data ? (
             <div className="flex flex-col items-center gap-3 px-6 py-10 text-center">
               <AlertCircle className="h-10 w-10 text-red-500" />
               <p className="max-w-md text-sm text-gray-700 dark:text-gray-300">{loadError}</p>
             </div>
-          ) : query.isLoading ? (
-            <CadastroListLoading message="Consultando PNCP..." />
+          ) : showInitialLoading ? (
+            <CadastroListLoading message="Carregando espelho local..." />
           ) : items.length === 0 ? (
-            <CadastroListEmpty
-              icon={ClipboardList}
-              title="Nenhuma licitação encontrada"
-              hint="Ajuste a busca ou os filtros e tente novamente."
-            />
+            <div className="space-y-4">
+              <CadastroListEmpty
+                icon={ClipboardList}
+                title="Nenhuma licitação encontrada"
+                hint={
+                  syncRunning
+                    ? 'Sincronização em andamento. Em breve os dados aparecem aqui.'
+                    : 'Ajuste os filtros ou clique em Sincronizar para puxar do PNCP.'
+                }
+              />
+              {totalPaginas > 1 ? (
+                <div className={cadastroListClasses.pagination}>
+                  <ListPagination
+                    currentPage={currentPage}
+                    totalPages={totalPaginas}
+                    onPageChange={goToPage}
+                  />
+                </div>
+              ) : null}
+            </div>
           ) : (
             <>
               <CadastroListSummary
@@ -459,7 +736,11 @@ function LicitacoesPncpPageContent() {
                 totalPages={totalPaginas}
               />
 
-              <div className="overflow-x-auto">
+              <div
+                className={`overflow-x-auto transition-opacity ${
+                  query.isFetching && !showInitialLoading ? 'opacity-60' : ''
+                }`}
+              >
                 <table className="w-full min-w-[72rem] text-sm">
                   <thead className="border-b border-gray-200 dark:border-gray-700">
                     <tr>
@@ -506,9 +787,20 @@ function LicitacoesPncpPageContent() {
                               </div>
                               <div
                                 className="mt-0.5 text-xs text-gray-500 dark:text-gray-400 line-clamp-2"
-                                title={row.unidadeCompradora || undefined}
+                                title={
+                                  [
+                                    row.codigoUnidadeCompradora,
+                                    row.unidadeCompradora,
+                                  ]
+                                    .filter(Boolean)
+                                    .join(' - ') || undefined
+                                }
                               >
-                                {row.unidadeCompradora || '—'}
+                                {row.codigoUnidadeCompradora && row.unidadeCompradora
+                                  ? `${row.codigoUnidadeCompradora} - ${row.unidadeCompradora}`
+                                  : row.unidadeCompradora ||
+                                    row.codigoUnidadeCompradora ||
+                                    '—'}
                               </div>
                             </div>
                           </td>
@@ -534,7 +826,7 @@ function LicitacoesPncpPageContent() {
                           </td>
                           <td className={cadastroListClasses.td}>
                             <div className="min-w-[16rem] max-w-[28rem]">
-                              <ObjetoExpandable text={row.objeto} />
+                              <ObjetoExpandable text={row.objeto} keywords={keywords} />
                             </div>
                           </td>
                           <td className={cadastroListClasses.tdCenter}>
@@ -555,21 +847,26 @@ function LicitacoesPncpPageContent() {
                             {formatCurrency(row.valorEstimado)}
                           </td>
                           <td className={cadastroListClasses.tdCenter}>
-                            {row.linkSistemaOrigem ? (
-                              <a
-                                href={row.linkSistemaOrigem}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                onClick={(e) => e.stopPropagation()}
-                                className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-100 hover:text-red-600 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-red-400"
-                                aria-label="Abrir sistema de origem"
-                                title="Abrir origem"
-                              >
-                                <ExternalLink className="h-4 w-4" aria-hidden />
-                              </a>
-                            ) : (
-                              '—'
-                            )}
+                            {(() => {
+                              const href =
+                                buildPncpEditalUrl(row.numeroControlePNCP) ||
+                                row.linkPncp ||
+                                null;
+                              if (!href) return '—';
+                              return (
+                                <a
+                                  href={href}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-100 hover:text-red-600 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-red-400"
+                                  aria-label="Abrir edital no PNCP"
+                                  title="Abrir no PNCP"
+                                >
+                                  <ExternalLink className="h-4 w-4" aria-hidden />
+                                </a>
+                              );
+                            })()}
                           </td>
                         </tr>
                       );
@@ -635,8 +932,8 @@ function LicitacoesPncpPageContent() {
                 <StringSingleSelectDropdown
                   value={modalidadeOptionLabel(modalidadeCodigo)}
                   onChange={(label) => {
-                    const codigo =
-                      label === 'Todas' ? 'all' : label.split('—')[0]?.trim() || '6';
+                    const found = MODALIDADE_OPTIONS.find((m) => m.nome === label);
+                    const codigo = found ? String(found.codigo) : 'all';
                     setModalidadeCodigo(codigo);
                     commitFilters({
                       uf,
@@ -692,8 +989,55 @@ function LicitacoesPncpPageContent() {
                 </div>
               </div>
 
+              <div className="rounded-lg border border-gray-200 p-3 dark:border-gray-700">
+                <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                  Espelho por palavras-chave
+                </p>
+                <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                  O sync guarda só objetos de{' '}
+                  <strong className="font-semibold text-gray-700 dark:text-gray-200">
+                    engenharia
+                  </strong>{' '}
+                  /{' '}
+                  <strong className="font-semibold text-gray-700 dark:text-gray-200">
+                    predial
+                  </strong>{' '}
+                  /{' '}
+                  <strong className="font-semibold text-gray-700 dark:text-gray-200">
+                    áreas verdes
+                  </strong>{' '}
+                  (e afins). A lista lê o banco local — sem rate limit do PNCP.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setShowKeywordsList((v) => !v)}
+                  className="mt-2 text-xs font-medium text-red-600 hover:text-red-700 dark:text-red-400"
+                >
+                  {showKeywordsList ? 'Ocultar palavras-chave' : 'Ver palavras-chave'}
+                </button>
+                {showKeywordsList ? (
+                  <div className="mt-2 max-h-36 overflow-y-auto">
+                    {keywordsQuery.isLoading ? (
+                      <p className="text-xs text-gray-500">Carregando...</p>
+                    ) : (
+                      <div className="flex flex-wrap gap-1.5">
+                        {(keywordsQuery.data ?? []).slice(0, 80).map((kw) => (
+                          <span
+                            key={kw}
+                            className="rounded bg-gray-100 px-1.5 py-0.5 text-[11px] text-gray-700 dark:bg-gray-700 dark:text-gray-200"
+                          >
+                            {kw}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ) : null}
+              </div>
+
               <p className="text-xs text-gray-500 dark:text-gray-400">
-                Fonte: API pública do PNCP. Id PNCP busca direto; demais termos varrem páginas do período.
+                Sync automático a cada ~1h (Brasil, últimos 30 dias). Use o botão de nuvem para forçar
+                agora.
               </p>
             </div>
 
@@ -712,6 +1056,164 @@ function LicitacoesPncpPageContent() {
               <button
                 type="button"
                 onClick={() => setShowFilters(false)}
+                className="rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+              >
+                Fechar
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {showSyncModal ? (
+        <div className="fixed inset-0 z-[2100] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setShowSyncModal(false)} />
+          <div className="relative flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-lg bg-white shadow-xl dark:bg-gray-800">
+            <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4 dark:border-gray-700">
+              <div>
+                <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">
+                  Sincronização PNCP
+                </h3>
+                <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                  {syncRunning
+                    ? `Em andamento${
+                        syncStatusQuery.data?.currentUf
+                          ? ` · UF ${syncStatusQuery.data.currentUf}`
+                          : ''
+                      }${
+                        syncStatusQuery.data?.currentModalidade
+                          ? ` · ${syncStatusQuery.data.currentModalidade}`
+                          : ''
+                      }`
+                    : `Última sync: ${formatSyncLabel(lastSyncAt)}`}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowSyncModal(false)}
+                className="rounded-lg p-2 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700"
+                aria-label="Fechar"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4 overflow-y-auto px-5 py-4">
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <div className="rounded-lg border border-gray-200 p-3 dark:border-gray-700">
+                  <p className="text-[11px] uppercase tracking-wide text-gray-500">No espelho</p>
+                  <p className="mt-1 text-lg font-semibold text-gray-900 dark:text-gray-100">
+                    {(mirror?.total ?? 0).toLocaleString('pt-BR')}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-gray-200 p-3 dark:border-gray-700">
+                  <p className="text-[11px] uppercase tracking-wide text-gray-500">Nesta sync</p>
+                  <p className="mt-1 text-lg font-semibold text-gray-900 dark:text-gray-100">
+                    {(progress?.upserted ?? syncProgress?.upserted ?? 0).toLocaleString('pt-BR')}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-gray-200 p-3 dark:border-gray-700">
+                  <p className="text-[11px] uppercase tracking-wide text-gray-500">UFs feitas</p>
+                  <p className="mt-1 text-lg font-semibold text-gray-900 dark:text-gray-100">
+                    {progress?.doneUfs ?? 0}/{progress?.totalUfs ?? 27}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-gray-200 p-3 dark:border-gray-700">
+                  <p className="text-[11px] uppercase tracking-wide text-gray-500">Faltam</p>
+                  <p className="mt-1 text-lg font-semibold text-gray-900 dark:text-gray-100">
+                    {progress?.pendingUfs ?? 0} UFs
+                  </p>
+                </div>
+              </div>
+
+              <div>
+                <div className="mb-1.5 flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
+                  <span>Progresso por UF</span>
+                  <span>{syncPct}%</span>
+                </div>
+                <div className="h-2 overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700">
+                  <div
+                    className="h-full rounded-full bg-red-600 transition-all duration-500"
+                    style={{ width: `${syncPct}%` }}
+                  />
+                </div>
+                <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                  {(progress?.pagesFetched ?? 0).toLocaleString('pt-BR')} páginas consultadas
+                  {(progress?.rateLimitHits ?? 0) > 0
+                    ? ` · ${progress?.rateLimitHits} rate-limit`
+                    : ''}
+                  {progress?.lookbackDays ? ` · últimos ${progress.lookbackDays} dias` : ''}
+                </p>
+              </div>
+
+              <div>
+                <p className="mb-2 text-sm font-medium text-gray-900 dark:text-gray-100">
+                  Status por UF
+                </p>
+                <div className="max-h-56 overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-700">
+                  <table className="w-full text-sm">
+                    <thead className="sticky top-0 bg-gray-50 text-left text-xs uppercase text-gray-500 dark:bg-gray-900/80 dark:text-gray-400">
+                      <tr>
+                        <th className="px-3 py-2 font-medium">UF</th>
+                        <th className="px-3 py-2 font-medium">Status</th>
+                        <th className="px-3 py-2 text-right font-medium">Sync</th>
+                        <th className="px-3 py-2 text-right font-medium">Espelho</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                      {(progress?.ufs ?? []).map((row) => {
+                        const mirrorCount =
+                          mirror?.byUf.find((m) => m.uf === row.uf)?.count ?? 0;
+                        const statusLabel =
+                          row.status === 'done'
+                            ? 'Feito'
+                            : row.status === 'running'
+                              ? 'Agora'
+                              : row.status === 'error'
+                                ? 'Erro'
+                                : 'Falta';
+                        const statusCls =
+                          row.status === 'done'
+                            ? 'text-emerald-600 dark:text-emerald-400'
+                            : row.status === 'running'
+                              ? 'font-semibold text-red-600 dark:text-red-400'
+                              : row.status === 'error'
+                                ? 'text-amber-600 dark:text-amber-400'
+                                : 'text-gray-400';
+                        return (
+                          <tr key={row.uf} className="bg-white dark:bg-gray-800">
+                            <td className="px-3 py-1.5 font-medium text-gray-900 dark:text-gray-100">
+                              {row.uf}
+                            </td>
+                            <td className={`px-3 py-1.5 ${statusCls}`}>{statusLabel}</td>
+                            <td className="px-3 py-1.5 text-right tabular-nums text-gray-700 dark:text-gray-300">
+                              {row.upsertedThisRun.toLocaleString('pt-BR')}
+                            </td>
+                            <td className="px-3 py-1.5 text-right tabular-nums text-gray-700 dark:text-gray-300">
+                              {mirrorCount.toLocaleString('pt-BR')}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between gap-2 border-t border-gray-200 px-5 py-4 dark:border-gray-700">
+              <button
+                type="button"
+                onClick={() => syncMutation.mutate()}
+                disabled={syncRunning}
+                className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+              >
+                <DownloadCloud className="h-4 w-4" />
+                {syncRunning ? 'Sincronizando…' : 'Sincronizar agora'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowSyncModal(false)}
                 className="rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
               >
                 Fechar

@@ -1,8 +1,12 @@
+import { PNCP_KEYWORDS_OBJETO_PADRAO } from './pncpKeywords';
+
+export { PNCP_KEYWORDS_OBJETO_PADRAO };
+
 const PNCP_CONSULTA_BASE = 'https://pncp.gov.br/api/consulta/v1';
 const PNCP_FETCH_TIMEOUT_MS = 45_000;
 /** Limite ao varrer páginas na busca textual (evita rate-limit). */
-const PNCP_MAX_PAGES_BUSCA = 20;
-const PNCP_PAGE_DELAY_MS = 350;
+const PNCP_MAX_PAGES_BUSCA = 6;
+const PNCP_PAGE_DELAY_MS = 500;
 
 export const PNCP_MODALIDADES = [
   { codigo: 6, nome: 'Pregão Eletrônico' },
@@ -24,6 +28,11 @@ export type PncpConsultaParams = {
   tamanhoPagina?: number;
   /** Filtro opcional no objeto/órgão/processo (case-insensitive, sem acento). */
   q?: string;
+  /**
+   * Quando true, mantém só contratações cujo objeto casa com as palavras-chave
+   * padrão (engenharia, manutenção predial, áreas verdes, etc.).
+   */
+  filtroKeywords?: boolean;
 };
 
 export type PncpContratacaoListItem = {
@@ -98,10 +107,17 @@ function normalizeSearchText(value: string): string {
     .trim();
 }
 
+export function normalizePncpSearchText(value: string): string {
+  return normalizeSearchText(value);
+}
+
 function buildPncpPortalLink(item: Record<string, unknown>): string | null {
   const numero = asString(item.numeroControlePNCP);
-  if (numero) {
-    return `https://pncp.gov.br/app/editais/${encodeURIComponent(numero)}`;
+  // Padrão: CNPJ-1-SEQUENCIAL/ANO → /app/editais/{CNPJ}/{ANO}/{SEQUENCIAL}
+  const parsed = numero?.match(/^(\d{14})-\d+-(\d+)\s*\/\s*(\d{4})$/);
+  if (parsed) {
+    const [, cnpj, seq, ano] = parsed;
+    return `https://pncp.gov.br/app/editais/${cnpj}/${ano}/${seq}`;
   }
   const orgao = asRecord(item.orgaoEntidade);
   const cnpj = asString(orgao.cnpj);
@@ -243,14 +259,53 @@ function applyTextFilter(items: PncpContratacaoListItem[], qRaw: string): PncpCo
   });
 }
 
-/** Com termo de busca: percorre várias páginas do PNCP e filtra localmente. */
+const KEYWORDS_NORMALIZED = PNCP_KEYWORDS_OBJETO_PADRAO.map((k) => normalizeSearchText(k)).filter(
+  (k, i, arr) => k.length >= 3 && arr.indexOf(k) === i
+);
+
+export function objetoMatchesPncpKeywords(objeto: string | null | undefined): boolean {
+  if (KEYWORDS_NORMALIZED.length === 0) return true;
+  const texto = normalizeSearchText(objeto || '');
+  if (!texto) return false;
+  return KEYWORDS_NORMALIZED.some((kw) => texto.includes(kw));
+}
+
+/** Filtra pelo objeto: basta casar com qualquer palavra-chave padrão. */
+function applyKeywordsObjetoFilter(items: PncpContratacaoListItem[]): PncpContratacaoListItem[] {
+  if (KEYWORDS_NORMALIZED.length === 0) return items;
+  return items.filter((item) => objetoMatchesPncpKeywords(item.objeto));
+}
+
+function paginateItems(
+  items: PncpContratacaoListItem[],
+  pagina: number,
+  tamanhoPagina: number
+): PncpConsultaResult {
+  const totalRegistros = items.length;
+  const totalPaginas = Math.max(1, Math.ceil(totalRegistros / tamanhoPagina) || 1);
+  const safePage = Math.min(Math.max(1, pagina), totalPaginas);
+  const start = (safePage - 1) * tamanhoPagina;
+  const pageItems = items.slice(start, start + tamanhoPagina);
+  return {
+    items: pageItems,
+    pagina: safePage,
+    tamanhoPagina,
+    totalRegistros,
+    totalPaginas,
+    empty: pageItems.length === 0,
+  };
+}
+
+/** Percorre páginas do PNCP e filtra localmente (busca e/ou palavras-chave). */
 async function fetchModalidadeComBusca(params: {
   dataInicial: string;
   dataFinal: string;
   uf: string;
   codigo: number;
   tamanhoPagina: number;
-  q: string;
+  pagina: number;
+  q?: string;
+  filtroKeywords?: boolean;
   timeoutMs?: number;
   maxPages?: number;
 }): Promise<PncpConsultaResult> {
@@ -260,7 +315,7 @@ async function fetchModalidadeComBusca(params: {
     uf: params.uf,
     codigo: params.codigo,
     pagina: 1,
-    tamanhoPagina: params.tamanhoPagina,
+    tamanhoPagina: Math.min(50, Math.max(params.tamanhoPagina, 20)),
     timeoutMs: params.timeoutMs,
   });
 
@@ -280,19 +335,18 @@ async function fetchModalidadeComBusca(params: {
         uf: params.uf,
         codigo: params.codigo,
         pagina: page,
-        tamanhoPagina: params.tamanhoPagina,
+        tamanhoPagina: Math.min(50, Math.max(params.tamanhoPagina, 20)),
         timeoutMs: params.timeoutMs,
       });
       collected.push(...next.items);
     } catch (err) {
       const message = err instanceof Error ? err.message : '';
       if (/limite de requisi/i.test(message)) break;
-      // página pontual falhou — segue com o que já tem
     }
   }
 
   const seen = new Set<string>();
-  const unique: PncpContratacaoListItem[] = [];
+  let unique: PncpContratacaoListItem[] = [];
   for (const item of collected) {
     const key = itemKey(item);
     if (seen.has(key)) continue;
@@ -300,21 +354,32 @@ async function fetchModalidadeComBusca(params: {
     unique.push(item);
   }
 
-  const items = applyTextFilter(unique, params.q);
-  items.sort((a, b) => {
+  if (params.filtroKeywords) {
+    unique = applyKeywordsObjetoFilter(unique);
+  }
+  if (params.q?.trim()) {
+    unique = applyTextFilter(unique, params.q);
+  }
+
+  unique.sort((a, b) => {
     const da = a.dataInclusao || a.dataAberturaProposta || '';
     const db = b.dataInclusao || b.dataAberturaProposta || '';
     return db.localeCompare(da);
   });
 
-  return {
-    items,
-    pagina: 1,
-    tamanhoPagina: params.tamanhoPagina,
-    totalRegistros: items.length,
-    totalPaginas: 1,
-    empty: items.length === 0,
-  };
+  return paginateItems(unique, params.pagina, params.tamanhoPagina);
+}
+
+export async function fetchPncpPublicacaoPage(params: {
+  dataInicial: string;
+  dataFinal: string;
+  uf: string;
+  codigo: number;
+  pagina: number;
+  tamanhoPagina: number;
+  timeoutMs?: number;
+}): Promise<PncpConsultaResult> {
+  return fetchUmaModalidade(params);
 }
 
 async function fetchUmaModalidade(params: {
@@ -532,26 +597,35 @@ export async function consultarContratacoesPublicacao(
   const pagina = Math.max(1, Number(params.pagina) || 1);
   const tamanhoPagina = Math.min(50, Math.max(10, Number(params.tamanhoPagina) || 50));
   const q = String(params.q || '').trim();
+  const filtroKeywords = Boolean(params.filtroKeywords);
+  // Só varre páginas na busca textual. Palavras-chave filtram a página atual (1 request).
+  const precisaVarrer = Boolean(q);
 
   // Colou o Id contratação PNCP → busca direta (ignora varredura de páginas).
   if (q && parseNumeroControlePncp(q)) {
     const byId = await fetchPorNumeroControle(q, tamanhoPagina);
-    if (byId) return byId;
+    if (byId) {
+      if (!filtroKeywords) return byId;
+      const items = applyKeywordsObjetoFilter(byId.items);
+      return { ...byId, items, empty: items.length === 0, totalRegistros: items.length };
+    }
   }
 
   if (!todas) {
-    if (q) {
+    if (precisaVarrer) {
       return fetchModalidadeComBusca({
         dataInicial,
         dataFinal,
         uf,
         codigo: modalidades[0],
         tamanhoPagina,
+        pagina,
         q,
+        filtroKeywords,
       });
     }
 
-    return fetchUmaModalidade({
+    const page = await fetchUmaModalidade({
       dataInicial,
       dataFinal,
       uf,
@@ -559,6 +633,13 @@ export async function consultarContratacoesPublicacao(
       pagina,
       tamanhoPagina,
     });
+    if (!filtroKeywords) return page;
+    const items = applyKeywordsObjetoFilter(page.items);
+    return {
+      ...page,
+      items,
+      empty: items.length === 0,
+    };
   }
 
   // Todas: uma modalidade por vez, sem retry, com pausa curta (evita rate-limit).
@@ -567,16 +648,19 @@ export async function consultarContratacoesPublicacao(
 
   for (let i = 0; i < modalidades.length; i++) {
     try {
-      const result = q
+      const result = precisaVarrer
         ? await fetchModalidadeComBusca({
             dataInicial,
             dataFinal,
             uf,
             codigo: modalidades[i],
-            tamanhoPagina,
+            // Coleta o máximo filtrado por modalidade; pagina no merge final.
+            tamanhoPagina: 5000,
+            pagina: 1,
             q,
+            filtroKeywords,
             timeoutMs: 35_000,
-            maxPages: 5,
+            maxPages: 4,
           })
         : await fetchUmaModalidade({
             dataInicial,
@@ -592,12 +676,14 @@ export async function consultarContratacoesPublicacao(
       const message = err instanceof Error ? err.message : '';
       if (/limite de requisi/i.test(message)) {
         rateLimited = true;
+        // Se já temos algo, devolve parcial em vez de travar a tela.
+        if (results.length > 0) break;
         break;
       }
       // ignora falha pontual de uma modalidade e segue nas demais
     }
     if (i < modalidades.length - 1) {
-      await new Promise((r) => setTimeout(r, 400));
+      await new Promise((r) => setTimeout(r, 600));
     }
   }
 
@@ -620,22 +706,30 @@ export async function consultarContratacoesPublicacao(
     }
   }
 
+  if (!precisaVarrer && filtroKeywords) {
+    items = applyKeywordsObjetoFilter(items);
+  }
+
   items.sort((a, b) => {
     const da = a.dataInclusao || a.dataAberturaProposta || '';
     const db = b.dataInclusao || b.dataAberturaProposta || '';
     return db.localeCompare(da);
   });
 
-  // Com q, cada modalidade já veio filtrada; sem q, não aplica filtro.
+  if (precisaVarrer) {
+    // Busca textual: cada modalidade já veio filtrada; re-pagina o conjunto unificado.
+    return paginateItems(items, pagina, tamanhoPagina);
+  }
+
   const totalRegistrosApi = results.reduce((sum, r) => sum + (r.totalRegistros || 0), 0);
   const totalPaginasApi = Math.max(1, ...results.map((r) => r.totalPaginas || 0), 1);
 
   return {
     items,
-    pagina: q ? 1 : pagina,
+    pagina,
     tamanhoPagina,
-    totalRegistros: q ? items.length : totalRegistrosApi || items.length,
-    totalPaginas: q ? 1 : totalPaginasApi,
+    totalRegistros: totalRegistrosApi || items.length,
+    totalPaginas: totalPaginasApi,
     empty: items.length === 0,
   };
 }

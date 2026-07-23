@@ -3432,3 +3432,63 @@ model RepasseFinanceiro {
   @@index([fornecedor])
   @@map("repasses_financeiros")
 }
+
+/// Espelho local de contratações PNCP (ingestão por keywords, janela recente).
+model PncpContratacao {
+  id                       String    @id @default(cuid())
+  numeroControlePNCP       String    @unique
+  sequencialCompra         Int?
+  processo                 String?
+  objeto                   String?   @db.Text
+  objetoNorm               String?   @db.Text
+  orgao                    String?
+  cnpjOrgao                String?
+  unidadeCompradora        String?
+  codigoUnidadeCompradora  String?
+  uf                       String
+  municipio                String?
+  modalidade               String?
+  codigoModalidade         Int
+  situacao                 String?
+  modoDisputa              String?
+  plataforma               String?
+  srp                      Boolean?
+  valorEstimado            Float?
+  valorHomologado          Float?
+  dataInclusao             DateTime?
+  dataAberturaProposta     DateTime?
+  dataEncerramentoProposta DateTime?
+  amparoLegal              String?   @db.Text
+  linkSistemaOrigem        String?
+  linkPncp                 String?
+  syncedAt                 DateTime  @default(now())
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
+
+  @@index([uf])
+  @@index([codigoModalidade])
+  @@index([dataInclusao])
+  @@index([uf, codigoModalidade, dataInclusao])
+  @@index([syncedAt])
+  @@map("pncp_contratacoes")
+}
+
+/// Histórico / status das sincronizações PNCP → banco local.
+model PncpSyncRun {
+  id            String    @id @default(cuid())
+  status        String // running | success | partial | failed
+  trigger       String // cron | manual
+  startedAt     DateTime  @default(now())
+  finishedAt    DateTime?
+  lookbackDays  Int
+  pagesFetched  Int       @default(0)
+  upserted      Int       @default(0)
+  pruned        Int       @default(0)
+  rateLimitHits Int       @default(0)
+  errorMessage  String?   @db.Text
+  createdAt     DateTime  @default(now())
+
+  @@index([startedAt])
+  @@index([status])
+  @@map("pncp_sync_runs")
+}

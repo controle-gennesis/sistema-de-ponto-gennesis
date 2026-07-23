@@ -10,6 +10,10 @@ type CadastroListSummaryProps = {
   itemLabelPlural?: string;
   currentPage?: number;
   totalPages?: number;
+  /** Quando true, oculta o texto "Página X de Y". */
+  hidePageLabel?: boolean;
+  /** Centraliza horizontalmente o texto "Página X de Y". */
+  centerPageLabel?: boolean;
 };
 
 export function getCadastroListRange(page: number, limit: number, total: number) {
@@ -66,19 +70,33 @@ export function CadastroListSummary({
   itemLabel,
   itemLabelPlural,
   currentPage = 1,
-  totalPages = 1
+  totalPages = 1,
+  hidePageLabel = false,
+  centerPageLabel = false,
 }: CadastroListSummaryProps) {
   const plural = itemLabelPlural ?? `${itemLabel}s`;
   const label = total === 1 ? itemLabel : plural;
 
   return (
-    <div className={cadastroListClasses.listSummary}>
-      <span>
+    <div
+      className={`${cadastroListClasses.listSummary}${
+        centerPageLabel && !hidePageLabel ? ' relative' : ''
+      }`}
+    >
+      <span className={centerPageLabel && !hidePageLabel ? 'sm:mr-auto' : undefined}>
         Mostrando {startItem} a {endItem} de {total} {label}
       </span>
-      <span>
-        Página {currentPage} de {totalPages}
-      </span>
+      {hidePageLabel ? null : (
+        <span
+          className={
+            centerPageLabel
+              ? 'text-center sm:absolute sm:left-1/2 sm:-translate-x-1/2'
+              : undefined
+          }
+        >
+          Página {currentPage} de {totalPages}
+        </span>
+      )}
     </div>
   );
 }

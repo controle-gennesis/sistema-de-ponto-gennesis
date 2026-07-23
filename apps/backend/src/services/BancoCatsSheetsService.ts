@@ -118,14 +118,33 @@ function parseGvizPayload(raw: string): GvizResponse {
   return JSON.parse(match[1]) as GvizResponse;
 }
 
+function formatNumberBr(value: number): string {
+  return value.toLocaleString('pt-BR', {
+    maximumFractionDigits: 6,
+  });
+}
+
+function isBlankOrDash(text: string | null | undefined): boolean {
+  const t = (text ?? '').trim();
+  return !t || t === '-' || t === '—' || t === '–' || t === '−';
+}
+
 function formatCell(cell: GvizCell | undefined): string {
   if (!cell) return '';
-  const formatted = cell.f?.trim();
-  if (formatted) return formatted;
+  const formatted = cell.f?.trim() ?? '';
   const value = cell.v;
+
+  // QUANT. e números: o GViz às vezes manda `f` vazio/`-` e o valor real em `v`.
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    if (isBlankOrDash(formatted)) return formatNumberBr(value);
+    return formatted;
+  }
+
+  if (!isBlankOrDash(formatted)) return formatted;
   if (value == null) return '';
   if (typeof value === 'boolean') return value ? 'TRUE' : 'FALSE';
-  return String(value).trim();
+  const asText = String(value).trim();
+  return isBlankOrDash(asText) ? '' : asText;
 }
 
 function normalizeHeader(label: string | null | undefined, index: number): string {

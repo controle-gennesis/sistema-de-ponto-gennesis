@@ -96,6 +96,7 @@ import logisticsDeliveryRequestRoutes from './routes/logisticsDeliveryRequests';
 import approvalsRoutes from './routes/approvals';
 import licitacoesRoutes from './routes/licitacoes';
 import pncpRoutes from './routes/pncp';
+import { startPncpSyncScheduler } from './services/PncpIngestService';
 import { LicitacaoController } from './controllers/LicitacaoController';
 import { authenticate, AuthRequest } from './middleware/auth';
 import { removeOrphanUserPermissions } from './lib/permissionRegistrySync';
@@ -461,6 +462,12 @@ try {
     console.log('📋 Licitações: checklist-template + PATCH /:id/analise-manual + /:id/finalizar-analise ativos');
     console.log('═══════════════════════════════════════');
     console.log('');
+
+    try {
+      startPncpSyncScheduler();
+    } catch (e) {
+      console.error('[pncp-sync] falha ao agendar:', e);
+    }
 
     // Pré-aquecer os datasets Fluig em background para carregamento instantâneo
     if (process.env.FLUIG_CONSUMER_KEY && process.env.FLUIG_ACCESS_TOKEN) {
