@@ -1,9 +1,12 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useRouter } from 'next/navigation';
 import {
   AlertCircle,
+  ChevronDown,
+  ChevronUp,
   ClipboardList,
   ExternalLink,
   Filter,
@@ -24,6 +27,7 @@ import {
 import { ListPagination } from '@/components/ui/ListPagination';
 import { DatePickerField } from '@/components/ui/DatePickerField';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { Loading } from '@/components/ui/Loading';
 import { cadastroListClasses } from '@/components/ui/RowActionMenu';
 import { getListTableRowClassName } from '@/components/ui/listTableUi';
 import api from '@/lib/api';
@@ -120,6 +124,63 @@ function DateTimeStacked({ iso }: { iso: string | null }) {
   );
 }
 
+function ObjetoExpandable({ text }: { text: string | null }) {
+  const [expanded, setExpanded] = useState(false);
+  const [needsToggle, setNeedsToggle] = useState(false);
+  const textRef = useRef<HTMLParagraphElement>(null);
+  const value = text?.trim() || '';
+
+  useEffect(() => {
+    setExpanded(false);
+  }, [value]);
+
+  useEffect(() => {
+    const el = textRef.current;
+    if (!el || !value) {
+      setNeedsToggle(false);
+      return;
+    }
+    if (expanded) return;
+    setNeedsToggle(el.scrollHeight > el.clientHeight + 2);
+  }, [value, expanded]);
+
+  if (!value) {
+    return <p className="text-sm text-gray-800 dark:text-gray-200">—</p>;
+  }
+
+  return (
+    <div>
+      <p
+        ref={textRef}
+        className={`text-sm leading-relaxed text-gray-800 dark:text-gray-200 ${
+          expanded ? '' : 'line-clamp-3'
+        }`}
+      >
+        {value}
+      </p>
+      {needsToggle || expanded ? (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="mt-1.5 inline-flex items-center gap-1 text-xs font-medium text-red-600 transition-colors hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+        >
+          {expanded ? (
+            <>
+              Ver menos
+              <ChevronUp className="h-3.5 w-3.5" aria-hidden />
+            </>
+          ) : (
+            <>
+              Ver mais
+              <ChevronDown className="h-3.5 w-3.5" aria-hidden />
+            </>
+          )}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 function formatCurrency(value: number | null): string {
   if (value == null || !Number.isFinite(value)) return '—';
   return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -187,7 +248,7 @@ function LicitacoesPncpPageContent() {
           dataInicial: dateInputToYyyymmdd(applied.dataInicial),
           dataFinal: dateInputToYyyymmdd(applied.dataFinal),
           pagina: applied.pagina,
-          tamanhoPagina: 50,
+          tamanhoPagina: 20,
           ...(hasSearch ? { q: searchTerm } : {}),
         },
         timeout:
@@ -203,7 +264,7 @@ function LicitacoesPncpPageContent() {
   const totalRegistros = query.data?.totalRegistros ?? items.length;
   const totalPaginas = Math.max(1, query.data?.totalPaginas ?? 1);
   const currentPage = query.data?.pagina ?? applied.pagina;
-  const pageSize = query.data?.tamanhoPagina ?? 50;
+  const pageSize = query.data?.tamanhoPagina ?? 20;
   const startItem = totalRegistros === 0 ? 0 : (currentPage - 1) * pageSize + 1;
   const endItem =
     totalRegistros === 0 ? 0 : Math.min(currentPage * pageSize, totalRegistros);
@@ -399,7 +460,7 @@ function LicitacoesPncpPageContent() {
               />
 
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[76rem] text-sm">
+                <table className="w-full min-w-[72rem] text-sm">
                   <thead className="border-b border-gray-200 dark:border-gray-700">
                     <tr>
                       <th scope="col" className={cadastroListClasses.th}>
@@ -471,13 +532,10 @@ function LicitacoesPncpPageContent() {
                               ) : null}
                             </div>
                           </td>
-                          <td className={cadastroListClasses.tdTruncate}>
-                            <span
-                              className="block max-w-[22rem] text-sm text-gray-900 dark:text-gray-100 line-clamp-3"
-                              title={row.objeto || undefined}
-                            >
-                              {row.objeto || '—'}
-                            </span>
+                          <td className={cadastroListClasses.td}>
+                            <div className="min-w-[16rem] max-w-[28rem]">
+                              <ObjetoExpandable text={row.objeto} />
+                            </div>
                           </td>
                           <td className={cadastroListClasses.tdCenter}>
                             <div>{row.processo || '—'}</div>
@@ -667,9 +725,35 @@ function LicitacoesPncpPageContent() {
 }
 
 export default function LicitacoesPncpPage() {
+  const router = useRouter();
+  const { data: userData, isLoading: loadingUser } = useQuery({
+    queryKey: ['auth-me'],
+    queryFn: async () => {
+      const res = await api.get('/auth/me');
+      return res.data;
+    },
+    staleTime: 5 * 60_000,
+  });
+
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    sessionStorage.removeItem('token');
+    router.push('/auth/login');
+  };
+
+  const user = userData?.data || { name: 'Usuário', role: 'EMPLOYEE' as const };
+
+  if (loadingUser) {
+    return <Loading message="Carregando..." fullScreen size="lg" />;
+  }
+
   return (
     <ProtectedRoute route="/ponto/licitacoes">
-      <MainLayout>
+      <MainLayout
+        userRole="EMPLOYEE"
+        userName={user.name || ''}
+        onLogout={handleLogout}
+      >
         <LicitacoesPncpPageContent />
       </MainLayout>
     </ProtectedRoute>
