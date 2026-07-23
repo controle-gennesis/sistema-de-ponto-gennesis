@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import clsx from 'clsx';
 import api from '@/lib/api';
+import { loadPdfjs } from '@/lib/loadPdfjs';
 
 export const PDF_ATTACHMENT_WIDTH = 340;
 export const PDF_PREVIEW_MAX_HEIGHT = 140;
@@ -35,8 +36,7 @@ export function ChatPdfPagePreview({ src, fileName, fileKey, className, maxHeigh
       started = true;
 
       try {
-        const pdfjs = await import('pdfjs-dist');
-        pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+        const pdfjs = await loadPdfjs();
 
         const response = await api.get('/chats/direct/attachments/download', {
           params: {

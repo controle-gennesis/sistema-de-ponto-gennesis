@@ -5,6 +5,7 @@ export const APP_TITLE = 'Gennesis Conecta';
 /** Rotas que não estão em PERMISSION_MODULES ou usam href diferente no menu. */
 const EXTRA_PAGE_TITLES: Record<string, string> = {
   '/ponto/home': 'Início',
+  '/ponto/agenda': 'Agenda',
   '/ponto/aprovacoes': 'Aprovações',
   '/ponto/solicitacoes-gerais': 'Solicitações DP/ADM/TST',
   '/ponto/gerenciar-solicitacoes-gerais': 'Gerenciar Solicitações',

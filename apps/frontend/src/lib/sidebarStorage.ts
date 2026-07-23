@@ -9,7 +9,7 @@ export const SIDEBAR_WIDTH_COLLAPSED = '5rem';
 export const SIDEBAR_TRANSITION_CLASS = 'duration-500 ease-in-out';
 
 /** Atalhos do rodapé do rail — recolhem o painel tier 2 automaticamente */
-export const RAIL_FOOTER_ROUTES = ['/ponto/conversas', '/ponto/kanban', '/ponto/drive', '/ponto/flow'] as const;
+export const RAIL_FOOTER_ROUTES = ['/ponto/agenda', '/ponto/conversas', '/ponto/kanban', '/ponto/drive', '/ponto/flow'] as const;
 
 export function isRailFooterRoute(pathname: string | null): boolean {
   if (pathname == null) return false;
