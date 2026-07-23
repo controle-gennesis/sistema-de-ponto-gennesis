@@ -43,18 +43,31 @@ function AgendaPage() {
 
   return (
     <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
-      <div className="flex flex-col -mx-2 sm:-mx-4">
-        <div className="mb-4 flex flex-shrink-0 items-center justify-between gap-3 px-4">
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">
-            {agendaView === 'tasks' ? 'Tarefas' : 'Agenda'}
-          </h1>
-          <AgendaModeSwitcher mode={agendaView} onChange={setView} />
-        </div>
-
+      <div
+        className={
+          agendaView === 'planner'
+            ? 'flex h-[calc(100dvh-2rem)] flex-col overflow-hidden -mx-2 sm:-mx-4 lg:h-[calc(100dvh-4rem)]'
+            : 'flex flex-col -mx-2 sm:-mx-4'
+        }
+      >
         {agendaView === 'tasks' ? (
-          <KanbanTasksView />
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-wrap items-start justify-between gap-3 px-4">
+              <div>
+                <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">Tarefas</h1>
+                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Minhas tarefas</p>
+              </div>
+              <AgendaModeSwitcher mode="tasks" onChange={setView} />
+            </div>
+            <KanbanTasksView />
+          </div>
         ) : (
-          <KanbanPlannerView />
+          <KanbanPlannerView
+            mode="planner"
+            onModeChange={setView}
+            pageTitle="Agenda"
+            pageSubtitle="Agenda pessoal"
+          />
         )}
       </div>
     </MainLayout>

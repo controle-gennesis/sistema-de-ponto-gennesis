@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { ChevronDown, ChevronLeft, ChevronRight, Trash2, RefreshCw, Share2, FileText, Upload, Download, X, CheckSquare, MoreVertical } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, Trash2, RefreshCw, Share2, FileText, Upload, Download, X, CheckSquare, MoreVertical, Plus } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
@@ -31,9 +31,13 @@ import {
   type PlannerTask,
 } from '@/lib/plannerTasks';
 import { PlannerAgendaShareModal } from './PlannerAgendaShareModal';
+import {
+  AgendaModeSwitcher,
+  type AgendaSurfaceMode,
+} from './AgendaModeSwitcher';
 
-const HOUR_START = 7;
-const HOUR_END = 21;
+const HOUR_START = 0;
+const HOUR_END = 23;
 const HOURS = Array.from({ length: HOUR_END - HOUR_START + 1 }, (_, i) => HOUR_START + i);
 const ROW_HEIGHT = 56;
 const TIME_COL_WIDTH = 64;
@@ -120,9 +124,101 @@ function fromLocalInputValue(value: string): string {
 }
 
 function formatHourLabel(hour: number): string {
+  if (hour === 0) return '12 am';
   const h12 = hour % 12 === 0 ? 12 : hour % 12;
   const suffix = hour < 12 ? 'am' : 'pm';
   return `${h12} ${suffix}`;
+}
+
+function MiniMonthCalendar({
+  selected,
+  onSelect,
+}: {
+  selected: Date;
+  onSelect: (day: Date) => void;
+}) {
+  const [cursor, setCursor] = useState(() => startOfMonth(selected));
+  const today = useMemo(() => startOfDay(new Date()), []);
+
+  useEffect(() => {
+    setCursor(startOfMonth(selected));
+  }, [selected]);
+
+  const cells = useMemo(() => {
+    const monthStart = startOfMonth(cursor);
+    const gridStart = startOfWeek(monthStart);
+    return Array.from({ length: 42 }, (_, i) => addDays(gridStart, i));
+  }, [cursor]);
+
+  const monthLabel = cursor.toLocaleDateString('pt-BR', {
+    month: 'long',
+    year: 'numeric',
+  });
+
+  const weekLetters = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'];
+
+  return (
+    <div className="w-[240px] shrink-0 rounded-2xl border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-900">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <span className="text-sm font-semibold capitalize text-gray-800 dark:text-gray-100">
+          {monthLabel}
+        </span>
+        <div className="flex items-center gap-0.5">
+          <button
+            type="button"
+            onClick={() => setCursor((c) => addMonths(c, -1))}
+            className="rounded-full p-1.5 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"
+            aria-label="Mês anterior"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => setCursor((c) => addMonths(c, 1))}
+            className="rounded-full p-1.5 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"
+            aria-label="Próximo mês"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
+      <div className="mb-1 grid grid-cols-7 text-center">
+        {weekLetters.map((letter, idx) => (
+          <span
+            key={`${letter}-${idx}`}
+            className="py-1 text-[11px] font-medium text-gray-400 dark:text-gray-500"
+          >
+            {letter}
+          </span>
+        ))}
+      </div>
+      <div className="grid grid-cols-7 text-center">
+        {cells.map((day) => {
+          const inMonth = isSameMonth(day, cursor);
+          const isSelected = isSameDay(day, selected);
+          const isToday = isSameDay(day, today);
+          return (
+            <button
+              key={day.toISOString()}
+              type="button"
+              onClick={() => onSelect(startOfDay(day))}
+              className={`mx-auto flex h-8 w-8 items-center justify-center rounded-full text-xs font-medium transition-colors ${
+                isSelected
+                  ? 'bg-red-600 text-white'
+                  : isToday
+                    ? 'bg-red-50 font-semibold text-red-700 dark:bg-red-950/40 dark:text-red-300'
+                    : inMonth
+                      ? 'text-gray-800 hover:bg-gray-100 dark:text-gray-100 dark:hover:bg-gray-800'
+                      : 'text-gray-300 hover:bg-gray-50 dark:text-gray-600 dark:hover:bg-gray-800/50'
+              }`}
+            >
+              {day.getDate()}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 function dayHeaderLabel(date: Date): { weekday: string; day: number } {
@@ -214,16 +310,18 @@ function ViewSwitcher({
 
   return (
     <div ref={rootRef} className="relative">
-      <button
+      <Button
         type="button"
+        variant="outline"
+        size="sm"
         onClick={() => setOpen((v) => !v)}
-        className="inline-flex items-center gap-1.5 rounded-full border border-gray-300 bg-white px-3.5 py-1.5 text-sm font-medium text-gray-800 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
         aria-haspopup="listbox"
         aria-expanded={open}
+        icon={<ChevronDown className={`h-4 w-4 transition-transform ${open ? 'rotate-180' : ''}`} />}
+        iconPosition="right"
       >
         {current.label}
-        <ChevronDown className={`h-4 w-4 text-gray-500 transition-transform ${open ? 'rotate-180' : ''}`} />
-      </button>
+      </Button>
       {open && (
         <div
           role="listbox"
@@ -292,7 +390,17 @@ function EventBlock({
   );
 }
 
-export function KanbanPlannerView() {
+export function KanbanPlannerView({
+  mode = 'planner',
+  onModeChange,
+  pageTitle,
+  pageSubtitle,
+}: {
+  mode?: AgendaSurfaceMode;
+  onModeChange?: (next: AgendaSurfaceMode) => void;
+  pageTitle?: string;
+  pageSubtitle?: string;
+} = {}) {
   const queryClient = useQueryClient();
   const router = useRouter();
   const pathname = usePathname();
@@ -310,6 +418,7 @@ export function KanbanPlannerView() {
   const [actionsMenuOpen, setActionsMenuOpen] = useState(false);
   const actionsMenuRef = useRef<HTMLDivElement>(null);
   const ataInputRef = useRef<HTMLInputElement>(null);
+  const gridScrollRef = useRef<HTMLDivElement>(null);
 
   const { data: agendas = [], isError: agendasError } = useQuery({
     queryKey: ['planner-agendas'],
@@ -636,23 +745,38 @@ export function KanbanPlannerView() {
 
   const goToday = () => setAnchor(startOfDay(new Date()));
 
+  useEffect(() => {
+    if (view !== 'day' && view !== 'week') return;
+    const el = gridScrollRef.current;
+    if (!el) return;
+    const hour = Math.max(0, new Date().getHours() - 1);
+    const top = hour * ROW_HEIGHT;
+    requestAnimationFrame(() => {
+      el.scrollTop = top;
+    });
+  }, [view, anchor]);
+
   const periodLabel = useMemo(() => {
+    const capitalizeFirst = (value: string) =>
+      value.length > 0 ? value.charAt(0).toUpperCase() + value.slice(1) : value;
+
     if (view === 'day') {
-      return anchor.toLocaleDateString('pt-BR', {
-        weekday: 'long',
-        day: 'numeric',
-        month: 'long',
-        year: 'numeric',
-      });
+      return capitalizeFirst(
+        anchor.toLocaleDateString('pt-BR', {
+          weekday: 'long',
+          day: 'numeric',
+          month: 'long',
+          year: 'numeric',
+        })
+      );
     }
-    if (view === 'week') {
-      return startOfWeek(anchor).toLocaleDateString('pt-BR', {
-        month: 'short',
-        year: 'numeric',
-      });
-    }
-    if (view === 'month') {
-      return anchor.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+    if (view === 'week' || view === 'month') {
+      return capitalizeFirst(
+        (view === 'week' ? startOfWeek(anchor) : anchor).toLocaleDateString('pt-BR', {
+          month: 'long',
+          year: 'numeric',
+        })
+      );
     }
     return String(anchor.getFullYear());
   }, [view, anchor]);
@@ -664,156 +788,206 @@ export function KanbanPlannerView() {
   const weekdayNames = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 
   return (
-    <div className="flex flex-col gap-3 px-4 pb-8">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-2">
+    <div className="flex h-full min-h-0 flex-col gap-4 px-4 lg:flex-row lg:items-stretch">
+      <aside className="flex w-full shrink-0 flex-col gap-3 lg:w-[240px]">
+        {pageTitle ? (
+          <div>
+            <h1 className="text-3xl font-bold leading-tight text-gray-900 dark:text-gray-100">
+              {pageTitle}
+            </h1>
+            {pageSubtitle ? (
+              <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">{pageSubtitle}</p>
+            ) : null}
+          </div>
+        ) : null}
+        {canWriteEffective && (
           <button
             type="button"
-            onClick={goPrev}
-            className="rounded-lg border border-gray-300 p-2 text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800"
-            aria-label="Período anterior"
+            onClick={() => {
+              setPendingAtaFile(null);
+              const now = new Date();
+              const start = new Date(now);
+              start.setMinutes(0, 0, 0);
+              const end = new Date(start);
+              end.setHours(start.getHours() + 1);
+              setForm({
+                ...EMPTY_FORM,
+                startAt: toLocalInputValue(start.toISOString()),
+                endAt: toLocalInputValue(end.toISOString()),
+              });
+              setFormOpen(true);
+            }}
+            className="flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
           >
-            <ChevronLeft className="h-4 w-4" />
+            <Plus className="h-4 w-4 shrink-0" />
+            <span>Criar</span>
           </button>
-          <button
-            type="button"
-            onClick={goToday}
-            className="rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800"
-          >
-            Hoje
-          </button>
-          <button
-            type="button"
-            onClick={goNext}
-            className="rounded-lg border border-gray-300 p-2 text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800"
-            aria-label="Próximo período"
-          >
-            <ChevronRight className="h-4 w-4" />
-          </button>
-          <span className="ml-1 text-sm font-semibold capitalize text-gray-800 dark:text-gray-100">
-            {periodLabel}
-          </span>
-          {agendas.length > 1 && (
-            <label className="ml-1 inline-flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
-              <span className="font-medium">Agenda</span>
-              <select
-                value={activeOwnerId}
-                onChange={(e) => setSelectedOwnerId(e.target.value)}
-                className="rounded-lg border border-red-300 bg-white px-3 py-2 text-sm font-semibold text-gray-800 outline-none ring-2 ring-red-100 dark:border-red-700 dark:bg-gray-800 dark:text-gray-100 dark:ring-red-950"
-                title="Escolher agenda"
-                aria-label="Escolher agenda"
-              >
-                {agendas.map((a) => (
-                  <option key={a.ownerId} value={a.ownerId}>
-                    {a.isMine ? 'Minha agenda' : a.name}
-                    {!a.isMine && a.permission === 'READ' ? ' (só ver)' : ''}
-                    {!a.isMine && a.permission === 'WRITE' ? ' (editar)' : ''}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {!isOwnerEffective && (
-            <span className="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
-              {canWriteEffective
-                ? `Editando agenda de ${activeAgenda?.name || 'outro usuário'}`
-                : `Vendo agenda de ${activeAgenda?.name || 'outro usuário'} (só ver)`}
+        )}
+        <MiniMonthCalendar
+          selected={anchor}
+          onSelect={(day) => {
+            setAnchor(day);
+            if (view === 'month') setView('day');
+          }}
+        />
+      </aside>
+
+      <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col gap-3">
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-x-3 gap-y-2">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={goPrev}
+              aria-label="Período anterior"
+              className="!px-2"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <Button type="button" variant="outline" size="sm" onClick={goToday}>
+              Hoje
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={goNext}
+              aria-label="Próximo período"
+              className="!px-2"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+            <span className="ml-1 text-sm font-semibold text-gray-800 dark:text-gray-100">
+              {periodLabel}
             </span>
-          )}
-          {isOwnerEffective && (
-            <div ref={actionsMenuRef} className="relative">
-              <button
-                type="button"
-                onClick={() => setActionsMenuOpen((v) => !v)}
-                className="inline-flex h-9 w-9 items-center justify-center rounded-full text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"
-                aria-label="Mais opções"
-                aria-haspopup="menu"
-                aria-expanded={actionsMenuOpen}
-                title="Mais opções"
-              >
-                <MoreVertical className="h-5 w-5" />
-              </button>
-              {actionsMenuOpen && (
-                <div
-                  role="menu"
-                  className="absolute right-0 top-full z-40 mt-1.5 min-w-[220px] overflow-hidden rounded-xl border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-900"
+            {agendas.length > 1 && (
+              <label className="ml-1 inline-flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
+                <span className="font-medium">Agenda</span>
+                <select
+                  value={activeOwnerId}
+                  onChange={(e) => setSelectedOwnerId(e.target.value)}
+                  className="rounded-lg border border-red-300 bg-white px-3 py-2 text-sm font-semibold text-gray-800 outline-none ring-2 ring-red-100 dark:border-red-700 dark:bg-gray-800 dark:text-gray-100 dark:ring-red-950"
+                  title="Escolher agenda"
+                  aria-label="Escolher agenda"
                 >
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setActionsMenuOpen(false);
-                      setShareOpen(true);
-                    }}
-                    className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800"
+                  {agendas.map((a) => (
+                    <option key={a.ownerId} value={a.ownerId}>
+                      {a.isMine ? 'Minha agenda' : a.name}
+                      {!a.isMine && a.permission === 'READ' ? ' (só ver)' : ''}
+                      {!a.isMine && a.permission === 'WRITE' ? ' (editar)' : ''}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {!isOwnerEffective && (
+              <span className="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+                {canWriteEffective
+                  ? `Editando agenda de ${activeAgenda?.name || 'outro usuário'}`
+                  : `Vendo agenda de ${activeAgenda?.name || 'outro usuário'} (só ver)`}
+              </span>
+            )}
+            {isOwnerEffective && (
+              <div ref={actionsMenuRef} className="relative">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setActionsMenuOpen((v) => !v)}
+                  className="!px-2"
+                  aria-label="Mais opções"
+                  aria-haspopup="menu"
+                  aria-expanded={actionsMenuOpen}
+                  title="Mais opções"
+                >
+                  <MoreVertical className="h-4 w-4" />
+                </Button>
+                {actionsMenuOpen && (
+                  <div
+                    role="menu"
+                    className="absolute right-0 top-full z-40 mt-1.5 min-w-[220px] overflow-hidden rounded-xl border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-900"
                   >
-                    <Share2 className="h-4 w-4 shrink-0 text-gray-500" />
-                    Compartilhar com alguém
-                  </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    disabled={syncingGoogle}
-                    onClick={() => {
-                      setActionsMenuOpen(false);
-                      void handleGoogleSyncClick();
-                    }}
-                    className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-60 dark:text-gray-200 dark:hover:bg-gray-800"
-                  >
-                    <RefreshCw
-                      className={`h-4 w-4 shrink-0 text-gray-500 ${syncingGoogle ? 'animate-spin' : ''}`}
-                    />
-                    {syncingGoogle
-                      ? 'Sincronizando…'
-                      : googleStatus?.connected
-                        ? 'Sincronizar Google'
-                        : 'Conectar ao Google'}
-                  </button>
-                  {googleStatus?.connected && (
                     <button
                       type="button"
                       role="menuitem"
-                      onClick={async () => {
+                      onClick={() => {
                         setActionsMenuOpen(false);
-                        try {
-                          await disconnectGoogleCalendarApi();
-                          queryClient.invalidateQueries({
-                            queryKey: ['planner-events', 'google-status'],
-                          });
-                          toast.success('Google Calendar desconectado');
-                        } catch {
-                          toast.error('Erro ao desconectar');
-                        }
+                        setShareOpen(true);
                       }}
-                      className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left text-sm text-gray-500 hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-gray-800"
+                      className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800"
                     >
-                      Desconectar Google
+                      <Share2 className="h-4 w-4 shrink-0 text-gray-500" />
+                      Compartilhar com alguém
                     </button>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-          <ViewSwitcher
-            value={view}
-            onChange={(next) => {
-              setView(next);
-              if (next === 'week') setAnchor((a) => startOfWeek(a));
-              if (next === 'month') setAnchor((a) => startOfMonth(a));
-              if (next === 'year') setAnchor((a) => startOfYear(a));
-              if (next === 'day') setAnchor((a) => startOfDay(a));
-            }}
-          />
+                    <button
+                      type="button"
+                      role="menuitem"
+                      disabled={syncingGoogle}
+                      onClick={() => {
+                        setActionsMenuOpen(false);
+                        void handleGoogleSyncClick();
+                      }}
+                      className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-60 dark:text-gray-200 dark:hover:bg-gray-800"
+                    >
+                      <RefreshCw
+                        className={`h-4 w-4 shrink-0 text-gray-500 ${syncingGoogle ? 'animate-spin' : ''}`}
+                      />
+                      {syncingGoogle
+                        ? 'Sincronizando…'
+                        : googleStatus?.connected
+                          ? 'Sincronizar Google'
+                          : 'Conectar ao Google'}
+                    </button>
+                    {googleStatus?.connected && (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={async () => {
+                          setActionsMenuOpen(false);
+                          try {
+                            await disconnectGoogleCalendarApi();
+                            queryClient.invalidateQueries({
+                              queryKey: ['planner-events', 'google-status'],
+                            });
+                            toast.success('Google Calendar desconectado');
+                          } catch {
+                            toast.error('Erro ao desconectar');
+                          }
+                        }}
+                        className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left text-sm text-gray-500 hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-gray-800"
+                      >
+                        Desconectar Google
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+            <ViewSwitcher
+              value={view}
+              onChange={(next) => {
+                setView(next);
+                if (next === 'week') setAnchor((a) => startOfWeek(a));
+                if (next === 'month') setAnchor((a) => startOfMonth(a));
+                if (next === 'year') setAnchor((a) => startOfYear(a));
+                if (next === 'day') setAnchor((a) => startOfDay(a));
+              }}
+            />
+            {onModeChange && (
+              <AgendaModeSwitcher mode={mode} onChange={onModeChange} />
+            )}
+          </div>
         </div>
-      </div>
 
       {(view === 'day' || view === 'week') && (
-        <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900">
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900">
           {/* Cabeçalho + grade no mesmo scroll: evita linhas tortas por causa da scrollbar */}
           <div
-            className="max-h-[min(70vh,720px)] overflow-auto"
+            ref={gridScrollRef}
+            className="min-h-0 flex-1 overflow-auto"
             style={{ scrollbarGutter: 'stable' }}
           >
             <div
@@ -999,7 +1173,7 @@ export function KanbanPlannerView() {
       )}
 
       {view === 'month' && (
-        <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900">
+        <div className="min-h-0 flex-1 overflow-auto rounded-2xl border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900">
           <div className="grid grid-cols-7 border-b border-gray-200 dark:border-gray-700">
             {weekdayNames.map((name) => (
               <div
@@ -1105,6 +1279,7 @@ export function KanbanPlannerView() {
       )}
 
       {view === 'year' && (
+        <div className="min-h-0 flex-1 overflow-auto">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {Array.from({ length: 12 }, (_, monthIdx) => {
             const monthDate = new Date(anchor.getFullYear(), monthIdx, 1);
@@ -1158,7 +1333,9 @@ export function KanbanPlannerView() {
             );
           })}
         </div>
+        </div>
       )}
+      </div>
 
       <Modal
         isOpen={formOpen}
