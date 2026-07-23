@@ -1173,8 +1173,8 @@ export function KanbanPlannerView({
       )}
 
       {view === 'month' && (
-        <div className="min-h-0 flex-1 overflow-auto rounded-2xl border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900">
-          <div className="grid grid-cols-7 border-b border-gray-200 dark:border-gray-700">
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900">
+          <div className="grid shrink-0 grid-cols-7 border-b border-gray-200 dark:border-gray-700">
             {weekdayNames.map((name) => (
               <div
                 key={name}
@@ -1184,7 +1184,7 @@ export function KanbanPlannerView({
               </div>
             ))}
           </div>
-          <div className="grid grid-cols-7">
+          <div className="grid min-h-0 flex-1 grid-cols-7 grid-rows-6">
             {monthCells.map((day) => {
               const inMonth = isSameMonth(day, anchor);
               const isToday = isSameDay(day, today);
@@ -1195,7 +1195,7 @@ export function KanbanPlannerView({
               return (
                 <div
                   key={day.toISOString()}
-                  className={`min-h-[96px] border-b border-r border-gray-200 p-1.5 dark:border-gray-700 ${
+                  className={`flex h-full min-h-0 flex-col border-b border-r border-gray-200 p-1.5 dark:border-gray-700 ${
                     inMonth ? 'bg-white dark:bg-gray-900' : 'bg-gray-50 dark:bg-gray-950/50'
                   }`}
                 >
@@ -1205,7 +1205,7 @@ export function KanbanPlannerView({
                       setAnchor(startOfDay(day));
                       setView('day');
                     }}
-                    className={`mb-1 flex h-7 w-7 items-center justify-center rounded-full text-sm font-semibold ${
+                    className={`mb-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-sm font-semibold ${
                       isToday
                         ? 'bg-red-600 text-white'
                         : inMonth
@@ -1215,7 +1215,7 @@ export function KanbanPlannerView({
                   >
                     {day.getDate()}
                   </button>
-                  <div className="flex flex-col gap-0.5">
+                  <div className="flex min-h-0 flex-1 flex-col gap-0.5">
                     {dayTasks.slice(0, 2).map((task) => {
                       const timeLabel = toTimeInputValue(task.dueDate);
                       return (
@@ -1271,7 +1271,7 @@ export function KanbanPlannerView({
             })}
           </div>
           {isLoading && (
-            <div className="border-t border-gray-200 px-4 py-3 text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
+            <div className="shrink-0 border-t border-gray-200 px-4 py-3 text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
               Carregando agenda…
             </div>
           )}
@@ -1280,59 +1280,59 @@ export function KanbanPlannerView({
 
       {view === 'year' && (
         <div className="min-h-0 flex-1 overflow-auto">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {Array.from({ length: 12 }, (_, monthIdx) => {
-            const monthDate = new Date(anchor.getFullYear(), monthIdx, 1);
-            const monthLabel = monthDate.toLocaleDateString('pt-BR', { month: 'long' });
-            const cellsStart = startOfWeek(monthDate);
-            const cells = Array.from({ length: 42 }, (_, i) => addDays(cellsStart, i));
-            return (
-              <button
-                key={monthIdx}
-                type="button"
-                onClick={() => {
-                  setAnchor(startOfMonth(monthDate));
-                  setView('month');
-                }}
-                className="rounded-2xl border border-gray-200 bg-white p-3 text-left hover:border-red-300 hover:shadow-sm dark:border-gray-700 dark:bg-gray-900 dark:hover:border-red-800"
-              >
-                <div className="mb-2 text-sm font-semibold capitalize text-gray-800 dark:text-gray-100">
-                  {monthLabel}
-                </div>
-                <div className="grid grid-cols-7 gap-px text-center text-[10px] text-gray-400">
-                  {weekdayNames.map((n) => (
-                    <span key={n}>{n[0]}</span>
-                  ))}
-                </div>
-                <div className="mt-1 grid grid-cols-7 gap-px text-center">
-                  {cells.map((day) => {
-                    const inMonth = day.getMonth() === monthIdx;
-                    const isToday = isSameDay(day, today);
-                    const hasEvents =
-                      inMonth &&
-                      events.some((ev) => isSameDay(new Date(ev.startAt), day));
-                    return (
-                      <span
-                        key={day.toISOString()}
-                        className={`flex h-6 items-center justify-center rounded-full text-[11px] ${
-                          isToday
-                            ? 'bg-red-600 font-bold text-white'
-                            : inMonth
-                              ? hasEvents
-                                ? 'font-semibold text-red-600 dark:text-red-400'
-                                : 'text-gray-700 dark:text-gray-200'
-                              : 'text-gray-300 dark:text-gray-700'
-                        }`}
-                      >
-                        {day.getDate()}
-                      </span>
-                    );
-                  })}
-                </div>
-              </button>
-            );
-          })}
-        </div>
+          <div className="grid h-full min-h-[640px] grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 xl:grid-rows-3">
+            {Array.from({ length: 12 }, (_, monthIdx) => {
+              const monthDate = new Date(anchor.getFullYear(), monthIdx, 1);
+              const monthLabel = monthDate.toLocaleDateString('pt-BR', { month: 'long' });
+              const cellsStart = startOfWeek(monthDate);
+              const cells = Array.from({ length: 42 }, (_, i) => addDays(cellsStart, i));
+              return (
+                <button
+                  key={monthIdx}
+                  type="button"
+                  onClick={() => {
+                    setAnchor(startOfMonth(monthDate));
+                    setView('month');
+                  }}
+                  className="flex h-full min-h-0 flex-col rounded-2xl border border-gray-200 bg-white p-3 text-left hover:border-red-300 hover:shadow-sm dark:border-gray-700 dark:bg-gray-900 dark:hover:border-red-800"
+                >
+                  <div className="mb-2 shrink-0 text-sm font-semibold capitalize text-gray-800 dark:text-gray-100">
+                    {monthLabel}
+                  </div>
+                  <div className="grid shrink-0 grid-cols-7 gap-px text-center text-[10px] text-gray-400">
+                    {weekdayNames.map((n) => (
+                      <span key={n}>{n[0]}</span>
+                    ))}
+                  </div>
+                  <div className="mt-1 grid min-h-0 flex-1 grid-cols-7 grid-rows-6 gap-px text-center">
+                    {cells.map((day) => {
+                      const inMonth = day.getMonth() === monthIdx;
+                      const isToday = isSameDay(day, today);
+                      const hasEvents =
+                        inMonth &&
+                        events.some((ev) => isSameDay(new Date(ev.startAt), day));
+                      return (
+                        <span
+                          key={day.toISOString()}
+                          className={`flex h-full min-h-0 items-center justify-center rounded-full text-[11px] ${
+                            isToday
+                              ? 'bg-red-600 font-bold text-white'
+                              : inMonth
+                                ? hasEvents
+                                  ? 'font-semibold text-red-600 dark:text-red-400'
+                                  : 'text-gray-700 dark:text-gray-200'
+                                : 'text-gray-300 dark:text-gray-700'
+                          }`}
+                        >
+                          {day.getDate()}
+                        </span>
+                      );
+                    })}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
         </div>
       )}
       </div>
