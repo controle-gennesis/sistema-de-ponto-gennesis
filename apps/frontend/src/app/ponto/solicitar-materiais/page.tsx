@@ -53,7 +53,7 @@ import { AsyncSearchSelectDropdown } from '@/components/ui/AsyncSearchSelectDrop
 import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
 import { getRmMaterialLabel, searchRmMaterials, type RmMaterialListItem } from '@/lib/searchRmMaterials';
 import { FORM_FIELD_INPUT_CLS, FORM_FIELD_TEXTAREA_CLS } from '@/lib/formFieldUi';
-import { isUnbRelatedLabel } from '@/lib/unbBranding';
+import { isExactUnbCostCenterLabel, isUnbRelatedLabel, resolveLockedUnbCostCenterId } from '@/lib/unbBranding';
 import {
   purchaseOrderPhaseLabel,
   ocStatusTextClass,
@@ -355,6 +355,41 @@ function isUnbCostCenterOption(costCenter: {
     isUnbRelatedLabel(costCenter.code) ||
     isUnbRelatedLabel(costCenter.label)
   );
+}
+
+function resolveLockedUnbContractId(
+  contracts: RmContractOption[],
+  lockedCostCenterId: string | null
+): string | null {
+  if (!contracts.length) return null;
+
+  const matchesCostCenter = lockedCostCenterId
+    ? contracts.filter(
+        (contract) =>
+          contract.costCenterId === lockedCostCenterId ||
+          contract.costCenter?.id === lockedCostCenterId
+      )
+    : [];
+
+  const unbRelated = contracts.filter(
+    (contract) =>
+      isUnbCostCenterOption(contract.costCenter) ||
+      isUnbRelatedLabel(contract.name) ||
+      isUnbRelatedLabel(contract.number)
+  );
+
+  const pool = matchesCostCenter.length > 0 ? matchesCostCenter : unbRelated;
+  if (pool.length === 0) return null;
+
+  const exactName = pool.find((contract) => isExactUnbCostCenterLabel(contract.name));
+  if (exactName) return exactName.id;
+
+  const exactCc = pool.find(
+    (contract) =>
+      isExactUnbCostCenterLabel(contract.costCenter?.name) ||
+      isExactUnbCostCenterLabel(contract.costCenter?.code)
+  );
+  return exactCc?.id ?? pool[0].id;
 }
 
 function validateNewMaterialRequestForm(
@@ -692,6 +727,11 @@ function SolicitarMateriaisPage() {
   const { costCenters, isLoading: loadingCostCenters } = useCostCenters();
   const { isUnbUser, unbCostCenterIds } = usePermissions();
 
+  const lockedUnbCostCenterId = useMemo(() => {
+    if (!isUnbUser) return null;
+    return resolveLockedUnbCostCenterId(costCenters, unbCostCenterIds);
+  }, [isUnbUser, costCenters, unbCostCenterIds]);
+
   const { data: contractOptionsData, isLoading: loadingContracts } = useQuery({
     queryKey: ['service-order-contract-options'],
     queryFn: async () => {
@@ -706,15 +746,38 @@ function SolicitarMateriaisPage() {
     [contractOptionsData]
   );
 
+  const lockedUnbContractId = useMemo(() => {
+    if (!isUnbUser) return null;
+    return resolveLockedUnbContractId(contractOptions, lockedUnbCostCenterId);
+  }, [isUnbUser, contractOptions, lockedUnbCostCenterId]);
+
   const { serviceOrders: newFormServiceOrders, isLoading: loadingNewFormServiceOrders } =
     useServiceOrdersByContract(formData.contractId);
   const { serviceOrders: editFormServiceOrders, isLoading: loadingEditFormServiceOrders } =
     useServiceOrdersByContract(editFormData.contractId);
 
   const isNewFormUnbCostCenter = useMemo(() => {
+    if (isUnbUser) return true;
     const contract = contractOptions.find((c) => c.id === formData.contractId);
     return isUnbCostCenterOption(contract?.costCenter);
-  }, [contractOptions, formData.contractId]);
+  }, [isUnbUser, contractOptions, formData.contractId]);
+
+  useEffect(() => {
+    if (!isNewRequestModalOpen || !lockedUnbContractId) return;
+    const contract = contractOptions.find((c) => c.id === lockedUnbContractId);
+    if (!contract) return;
+    setFormData((prev) => {
+      const nextCostCenterId = contract.costCenterId || contract.costCenter?.id || '';
+      if (prev.contractId === lockedUnbContractId && prev.costCenterId === nextCostCenterId) {
+        return prev;
+      }
+      return {
+        ...prev,
+        contractId: lockedUnbContractId,
+        costCenterId: nextCostCenterId,
+      };
+    });
+  }, [isNewRequestModalOpen, lockedUnbContractId, contractOptions]);
 
   const handleNewContractChange = (contractId: string) => {
     const contract = contractOptions.find((c) => c.id === contractId);
@@ -983,21 +1046,30 @@ function SolicitarMateriaisPage() {
     [costCenters]
   );
 
-  const contractSelectOptions = useMemo(
-    () =>
-      contractOptions.map((contract) => {
-        const label = formatRmContractLabel(contract);
-        return {
-          value: contract.id,
-          label,
-          searchText: [contract.number, contract.name, contract.costCenter?.code, contract.costCenter?.name]
-            .map((part) => String(part ?? '').trim())
-            .filter(Boolean)
-            .join(' '),
-        };
-      }),
-    [contractOptions]
-  );
+  const contractSelectOptions = useMemo(() => {
+    let list = contractOptions;
+    if (isUnbUser) {
+      list = lockedUnbContractId
+        ? list.filter((contract) => contract.id === lockedUnbContractId)
+        : list.filter(
+            (contract) =>
+              isUnbCostCenterOption(contract.costCenter) ||
+              isUnbRelatedLabel(contract.name) ||
+              isUnbRelatedLabel(contract.number)
+          );
+    }
+    return list.map((contract) => {
+      const label = formatRmContractLabel(contract);
+      return {
+        value: contract.id,
+        label,
+        searchText: [contract.number, contract.name, contract.costCenter?.code, contract.costCenter?.name]
+          .map((part) => String(part ?? '').trim())
+          .filter(Boolean)
+          .join(' '),
+      };
+    });
+  }, [contractOptions, isUnbUser, lockedUnbContractId]);
 
   const rmListFaseOptions = useMemo(() => {
     const options: { value: string; label: string; searchText?: string }[] = [{ value: '', label: 'Todas' }];
@@ -2007,6 +2079,7 @@ function SolicitarMateriaisPage() {
                           onChange={handleNewContractChange}
                           options={contractSelectOptions}
                           allowEmpty={false}
+                          disabled={Boolean(lockedUnbContractId)}
                           placeholder="Digite para buscar contrato..."
                           searchPlaceholder="Pesquisar contrato..."
                           emptyOptionsMessage="Nenhum contrato disponível."
@@ -2509,6 +2582,7 @@ function SolicitarMateriaisPage() {
                     onChange={handleEditContractChange}
                     options={contractSelectOptions}
                     allowEmpty={false}
+                    disabled={Boolean(lockedUnbContractId)}
                     placeholder="Digite para buscar contrato..."
                     searchPlaceholder="Pesquisar contrato..."
                     emptyOptionsMessage="Nenhum contrato disponível."
