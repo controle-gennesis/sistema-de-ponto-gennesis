@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useRef, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   AlertCircle,
@@ -187,6 +187,7 @@ function ResponsaveisTecnicosContent() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [empresaFilter, setEmpresaFilter] = useState('all');
   const [creaFilter, setCreaFilter] = useState('all');
+  const [profissionalFilter, setProfissionalFilter] = useState('all');
   const [anuidadeFilter, setAnuidadeFilter] = useState('all');
   const [dataInicioDeFilter, setDataInicioDeFilter] = useState('');
   const [dataInicioAteFilter, setDataInicioAteFilter] = useState('');
@@ -210,6 +211,7 @@ function ResponsaveisTecnicosContent() {
     statusFilter !== 'all' ||
     empresaFilter !== 'all' ||
     creaFilter !== 'all' ||
+    profissionalFilter !== 'all' ||
     anuidadeFilter !== 'all' ||
     !!dataInicioDeFilter ||
     !!dataInicioAteFilter;
@@ -218,6 +220,7 @@ function ResponsaveisTecnicosContent() {
     setStatusFilter('all');
     setEmpresaFilter('all');
     setCreaFilter('all');
+    setProfissionalFilter('all');
     setAnuidadeFilter('all');
     setDataInicioDeFilter('');
     setDataInicioAteFilter('');
@@ -231,6 +234,7 @@ function ResponsaveisTecnicosContent() {
       statusFilter,
       empresaFilter,
       creaFilter,
+      profissionalFilter,
       anuidadeFilter,
       dataInicioDeFilter,
       dataInicioAteFilter,
@@ -241,6 +245,9 @@ function ResponsaveisTecnicosContent() {
       if (statusFilter && statusFilter !== 'all') params.set('status', statusFilter);
       if (empresaFilter && empresaFilter !== 'all') params.set('empresa', empresaFilter);
       if (creaFilter && creaFilter !== 'all') params.set('crea', creaFilter);
+      if (profissionalFilter && profissionalFilter !== 'all') {
+        params.set('profissional', profissionalFilter);
+      }
       if (anuidadeFilter && anuidadeFilter !== 'all') params.set('anuidade', anuidadeFilter);
       if (dataInicioDeFilter) params.set('dataInicioDe', dataInicioDeFilter);
       if (dataInicioAteFilter) params.set('dataInicioAte', dataInicioAteFilter);
@@ -249,6 +256,29 @@ function ResponsaveisTecnicosContent() {
       return (res.data?.data || []) as ResponsavelTecnico[];
     },
   });
+
+  const { data: allForFilterOptions = [] } = useQuery({
+    queryKey: ['responsaveis-tecnicos', 'filter-options'],
+    queryFn: async () => {
+      const res = await api.get('/responsaveis-tecnicos');
+      return (res.data?.data || []) as ResponsavelTecnico[];
+    },
+    staleTime: 60_000,
+  });
+
+  const profissionalFilterOptions = useMemo(() => {
+    const names = Array.from(
+      new Set(
+        allForFilterOptions
+          .map((r) => r.profissional?.trim())
+          .filter((name): name is string => !!name)
+      )
+    ).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+    return labeledToSelectOptions([
+      { value: 'all', label: 'Todos' },
+      ...names.map((name) => ({ value: name, label: name })),
+    ]);
+  }, [allForFilterOptions]);
 
   const rows = data || [];
   const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
@@ -724,6 +754,20 @@ function ResponsaveisTecnicosContent() {
               </button>
             </div>
             <div className="max-h-[70vh] space-y-4 overflow-y-auto px-5 py-4">
+              <div>
+                <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Profissional
+                </label>
+                <StringSingleSelectDropdown
+                  value={profissionalFilter}
+                  onChange={(v) => {
+                    setProfissionalFilter(v || 'all');
+                    setCurrentPage(1);
+                  }}
+                  options={profissionalFilterOptions}
+                  allowEmpty={false}
+                />
+              </div>
               <div>
                 <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                   Empresa
