@@ -81,6 +81,13 @@ model User {
   kanbanCardComments       KanbanCardComment[]    @relation("KanbanCardCommentAuthor")
   kanbanCardAttachments    KanbanCardAttachment[] @relation("KanbanCardAttachmentUploader")
   kanbanChecklistAssigned  KanbanChecklistItem[]  @relation("KanbanChecklistAssignee")
+  plannerEvents            PlannerEvent[]         @relation("PlannerEventOwner")
+  plannerTasks             PlannerTask[]          @relation("PlannerTaskOwner")
+  plannerTaskLists         PlannerTaskList[]      @relation("PlannerTaskListOwner")
+  plannerAgendaSharesOwned     PlannerAgendaShare[] @relation("PlannerAgendaShareOwner")
+  plannerAgendaSharesReceived  PlannerAgendaShare[] @relation("PlannerAgendaShareSharedWith")
+  plannerAgendaSharesCreated   PlannerAgendaShare[] @relation("PlannerAgendaShareCreatedBy")
+  googleCalendarConnection GoogleCalendarConnection? @relation("GoogleCalendarConnectionUser")
   demandSheetApprovalsCreated       DemandSheetApproval[] @relation("DemandSheetApprovalCreator")
   demandSheetApprovalsAsSolicitante DemandSheetApproval[] @relation("DemandSheetApprovalSolicitante")
   demandSheetApprovalsManagerApproved DemandSheetApproval[] @relation("DemandSheetApprovalManager")
@@ -2672,6 +2679,115 @@ model KanbanCard {
   @@index([columnId])
   @@index([assigneeUserId])
   @@map("kanban_cards")
+}
+
+enum PlannerAgendaSharePermission {
+  READ
+  WRITE
+}
+
+/// Eventos da agenda/planejador semanal (independente dos cards do Kanban).
+model PlannerEvent {
+  id            String   @id @default(cuid())
+  userId        String
+  title         String
+  description   String   @default("")
+  startAt       DateTime
+  endAt         DateTime
+  color         String   @default("#3B82F6")
+  /// ID do evento no Google Calendar (para sincronização sem duplicar).
+  googleEventId String?
+  /// PDF da ata da reunião (opcional).
+  ataFileName   String?  @map("ata_file_name")
+  ataFileUrl    String?  @map("ata_file_url")
+  ataFileKey    String?  @map("ata_file_key")
+  ataFileSize   Int?     @map("ata_file_size")
+  ataMimeType   String?  @map("ata_mime_type")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user User @relation("PlannerEventOwner", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, googleEventId])
+  @@index([userId, startAt])
+  @@index([userId, endAt])
+  @@map("planner_events")
+}
+
+/// Compartilhamento da agenda de um usuário com outro (ver ou editar).
+model PlannerAgendaShare {
+  id               String                       @id @default(cuid())
+  ownerId          String                       @map("owner_id")
+  sharedWithUserId String                       @map("shared_with_user_id")
+  permission       PlannerAgendaSharePermission @default(READ)
+  createdBy        String?                      @map("created_by")
+  createdAt        DateTime                     @default(now())
+  updatedAt        DateTime                     @updatedAt
+
+  owner       User  @relation("PlannerAgendaShareOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  sharedWith  User  @relation("PlannerAgendaShareSharedWith", fields: [sharedWithUserId], references: [id], onDelete: Cascade)
+  creator     User? @relation("PlannerAgendaShareCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
+
+  @@unique([ownerId, sharedWithUserId])
+  @@index([sharedWithUserId])
+  @@index([ownerId])
+  @@map("planner_agenda_shares")
+}
+
+/// Listas de tarefas (blocos estilo Google Tasks).
+model PlannerTaskList {
+  id        String   @id @default(cuid())
+  userId    String
+  title     String
+  position  Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user  User          @relation("PlannerTaskListOwner", fields: [userId], references: [id], onDelete: Cascade)
+  tasks PlannerTask[]
+
+  @@index([userId, position])
+  @@map("planner_task_lists")
+}
+
+/// Tarefas estilo Google Tasks — com data aparecem na Agenda.
+model PlannerTask {
+  id          String    @id @default(cuid())
+  userId      String
+  listId      String
+  title       String
+  notes       String    @default("")
+  completed   Boolean   @default(false)
+  starred     Boolean   @default(false)
+  /// Data/hora da tarefa. Se preenchida, aparece na Agenda.
+  dueDate     DateTime?
+  position    Int       @default(0)
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  user User            @relation("PlannerTaskOwner", fields: [userId], references: [id], onDelete: Cascade)
+  list PlannerTaskList @relation(fields: [listId], references: [id], onDelete: Cascade)
+
+  @@index([userId, completed, position])
+  @@index([userId, dueDate])
+  @@index([listId, completed, position])
+  @@map("planner_tasks")
+}
+
+/// Conexão OAuth do Google Calendar por usuário.
+model GoogleCalendarConnection {
+  id           String    @id @default(cuid())
+  userId       String    @unique
+  accessToken  String
+  refreshToken String
+  expiryDate   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  user User @relation("GoogleCalendarConnectionUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("google_calendar_connections")
 }
 
 model KanbanCardMember {

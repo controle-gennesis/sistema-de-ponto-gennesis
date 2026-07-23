@@ -74,6 +74,7 @@ export class ResponsavelTecnicoController {
       const status = String(req.query.status || '').trim();
       const empresa = String(req.query.empresa || '').trim();
       const crea = String(req.query.crea || '').trim();
+      const profissional = String(req.query.profissional || '').trim();
       const anuidade = String(req.query.anuidade || '').trim();
       const dataInicioDe = String(req.query.dataInicioDe || '').trim();
       const dataInicioAte = String(req.query.dataInicioAte || '').trim();
@@ -92,6 +93,18 @@ export class ResponsavelTecnicoController {
           { uf: { equals: creaNorm.slice(0, 2), mode: 'insensitive' } },
           { crea: { contains: creaNorm, mode: 'insensitive' } },
         ];
+      }
+      if (profissional) {
+        const profissionalOr: Prisma.ResponsavelTecnicoWhereInput[] = [
+          { profissional: { equals: profissional, mode: 'insensitive' } },
+          { registro: { equals: profissional, mode: 'insensitive' } },
+        ];
+        if (where.OR) {
+          where.AND = [{ OR: where.OR }, { OR: profissionalOr }];
+          delete where.OR;
+        } else {
+          where.OR = profissionalOr;
+        }
       }
       if (anuidade && anuidade !== 'all') {
         where.anuidade2026 = { equals: anuidade, mode: 'insensitive' };
@@ -122,10 +135,13 @@ export class ResponsavelTecnicoController {
           { protocolo: { contains: q, mode: 'insensitive' } },
           { titulo: { contains: q, mode: 'insensitive' } },
         ];
-        // Se já há OR de CREA, combina com AND
+        // Se já há OR (CREA / profissional), combina com AND
         if (where.OR) {
-          where.AND = [{ OR: where.OR }, { OR: textOr }];
+          where.AND = [...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []), { OR: where.OR }, { OR: textOr }];
           delete where.OR;
+        } else if (where.AND) {
+          const andList = Array.isArray(where.AND) ? where.AND : [where.AND];
+          where.AND = [...andList, { OR: textOr }];
         } else {
           where.OR = textOr;
         }

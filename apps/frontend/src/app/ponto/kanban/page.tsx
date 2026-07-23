@@ -2316,6 +2316,23 @@ function KanbanPage() {
 
   const [createBoardOpen, setCreateBoardOpen] = useState(false);
   const [creatingBoard, setCreatingBoard] = useState(false);
+
+  useEffect(() => {
+    const viewParam = searchParams?.get('view');
+    if (viewParam === 'planner' || viewParam === 'tasks') {
+      const qs = viewParam === 'tasks' ? '?view=tasks' : '';
+      router.replace(`/ponto/agenda${qs}`);
+      return;
+    }
+    const googleFlag = searchParams?.get('googleCalendar');
+    if (googleFlag === 'connected' || googleFlag === 'error') {
+      const reason = searchParams?.get('reason');
+      const params = new URLSearchParams();
+      params.set('googleCalendar', googleFlag);
+      if (reason) params.set('reason', reason);
+      router.replace(`/ponto/agenda?${params.toString()}`);
+    }
+  }, [searchParams, router]);
   const [renameBoardTarget, setRenameBoardTarget] = useState<{
     boardId: string;
     name: string;
@@ -2371,7 +2388,9 @@ function KanbanPage() {
 
   const boardReadOnly = board?.canWrite === false;
 
-  useDocumentTitle(board?.department ? `Tasks - ${board.department}` : 'Tasks');
+  useDocumentTitle(
+    board?.department ? `Tasks - ${board.department}` : 'Tasks'
+  );
 
   const openBoard = useCallback(
     (departmentKey: string) => {
@@ -3458,7 +3477,9 @@ function KanbanPage() {
         <div className="mb-4 flex-shrink-0 space-y-4 px-4">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="min-w-0">
-              <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">Tasks</h1>
+              <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">
+                Tasks
+              </h1>
               {board?.department && (
                 <div className="mt-1 flex flex-wrap items-center gap-2">
                   <p className="inline-flex items-center gap-1.5 text-sm text-gray-500 dark:text-gray-400">
