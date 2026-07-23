@@ -397,6 +397,9 @@ export class ConstructionMaterialController {
       const productCode = await this.generateNextMaterialCode();
 
       const budgetNatureId = await this.resolveBudgetNatureId(parsed);
+      if (!budgetNatureId) {
+        throw createError('Natureza orçamentária é obrigatória', 400);
+      }
 
       const fullData = {
         code: productCode,
@@ -467,13 +470,16 @@ export class ConstructionMaterialController {
 
       let budgetNatureId: string | null | undefined;
       if (req.body.budgetNatureId === '' || req.body.budgetNatureId === null) {
-        budgetNatureId = null;
+        throw createError('Natureza orçamentária é obrigatória', 400);
       } else if (
         parsed.budgetNatureId ||
         parsed.budgetNatureCode ||
         parsed.naturezaOrcamentaria
       ) {
         budgetNatureId = await this.resolveBudgetNatureId(parsed);
+        if (!budgetNatureId) {
+          throw createError('Natureza orçamentária é obrigatória', 400);
+        }
       }
 
       const updateData: any = {

@@ -34,14 +34,15 @@ import api from '@/lib/api';
 import toast from 'react-hot-toast';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
+import { isMaterialCadastroBudgetNature } from '@/lib/budgetNatureMatch';
+import * as XLSX from 'xlsx';
+import { ButtonSeg } from '../solicitacoes-dp/DpSolicitacaoTypeFields';
 
 const MATERIAL_ACTIVE_FILTER_OPTIONS = labeledToSelectOptions([
   { value: 'all', label: 'Todos' },
   { value: 'true', label: 'Ativos' },
   { value: 'false', label: 'Inativos' },
 ]);
-import * as XLSX from 'xlsx';
-import { ButtonSeg } from '../solicitacoes-dp/DpSolicitacaoTypeFields';
 
 type ProductTypeKind = 'Produto' | 'Serviço' | '';
 
@@ -704,12 +705,17 @@ export default function MateriaisConstrucaoPage() {
       return;
     }
 
+    if (!formData.budgetNatureId) {
+      toast.error('Selecione a natureza orçamentária');
+      return;
+    }
+
     const dataToSend: Record<string, unknown> = {
       name,
       productType: formData.productType,
       description: formData.description.trim() || undefined,
       unit,
-      budgetNatureId: formData.budgetNatureId || null,
+      budgetNatureId: formData.budgetNatureId,
       isActive: formData.isActive
     };
 
@@ -1770,12 +1776,18 @@ function MaterialFormModal({
   const budgetNatureSelectOptions = useMemo(
     () =>
       labeledToSelectOptions(
-        budgetNatureOptions.map((bn) => ({
-          value: bn.id,
-          label: formatBudgetNatureLabel(bn),
-        }))
+        budgetNatureOptions
+          .filter(
+            (bn) =>
+              isMaterialCadastroBudgetNature(bn.name) ||
+              bn.id === formData.budgetNatureId
+          )
+          .map((bn) => ({
+            value: bn.id,
+            label: formatBudgetNatureLabel(bn),
+          }))
       ),
-    [budgetNatureOptions]
+    [budgetNatureOptions, formData.budgetNatureId]
   );
 
   useEffect(() => {
@@ -1882,7 +1894,7 @@ function MaterialFormModal({
                 options={unitSelectOptions}
                 placeholder="Selecione a unidade"
                 emptyOptionLabel="Selecione a unidade"
-                className={selectFieldClass}
+                className="w-full"
               />
               {useCustomUnit ? (
                 <input
@@ -1898,7 +1910,7 @@ function MaterialFormModal({
 
             <div>
               <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                Natureza Orçamentária
+                Natureza Orçamentária *
               </label>
               <StringSingleSelectDropdown
                 value={formData.budgetNatureId}
@@ -1906,9 +1918,9 @@ function MaterialFormModal({
                   setFormData({ ...formData, budgetNatureId })
                 }
                 options={budgetNatureSelectOptions}
-                placeholder="Selecione (opcional)"
-                emptyOptionLabel="Selecione (opcional)"
-                className={selectFieldClass}
+                placeholder="Selecione a natureza"
+                emptyOptionLabel="Selecione a natureza"
+                className="w-full"
               />
             </div>
 
