@@ -7,6 +7,8 @@ import { ChevronDown, ChevronLeft, ChevronRight, Trash2, RefreshCw, Share2, File
 import toast from 'react-hot-toast';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
+import { DatePickerField } from '@/components/ui/DatePickerField';
+import { TimePickerField } from '@/components/ui/TimePickerField';
 import { usePermissions } from '@/hooks/usePermissions';
 import {
   createPlannerEvent,
@@ -35,6 +37,8 @@ import {
   AgendaModeSwitcher,
   type AgendaSurfaceMode,
 } from './AgendaModeSwitcher';
+import { kanbanLabel } from './kanbanFormStyles';
+import { splitDateTime } from './kanbanDateTime';
 
 const HOUR_START = 0;
 const HOUR_END = 23;
@@ -121,6 +125,20 @@ function toLocalInputValue(iso: string): string {
 function fromLocalInputValue(value: string): string {
   const d = new Date(value);
   return d.toISOString();
+}
+
+function combineDateAndTime(date: string, time: string): string {
+  if (!date) return '';
+  return `${date}T${time || '09:00'}`;
+}
+
+function addOneHourHm(time: string): string {
+  const match = time.match(/^(\d{2}):(\d{2})$/);
+  if (!match) return '10:00';
+  const total = (Number(match[1]) * 60 + Number(match[2]) + 60) % (24 * 60);
+  const hh = String(Math.floor(total / 60)).padStart(2, '0');
+  const mi = String(total % 60).padStart(2, '0');
+  return `${hh}:${mi}`;
 }
 
 function formatHourLabel(hour: number): string {
@@ -1363,6 +1381,14 @@ export function KanbanPlannerView({
               toast.error('Informe o título');
               return;
             }
+            if (!form.startAt || !form.endAt) {
+              toast.error('Informe a data e os horários');
+              return;
+            }
+            if (form.endAt <= form.startAt) {
+              toast.error('O término deve ser depois do início');
+              return;
+            }
             saveMutation.mutate();
           }}
         >
@@ -1372,9 +1398,7 @@ export function KanbanPlannerView({
             </p>
           )}
           <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-              Título
-            </label>
+            <label className={kanbanLabel}>Título</label>
             <input
               className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:opacity-70 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
               value={form.title}
@@ -1385,38 +1409,75 @@ export function KanbanPlannerView({
               readOnly={!canWriteEffective}
             />
           </div>
+          <div>
+            <label className={kanbanLabel}>Data *</label>
+            <DatePickerField
+              value={splitDateTime(form.startAt).date}
+              onChange={(ymd) => {
+                if (!canWriteEffective) return;
+                if (!ymd) {
+                  setForm({ ...form, startAt: '', endAt: '' });
+                  return;
+                }
+                const startTime = splitDateTime(form.startAt).time || '09:00';
+                const endTime =
+                  splitDateTime(form.endAt).time || addOneHourHm(startTime);
+                setForm({
+                  ...form,
+                  startAt: combineDateAndTime(ymd, startTime),
+                  endAt: combineDateAndTime(ymd, endTime),
+                });
+              }}
+              placeholder="dd/mm/aaaa"
+              noFocusRing
+              disabled={!canWriteEffective}
+              aria-label="Data do evento"
+            />
+          </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                Início
-              </label>
-              <input
-                type="datetime-local"
-                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:opacity-70 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-                value={form.startAt}
-                onChange={(e) => setForm({ ...form, startAt: e.target.value })}
-                required={canWriteEffective}
-                disabled={!canWriteEffective}
-                readOnly={!canWriteEffective}
+              <label className={kanbanLabel}>Hora de início *</label>
+              <TimePickerField
+                value={form.startAt ? splitDateTime(form.startAt).time : ''}
+                disabled={!canWriteEffective || !splitDateTime(form.startAt).date}
+                onChange={(time) => {
+                  if (!canWriteEffective) return;
+                  const date = splitDateTime(form.startAt).date;
+                  if (!date) return;
+                  const nextStart = combineDateAndTime(date, time || '09:00');
+                  const endTime = splitDateTime(form.endAt).time || addOneHourHm(time || '09:00');
+                  let nextEnd = combineDateAndTime(date, endTime);
+                  if (nextEnd <= nextStart) {
+                    nextEnd = combineDateAndTime(date, addOneHourHm(time || '09:00'));
+                  }
+                  setForm({ ...form, startAt: nextStart, endAt: nextEnd });
+                }}
+                noFocusRing
+                aria-label="Hora de início"
               />
             </div>
             <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                Término
-              </label>
-              <input
-                type="datetime-local"
-                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:opacity-70 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-                value={form.endAt}
-                onChange={(e) => setForm({ ...form, endAt: e.target.value })}
-                required={canWriteEffective}
-                disabled={!canWriteEffective}
-                readOnly={!canWriteEffective}
+              <label className={kanbanLabel}>Hora de término *</label>
+              <TimePickerField
+                value={form.endAt ? splitDateTime(form.endAt).time : ''}
+                disabled={!canWriteEffective || !splitDateTime(form.startAt).date}
+                minTime={form.startAt ? splitDateTime(form.startAt).time : undefined}
+                onChange={(time) => {
+                  if (!canWriteEffective) return;
+                  const date = splitDateTime(form.startAt).date;
+                  if (!date) return;
+                  setForm({
+                    ...form,
+                    endAt: combineDateAndTime(date, time || '10:00'),
+                  });
+                }}
+                noFocusRing
+                aria-label="Hora de término"
               />
             </div>
           </div>
           <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+            <label className={kanbanLabel}>
               Descrição
             </label>
             <textarea

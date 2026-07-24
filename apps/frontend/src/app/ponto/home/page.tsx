@@ -249,15 +249,17 @@ export default function HomePage() {
               </p>
             ) : (
               <ol className="relative ml-1">
+                {todayItems.length > 1 ? (
+                  <span
+                    className="pointer-events-none absolute bottom-[5px] left-[5px] top-[5px] w-px -translate-x-1/2 bg-gray-200 dark:bg-gray-700"
+                    aria-hidden
+                  />
+                ) : null}
                 {todayItems.map((item) => (
-                  <li key={item.id} className="flex gap-3 pb-5 last:pb-0">
-                    <div className="relative flex w-2.5 shrink-0 flex-col items-center self-stretch">
+                  <li key={item.id} className="relative flex gap-3 pb-5 last:pb-0">
+                    <div className="relative z-10 flex w-2.5 shrink-0 justify-center pt-[3px]">
                       <span
-                        className="absolute bottom-0 left-1/2 top-[5px] w-px -translate-x-1/2 bg-gray-200 dark:bg-gray-700"
-                        aria-hidden
-                      />
-                      <span
-                        className="relative z-10 h-2.5 w-2.5 shrink-0 rounded-full"
+                        className="h-2.5 w-2.5 shrink-0 rounded-full ring-2 ring-white dark:ring-gray-900"
                         style={{
                           backgroundColor:
                             item.kind === 'event' ? item.color || '#3B82F6' : '#F59E0B',
