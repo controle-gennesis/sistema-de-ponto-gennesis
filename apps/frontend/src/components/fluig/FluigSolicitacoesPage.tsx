@@ -633,6 +633,31 @@ export function FluigSolicitacoesPage({
       if (/Etapa\s*10\b/i.test(s)) {
         return { key: 'G3_ETAPA_10_FINALIZADA', label: 'Finalizada' };
       }
+      const g3Norm = s
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '');
+      if (/gestor\s+de\s+compras/.test(g3Norm) || /aprovacao\s+do\s+compras/.test(g3Norm)) {
+        return { key: 'G3_APROVACAO_DO_COMPRAS', label: 'Aprovação do Compras' };
+      }
+      if (/setor\s+tecnico/.test(g3Norm)) {
+        return { key: 'G3_APROVACAO_SETOR_TECNICO', label: 'Aprovação do Setor Técnico' };
+      }
+      if (/diretoria/.test(g3Norm)) {
+        return { key: 'G3_APROVACAO_DIRETORIA', label: 'Aprovação da Diretoria' };
+      }
+      if (/estoque/.test(g3Norm)) {
+        return { key: 'G3_APROVACAO_ESTOQUE', label: 'Aprovação de Estoque' };
+      }
+      if (/recotacao/.test(g3Norm)) {
+        return { key: 'G3_RECOTACAO', label: 'Recotação' };
+      }
+      if (/finalizada/.test(g3Norm)) {
+        return { key: 'G3_FINALIZADA', label: 'Finalizada' };
+      }
+      if (/validacao\s+de\s+frete|frete/.test(g3Norm) && /validacao|frete/.test(g3Norm)) {
+        return { key: 'G3_VALIDACAO_FRETE', label: 'Validação de Frete' };
+      }
     }
 
     if (datasetId === 'DataSet_G4FollowUp') {
@@ -788,12 +813,12 @@ export function FluigSolicitacoesPage({
       const stageOrderIndex = (label: string): number => {
         const l = norm(label);
 
-        // G3: Gestor de Compras -> Aprovação Setor Técnico -> Aprovação da diretoria -> Finalizada
+        // G3: Aprovação do Compras -> Aprovação do Setor Técnico -> Aprovação da Diretoria -> Finalizada
         if (datasetId === 'DataSet_G3FollowUp') {
           if (l.includes('finalizada')) return 3;
           if (l.includes('diretoria')) return 2;
           if (l.includes('setor tecnico')) return 1;
-          if (l.includes('gestor de compras')) return 0;
+          if (l.includes('gestor de compras') || l.includes('aprovacao do compras')) return 0;
           return 999;
         }
 
