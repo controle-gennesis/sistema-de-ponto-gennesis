@@ -188,6 +188,11 @@ export class FluigService {
     return `dataset:${datasetId}:${JSON.stringify(options)}`;
   }
 
+  private isEmptyDatasetPayload(data: FluigDatasetValues | null | undefined): boolean {
+    const values = data?.content?.values;
+    return !Array.isArray(values) || values.length === 0;
+  }
+
   private async fetchDatasetDirect(
     datasetId: string,
     options?: {
@@ -233,16 +238,25 @@ export class FluigService {
 
     if (cached) {
       const age = Date.now() - cached.fetchedAt;
+      const emptyCached = this.isEmptyDatasetPayload(cached.data);
 
-      if (age <= CACHE_STALE_TTL_MS) {
+      // Resposta vazia no cache costuma ser falha transitória do Fluig — não servir por minutos.
+      if (emptyCached) {
+        this.datasetCache.delete(cacheKey);
+      } else if (age <= CACHE_STALE_TTL_MS) {
         // Retorna do cache imediatamente
         if (age > CACHE_FRESH_TTL_MS && !cached.refreshing) {
           // Cache ficou stale: dispara refresh em background sem bloquear a resposta
           cached.refreshing = true;
           this.fetchDatasetDirect(datasetId, options)
             .then((data) => {
+              if (this.isEmptyDatasetPayload(data)) {
+                cached.refreshing = false;
+                console.warn(`⚠️  Fluig refresh BG retornou vazio (${datasetId}); mantendo cache anterior`);
+                return;
+              }
               this.datasetCache.set(cacheKey, { data, fetchedAt: Date.now(), refreshing: false });
-              console.log(`✅ Fluig cache atualizado em BG: ${datasetId}`);
+              console.log(`✅ Fluig cache atualizado em BG: ${datasetId} (${data.content?.values?.length ?? 0} rows)`);
             })
             .catch((err) => {
               cached.refreshing = false;
@@ -255,7 +269,13 @@ export class FluigService {
 
     // Cache vazio ou expirado: busca síncrona
     const data = await this.fetchDatasetDirect(datasetId, options);
+    const rowCount = data?.content?.values?.length ?? 0;
+    if (this.isEmptyDatasetPayload(data)) {
+      console.warn(`⚠️  Fluig dataset ${datasetId} retornou 0 registros — não cacheando`);
+      return data;
+    }
     this.datasetCache.set(cacheKey, { data, fetchedAt: Date.now(), refreshing: false });
+    console.log(`✅ Fluig dataset ${datasetId}: ${rowCount} registro(s) em cache`);
     return data;
   }
 
@@ -290,8 +310,13 @@ export class FluigService {
         if (entry) entry.refreshing = true;
         this.fetchDatasetDirect(id)
           .then((data) => {
+            if (!Array.isArray(data?.content?.values) || data.content.values.length === 0) {
+              if (entry) entry.refreshing = false;
+              console.warn(`⚠️  Fluig refresh periódico ${id} retornou vazio; mantendo cache anterior`);
+              return;
+            }
             this.datasetCache.set(cacheKey, { data, fetchedAt: Date.now(), refreshing: false });
-            console.log(`✅ Fluig refresh periódico: ${id}`);
+            console.log(`✅ Fluig refresh periódico: ${id} (${data.content?.values?.length ?? 0} rows)`);
           })
           .catch((err) => {
             if (entry) entry.refreshing = false;

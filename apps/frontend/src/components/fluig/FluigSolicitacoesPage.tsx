@@ -1,12 +1,10 @@
 'use client';
 
-import React, { useMemo, useState, useRef, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { useQueries, useQueryClient } from '@tanstack/react-query';
+import { useQueries } from '@tanstack/react-query';
 import {
-  BarChart3,
   Loader2,
-  RefreshCw,
   AlertCircle,
   Building2,
   Search,
@@ -15,37 +13,50 @@ import {
   Download,
   ChevronUp,
   ChevronDown,
-  ChevronLeft,
-  ChevronRight,
   Layers,
   Truck,
   Users,
   Landmark,
+  FileText,
+  ExternalLink,
   X,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
-import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { Modal } from '@/components/ui/Modal';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Loading } from '@/components/ui/Loading';
+import { CadastroListSummary, getCadastroListRange } from '@/components/ui/CadastroListSummary';
+import { ListPagination } from '@/components/ui/ListPagination';
+import { MultiSelectSearchDropdown } from '@/components/ui/MultiSelectSearchDropdown';
+import { cadastroListClasses } from '@/components/ui/RowActionMenu';
+import {
+  getListTableRowClassName,
+  ListRowNavigableLabel,
+} from '@/components/ui/listTableUi';
+import { TabCountBadge } from '@/components/ui/TabCountBadge';
 import { useCostCenters } from '@/hooks/useCostCenters';
+import {
+  buildFluigWorkflowProcessViewUrl,
+  formatFluigBudgetFieldDisplay,
+} from '@/lib/fluigWorkflowApproval';
 import api from '@/lib/api';
 import * as XLSX from 'xlsx';
 
-const FLUIG_RECORDS_PER_PAGE_OPTIONS = [
-  { value: '25', label: '25', searchText: '25' },
-  { value: '50', label: '50', searchText: '50' },
-  { value: '100', label: '100', searchText: '100' },
-];
+const FLUIG_LIST_PAGE_SIZE = 20;
+
+const ACTIONS_COL_TH =
+  'w-[4%] min-w-[3.5rem] whitespace-nowrap px-2 py-4 text-center align-middle text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-3';
+const ACTIONS_COL_TD =
+  'w-[4%] min-w-[3.5rem] whitespace-nowrap px-2 py-3 text-center align-middle sm:px-3';
 
 export const G5_RELATORIO_DATASET_ID = 'G5-Relatorio-DF-GO-TODOS-SETORES';
 
 const DEFAULT_BI_DATASETS = ['DataSet_G3FollowUp', 'DataSet_G4FollowUp', G5_RELATORIO_DATASET_ID] as const;
 
 const DEFAULT_DATASET_TAB_LABELS: Record<string, string> = {
-  DataSet_G3FollowUp: 'G3',
-  DataSet_G4FollowUp: 'G4',
-  [G5_RELATORIO_DATASET_ID]: 'G5',
+  DataSet_G3FollowUp: 'G3 - Aprovação de Ordem de Compra',
+  DataSet_G4FollowUp: 'G4 - Anexação de Comprovante',
+  [G5_RELATORIO_DATASET_ID]: 'G5 - Pagamentos Avulsos',
 };
 
 const FILIAIS_PERMITIDAS = [
@@ -372,6 +383,27 @@ function formatSolicitacaoModalTitle(columns: string[], row: Record<string, unkn
   return `Solicitação ${num}`;
 }
 
+/** ID de processo Fluig para o link (preferência NUM_PROCES). */
+function getFluigProcessInstanceId(
+  row: Record<string, unknown>,
+  columns: string[],
+  fallbackIdCol: string
+): string {
+  const numProces =
+    columns.find((c) => /^NUM_PROCES$/i.test(c.trim())) ??
+    columns.find((c) => columnLooksLikeNumeroProcesso(c));
+  if (numProces) {
+    const v = formatValue(row[numProces]);
+    if (v && v !== '—') return v;
+  }
+  const fromFallback = formatValue(row[fallbackIdCol] ?? '');
+  if (fromFallback && fromFallback !== '—') return fromFallback;
+  const idCol = findSolicitacaoIdColumn(columns);
+  if (!idCol) return '';
+  const v = formatValue(row[idCol]);
+  return v && v !== '—' ? v : '';
+}
+
 /** Texto normalizado para classificar colunas do modal de detalhe (nome técnico + rótulo). */
 function fluigDetailModalHint(colRaw: string): string {
   const r = colRaw.trim();
@@ -432,19 +464,6 @@ function fluigDetailModalSectionIndex(colRaw: string): number {
   return FLUIG_DETAIL_MODAL_SECTIONS.length;
 }
 
-/** Só a descrição do CC quando o Fluig envia "código - descrição" (hífen, en-dash ou em-dash). */
-function centroCustoSomenteNome(raw: string): string {
-  const s = raw.trim();
-  if (!s) return '';
-  const parts = s.split(/\s*[-–—]\s*/);
-  if (parts.length >= 2) {
-    const nome = parts.slice(1).join(' - ').trim();
-    if (nome) return nome;
-    return '—';
-  }
-  return s;
-}
-
 type FluigSolicitacoesPageConfig = {
   title?: string;
   subtitle?: string;
@@ -457,8 +476,6 @@ type FluigSolicitacoesPageConfig = {
   excludedFiliais?: readonly string[];
   hideFilialFilter?: boolean;
   showProcessCard?: boolean;
-  fixedRecordsPerPage?: 25 | 50 | 100;
-  hideRecordsPerPageSelector?: boolean;
   useEmployeeListLayout?: boolean;
   showExportButton?: boolean;
   /** Nome exato da coluna Fluig com data/hora base do lead time (opcional). */
@@ -467,13 +484,73 @@ type FluigSolicitacoesPageConfig = {
   naturezaOrcamentariaColumn?: string;
 };
 
+/** Histórico / título com “Ver mais”, no padrão PNCP. */
+function FluigHistoricoExpandable({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const [needsToggle, setNeedsToggle] = useState(false);
+  const textRef = useRef<HTMLParagraphElement>(null);
+  const value = text?.trim() || '';
+
+  useEffect(() => {
+    setExpanded(false);
+  }, [value]);
+
+  useEffect(() => {
+    const el = textRef.current;
+    if (!el || !value) {
+      setNeedsToggle(false);
+      return;
+    }
+    if (expanded) return;
+    setNeedsToggle(el.scrollHeight > el.clientHeight + 2);
+  }, [value, expanded]);
+
+  if (!value || value === '—') {
+    return <p className="text-sm text-gray-500 dark:text-gray-400">—</p>;
+  }
+
+  return (
+    <div className="min-w-0 max-w-xl" onClick={(e) => e.stopPropagation()}>
+      <p
+        ref={textRef}
+        className={`text-sm leading-relaxed text-gray-900 dark:text-gray-100 ${
+          expanded ? '' : 'line-clamp-3'
+        }`}
+      >
+        {value}
+      </p>
+      {needsToggle || expanded ? (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            setExpanded((v) => !v);
+          }}
+          className="mt-1.5 inline-flex items-center gap-1 text-xs font-medium text-red-600 transition-colors hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+        >
+          {expanded ? (
+            <>
+              Ver menos
+              <ChevronUp className="h-3.5 w-3.5" aria-hidden />
+            </>
+          ) : (
+            <>
+              Ver mais
+              <ChevronDown className="h-3.5 w-3.5" aria-hidden />
+            </>
+          )}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 export function FluigSolicitacoesPage({
   config,
 }: {
   config?: FluigSolicitacoesPageConfig;
 }) {
   const router = useRouter();
-  const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState(0);
   const [selectedFiliais, setSelectedFiliais] = useState<string[]>([]);
   const [selectedCCs, setSelectedCCs] = useState<string[]>([]);
@@ -481,19 +558,7 @@ export function FluigSolicitacoesPage({
   const [selectedUrgencias, setSelectedUrgencias] = useState<string[]>([]);
   const [selectedFornecedores, setSelectedFornecedores] = useState<string[]>([]);
   const [selectedNaturezasOrcamentarias, setSelectedNaturezasOrcamentarias] = useState<string[]>([]);
-  const [selectedFiliaisSearch, setSelectedFiliaisSearch] = useState('');
-  const [selectedCCSearch, setSelectedCCSearch] = useState('');
-  const [selectedSetorSolicitanteSearch, setSelectedSetorSolicitanteSearch] = useState('');
-  const [selectedUrgenciaSearch, setSelectedUrgenciaSearch] = useState('');
-  const [selectedFornecedoresSearch, setSelectedFornecedoresSearch] = useState('');
-  const [selectedNaturezaOrcamentariaSearch, setSelectedNaturezaOrcamentariaSearch] = useState('');
-  const [showFilialDropdown, setShowFilialDropdown] = useState(false);
-  const [showCCDropdown, setShowCCDropdown] = useState(false);
-  const [showSetorSolicitanteDropdown, setShowSetorSolicitanteDropdown] = useState(false);
-  const [showUrgenciaDropdown, setShowUrgenciaDropdown] = useState(false);
-  const [showFornecedorDropdown, setShowFornecedorDropdown] = useState(false);
-  const [showNaturezaOrcamentariaDropdown, setShowNaturezaOrcamentariaDropdown] = useState(false);
-  const [isFiltersMinimized, setIsFiltersMinimized] = useState(true);
+  const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
   const [searchText, setSearchText] = useState('');
   // Quando o usuário mexe em um filtro (Filial/CC/Fornecedor/…), ele vira o "ativo".
   // Os outros ficam temporariamente ignorados no resultado para evitar influência cruzada.
@@ -501,9 +566,7 @@ export function FluigSolicitacoesPage({
     'filial' | 'cc' | 'setorSolicitante' | 'urgencia' | 'fornecedor' | 'naturezaOrcamentaria' | null
   >(null);
   const [selectedEtapaIndex, setSelectedEtapaIndex] = useState(0);
-  const [compactView, setCompactView] = useState(true);
-  const [recordsPerPage, setRecordsPerPage] = useState<25 | 50 | 100>(25);
-  const [currentPage, setCurrentPage] = useState(0);
+  const [currentPage, setCurrentPage] = useState(1);
   const [detail, setDetail] = useState<{
     row: Record<string, unknown>;
     columns: string[];
@@ -554,8 +617,6 @@ export function FluigSolicitacoesPage({
   );
   const hideFilialFilter = config?.hideFilialFilter ?? false;
   const showProcessCard = config?.showProcessCard ?? true;
-  const effectiveRecordsPerPage = config?.fixedRecordsPerPage ?? recordsPerPage;
-  const hideRecordsPerPageSelector = config?.hideRecordsPerPageSelector ?? false;
   const useEmployeeListLayout = config?.useEmployeeListLayout ?? false;
   const showExportButton = config?.showExportButton ?? false;
 
@@ -609,13 +670,36 @@ export function FluigSolicitacoesPage({
 
   const getCCDisplayLabel = (code: string): string => {
     const c = String(code).trim();
-    const dashIdx = c.indexOf(' - ');
-    const codeOnly = dashIdx >= 0 ? c.slice(0, dashIdx).trim() : c;
-    const nameFromValue = dashIdx >= 0 ? c.slice(dashIdx + 3).trim() : '';
-    let name = ccCodeToName.get(codeOnly) || ccCodeToName.get(c) || ccCodeToName.get(codeOnly.replace(/\s+/g, ''));
-    if (name && /^[\d.]+\s*-\s*/.test(name)) name = name.replace(/^[\d.]+\s*-\s*/, '').trim();
-    if (name) return name;
-    if (nameFromValue) return nameFromValue;
+    if (!c) return '';
+
+    const fromSplit = formatFluigBudgetFieldDisplay(c);
+    const looksLikeCodeOnly = (s: string) => /^[\d.\s]+$/.test(s.trim());
+
+    const dashParts = c.split(/\s*[-–—]\s*/);
+    const codeOnly = dashParts.length >= 2 ? dashParts[0].trim() : c;
+    const nameFromValue =
+      dashParts.length >= 2 ? dashParts.slice(1).join(' - ').trim() : '';
+
+    const candidates = Array.from(
+      new Set(
+        [c, codeOnly, codeOnly.replace(/\s+/g, ''), c.replace(/\s+/g, '')]
+          .map((x) => x.trim())
+          .filter(Boolean)
+      )
+    );
+
+    for (const key of candidates) {
+      let name = ccCodeToName.get(key);
+      if (!name) continue;
+      if (/^[\d.]+\s*[-–—]\s*/.test(name)) {
+        name = name.replace(/^[\d.]+\s*[-–—]\s*/, '').trim();
+      }
+      const displayName = formatFluigBudgetFieldDisplay(name) ?? name;
+      if (displayName) return displayName;
+    }
+
+    if (nameFromValue && !looksLikeCodeOnly(nameFromValue)) return nameFromValue;
+    if (fromSplit && !looksLikeCodeOnly(fromSplit)) return fromSplit;
     return c;
   };
 
@@ -623,7 +707,7 @@ export function FluigSolicitacoesPage({
     queries: datasets.map((datasetId) => ({
       queryKey: ['fluig-dataset', datasetId],
       queryFn: async () => {
-        const res = await api.post(`/fluig/datasets/${datasetId}/data`, {}, {
+        const res = await api.post(`/fluig/datasets/${encodeURIComponent(datasetId)}/data`, {}, {
           timeout: 130000,
         });
         return res.data;
@@ -632,10 +716,6 @@ export function FluigSolicitacoesPage({
   });
 
   const loadingData = datasetQueries.some((q) => q.isLoading);
-  const isFetching = datasetQueries.some((q) => q.isFetching);
-  const refetchData = () => {
-    queryClient.refetchQueries({ queryKey: ['fluig-dataset'] });
-  };
   const hasError = datasetQueries.some((q) => q.error);
 
   const handleLogout = () => {
@@ -649,7 +729,7 @@ export function FluigSolicitacoesPage({
     setActiveTab(idx);
     // Resetar estado de visualização e busca ao trocar de dataset
     setSelectedEtapaIndex(0);
-    setCurrentPage(0);
+    setCurrentPage(1);
     setSearchText('');
     setActiveFilterCategory(null);
   };
@@ -888,20 +968,28 @@ export function FluigSolicitacoesPage({
   }, [currentColumns, currentValuesFilteredByFilial, config?.naturezaOrcamentariaColumn]);
 
   // Resolve coluna CC: usa columns, ou busca nas chaves reais das linhas (G4 usa "Centro De Custo Mecanismo")
-  const ccColResolved = useMemo(() => {
-    const first = currentValues[0] as Record<string, unknown> | undefined;
-    if (!first) return ccColFromColumns;
-
-    const matchesCustoMecanismo = (k: string) => {
-      const n = k.toLowerCase().replace(/\s+/g, ' ');
-      return n.includes('centro') && n.includes('custo') && n.includes('mecanismo');
+  const ccColumnsCandidates = useMemo(() => {
+    const matchesCc = (k: string) => {
+      const n = k.toLowerCase().replace(/\s+/g, ' ').trim();
+      return (
+        n === 'cc' ||
+        n === 'contrato' ||
+        /ccusto|cc_custo|centro[\s_-]?custo|centrocusto|cod[\s_-]?ccusto|custo\s*mecanismo|mecanismo.*custo/.test(
+          n
+        )
+      );
     };
+    const fromColumns = currentColumns.filter(matchesCc);
+    const fromFirstRow = currentValues[0]
+      ? Object.keys(currentValues[0] as Record<string, unknown>).filter(matchesCc)
+      : [];
+    return Array.from(new Set([...fromColumns, ...fromFirstRow]));
+  }, [currentColumns, currentValues]);
 
-    if (ccColFromColumns && first[ccColFromColumns] != null) return ccColFromColumns;
-    const fromRowKeys = Object.keys(first).find(matchesCustoMecanismo)
-      ?? Object.keys(first).find((k) => k.trim().toLowerCase() === 'contrato');
-    return fromRowKeys ?? ccColFromColumns;
-  }, [ccColFromColumns, currentValues]);
+  const ccColResolved = useMemo(() => {
+    if (ccColFromColumns) return ccColFromColumns;
+    return ccColumnsCandidates[0] ?? null;
+  }, [ccColFromColumns, ccColumnsCandidates]);
 
   const filiais = useMemo(() => {
     if (!filialCol) return [];
@@ -913,14 +1001,32 @@ export function FluigSolicitacoesPage({
     return Array.from(set).sort();
   }, [currentValuesFilteredByFilial, filialCol]);
 
-  const getCCValue = (row: Record<string, unknown>): string => {
-    if (!ccColResolved) return '';
-    let val = row[ccColResolved];
+  const readFluigCellString = (row: Record<string, unknown>, col: string): string => {
+    const val = row[col];
     if (val != null && typeof val === 'object') {
       const o = val as Record<string, unknown>;
-      val = o.display ?? o.displayValue ?? o.internalValue ?? o.value ?? val;
+      return String(o.display ?? o.displayValue ?? o.internalValue ?? o.value ?? val).trim();
     }
     return String(val ?? '').trim();
+  };
+
+  const looksLikeCcCodeOnly = (s: string) => /^[\d.\s]+$/.test(s.trim());
+
+  const getCCValue = (row: Record<string, unknown>): string => {
+    const cols =
+      ccColumnsCandidates.length > 0
+        ? ccColumnsCandidates
+        : ccColResolved
+          ? [ccColResolved]
+          : [];
+    let codeFallback = '';
+    for (const col of cols) {
+      const v = readFluigCellString(row, col);
+      if (!v || v === '—') continue;
+      if (!looksLikeCcCodeOnly(v)) return v;
+      if (!codeFallback) codeFallback = v;
+    }
+    return codeFallback;
   };
 
   const centrosCusto = useMemo(() => {
@@ -993,6 +1099,11 @@ export function FluigSolicitacoesPage({
     return String(val ?? '').trim();
   };
 
+  const getNaturezaOrcamentariaDisplay = (row: Record<string, unknown>): string => {
+    const raw = getNaturezaOrcamentariaValue(row);
+    return formatFluigBudgetFieldDisplay(raw) ?? raw;
+  };
+
   const naturezasOrcamentarias = useMemo(() => {
     if (!naturezaOrcamentariaCol) return [];
     const set = new Set<string>();
@@ -1003,26 +1114,15 @@ export function FluigSolicitacoesPage({
     return Array.from(set).sort();
   }, [currentValuesFilteredByFilial, naturezaOrcamentariaCol]);
 
-  const filialRef = useRef<HTMLDivElement>(null);
-  const ccRef = useRef<HTMLDivElement>(null);
-  const setorSolicitanteRef = useRef<HTMLDivElement>(null);
-  const urgenciaRef = useRef<HTMLDivElement>(null);
-  const fornecedorRef = useRef<HTMLDivElement>(null);
-  const naturezaOrcamentariaRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (filialRef.current && !filialRef.current.contains(e.target as Node)) setShowFilialDropdown(false);
-      if (ccRef.current && !ccRef.current.contains(e.target as Node)) setShowCCDropdown(false);
-      if (setorSolicitanteRef.current && !setorSolicitanteRef.current.contains(e.target as Node)) setShowSetorSolicitanteDropdown(false);
-      if (urgenciaRef.current && !urgenciaRef.current.contains(e.target as Node)) setShowUrgenciaDropdown(false);
-      if (fornecedorRef.current && !fornecedorRef.current.contains(e.target as Node)) setShowFornecedorDropdown(false);
-      if (naturezaOrcamentariaRef.current && !naturezaOrcamentariaRef.current.contains(e.target as Node))
-        setShowNaturezaOrcamentariaDropdown(false);
-    };
-    document.addEventListener('click', handler);
-    return () => document.removeEventListener('click', handler);
-  }, []);
+  const naturezaOrcamentariaFilterOptions = useMemo(
+    () =>
+      naturezasOrcamentarias.map((n) => ({
+        value: n,
+        label: formatFluigBudgetFieldDisplay(n) ?? n,
+        searchText: `${n} ${formatFluigBudgetFieldDisplay(n) ?? ''}`,
+      })),
+    [naturezasOrcamentarias]
+  );
 
   // Resetar todos os filtros APENAS quando o dataset mudar (troca de aba/dataset),
   // nunca quando o usuário alterar seleções (evita loop infinito por referência de array)
@@ -1146,8 +1246,8 @@ export function FluigSolicitacoesPage({
   }, [filteredStatusList.length]);
 
   useEffect(() => {
-    setCurrentPage(0);
-  }, [selectedEtapaIndex, recordsPerPage, effectiveRecordsPerPage]);
+    setCurrentPage(1);
+  }, [selectedEtapaIndex, searchText, datasetId]);
 
   const handleClearFilters = () => {
     setSelectedFiliais([...filiais]);
@@ -1156,12 +1256,6 @@ export function FluigSolicitacoesPage({
     setSelectedUrgencias([...urgencias]);
     setSelectedFornecedores([...fornecedores]);
     setSelectedNaturezasOrcamentarias([...naturezasOrcamentarias]);
-    setSelectedFiliaisSearch('');
-    setSelectedCCSearch('');
-    setSelectedSetorSolicitanteSearch('');
-    setSelectedUrgenciaSearch('');
-    setSelectedFornecedoresSearch('');
-    setSelectedNaturezaOrcamentariaSearch('');
     setSearchText('');
     setActiveFilterCategory(null);
   };
@@ -1205,786 +1299,176 @@ export function FluigSolicitacoesPage({
           </p>
         </div>
 
-        {/* Card: Processos + Atualizar */}
+        {/* Abas G3 / G4 / G5 (centralizadas, padrão OCs) */}
         {showProcessCard && (
-          <Card>
-            <CardContent className="p-4 sm:p-6">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                <div className="flex items-center space-x-2">
-                  <BarChart3 className="w-5 h-5 text-gray-900 dark:text-gray-100" />
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Processos</h3>
-                </div>
-                <div className="flex flex-wrap items-center gap-3">
-                  <div className="flex gap-1 p-1 rounded-lg bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
-                    {datasets.map((ds, idx) => (
-                      <button
-                        key={ds}
-                        onClick={() => handleDatasetTabClick(idx)}
-                        className={`px-4 py-2 rounded-md text-sm font-medium transition-colors whitespace-nowrap ${
-                          activeTab === idx
-                            ? 'bg-white dark:bg-gray-800 text-red-600 dark:text-red-400 shadow-sm'
-                            : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
-                        }`}
-                      >
-                        {datasetTabLabels[ds]}
-                      </button>
-                    ))}
-                  </div>
+          <div className="border-b border-gray-200 dark:border-gray-700">
+            <nav
+              className="-mb-px flex flex-wrap justify-center gap-x-4 gap-y-2 overflow-x-auto sm:gap-x-6"
+              role="tablist"
+              aria-label="Processos Fluig"
+            >
+              {datasets.map((ds, idx) => {
+                const active = activeTab === idx;
+                return (
                   <button
-                    onClick={() => refetchData()}
-                    disabled={loadingData || isFetching}
-                    className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 transition-colors text-sm"
+                    key={ds}
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    onClick={() => handleDatasetTabClick(idx)}
+                    className={`flex items-center gap-2 whitespace-nowrap rounded-t-lg border-b-2 px-2 py-2.5 text-xs font-medium transition-colors sm:px-3 sm:text-sm ${
+                      active
+                        ? 'border-red-500 text-red-600 dark:border-red-400 dark:text-red-400'
+                        : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 dark:text-gray-400 dark:hover:border-gray-600 dark:hover:text-gray-200'
+                    }`}
                   >
-                    {(loadingData || isFetching) ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <RefreshCw className="w-4 h-4" />
-                    )}
-                    Atualizar
+                    {datasetTabLabels[ds]}
                   </button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+                );
+              })}
+            </nav>
+          </div>
         )}
 
-        {/* Card: Filtros — suspenso (expandir/minimizar) + multi-select com busca */}
-        {!loadingData && !error && !isEmpty && (
-          <Card>
-            <CardHeader className="border-b-0">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-2">
-                  <Filter className="w-5 h-5 text-gray-900 dark:text-gray-100" />
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Filtro</h3>
-                </div>
-                <div className="flex items-center space-x-4">
-                  {!isFiltersMinimized && (
-                    <button
-                      onClick={handleClearFilters}
-                      className="flex items-center justify-center w-8 h-8 text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors"
-                      title="Limpar todos os filtros"
-                    >
-                      <RotateCcw className="w-5 h-5" />
-                    </button>
-                  )}
-                  <button
-                    onClick={() => setIsFiltersMinimized(!isFiltersMinimized)}
-                    className="flex items-center justify-center w-8 h-8 text-gray-900 dark:text-gray-100 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-                    title={isFiltersMinimized ? 'Expandir filtros' : 'Minimizar filtros'}
-                  >
-                    {isFiltersMinimized ? (
-                      <ChevronDown className="w-5 h-5" />
-                    ) : (
-                      <ChevronUp className="w-5 h-5" />
-                    )}
-                  </button>
-                </div>
+        {/* Modal de filtros (padrão do sistema) */}
+        {isFiltersModalOpen && !loadingData && !error && !isEmpty ? (
+          <div className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center p-4">
+            <div
+              className="absolute inset-0 bg-black/40"
+              onClick={() => setIsFiltersModalOpen(false)}
+              aria-hidden
+            />
+            <div className="relative mx-4 w-full max-w-lg rounded-xl bg-white shadow-2xl dark:bg-gray-800">
+              <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4 dark:border-gray-700">
+                <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">Filtro</h3>
+                <button
+                  type="button"
+                  onClick={() => setIsFiltersModalOpen(false)}
+                  className="rounded-md p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+                  aria-label="Fechar filtros"
+                >
+                  <X className="h-4 w-4" />
+                </button>
               </div>
-            </CardHeader>
-            {!isFiltersMinimized && (
-              <CardContent className="p-4 sm:p-6 w-full">
-                <div className="space-y-4 w-full">
-                  <div className="flex flex-wrap gap-4 w-full">
-                    {filialCol && !hideFilialFilter && (
-                      <div ref={filialRef} className="relative flex-1 min-w-[180px]">
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Filial</label>
-                        <div className="relative">
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setShowFilialDropdown((v) => !v);
-                              setShowCCDropdown(false);
-                              setShowSetorSolicitanteDropdown(false);
-                              setShowUrgenciaDropdown(false);
-                              setShowFornecedorDropdown(false);
-                              setShowNaturezaOrcamentariaDropdown(false);
-                            }}
-                            className="w-full h-10 pl-10 pr-11 text-left rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500 dark:focus:ring-red-400 focus:border-transparent relative"
-                          >
-                            <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4 pointer-events-none" />
-                            <span className="block pr-6 text-sm truncate">
-                              {selectedFiliais.length === 0
-                                ? 'Nenhuma'
-                                : selectedFiliais.length === filiais.length
-                                  ? 'Todas'
-                                  : `${selectedFiliais.length} selecionada(s)`}
-                            </span>
-                            <span className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center justify-center w-5 h-5 text-gray-400 dark:text-gray-500 pointer-events-none">
-                              {showFilialDropdown ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                            </span>
-                          </button>
-                        </div>
-                        {showFilialDropdown && (
-                          <div className="absolute z-30 mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-lg p-3">
-                            <input
-                              type="text"
-                              placeholder="Pesquisar..."
-                              value={selectedFiliaisSearch}
-                              onChange={(e) => setSelectedFiliaisSearch(e.target.value)}
-                              className="mb-2 block w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-red-500 dark:focus:ring-red-400"
-                            />
-                            <div className="flex items-center gap-2 mb-2">
-                              <label htmlFor="select-all-filial" className="flex items-center gap-3 cursor-pointer group">
-                                <div className="relative">
-                                  <input
-                                    id="select-all-filial"
-                                    type="checkbox"
-                                    checked={selectedFiliais.length > 0 && selectedFiliais.length === filiais.length}
-                                    onChange={(e) => {
-                                      setActiveFilterCategory('filial');
-                                      if (e.target.checked) setSelectedFiliais([...filiais]);
-                                      else setSelectedFiliais([]);
-                                    }}
-                                    className="sr-only"
-                                  />
-                                  <div
-                                    className={`w-5 h-5 rounded border-2 transition-all duration-200 flex items-center justify-center ${
-                                      selectedFiliais.length > 0 && selectedFiliais.length === filiais.length
-                                        ? 'bg-red-600 dark:bg-red-500 border-red-600 dark:border-red-500'
-                                        : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 group-hover:border-red-500 dark:group-hover:border-red-400'
-                                    }`}
-                                  >
-                                    {selectedFiliais.length > 0 && selectedFiliais.length === filiais.length && (
-                                      <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                                      </svg>
-                                    )}
-                                  </div>
-                                </div>
-                                <span className="text-sm text-gray-700 dark:text-gray-300">Selecionar tudo</span>
-                              </label>
-                            </div>
-                            <div className="max-h-48 overflow-y-auto">
-                              {filiais
-                                .filter((f) => f.toLowerCase().includes(selectedFiliaisSearch.toLowerCase()))
-                                .map((f) => {
-                                  const checked = selectedFiliais.includes(f);
-                                  return (
-                                    <label key={f} className="flex items-center gap-3 py-1.5 cursor-pointer group">
-                                      <div className="relative">
-                                        <input
-                                          type="checkbox"
-                                          checked={checked}
-                                          onChange={(e) => {
-                                            e.stopPropagation();
-                                            setActiveFilterCategory('filial');
-                                            if (e.target.checked) setSelectedFiliais((prev) => Array.from(new Set([...prev, f])));
-                                            else setSelectedFiliais((prev) => prev.filter((x) => x !== f));
-                                          }}
-                                          className="sr-only"
-                                        />
-                                        <div
-                                          className={`w-5 h-5 rounded border-2 transition-all duration-200 flex items-center justify-center ${
-                                            checked
-                                              ? 'bg-red-600 dark:bg-red-500 border-red-600 dark:border-red-500'
-                                              : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 group-hover:border-red-500 dark:group-hover:border-red-400'
-                                          }`}
-                                        >
-                                          {checked && (
-                                            <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                                            </svg>
-                                          )}
-                                        </div>
-                                      </div>
-                                      <span className="text-sm text-gray-900 dark:text-gray-100">{f}</span>
-                                    </label>
-                                  );
-                                })}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {ccColResolved && (
-                      <div ref={ccRef} className="relative flex-1 min-w-[180px]">
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Centro de custo</label>
-                        <div className="relative">
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setShowCCDropdown((v) => !v);
-                              setShowFilialDropdown(false);
-                              setShowSetorSolicitanteDropdown(false);
-                              setShowUrgenciaDropdown(false);
-                              setShowFornecedorDropdown(false);
-                              setShowNaturezaOrcamentariaDropdown(false);
-                            }}
-                            className="w-full h-10 pl-10 pr-11 text-left rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500 dark:focus:ring-red-400 focus:border-transparent relative"
-                          >
-                            <Layers className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4 pointer-events-none" />
-                            <span className="block pr-6 text-sm truncate">
-                              {selectedCCs.length === 0
-                                ? 'Nenhum'
-                                : selectedCCs.length === centrosCusto.length
-                                  ? 'Todos'
-                                  : `${selectedCCs.length} selecionado(s)`}
-                            </span>
-                            <span className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center justify-center w-5 h-5 text-gray-400 dark:text-gray-500 pointer-events-none">
-                              {showCCDropdown ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                            </span>
-                          </button>
-                        </div>
-                        {showCCDropdown && (
-                          <div className="absolute z-30 mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-lg p-3">
-                            <input
-                              type="text"
-                              placeholder="Pesquisar..."
-                              value={selectedCCSearch}
-                              onChange={(e) => setSelectedCCSearch(e.target.value)}
-                              className="mb-2 block w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-red-500 dark:focus:ring-red-400"
-                            />
-                            <div className="flex items-center gap-2 mb-2">
-                              <label htmlFor="select-all-cc" className="flex items-center gap-3 cursor-pointer group">
-                                <div className="relative">
-                                  <input
-                                    id="select-all-cc"
-                                    type="checkbox"
-                                    checked={selectedCCs.length > 0 && selectedCCs.length === centrosCusto.length}
-                                    onChange={(e) => {
-                                      setActiveFilterCategory('cc');
-                                      if (e.target.checked) setSelectedCCs([...centrosCusto]);
-                                      else setSelectedCCs([]);
-                                    }}
-                                    className="sr-only"
-                                  />
-                                  <div
-                                    className={`w-5 h-5 rounded border-2 transition-all duration-200 flex items-center justify-center ${
-                                      selectedCCs.length > 0 && selectedCCs.length === centrosCusto.length
-                                        ? 'bg-red-600 dark:bg-red-500 border-red-600 dark:border-red-500'
-                                        : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 group-hover:border-red-500 dark:group-hover:border-red-400'
-                                    }`}
-                                  >
-                                    {selectedCCs.length > 0 && selectedCCs.length === centrosCusto.length && (
-                                      <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                                      </svg>
-                                    )}
-                                  </div>
-                                </div>
-                                <span className="text-sm text-gray-700 dark:text-gray-300">Selecionar tudo</span>
-                              </label>
-                            </div>
-                            <div className="max-h-48 overflow-y-auto">
-                              {centrosCusto
-                                .filter((c) => {
-                                  const q = selectedCCSearch.toLowerCase();
-                                  const nome = datasetId === 'DataSet_G4FollowUp' ? getCCDisplayLabel(c) : null;
-                                  const label = (datasetId === 'DataSet_G4FollowUp' && nome && nome !== c ? `${c} - ${nome}` : c).toLowerCase();
-                                  return !q || label.includes(q) || c.toLowerCase().includes(q);
-                                })
-                                .map((c) => {
-                                  const nome = datasetId === 'DataSet_G4FollowUp' ? getCCDisplayLabel(c) : null;
-                                  const displayLabel = datasetId === 'DataSet_G4FollowUp' && nome && nome !== c ? `${c} - ${nome}` : c;
-                                  const checked = selectedCCs.includes(c);
-                                  return (
-                                    <label key={c} className="flex items-center gap-3 py-1.5 cursor-pointer group">
-                                      <div className="relative">
-                                        <input
-                                          type="checkbox"
-                                          checked={checked}
-                                          onChange={(e) => {
-                                            e.stopPropagation();
-                                            setActiveFilterCategory('cc');
-                                            if (e.target.checked) setSelectedCCs((prev) => Array.from(new Set([...prev, c])));
-                                            else setSelectedCCs((prev) => prev.filter((x) => x !== c));
-                                          }}
-                                          className="sr-only"
-                                        />
-                                        <div
-                                          className={`w-5 h-5 rounded border-2 transition-all duration-200 flex items-center justify-center ${
-                                            checked
-                                              ? 'bg-red-600 dark:bg-red-500 border-red-600 dark:border-red-500'
-                                              : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 group-hover:border-red-500 dark:group-hover:border-red-400'
-                                          }`}
-                                        >
-                                          {checked && (
-                                            <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                                            </svg>
-                                          )}
-                                        </div>
-                                      </div>
-                                      <span className="text-sm text-gray-900 dark:text-gray-100">{displayLabel}</span>
-                                    </label>
-                                  );
-                                })}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {setorSolicitanteCol && (
-                      <div ref={setorSolicitanteRef} className="relative flex-1 min-w-[180px]">
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Setor solicitante</label>
-                        <div className="relative">
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setShowSetorSolicitanteDropdown((v) => !v);
-                              setShowFilialDropdown(false);
-                              setShowCCDropdown(false);
-                              setShowUrgenciaDropdown(false);
-                              setShowFornecedorDropdown(false);
-                              setShowNaturezaOrcamentariaDropdown(false);
-                            }}
-                            className="w-full h-10 pl-10 pr-11 text-left rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500 dark:focus:ring-red-400 focus:border-transparent relative"
-                          >
-                            <Users className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4 pointer-events-none" />
-                            <span className="block pr-6 text-sm truncate">
-                              {selectedSetoresSolicitantes.length === 0
-                                ? 'Nenhum'
-                                : selectedSetoresSolicitantes.length === setoresSolicitantes.length
-                                  ? 'Todos'
-                                  : `${selectedSetoresSolicitantes.length} selecionado(s)`}
-                            </span>
-                            <span className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center justify-center w-5 h-5 text-gray-400 dark:text-gray-500 pointer-events-none">
-                              {showSetorSolicitanteDropdown ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                            </span>
-                          </button>
-                        </div>
-                        {showSetorSolicitanteDropdown && (
-                          <div className="absolute z-30 mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-lg p-3">
-                            <input
-                              type="text"
-                              placeholder="Pesquisar..."
-                              value={selectedSetorSolicitanteSearch}
-                              onChange={(e) => setSelectedSetorSolicitanteSearch(e.target.value)}
-                              className="mb-2 block w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-red-500 dark:focus:ring-red-400"
-                            />
-                            <div className="flex items-center gap-2 mb-2">
-                              <label htmlFor="select-all-setor-solicitante" className="flex items-center gap-3 cursor-pointer group">
-                                <div className="relative">
-                                  <input
-                                    id="select-all-setor-solicitante"
-                                    type="checkbox"
-                                    checked={selectedSetoresSolicitantes.length > 0 && selectedSetoresSolicitantes.length === setoresSolicitantes.length}
-                                    onChange={(e) => {
-                                      setActiveFilterCategory('setorSolicitante');
-                                      if (e.target.checked) setSelectedSetoresSolicitantes([...setoresSolicitantes]);
-                                      else setSelectedSetoresSolicitantes([]);
-                                    }}
-                                    className="sr-only"
-                                  />
-                                  <div
-                                    className={`w-5 h-5 rounded border-2 transition-all duration-200 flex items-center justify-center ${
-                                      selectedSetoresSolicitantes.length > 0 && selectedSetoresSolicitantes.length === setoresSolicitantes.length
-                                        ? 'bg-red-600 dark:bg-red-500 border-red-600 dark:border-red-500'
-                                        : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 group-hover:border-red-500 dark:group-hover:border-red-400'
-                                    }`}
-                                  >
-                                    {selectedSetoresSolicitantes.length > 0 && selectedSetoresSolicitantes.length === setoresSolicitantes.length && (
-                                      <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                                      </svg>
-                                    )}
-                                  </div>
-                                </div>
-                                <span className="text-sm text-gray-700 dark:text-gray-300">Selecionar tudo</span>
-                              </label>
-                            </div>
-                            <div className="max-h-48 overflow-y-auto">
-                              {setoresSolicitantes
-                                .filter((s) => s.toLowerCase().includes(selectedSetorSolicitanteSearch.toLowerCase()))
-                                .map((s) => {
-                                  const checked = selectedSetoresSolicitantes.includes(s);
-                                  return (
-                                    <label key={s} className="flex items-center gap-3 py-1.5 cursor-pointer group">
-                                      <div className="relative">
-                                        <input
-                                          type="checkbox"
-                                          checked={checked}
-                                          onChange={(e) => {
-                                            e.stopPropagation();
-                                            setActiveFilterCategory('setorSolicitante');
-                                            if (e.target.checked) setSelectedSetoresSolicitantes((prev) => Array.from(new Set([...prev, s])));
-                                            else setSelectedSetoresSolicitantes((prev) => prev.filter((x) => x !== s));
-                                          }}
-                                          className="sr-only"
-                                        />
-                                        <div
-                                          className={`w-5 h-5 rounded border-2 transition-all duration-200 flex items-center justify-center ${
-                                            checked
-                                              ? 'bg-red-600 dark:bg-red-500 border-red-600 dark:border-red-500'
-                                              : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 group-hover:border-red-500 dark:group-hover:border-red-400'
-                                          }`}
-                                        >
-                                          {checked && (
-                                            <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                                            </svg>
-                                          )}
-                                        </div>
-                                      </div>
-                                      <span className="text-sm text-gray-900 dark:text-gray-100 truncate" title={s}>{s}</span>
-                                    </label>
-                                  );
-                                })}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {urgenciaCol && (
-                      <div ref={urgenciaRef} className="relative flex-1 min-w-[180px]">
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Urgência</label>
-                        <div className="relative">
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setShowUrgenciaDropdown((v) => !v);
-                              setShowFilialDropdown(false);
-                              setShowCCDropdown(false);
-                              setShowSetorSolicitanteDropdown(false);
-                              setShowFornecedorDropdown(false);
-                              setShowNaturezaOrcamentariaDropdown(false);
-                            }}
-                            className="w-full h-10 pl-10 pr-11 text-left rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500 dark:focus:ring-red-400 focus:border-transparent relative"
-                          >
-                            <AlertCircle className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4 pointer-events-none" />
-                            <span className="block pr-6 text-sm truncate">
-                              {selectedUrgencias.length === 0
-                                ? 'Nenhuma'
-                                : selectedUrgencias.length === urgencias.length
-                                  ? 'Todas'
-                                  : `${selectedUrgencias.length} selecionada(s)`}
-                            </span>
-                            <span className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center justify-center w-5 h-5 text-gray-400 dark:text-gray-500 pointer-events-none">
-                              {showUrgenciaDropdown ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                            </span>
-                          </button>
-                        </div>
-                        {showUrgenciaDropdown && (
-                          <div className="absolute z-30 mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-lg p-3">
-                            <input
-                              type="text"
-                              placeholder="Pesquisar..."
-                              value={selectedUrgenciaSearch}
-                              onChange={(e) => setSelectedUrgenciaSearch(e.target.value)}
-                              className="mb-2 block w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-red-500 dark:focus:ring-red-400"
-                            />
-                            <div className="flex items-center gap-2 mb-2">
-                              <label htmlFor="select-all-urgencia" className="flex items-center gap-3 cursor-pointer group">
-                                <div className="relative">
-                                  <input
-                                    id="select-all-urgencia"
-                                    type="checkbox"
-                                    checked={selectedUrgencias.length > 0 && selectedUrgencias.length === urgencias.length}
-                                    onChange={(e) => {
-                                      setActiveFilterCategory('urgencia');
-                                      if (e.target.checked) setSelectedUrgencias([...urgencias]);
-                                      else setSelectedUrgencias([]);
-                                    }}
-                                    className="sr-only"
-                                  />
-                                  <div
-                                    className={`w-5 h-5 rounded border-2 transition-all duration-200 flex items-center justify-center ${
-                                      selectedUrgencias.length > 0 && selectedUrgencias.length === urgencias.length
-                                        ? 'bg-red-600 dark:bg-red-500 border-red-600 dark:border-red-500'
-                                        : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 group-hover:border-red-500 dark:group-hover:border-red-400'
-                                    }`}
-                                  >
-                                    {selectedUrgencias.length > 0 && selectedUrgencias.length === urgencias.length && (
-                                      <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                                      </svg>
-                                    )}
-                                  </div>
-                                </div>
-                                <span className="text-sm text-gray-700 dark:text-gray-300">Selecionar tudo</span>
-                              </label>
-                            </div>
-                            <div className="max-h-48 overflow-y-auto">
-                              {urgencias
-                                .filter((u) => u.toLowerCase().includes(selectedUrgenciaSearch.toLowerCase()))
-                                .map((u) => {
-                                  const checked = selectedUrgencias.includes(u);
-                                  return (
-                                    <label key={u} className="flex items-center gap-3 py-1.5 cursor-pointer group">
-                                      <div className="relative">
-                                        <input
-                                          type="checkbox"
-                                          checked={checked}
-                                          onChange={(e) => {
-                                            e.stopPropagation();
-                                            setActiveFilterCategory('urgencia');
-                                            if (e.target.checked) setSelectedUrgencias((prev) => Array.from(new Set([...prev, u])));
-                                            else setSelectedUrgencias((prev) => prev.filter((x) => x !== u));
-                                          }}
-                                          className="sr-only"
-                                        />
-                                        <div
-                                          className={`w-5 h-5 rounded border-2 transition-all duration-200 flex items-center justify-center ${
-                                            checked
-                                              ? 'bg-red-600 dark:bg-red-500 border-red-600 dark:border-red-500'
-                                              : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 group-hover:border-red-500 dark:group-hover:border-red-400'
-                                          }`}
-                                        >
-                                          {checked && (
-                                            <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                                            </svg>
-                                          )}
-                                        </div>
-                                      </div>
-                                      <span className="text-sm text-gray-900 dark:text-gray-100 truncate" title={u}>{u}</span>
-                                    </label>
-                                  );
-                                })}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {fornecedorCol && (
-                      <div ref={fornecedorRef} className="relative flex-1 min-w-[180px]">
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Fornecedor</label>
-                        <div className="relative">
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setShowFornecedorDropdown((v) => !v);
-                              setShowFilialDropdown(false);
-                              setShowCCDropdown(false);
-                              setShowSetorSolicitanteDropdown(false);
-                              setShowUrgenciaDropdown(false);
-                              setShowNaturezaOrcamentariaDropdown(false);
-                            }}
-                            className="w-full h-10 pl-10 pr-11 text-left rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500 dark:focus:ring-red-400 focus:border-transparent relative"
-                          >
-                            <Truck className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4 pointer-events-none" />
-                            <span className="block pr-6 text-sm truncate">
-                              {selectedFornecedores.length === 0
-                                ? 'Nenhum'
-                                : selectedFornecedores.length === fornecedores.length
-                                  ? 'Todos'
-                                  : `${selectedFornecedores.length} selecionado(s)`}
-                            </span>
-                            <span className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center justify-center w-5 h-5 text-gray-400 dark:text-gray-500 pointer-events-none">
-                              {showFornecedorDropdown ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                            </span>
-                          </button>
-                        </div>
-                        {showFornecedorDropdown && (
-                          <div className="absolute z-30 mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-lg p-3">
-                            <input
-                              type="text"
-                              placeholder="Pesquisar..."
-                              value={selectedFornecedoresSearch}
-                              onChange={(e) => setSelectedFornecedoresSearch(e.target.value)}
-                              className="mb-2 block w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-red-500 dark:focus:ring-red-400"
-                            />
-                            <div className="flex items-center gap-2 mb-2">
-                              <label htmlFor="select-all-fornecedor" className="flex items-center gap-3 cursor-pointer group">
-                                <div className="relative">
-                                  <input
-                                    id="select-all-fornecedor"
-                                    type="checkbox"
-                                    checked={selectedFornecedores.length > 0 && selectedFornecedores.length === fornecedores.length}
-                                    onChange={(e) => {
-                                      setActiveFilterCategory('fornecedor');
-                                      if (e.target.checked) setSelectedFornecedores([...fornecedores]);
-                                      else setSelectedFornecedores([]);
-                                    }}
-                                    className="sr-only"
-                                  />
-                                  <div
-                                    className={`w-5 h-5 rounded border-2 transition-all duration-200 flex items-center justify-center ${
-                                      selectedFornecedores.length > 0 && selectedFornecedores.length === fornecedores.length
-                                        ? 'bg-red-600 dark:bg-red-500 border-red-600 dark:border-red-500'
-                                        : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 group-hover:border-red-500 dark:group-hover:border-red-400'
-                                    }`}
-                                  >
-                                    {selectedFornecedores.length > 0 && selectedFornecedores.length === fornecedores.length && (
-                                      <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                                      </svg>
-                                    )}
-                                  </div>
-                                </div>
-                                <span className="text-sm text-gray-700 dark:text-gray-300">Selecionar tudo</span>
-                              </label>
-                            </div>
-                            <div className="max-h-48 overflow-y-auto">
-                              {fornecedores
-                                .filter((f) => f.toLowerCase().includes(selectedFornecedoresSearch.toLowerCase()))
-                                .map((f) => {
-                                  const checked = selectedFornecedores.includes(f);
-                                  return (
-                                    <label key={f} className="flex items-center gap-3 py-1.5 cursor-pointer group">
-                                      <div className="relative">
-                                        <input
-                                          type="checkbox"
-                                          checked={checked}
-                                          onChange={(e) => {
-                                            e.stopPropagation();
-                                            setActiveFilterCategory('fornecedor');
-                                            if (e.target.checked) setSelectedFornecedores((prev) => Array.from(new Set([...prev, f])));
-                                            else setSelectedFornecedores((prev) => prev.filter((x) => x !== f));
-                                          }}
-                                          className="sr-only"
-                                        />
-                                        <div
-                                          className={`w-5 h-5 rounded border-2 transition-all duration-200 flex items-center justify-center ${
-                                            checked
-                                              ? 'bg-red-600 dark:bg-red-500 border-red-600 dark:border-red-500'
-                                              : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 group-hover:border-red-500 dark:group-hover:border-red-400'
-                                          }`}
-                                        >
-                                          {checked && (
-                                            <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                                            </svg>
-                                          )}
-                                        </div>
-                                      </div>
-                                      <span className="text-sm text-gray-900 dark:text-gray-100 truncate" title={f}>{f}</span>
-                                    </label>
-                                  );
-                                })}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {naturezaOrcamentariaCol && (
-                      <div ref={naturezaOrcamentariaRef} className="relative flex-1 min-w-[180px]">
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                          Natureza orçamentária
-                        </label>
-                        <div className="relative">
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setShowNaturezaOrcamentariaDropdown((v) => !v);
-                              setShowFilialDropdown(false);
-                              setShowCCDropdown(false);
-                              setShowSetorSolicitanteDropdown(false);
-                              setShowUrgenciaDropdown(false);
-                              setShowFornecedorDropdown(false);
-                            }}
-                            className="w-full h-10 pl-10 pr-11 text-left rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500 dark:focus:ring-red-400 focus:border-transparent relative"
-                          >
-                            <Landmark className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4 pointer-events-none" />
-                            <span className="block pr-6 text-sm truncate">
-                              {selectedNaturezasOrcamentarias.length === 0
-                                ? 'Nenhuma'
-                                : selectedNaturezasOrcamentarias.length === naturezasOrcamentarias.length
-                                  ? 'Todas'
-                                  : `${selectedNaturezasOrcamentarias.length} selecionada(s)`}
-                            </span>
-                            <span className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center justify-center w-5 h-5 text-gray-400 dark:text-gray-500 pointer-events-none">
-                              {showNaturezaOrcamentariaDropdown ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                            </span>
-                          </button>
-                        </div>
-                        {showNaturezaOrcamentariaDropdown && (
-                          <div className="absolute z-30 mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-lg p-3">
-                            <input
-                              type="text"
-                              placeholder="Pesquisar..."
-                              value={selectedNaturezaOrcamentariaSearch}
-                              onChange={(e) => setSelectedNaturezaOrcamentariaSearch(e.target.value)}
-                              className="mb-2 block w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-red-500 dark:focus:ring-red-400"
-                            />
-                            <div className="flex items-center gap-2 mb-2">
-                              <label htmlFor="select-all-natureza-orcamentaria" className="flex items-center gap-3 cursor-pointer group">
-                                <div className="relative">
-                                  <input
-                                    id="select-all-natureza-orcamentaria"
-                                    type="checkbox"
-                                    checked={
-                                      selectedNaturezasOrcamentarias.length > 0 &&
-                                      selectedNaturezasOrcamentarias.length === naturezasOrcamentarias.length
-                                    }
-                                    onChange={(e) => {
-                                      setActiveFilterCategory('naturezaOrcamentaria');
-                                      if (e.target.checked) setSelectedNaturezasOrcamentarias([...naturezasOrcamentarias]);
-                                      else setSelectedNaturezasOrcamentarias([]);
-                                    }}
-                                    className="sr-only"
-                                  />
-                                  <div
-                                    className={`w-5 h-5 rounded border-2 transition-all duration-200 flex items-center justify-center ${
-                                      selectedNaturezasOrcamentarias.length > 0 &&
-                                      selectedNaturezasOrcamentarias.length === naturezasOrcamentarias.length
-                                        ? 'bg-red-600 dark:bg-red-500 border-red-600 dark:border-red-500'
-                                        : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 group-hover:border-red-500 dark:group-hover:border-red-400'
-                                    }`}
-                                  >
-                                    {selectedNaturezasOrcamentarias.length > 0 &&
-                                      selectedNaturezasOrcamentarias.length === naturezasOrcamentarias.length && (
-                                        <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                                        </svg>
-                                      )}
-                                  </div>
-                                </div>
-                                <span className="text-sm text-gray-700 dark:text-gray-300">Selecionar tudo</span>
-                              </label>
-                            </div>
-                            <div className="max-h-48 overflow-y-auto">
-                              {naturezasOrcamentarias
-                                .filter((n) => n.toLowerCase().includes(selectedNaturezaOrcamentariaSearch.toLowerCase()))
-                                .map((n) => {
-                                  const checked = selectedNaturezasOrcamentarias.includes(n);
-                                  return (
-                                    <label key={n} className="flex items-center gap-3 py-1.5 cursor-pointer group">
-                                      <div className="relative">
-                                        <input
-                                          type="checkbox"
-                                          checked={checked}
-                                          onChange={(e) => {
-                                            e.stopPropagation();
-                                            setActiveFilterCategory('naturezaOrcamentaria');
-                                            if (e.target.checked)
-                                              setSelectedNaturezasOrcamentarias((prev) => Array.from(new Set([...prev, n])));
-                                            else setSelectedNaturezasOrcamentarias((prev) => prev.filter((x) => x !== n));
-                                          }}
-                                          className="sr-only"
-                                        />
-                                        <div
-                                          className={`w-5 h-5 rounded border-2 transition-all duration-200 flex items-center justify-center ${
-                                            checked
-                                              ? 'bg-red-600 dark:bg-red-500 border-red-600 dark:border-red-500'
-                                              : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 group-hover:border-red-500 dark:group-hover:border-red-400'
-                                          }`}
-                                        >
-                                          {checked && (
-                                            <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                                            </svg>
-                                          )}
-                                        </div>
-                                      </div>
-                                      <span className="text-sm text-gray-900 dark:text-gray-100 truncate" title={n}>
-                                        {n}
-                                      </span>
-                                    </label>
-                                  );
-                                })}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </CardContent>
-            )}
-          </Card>
-        )}
+              <div className="max-h-[70vh] space-y-4 overflow-y-auto px-5 py-4">
+                {filialCol && !hideFilialFilter ? (
+                  <MultiSelectSearchDropdown
+                    label="Filial"
+                    options={filiais.map((f) => ({ value: f, label: f }))}
+                    selected={selectedFiliais}
+                    onChange={(next) => {
+                      setActiveFilterCategory('filial');
+                      setSelectedFiliais(next);
+                    }}
+                    placeholder="Todas"
+                    searchPlaceholder="Pesquisar..."
+                    icon={<Building2 className="h-4 w-4" />}
+                    noFocusRing
+                  />
+                ) : null}
+                {ccColResolved ? (
+                  <MultiSelectSearchDropdown
+                    label="Centro de custo"
+                    options={centrosCusto.map((c) => {
+                      const nome = getCCDisplayLabel(c);
+                      return {
+                        value: c,
+                        label: nome && nome !== '—' ? nome : c,
+                        searchText: `${c} ${nome}`,
+                      };
+                    })}
+                    selected={selectedCCs}
+                    onChange={(next) => {
+                      setActiveFilterCategory('cc');
+                      setSelectedCCs(next);
+                    }}
+                    placeholder="Todos"
+                    searchPlaceholder="Pesquisar..."
+                    icon={<Layers className="h-4 w-4" />}
+                    noFocusRing
+                  />
+                ) : null}
+                {setorSolicitanteCol ? (
+                  <MultiSelectSearchDropdown
+                    label="Setor solicitante"
+                    options={setoresSolicitantes.map((s) => ({ value: s, label: s }))}
+                    selected={selectedSetoresSolicitantes}
+                    onChange={(next) => {
+                      setActiveFilterCategory('setorSolicitante');
+                      setSelectedSetoresSolicitantes(next);
+                    }}
+                    placeholder="Todos"
+                    searchPlaceholder="Pesquisar..."
+                    icon={<Users className="h-4 w-4" />}
+                    noFocusRing
+                  />
+                ) : null}
+                {urgenciaCol ? (
+                  <MultiSelectSearchDropdown
+                    label="Urgência"
+                    options={urgencias.map((u) => ({ value: u, label: u }))}
+                    selected={selectedUrgencias}
+                    onChange={(next) => {
+                      setActiveFilterCategory('urgencia');
+                      setSelectedUrgencias(next);
+                    }}
+                    placeholder="Todas"
+                    searchPlaceholder="Pesquisar..."
+                    icon={<AlertCircle className="h-4 w-4" />}
+                    noFocusRing
+                  />
+                ) : null}
+                {fornecedorCol ? (
+                  <MultiSelectSearchDropdown
+                    label="Fornecedor"
+                    options={fornecedores.map((f) => ({ value: f, label: f }))}
+                    selected={selectedFornecedores}
+                    onChange={(next) => {
+                      setActiveFilterCategory('fornecedor');
+                      setSelectedFornecedores(next);
+                    }}
+                    placeholder="Todos"
+                    searchPlaceholder="Pesquisar..."
+                    icon={<Truck className="h-4 w-4" />}
+                    noFocusRing
+                  />
+                ) : null}
+                {naturezaOrcamentariaCol ? (
+                  <MultiSelectSearchDropdown
+                    label="Natureza orçamentária"
+                    options={naturezaOrcamentariaFilterOptions}
+                    selected={selectedNaturezasOrcamentarias}
+                    onChange={(next) => {
+                      setActiveFilterCategory('naturezaOrcamentaria');
+                      setSelectedNaturezasOrcamentarias(next);
+                    }}
+                    placeholder="Todas"
+                    searchPlaceholder="Pesquisar..."
+                    icon={<Landmark className="h-4 w-4" />}
+                    noFocusRing
+                  />
+                ) : null}
+              </div>
+              <div className="flex items-center justify-between border-t border-gray-200 px-5 py-4 dark:border-gray-700">
+                <button
+                  type="button"
+                  onClick={handleClearFilters}
+                  className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+                >
+                  <RotateCcw className="h-4 w-4" />
+                  Limpar filtros
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsFiltersModalOpen(false)}
+                  className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-gray-800 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-gray-200"
+                >
+                  Fechar
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         {hasError && (
           <Card className="border-red-200 dark:border-red-800">
@@ -2037,15 +1521,18 @@ export function FluigSolicitacoesPage({
                 <CardContent className="p-4 sm:p-6">
                   <div className="flex flex-col items-center justify-center py-12">
                     <Building2 className="w-16 h-16 text-gray-300 dark:text-gray-600 mb-4" />
-                    <p className="text-gray-600 dark:text-gray-400">Nenhum dado em {datasetId}</p>
-                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Altere a aba ou tente atualizar.</p>
+                    <p className="text-gray-600 dark:text-gray-400">
+                      Nenhum dado em {datasetTabLabels[datasetId] ?? datasetId}
+                    </p>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                      O Fluig pode demorar para responder nesta aba. Troque de aba e volte, ou recarregue a página.
+                    </p>
                   </div>
                 </CardContent>
               </Card>
             )}
 
             {!error && !isEmpty && filteredStatusList.length > 0 && (() => {
-              const totalSolicitacoes = filteredStatusList.reduce((acc, [, rows]) => acc + rows.length, 0);
               const [etapaAtual, rowsAtuais] = filteredStatusList[selectedEtapaIndex] ?? filteredStatusList[0];
               const showLeadTimeColumn = !!movimentoDataHoraCol && !isEtapaSemLeadTime(etapaAtual);
               const getHistText = (r: Record<string, unknown>) => {
@@ -2059,73 +1546,93 @@ export function FluigSolicitacoesPage({
               };
               return (
                 <div className="space-y-5">
-                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                    <div className="flex items-center gap-3 flex-wrap">
-                      <span className="text-base font-medium text-gray-700 dark:text-gray-300">
-                        {totalSolicitacoes} solicitação(ões)
-                      </span>
-                      {hasActiveFilters && (
-                        <span className="px-2.5 py-1 text-xs font-medium rounded-full bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300">
-                          filtrado
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex gap-2 overflow-x-auto pb-1">
-                      {filteredStatusList.map(([etapa, rows], idx) => (
-                        <button
-                          key={`${datasetId}-${etapa}`}
-                          onClick={() => setSelectedEtapaIndex(idx)}
-                          className={`shrink-0 px-4 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
-                            idx === selectedEtapaIndex
-                              ? 'bg-red-600 text-white shadow-sm'
-                              : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
-                          }`}
-                          title={`${etapa} — ${rows.length} registro(s)`}
-                        >
-                          {etapa} <span className={idx === selectedEtapaIndex ? 'text-red-100' : 'opacity-75'}>({rows.length})</span>
-                        </button>
-                      ))}
-                    </div>
+                  <div className="px-2 bg-transparent">
+                    <nav
+                      className="-mb-px flex flex-wrap justify-center gap-x-1 gap-y-2 overflow-x-auto py-3 sm:gap-x-2"
+                      role="tablist"
+                      aria-label="Etapas do processo"
+                    >
+                      {filteredStatusList.map(([etapa, rows], idx) => {
+                        const active = idx === selectedEtapaIndex;
+                        return (
+                          <button
+                            key={`${datasetId}-${etapa}`}
+                            type="button"
+                            role="tab"
+                            aria-selected={active}
+                            onClick={() => setSelectedEtapaIndex(idx)}
+                            className={`flex items-center gap-2 whitespace-nowrap rounded-t-lg border-b-2 px-2 py-2 text-xs font-medium transition-colors sm:px-3 sm:text-sm ${
+                              active
+                                ? 'border-red-500 text-red-600 dark:border-red-400 dark:text-red-400'
+                                : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
+                            }`}
+                            title={`${etapa} — ${rows.length} registro(s)`}
+                          >
+                            {etapa}
+                            <TabCountBadge count={rows.length} active={active} tone="red" />
+                          </button>
+                        );
+                      })}
+                    </nav>
                   </div>
 
-                  <Card className={`overflow-hidden border border-gray-200 dark:border-gray-700/80 ${useEmployeeListLayout ? 'shadow-sm' : ''}`}>
-                    <div
-                      className={`px-5 py-4 ${useEmployeeListLayout ? 'border-b border-gray-200 dark:border-gray-700/80 bg-white dark:bg-gray-800' : 'border-b border-gray-200 dark:border-gray-700/80 bg-gray-50/50 dark:bg-gray-800/30'}`}
-                    >
-                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                        <div>
-                          <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 truncate" title={etapaAtual}>
-                            {etapaAtual}
-                          </h3>
-                          <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
-                            {rowsAtuais.length === 0
-                              ? 'Nenhuma solicitação'
-                              : `${rowsAtuais.length} registro(s) nesta etapa`}
-                          </p>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-3">
-                          <div className="flex-none min-w-[260px]">
-                            <div className="relative">
-                              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 dark:text-gray-500" />
-                              <input
-                                type="text"
-                                placeholder="Buscar..."
-                                value={searchText}
-                                onChange={(e) => setSearchText(e.target.value)}
-                                className={`w-full min-w-0 pl-10 pr-10 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:border-red-500 dark:focus:border-red-500 ${useEmployeeListLayout ? 'rounded-md focus:ring-red-500' : 'rounded-lg focus:ring-red-500'}`}
-                              />
-                              {searchText && (
-                                <button
-                                  type="button"
-                                  onClick={() => setSearchText('')}
-                                  aria-label="Limpar busca"
-                                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-md text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                                >
-                                  <X className="w-4 h-4" />
-                                </button>
-                              )}
-                            </div>
+                  <Card className={`${cadastroListClasses.card} overflow-hidden`}>
+                    <CardHeader className={cadastroListClasses.cardHeader}>
+                      <div className={cadastroListClasses.cardHeaderRow}>
+                        <div className={cadastroListClasses.cardHeaderIconRow}>
+                          <div className="rounded-lg bg-red-100 p-2 sm:p-3 dark:bg-red-900/30">
+                            <FileText className="h-5 w-5 text-red-600 sm:h-6 sm:w-6 dark:text-red-400" />
                           </div>
+                          <div>
+                            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 truncate" title={etapaAtual}>
+                              {etapaAtual}
+                            </h3>
+                            <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
+                              {rowsAtuais.length === 0
+                                ? 'Nenhuma solicitação'
+                                : `${rowsAtuais.length} registro(s) nesta etapa`}
+                            </p>
+                          </div>
+                        </div>
+                        <div className={cadastroListClasses.cardToolbar}>
+                          <div className="relative min-w-[240px] flex-1 sm:w-[280px] sm:flex-none">
+                            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
+                            <input
+                              type="text"
+                              role="searchbox"
+                              placeholder="Buscar..."
+                              value={searchText}
+                              onChange={(e) => setSearchText(e.target.value)}
+                              autoComplete="off"
+                              className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                            />
+                            {searchText ? (
+                              <button
+                                type="button"
+                                onClick={() => setSearchText('')}
+                                aria-label="Limpar busca"
+                                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-300"
+                              >
+                                <X className="h-4 w-4" />
+                              </button>
+                            ) : null}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setIsFiltersModalOpen(true)}
+                            className={`relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition-colors ${
+                              hasActiveFilters
+                                ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40'
+                                : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
+                            }`}
+                            aria-label="Abrir filtro"
+                            title={hasActiveFilters ? 'Filtro (ativo)' : 'Filtro'}
+                          >
+                            <Filter className="h-4 w-4" />
+                            {hasActiveFilters ? (
+                              <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
+                            ) : null}
+                          </button>
                           {showExportButton && (
                             <button
                               type="button"
@@ -2138,85 +1645,53 @@ export function FluigSolicitacoesPage({
                               <Download className="h-4 w-4" />
                             </button>
                           )}
-                          {compactView && !hideRecordsPerPageSelector && (
-                            <div className="flex items-center gap-2.5 flex-shrink-0">
-                              <label className="text-sm text-gray-600 dark:text-gray-400">
-                                Por página
-                              </label>
-                              <StringSingleSelectDropdown
-                                value={String(recordsPerPage)}
-                                onChange={(v) => setRecordsPerPage(Number(v) as 25 | 50 | 100)}
-                                options={FLUIG_RECORDS_PER_PAGE_OPTIONS}
-                                allowEmpty={false}
-                                className="min-w-[5rem]"
-                              />
-                            </div>
-                          )}
-                          <div
-                            className="hidden sm:block w-px h-6 shrink-0 self-center bg-gray-200 dark:bg-gray-600"
-                            aria-hidden
-                          />
-                          <label className="flex items-center gap-2.5 cursor-pointer group select-none flex-shrink-0">
-                            <div className="relative">
-                              <input
-                                type="checkbox"
-                                checked={compactView}
-                                onChange={(e) => setCompactView(e.target.checked)}
-                                className="sr-only"
-                              />
-                              <div className={`w-5 h-5 rounded border-2 transition-all duration-200 flex items-center justify-center ${
-                                compactView
-                                  ? 'bg-red-600 dark:bg-red-500 border-red-600 dark:border-red-500'
-                                  : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 group-hover:border-red-500 dark:group-hover:border-red-400'
-                              }`}>
-                                {compactView && (
-                                  <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                                  </svg>
-                                )}
-                              </div>
-                            </div>
-                            <span className="text-sm font-medium text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-gray-100 transition-colors">
-                              Compacta
-                            </span>
-                          </label>
                         </div>
                       </div>
-                    </div>
+                    </CardHeader>
+                    <CardContent className={cadastroListClasses.cardContent}>
                     {(() => {
-                      const isCompact = compactView;
-                      const rowsToShow = isCompact
-                        ? rowsAtuais.slice(currentPage * effectiveRecordsPerPage, currentPage * effectiveRecordsPerPage + effectiveRecordsPerPage)
-                        : rowsAtuais;
-                      const totalPages = Math.ceil(rowsAtuais.length / effectiveRecordsPerPage);
-                      const start = currentPage * effectiveRecordsPerPage;
+                      const { startItem, endItem, totalPages } = getCadastroListRange(
+                        currentPage,
+                        FLUIG_LIST_PAGE_SIZE,
+                        rowsAtuais.length
+                      );
+                      const safePage = Math.min(currentPage, totalPages);
+                      const rowsToShow = rowsAtuais.slice(
+                        (safePage - 1) * FLUIG_LIST_PAGE_SIZE,
+                        (safePage - 1) * FLUIG_LIST_PAGE_SIZE + FLUIG_LIST_PAGE_SIZE
+                      );
                       const listShowFilial = useEmployeeListLayout && !!filialCol && !hideFilialFilter;
                       const listShowCC = useEmployeeListLayout && !!ccColResolved;
                       const listShowNatureza = useEmployeeListLayout && !!naturezaOrcamentariaCol;
-                      const listShowSetor = useEmployeeListLayout && !!setorSolicitanteCol;
-                      const listShowUrgencia = useEmployeeListLayout && !!urgenciaCol;
                       const listShowFornecedor = useEmployeeListLayout && !!fornecedorCol;
-                      const thPad = isCompact ? 'py-2' : 'py-4';
-                      const tdPad = isCompact ? 'py-2.5' : 'py-3';
+                      const thPad = 'py-4';
+                      const tdPad = 'py-3';
                       const solicitacaoHeader = g5TitleDatasets.has(datasetId) ? 'Título da Solicitação' : 'Histórico';
                       const emptyColSpan = useEmployeeListLayout
-                        ? 2 +
+                        ? 3 +
                           (listShowFilial ? 1 : 0) +
                           (listShowCC ? 1 : 0) +
                           (listShowNatureza ? 1 : 0) +
-                          (listShowSetor ? 1 : 0) +
-                          (listShowUrgencia ? 1 : 0) +
                           (listShowFornecedor ? 1 : 0) +
                           (showLeadTimeColumn ? 1 : 0)
                         : showLeadTimeColumn
-                          ? 3
-                          : 2;
+                          ? 4
+                          : 3;
                       return (
                         <>
-                          <div
-                            className={`overflow-x-auto overflow-y-auto min-h-[280px] ${compactView ? 'max-h-[calc(100vh-310px)]' : 'max-h-[calc(100vh-270px)]'}`}
-                          >
-                            <table className={`w-full ${isCompact ? 'text-xs' : 'text-sm'}`}>
+                          {rowsAtuais.length > 0 ? (
+                            <CadastroListSummary
+                              startItem={startItem}
+                              endItem={endItem}
+                              total={rowsAtuais.length}
+                              itemLabel="solicitação"
+                              itemLabelPlural="solicitações"
+                              currentPage={safePage}
+                              totalPages={totalPages}
+                            />
+                          ) : null}
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-sm">
                               <thead
                                 className={
                                   useEmployeeListLayout
@@ -2233,10 +1708,31 @@ export function FluigSolicitacoesPage({
                                         IdMov
                                       </th>
                                       <th
-                                        className={`px-3 sm:px-6 ${thPad} text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider min-w-[14rem]`}
+                                        className={`px-3 sm:px-6 ${thPad} text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider min-w-[18rem]`}
                                       >
                                         {solicitacaoHeader}
                                       </th>
+                                      {listShowCC && (
+                                        <th
+                                          className={`px-3 sm:px-6 ${thPad} text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider min-w-[10rem]`}
+                                        >
+                                          Centro de custo
+                                        </th>
+                                      )}
+                                      {listShowNatureza && (
+                                        <th
+                                          className={`px-3 sm:px-6 ${thPad} text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider min-w-[10rem]`}
+                                        >
+                                          Natureza
+                                        </th>
+                                      )}
+                                      {listShowFornecedor && (
+                                        <th
+                                          className={`px-3 sm:px-6 ${thPad} text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider min-w-[10rem]`}
+                                        >
+                                          Fornecedor
+                                        </th>
+                                      )}
                                       {listShowFilial && (
                                         <th
                                           className={`px-3 sm:px-6 ${thPad} text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider`}
@@ -2244,68 +1740,35 @@ export function FluigSolicitacoesPage({
                                           Filial
                                         </th>
                                       )}
-                                      {listShowCC && (
-                                        <th
-                                          className={`px-3 sm:px-6 ${thPad} text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider`}
-                                        >
-                                          Centro de custo
-                                        </th>
-                                      )}
-                                      {listShowNatureza && (
-                                        <th
-                                          className={`px-3 sm:px-6 ${thPad} text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider min-w-[10rem]`}
-                                        >
-                                          Natureza
-                                        </th>
-                                      )}
-                                      {listShowSetor && (
-                                        <th
-                                          className={`px-3 sm:px-6 ${thPad} text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider`}
-                                        >
-                                          Setor solicitante
-                                        </th>
-                                      )}
-                                      {listShowUrgencia && (
-                                        <th
-                                          className={`px-3 sm:px-6 ${thPad} text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider`}
-                                        >
-                                          Urgência
-                                        </th>
-                                      )}
-                                      {listShowFornecedor && (
-                                        <th
-                                          className={`px-3 sm:px-6 ${thPad} text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider`}
-                                        >
-                                          Fornecedor
-                                        </th>
-                                      )}
                                       {showLeadTimeColumn && (
                                         <th
-                                          className={`px-3 sm:px-6 ${thPad} text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider`}
+                                          className={`px-3 sm:px-6 ${thPad} text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap`}
                                         >
                                           Lead time
                                         </th>
                                       )}
+                                      <th className={ACTIONS_COL_TH}>Ações</th>
                                     </>
                                   ) : (
                                     <>
                                       <th
-                                        className={`px-5 text-left font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-28 ${isCompact ? 'py-2' : 'py-3'}`}
+                                        className="px-5 py-3 text-left font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-28"
                                       >
                                         IdMov
                                       </th>
+                                      <th
+                                        className="px-5 py-3 text-left font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider min-w-[18rem]"
+                                      >
+                                        {solicitacaoHeader}
+                                      </th>
                                       {showLeadTimeColumn && (
                                         <th
-                                          className={`px-5 text-left font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-32 ${isCompact ? 'py-2' : 'py-3'}`}
+                                          className="px-5 py-3 text-center font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-32"
                                         >
                                           Lead time
                                         </th>
                                       )}
-                                      <th
-                                        className={`px-5 text-left font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider ${isCompact ? 'py-2' : 'py-3'}`}
-                                      >
-                                        {solicitacaoHeader}
-                                      </th>
+                                      <th className={ACTIONS_COL_TH}>Ações</th>
                                     </>
                                   )}
                                 </tr>
@@ -2332,50 +1795,39 @@ export function FluigSolicitacoesPage({
                                     const idStr = formatValue(row[idCol] ?? '');
                                     const openDetail = () => setDetail({ row, columns: currentColumns, datasetId });
                                     if (useEmployeeListLayout) {
-                                      const urgVal = getUrgenciaValue(row);
-                                      const urgLower = urgVal.toLowerCase();
-                                      const urgUrgent = /urg|alta|imedi|crit/i.test(urgLower);
                                       const ccRaw = getCCValue(row);
-                                      const ccNome =
-                                        datasetId === 'DataSet_G4FollowUp'
-                                          ? getCCDisplayLabel(ccRaw)
-                                          : centroCustoSomenteNome(ccRaw);
+                                      const ccNome = getCCDisplayLabel(ccRaw);
+                                      const processId = getFluigProcessInstanceId(row, currentColumns, idCol);
                                       return (
                                         <tr
-                                          key={isCompact ? start + i : i}
+                                          key={(safePage - 1) * FLUIG_LIST_PAGE_SIZE + i}
                                           onClick={openDetail}
-                                          className="group cursor-pointer transition-colors hover:bg-gray-50 dark:hover:bg-gray-700/50"
+                                          onKeyDown={(event) => {
+                                            if (event.key === 'Enter' || event.key === ' ') {
+                                              event.preventDefault();
+                                              openDetail();
+                                            }
+                                          }}
+                                          tabIndex={0}
+                                          role="button"
+                                          className={getListTableRowClassName(true)}
                                         >
                                           <td
-                                            className={`px-3 sm:px-4 ${tdPad} align-middle text-left font-mono text-sm tabular-nums text-gray-700 dark:text-gray-300 whitespace-nowrap`}
+                                            className={`px-3 sm:px-4 ${tdPad} align-middle text-left whitespace-nowrap`}
                                           >
-                                            {idStr}
+                                            <ListRowNavigableLabel className="font-mono font-medium tabular-nums">
+                                              {idStr}
+                                            </ListRowNavigableLabel>
                                           </td>
                                           <td className={`px-3 sm:px-6 ${tdPad} align-middle text-left`}>
-                                            <div className="min-w-0 max-w-xl">
-                                              <p
-                                                className={`${isCompact ? 'text-xs' : 'text-sm'} font-semibold text-gray-900 dark:text-gray-100 ${isCompact ? 'truncate' : 'line-clamp-2'}`}
-                                                title={hist}
-                                              >
-                                                {hist || '—'}
-                                              </p>
-                                            </div>
+                                            <FluigHistoricoExpandable text={hist} />
                                           </td>
-                                          {listShowFilial && (
-                                            <td
-                                              className={`px-3 sm:px-6 ${tdPad} text-sm text-left text-gray-700 dark:text-gray-300 max-w-[14rem]`}
-                                            >
-                                              <span className="line-clamp-2" title={getFilialValue(row) || undefined}>
-                                                {getFilialValue(row) || '—'}
-                                              </span>
-                                            </td>
-                                          )}
                                           {listShowCC && (
                                             <td
-                                              className={`px-3 sm:px-6 ${tdPad} text-sm text-center text-gray-700 dark:text-gray-300`}
+                                              className={`px-3 sm:px-6 ${tdPad} align-middle text-sm text-center text-gray-700 dark:text-gray-300`}
                                             >
                                               <span
-                                                className="line-clamp-2 inline-block max-w-[12rem]"
+                                                className="line-clamp-2 mx-auto inline-block max-w-[14rem] text-center align-middle"
                                                 title={ccNome && ccNome !== '—' ? ccNome : undefined}
                                               >
                                                 {ccNome || '—'}
@@ -2384,91 +1836,118 @@ export function FluigSolicitacoesPage({
                                           )}
                                           {listShowNatureza && (
                                             <td
-                                              className={`px-3 sm:px-6 ${tdPad} text-sm text-left text-gray-700 dark:text-gray-300 max-w-[18rem]`}
+                                              className={`px-3 sm:px-6 ${tdPad} align-middle text-sm text-center text-gray-700 dark:text-gray-300 max-w-[16rem]`}
                                             >
                                               <span
-                                                className="line-clamp-2"
-                                                title={getNaturezaOrcamentariaValue(row) || undefined}
+                                                className="line-clamp-2 mx-auto inline-block max-w-[16rem] text-center align-middle"
+                                                title={getNaturezaOrcamentariaDisplay(row) || undefined}
                                               >
-                                                {getNaturezaOrcamentariaValue(row) || '—'}
+                                                {getNaturezaOrcamentariaDisplay(row) || '—'}
                                               </span>
-                                            </td>
-                                          )}
-                                          {listShowSetor && (
-                                            <td
-                                              className={`px-3 sm:px-6 ${tdPad} text-sm text-center text-gray-700 dark:text-gray-300`}
-                                            >
-                                              <span
-                                                className="line-clamp-2 inline-block max-w-[12rem]"
-                                                title={getSetorSolicitanteValue(row) || undefined}
-                                              >
-                                                {getSetorSolicitanteValue(row) || '—'}
-                                              </span>
-                                            </td>
-                                          )}
-                                          {listShowUrgencia && (
-                                            <td className={`px-3 sm:px-6 ${tdPad} text-center align-middle`}>
-                                              {urgVal ? (
-                                                <span
-                                                  className={`inline-flex items-center justify-center rounded-full px-2.5 py-1 text-xs font-medium ${
-                                                    urgUrgent
-                                                      ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
-                                                      : 'bg-gray-100 text-gray-700 dark:bg-gray-700/50 dark:text-gray-300'
-                                                  }`}
-                                                >
-                                                  {urgVal}
-                                                </span>
-                                              ) : (
-                                                <span className="text-sm text-gray-400 dark:text-gray-500">—</span>
-                                              )}
                                             </td>
                                           )}
                                           {listShowFornecedor && fornecedorCol && (
                                             <td
-                                              className={`px-3 sm:px-6 ${tdPad} text-sm text-left text-gray-700 dark:text-gray-300 max-w-xs`}
+                                              className={`px-3 sm:px-6 ${tdPad} align-middle text-sm text-center text-gray-700 dark:text-gray-300 max-w-xs`}
                                             >
-                                              <span className="line-clamp-2" title={formatValue(row[fornecedorCol])}>
+                                              <span
+                                                className="line-clamp-2 mx-auto inline-block max-w-xs text-center align-middle"
+                                                title={formatValue(row[fornecedorCol])}
+                                              >
                                                 {formatValue(row[fornecedorCol])}
+                                              </span>
+                                            </td>
+                                          )}
+                                          {listShowFilial && (
+                                            <td
+                                              className={`px-3 sm:px-6 ${tdPad} align-middle text-sm text-center text-gray-700 dark:text-gray-300 max-w-[12rem]`}
+                                            >
+                                              <span
+                                                className="line-clamp-2 mx-auto inline-block max-w-[12rem] text-center"
+                                                title={getFilialValue(row) || undefined}
+                                              >
+                                                {getFilialValue(row) || '—'}
                                               </span>
                                             </td>
                                           )}
                                           {showLeadTimeColumn && (
                                             <td
-                                              className={`px-3 sm:px-6 ${tdPad} text-sm text-center text-gray-700 dark:text-gray-300 whitespace-nowrap`}
+                                              className={`px-3 sm:px-6 ${tdPad} align-middle text-sm text-center text-gray-700 dark:text-gray-300 whitespace-nowrap tabular-nums`}
                                             >
                                               {getLeadTimeFromRow(row)}
                                             </td>
                                           )}
+                                          <td className={ACTIONS_COL_TD}>
+                                            <div className="flex justify-center">
+                                              {processId ? (
+                                                <a
+                                                  href={buildFluigWorkflowProcessViewUrl(processId)}
+                                                  target="_blank"
+                                                  rel="noopener noreferrer"
+                                                  onClick={(event) => event.stopPropagation()}
+                                                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-100 hover:text-red-600 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-red-400"
+                                                  aria-label={`Abrir solicitação ${processId} no Fluig`}
+                                                  title="Abrir no Fluig"
+                                                >
+                                                  <ExternalLink className="h-4 w-4" aria-hidden />
+                                                </a>
+                                              ) : (
+                                                <span className="text-sm text-gray-400 dark:text-gray-500">—</span>
+                                              )}
+                                            </div>
+                                          </td>
                                         </tr>
                                       );
                                     }
+                                    const processId = getFluigProcessInstanceId(row, currentColumns, idCol);
                                     return (
                                       <tr
-                                        key={isCompact ? start + i : i}
+                                        key={(safePage - 1) * FLUIG_LIST_PAGE_SIZE + i}
                                         onClick={openDetail}
-                                        className="group cursor-pointer transition-colors hover:bg-red-50/80 dark:hover:bg-red-900/15 border-b border-gray-100 dark:border-gray-700/50 last:border-b-0"
+                                        onKeyDown={(event) => {
+                                          if (event.key === 'Enter' || event.key === ' ') {
+                                            event.preventDefault();
+                                            openDetail();
+                                          }
+                                        }}
+                                        tabIndex={0}
+                                        role="button"
+                                        className={getListTableRowClassName(
+                                          true,
+                                          'border-b border-gray-100 dark:border-gray-700/50 last:border-b-0'
+                                        )}
                                       >
-                                        <td
-                                          className={`px-5 font-mono text-gray-700 dark:text-gray-300 align-middle ${isCompact ? 'py-1.5' : 'py-3'}`}
-                                        >
-                                          {idStr}
+                                        <td className="px-5 py-3 align-middle">
+                                          <ListRowNavigableLabel className="font-mono font-medium">
+                                            {idStr}
+                                          </ListRowNavigableLabel>
+                                        </td>
+                                        <td className="px-5 py-3 text-gray-800 dark:text-gray-200 align-middle overflow-hidden leading-relaxed">
+                                          <FluigHistoricoExpandable text={hist} />
                                         </td>
                                         {showLeadTimeColumn && (
-                                          <td
-                                            className={`px-5 text-gray-800 dark:text-gray-200 align-middle whitespace-nowrap ${isCompact ? 'py-1.5' : 'py-3'}`}
-                                          >
+                                          <td className="px-5 py-3 text-gray-800 dark:text-gray-200 align-middle whitespace-nowrap text-center tabular-nums">
                                             {getLeadTimeFromRow(row)}
                                           </td>
                                         )}
-                                        <td
-                                          className={`px-5 text-gray-800 dark:text-gray-200 align-middle overflow-hidden ${isCompact ? 'py-1.5 leading-snug' : 'py-3 leading-relaxed'}`}
-                                        >
-                                          <span
-                                            className={`block min-w-0 ${isCompact ? 'truncate' : 'line-clamp-2'}`}
-                                            title={hist}
-                                          >
-                                            {hist || '—'}
-                                          </span>
+                                        <td className={ACTIONS_COL_TD}>
+                                          <div className="flex justify-center">
+                                            {processId ? (
+                                              <a
+                                                href={buildFluigWorkflowProcessViewUrl(processId)}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                onClick={(event) => event.stopPropagation()}
+                                                className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-100 hover:text-red-600 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-red-400"
+                                                aria-label={`Abrir solicitação ${processId} no Fluig`}
+                                                title="Abrir no Fluig"
+                                              >
+                                                <ExternalLink className="h-4 w-4" aria-hidden />
+                                              </a>
+                                            ) : (
+                                              <span className="text-sm text-gray-400 dark:text-gray-500">—</span>
+                                            )}
+                                          </div>
                                         </td>
                                       </tr>
                                     );
@@ -2477,37 +1956,16 @@ export function FluigSolicitacoesPage({
                               </tbody>
                             </table>
                           </div>
-                          {compactView && totalPages > 1 && (
-                            <div className={`flex items-center justify-between gap-4 px-5 py-3 border-t border-gray-200 dark:border-gray-700/80 ${useEmployeeListLayout ? 'bg-white dark:bg-gray-800' : 'bg-gray-50/50 dark:bg-gray-800/30'}`}>
-                              <p className="text-sm text-gray-500 dark:text-gray-400">
-                                Mostrando {start + 1} a {Math.min(start + effectiveRecordsPerPage, rowsAtuais.length)} de {rowsAtuais.length} solicitações
-                              </p>
-                              <div className="flex items-center gap-1">
-                                <button
-                                  onClick={() => setCurrentPage((p) => Math.max(0, p - 1))}
-                                  disabled={currentPage === 0}
-                                  className="p-2 rounded-md text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
-                                  title="Anterior"
-                                >
-                                  <ChevronLeft className="w-5 h-5" />
-                                </button>
-                                <span className="text-sm text-gray-600 dark:text-gray-300 px-2">
-                                  Página {currentPage + 1} de {totalPages}
-                                </span>
-                                <button
-                                  onClick={() => setCurrentPage((p) => Math.min(totalPages - 1, p + 1))}
-                                  disabled={currentPage >= totalPages - 1}
-                                  className="p-2 rounded-md text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
-                                  title="Próxima"
-                                >
-                                  <ChevronRight className="w-5 h-5" />
-                                </button>
-                              </div>
-                            </div>
-                          )}
+                          <ListPagination
+                            currentPage={safePage}
+                            totalPages={totalPages}
+                            onPageChange={setCurrentPage}
+                            className={cadastroListClasses.pagination}
+                          />
                         </>
                       );
                     })()}
+                    </CardContent>
                   </Card>
                 </div>
               );
@@ -2542,6 +2000,15 @@ export function FluigSolicitacoesPage({
                         )}
                       </div>
                       <button
+                        type="button"
+                        onClick={() => setIsFiltersModalOpen(true)}
+                        className="relative inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-red-300 bg-red-50 px-3 text-sm font-medium text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+                      >
+                        <Filter className="h-4 w-4" />
+                        Filtro
+                      </button>
+                      <button
+                        type="button"
                         onClick={handleClearFilters}
                         className="flex items-center gap-2 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 text-sm transition-colors whitespace-nowrap"
                       >
