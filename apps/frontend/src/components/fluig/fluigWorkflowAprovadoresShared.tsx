@@ -20,6 +20,7 @@ import {
   FLUIG_WORKFLOW_APPROVAL_DATASET_G3,
   FLUIG_WORKFLOW_APPROVAL_DATASET_G5,
   formatWorkflowApprovalDateDisplay,
+  formatFluigBudgetFieldDisplay,
   isWorkflowApprovalDateInRange,
   compareWorkflowApprovalDateDesc,
   formatWorkflowFilialDisplay,
@@ -247,6 +248,8 @@ function matchesApproverRequestSearch(
   if (item.filial?.toLowerCase().includes(term)) return true;
   const filialLabel = formatWorkflowFilialDisplay(item.filial, datasetId);
   if (filialLabel?.toLowerCase().includes(term)) return true;
+  const centroCustoLabel = formatFluigBudgetFieldDisplay(item.centroCusto);
+  if (centroCustoLabel?.toLowerCase().includes(term)) return true;
   const statusWord = item.disposition === 'approved' ? 'aprovado' : 'pendente';
   return statusWord.includes(term);
 }
@@ -320,6 +323,7 @@ export const FilteredApproverRequestList = React.memo(function FilteredApproverR
   const [periodFrom, setPeriodFrom] = useState('');
   const [periodTo, setPeriodTo] = useState('');
   const [stageFilter, setStageFilter] = useState<ApproverStageFilter>('all');
+  const [filterCentroCusto, setFilterCentroCusto] = useState('');
   const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
   const stageFilterOptions = useMemo(
     () => buildApproverStageFilterOptions(datasetId),
@@ -329,9 +333,11 @@ export const FilteredApproverRequestList = React.memo(function FilteredApproverR
   const deferredPeriodFrom = useDeferredValue(periodFrom);
   const deferredPeriodTo = useDeferredValue(periodTo);
   const deferredStageFilter = useDeferredValue(stageFilter);
+  const deferredCentroCusto = useDeferredValue(filterCentroCusto);
   const hasPeriodFilter = Boolean(periodFrom || periodTo);
   const hasStageFilter = stageFilter !== 'all';
-  const hasActiveModalFilter = hasPeriodFilter || hasStageFilter;
+  const hasCentroCustoFilter = Boolean(filterCentroCusto);
+  const hasActiveModalFilter = hasPeriodFilter || hasStageFilter || hasCentroCustoFilter;
   const showApprovalDateColumn = filter !== 'pending';
   const showPeriodFilterFields = filter !== 'pending';
 
@@ -346,15 +352,40 @@ export const FilteredApproverRequestList = React.memo(function FilteredApproverR
     [filter, stableApproved, stablePending]
   );
 
+  const centroCustoFilterOptions = useMemo(() => {
+    const values = new Set<string>();
+    for (const item of items) {
+      const display = formatFluigBudgetFieldDisplay(item.centroCusto);
+      if (display) values.add(display);
+    }
+    return Array.from(values)
+      .sort((a, b) => a.localeCompare(b, 'pt-BR', { sensitivity: 'base' }))
+      .map((value) => ({ value, label: value }));
+  }, [items]);
+
   const filteredItems = useMemo(() => {
     const term = deferredSearch.trim().toLowerCase();
     return items.filter((item) => {
       if (term && !matchesApproverRequestSearch(item, term, datasetId)) return false;
       if (!matchesApprovalStage(item, deferredStageFilter)) return false;
       if (!matchesApprovalPeriod(item, deferredPeriodFrom, deferredPeriodTo)) return false;
+      if (
+        deferredCentroCusto &&
+        formatFluigBudgetFieldDisplay(item.centroCusto) !== deferredCentroCusto
+      ) {
+        return false;
+      }
       return true;
     });
-  }, [items, deferredSearch, deferredStageFilter, deferredPeriodFrom, deferredPeriodTo, datasetId]);
+  }, [
+    items,
+    deferredSearch,
+    deferredStageFilter,
+    deferredPeriodFrom,
+    deferredPeriodTo,
+    deferredCentroCusto,
+    datasetId,
+  ]);
 
   const totalPages = Math.max(1, Math.ceil(filteredItems.length / APPROVER_REQUESTS_PAGE_SIZE));
 
@@ -365,13 +396,21 @@ export const FilteredApproverRequestList = React.memo(function FilteredApproverR
 
   useEffect(() => {
     setPage(1);
-  }, [filter, deferredSearch, deferredStageFilter, deferredPeriodFrom, deferredPeriodTo]);
+  }, [
+    filter,
+    deferredSearch,
+    deferredStageFilter,
+    deferredPeriodFrom,
+    deferredPeriodTo,
+    deferredCentroCusto,
+  ]);
 
   useEffect(() => {
     setSearch('');
     setPeriodFrom('');
     setPeriodTo('');
     setStageFilter('all');
+    setFilterCentroCusto('');
     setIsFiltersModalOpen(false);
   }, [filter]);
 
@@ -380,6 +419,15 @@ export const FilteredApproverRequestList = React.memo(function FilteredApproverR
       setStageFilter('all');
     }
   }, [datasetId, stageFilter, stageFilterOptions]);
+
+  useEffect(() => {
+    if (
+      filterCentroCusto &&
+      !centroCustoFilterOptions.some((option) => option.value === filterCentroCusto)
+    ) {
+      setFilterCentroCusto('');
+    }
+  }, [filterCentroCusto, centroCustoFilterOptions]);
 
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
@@ -486,6 +534,7 @@ export const FilteredApproverRequestList = React.memo(function FilteredApproverR
                   <tr>
                     <th className={ID_COL_TH}>ID</th>
                     <th className={cadastroListClasses.th}>Título</th>
+                    <th className={cadastroListClasses.thCenter}>Centro de Custo</th>
                     <th className={cadastroListClasses.thCenter}>Status</th>
                     <th className={cadastroListClasses.thCenter}>Etapa</th>
                     {showApprovalDateColumn ? (
@@ -527,6 +576,12 @@ export const FilteredApproverRequestList = React.memo(function FilteredApproverR
                           )}
                         </td>
                         <td className={`${cadastroListClasses.td} max-w-xs truncate`}>{item.title}</td>
+                        <td
+                          className={`${cadastroListClasses.tdCenter} max-w-[14rem] truncate`}
+                          title={formatFluigBudgetFieldDisplay(item.centroCusto) ?? undefined}
+                        >
+                          {formatFluigBudgetFieldDisplay(item.centroCusto) || '—'}
+                        </td>
                         <td className={cadastroListClasses.tdCenter}>
                           <span
                             className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${
@@ -628,6 +683,20 @@ export const FilteredApproverRequestList = React.memo(function FilteredApproverR
                     searchPlaceholder="Pesquisar..."
                   />
                 </div>
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Centro de custo
+                  </label>
+                  <StringSingleSelectDropdown
+                    value={filterCentroCusto}
+                    onChange={setFilterCentroCusto}
+                    options={centroCustoFilterOptions}
+                    allowEmpty
+                    emptyOptionLabel="Todos os centros de custo"
+                    placeholder="Todos os centros de custo"
+                    searchPlaceholder="Pesquisar..."
+                  />
+                </div>
                 {showPeriodFilterFields ? (
                   <div>
                     <p className="mb-3 text-sm text-gray-600 dark:text-gray-400">
@@ -674,6 +743,7 @@ export const FilteredApproverRequestList = React.memo(function FilteredApproverR
                   setPeriodFrom('');
                   setPeriodTo('');
                   setStageFilter('all');
+                  setFilterCentroCusto('');
                 }}
                 className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
               >

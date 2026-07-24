@@ -1086,6 +1086,7 @@ export type WorkflowApproverRequestRef = {
   rowKey: string;
   processId: string;
   title: string;
+  centroCusto: string | null;
   filial: string | null;
   sector: WorkflowSector;
   sectorLabel: string;
@@ -1273,6 +1274,7 @@ export function aggregateWorkflowByApprover(
           rowKey: row.rowKey,
           processId: row.processId,
           title: row.title,
+          centroCusto: row.centroCusto,
           filial: row.filial,
           sector: step.sector,
           sectorLabel: SECTOR_LABELS[step.sector],
@@ -1300,6 +1302,7 @@ export function aggregateWorkflowByApprover(
         rowKey: row.rowKey,
         processId: row.processId,
         title: row.title,
+        centroCusto: row.centroCusto,
         filial: row.filial,
         sector: row.currentPendingSector,
         sectorLabel: SECTOR_LABELS[row.currentPendingSector],
