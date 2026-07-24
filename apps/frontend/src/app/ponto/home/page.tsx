@@ -53,6 +53,7 @@ type TodayItem = {
   kind: 'event' | 'task';
   title: string;
   sortAt: number;
+  expiresAt: number;
   timeLabel: string;
   color?: string;
 };
@@ -63,11 +64,14 @@ function buildTodayItems(events: PlannerEvent[], tasks: PlannerTask[]): TodayIte
   for (const ev of events) {
     const start = new Date(ev.startAt);
     if (Number.isNaN(start.getTime())) continue;
+    const end = new Date(ev.endAt);
+    const expiresAt = Number.isNaN(end.getTime()) ? start.getTime() : end.getTime();
     items.push({
       id: `ev-${ev.id}`,
       kind: 'event',
       title: ev.title,
       sortAt: start.getTime(),
+      expiresAt,
       timeLabel: start.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
       color: ev.color || '#3B82F6',
     });
@@ -83,6 +87,7 @@ function buildTodayItems(events: PlannerEvent[], tasks: PlannerTask[]): TodayIte
       kind: 'task',
       title: task.title,
       sortAt: due.getTime(),
+      expiresAt: due.getTime(),
       timeLabel: time || '—',
     });
   }
@@ -139,10 +144,11 @@ export default function HomePage() {
     staleTime: 60_000,
   });
 
-  const todayItems = useMemo(
-    () => buildTodayItems(todayEvents, todayTasks),
-    [todayEvents, todayTasks]
-  );
+  const todayItems = useMemo(() => {
+    const items = buildTodayItems(todayEvents, todayTasks);
+    const cutoff = now.getTime();
+    return items.filter((item) => item.expiresAt >= cutoff);
+  }, [todayEvents, todayTasks, now]);
 
   const agendaLoading = loadingEvents || loadingTasks;
 
@@ -242,18 +248,24 @@ export default function HomePage() {
                 Nada marcado na agenda para hoje.
               </p>
             ) : (
-              <ol className="relative ml-1 border-l border-gray-200 pl-5 dark:border-gray-700">
+              <ol className="relative ml-1">
                 {todayItems.map((item) => (
-                  <li key={item.id} className="relative pb-5 last:pb-0">
-                    <span
-                      className="absolute -left-[1.4rem] top-1.5 h-2.5 w-2.5 rounded-full ring-4 ring-white dark:ring-gray-950"
-                      style={{
-                        backgroundColor:
-                          item.kind === 'event' ? item.color || '#3B82F6' : '#F59E0B',
-                      }}
-                      aria-hidden
-                    />
-                    <Link href="/ponto/agenda" className="group block">
+                  <li key={item.id} className="flex gap-3 pb-5 last:pb-0">
+                    <div className="relative flex w-2.5 shrink-0 flex-col items-center self-stretch">
+                      <span
+                        className="absolute bottom-0 left-1/2 top-[5px] w-px -translate-x-1/2 bg-gray-200 dark:bg-gray-700"
+                        aria-hidden
+                      />
+                      <span
+                        className="relative z-10 h-2.5 w-2.5 shrink-0 rounded-full"
+                        style={{
+                          backgroundColor:
+                            item.kind === 'event' ? item.color || '#3B82F6' : '#F59E0B',
+                        }}
+                        aria-hidden
+                      />
+                    </div>
+                    <Link href="/ponto/agenda" className="group block min-w-0 flex-1">
                       <div className="flex items-baseline gap-2">
                         <time className="font-mono text-xs font-semibold tabular-nums text-red-600 dark:text-red-400">
                           {item.timeLabel}
