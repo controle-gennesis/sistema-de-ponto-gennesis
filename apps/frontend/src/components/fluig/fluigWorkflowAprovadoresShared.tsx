@@ -699,9 +699,6 @@ export const FilteredApproverRequestList = React.memo(function FilteredApproverR
                 </div>
                 {showPeriodFilterFields ? (
                   <div>
-                    <p className="mb-3 text-sm text-gray-600 dark:text-gray-400">
-                      Período em que a solicitação foi aprovada por esta pessoa.
-                    </p>
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                       <div>
                         <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
