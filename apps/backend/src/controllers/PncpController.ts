@@ -5,16 +5,62 @@ import { PNCP_KEYWORDS_OBJETO_PADRAO, PNCP_MODALIDADES } from '../services/PncpC
 import { consultarContratacoesLocais } from '../services/PncpLocalConsultaService';
 import {
   getPncpSyncStatus,
-  startPncpIngestBackground,
+  requestPncpSyncCancel,
+  startPncpIngestBackgroundSafe,
+  type PncpSyncOptions,
+  BRASIL_UFS,
 } from '../services/PncpIngestService';
 
-function parseModalidade(raw: unknown): number | null {
+function parseModalidadeList(raw: unknown): number[] | null {
   if (raw == null || raw === '') return null;
-  const s = String(raw).trim().toLowerCase();
-  if (s === 'all' || s === 'todos' || s === '0') return null;
-  const n = Number(s);
-  if (!Number.isInteger(n) || n <= 0) return null;
-  return n;
+  const parts = Array.isArray(raw)
+    ? raw.map((v) => String(v))
+    : String(raw)
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+  if (parts.length === 0) return null;
+  if (parts.some((s) => ['all', 'todos', '0'].includes(s.toLowerCase()))) return null;
+  const nums = parts
+    .map((s) => Number(s))
+    .filter((n) => Number.isInteger(n) && n > 0);
+  return nums.length > 0 ? Array.from(new Set(nums)) : null;
+}
+
+function parseUfList(raw: unknown): string[] {
+  if (raw == null || raw === '') return [];
+  const parts = Array.isArray(raw)
+    ? raw.map((v) => String(v))
+    : String(raw)
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+  if (parts.some((s) => ['all', 'todos', '*'].includes(s.toLowerCase()))) return [];
+  return Array.from(
+    new Set(parts.map((s) => s.toUpperCase()).filter((s) => /^[A-Z]{2}$/.test(s)))
+  );
+}
+
+function parseSyncOptions(body: unknown): PncpSyncOptions {
+  if (!body || typeof body !== 'object') {
+    return { incremental: true, staleOnly: true };
+  }
+  const raw = body as Record<string, unknown>;
+  const ufs = Array.isArray(raw.ufs)
+    ? raw.ufs.map((u) => String(u).trim().toUpperCase()).filter(Boolean)
+    : undefined;
+  const invalid = ufs?.filter((uf) => !BRASIL_UFS.includes(uf as (typeof BRASIL_UFS)[number]));
+  if (invalid?.length) {
+    throw createError(`UF(s) inválida(s): ${invalid.join(', ')}`, 400);
+  }
+  const fullResync = raw.fullResync === true;
+  return {
+    ufs,
+    retryErrorsOnly: raw.retryErrorsOnly === true,
+    incremental: fullResync ? false : raw.incremental !== false,
+    staleOnly: fullResync ? false : raw.staleOnly !== false,
+    fullResync,
+  };
 }
 
 export class PncpController {
@@ -33,22 +79,22 @@ export class PncpController {
     try {
       const dataInicial = String(req.query.dataInicial || '');
       const dataFinal = String(req.query.dataFinal || '');
-      const uf = String(req.query.uf || '');
-      const codigoModalidadeContratacao = parseModalidade(req.query.codigoModalidadeContratacao);
+      const ufs = parseUfList(req.query.uf ?? req.query.ufs);
+      const codigosModalidade = parseModalidadeList(req.query.codigoModalidadeContratacao);
       const pagina = Number(req.query.pagina || 1);
       const tamanhoPagina = Number(req.query.tamanhoPagina || 50);
       const q = req.query.q != null ? String(req.query.q) : undefined;
 
-      if (!dataInicial || !dataFinal || !uf) {
-        throw createError('Informe dataInicial, dataFinal e uf.', 400);
+      if (!dataInicial || !dataFinal) {
+        throw createError('Informe dataInicial e dataFinal.', 400);
       }
 
       // Espelho local (já filtrado por keywords na ingestão).
       const result = await consultarContratacoesLocais({
         dataInicial,
         dataFinal,
-        uf,
-        codigoModalidadeContratacao,
+        ufs,
+        codigoModalidadeContratacao: codigosModalidade,
         pagina,
         tamanhoPagina,
         q,
@@ -78,10 +124,21 @@ export class PncpController {
     }
   }
 
-  async startSync(_req: AuthRequest, res: Response, next: NextFunction) {
+  async startSync(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      const result = startPncpIngestBackground('manual');
+      const options = parseSyncOptions(req.body);
+      const result = await startPncpIngestBackgroundSafe('manual', options);
       const status = await getPncpSyncStatus();
+
+      if (result.nothingToDo) {
+        res.status(400).json({
+          success: false,
+          data: status,
+          message: result.message,
+        });
+        return;
+      }
+
       if (result.alreadyRunning) {
         res.status(202).json({
           success: true,
@@ -90,10 +147,41 @@ export class PncpController {
         });
         return;
       }
+
+      const ufLabel =
+        options.retryErrorsOnly
+          ? 'UFs com erro'
+          : options.ufs?.length
+            ? `${options.ufs.length} UF(s)`
+            : 'Brasil';
       res.status(202).json({
         success: true,
         data: status,
-        message: 'Sincronização iniciada em segundo plano.',
+        message: `Sincronização iniciada (${ufLabel}, incremental).`,
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async stopSync(_req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const result = requestPncpSyncCancel();
+      const status = await getPncpSyncStatus();
+
+      if (!result.requested) {
+        res.status(400).json({
+          success: false,
+          data: status,
+          message: result.message,
+        });
+        return;
+      }
+
+      res.status(202).json({
+        success: true,
+        data: status,
+        message: 'Cancelamento solicitado. A sync para na próxima pausa.',
       });
     } catch (err) {
       next(err);

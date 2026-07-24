@@ -3492,3 +3492,19 @@ model PncpSyncRun {
   @@index([status])
   @@map("pncp_sync_runs")
 }
+
+/// Estado de sincronização por UF (incremental + retry de erros).
+model PncpSyncUfState {
+  uf               String    @id
+  lastSuccessAt    DateTime?
+  lastAttemptAt    DateTime?
+  lastDataFinal    String?
+  lastStatus       String    @default("pending") // success | error | pending
+  lastErrorMessage String?   @db.Text
+  lastRunId        String?
+  updatedAt        DateTime  @updatedAt
+
+  @@index([lastStatus])
+  @@index([lastSuccessAt])
+  @@map("pncp_sync_uf_states")
+}

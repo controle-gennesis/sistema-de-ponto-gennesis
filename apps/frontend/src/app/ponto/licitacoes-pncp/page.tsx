@@ -13,6 +13,7 @@ import {
   Filter,
   RotateCcw,
   Search,
+  Square,
   X,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -26,7 +27,7 @@ import {
 } from '@/components/ui/CadastroListSummary';
 import { ListPagination } from '@/components/ui/ListPagination';
 import { DatePickerField } from '@/components/ui/DatePickerField';
-import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { MultiSelectSearchDropdown } from '@/components/ui/MultiSelectSearchDropdown';
 import { Loading } from '@/components/ui/Loading';
 import { cadastroListClasses } from '@/components/ui/RowActionMenu';
 import { getListTableRowClassName } from '@/components/ui/listTableUi';
@@ -36,12 +37,21 @@ type PncpUfProgress = {
   uf: string;
   status: 'pending' | 'running' | 'done' | 'error';
   upsertedThisRun: number;
+  lastSuccessAt?: string | null;
+  lastAttemptAt?: string | null;
+  lastStatus?: string | null;
+  lastErrorMessage?: string | null;
 };
 
 type PncpSyncStatus = {
   running: boolean;
   currentUf?: string | null;
   currentModalidade?: string | null;
+  syncOptions?: {
+    ufs: string[];
+    retryErrorsOnly: boolean;
+    incremental: boolean;
+  } | null;
   progress?: {
     totalUfs: number;
     doneUfs: number;
@@ -57,6 +67,7 @@ type PncpSyncStatus = {
     total: number;
     byUf: { uf: string; count: number }[];
   };
+  errorUfCount?: number;
   lastRun: {
     id: string;
     status: string;
@@ -73,12 +84,20 @@ type PncpSyncStatus = {
 };
 
 const BRASIL_UFS = [
-  'AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 'MT', 'MS', 'MG',
-  'PA', 'PB', 'PR', 'PE', 'PI', 'RJ', 'RN', 'RS', 'RO', 'RR', 'SC', 'SP', 'SE', 'TO',
+  'DF', 'GO', 'SP',
+  'AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'ES', 'MA', 'MT', 'MS', 'MG',
+  'PA', 'PB', 'PR', 'PE', 'PI', 'RJ', 'RN', 'RS', 'RO', 'RR', 'SC', 'SE', 'TO',
 ] as const;
 
+type PncpSyncRequest = {
+  ufs?: string[];
+  retryErrorsOnly?: boolean;
+  incremental?: boolean;
+  staleOnly?: boolean;
+  fullResync?: boolean;
+};
+
 const MODALIDADE_OPTIONS = [
-  { codigo: 'all', nome: 'Todas' },
   { codigo: '6', nome: 'Pregão Eletrônico' },
   { codigo: '8', nome: 'Dispensa de Licitação' },
   { codigo: '9', nome: 'Inexigibilidade' },
@@ -340,6 +359,21 @@ function modalidadeOptionLabel(codigo: string): string {
   return found.nome;
 }
 
+function formatUfFilterLabel(ufs: string[]): string {
+  if (ufs.length === 0 || ufs.length === BRASIL_UFS.length) return 'Todas as UFs';
+  if (ufs.length === 1) return ufs[0];
+  if (ufs.length <= 3) return ufs.join(', ');
+  return `${ufs.length} UFs`;
+}
+
+function formatModalidadeFilterLabel(codigos: string[]): string {
+  if (codigos.length === 0 || codigos.length === MODALIDADE_OPTIONS.length) {
+    return 'Todas as modalidades';
+  }
+  if (codigos.length === 1) return modalidadeOptionLabel(codigos[0]);
+  return `${codigos.length} modalidades`;
+}
+
 function formatSyncLabel(iso: string | null | undefined): string {
   if (!iso) return 'nunca';
   const d = new Date(iso);
@@ -356,17 +390,22 @@ function formatSyncLabel(iso: string | null | undefined): string {
 function LicitacoesPncpPageContent() {
   const queryClient = useQueryClient();
   const defaults = useMemo(() => defaultRange(), []);
-  const [uf, setUf] = useState('DF');
-  const [modalidadeCodigo, setModalidadeCodigo] = useState('all');
+  const [ufs, setUfs] = useState<string[]>(['DF']);
+  const [modalidadeCodigos, setModalidadeCodigos] = useState<string[]>([]);
   const [dataInicial, setDataInicial] = useState(defaults.dataInicial);
   const [dataFinal, setDataFinal] = useState(defaults.dataFinal);
   const [q, setQ] = useState('');
   const [showFilters, setShowFilters] = useState(false);
+  const [filterDropdownOpen, setFilterDropdownOpen] = useState<'uf' | 'modalidade' | null>(null);
   const [showKeywordsList, setShowKeywordsList] = useState(false);
   const [showSyncModal, setShowSyncModal] = useState(false);
+  const [syncRetryErrorsOnly, setSyncRetryErrorsOnly] = useState(false);
+  const [syncFullResync, setSyncFullResync] = useState(false);
+  const [syncSelectedUfs, setSyncSelectedUfs] = useState<string[]>(() => [...BRASIL_UFS]);
+  const [syncStopRequested, setSyncStopRequested] = useState(false);
   const [applied, setApplied] = useState({
-    uf: 'DF',
-    modalidadeCodigo: 'all',
+    ufs: ['DF'] as string[],
+    modalidadeCodigos: [] as string[],
     dataInicial: defaults.dataInicial,
     dataFinal: defaults.dataFinal,
     q: '',
@@ -375,8 +414,13 @@ function LicitacoesPncpPageContent() {
 
   const MIN_SEARCH_LEN = 3;
 
-  const modalidadeOptions = useMemo(
-    () => MODALIDADE_OPTIONS.map((m) => m.nome),
+  const ufFilterOptions = useMemo(
+    () => BRASIL_UFS.map((uf) => ({ value: uf, label: uf })),
+    []
+  );
+
+  const modalidadeFilterOptions = useMemo(
+    () => MODALIDADE_OPTIONS.map((m) => ({ value: String(m.codigo), label: m.nome })),
     []
   );
 
@@ -386,8 +430,8 @@ function LicitacoesPncpPageContent() {
     /^\d{14}-\d+-\d+\s*\/\s*\d{4}$/.test(searchTerm);
 
   const hasActiveFilters =
-    applied.uf !== 'DF' ||
-    applied.modalidadeCodigo !== 'all' ||
+    !(applied.ufs.length === 1 && applied.ufs[0] === 'DF') ||
+    applied.modalidadeCodigos.length > 0 ||
     applied.dataInicial !== defaults.dataInicial ||
     applied.dataFinal !== defaults.dataFinal ||
     hasSearch;
@@ -414,15 +458,23 @@ function LicitacoesPncpPageContent() {
   });
 
   const syncMutation = useMutation({
-    mutationFn: async () => {
-      const res = await api.post('/pncp/sync');
+    mutationFn: async (payload: PncpSyncRequest = { incremental: true, staleOnly: true }) => {
+      const res = await api.post('/pncp/sync', payload);
       return (res.data?.data ?? res.data) as PncpSyncStatus;
     },
-    onSuccess: (data) => {
+    onSuccess: (data, variables) => {
+      setSyncStopRequested(false);
       void queryClient.invalidateQueries({ queryKey: ['pncp-sync-status'] });
       setShowSyncModal(true);
       if (data.running) {
-        toast.success('Sincronização iniciada (DF primeiro). Pode demorar vários minutos.');
+        const label = variables.retryErrorsOnly
+          ? 'Repetindo UFs com erro'
+          : variables.fullResync
+            ? 'Sync completo'
+            : variables.ufs?.length && variables.ufs.length < BRASIL_UFS.length
+              ? `${variables.ufs.length} UF(s)`
+              : 'UFs desatualizadas';
+        toast.success(`Sincronização iniciada (${label}).`);
       }
     },
     onError: (err: { response?: { data?: { message?: string } }; message?: string }) => {
@@ -432,8 +484,106 @@ function LicitacoesPncpPageContent() {
     },
   });
 
+  const stopSyncMutation = useMutation({
+    mutationFn: async () => {
+      const res = await api.post('/pncp/sync/stop');
+      return (res.data?.data ?? res.data) as PncpSyncStatus;
+    },
+    onSuccess: () => {
+      setSyncStopRequested(true);
+      void queryClient.invalidateQueries({ queryKey: ['pncp-sync-status'] });
+      toast.success('Parando sincronização…');
+    },
+    onError: (err: { response?: { data?: { message?: string } }; message?: string }) => {
+      toast.error(
+        err?.response?.data?.message || err?.message || 'Não foi possível parar a sincronização.'
+      );
+    },
+  });
+
   const syncRunning =
     Boolean(syncStatusQuery.data?.running) || syncMutation.isPending;
+
+  useEffect(() => {
+    if (!syncStatusQuery.data?.running) {
+      setSyncStopRequested(false);
+    }
+  }, [syncStatusQuery.data?.running]);
+
+  const errorUfs = useMemo(
+    () =>
+      (syncStatusQuery.data?.progress?.ufs ?? [])
+        .filter((u) => u.lastStatus === 'error' || u.status === 'error')
+        .map((u) => u.uf)
+        .sort(),
+    [syncStatusQuery.data?.progress?.ufs]
+  );
+  const errorUfCount = syncStatusQuery.data?.errorUfCount ?? errorUfs.length;
+
+  const sortedUfRows = useMemo(() => {
+    const rows = [...(syncStatusQuery.data?.progress?.ufs ?? [])];
+    rows.sort((a, b) => {
+      const aErr = a.lastStatus === 'error' || a.status === 'error' ? 0 : 1;
+      const bErr = b.lastStatus === 'error' || b.status === 'error' ? 0 : 1;
+      if (aErr !== bErr) return aErr - bErr;
+      return a.uf.localeCompare(b.uf);
+    });
+    return rows;
+  }, [syncStatusQuery.data?.progress?.ufs]);
+
+  const buildSyncPayload = (): PncpSyncRequest => {
+    if (syncRetryErrorsOnly) {
+      return { retryErrorsOnly: true, incremental: true, staleOnly: false };
+    }
+    if (syncFullResync) {
+      const allSelected = syncSelectedUfs.length === BRASIL_UFS.length;
+      return {
+        fullResync: true,
+        incremental: false,
+        staleOnly: false,
+        ...(allSelected ? {} : { ufs: syncSelectedUfs }),
+      };
+    }
+    const allSelected = syncSelectedUfs.length === BRASIL_UFS.length;
+    return {
+      incremental: true,
+      staleOnly: allSelected,
+      ...(allSelected ? {} : { ufs: syncSelectedUfs, staleOnly: false }),
+    };
+  };
+
+  const startSync = () => {
+    syncMutation.mutate(buildSyncPayload());
+  };
+
+  const toggleSyncUf = (uf: string) => {
+    setSyncRetryErrorsOnly(false);
+    setSyncFullResync(false);
+    setSyncSelectedUfs((prev) =>
+      prev.includes(uf) ? prev.filter((u) => u !== uf) : [...prev, uf]
+    );
+  };
+
+  const allSyncUfsSelected = syncSelectedUfs.length === BRASIL_UFS.length;
+
+  const toggleAllSyncUfs = () => {
+    setSyncRetryErrorsOnly(false);
+    if (allSyncUfsSelected) {
+      setSyncSelectedUfs([]);
+    } else {
+      setSyncFullResync(false);
+      setSyncSelectedUfs([...BRASIL_UFS]);
+    }
+  };
+
+  const selectErrorSyncUfs = () => {
+    if (errorUfs.length === 0) {
+      toast.error('Nenhuma UF com erro no momento.');
+      return;
+    }
+    setSyncRetryErrorsOnly(true);
+    setSyncSelectedUfs(errorUfs);
+  };
 
   const query = useQuery({
     queryKey: [
@@ -443,8 +593,15 @@ function LicitacoesPncpPageContent() {
     queryFn: async () => {
       const res = await api.get('/pncp/contratacoes', {
         params: {
-          uf: applied.uf,
-          codigoModalidadeContratacao: applied.modalidadeCodigo,
+          uf:
+            applied.ufs.length === 0 || applied.ufs.length === BRASIL_UFS.length
+              ? 'all'
+              : applied.ufs.join(','),
+          codigoModalidadeContratacao:
+            applied.modalidadeCodigos.length === 0 ||
+            applied.modalidadeCodigos.length === MODALIDADE_OPTIONS.length
+              ? 'all'
+              : applied.modalidadeCodigos.join(','),
           dataInicial: dateInputToYyyymmdd(applied.dataInicial),
           dataFinal: dateInputToYyyymmdd(applied.dataFinal),
           pagina: applied.pagina,
@@ -511,8 +668,8 @@ function LicitacoesPncpPageContent() {
       : 0;
 
   const commitFilters = (next: {
-    uf: string;
-    modalidadeCodigo: string;
+    ufs: string[];
+    modalidadeCodigos: string[];
     dataInicial: string;
     dataFinal: string;
   }) => {
@@ -549,14 +706,14 @@ function LicitacoesPncpPageContent() {
   }, [q]);
 
   const clearFilters = () => {
-    setUf('DF');
-    setModalidadeCodigo('all');
+    setUfs(['DF']);
+    setModalidadeCodigos([]);
     setDataInicial(defaults.dataInicial);
     setDataFinal(defaults.dataFinal);
     setApplied((prev) => ({
       ...prev,
-      uf: 'DF',
-      modalidadeCodigo: 'all',
+      ufs: ['DF'],
+      modalidadeCodigos: [],
       dataInicial: defaults.dataInicial,
       dataFinal: defaults.dataFinal,
       pagina: 1,
@@ -677,14 +834,14 @@ function LicitacoesPncpPageContent() {
 
               <button
                 type="button"
-                onClick={() => syncMutation.mutate()}
+                onClick={() => setShowSyncModal(true)}
                 disabled={syncRunning}
                 className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
                 aria-label="Sincronizar PNCP"
                 title={
                   syncRunning
                     ? 'Sincronização em andamento'
-                    : 'Sincronizar agora com o PNCP'
+                    : 'Sincronizar com o PNCP'
                 }
               >
                 <DownloadCloud
@@ -908,20 +1065,22 @@ function LicitacoesPncpPageContent() {
                 <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
                   UF
                 </label>
-                <StringSingleSelectDropdown
-                  value={uf}
-                  onChange={(nextUf) => {
-                    setUf(nextUf);
+                <MultiSelectSearchDropdown
+                  options={ufFilterOptions}
+                  selected={ufs}
+                  onChange={(next) => {
+                    setUfs(next);
                     commitFilters({
-                      uf: nextUf,
-                      modalidadeCodigo,
+                      ufs: next,
+                      modalidadeCodigos,
                       dataInicial,
                       dataFinal,
                     });
                   }}
-                  options={[...BRASIL_UFS]}
-                  allowEmpty={false}
-                  placeholder="UF"
+                  placeholder={formatUfFilterLabel(ufs)}
+                  searchPlaceholder="Pesquisar UF..."
+                  open={filterDropdownOpen === 'uf'}
+                  onOpenChange={(open) => setFilterDropdownOpen(open ? 'uf' : null)}
                 />
               </div>
 
@@ -929,22 +1088,22 @@ function LicitacoesPncpPageContent() {
                 <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
                   Modalidade
                 </label>
-                <StringSingleSelectDropdown
-                  value={modalidadeOptionLabel(modalidadeCodigo)}
-                  onChange={(label) => {
-                    const found = MODALIDADE_OPTIONS.find((m) => m.nome === label);
-                    const codigo = found ? String(found.codigo) : 'all';
-                    setModalidadeCodigo(codigo);
+                <MultiSelectSearchDropdown
+                  options={modalidadeFilterOptions}
+                  selected={modalidadeCodigos}
+                  onChange={(next) => {
+                    setModalidadeCodigos(next);
                     commitFilters({
-                      uf,
-                      modalidadeCodigo: codigo,
+                      ufs,
+                      modalidadeCodigos: next,
                       dataInicial,
                       dataFinal,
                     });
                   }}
-                  options={modalidadeOptions}
-                  allowEmpty={false}
-                  placeholder="Modalidade"
+                  placeholder={formatModalidadeFilterLabel(modalidadeCodigos)}
+                  searchPlaceholder="Pesquisar modalidade..."
+                  open={filterDropdownOpen === 'modalidade'}
+                  onOpenChange={(open) => setFilterDropdownOpen(open ? 'modalidade' : null)}
                 />
               </div>
 
@@ -958,8 +1117,8 @@ function LicitacoesPncpPageContent() {
                     onChange={(next) => {
                       setDataInicial(next);
                       commitFilters({
-                        uf,
-                        modalidadeCodigo,
+                        ufs,
+                        modalidadeCodigos,
                         dataInicial: next,
                         dataFinal,
                       });
@@ -977,8 +1136,8 @@ function LicitacoesPncpPageContent() {
                     onChange={(next) => {
                       setDataFinal(next);
                       commitFilters({
-                        uf,
-                        modalidadeCodigo,
+                        ufs,
+                        modalidadeCodigos,
                         dataInicial,
                         dataFinal: next,
                       });
@@ -1142,50 +1301,187 @@ function LicitacoesPncpPageContent() {
                   {(progress?.rateLimitHits ?? 0) > 0
                     ? ` · ${progress?.rateLimitHits} rate-limit`
                     : ''}
-                  {progress?.lookbackDays ? ` · últimos ${progress.lookbackDays} dias` : ''}
+                  {progress?.lookbackDays && syncStatusQuery.data?.syncOptions?.fullResync
+                    ? ` · lookback ${progress.lookbackDays} dias (completo)`
+                    : syncStatusQuery.data?.syncOptions?.incremental !== false
+                      ? ' · incremental'
+                      : ''}
+                  {syncStatusQuery.data?.syncOptions?.staleOnly ? ' · só desatualizadas' : ''}
+                  {!syncRunning && (syncStatusQuery.data?.lastRun?.pruned ?? 0) > 0
+                    ? ` · ${syncStatusQuery.data?.lastRun?.pruned} removidos na última sync`
+                    : ''}
                 </p>
               </div>
 
+              {!syncRunning ? (
+                <div className="space-y-3 rounded-lg border border-gray-200 p-3 dark:border-gray-700">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                      UFs para sincronizar
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={toggleAllSyncUfs}
+                        disabled={syncRetryErrorsOnly}
+                        className="rounded-md border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700"
+                      >
+                        {allSyncUfsSelected ? 'Desmarcar todas' : 'Marcar todas'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={selectErrorSyncUfs}
+                        disabled={errorUfCount === 0}
+                        className="rounded-md border border-amber-300 px-2 py-1 text-xs text-amber-800 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-amber-700 dark:text-amber-300 dark:hover:bg-amber-950/30"
+                      >
+                        Só erros ({errorUfCount})
+                      </button>
+                    </div>
+                  </div>
+
+                  <label className="flex cursor-pointer items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                    <input
+                      type="checkbox"
+                      checked={syncRetryErrorsOnly}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        setSyncRetryErrorsOnly(checked);
+                        if (checked) {
+                          setSyncFullResync(false);
+                          setSyncSelectedUfs(errorUfs);
+                        }
+                      }}
+                      disabled={errorUfCount === 0}
+                      className="rounded border-gray-300 text-red-600 focus:ring-red-500 disabled:opacity-50"
+                    />
+                    Repetir apenas UFs com erro na última tentativa
+                  </label>
+
+                  <label className="flex cursor-pointer items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                    <input
+                      type="checkbox"
+                      checked={syncFullResync}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        setSyncFullResync(checked);
+                        if (checked) setSyncRetryErrorsOnly(false);
+                      }}
+                      disabled={syncRetryErrorsOnly}
+                      className="rounded border-gray-300 text-red-600 focus:ring-red-500 disabled:opacity-50"
+                    />
+                    Sync completo (30 dias — varrer tudo de novo)
+                  </label>
+
+                  {!syncRetryErrorsOnly ? (
+                    <div className="grid grid-cols-5 gap-1.5 sm:grid-cols-9">
+                      {BRASIL_UFS.map((uf) => {
+                        const selected = syncSelectedUfs.includes(uf);
+                        const hadError = errorUfs.includes(uf);
+                        return (
+                          <button
+                            key={uf}
+                            type="button"
+                            onClick={() => toggleSyncUf(uf)}
+                            className={`rounded-md border px-1.5 py-1 text-xs font-medium transition-colors ${
+                              selected
+                                ? 'border-red-300 bg-red-50 text-red-800 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300'
+                                : 'border-gray-200 bg-white text-gray-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-400'
+                            } ${hadError ? 'ring-1 ring-amber-400/70' : ''}`}
+                          >
+                            {uf}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-amber-700 dark:text-amber-300">
+                      Serão repetidas: {errorUfs.length ? errorUfs.join(', ') : 'nenhuma UF com erro'}.
+                    </p>
+                  )}
+
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    {syncFullResync
+                      ? 'Modo completo: revarre os últimos 30 dias nas UFs selecionadas (lento).'
+                      : syncSelectedUfs.length === BRASIL_UFS.length
+                        ? 'Padrão: só UFs desatualizadas, buscando publicações desde a última sync OK (rápido). Se tudo estiver em dia, avisa e não roda.'
+                        : 'UFs escolhidas manualmente: busca novidades desde a última sync OK de cada uma.'}
+                  </p>
+                </div>
+              ) : null}
+
               <div>
-                <p className="mb-2 text-sm font-medium text-gray-900 dark:text-gray-100">
-                  Status por UF
-                </p>
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                    Status por UF
+                  </p>
+                  {errorUfCount > 0 ? (
+                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+                      {errorUfCount} com erro: {errorUfs.join(', ')}
+                    </span>
+                  ) : null}
+                </div>
                 <div className="max-h-56 overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-700">
                   <table className="w-full text-sm">
                     <thead className="sticky top-0 bg-gray-50 text-left text-xs uppercase text-gray-500 dark:bg-gray-900/80 dark:text-gray-400">
                       <tr>
                         <th className="px-3 py-2 font-medium">UF</th>
                         <th className="px-3 py-2 font-medium">Status</th>
+                        <th className="px-3 py-2 font-medium">Última OK</th>
+                        <th className="px-3 py-2 font-medium">Última tent.</th>
                         <th className="px-3 py-2 text-right font-medium">Sync</th>
                         <th className="px-3 py-2 text-right font-medium">Espelho</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                      {(progress?.ufs ?? []).map((row) => {
+                      {sortedUfRows.map((row) => {
                         const mirrorCount =
                           mirror?.byUf.find((m) => m.uf === row.uf)?.count ?? 0;
+                        const hasError =
+                          row.lastStatus === 'error' || row.status === 'error';
                         const statusLabel =
-                          row.status === 'done'
-                            ? 'Feito'
-                            : row.status === 'running'
-                              ? 'Agora'
-                              : row.status === 'error'
-                                ? 'Erro'
-                                : 'Falta';
+                          row.status === 'running'
+                            ? 'Agora'
+                            : hasError
+                              ? 'Erro'
+                              : row.status === 'done' || row.lastStatus === 'success'
+                                ? 'Em dia'
+                                : row.lastSuccessAt
+                                  ? 'Em dia'
+                                  : 'Nunca';
                         const statusCls =
-                          row.status === 'done'
-                            ? 'text-emerald-600 dark:text-emerald-400'
-                            : row.status === 'running'
-                              ? 'font-semibold text-red-600 dark:text-red-400'
-                              : row.status === 'error'
-                                ? 'text-amber-600 dark:text-amber-400'
+                          row.status === 'running'
+                            ? 'font-semibold text-red-600 dark:text-red-400'
+                            : hasError
+                              ? 'font-medium text-amber-600 dark:text-amber-400'
+                              : row.lastSuccessAt || row.lastStatus === 'success'
+                                ? 'text-emerald-600 dark:text-emerald-400'
                                 : 'text-gray-400';
+                        const errorTitle = row.lastErrorMessage?.trim() || undefined;
                         return (
-                          <tr key={row.uf} className="bg-white dark:bg-gray-800">
+                          <tr
+                            key={row.uf}
+                            className={`bg-white dark:bg-gray-800 ${hasError ? 'bg-amber-50/40 dark:bg-amber-950/10' : ''}`}
+                          >
                             <td className="px-3 py-1.5 font-medium text-gray-900 dark:text-gray-100">
                               {row.uf}
                             </td>
-                            <td className={`px-3 py-1.5 ${statusCls}`}>{statusLabel}</td>
+                            <td
+                              className={`px-3 py-1.5 ${statusCls}`}
+                              title={hasError ? errorTitle : undefined}
+                            >
+                              {statusLabel}
+                              {hasError && errorTitle ? (
+                                <span className="mt-0.5 block max-w-[140px] truncate text-[10px] font-normal text-amber-700/90 dark:text-amber-400/90">
+                                  {errorTitle}
+                                </span>
+                              ) : null}
+                            </td>
+                            <td className="px-3 py-1.5 text-xs text-gray-500 dark:text-gray-400">
+                              {row.lastSuccessAt ? formatSyncLabel(row.lastSuccessAt) : '—'}
+                            </td>
+                            <td className="px-3 py-1.5 text-xs text-gray-500 dark:text-gray-400">
+                              {row.lastAttemptAt ? formatSyncLabel(row.lastAttemptAt) : '—'}
+                            </td>
                             <td className="px-3 py-1.5 text-right tabular-nums text-gray-700 dark:text-gray-300">
                               {row.upsertedThisRun.toLocaleString('pt-BR')}
                             </td>
@@ -1201,16 +1497,32 @@ function LicitacoesPncpPageContent() {
               </div>
             </div>
 
-            <div className="flex items-center justify-between gap-2 border-t border-gray-200 px-5 py-4 dark:border-gray-700">
-              <button
-                type="button"
-                onClick={() => syncMutation.mutate()}
-                disabled={syncRunning}
-                className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
-              >
-                <DownloadCloud className="h-4 w-4" />
-                {syncRunning ? 'Sincronizando…' : 'Sincronizar agora'}
-              </button>
+            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-gray-200 px-5 py-4 dark:border-gray-700">
+              <div className="flex flex-wrap items-center gap-2">
+                {syncRunning ? (
+                  <button
+                    type="button"
+                    onClick={() => stopSyncMutation.mutate()}
+                    disabled={syncStopRequested || stopSyncMutation.isPending}
+                    className="inline-flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-800 transition-colors hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-300 dark:hover:bg-amber-900/40"
+                  >
+                    <Square className="h-4 w-4 fill-current" />
+                    {syncStopRequested || stopSyncMutation.isPending
+                      ? 'Parando…'
+                      : 'Parar sincronização'}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={startSync}
+                    disabled={!syncRetryErrorsOnly && syncSelectedUfs.length === 0}
+                    className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                  >
+                    <DownloadCloud className="h-4 w-4" />
+                    Sincronizar agora
+                  </button>
+                )}
+              </div>
               <button
                 type="button"
                 onClick={() => setShowSyncModal(false)}

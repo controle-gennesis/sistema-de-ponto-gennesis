@@ -8,31 +8,58 @@ import {
 } from './PncpConsultaService';
 
 /** DF/GO/SP primeiro para a lista encher rápido; depois o restante do Brasil. */
-const BRASIL_UFS = [
+export const BRASIL_UFS = [
   'DF', 'GO', 'SP',
   'AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'ES', 'MA', 'MT', 'MS', 'MG',
   'PA', 'PB', 'PR', 'PE', 'PI', 'RJ', 'RN', 'RS', 'RO', 'RR', 'SC', 'SE', 'TO',
 ] as const;
 
+const BRASIL_UF_SET = new Set<string>(BRASIL_UFS);
+
 const DEFAULT_LOOKBACK_DAYS = 30;
 const DEFAULT_PAGE_DELAY_MS = 650;
 const DEFAULT_INTERVAL_MS = 60 * 60 * 1000;
+const INCREMENTAL_OVERLAP_DAYS = 1;
 const MAX_429_RETRIES = 5;
 const MAX_PAGES_PER_COMBO = 40;
 const PROGRESS_EVERY_PAGES = 3;
 
 export type PncpSyncTrigger = 'cron' | 'manual';
 
+export type PncpSyncOptions = {
+  /** Subconjunto de UFs; omitido = todas. */
+  ufs?: string[];
+  /** Só UFs com erro na última tentativa persistida. */
+  retryErrorsOnly?: boolean;
+  /** Busca desde a última sync OK da UF (default true). */
+  incremental?: boolean;
+  /** Só UFs desatualizadas (default true no incremental). Ignorado se escolher UFs específicas. */
+  staleOnly?: boolean;
+  /** Força lookback completo (30 dias) em todas as UFs selecionadas. */
+  fullResync?: boolean;
+};
+
 export type PncpUfProgress = {
   uf: string;
   status: 'pending' | 'running' | 'done' | 'error';
   upsertedThisRun: number;
+  lastSuccessAt: string | null;
+  lastAttemptAt: string | null;
+  lastStatus: string | null;
+  lastErrorMessage: string | null;
 };
 
 export type PncpSyncStatus = {
   running: boolean;
   currentUf: string | null;
   currentModalidade: string | null;
+  syncOptions: {
+    ufs: string[];
+    retryErrorsOnly: boolean;
+    incremental: boolean;
+    staleOnly: boolean;
+    fullResync: boolean;
+  } | null;
   progress: {
     totalUfs: number;
     doneUfs: number;
@@ -48,6 +75,7 @@ export type PncpSyncStatus = {
     total: number;
     byUf: { uf: string; count: number }[];
   };
+  errorUfCount: number;
   lastRun: {
     id: string;
     status: string;
@@ -64,7 +92,23 @@ export type PncpSyncStatus = {
 };
 
 let running = false;
+let cancelRequested = false;
 let currentRunId: string | null = null;
+
+function isSyncCancelRequested(): boolean {
+  return cancelRequested;
+}
+
+/** Solicita interrupção da sync em andamento (efetiva entre páginas/UFs). */
+export function requestPncpSyncCancel(): { requested: boolean; message?: string } {
+  if (!running) {
+    return { requested: false, message: 'Nenhuma sincronização em andamento.' };
+  }
+  cancelRequested = true;
+  console.log('[pncp-sync] cancelamento solicitado');
+  return { requested: true };
+}
+
 let currentUf: string | null = null;
 let currentModalidade: string | null = null;
 let liveLookbackDays = DEFAULT_LOOKBACK_DAYS;
@@ -73,6 +117,7 @@ let livePagesFetched = 0;
 let liveUpserted = 0;
 let liveRateLimitHits = 0;
 let liveUfProgress: PncpUfProgress[] = [];
+let liveSyncOptions: PncpSyncStatus['syncOptions'] = null;
 let cronStarted = false;
 let cronTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -110,6 +155,252 @@ function parseIsoDate(value: string | null | undefined): Date | null {
 function isRateLimitError(err: unknown): boolean {
   const message = err instanceof Error ? err.message : String(err || '');
   return /limite de requisi/i.test(message);
+}
+
+function normalizeUfs(raw: string[] | undefined): string[] {
+  if (!raw?.length) return [...BRASIL_UFS];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const item of raw) {
+    const uf = String(item || '').trim().toUpperCase();
+    if (!BRASIL_UF_SET.has(uf) || seen.has(uf)) continue;
+    seen.add(uf);
+    out.push(uf);
+  }
+  return out.sort(
+    (a, b) => BRASIL_UFS.indexOf(a as (typeof BRASIL_UFS)[number]) - BRASIL_UFS.indexOf(b as (typeof BRASIL_UFS)[number])
+  );
+}
+
+function resolveSyncOptions(options?: PncpSyncOptions): Required<PncpSyncOptions> {
+  const fullResync = options?.fullResync === true;
+  const incremental = fullResync ? false : options?.incremental !== false;
+  return {
+    ufs: normalizeUfs(options?.ufs),
+    retryErrorsOnly: options?.retryErrorsOnly === true,
+    incremental,
+    staleOnly: fullResync ? false : options?.staleOnly !== false,
+    fullResync,
+  };
+}
+
+/** Preenche lastSuccessAt a partir do espelho local (syncs anteriores à tabela por UF). */
+async function backfillPncpSyncUfStatesFromMirror(): Promise<number> {
+  const [mirrorMax, lastGlobalRun, existingStates] = await Promise.all([
+    prisma.pncpContratacao.groupBy({
+      by: ['uf'],
+      _max: { syncedAt: true, dataInclusao: true },
+    }),
+    prisma.pncpSyncRun.findFirst({
+      where: { status: { in: ['success', 'partial'] }, finishedAt: { not: null } },
+      orderBy: { finishedAt: 'desc' },
+    }),
+    prisma.pncpSyncUfState.findMany({ select: { uf: true, lastSuccessAt: true, lastStatus: true } }),
+  ]);
+
+  const existingMap = new Map(existingStates.map((s) => [s.uf, s]));
+  let count = 0;
+
+  for (const row of mirrorMax) {
+    const existing = existingMap.get(row.uf);
+    if (existing?.lastSuccessAt) continue;
+
+    const inferred =
+      row._max.syncedAt ?? row._max.dataInclusao ?? lastGlobalRun?.finishedAt ?? null;
+    if (!inferred) continue;
+
+    await prisma.pncpSyncUfState.upsert({
+      where: { uf: row.uf },
+      create: {
+        uf: row.uf,
+        lastSuccessAt: inferred,
+        lastAttemptAt: inferred,
+        lastStatus: existing?.lastStatus === 'error' ? 'error' : 'success',
+        lastDataFinal: toYyyymmdd(inferred),
+      },
+      update: {
+        lastSuccessAt: inferred,
+        lastAttemptAt: inferred,
+        ...(existing?.lastStatus === 'error' ? {} : { lastStatus: 'success' }),
+      },
+    });
+    count += 1;
+  }
+
+  if (count > 0) {
+    console.log(`[pncp-sync] backfill: ${count} UF(s) com lastSuccessAt inferido do espelho`);
+  }
+  return count;
+}
+
+function isExplicitUfSelection(options: Required<PncpSyncOptions>): boolean {
+  return options.ufs.length < BRASIL_UFS.length;
+}
+
+async function resolveUfsToSync(options: Required<PncpSyncOptions>): Promise<string[]> {
+  await backfillPncpSyncUfStatesFromMirror();
+
+  if (options.retryErrorsOnly) {
+    const errorRows = await prisma.pncpSyncUfState.findMany({
+      where: { lastStatus: 'error' },
+      select: { uf: true },
+      orderBy: { uf: 'asc' },
+    });
+    let ufs = errorRows.map((r: { uf: string }) => r.uf);
+    if (options.ufs.length < BRASIL_UFS.length) {
+      const allowed = new Set(options.ufs);
+      ufs = ufs.filter((uf: string) => allowed.has(uf));
+    }
+    return ufs.sort(
+      (a: string, b: string) =>
+        BRASIL_UFS.indexOf(a as (typeof BRASIL_UFS)[number]) -
+        BRASIL_UFS.indexOf(b as (typeof BRASIL_UFS)[number])
+    );
+  }
+
+  let ufs = options.ufs;
+
+  if (
+    options.staleOnly &&
+    options.incremental &&
+    !options.fullResync &&
+    !isExplicitUfSelection(options)
+  ) {
+    const staleMs = envInt('PNCP_SYNC_STALE_MS', 45 * 60 * 1000);
+    const cutoff = Date.now() - staleMs;
+    const states = await loadUfStates();
+
+    ufs = ufs.filter((uf) => {
+      const s = states.get(uf);
+      if (!s?.lastSuccessAt || s.lastStatus === 'error') return true;
+      return s.lastSuccessAt.getTime() < cutoff;
+    });
+
+    if (ufs.length === 0) {
+      console.log('[pncp-sync] todas as UFs estão atualizadas (staleOnly)');
+    } else {
+      console.log(`[pncp-sync] staleOnly: ${ufs.length} UF(s) desatualizada(s) → ${ufs.join(', ')}`);
+    }
+  }
+
+  return ufs;
+}
+
+type UfStateRow = Awaited<ReturnType<typeof loadUfStates>> extends Map<string, infer V> ? V : never;
+
+async function loadUfStates(): Promise<
+  Map<
+    string,
+    {
+      lastSuccessAt: Date | null;
+      lastAttemptAt: Date | null;
+      lastStatus: string;
+      lastErrorMessage: string | null;
+    }
+  >
+> {
+  const rows = await prisma.pncpSyncUfState.findMany();
+  return new Map(
+    rows.map(
+      (r: {
+        uf: string;
+        lastSuccessAt: Date | null;
+        lastAttemptAt: Date | null;
+        lastStatus: string;
+        lastErrorMessage: string | null;
+      }) => [
+        r.uf,
+        {
+          lastSuccessAt: r.lastSuccessAt,
+          lastAttemptAt: r.lastAttemptAt,
+          lastStatus: r.lastStatus,
+          lastErrorMessage: r.lastErrorMessage,
+        },
+      ]
+    )
+  );
+}
+
+async function loadMirrorLastSyncedByUf(): Promise<Map<string, Date>> {
+  const rows = await prisma.pncpContratacao.groupBy({
+    by: ['uf'],
+    _max: { syncedAt: true },
+  });
+  const map = new Map<string, Date>();
+  for (const row of rows) {
+    if (row._max.syncedAt) map.set(row.uf, row._max.syncedAt);
+  }
+  return map;
+}
+
+let lastBackfillAt = 0;
+
+async function ensureUfStatesBackfilled(): Promise<void> {
+  const now = Date.now();
+  if (now - lastBackfillAt < 30_000) return;
+
+  const [stateSuccessCount, mirrorUfCount] = await Promise.all([
+    prisma.pncpSyncUfState.count({ where: { lastSuccessAt: { not: null } } }),
+    prisma.pncpContratacao.groupBy({ by: ['uf'], _count: { _all: true } }).then((r) => r.length),
+  ]);
+
+  if (mirrorUfCount > 0 && stateSuccessCount >= mirrorUfCount) {
+    lastBackfillAt = now;
+    return;
+  }
+
+  await backfillPncpSyncUfStatesFromMirror();
+  lastBackfillAt = now;
+}
+
+function getDateWindowForUf(
+  ufState: UfStateRow | undefined,
+  lookbackDays: number,
+  incremental: boolean
+): { dataInicial: string; dataFinal: string; mode: 'incremental' | 'full' } {
+  const end = new Date();
+  const dataFinal = toYyyymmdd(end);
+
+  if (incremental && ufState?.lastSuccessAt) {
+    const start = new Date(ufState.lastSuccessAt);
+    start.setDate(start.getDate() - INCREMENTAL_OVERLAP_DAYS);
+    return { dataInicial: toYyyymmdd(start), dataFinal, mode: 'incremental' };
+  }
+
+  const start = new Date();
+  start.setDate(start.getDate() - lookbackDays);
+  return { dataInicial: toYyyymmdd(start), dataFinal, mode: 'full' };
+}
+
+async function persistUfState(
+  uf: string,
+  status: 'success' | 'error',
+  runId: string,
+  dataFinal: string,
+  errorMessage?: string | null
+): Promise<void> {
+  const now = new Date();
+  await prisma.pncpSyncUfState.upsert({
+    where: { uf },
+    create: {
+      uf,
+      lastStatus: status,
+      lastAttemptAt: now,
+      lastSuccessAt: status === 'success' ? now : null,
+      lastDataFinal: dataFinal,
+      lastErrorMessage: status === 'error' ? errorMessage ?? null : null,
+      lastRunId: runId,
+    },
+    update: {
+      lastStatus: status,
+      lastAttemptAt: now,
+      lastDataFinal: dataFinal,
+      lastRunId: runId,
+      ...(status === 'success'
+        ? { lastSuccessAt: now, lastErrorMessage: null }
+        : { lastErrorMessage: errorMessage ?? null }),
+    },
+  });
 }
 
 async function upsertItems(
@@ -224,7 +515,7 @@ export async function recoverOrphanPncpSyncRuns(): Promise<number> {
   return result.count;
 }
 
-function resetLiveProgress(lookbackDays: number): void {
+function resetLiveProgress(lookbackDays: number, ufs: string[], ufStateMap: Map<string, UfStateRow>): void {
   liveLookbackDays = lookbackDays;
   liveStartedAt = new Date().toISOString();
   livePagesFetched = 0;
@@ -232,11 +523,18 @@ function resetLiveProgress(lookbackDays: number): void {
   liveRateLimitHits = 0;
   currentUf = null;
   currentModalidade = null;
-  liveUfProgress = BRASIL_UFS.map((uf) => ({
-    uf,
-    status: 'pending' as const,
-    upsertedThisRun: 0,
-  }));
+  liveUfProgress = ufs.map((uf) => {
+    const state = ufStateMap.get(uf);
+    return {
+      uf,
+      status: 'pending' as const,
+      upsertedThisRun: 0,
+      lastSuccessAt: state?.lastSuccessAt?.toISOString() ?? null,
+      lastAttemptAt: state?.lastAttemptAt?.toISOString() ?? null,
+      lastStatus: state?.lastStatus ?? null,
+      lastErrorMessage: state?.lastErrorMessage ?? null,
+    };
+  });
 }
 
 function setUfStatus(uf: string, status: PncpUfProgress['status']): void {
@@ -249,10 +547,64 @@ function addUfUpserted(uf: string, n: number): void {
   if (row) row.upsertedThisRun += n;
 }
 
-export async function getPncpSyncStatus(): Promise<PncpSyncStatus> {
-  const last = await prisma.pncpSyncRun.findFirst({
-    orderBy: { startedAt: 'desc' },
+function buildIdleUfProgress(
+  ufStateMap: Map<string, UfStateRow>,
+  mirrorSyncedAt: Map<string, Date>
+): PncpUfProgress[] {
+  return BRASIL_UFS.map((uf) => {
+    const state = ufStateMap.get(uf);
+    const mirrorAt = mirrorSyncedAt.get(uf);
+    const lastSuccessAt = state?.lastSuccessAt ?? mirrorAt ?? null;
+    const lastStatus =
+      state?.lastStatus ??
+      (mirrorAt ? 'success' : null);
+    const idleStatus: PncpUfProgress['status'] =
+      lastStatus === 'error' ? 'error' : lastStatus === 'success' ? 'done' : 'pending';
+    return {
+      uf,
+      status: idleStatus,
+      upsertedThisRun: 0,
+      lastSuccessAt: lastSuccessAt?.toISOString() ?? null,
+      lastAttemptAt: state?.lastAttemptAt?.toISOString() ?? lastSuccessAt?.toISOString() ?? null,
+      lastStatus,
+      lastErrorMessage: state?.lastErrorMessage ?? null,
+    };
   });
+}
+
+function buildDisplayUfProgress(
+  ufStateMap: Map<string, UfStateRow>,
+  mirrorSyncedAt: Map<string, Date>,
+  liveOverrides?: PncpUfProgress[]
+): PncpUfProgress[] {
+  const base = buildIdleUfProgress(ufStateMap, mirrorSyncedAt);
+  if (!liveOverrides?.length) return base;
+
+  const liveMap = new Map(liveOverrides.map((u) => [u.uf, u]));
+  return base.map((row) => {
+    const live = liveMap.get(row.uf);
+    if (!live) return row;
+    return {
+      ...row,
+      status: live.status,
+      upsertedThisRun: live.upsertedThisRun,
+      lastSuccessAt: live.lastSuccessAt ?? row.lastSuccessAt,
+      lastAttemptAt: live.lastAttemptAt ?? row.lastAttemptAt,
+      lastStatus: live.lastStatus ?? row.lastStatus,
+      lastErrorMessage: live.lastErrorMessage ?? row.lastErrorMessage,
+    };
+  });
+}
+
+export async function getPncpSyncStatus(): Promise<PncpSyncStatus> {
+  await ensureUfStatesBackfilled();
+
+  const [last, ufStateMap, errorUfCount, mirrorSyncedAt] = await Promise.all([
+    prisma.pncpSyncRun.findFirst({ orderBy: { startedAt: 'desc' } }),
+    loadUfStates(),
+    prisma.pncpSyncUfState.count({ where: { lastStatus: 'error' } }),
+    loadMirrorLastSyncedByUf(),
+  ]);
 
   const isRunning = running && (!last || last.id === currentRunId || last.status === 'running');
 
@@ -264,25 +616,30 @@ export async function getPncpSyncStatus(): Promise<PncpSyncStatus> {
   const byUf = grouped.map((g) => ({ uf: g.uf, count: g._count._all }));
   const mirrorTotal = byUf.reduce((sum, r) => sum + r.count, 0);
 
-  const ufs =
-    liveUfProgress.length > 0
-      ? liveUfProgress
-      : BRASIL_UFS.map((uf) => ({
-          uf,
-          status: 'pending' as const,
-          upsertedThisRun: 0,
-        }));
+  const ufs = buildDisplayUfProgress(
+    ufStateMap,
+    mirrorSyncedAt,
+    isRunning ? liveUfProgress : undefined
+  );
 
-  const doneUfs = ufs.filter((u) => u.status === 'done' || u.status === 'error').length;
+  const errorCountFromDisplay = ufs.filter((u) => u.lastStatus === 'error' || u.status === 'error').length;
 
   return {
     running: isRunning,
     currentUf: isRunning ? currentUf : null,
     currentModalidade: isRunning ? currentModalidade : null,
+    syncOptions: isRunning ? liveSyncOptions : null,
     progress: {
-      totalUfs: BRASIL_UFS.length,
-      doneUfs,
-      pendingUfs: ufs.filter((u) => u.status === 'pending').length,
+      totalUfs: isRunning && liveUfProgress.length > 0 ? liveUfProgress.length : BRASIL_UFS.length,
+      doneUfs: isRunning
+        ? ufs.filter((u) => liveUfProgress.some((l) => l.uf === u.uf && (u.status === 'done' || u.status === 'error'))).length
+        : ufs.filter((u) => u.lastStatus === 'success' || u.lastStatus === 'error').length,
+      pendingUfs: isRunning
+        ? liveUfProgress.filter((l) => {
+            const row = ufs.find((u) => u.uf === l.uf);
+            return row?.status === 'pending';
+          }).length
+        : ufs.filter((u) => u.status === 'pending' && u.lastStatus !== 'error').length,
       pagesFetched: isRunning ? livePagesFetched : last?.pagesFetched ?? 0,
       upserted: isRunning ? liveUpserted : last?.upserted ?? 0,
       rateLimitHits: isRunning ? liveRateLimitHits : last?.rateLimitHits ?? 0,
@@ -294,6 +651,7 @@ export async function getPncpSyncStatus(): Promise<PncpSyncStatus> {
       total: mirrorTotal,
       byUf,
     },
+    errorUfCount: Math.max(errorUfCount, errorCountFromDisplay),
     lastRun: last
       ? {
           id: last.id,
@@ -312,27 +670,52 @@ export async function getPncpSyncStatus(): Promise<PncpSyncStatus> {
   };
 }
 
+export class PncpSyncNothingToDoError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'PncpSyncNothingToDoError';
+  }
+}
+
 /**
- * Ingestão Brasil × modalidades, janela recente, só keywords.
+ * Ingestão por UF × modalidades. Suporta seleção de UFs, retry de erros e sync incremental.
  * Não roda em paralelo — lock em memória.
  */
-export async function runPncpIngest(trigger: PncpSyncTrigger = 'manual'): Promise<PncpSyncStatus> {
+export async function runPncpIngest(
+  trigger: PncpSyncTrigger = 'manual',
+  rawOptions?: PncpSyncOptions
+): Promise<PncpSyncStatus> {
   if (running) {
     return getPncpSyncStatus();
   }
 
+  const options = resolveSyncOptions(rawOptions);
+  const ufsToSync = await resolveUfsToSync(options);
+  const ufStateMap = await loadUfStates();
+
+  if (ufsToSync.length === 0) {
+    throw new PncpSyncNothingToDoError(
+      options.retryErrorsOnly
+        ? 'Nenhuma UF com erro para repetir.'
+        : options.staleOnly && options.incremental && !options.fullResync
+          ? 'Todas as UFs estão atualizadas. Nada novo para buscar.'
+          : 'Nenhuma UF selecionada para sincronizar.'
+    );
+  }
+
   running = true;
+  cancelRequested = false;
   const lookbackDays = envInt('PNCP_SYNC_LOOKBACK_DAYS', DEFAULT_LOOKBACK_DAYS);
   const pageDelayMs = envInt('PNCP_SYNC_PAGE_DELAY_MS', DEFAULT_PAGE_DELAY_MS);
-  resetLiveProgress(lookbackDays);
+  liveSyncOptions = {
+    ufs: ufsToSync,
+    retryErrorsOnly: options.retryErrorsOnly,
+    incremental: options.incremental,
+    staleOnly: options.staleOnly,
+    fullResync: options.fullResync,
+  };
+  resetLiveProgress(lookbackDays, ufsToSync, ufStateMap);
 
-  const end = new Date();
-  const start = new Date();
-  start.setDate(start.getDate() - lookbackDays);
-  const dataInicial = toYyyymmdd(start);
-  const dataFinal = toYyyymmdd(end);
-
-  // Limpa qualquer "running" fantasma antes de criar o novo.
   await recoverOrphanPncpSyncRuns();
 
   const run = await prisma.pncpSyncRun.create({
@@ -349,24 +732,48 @@ export async function runPncpIngest(trigger: PncpSyncTrigger = 'manual'): Promis
   let pruned = 0;
   let rateLimitHits = 0;
   let hadPartialFailure = false;
+  let wasCancelled = false;
 
   try {
-    for (const uf of BRASIL_UFS) {
+    ufLoop: for (const uf of ufsToSync) {
+      if (isSyncCancelRequested()) {
+        wasCancelled = true;
+        break;
+      }
+
       currentUf = uf;
       setUfStatus(uf, 'running');
-      console.log(`[pncp-sync] UF ${uf}… (upserted=${upserted}, pages=${pagesFetched})`);
+
+      const window = getDateWindowForUf(ufStateMap.get(uf), lookbackDays, options.incremental);
+      console.log(
+        `[pncp-sync] UF ${uf} (${window.mode} ${window.dataInicial}→${window.dataFinal})… upserted=${upserted}, pages=${pagesFetched}`
+      );
 
       let ufHadError = false;
+      let ufErrorMessage: string | null = null;
+
       for (const modalidade of PNCP_MODALIDADES) {
+        if (isSyncCancelRequested()) {
+          wasCancelled = true;
+          setUfStatus(uf, 'pending');
+          break ufLoop;
+        }
+
         currentModalidade = modalidade.nome;
         let page = 1;
         let totalPages = 1;
 
         while (page <= totalPages && page <= MAX_PAGES_PER_COMBO) {
+          if (isSyncCancelRequested()) {
+            wasCancelled = true;
+            setUfStatus(uf, 'pending');
+            break ufLoop;
+          }
+
           try {
             const { result, rateHits } = await fetchComboWithBackoff({
-              dataInicial,
-              dataFinal,
+              dataInicial: window.dataInicial,
+              dataFinal: window.dataFinal,
               uf,
               codigo: modalidade.codigo,
               pagina: page,
@@ -382,11 +789,22 @@ export async function runPncpIngest(trigger: PncpSyncTrigger = 'manual'): Promis
             liveUpserted = upserted;
             addUfUpserted(uf, added);
 
+            // Incremental: sem registros na 1ª página → pula restante desta modalidade.
+            if (
+              options.incremental &&
+              page === 1 &&
+              (result.items?.length ?? 0) === 0 &&
+              (result.totalRegistros ?? 0) === 0
+            ) {
+              break;
+            }
+
             if (pagesFetched % PROGRESS_EVERY_PAGES === 0) {
               await persistProgress(run.id, { pagesFetched, upserted, rateLimitHits });
             }
           } catch (err) {
             ufHadError = true;
+            ufErrorMessage = err instanceof Error ? err.message : String(err);
             if (isRateLimitError(err)) {
               rateLimitHits += 1;
               liveRateLimitHits = rateLimitHits;
@@ -396,7 +814,7 @@ export async function runPncpIngest(trigger: PncpSyncTrigger = 'manual'): Promis
             hadPartialFailure = true;
             console.warn(
               `[pncp-sync] falha ${uf}/${modalidade.codigo} p${page}:`,
-              err instanceof Error ? err.message : err
+              ufErrorMessage
             );
             break;
           }
@@ -410,36 +828,74 @@ export async function runPncpIngest(trigger: PncpSyncTrigger = 'manual'): Promis
         await sleep(Math.min(pageDelayMs, 400));
       }
 
+      if (wasCancelled) break;
+
+      const ufStatus = ufHadError ? 'error' : 'success';
       setUfStatus(uf, ufHadError ? 'error' : 'done');
+      await persistUfState(uf, ufStatus, run.id, window.dataFinal, ufErrorMessage);
+
+      const row = liveUfProgress.find((u) => u.uf === uf);
+      if (row && ufStatus === 'success') {
+        const nowIso = new Date().toISOString();
+        row.lastSuccessAt = nowIso;
+        row.lastAttemptAt = nowIso;
+        row.lastStatus = 'success';
+        row.lastErrorMessage = null;
+      } else if (row) {
+        row.lastAttemptAt = new Date().toISOString();
+        row.lastStatus = 'error';
+        row.lastErrorMessage = ufErrorMessage;
+      }
     }
 
     currentModalidade = null;
 
-    const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - lookbackDays);
-    const deletedOld = await prisma.pncpContratacao.deleteMany({
-      where: {
-        OR: [
-          { dataInclusao: { lt: cutoff } },
-          {
-            AND: [{ dataInclusao: null }, { syncedAt: { lt: cutoff } }],
-          },
-        ],
-      },
-    });
-    pruned = deletedOld.count;
-
-    const stale = await prisma.pncpContratacao.findMany({
-      select: { id: true, objeto: true },
-    });
-    const staleIds = stale
-      .filter((row) => !objetoMatchesPncpKeywords(row.objeto))
-      .map((row) => row.id);
-    if (staleIds.length > 0) {
-      const deletedKw = await prisma.pncpContratacao.deleteMany({
-        where: { id: { in: staleIds } },
+    if (wasCancelled) {
+      await prisma.pncpSyncRun.update({
+        where: { id: run.id },
+        data: {
+          status: 'partial',
+          finishedAt: new Date(),
+          pagesFetched,
+          upserted,
+          pruned,
+          rateLimitHits,
+          errorMessage: 'Sincronização cancelada pelo usuário.',
+        },
       });
-      pruned += deletedKw.count;
+      console.log(`[pncp-sync] cancelada upserted=${upserted} pages=${pagesFetched}`);
+    } else {
+    if (options.fullResync) {
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - lookbackDays);
+      const deletedOld = await prisma.pncpContratacao.deleteMany({
+        where: {
+          OR: [
+            { dataInclusao: { lt: cutoff } },
+            {
+              AND: [{ dataInclusao: null }, { syncedAt: { lt: cutoff } }],
+            },
+          ],
+        },
+      });
+      pruned = deletedOld.count;
+
+      const stale = await prisma.pncpContratacao.findMany({
+        select: { id: true, objeto: true },
+      });
+      const staleIds = stale
+        .filter((row) => !objetoMatchesPncpKeywords(row.objeto))
+        .map((row) => row.id);
+      if (staleIds.length > 0) {
+        const deletedKw = await prisma.pncpContratacao.deleteMany({
+          where: { id: { in: staleIds } },
+        });
+        pruned += deletedKw.count;
+      }
+
+      if (pruned > 0) {
+        console.log(`[pncp-sync] prune (full): ${pruned} registro(s) removidos`);
+      }
     }
 
     const status = hadPartialFailure ? 'partial' : 'success';
@@ -457,7 +913,8 @@ export async function runPncpIngest(trigger: PncpSyncTrigger = 'manual'): Promis
           : null,
       },
     });
-    console.log(`[pncp-sync] fim status=${status} upserted=${upserted} pages=${pagesFetched}`);
+    console.log(`[pncp-sync] fim status=${status} upserted=${upserted} pages=${pagesFetched} ufs=${ufsToSync.length}`);
+    }
   } catch (err) {
     const fatalError = err instanceof Error ? err.message : 'Erro desconhecido no sync PNCP';
     await prisma.pncpSyncRun.update({
@@ -475,27 +932,68 @@ export async function runPncpIngest(trigger: PncpSyncTrigger = 'manual'): Promis
     console.error('[pncp-sync] failed:', fatalError);
   } finally {
     running = false;
+    cancelRequested = false;
     currentRunId = null;
     currentUf = null;
     currentModalidade = null;
-    // Mantém liveUfProgress até o próximo sync para a modal mostrar o resumo.
+    liveSyncOptions = null;
+    liveUfProgress = [];
   }
 
   return getPncpSyncStatus();
 }
 
 /** Dispara sync em background; retorna status imediato. */
-export function startPncpIngestBackground(trigger: PncpSyncTrigger): {
+export function startPncpIngestBackground(
+  trigger: PncpSyncTrigger,
+  options?: PncpSyncOptions
+): {
   accepted: boolean;
   alreadyRunning: boolean;
+  nothingToDo?: boolean;
+  message?: string;
 } {
   if (running) {
     return { accepted: false, alreadyRunning: true };
   }
-  void runPncpIngest(trigger).catch((err) => {
+
+  void runPncpIngest(trigger, options).catch((err) => {
+    if (err instanceof PncpSyncNothingToDoError) {
+      console.log(`[pncp-sync] ${err.message}`);
+      return;
+    }
     console.error('[pncp-sync] erro não tratado:', err);
   });
+
   return { accepted: true, alreadyRunning: false };
+}
+
+export async function startPncpIngestBackgroundSafe(
+  trigger: PncpSyncTrigger,
+  options?: PncpSyncOptions
+): Promise<{
+  accepted: boolean;
+  alreadyRunning: boolean;
+  nothingToDo: boolean;
+  message?: string;
+}> {
+  if (running) {
+    return { accepted: false, alreadyRunning: true, nothingToDo: false };
+  }
+
+  const resolved = resolveSyncOptions(options);
+  const ufsToSync = await resolveUfsToSync(resolved);
+  if (ufsToSync.length === 0) {
+    const message = resolved.retryErrorsOnly
+      ? 'Nenhuma UF com erro para repetir.'
+      : resolved.staleOnly && resolved.incremental && !resolved.fullResync
+        ? 'Todas as UFs estão atualizadas. Nada novo para buscar.'
+        : 'Nenhuma UF selecionada para sincronizar.';
+    return { accepted: false, alreadyRunning: false, nothingToDo: true, message };
+  }
+
+  startPncpIngestBackground(trigger, options);
+  return { accepted: true, alreadyRunning: false, nothingToDo: false };
 }
 
 export function startPncpSyncScheduler(): void {
@@ -510,22 +1008,26 @@ export function startPncpSyncScheduler(): void {
   const bootDelayMs = envInt('PNCP_SYNC_BOOT_DELAY_MS', 30_000);
 
   console.log(
-    `[pncp-sync] agendado: primeira em ${Math.round(bootDelayMs / 1000)}s, depois a cada ${Math.round(intervalMs / 60000)} min`
+    `[pncp-sync] agendado: primeira em ${Math.round(bootDelayMs / 1000)}s, depois a cada ${Math.round(intervalMs / 60000)} min (incremental)`
   );
 
   void recoverOrphanPncpSyncRuns().catch((e) => {
     console.error('[pncp-sync] falha ao limpar órfãos:', e);
   });
 
+  void ensureUfStatesBackfilled().catch((e) => {
+    console.error('[pncp-sync] falha no backfill inicial:', e);
+  });
+
   setTimeout(() => {
-    const r = startPncpIngestBackground('cron');
+    const r = startPncpIngestBackground('cron', { incremental: true, staleOnly: true });
     if (r.alreadyRunning) {
       console.log('[pncp-sync] já em andamento no boot');
     }
   }, bootDelayMs);
 
   cronTimer = setInterval(() => {
-    startPncpIngestBackground('cron');
+    startPncpIngestBackground('cron', { incremental: true, staleOnly: true });
   }, intervalMs);
 
   if (typeof cronTimer.unref === 'function') {

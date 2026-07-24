@@ -595,7 +595,8 @@ export function KanbanPlannerView({
     next.delete('googleCalendar');
     next.delete('reason');
     const qs = next.toString();
-    router.replace(qs ? `${pathname}?${qs}` : pathname);
+    const path = pathname ?? '/';
+    router.replace(qs ? `${path}?${qs}` : path);
   }, [searchParams, pathname, router, rangeFrom, rangeTo, queryClient]);
 
   const handleGoogleSyncClick = async () => {

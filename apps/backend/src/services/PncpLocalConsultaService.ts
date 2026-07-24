@@ -99,12 +99,17 @@ export async function consultarContratacoesLocais(
     throw new Error('A data inicial não pode ser maior que a data final.');
   }
 
-  const uf = String(params.uf || '')
-    .trim()
-    .toUpperCase();
-  if (!/^[A-Z]{2}$/.test(uf)) {
-    throw new Error('Informe a UF com 2 letras (ex.: DF, SP).');
-  }
+  const ufsRaw = [
+    ...(Array.isArray(params.ufs) ? params.ufs : []),
+    ...(params.uf ? [params.uf] : []),
+  ];
+  const ufs = Array.from(
+    new Set(
+      ufsRaw
+        .map((u) => String(u || '').trim().toUpperCase())
+        .filter((u) => /^[A-Z]{2}$/.test(u))
+    )
+  );
 
   const pagina = Math.max(1, Number(params.pagina) || 1);
   const tamanhoPagina = Math.min(50, Math.max(10, Number(params.tamanhoPagina) || 20));
@@ -130,7 +135,6 @@ export async function consultarContratacoesLocais(
   const dateEnd = yyyymmddToDateEnd(dataFinal);
 
   const where: Prisma.PncpContratacaoWhereInput = {
-    uf,
     OR: [
       { dataInclusao: { gte: dateStart, lte: dateEnd } },
       {
@@ -142,9 +146,22 @@ export async function consultarContratacoesLocais(
     ],
   };
 
+  if (ufs.length === 1) {
+    where.uf = ufs[0];
+  } else if (ufs.length > 1) {
+    where.uf = { in: ufs };
+  }
+
   const rawCodigo = params.codigoModalidadeContratacao;
-  if (rawCodigo != null && Number(rawCodigo) > 0) {
-    where.codigoModalidade = Number(rawCodigo);
+  const codigos = Array.isArray(rawCodigo)
+    ? rawCodigo.filter((n) => Number.isInteger(n) && n > 0)
+    : rawCodigo != null && Number(rawCodigo) > 0
+      ? [Number(rawCodigo)]
+      : [];
+  if (codigos.length === 1) {
+    where.codigoModalidade = codigos[0];
+  } else if (codigos.length > 1) {
+    where.codigoModalidade = { in: codigos };
   }
 
   if (q) {

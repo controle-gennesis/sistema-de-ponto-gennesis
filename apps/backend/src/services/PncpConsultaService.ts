@@ -21,9 +21,11 @@ export const PNCP_MODALIDADES = [
 export type PncpConsultaParams = {
   dataInicial: string; // YYYYMMDD
   dataFinal: string; // YYYYMMDD
-  /** null = todas as modalidades */
-  codigoModalidadeContratacao?: number | null;
-  uf: string;
+  /** null/omitido = todas as modalidades. Número único (legado) ou lista. */
+  codigoModalidadeContratacao?: number | number[] | null;
+  /** UF única (legado) ou lista. Vazio/omitido = todas. */
+  uf?: string;
+  ufs?: string[];
   pagina?: number;
   tamanhoPagina?: number;
   /** Filtro opcional no objeto/órgão/processo (case-insensitive, sem acento). */
