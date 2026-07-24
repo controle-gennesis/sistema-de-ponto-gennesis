@@ -627,6 +627,9 @@ export function FluigSolicitacoesPage({
       if (/Etapa\s*108\b/i.test(s)) {
         return { key: 'G3_ETAPA_108_ANALISE_CONTROLADORIA', label: 'Análise Controladoria' };
       }
+      if (/Etapa\s*117\b/i.test(s)) {
+        return { key: 'G3_ETAPA_117_VALIDACAO_FRETE', label: 'Validação de Frete' };
+      }
       if (/Etapa\s*10\b/i.test(s)) {
         return { key: 'G3_ETAPA_10_FINALIZADA', label: 'Finalizada' };
       }
@@ -641,6 +644,9 @@ export function FluigSolicitacoesPage({
     if (datasetId.startsWith('G5-Relatorio-DF')) {
       if (/Etapa\s*390\b/i.test(s)) {
         return { key: 'G5_DF_ETAPA_390_ANEXAR_NF', label: 'Anexar NF' };
+      }
+      if (/Etapa\s*395\b/i.test(s)) {
+        return { key: 'G5_DF_ETAPA_395_VALIDACAO_NF', label: 'Validação de NF' };
       }
       if (/Etapa\s*117\b/i.test(s)) {
         return { key: 'G5_DF_ETAPA_117_FINALIZADO', label: 'Finalizado' };
