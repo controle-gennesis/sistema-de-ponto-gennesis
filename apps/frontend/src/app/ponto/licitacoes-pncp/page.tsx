@@ -51,6 +51,8 @@ type PncpSyncStatus = {
     ufs: string[];
     retryErrorsOnly: boolean;
     incremental: boolean;
+    staleOnly?: boolean;
+    fullResync?: boolean;
   } | null;
   progress?: {
     totalUfs: number;
