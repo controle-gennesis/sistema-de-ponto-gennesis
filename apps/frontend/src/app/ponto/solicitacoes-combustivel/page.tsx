@@ -256,8 +256,10 @@ type FuelRefuelRequest = {
   dashboardPhotoName?: string | null;
   managerApprovalComment?: string | null;
   managerRejectionReason?: string | null;
+  managerApprovedAt?: string | null;
   suppliesApprovalComment?: string | null;
   suppliesRejectionReason?: string | null;
+  suppliesApprovedAt?: string | null;
   odometerKm?: number | null;
   tankLevelAfter?: FuelTankLevelAfter | null;
   litersRefueled?: string | number | null;
@@ -996,6 +998,40 @@ export default function SolicitacoesCombustivelPage() {
                     </span>
                   </p>
                 </div>
+                {selected.managerApprover ? (
+                  <div>
+                    <span className="font-medium text-gray-500 dark:text-gray-400">
+                      {selected.managerRejectionReason
+                        ? 'Rejeitado pelo gestor'
+                        : 'Aprovado pelo gestor'}
+                    </span>
+                    <p className="text-gray-900 dark:text-gray-100">
+                      {selected.managerApprover.name}
+                      {selected.managerApprovedAt
+                        ? ` · ${format(new Date(selected.managerApprovedAt), 'dd/MM/yyyy HH:mm', {
+                            locale: ptBR,
+                          })}`
+                        : ''}
+                    </p>
+                  </div>
+                ) : null}
+                {selected.suppliesApprover ? (
+                  <div>
+                    <span className="font-medium text-gray-500 dark:text-gray-400">
+                      {selected.suppliesRejectionReason || selected.status === 'REJECTED'
+                        ? 'Rejeitado por (Suprimentos)'
+                        : 'Atendido por (Suprimentos)'}
+                    </span>
+                    <p className="text-gray-900 dark:text-gray-100">
+                      {selected.suppliesApprover.name}
+                      {selected.suppliesApprovedAt
+                        ? ` · ${format(new Date(selected.suppliesApprovedAt), 'dd/MM/yyyy HH:mm', {
+                            locale: ptBR,
+                          })}`
+                        : ''}
+                    </p>
+                  </div>
+                ) : null}
                 <div className="sm:col-span-2">
                   <span className="font-medium text-gray-500 dark:text-gray-400">Rota</span>
                   <p className="text-gray-900 dark:text-gray-100">{selected.route}</p>
