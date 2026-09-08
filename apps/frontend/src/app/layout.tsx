@@ -23,8 +23,11 @@ export default function RootLayout({
         <meta name="robots" content="index, follow" />
         <meta name="google-site-verification" content="8G3AX5qUg4QPPea1ghF6fZL0teE8VA2mnf9I-6obkoQ" />
         <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-        <link rel="icon" href="/logopv.png" type="image/png" />
-        <link rel="shortcut icon" href="/logopv.png" type="image/png" />
+        <link rel="icon" href="/favicon.ico" sizes="any" />
+        <link rel="icon" type="image/png" sizes="48x48" href="/icon-48.png" />
+        <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
+        <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+        <link rel="shortcut icon" href="/favicon.ico" />
       </head>
       <body className={inter.className}>
         <Providers>
