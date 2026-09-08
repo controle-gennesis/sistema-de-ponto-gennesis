@@ -17,6 +17,10 @@ router.get('/conversations', (req, res, next) =>
   controller.listConversations(req as any, res, next)
 );
 
+router.get('/central-pending-count', (req, res, next) =>
+  controller.centralPendingCount(req as any, res, next)
+);
+
 router.get('/medical-certificate-submissions', (req, res, next) =>
   controller.listMedicalCertificateSubmissions(req as any, res, next)
 );

@@ -522,6 +522,7 @@ function ConversasWhatsAppPageContent() {
   const updateSupportTicket = async (id: string, status: string, resolutionNote?: string) => {
     await api.patch(`/support-tickets/${id}`, { status, resolutionNote });
     await queryClient.invalidateQueries({ queryKey: ['support-tickets-central'] });
+    await queryClient.invalidateQueries({ queryKey: ['central-atendimentos-pending-count'] });
   };
 
   const isMedicalCertificatePending = (status: string | null | undefined) =>
@@ -606,6 +607,7 @@ function ConversasWhatsAppPageContent() {
       await queryClient.invalidateQueries({ queryKey: ['whatsapp-conversations'] });
       await queryClient.invalidateQueries({ queryKey: ['whatsapp-conversation', selectedId] });
       await queryClient.invalidateQueries({ queryKey: ['whatsapp-medical-certificate-submissions'] });
+      await queryClient.invalidateQueries({ queryKey: ['central-atendimentos-pending-count'] });
     } catch (error) {
       console.error('Erro ao finalizar atestado:', error);
       alert('Erro ao finalizar atestado.');
@@ -697,6 +699,7 @@ function ConversasWhatsAppPageContent() {
       await api.delete(`/whatsapp/conversations/${selectedId}`);
       setSelectedId(null);
       await queryClient.invalidateQueries({ queryKey: ['whatsapp-conversations'] });
+      await queryClient.invalidateQueries({ queryKey: ['central-atendimentos-pending-count'] });
     } catch (error) {
       console.error('Erro ao remover conversa:', error);
       alert('Erro ao remover a conversa.');
@@ -712,6 +715,7 @@ function ConversasWhatsAppPageContent() {
       await api.post(`/whatsapp/conversations/${selectedId}/end`);
       setSelectedId(null);
       await queryClient.invalidateQueries({ queryKey: ['whatsapp-conversations'] });
+      await queryClient.invalidateQueries({ queryKey: ['central-atendimentos-pending-count'] });
     } catch (error) {
       console.error('Erro ao encerrar conversa:', error);
       alert('Erro ao encerrar a conversa.');
@@ -731,6 +735,7 @@ function ConversasWhatsAppPageContent() {
       setReplyText('');
       await queryClient.invalidateQueries({ queryKey: ['whatsapp-conversations'] });
       await queryClient.invalidateQueries({ queryKey: ['whatsapp-conversation', selectedId] });
+      await queryClient.invalidateQueries({ queryKey: ['central-atendimentos-pending-count'] });
     } catch (error) {
       console.error('Erro ao enviar mensagem:', error);
       alert('Erro ao enviar mensagem.');

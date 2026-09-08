@@ -395,6 +395,8 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
     isAdministrator || can(pk('/ponto/solicitacoes-ferramentas'));
   const canSeeEntregaLogistica =
     isAdministrator || can(pk('/ponto/entrega-logistica'));
+  const canSeeCentralAtendimentos =
+    isAdministrator || can(pk('/ponto/conversas-whatsapp'));
 
   const { data: chatUnreadCount = 0 } = useQuery({
     queryKey: ['chat-unread-count', user?.id],
@@ -407,6 +409,19 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
     staleTime: 15_000,
     refetchInterval: () => visibleTabRefetchInterval(30_000),
     refetchOnWindowFocus: true,
+  });
+
+  const { data: centralAtendimentosPendingCount = 0 } = useQuery({
+    queryKey: ['central-atendimentos-pending-count'],
+    queryFn: async () => {
+      const res = await api.get('/whatsapp/central-pending-count');
+      const n = Number(res.data?.data?.count ?? res.data?.count);
+      return Number.isFinite(n) && n > 0 ? n : 0;
+    },
+    enabled: canSeeCentralAtendimentos && !isLoading,
+    refetchInterval: () => visibleTabRefetchInterval(30_000),
+    refetchOnWindowFocus: true,
+    staleTime: 15_000,
   });
 
   const { data: pendingFuroCount = 0 } = useQuery({
@@ -512,6 +527,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
     if (href === '/ponto/solicitacoes-reserva-veiculos') return vehicleReservationSuppliesPendingCount;
     if (href === '/ponto/solicitacoes-ferramentas') return toolRentalSuppliesPendingCount;
     if (href === '/ponto/entrega-logistica') return entregaLogisticaPendingCount;
+    if (href === '/ponto/conversas-whatsapp') return centralAtendimentosPendingCount;
     return 0;
   };
 

@@ -201,6 +201,39 @@ export class WhatsAppController {
   }
 
   /**
+   * Contagem da fila humana da Central: Aguardando atendente + Em atendimento
+   * (WhatsApp escalonado + chamados Gennecy abertos/em andamento, sem duplicar WA).
+   */
+  async centralPendingCount(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const [waRows, supportRows] = await Promise.all([
+        prisma.whatsAppConversation.findMany({
+          select: { id: true, status: true, payload: true },
+        }),
+        prisma.supportTicket.findMany({
+          where: { status: { in: ['OPEN', 'IN_PROGRESS'] } },
+          select: { whatsAppConversationId: true },
+        }),
+      ]);
+
+      const waIds = new Set(waRows.map((c) => c.id));
+      const waHumanCount = waRows.filter((c) => {
+        if (c.status !== 'PENDING') return false;
+        const payload = (c.payload as Record<string, unknown> | null) || {};
+        return !!payload.attendantRequested || !!payload.attendantInProgress;
+      }).length;
+
+      const supportCount = supportRows.filter(
+        (t) => !t.whatsAppConversationId || !waIds.has(t.whatsAppConversationId),
+      ).length;
+
+      res.json({ success: true, data: { count: waHumanCount + supportCount } });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
    * Lista de envios de atestado (1 item por submission), para fila do painel de atestados.
    */
   async listMedicalCertificateSubmissions(req: AuthRequest, res: Response, next: NextFunction) {
