@@ -320,14 +320,14 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
     name: 'Criar solicitações restritas',
     href: '/ponto/controle/criar-tipos-restritos-dp',
     category: 'Controle',
-    group: 'Geral',
+    group: 'Solicitações Internas',
   },
   {
     key: pathToModuleKey('/ponto/controle/ver-solicitacoes-internas-cc'),
     name: 'Ver solicitações internas por centro de custo',
     href: '/ponto/controle/ver-solicitacoes-internas-cc',
     category: 'Controle',
-    group: 'Geral',
+    group: 'Solicitações Internas',
   },
   {
     key: pathToModuleKey('/ponto/controle/alterar-senha-funcionarios'),
@@ -369,7 +369,7 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
     name: 'Aprovar Solicitações Restritas',
     href: '/ponto/controle/aprovar-solicitacoes-restritas-dp',
     category: 'Controle',
-    group: 'Aprovações',
+    group: 'Solicitações Internas',
   },
   {
     key: pathToModuleKey('/ponto/controle/aprovar-requisicoes-materiais'),
@@ -383,21 +383,21 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
     name: 'Aprovar Ordem de Compra - Compras',
     href: '/ponto/controle/aprovar-oc-compras',
     category: 'Controle',
-    group: 'Aprovações',
+    group: 'Ordem de Compra',
   },
   {
     key: pathToModuleKey('/ponto/controle/aprovar-oc-gestor'),
     name: 'Aprovar Ordem de Compra - Gestor',
     href: '/ponto/controle/aprovar-oc-gestor',
     category: 'Controle',
-    group: 'Aprovações',
+    group: 'Ordem de Compra',
   },
   {
     key: pathToModuleKey('/ponto/controle/aprovar-oc-diretoria'),
     name: 'Aprovar Ordem de Compra - Diretoria',
     href: '/ponto/controle/aprovar-oc-diretoria',
     category: 'Controle',
-    group: 'Aprovações',
+    group: 'Ordem de Compra',
   },
   {
     key: pathToModuleKey('/ponto/controle/oc-anexar-boleto'),
@@ -506,6 +506,8 @@ export const PERMISSION_CONTROLE_CATEGORY = 'Controle' as const;
 /** Ordem dos tópicos na aba Controle. */
 export const PERMISSION_CONTROLE_GROUP_ORDER = [
   'Geral',
+  'Solicitações Internas',
   'Aprovações',
   'Ordem de Compra',
+  'Gestão de OS',
 ] as const;

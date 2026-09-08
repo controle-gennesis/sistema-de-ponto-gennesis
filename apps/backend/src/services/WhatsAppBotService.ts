@@ -300,10 +300,6 @@ const FAQ_TOPICS: FaqTopic[] = [
   }
 ];
 
-/** Delay curto (API oficial) — rápido sem parecer “instantâneo” */
-const delayNatural = () =>
-  new Promise((r) => setTimeout(r, 600 + Math.random() * 700));
-
 /** Escolhe uma opção aleatória de um array */
 const pick = <T>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
 
@@ -1633,7 +1629,6 @@ export class WhatsAppBotService {
       }
     });
 
-    await delayNatural();
     if (sendAction.type === 'text') {
       await metaWhatsApp.sendText(phone, sendAction.text);
     } else if (sendAction.type === 'buttons') {
