@@ -110,6 +110,7 @@ export class HelpTutorialService {
 
     for (const item of HELP_TUTORIAL_SEEDS) {
       const slug = item.slug || slugify(item.title);
+      const steps = item.steps || [];
       const seedData = {
         title: item.title,
         summary: item.summary,
@@ -117,7 +118,7 @@ export class HelpTutorialService {
         keywords: item.keywords || [],
         href: item.href || null,
         contentType: 'STEPS' as const,
-        steps: (item.steps || []) as unknown as Prisma.InputJsonValue,
+        steps: steps as unknown as Prisma.InputJsonValue,
       };
 
       const current = existingBySlug.get(slug);
@@ -128,7 +129,7 @@ export class HelpTutorialService {
           current.summary === seedData.summary &&
           (current.href || null) === seedData.href &&
           JSON.stringify(current.keywords || []) === JSON.stringify(seedData.keywords) &&
-          JSON.stringify(current.steps ?? []) === JSON.stringify(item.steps || []);
+          JSON.stringify(current.steps ?? []) === JSON.stringify(steps);
         if (same) continue;
         await prisma.helpTutorial.update({
           where: { slug },
@@ -142,14 +143,6 @@ export class HelpTutorialService {
           slug,
           ...seedData,
         },
-      });
-      existingBySlug.set(slug, {
-        slug,
-        title: seedData.title,
-        summary: seedData.summary,
-        steps: seedData.steps,
-        href: seedData.href,
-        keywords: seedData.keywords,
       });
     }
   }
