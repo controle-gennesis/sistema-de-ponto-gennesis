@@ -3,35 +3,37 @@
 import { useEffect } from 'react';
 import { useBrandingLogo } from '@/hooks/useBrandingLogo';
 
-function appendIcon(rel: string, href: string, type?: string, sizes?: string) {
-  const link = document.createElement('link');
-  link.rel = rel;
-  link.href = href;
-  if (type) link.type = type;
-  if (sizes) link.setAttribute('sizes', sizes);
-  document.head.appendChild(link);
-}
+const BRANDING_ICON_ATTR = 'data-branding-favicon';
 
 /**
- * Mantém ícones estáveis (favicon.ico / 48 / 192) para o Google e abas,
- * e aplica o logo de branding (Gennesis/UNB) por cima quando diferente.
+ * Não remove links de ícone do React/Next (isso causa
+ * "Cannot read properties of null (reading 'removeChild')").
+ * Só adiciona um override quando o branding UNB está ativo.
  */
 function applyFavicon(brandingHref: string) {
-  document.querySelectorAll("link[rel*='icon'], link[rel='apple-touch-icon']").forEach((link) => {
-    link.remove();
-  });
-
-  appendIcon('icon', '/favicon.ico', undefined, 'any');
-  appendIcon('icon', '/icon-48.png', 'image/png', '48x48');
-  appendIcon('icon', '/icon-192.png', 'image/png', '192x192');
-  appendIcon('apple-touch-icon', '/apple-touch-icon.png', undefined, '180x180');
-  appendIcon('shortcut icon', '/favicon.ico');
-
   const isDefaultGennesis =
     brandingHref === '/logopv.png' || brandingHref === '/logobranca.png';
-  if (brandingHref && !isDefaultGennesis) {
-    appendIcon('icon', brandingHref, 'image/png');
+
+  const existing = document.querySelector(
+    `link[${BRANDING_ICON_ATTR}="1"]`
+  ) as HTMLLinkElement | null;
+
+  if (isDefaultGennesis) {
+    existing?.remove();
+    return;
   }
+
+  if (existing) {
+    existing.href = brandingHref;
+    return;
+  }
+
+  const link = document.createElement('link');
+  link.rel = 'icon';
+  link.type = 'image/png';
+  link.href = brandingHref;
+  link.setAttribute(BRANDING_ICON_ATTR, '1');
+  document.head.appendChild(link);
 }
 
 export function Favicon() {
