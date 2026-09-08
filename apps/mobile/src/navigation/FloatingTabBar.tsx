@@ -12,6 +12,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { House, Fuel, CarFront, Inbox, Plus, type LucideIcon } from 'lucide-react-native';
 import { useTheme } from '../context/ThemeContext';
 import { emitFabBarPress, FabBarTabName } from './fabBarEvents';
+import { useChromeVisibility } from './ChromeVisibilityContext';
 
 const BUTTON = 58;
 const RADIUS = 20;
@@ -126,6 +127,7 @@ function SquircleButton({
 export default function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
   const { colors, isDark } = useTheme();
+  const chrome = useChromeVisibility();
 
   const activeRoute = state.routes[state.index]?.name ?? '';
   const showFab = FAB_TABS.has(activeRoute);
@@ -190,6 +192,10 @@ export default function FloatingTabBar({ state, descriptors, navigation }: Botto
     centeringRef.current.start();
   }, [showFab, fabPop, fabSlot]);
 
+  useEffect(() => {
+    chrome?.reveal();
+  }, [state.index, chrome?.reveal]);
+
   const handleFabPress = () => {
     if (activeRoute === 'Combustivel' || activeRoute === 'Reservas' || activeRoute === 'DpRequests') {
       emitFabBarPress(activeRoute as FabBarTabName);
@@ -250,16 +256,35 @@ export default function FloatingTabBar({ state, descriptors, navigation }: Botto
     );
   };
 
+  const hideDistance = BUTTON + bottomPad + 24;
+  const barStyle = [
+    styles.safeFill,
+    {
+      paddingBottom: bottomPad,
+      paddingHorizontal: HORIZONTAL_PADDING,
+    },
+    chrome
+      ? {
+          transform: [
+            {
+              translateY: chrome.progress.interpolate({
+                inputRange: [0, 1],
+                outputRange: [hideDistance, 0],
+              }),
+            },
+          ],
+          opacity: chrome.progress.interpolate({
+            inputRange: [0, 0.4, 1],
+            outputRange: [0, 0.45, 1],
+          }),
+        }
+      : null,
+  ];
+
   return (
-    <View
-      pointerEvents="box-none"
-      style={[
-        styles.safeFill,
-        {
-          paddingBottom: bottomPad,
-          paddingHorizontal: HORIZONTAL_PADDING,
-        },
-      ]}
+    <Animated.View
+      pointerEvents={chrome && !chrome.visible ? 'none' : 'box-none'}
+      style={barStyle}
     >
       <View style={styles.row}>
         <View style={styles.cluster}>
@@ -322,7 +347,7 @@ export default function FloatingTabBar({ state, descriptors, navigation }: Botto
           {rightRoutes.map((route) => renderTab(route, routes.indexOf(route)))}
         </View>
       </View>
-    </View>
+    </Animated.View>
   );
 }
 

@@ -24,6 +24,8 @@ export type ActivityNotification = {
   status: string;
   title: string;
   body: string;
+  /** Número/código visível (#12, #ABC) */
+  displayCode?: string | null;
   updatedAt: string;
   detectedAt: string;
   read: boolean;
@@ -63,6 +65,10 @@ export async function saveFeed(items: ActivityNotification[]) {
   await storage.setItem(FEED_KEY, JSON.stringify(items.slice(0, MAX_FEED)));
 }
 
+export function activityPageTitle(kind: ActivityKind): string {
+  return kind === 'fuel' ? 'Combustível' : 'Frota';
+}
+
 export function fuelStatusTitle(status: string): string {
   const map: Record<string, string> = {
     PENDING_MANAGER: 'Combustível aguardando gestor',
@@ -88,29 +94,90 @@ export function reservationStatusTitle(status: string): string {
   return map[status] || 'Atualização de reserva';
 }
 
-export function fuelStatusBody(status: string): string {
-  const map: Record<string, string> = {
-    PENDING_MANAGER: 'Sua solicitação está com o gestor.',
-    PENDING_SUPPLIES: 'Suprimentos vai analisar o pedido.',
-    APPROVED: 'Suprimentos vai analisar o pedido.',
-    AWAITING_REFUEL: 'Você já pode informar o abastecimento.',
-    COMPLETED: 'O abastecimento foi registrado com sucesso.',
-    REJECTED: 'Confira o motivo na solicitação.',
-    CANCELLED: 'A solicitação foi cancelada.',
-  };
-  return map[status] || 'Status atualizado.';
+function formatRef(displayCode?: string | null): string | null {
+  const raw = displayCode?.trim();
+  if (!raw) return null;
+  return raw.startsWith('#') ? raw : `#${raw}`;
 }
 
-export function reservationStatusBody(status: string): string {
-  const map: Record<string, string> = {
-    PENDING_SUPPLIES: 'Sua reserva está em análise.',
-    APPROVED: 'O veículo foi liberado para uso.',
-    COMPLETED: 'A baixa foi registrada; falta a vistoria.',
-    INSPECTED: 'A vistoria foi concluída.',
-    REJECTED: 'Confira o motivo no detalhe da reserva.',
-    CANCELLED: 'A reserva foi cancelada.',
-  };
-  return map[status] || 'Status atualizado.';
+export function fuelStatusMessage(status: string, displayCode?: string | null): string {
+  const ref = formatRef(displayCode);
+  const map = (withId: string, withoutId: string) => (ref ? withId : withoutId);
+
+  switch (status) {
+    case 'PENDING_MANAGER':
+      return map(
+        `A solicitação ${ref} está aguardando o gestor`,
+        'A solicitação está aguardando o gestor',
+      );
+    case 'PENDING_SUPPLIES':
+    case 'APPROVED':
+      return map(
+        `A solicitação ${ref} está aguardando suprimentos`,
+        'A solicitação está aguardando suprimentos',
+      );
+    case 'AWAITING_REFUEL':
+      return map(
+        `A solicitação ${ref} foi liberada para abastecer`,
+        'A solicitação foi liberada para abastecer',
+      );
+    case 'COMPLETED':
+      return map(
+        `O abastecimento da solicitação ${ref} foi concluído`,
+        'O abastecimento foi concluído',
+      );
+    case 'REJECTED':
+      return map(`A solicitação ${ref} foi rejeitada`, 'A solicitação foi rejeitada');
+    case 'CANCELLED':
+      return map(`A solicitação ${ref} foi cancelada`, 'A solicitação foi cancelada');
+    default:
+      return map(`Atualização na solicitação ${ref}`, 'Atualização na solicitação');
+  }
+}
+
+export function reservationStatusMessage(status: string, displayCode?: string | null): string {
+  const ref = formatRef(displayCode);
+  const map = (withId: string, withoutId: string) => (ref ? withId : withoutId);
+
+  switch (status) {
+    case 'PENDING_SUPPLIES':
+      return map(
+        `A reserva ${ref} está aguardando aprovação`,
+        'A reserva está aguardando aprovação',
+      );
+    case 'APPROVED':
+      return map(`A reserva ${ref} foi aprovada`, 'A reserva foi aprovada');
+    case 'COMPLETED':
+      return map(
+        `A reserva ${ref} está aguardando vistoria`,
+        'A reserva está aguardando vistoria',
+      );
+    case 'INSPECTED':
+      return map(
+        `A vistoria da reserva ${ref} foi concluída`,
+        'A vistoria da reserva foi concluída',
+      );
+    case 'REJECTED':
+      return map(`A reserva ${ref} foi rejeitada`, 'A reserva foi rejeitada');
+    case 'CANCELLED':
+      return map(`A reserva ${ref} foi cancelada`, 'A reserva foi cancelada');
+    default:
+      return map(`Atualização na reserva ${ref}`, 'Atualização na reserva');
+  }
+}
+
+export function fuelStatusBody(status: string, displayCode?: string | null): string {
+  return fuelStatusMessage(status, displayCode);
+}
+
+export function reservationStatusBody(status: string, displayCode?: string | null): string {
+  return reservationStatusMessage(status, displayCode);
+}
+
+export function activitySubtitle(item: ActivityNotification): string {
+  const code = item.displayCode?.trim() || null;
+  if (item.kind === 'fuel') return fuelStatusMessage(item.status, code);
+  return reservationStatusMessage(item.status, code);
 }
 
 export function formatRelativeTime(iso: string): string {

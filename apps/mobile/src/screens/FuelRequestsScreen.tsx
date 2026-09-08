@@ -34,13 +34,15 @@ import {
   Trash2,
   Filter,
 } from 'lucide-react-native';
-import Toast from 'react-native-toast-message';
 import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../context/AuthContext';
 import api from '../services/api';
 import { onFabBarPress } from '../navigation/fabBarEvents';
+import { useChromeScroll } from '../navigation/ChromeVisibilityContext';
 import AppHeader from '../components/AppHeader';
+import { AppToastHost, formFooterBottomPad, showAppToast, showFormValidationToast, useDeferredToast } from '../components/AppToast';
 import DateField from '../components/DateField';
+import FormFieldLabel from '../components/FormFieldLabel';
 import { PersonPickerListRow, PersonSelectField } from '../components/PersonPickerUi';
 import { formatCpfDisplay } from '../lib/cpf';
 type FuelVehicleType = 'PRIVATE' | 'COMPANY';
@@ -290,6 +292,7 @@ function SelectField({
   onPress,
   colors,
   isDark,
+  required,
 }: {
   label: string;
   valueLabel: string;
@@ -297,11 +300,14 @@ function SelectField({
   onPress: () => void;
   colors: any;
   isDark: boolean;
+  required?: boolean;
 }) {
   const filled = !!valueLabel;
   return (
     <View style={{ marginBottom: 14 }}>
-      <Text
+      <FormFieldLabel
+        label={label}
+        required={required}
         style={{
           fontSize: 13,
           fontWeight: '600',
@@ -309,9 +315,7 @@ function SelectField({
           marginBottom: 8,
           letterSpacing: -0.1,
         }}
-      >
-        {label}
-      </Text>
+      />
       <TouchableOpacity
         onPress={onPress}
         activeOpacity={0.75}
@@ -366,6 +370,7 @@ export default function FuelRequestsScreen() {
   const insets = useSafeAreaInsets();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const styles = useMemo(() => getStyles(colors, isDark), [colors, isDark]);
+  const { scrollProps: chromeScroll, headerOffset } = useChromeScroll();
 
   const [rows, setRows] = useState<FuelRequestRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -375,9 +380,11 @@ export default function FuelRequestsScreen() {
   const [statusFilter, setStatusFilter] = useState<'all' | FuelRefuelStatus>('all');
   const [filterOpen, setFilterOpen] = useState(false);
   const [showForm, setShowForm] = useState(false);
+  const deferFormToast = useDeferredToast(showForm);
   const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState<FormState>(EMPTY_FORM());
   const [reportTarget, setReportTarget] = useState<FuelRequestRow | null>(null);
+  const deferReportToast = useDeferredToast(Boolean(reportTarget));
   const [reportForm, setReportForm] = useState<ReportFormState>(EMPTY_REPORT_FORM());
   const [reportSubmitting, setReportSubmitting] = useState(false);
   const [detailTarget, setDetailTarget] = useState<FuelRequestRow | null>(null);
@@ -422,7 +429,7 @@ export default function FuelRequestsScreen() {
       if (!res.ok) throw new Error(data?.message || data?.error || 'Erro ao carregar');
       setRows((data?.data || []) as FuelRequestRow[]);
     } catch (e: any) {
-      Toast.show({
+      showAppToast({
         type: 'error',
         text1: 'Erro',
         text2: e?.message || 'Não foi possível carregar solicitações',
@@ -470,7 +477,7 @@ export default function FuelRequestsScreen() {
         setVehicles((vehiclesJson?.data || []) as FleetVehicle[]);
       }
     } catch {
-      Toast.show({ type: 'error', text1: 'Erro ao carregar opções do formulário' });
+      showAppToast({ type: 'error', text1: 'Erro ao carregar opções do formulário' });
     } finally {
       setLoadingOptions(false);
     }
@@ -601,32 +608,33 @@ export default function FuelRequestsScreen() {
   };
 
   const submitForm = async () => {
+    const toastTop = Math.max(insets.top, 12) + 8;
     if (!form.refuelDate) {
-      Toast.show({ type: 'error', text1: 'Informe a data do abastecimento' });
+      showFormValidationToast('Informe a data do abastecimento', { topOffset: toastTop });
       return;
     }
     if (form.route.trim().length < 2) {
-      Toast.show({ type: 'error', text1: 'Informe a rota' });
+      showFormValidationToast('Informe a rota', { topOffset: toastTop });
       return;
     }
     if (!form.contractId) {
-      Toast.show({ type: 'error', text1: 'Selecione o contrato' });
+      showFormValidationToast('Selecione o contrato', { topOffset: toastTop });
       return;
     }
     if (!form.driverUserId) {
-      Toast.show({ type: 'error', text1: 'Selecione o condutor' });
+      showFormValidationToast('Selecione o condutor', { topOffset: toastTop });
       return;
     }
     if (!form.vehicleId || !form.vehiclePlate.trim()) {
-      Toast.show({ type: 'error', text1: 'Selecione o veículo' });
+      showFormValidationToast('Selecione o veículo', { topOffset: toastTop });
       return;
     }
     if (!form.vehicleType) {
-      Toast.show({ type: 'error', text1: 'Veículo sem tipo (frota/particular)' });
+      showFormValidationToast('Veículo sem tipo (frota/particular)', { topOffset: toastTop });
       return;
     }
     if (!form.dashboardPhoto.startsWith('data:image/')) {
-      Toast.show({ type: 'error', text1: 'Envie a foto do painel' });
+      showFormValidationToast('Envie a foto do painel', { topOffset: toastTop });
       return;
     }
 
@@ -645,13 +653,13 @@ export default function FuelRequestsScreen() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.message || data?.error || 'Erro ao registrar');
-      Toast.show({ type: 'success', text1: data?.message || 'Solicitação registrada' });
+      deferFormToast({ type: 'success', text1: data?.message || 'Solicitação registrada' });
       setShowForm(false);
       setForm(EMPTY_FORM());
       setLoading(true);
       void loadList();
     } catch (e: any) {
-      Toast.show({
+      showAppToast({
         type: 'error',
         text1: 'Erro',
         text2: e?.message || 'Não foi possível registrar',
@@ -668,27 +676,28 @@ export default function FuelRequestsScreen() {
 
   const submitReportForm = async () => {
     if (!reportTarget) return;
+    const toastTop = Math.max(insets.top, 12) + 8;
     const odometerKm = Number(reportForm.odometerKm.replace(/\D/g, ''));
     if (!Number.isFinite(odometerKm) || odometerKm <= 0) {
-      Toast.show({ type: 'error', text1: 'Informe o hodômetro em km' });
+      showFormValidationToast('Informe o hodômetro em km', { topOffset: toastTop });
       return;
     }
     if (!reportForm.tankLevelAfter) {
-      Toast.show({ type: 'error', text1: 'Selecione o nível do tanque' });
+      showFormValidationToast('Selecione o nível do tanque', { topOffset: toastTop });
       return;
     }
     const litersRefueled = parseBrDecimal(reportForm.litersRefueled);
     if (litersRefueled == null || litersRefueled <= 0) {
-      Toast.show({ type: 'error', text1: 'Informe os litros abastecidos' });
+      showFormValidationToast('Informe os litros abastecidos', { topOffset: toastTop });
       return;
     }
     const pricePerLiter = parseBrDecimal(reportForm.pricePerLiter);
     if (pricePerLiter == null || pricePerLiter <= 0) {
-      Toast.show({ type: 'error', text1: 'Informe o valor por litro' });
+      showFormValidationToast('Informe o valor por litro', { topOffset: toastTop });
       return;
     }
     if (!reportForm.receiptPhoto.startsWith('data:image/')) {
-      Toast.show({ type: 'error', text1: 'Envie a foto do cupom fiscal' });
+      showFormValidationToast('Envie a foto do cupom fiscal', { topOffset: toastTop });
       return;
     }
 
@@ -704,13 +713,13 @@ export default function FuelRequestsScreen() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.message || data?.error || 'Erro ao informar');
-      Toast.show({ type: 'success', text1: data?.message || 'Abastecimento informado' });
+      deferReportToast({ type: 'success', text1: data?.message || 'Abastecimento informado' });
       setReportTarget(null);
       setReportForm(EMPTY_REPORT_FORM());
       setLoading(true);
       void loadList();
     } catch (e: any) {
-      Toast.show({
+      showAppToast({
         type: 'error',
         text1: 'Erro',
         text2: e?.message || 'Não foi possível informar o abastecimento',
@@ -787,96 +796,96 @@ export default function FuelRequestsScreen() {
             },
           ]}
         >
-            <View style={styles.pickerHandle} />
-            <View style={styles.pickerHeader}>
-              <Text style={[styles.pickerTitle, { color: colors.text }]}>{picker.title}</Text>
-              <TouchableOpacity
-                onPress={() => setPicker(null)}
-                style={[styles.formCloseBtn, { width: 36, height: 36 }]}
-              >
-                <X size={18} color={colors.text} strokeWidth={2.2} />
-              </TouchableOpacity>
-            </View>
-            <View style={[styles.pickerSearchBox, { marginBottom: 10 }]}>
-              <Search size={16} color={colors.textSecondary} />
-              <TextInput
-                style={styles.pickerSearchInput}
-                placeholder="Buscar..."
-                placeholderTextColor={colors.textSecondary}
-                value={pickerSearch}
-                onChangeText={setPickerSearch}
-              />
-            </View>
-            <FlatList
-              style={{ flex: 1 }}
-              data={pickerFiltered}
-              keyExtractor={(item) => item.value}
-              keyboardShouldPersistTaps="handled"
-              showsVerticalScrollIndicator={false}
-              renderItem={({ item }) =>
-                'avatarUri' in item ? (
-                  <PersonPickerListRow
-                    label={item.label}
-                    subtitle={item.subtitle}
-                    avatarUri={item.avatarUri}
-                    colors={colors}
-                    isDark={isDark}
-                    onPress={() => {
-                      picker.onSelect(item.value);
-                      setPicker(null);
+          <View style={styles.pickerHandle} />
+          <View style={styles.pickerHeader}>
+            <Text style={[styles.pickerTitle, { color: colors.text }]}>{picker.title}</Text>
+            <TouchableOpacity
+              onPress={() => setPicker(null)}
+              style={[styles.formCloseBtn, { width: 36, height: 36 }]}
+            >
+              <X size={18} color={colors.text} strokeWidth={2.2} />
+            </TouchableOpacity>
+          </View>
+          <View style={[styles.pickerSearchBox, { marginBottom: 10 }]}>
+            <Search size={16} color={colors.textSecondary} />
+            <TextInput
+              style={styles.pickerSearchInput}
+              placeholder="Buscar..."
+              placeholderTextColor={colors.textSecondary}
+              value={pickerSearch}
+              onChangeText={setPickerSearch}
+            />
+          </View>
+          <FlatList
+            style={{ flex: 1 }}
+            data={pickerFiltered}
+            keyExtractor={(item) => item.value}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+            renderItem={({ item }) =>
+              'avatarUri' in item ? (
+                <PersonPickerListRow
+                  label={item.label}
+                  subtitle={item.subtitle}
+                  avatarUri={item.avatarUri}
+                  colors={colors}
+                  isDark={isDark}
+                  onPress={() => {
+                    picker.onSelect(item.value);
+                    setPicker(null);
+                  }}
+                />
+              ) : (
+                <TouchableOpacity
+                  style={[
+                    styles.pickerItem,
+                    { backgroundColor: isDark ? colors.surface : colors.background },
+                  ]}
+                  onPress={() => {
+                    picker.onSelect(item.value);
+                    setPicker(null);
+                  }}
+                  activeOpacity={0.75}
+                >
+                  <Text
+                    style={{
+                      color: colors.text,
+                      fontSize: 15,
+                      fontWeight: '600',
+                      letterSpacing: -0.2,
                     }}
-                  />
-                ) : (
-                  <TouchableOpacity
-                    style={[
-                      styles.pickerItem,
-                      { backgroundColor: isDark ? colors.surface : colors.background },
-                    ]}
-                    onPress={() => {
-                      picker.onSelect(item.value);
-                      setPicker(null);
-                    }}
-                    activeOpacity={0.75}
                   >
+                    {item.label}
+                  </Text>
+                  {item.subtitle ? (
                     <Text
                       style={{
-                        color: colors.text,
-                        fontSize: 15,
-                        fontWeight: '600',
-                        letterSpacing: -0.2,
+                        color: colors.textSecondary,
+                        fontSize: 12,
+                        marginTop: 3,
+                        fontWeight: '500',
                       }}
                     >
-                      {item.label}
+                      {item.subtitle}
                     </Text>
-                    {item.subtitle ? (
-                      <Text
-                        style={{
-                          color: colors.textSecondary,
-                          fontSize: 12,
-                          marginTop: 3,
-                          fontWeight: '500',
-                        }}
-                      >
-                        {item.subtitle}
-                      </Text>
-                    ) : null}
-                  </TouchableOpacity>
-                )
-              }
-              ListEmptyComponent={
-                <Text
-                  style={{
-                    textAlign: 'center',
-                    color: colors.textSecondary,
-                    padding: 28,
-                    fontWeight: '500',
-                  }}
-                >
-                  Nenhum resultado
-                </Text>
-              }
-              contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 24), gap: 8 }}
-            />
+                  ) : null}
+                </TouchableOpacity>
+              )
+            }
+            ListEmptyComponent={
+              <Text
+                style={{
+                  textAlign: 'center',
+                  color: colors.textSecondary,
+                  padding: 28,
+                  fontWeight: '500',
+                }}
+              >
+                Nenhum resultado
+              </Text>
+            }
+            contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 24), gap: 8 }}
+          />
         </View>
       </View>
     );
@@ -884,7 +893,7 @@ export default function FuelRequestsScreen() {
 
   const cancelRequest = (row: FuelRequestRow) => {
     if (!canCancel(row)) {
-      Toast.show({
+      showAppToast({
         type: 'error',
         text1: 'Só é possível excluir solicitações aguardando o gestor',
       });
@@ -908,11 +917,11 @@ export default function FuelRequestsScreen() {
                 throw new Error(data?.message || data?.error || 'Erro ao excluir');
               }
               if (detailTarget?.id === row.id) setDetailTarget(null);
-              Toast.show({ type: 'success', text1: 'Solicitação excluída' });
+              showAppToast({ type: 'success', text1: 'Solicitação excluída' });
               setLoading(true);
               await loadList();
             } catch (e: any) {
-              Toast.show({
+              showAppToast({
                 type: 'error',
                 text1: 'Erro',
                 text2: e?.message || 'Não foi possível excluir',
@@ -937,7 +946,12 @@ export default function FuelRequestsScreen() {
 
       <ScrollView
         style={styles.container}
-        contentContainerStyle={[styles.scrollContent, isTabScreen && { paddingBottom: 110 }]}
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingTop: isTabScreen ? headerOffset + 8 : 8 },
+          isTabScreen && { paddingBottom: 110 },
+        ]}
+        {...chromeScroll}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -1214,12 +1228,13 @@ export default function FuelRequestsScreen() {
                   <Text style={styles.sectionTitle}>Detalhes</Text>
                   <DateField
                     label="Data do abastecimento"
+                    required
                     value={form.refuelDate}
                     onChange={(refuelDate) => setForm((f) => ({ ...f, refuelDate }))}
                     placeholder="Selecionar data"
                   />
 
-                  <Text style={styles.fieldLabel}>Rota</Text>
+                  <FormFieldLabel label="Rota" required style={styles.fieldLabel} />
                   <TextInput
                     style={styles.input}
                     value={form.route}
@@ -1230,6 +1245,7 @@ export default function FuelRequestsScreen() {
 
                   <SelectField
                     label="Contrato"
+                    required
                     valueLabel={(() => {
                       const c = contracts.find((item) => item.id === form.contractId);
                       return c?.name || '';
@@ -1256,6 +1272,7 @@ export default function FuelRequestsScreen() {
                   <Text style={styles.sectionTitle}>Condutor e veículo</Text>
                   <PersonSelectField
                     label="Condutor"
+                    required
                     valueLabel={form.driverNamePreview}
                     valueSubtitle={
                       drivers.find((d) => d.id === form.driverUserId)
@@ -1293,6 +1310,7 @@ export default function FuelRequestsScreen() {
 
                   <SelectField
                     label="Veículo (placa)"
+                    required
                     valueLabel={form.vehiclePlate}
                     placeholder="Selecione o veículo"
                     colors={colors}
@@ -1336,7 +1354,7 @@ export default function FuelRequestsScreen() {
                   ) : null}
 
                   <Text style={styles.sectionTitle}>Comprovante</Text>
-                  <Text style={styles.fieldLabel}>Foto do painel</Text>
+                  <FormFieldLabel label="Foto do painel" required style={styles.fieldLabel} />
                   {form.dashboardPhoto ? (
                     <View style={styles.photoWrap}>
                       <Image source={{ uri: form.dashboardPhoto }} style={styles.photoPreview} />
@@ -1379,7 +1397,7 @@ export default function FuelRequestsScreen() {
                   />
                 </ScrollView>
 
-                <View style={[styles.formFooter, { borderTopColor: isDark ? colors.border : 'rgba(0,0,0,0.06)' }]}>
+                <View style={[styles.formFooter, { borderTopColor: isDark ? colors.border : 'rgba(0,0,0,0.06)', paddingBottom: formFooterBottomPad(insets.bottom) }]}>
                   <TouchableOpacity
                     style={[styles.primaryBtn, styles.formSubmitBtn, submitting && { opacity: 0.7 }]}
                     onPress={submitForm}
@@ -1397,6 +1415,7 @@ export default function FuelRequestsScreen() {
             )}
           </KeyboardAvoidingView>
           {renderPickerOverlay()}
+          <AppToastHost topOffset={Math.max(insets.top, 12) + 8} />
         </View>
       </Modal>
 
@@ -1700,7 +1719,7 @@ export default function FuelRequestsScreen() {
 
               <Text style={styles.sectionTitle}>Dados do abastecimento</Text>
 
-              <Text style={styles.fieldLabel}>Hodômetro (km) *</Text>
+              <FormFieldLabel label="Hodômetro (km)" required style={styles.fieldLabel} />
               <TextInput
                 style={styles.input}
                 value={reportForm.odometerKm}
@@ -1713,7 +1732,8 @@ export default function FuelRequestsScreen() {
               />
 
               <SelectField
-                label="Tanque após abastecimento *"
+                label="Tanque após abastecimento"
+                required
                 valueLabel={
                   TANK_LEVEL_OPTIONS.find((o) => o.value === reportForm.tankLevelAfter)?.label ||
                   ''
@@ -1740,7 +1760,7 @@ export default function FuelRequestsScreen() {
                 }}
               />
 
-              <Text style={styles.fieldLabel}>Litros abastecidos *</Text>
+              <FormFieldLabel label="Litros abastecidos" required style={styles.fieldLabel} />
               <TextInput
                 style={styles.input}
                 value={reportForm.litersRefueled}
@@ -1752,7 +1772,7 @@ export default function FuelRequestsScreen() {
                 keyboardType="decimal-pad"
               />
 
-              <Text style={styles.fieldLabel}>Valor por litro (R$) *</Text>
+              <FormFieldLabel label="Valor por litro (R$)" required style={styles.fieldLabel} />
               <TextInput
                 style={styles.input}
                 value={reportForm.pricePerLiter}
@@ -1765,6 +1785,7 @@ export default function FuelRequestsScreen() {
               />
 
               <Text style={styles.sectionTitle}>Cupom fiscal</Text>
+              <FormFieldLabel label="Foto do cupom" required style={styles.fieldLabel} />
               {reportForm.receiptPhoto ? (
                 <View style={styles.photoWrap}>
                   <Image source={{ uri: reportForm.receiptPhoto }} style={styles.photoPreview} />
@@ -1825,7 +1846,10 @@ export default function FuelRequestsScreen() {
             <View
               style={[
                 styles.formFooter,
-                { borderTopColor: isDark ? colors.border : 'rgba(0,0,0,0.06)' },
+                {
+                  borderTopColor: isDark ? colors.border : 'rgba(0,0,0,0.06)',
+                  paddingBottom: formFooterBottomPad(insets.bottom),
+                },
               ]}
             >
               <TouchableOpacity
@@ -1848,6 +1872,7 @@ export default function FuelRequestsScreen() {
             </View>
           </KeyboardAvoidingView>
           {renderPickerOverlay()}
+          <AppToastHost topOffset={Math.max(insets.top, 12) + 8} />
         </View>
       </Modal>
     </View>
@@ -2391,12 +2416,12 @@ const getStyles = (colors: any, isDark: boolean) =>
       flexDirection: 'row',
       alignItems: 'center',
       gap: 8,
-      backgroundColor: isDark ? colors.card : colors.surface,
+      backgroundColor: colors.surface,
       borderRadius: 12,
       paddingHorizontal: 12,
       height: 40,
       borderWidth: StyleSheet.hairlineWidth * 1.5,
-      borderColor: isDark ? 'transparent' : 'rgba(15, 23, 42, 0.08)',
+      borderColor: isDark ? colors.border : 'rgba(15, 23, 42, 0.08)',
     },
     pickerSearchInput: {
       flex: 1,

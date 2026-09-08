@@ -2,25 +2,16 @@
   "expo": {
     "name": "Gennesis Conecta",
     "slug": "sistema-ponto-engenharia",
-    "version": "1.0.6",
+    "version": "1.0.7",
     "orientation": "portrait",
     "icon": "./assets/favicon.png",
     "userInterfaceStyle": "automatic",
-    "splash": {
-      "image": "./assets/favicon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#111827"
-    },
     "assetBundlePatterns": [
       "**/*"
     ],
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.engenharia.sistemaponto",
-      "statusBar": {
-        "style": "light",
-        "backgroundColor": "#111827"
-      },
       "infoPlist": {
         "NSCameraUsageDescription": "Este app precisa acessar a câmera para capturar fotos ao bater o ponto.",
         "NSLocationWhenInUseUsageDescription": "Este app precisa acessar sua localização para validar o ponto.",
@@ -28,17 +19,12 @@
       }
     },
     "android": {
-      "versionCode": 7,
+      "versionCode": 8,
       "adaptiveIcon": {
         "foregroundImage": "./assets/favicon.png",
         "backgroundColor": "#111827"
       },
       "package": "com.engenharia.sistemaponto",
-      "usesCleartextTraffic": true,
-      "navigationBar": {
-        "visible": "leanback",
-        "backgroundColor": "#374151"
-      },
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.ACCESS_FINE_LOCATION",
@@ -60,12 +46,24 @@
         {
           "android": {
             "datePicker": {
-              "colorAccent": { "light": "#ce3736", "dark": "#ef4444" },
-              "colorControlActivated": { "light": "#ce3736", "dark": "#ef4444" }
+              "colorAccent": {
+                "light": "#ce3736",
+                "dark": "#ef4444"
+              },
+              "colorControlActivated": {
+                "light": "#ce3736",
+                "dark": "#ef4444"
+              }
             },
             "timePicker": {
-              "headerBackground": { "light": "#ce3736", "dark": "#ef4444" },
-              "numbersSelectorColor": { "light": "#ce3736", "dark": "#ef4444" }
+              "headerBackground": {
+                "light": "#ce3736",
+                "dark": "#ef4444"
+              },
+              "numbersSelectorColor": {
+                "light": "#ce3736",
+                "dark": "#ef4444"
+              }
             }
           }
         }
@@ -76,6 +74,37 @@
           "icon": "./assets/favicon.png",
           "color": "#ce3736",
           "defaultChannel": "gennesis-activity"
+        }
+      ],
+      "expo-font",
+      "expo-secure-store",
+      [
+        "expo-status-bar",
+        {
+          "style": "light"
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/favicon.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#111827"
+        }
+      ],
+      [
+        "expo-navigation-bar",
+        {
+          "style": "light",
+          "hidden": false
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
         }
       ]
     ],

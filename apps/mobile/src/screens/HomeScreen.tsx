@@ -11,6 +11,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import AppHeader from '../components/AppHeader';
+import { useChromeScroll } from '../navigation/ChromeVisibilityContext';
 import UserAvatar from '../components/UserAvatar';
 import LiveActivitySection from '../components/LiveActivitySection';
 import HomeAgendaCard from '../components/HomeAgendaCard';
@@ -33,6 +34,7 @@ export default function HomeScreen() {
   const { canSeeCombustivel, canSeeReservas } = usePermissions();
   const { items: liveItems } = useLiveActivities();
   const styles = useMemo(() => getStyles(colors, isDark), [colors, isDark]);
+  const { scrollProps: chromeScroll, headerOffset } = useChromeScroll();
 
   const firstName = user?.name?.trim().split(/\s+/)[0] || 'colaborador';
 
@@ -54,8 +56,9 @@ export default function HomeScreen() {
 
       <ScrollView
         style={styles.container}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[styles.scrollContent, { paddingTop: headerOffset + 8 }]}
         showsVerticalScrollIndicator={false}
+        {...chromeScroll}
       >
         <View style={styles.greetingRow}>
           <View style={styles.greetingTextWrap}>

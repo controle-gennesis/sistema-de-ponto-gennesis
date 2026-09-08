@@ -1,12 +1,12 @@
 import React from 'react';
-import { View, Platform, Animated, Easing, InteractionManager } from 'react-native';
+import { View, Platform, Animated, Easing } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import * as NavigationBar from 'expo-navigation-bar';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import Toast from 'react-native-toast-message';
+import { AppToastHost, RootOverlayToastHost } from './src/components/AppToast';
 
 import LoginScreen from './src/screens/LoginScreen';
 import PunchScreen from './src/screens/PunchScreen';
@@ -30,6 +30,7 @@ import BottomTabNavigator from './src/navigation/BottomTabNavigator';
 import { AuthProvider, useAuth } from './src/context/AuthContext';
 import { ThemeProvider, useTheme } from './src/context/ThemeContext';
 import { NotificationsProvider } from './src/notifications/NotificationsContext';
+import { ChromeVisibilityProvider } from './src/navigation/ChromeVisibilityContext';
 import NotificationsSheet from './src/components/NotificationsSheet';
 
 export type RootStackParamList = {
@@ -174,12 +175,12 @@ function StatusBarComponent() {
 
   React.useEffect(() => {
     if (Platform.OS !== 'android') return;
-    const task = InteractionManager.runAfterInteractions(() => {
-      void NavigationBar.setButtonStyleAsync(barStyle === 'light' ? 'light' : 'dark').catch(
-        () => undefined,
-      );
-    });
-    return () => task.cancel();
+    // SDK 57+: setButtonStyleAsync foi removido; use setStyle
+    try {
+      NavigationBar.setStyle(barStyle === 'light' ? 'light' : 'dark');
+    } catch {
+      // Expo Go / plataformas sem suporte nativo
+    }
   }, [barStyle]);
 
   return <StatusBar style={barStyle} />;
@@ -192,9 +193,12 @@ export default function App() {
         <ThemeProvider>
           <AuthProvider>
             <NotificationsProvider>
-              <AppNavigator />
-              <StatusBarComponent />
-              <Toast />
+              <ChromeVisibilityProvider>
+                <AppNavigator />
+                <StatusBarComponent />
+                <AppToastHost />
+                <RootOverlayToastHost />
+              </ChromeVisibilityProvider>
             </NotificationsProvider>
           </AuthProvider>
         </ThemeProvider>

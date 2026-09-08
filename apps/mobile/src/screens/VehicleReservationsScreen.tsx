@@ -38,13 +38,15 @@ import {
   FileText,
   Filter,
 } from 'lucide-react-native';
-import Toast from 'react-native-toast-message';
 import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../context/AuthContext';
 import api from '../services/api';
 import { onFabBarPress } from '../navigation/fabBarEvents';
+import { useChromeScroll } from '../navigation/ChromeVisibilityContext';
 import AppHeader from '../components/AppHeader';
+import { AppToastHost, formFooterBottomPad, showAppToast, showFormValidationToast, useDeferredToast } from '../components/AppToast';
 import DateField from '../components/DateField';
+import FormFieldLabel from '../components/FormFieldLabel';
 import { PersonPickerListRow, PersonSelectField } from '../components/PersonPickerUi';
 import { formatCpfDisplay } from '../lib/cpf';
 type VehicleReservationStatus =
@@ -217,6 +219,7 @@ function SelectField({
   onPress,
   colors,
   isDark,
+  required,
 }: {
   label: string;
   valueLabel: string;
@@ -225,11 +228,14 @@ function SelectField({
   onPress: () => void;
   colors: any;
   isDark: boolean;
+  required?: boolean;
 }) {
   const filled = !!valueLabel;
   return (
     <View style={{ marginBottom: 14 }}>
-      <Text
+      <FormFieldLabel
+        label={label}
+        required={required}
         style={{
           fontSize: 13,
           fontWeight: '600',
@@ -237,9 +243,7 @@ function SelectField({
           marginBottom: 8,
           letterSpacing: -0.1,
         }}
-      >
-        {label}
-      </Text>
+      />
       <TouchableOpacity
         onPress={onPress}
         activeOpacity={0.75}
@@ -417,6 +421,7 @@ export default function VehicleReservationsScreen() {
   const insets = useSafeAreaInsets();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const styles = useMemo(() => getStyles(colors, isDark), [colors, isDark]);
+  const { scrollProps: chromeScroll, headerOffset } = useChromeScroll();
 
   const [rows, setRows] = useState<VehicleReservation[]>([]);
   const [loading, setLoading] = useState(true);
@@ -426,6 +431,7 @@ export default function VehicleReservationsScreen() {
   const [statusFilter, setStatusFilter] = useState<'all' | VehicleReservationStatus>('all');
   const [filterOpen, setFilterOpen] = useState(false);
   const [showForm, setShowForm] = useState(false);
+  const deferFormToast = useDeferredToast(showForm);
   const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState<FormState>(EMPTY_FORM());
   const [employees, setEmployees] = useState<EmployeeOption[]>([]);
@@ -433,6 +439,7 @@ export default function VehicleReservationsScreen() {
   const [loadingOptions, setLoadingOptions] = useState(false);
 
   const [returnTarget, setReturnTarget] = useState<VehicleReservation | null>(null);
+  const deferReturnToast = useDeferredToast(Boolean(returnTarget));
   const [detailTarget, setDetailTarget] = useState<VehicleReservation | null>(null);
   const [returnForm, setReturnForm] = useState({
     devolucaoAt: nowDatetimeLocal(),
@@ -474,7 +481,7 @@ export default function VehicleReservationsScreen() {
       if (!res.ok) throw new Error(data?.message || data?.error || 'Erro ao carregar');
       setRows((data?.data || []) as VehicleReservation[]);
     } catch (e: any) {
-      Toast.show({
+      showAppToast({
         type: 'error',
         text1: 'Erro',
         text2: e?.message || 'Não foi possível carregar reservas',
@@ -533,7 +540,7 @@ export default function VehicleReservationsScreen() {
         setContracts(mapped);
       }
     } catch {
-      Toast.show({ type: 'error', text1: 'Erro ao carregar opções' });
+      showAppToast({ type: 'error', text1: 'Erro ao carregar opções' });
     } finally {
       setLoadingOptions(false);
     }
@@ -588,29 +595,32 @@ export default function VehicleReservationsScreen() {
   }, [rows, cardFilter, searchTerm, statusFilter]);
 
   const submitForm = async () => {
+    const toastTop = Math.max(insets.top, 12) + 8;
     const solicitante = String(user?.name || '').trim();
     if (!solicitante) {
-      Toast.show({ type: 'error', text1: 'Não foi possível identificar o solicitante logado' });
+      showFormValidationToast('Não foi possível identificar o solicitante logado', {
+        topOffset: toastTop,
+      });
       return;
     }
     if (!form.motorista) {
-      Toast.show({ type: 'error', text1: 'Selecione o motorista' });
+      showFormValidationToast('Selecione o motorista', { topOffset: toastTop });
       return;
     }
     if (!form.atividade.trim()) {
-      Toast.show({ type: 'error', text1: 'Informe a atividade' });
+      showFormValidationToast('Informe a atividade', { topOffset: toastTop });
       return;
     }
     if (!form.localDestino.trim()) {
-      Toast.show({ type: 'error', text1: 'Informe o local de destino' });
+      showFormValidationToast('Informe o local de destino', { topOffset: toastTop });
       return;
     }
     if (!form.dataUsoInicio || !form.dataUsoFim) {
-      Toast.show({ type: 'error', text1: 'Informe início e fim do uso' });
+      showFormValidationToast('Informe início e fim do uso', { topOffset: toastTop });
       return;
     }
     if (form.dataUsoFim < form.dataUsoInicio) {
-      Toast.show({ type: 'error', text1: 'Fim do uso inválido' });
+      showFormValidationToast('Fim do uso inválido', { topOffset: toastTop });
       return;
     }
 
@@ -630,12 +640,12 @@ export default function VehicleReservationsScreen() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.message || data?.error || 'Erro ao registrar');
-      Toast.show({ type: 'success', text1: data?.message || 'Reserva registrada' });
+      deferFormToast({ type: 'success', text1: data?.message || 'Reserva registrada' });
       setShowForm(false);
       setLoading(true);
       void loadList();
     } catch (e: any) {
-      Toast.show({ type: 'error', text1: 'Erro', text2: e?.message || 'Falha ao registrar' });
+      showAppToast({ type: 'error', text1: 'Erro', text2: e?.message || 'Falha ao registrar' });
     } finally {
       setSubmitting(false);
     }
@@ -644,7 +654,7 @@ export default function VehicleReservationsScreen() {
   const takeReturnPhoto = async () => {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== 'granted') {
-      Toast.show({ type: 'error', text1: 'Permissão de câmera necessária' });
+      showAppToast({ type: 'error', text1: 'Permissão de câmera necessária' });
       return;
     }
     const result = await ImagePicker.launchCameraAsync({
@@ -662,16 +672,17 @@ export default function VehicleReservationsScreen() {
 
   const submitReturn = async () => {
     if (!returnTarget) return;
+    const toastTop = Math.max(insets.top, 12) + 8;
     if (!returnForm.devolucaoAt) {
-      Toast.show({ type: 'error', text1: 'Informe data/hora da devolução' });
+      showFormValidationToast('Informe data/hora da devolução', { topOffset: toastTop });
       return;
     }
     if (!returnForm.baixaFoto.startsWith('data:image/')) {
-      Toast.show({ type: 'error', text1: 'Tire a foto do veículo' });
+      showFormValidationToast('Tire a foto do veículo', { topOffset: toastTop });
       return;
     }
     if (!returnForm.baixaAssinatura.startsWith('data:image/')) {
-      Toast.show({ type: 'error', text1: 'Assine a devolução' });
+      showFormValidationToast('Assine a devolução', { topOffset: toastTop });
       return;
     }
 
@@ -686,12 +697,12 @@ export default function VehicleReservationsScreen() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.message || data?.error || 'Erro na baixa');
-      Toast.show({ type: 'success', text1: data?.message || 'Baixa registrada' });
+      deferReturnToast({ type: 'success', text1: data?.message || 'Baixa registrada' });
       setReturnTarget(null);
       setLoading(true);
       void loadList();
     } catch (e: any) {
-      Toast.show({ type: 'error', text1: 'Erro', text2: e?.message || 'Falha na baixa' });
+      showAppToast({ type: 'error', text1: 'Erro', text2: e?.message || 'Falha na baixa' });
     } finally {
       setReturning(false);
     }
@@ -755,96 +766,96 @@ export default function VehicleReservationsScreen() {
             },
           ]}
         >
-            <View style={styles.pickerHandle} />
-            <View style={styles.pickerHeader}>
-              <Text style={[styles.pickerTitle, { color: colors.text }]}>{picker.title}</Text>
-              <TouchableOpacity
-                onPress={() => setPicker(null)}
-                style={[styles.formCloseBtn, { width: 36, height: 36 }]}
-              >
-                <X size={18} color={colors.text} strokeWidth={2.2} />
-              </TouchableOpacity>
-            </View>
-            <View style={[styles.pickerSearchBox, { marginBottom: 10 }]}>
-              <Search size={16} color={colors.textSecondary} />
-              <TextInput
-                style={styles.pickerSearchInput}
-                placeholder="Buscar..."
-                placeholderTextColor={colors.textSecondary}
-                value={pickerSearch}
-                onChangeText={setPickerSearch}
-              />
-            </View>
-            <FlatList
-              style={{ flex: 1 }}
-              data={pickerFiltered}
-              keyExtractor={(item) => item.value}
-              keyboardShouldPersistTaps="handled"
-              showsVerticalScrollIndicator={false}
-              renderItem={({ item }) =>
-                'avatarUri' in item ? (
-                  <PersonPickerListRow
-                    label={item.label}
-                    subtitle={item.subtitle}
-                    avatarUri={item.avatarUri}
-                    colors={colors}
-                    isDark={isDark}
-                    onPress={() => {
-                      picker.onSelect(item.value);
-                      setPicker(null);
+          <View style={styles.pickerHandle} />
+          <View style={styles.pickerHeader}>
+            <Text style={[styles.pickerTitle, { color: colors.text }]}>{picker.title}</Text>
+            <TouchableOpacity
+              onPress={() => setPicker(null)}
+              style={[styles.formCloseBtn, { width: 36, height: 36 }]}
+            >
+              <X size={18} color={colors.text} strokeWidth={2.2} />
+            </TouchableOpacity>
+          </View>
+          <View style={[styles.pickerSearchBox, { marginBottom: 10 }]}>
+            <Search size={16} color={colors.textSecondary} />
+            <TextInput
+              style={styles.pickerSearchInput}
+              placeholder="Buscar..."
+              placeholderTextColor={colors.textSecondary}
+              value={pickerSearch}
+              onChangeText={setPickerSearch}
+            />
+          </View>
+          <FlatList
+            style={{ flex: 1 }}
+            data={pickerFiltered}
+            keyExtractor={(item) => item.value}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+            renderItem={({ item }) =>
+              'avatarUri' in item ? (
+                <PersonPickerListRow
+                  label={item.label}
+                  subtitle={item.subtitle}
+                  avatarUri={item.avatarUri}
+                  colors={colors}
+                  isDark={isDark}
+                  onPress={() => {
+                    picker.onSelect(item.value);
+                    setPicker(null);
+                  }}
+                />
+              ) : (
+                <TouchableOpacity
+                  style={[
+                    styles.pickerItem,
+                    { backgroundColor: isDark ? colors.surface : colors.background },
+                  ]}
+                  onPress={() => {
+                    picker.onSelect(item.value);
+                    setPicker(null);
+                  }}
+                  activeOpacity={0.75}
+                >
+                  <Text
+                    style={{
+                      color: colors.text,
+                      fontSize: 15,
+                      fontWeight: '600',
+                      letterSpacing: -0.2,
                     }}
-                  />
-                ) : (
-                  <TouchableOpacity
-                    style={[
-                      styles.pickerItem,
-                      { backgroundColor: isDark ? colors.surface : colors.background },
-                    ]}
-                    onPress={() => {
-                      picker.onSelect(item.value);
-                      setPicker(null);
-                    }}
-                    activeOpacity={0.75}
                   >
+                    {item.label}
+                  </Text>
+                  {item.subtitle ? (
                     <Text
                       style={{
-                        color: colors.text,
-                        fontSize: 15,
-                        fontWeight: '600',
-                        letterSpacing: -0.2,
+                        color: colors.textSecondary,
+                        fontSize: 12,
+                        marginTop: 3,
+                        fontWeight: '500',
                       }}
                     >
-                      {item.label}
+                      {item.subtitle}
                     </Text>
-                    {item.subtitle ? (
-                      <Text
-                        style={{
-                          color: colors.textSecondary,
-                          fontSize: 12,
-                          marginTop: 3,
-                          fontWeight: '500',
-                        }}
-                      >
-                        {item.subtitle}
-                      </Text>
-                    ) : null}
-                  </TouchableOpacity>
-                )
-              }
-              ListEmptyComponent={
-                <Text
-                  style={{
-                    textAlign: 'center',
-                    color: colors.textSecondary,
-                    padding: 28,
-                    fontWeight: '500',
-                  }}
-                >
-                  Nenhum resultado
-                </Text>
-              }
-              contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 24), gap: 8 }}
-            />
+                  ) : null}
+                </TouchableOpacity>
+              )
+            }
+            ListEmptyComponent={
+              <Text
+                style={{
+                  textAlign: 'center',
+                  color: colors.textSecondary,
+                  padding: 28,
+                  fontWeight: '500',
+                }}
+              >
+                Nenhum resultado
+              </Text>
+            }
+            contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 24), gap: 8 }}
+          />
         </View>
       </View>
     );
@@ -862,7 +873,7 @@ export default function VehicleReservationsScreen() {
 
   const deleteReservation = (row: VehicleReservation) => {
     if (!canDelete(row)) {
-      Toast.show({
+      showAppToast({
         type: 'error',
         text1: 'Somente reservas pendentes podem ser excluídas',
       });
@@ -886,10 +897,10 @@ export default function VehicleReservationsScreen() {
                 throw new Error(data?.message || data?.error || 'Erro ao excluir');
               }
               if (detailTarget?.id === row.id) setDetailTarget(null);
-              Toast.show({ type: 'success', text1: 'Reserva excluída' });
+              showAppToast({ type: 'success', text1: 'Reserva excluída' });
               await loadList();
             } catch (e: any) {
-              Toast.show({
+              showAppToast({
                 type: 'error',
                 text1: 'Erro',
                 text2: e?.message || 'Não foi possível excluir',
@@ -910,7 +921,12 @@ export default function VehicleReservationsScreen() {
 
       <ScrollView
         style={styles.container}
-        contentContainerStyle={[styles.scrollContent, isTabScreen && { paddingBottom: 110 }]}
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingTop: headerOffset + 8 },
+          isTabScreen && { paddingBottom: 110 },
+        ]}
+        {...chromeScroll}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -1481,6 +1497,7 @@ export default function VehicleReservationsScreen() {
                   <Text style={styles.sectionTitle}>Pessoas</Text>
                   <PersonSelectField
                     label="Motorista"
+                    required
                     valueLabel={form.motorista}
                     valueSubtitle={
                       employees.find((e) => e.name === form.motorista)?.cpf || undefined
@@ -1507,7 +1524,7 @@ export default function VehicleReservationsScreen() {
                   />
 
                   <Text style={styles.sectionTitle}>Atividade</Text>
-                  <Text style={styles.fieldLabel}>Atividade</Text>
+                  <FormFieldLabel label="Atividade" required style={styles.fieldLabel} />
                   <TextInput
                     style={styles.input}
                     value={form.atividade}
@@ -1516,7 +1533,7 @@ export default function VehicleReservationsScreen() {
                     placeholderTextColor={colors.textSecondary}
                   />
 
-                  <Text style={styles.fieldLabel}>Local de destino</Text>
+                  <FormFieldLabel label="Local de destino" required style={styles.fieldLabel} />
                   <TextInput
                     style={styles.input}
                     value={form.localDestino}
@@ -1528,6 +1545,7 @@ export default function VehicleReservationsScreen() {
                   <Text style={styles.sectionTitle}>Agenda</Text>
                   <DateField
                     label="Início do uso"
+                    required
                     value={form.dataUsoInicio}
                     mode="datetime"
                     onChange={(dataUsoInicio) =>
@@ -1541,6 +1559,7 @@ export default function VehicleReservationsScreen() {
                   />
                   <DateField
                     label="Fim do uso"
+                    required
                     value={form.dataUsoFim}
                     mode="datetime"
                     onChange={(dataUsoFim) =>
@@ -1612,7 +1631,7 @@ export default function VehicleReservationsScreen() {
                   />
                 </ScrollView>
 
-                <View style={[styles.formFooter, { borderTopColor: isDark ? colors.border : 'rgba(0,0,0,0.06)' }]}>
+                <View style={[styles.formFooter, { borderTopColor: isDark ? colors.border : 'rgba(0,0,0,0.06)', paddingBottom: formFooterBottomPad(insets.bottom) }]}>
                   <TouchableOpacity
                     style={[styles.primaryBtn, styles.formSubmitBtn, submitting && { opacity: 0.7 }]}
                     onPress={submitForm}
@@ -1630,6 +1649,7 @@ export default function VehicleReservationsScreen() {
             )}
           </KeyboardAvoidingView>
           {renderPickerOverlay()}
+          <AppToastHost topOffset={Math.max(insets.top, 12) + 8} />
         </View>
       </Modal>
 
@@ -1679,13 +1699,14 @@ export default function VehicleReservationsScreen() {
             >
               <DateField
                 label="Data/hora devolução"
+                required
                 value={returnForm.devolucaoAt}
                 onChange={(devolucaoAt) => setReturnForm((f) => ({ ...f, devolucaoAt }))}
                 mode="datetime"
                 placeholder="Selecionar data e hora"
               />
 
-              <Text style={styles.fieldLabel}>Foto do veículo</Text>
+              <FormFieldLabel label="Foto do veículo" required style={styles.fieldLabel} />
               {returnForm.baixaFoto ? (
                 <Image source={{ uri: returnForm.baixaFoto }} style={styles.photoPreview} />
               ) : null}
@@ -1694,7 +1715,11 @@ export default function VehicleReservationsScreen() {
                 <Text style={styles.secondaryBtnText}>Tirar foto</Text>
               </TouchableOpacity>
 
-              <Text style={[styles.fieldLabel, { marginTop: 8 }]}>Assinatura</Text>
+              <FormFieldLabel
+                label="Assinatura"
+                required
+                style={[styles.fieldLabel, { marginTop: 8 }]}
+              />
               <SignaturePad
                 colors={colors}
                 onChange={(baixaAssinatura) => setReturnForm((f) => ({ ...f, baixaAssinatura }))}
@@ -1712,7 +1737,7 @@ export default function VehicleReservationsScreen() {
                 multiline
               />
             </ScrollView>
-            <View style={[styles.formFooter, { borderTopColor: isDark ? colors.border : 'rgba(0,0,0,0.06)' }]}>
+            <View style={[styles.formFooter, { borderTopColor: isDark ? colors.border : 'rgba(0,0,0,0.06)', paddingBottom: formFooterBottomPad(insets.bottom) }]}>
               <TouchableOpacity
                 style={[styles.primaryBtn, styles.formSubmitBtn, returning && { opacity: 0.7 }]}
                 onPress={submitReturn}
@@ -1727,6 +1752,7 @@ export default function VehicleReservationsScreen() {
               </TouchableOpacity>
             </View>
           </KeyboardAvoidingView>
+          <AppToastHost topOffset={Math.max(insets.top, 12) + 8} />
         </View>
       </Modal>
     </View>
@@ -2150,12 +2176,12 @@ const getStyles = (colors: any, isDark: boolean) =>
       flexDirection: 'row',
       alignItems: 'center',
       gap: 8,
-      backgroundColor: isDark ? colors.card : colors.surface,
+      backgroundColor: colors.surface,
       borderRadius: 12,
       paddingHorizontal: 12,
       height: 40,
       borderWidth: StyleSheet.hairlineWidth * 1.5,
-      borderColor: isDark ? 'transparent' : 'rgba(15, 23, 42, 0.08)',
+      borderColor: isDark ? colors.border : 'rgba(15, 23, 42, 0.08)',
     },
     pickerSearchInput: {
       flex: 1,

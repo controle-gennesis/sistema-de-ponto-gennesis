@@ -6,11 +6,14 @@ import {
   TouchableOpacity,
   StyleSheet,
   Platform,
+  Animated,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Menu as MenuIcon, ArrowLeft, Bell } from 'lucide-react-native';
 import { useTheme } from '../context/ThemeContext';
 import { useNotifications } from '../notifications/NotificationsContext';
+import { useChromeVisibility } from '../navigation/ChromeVisibilityContext';
+import { ThemePatternFill } from './ThemeBackground';
 import Menu from './Menu';
 
 type AppHeaderProps = {
@@ -70,6 +73,7 @@ export default function AppHeader({
 }: AppHeaderProps) {
   const { colors, isDark } = useTheme();
   const [showMenu, setShowMenu] = useState(false);
+  const chrome = useChromeVisibility();
 
   const iconColor = colors.text;
 
@@ -108,36 +112,72 @@ export default function AppHeader({
     );
   }
 
+  const headerInner = (
+    <SafeAreaView
+      edges={['top']}
+      style={styles.topSafe}
+      onLayout={(e) => chrome?.setHeaderHeight(e.nativeEvent.layout.height)}
+    >
+      <View style={styles.header}>
+        <View style={styles.side}>
+          <HeaderIconButton
+            onPress={() => setShowMenu(true)}
+            accessibilityLabel="Menu"
+          >
+            <MenuIcon size={22} color={iconColor} strokeWidth={2.2} />
+          </HeaderIconButton>
+        </View>
+
+        <View style={styles.center} pointerEvents="none">
+          <Image
+            source={
+              isDark
+                ? require('../../assets/logobrancavermelha.png')
+                : require('../../assets/logo.png')
+            }
+            style={styles.logo}
+            resizeMode="contain"
+          />
+        </View>
+
+        <View style={[styles.side, styles.sideRight]}>
+          <NotificationBell iconColor={iconColor} />
+        </View>
+      </View>
+    </SafeAreaView>
+  );
+
+  if (!chrome) {
+    return (
+      <>
+        {headerInner}
+        <Menu visible={showMenu} onClose={() => setShowMenu(false)} />
+      </>
+    );
+  }
+
   return (
     <>
-      <SafeAreaView edges={['top']} style={styles.topSafe}>
-        <View style={styles.header}>
-          <View style={styles.side}>
-            <HeaderIconButton
-              onPress={() => setShowMenu(true)}
-              accessibilityLabel="Menu"
-            >
-              <MenuIcon size={22} color={iconColor} strokeWidth={2.2} />
-            </HeaderIconButton>
-          </View>
-
-          <View style={styles.center} pointerEvents="none">
-            <Image
-              source={
-                isDark
-                  ? require('../../assets/logobrancavermelha.png')
-                  : require('../../assets/logo.png')
-              }
-              style={styles.logo}
-              resizeMode="contain"
-            />
-          </View>
-
-          <View style={[styles.side, styles.sideRight]}>
-            <NotificationBell iconColor={iconColor} />
-          </View>
-        </View>
-      </SafeAreaView>
+      <Animated.View
+        pointerEvents={chrome.visible ? 'auto' : 'none'}
+        style={[
+          styles.overlay,
+          {
+            opacity: chrome.progress,
+            transform: [
+              {
+                translateY: chrome.progress.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [-160, 0],
+                }),
+              },
+            ],
+          },
+        ]}
+      >
+        <ThemePatternFill />
+        {headerInner}
+      </Animated.View>
 
       <Menu visible={showMenu} onClose={() => setShowMenu(false)} />
     </>
@@ -145,6 +185,13 @@ export default function AppHeader({
 }
 
 const styles = StyleSheet.create({
+  overlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 20,
+  },
   topSafe: {
     backgroundColor: 'transparent',
   },

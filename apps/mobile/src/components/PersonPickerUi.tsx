@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { ChevronDown } from 'lucide-react-native';
 import UserAvatar from './UserAvatar';
+import FormFieldLabel from './FormFieldLabel';
 
 export type PersonPickerOption = {
   value: string;
@@ -77,6 +78,7 @@ export function PersonSelectField({
   onPress,
   colors,
   isDark,
+  required,
 }: {
   label: string;
   valueLabel: string;
@@ -86,12 +88,17 @@ export function PersonSelectField({
   onPress: () => void;
   colors: ThemeColors;
   isDark: boolean;
+  required?: boolean;
 }) {
   const filled = !!valueLabel;
 
   return (
     <View style={{ marginBottom: 14 }}>
-      <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>{label}</Text>
+      <FormFieldLabel
+        label={label}
+        required={required}
+        style={[styles.fieldLabel, { color: colors.textSecondary }]}
+      />
       <TouchableOpacity
         onPress={onPress}
         activeOpacity={0.75}

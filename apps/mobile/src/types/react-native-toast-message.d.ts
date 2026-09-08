@@ -22,9 +22,11 @@ declare module 'react-native-toast-message' {
     [key: string]: ((props: any) => React.ReactElement) | undefined;
   }
 
+  export type { ToastConfig as ToastConfigType };
+
   export default class Toast extends Component {
     static show(params: ToastShowParams): void;
-    static hide(): void;
+    static hide(params?: any): void;
     static setRef(ref: any): void;
   }
 }

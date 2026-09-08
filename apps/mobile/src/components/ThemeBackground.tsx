@@ -21,6 +21,31 @@ type Props = {
   children: React.ReactNode;
 };
 
+/** Mesmo padrão da tela — usado na navbar pra cobrir a lista sem ficar cinza chapado. */
+export function ThemePatternFill() {
+  const { isDark, colors } = useTheme();
+
+  return (
+    <View
+      pointerEvents="none"
+      style={[StyleSheet.absoluteFillObject, { backgroundColor: colors.appShell }]}
+    >
+      <ImageBackground
+        source={BG_LIGHT}
+        style={StyleSheet.absoluteFillObject}
+        imageStyle={{ opacity: isDark ? 0 : 1 }}
+        resizeMode="repeat"
+      />
+      <ImageBackground
+        source={BG_DARK}
+        style={StyleSheet.absoluteFillObject}
+        imageStyle={{ opacity: isDark ? 0.55 : 0 }}
+        resizeMode="repeat"
+      />
+    </View>
+  );
+}
+
 export default function ThemeBackground({ children }: Props) {
   const { isDark, colors } = useTheme();
 

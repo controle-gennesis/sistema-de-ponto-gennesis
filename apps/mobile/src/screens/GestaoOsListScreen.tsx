@@ -17,6 +17,7 @@ import { Camera as CameraIcon, Wrench, X } from 'lucide-react-native';
 import { CameraView, useCameraPermissions, type BarcodeScanningResult } from 'expo-camera';
 import { useTheme } from '../context/ThemeContext';
 import AppHeader from '../components/AppHeader';
+import { useChromeScroll } from '../navigation/ChromeVisibilityContext';
 import { usePermissions } from '../hooks/usePermissions';
 import {
   fetchAssignedWorkOrders,
@@ -51,6 +52,7 @@ function extractQrToken(raw: string): string {
 
 export default function GestaoOsListScreen() {
   const { colors } = useTheme();
+  const { scrollProps: chromeScroll, headerOffset } = useChromeScroll();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { canSeeGestaoOs, isLoading: permissionsLoading } = usePermissions();
   const [qrToken, setQrToken] = useState('');
@@ -113,7 +115,7 @@ export default function GestaoOsListScreen() {
   return (
     <View style={[styles.container, { backgroundColor: colors.screenRoot }]}>
       <AppHeader title="Central de Chamados" />
-      <View style={styles.body}>
+      <View style={[styles.body, { paddingTop: headerOffset + 8 }]}>
         {memberships.length > 1 ? (
           <View style={styles.companyRow}>
             {memberships.map((m: { companyId: string; company: { name: string } }) => (
@@ -209,6 +211,7 @@ export default function GestaoOsListScreen() {
         <FlatList
           data={(listQuery.data as GestaoOsWorkOrderMobile[]) || []}
           keyExtractor={(item) => item.id}
+          {...chromeScroll}
           refreshControl={
             <RefreshControl refreshing={!!listQuery.isFetching} onRefresh={onRefresh} />
           }

@@ -31,14 +31,16 @@ import {
   Paperclip,
   Search,
 } from 'lucide-react-native';
-import Toast from 'react-native-toast-message';
 import AppHeader from '../components/AppHeader';
+import { AppToastHost, formFooterBottomPad, showAppToast, showFormValidationToast, useDeferredToast } from '../components/AppToast';
 import DateField from '../components/DateField';
+import FormFieldLabel from '../components/FormFieldLabel';
 import { PersonPickerListRow, PersonSelectField } from '../components/PersonPickerUi';
 import { formatCpfDisplay } from '../lib/cpf';
 import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../context/AuthContext';
 import { onFabBarPress } from '../navigation/fabBarEvents';
+import { useChromeScroll } from '../navigation/ChromeVisibilityContext';
 import { formatDpRequestDetails } from '../lib/formatDpRequestDetails';
 import {
   ADM_SIMPLE_TYPES,
@@ -184,6 +186,7 @@ function SelectField({
   onPress,
   colors,
   isDark,
+  required,
 }: {
   label: string;
   valueLabel: string;
@@ -191,11 +194,14 @@ function SelectField({
   onPress: () => void;
   colors: any;
   isDark: boolean;
+  required?: boolean;
 }) {
   const filled = !!valueLabel;
   return (
     <View style={{ marginBottom: 14 }}>
-      <Text
+      <FormFieldLabel
+        label={label}
+        required={required}
         style={{
           fontSize: 13,
           fontWeight: '600',
@@ -203,9 +209,7 @@ function SelectField({
           marginBottom: 8,
           letterSpacing: -0.1,
         }}
-      >
-        {label}
-      </Text>
+      />
       <TouchableOpacity
         onPress={onPress}
         activeOpacity={0.75}
@@ -357,7 +361,7 @@ function itemCardTitle(requestType: DpRequestType | '', index: number) {
 async function pickAttachment(): Promise<Attachment | null> {
   const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
   if (status !== 'granted') {
-    Toast.show({ type: 'error', text1: 'Permissão de galeria necessária' });
+    showAppToast({ type: 'error', text1: 'Permissão de galeria necessária' });
     return null;
   }
   const result = await ImagePicker.launchImageLibraryAsync({
@@ -369,7 +373,7 @@ async function pickAttachment(): Promise<Attachment | null> {
   const asset = result.assets[0];
   const dataBase64 = asset.base64!;
   if (dataBase64.length > 2_800_000) {
-    Toast.show({ type: 'error', text1: 'Arquivo muito grande (máx. ~2 MB)' });
+    showAppToast({ type: 'error', text1: 'Arquivo muito grande (máx. ~2 MB)' });
     return null;
   }
   return {
@@ -389,6 +393,7 @@ export default function DpRequestsScreen() {
   const insets = useSafeAreaInsets();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const styles = useMemo(() => getStyles(colors, isDark), [colors, isDark]);
+  const { scrollProps: chromeScroll, headerOffset } = useChromeScroll();
 
   const myEmployeeId = user?.employee?.id || '';
   const isDepartamentoPessoal = !!user?.employee?.department
@@ -401,10 +406,12 @@ export default function DpRequestsScreen() {
   const [filterOpen, setFilterOpen] = useState(false);
 
   const [detail, setDetail] = useState<DpRequest | null>(null);
+  const deferDetailToast = useDeferredToast(Boolean(detail));
   const [returnComment, setReturnComment] = useState('');
   const [returning, setReturning] = useState(false);
 
   const [createOpen, setCreateOpen] = useState(false);
+  const deferCreateToast = useDeferredToast(createOpen);
   const [createTarget, setCreateTarget] = useState<CreateTarget>(null);
   const [urgency, setUrgency] = useState<DpUrgency>('MEDIUM');
   const [requestType, setRequestType] = useState<DpRequestType | ''>('');
@@ -534,6 +541,10 @@ export default function DpRequestsScreen() {
     setPrazoInicio('');
     setPrazoFim('');
     setRows([emptyFormRow(myEmployeeId)]);
+  };
+
+  const notifyCreateError = (message: string) => {
+    showFormValidationToast(message, { topOffset: Math.max(insets.top, 12) + 8 });
   };
 
   const updateRow = (index: number, patch: Partial<FormRow>) => {
@@ -893,11 +904,11 @@ export default function DpRequestsScreen() {
         prazoFim,
         details,
       });
-      Toast.show({ type: 'success', text1: 'Solicitação criada' });
+      deferCreateToast({ type: 'success', text1: 'Solicitação criada' });
       setCreateOpen(false);
       await queryClient.invalidateQueries({ queryKey: ['dp-my-requests'] });
     } catch (e: any) {
-      Toast.show({ type: 'error', text1: 'Erro', text2: e?.message || 'Falha ao criar' });
+      notifyCreateError(e?.message || 'Falha ao criar');
     } finally {
       setSaving(false);
     }
@@ -907,18 +918,18 @@ export default function DpRequestsScreen() {
     if (!detail) return;
     const comment = returnComment.trim();
     if (!comment) {
-      Toast.show({ type: 'error', text1: 'Escreva a resposta' });
+      showAppToast({ type: 'error', text1: 'Escreva a resposta' });
       return;
     }
     setReturning(true);
     try {
       await submitRequesterReturn(detail.id, comment);
-      Toast.show({ type: 'success', text1: 'Resposta enviada' });
+      deferDetailToast({ type: 'success', text1: 'Resposta enviada' });
       setReturnComment('');
       setDetail(null);
       await queryClient.invalidateQueries({ queryKey: ['dp-my-requests'] });
     } catch (e: any) {
-      Toast.show({ type: 'error', text1: e?.message || 'Falha ao responder' });
+      showAppToast({ type: 'error', text1: e?.message || 'Falha ao responder' });
     } finally {
       setReturning(false);
     }
@@ -942,7 +953,12 @@ export default function DpRequestsScreen() {
 
       <ScrollView
         style={styles.container}
-        contentContainerStyle={[styles.scrollContent, isTabScreen && { paddingBottom: 110 }]}
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingTop: isTabScreen ? headerOffset + 8 : 8 },
+          isTabScreen && { paddingBottom: 110 },
+        ]}
+        {...chromeScroll}
         refreshControl={
           <RefreshControl
             refreshing={listQuery.isRefetching}
@@ -1428,7 +1444,7 @@ export default function DpRequestsScreen() {
                 >
                   <Text style={styles.sectionTitle}>Dados gerais</Text>
 
-                  <Text style={styles.fieldLabel}>Urgência</Text>
+                  <FormFieldLabel label="Urgência" required style={styles.fieldLabel} />
                   <View style={styles.segRow}>
                     {(['MEDIUM', 'URGENT'] as DpUrgency[]).map((u) => (
                       <TouchableOpacity
@@ -1446,6 +1462,7 @@ export default function DpRequestsScreen() {
 
                   <SelectField
                     label="Tipo"
+                    required
                     valueLabel={requestType ? DP_TYPE_LABELS[requestType] : ''}
                     placeholder="Selecionar tipo"
                     colors={colors}
@@ -1469,6 +1486,7 @@ export default function DpRequestsScreen() {
 
                   <SelectField
                     label="Contrato"
+                    required
                     valueLabel={selectedCostCenter?.name || ''}
                     placeholder="Selecionar contrato"
                     colors={colors}
@@ -1479,7 +1497,6 @@ export default function DpRequestsScreen() {
                         costCenters.map((c) => ({
                           value: c.id,
                           label: c.name,
-                          subtitle: c.code || undefined,
                         })),
                         (id) => {
                           const c = costCenters.find((x) => x.id === id);
@@ -1538,12 +1555,14 @@ export default function DpRequestsScreen() {
 
                   <DateField
                     label="Prazo início (retorno)"
+                    required
                     value={prazoInicio}
                     onChange={setPrazoInicio}
                     placeholder="Selecionar data"
                   />
                   <DateField
                     label="Prazo fim (retorno)"
+                    required
                     value={prazoFim}
                     onChange={setPrazoFim}
                     placeholder="Selecionar data"
@@ -1579,6 +1598,7 @@ export default function DpRequestsScreen() {
                             {requestType !== 'ADMISSAO' ? (
                               <PersonSelectField
                                 label="Colaborador"
+                                required
                                 valueLabel={empLabel}
                                 valueSubtitle={
                                   selectedEmployee
@@ -1618,6 +1638,7 @@ export default function DpRequestsScreen() {
                               <>
                                 <Field
                                   label="Nome do candidato"
+                                  required
                                   value={row.nome}
                                   onChange={(nome) => updateRow(index, { nome })}
                                   styles={styles}
@@ -1626,6 +1647,7 @@ export default function DpRequestsScreen() {
                                 />
                                 <Field
                                   label="Função"
+                                  required
                                   value={row.funcao}
                                   onChange={(funcao) => updateRow(index, { funcao })}
                                   styles={styles}
@@ -1634,6 +1656,7 @@ export default function DpRequestsScreen() {
                                 />
                                 <Field
                                   label="Contato"
+                                  required
                                   value={row.contato}
                                   onChange={(contato) => updateRow(index, { contato })}
                                   styles={styles}
@@ -1642,6 +1665,7 @@ export default function DpRequestsScreen() {
                                 />
                                 <SelectField
                                   label="Setor"
+                                  required
                                   valueLabel={row.setor}
                                   placeholder="Selecionar setor"
                                   colors={colors}
@@ -1656,6 +1680,7 @@ export default function DpRequestsScreen() {
                                 />
                                 <SelectField
                                   label="Motivo da contratação"
+                                  required
                                   valueLabel={optionLabel(
                                     MOTIVO_CONTRATACAO_OPTIONS,
                                     row.motivoContratacao
@@ -1690,6 +1715,7 @@ export default function DpRequestsScreen() {
                             {(ADM_SIMPLE_TYPES as readonly string[]).includes(requestType) ? (
                               <Field
                                 label="Detalhes"
+                                required
                                 value={row.detalhes}
                                 onChange={(detalhes) => updateRow(index, { detalhes })}
                                 styles={styles}
@@ -1703,16 +1729,19 @@ export default function DpRequestsScreen() {
                               <>
                                 <DateField
                                   label="Data ida"
+                                  required
                                   value={row.dataInicial}
                                   onChange={(dataInicial) => updateRow(index, { dataInicial })}
                                 />
                                 <DateField
                                   label="Data volta"
+                                  required
                                   value={row.dataFinal}
                                   onChange={(dataFinal) => updateRow(index, { dataFinal })}
                                 />
                                 <Field
                                   label="Cidade"
+                                  required
                                   value={row.cidade}
                                   onChange={(cidade) => updateRow(index, { cidade })}
                                   styles={styles}
@@ -1721,6 +1750,7 @@ export default function DpRequestsScreen() {
                                 />
                                 <Field
                                   label="Motivo"
+                                  required
                                   value={row.motivo}
                                   onChange={(motivo) => updateRow(index, { motivo })}
                                   styles={styles}
@@ -1729,6 +1759,7 @@ export default function DpRequestsScreen() {
                                 />
                                 <Field
                                   label="Nº de dias"
+                                  required
                                   value={row.numeroDias}
                                   onChange={(numeroDias) => updateRow(index, { numeroDias })}
                                   styles={styles}
@@ -1736,7 +1767,7 @@ export default function DpRequestsScreen() {
                                   isDark={isDark}
                                   keyboardType="number-pad"
                                 />
-                                <Text style={styles.fieldLabel}>Pedágio</Text>
+                                <FormFieldLabel label="Pedágio" required style={styles.fieldLabel} />
                                 <View style={styles.segRow}>
                                   {(['SIM', 'NAO'] as const).map((p) => (
                                     <TouchableOpacity
@@ -1762,11 +1793,13 @@ export default function DpRequestsScreen() {
                               <>
                                 <DateField
                                   label="Data inicial"
+                                  required
                                   value={row.dataInicial}
                                   onChange={(dataInicial) => updateRow(index, { dataInicial })}
                                 />
                                 <DateField
                                   label="Data final"
+                                  required
                                   value={row.dataFinal}
                                   onChange={(dataFinal) => updateRow(index, { dataFinal })}
                                 />
@@ -1784,7 +1817,7 @@ export default function DpRequestsScreen() {
 
                             {requestType === 'ADVERTENCIA_SUSPENSAO' ? (
                               <>
-                                <Text style={styles.fieldLabel}>Punição</Text>
+                                <FormFieldLabel label="Punição" required style={styles.fieldLabel} />
                                 <View style={styles.segRow}>
                                   {(['ADVERTENCIA', 'SUSPENSAO'] as const).map((p) => (
                                     <TouchableOpacity
@@ -1805,6 +1838,7 @@ export default function DpRequestsScreen() {
                                 </View>
                                 <Field
                                   label="Motivo"
+                                  required
                                   value={row.motivo}
                                   onChange={(motivo) => updateRow(index, { motivo })}
                                   styles={styles}
@@ -1817,7 +1851,11 @@ export default function DpRequestsScreen() {
 
                             {requestType === 'ALTERACAO_FUNCAO_SALARIO' ? (
                               <>
-                                <Text style={styles.fieldLabel}>Tipo de alteração</Text>
+                                <FormFieldLabel
+                                  label="Tipo de alteração"
+                                  required
+                                  style={styles.fieldLabel}
+                                />
                                 <View style={styles.segRow}>
                                   {(['FUNCAO', 'SALARIO'] as const).map((p) => (
                                     <TouchableOpacity
@@ -1841,6 +1879,7 @@ export default function DpRequestsScreen() {
                                 </View>
                                 <Field
                                   label="Valor antigo"
+                                  required
                                   value={row.funcaoAntigo}
                                   onChange={(funcaoAntigo) => updateRow(index, { funcaoAntigo })}
                                   styles={styles}
@@ -1849,6 +1888,7 @@ export default function DpRequestsScreen() {
                                 />
                                 <Field
                                   label="Valor novo"
+                                  required
                                   value={row.funcaoNovo}
                                   onChange={(funcaoNovo) => updateRow(index, { funcaoNovo })}
                                   styles={styles}
@@ -1857,6 +1897,7 @@ export default function DpRequestsScreen() {
                                 />
                                 <Field
                                   label="Justificativa"
+                                  required
                                   value={row.justificativa}
                                   onChange={(justificativa) => updateRow(index, { justificativa })}
                                   styles={styles}
@@ -1871,16 +1912,19 @@ export default function DpRequestsScreen() {
                               <>
                                 <DateField
                                   label="Data inicial"
+                                  required
                                   value={row.dataInicial}
                                   onChange={(dataInicial) => updateRow(index, { dataInicial })}
                                 />
                                 <DateField
                                   label="Data final"
+                                  required
                                   value={row.dataFinal}
                                   onChange={(dataFinal) => updateRow(index, { dataFinal })}
                                 />
                                 <Field
                                   label="Nº de dias"
+                                  required
                                   value={row.numeroDias}
                                   onChange={(numeroDias) => updateRow(index, { numeroDias })}
                                   styles={styles}
@@ -1894,6 +1938,7 @@ export default function DpRequestsScreen() {
                                       ? row.attachment.fileName
                                       : 'Anexar atestado'
                                   }
+                                  required
                                   attached={!!row.attachment}
                                   onPress={async () => {
                                     const file = await pickAttachment();
@@ -1910,6 +1955,7 @@ export default function DpRequestsScreen() {
                               <>
                                 <Field
                                   label="Justificativa"
+                                  required
                                   value={row.justificativa}
                                   onChange={(justificativa) => updateRow(index, { justificativa })}
                                   styles={styles}
@@ -1919,11 +1965,13 @@ export default function DpRequestsScreen() {
                                 />
                                 <DateField
                                   label="Início do período"
+                                  required
                                   value={row.dataInicial}
                                   onChange={(dataInicial) => updateRow(index, { dataInicial })}
                                 />
                                 <DateField
                                   label="Fim do período"
+                                  required
                                   value={row.dataFinal}
                                   onChange={(dataFinal) => updateRow(index, { dataFinal })}
                                 />
@@ -1933,6 +1981,7 @@ export default function DpRequestsScreen() {
                                       ? row.attachment.fileName
                                       : 'Anexar autorização'
                                   }
+                                  required
                                   attached={!!row.attachment}
                                   onPress={async () => {
                                     const file = await pickAttachment();
@@ -1949,16 +1998,19 @@ export default function DpRequestsScreen() {
                               <>
                                 <DateField
                                   label="Data inicial"
+                                  required
                                   value={row.dataInicial}
                                   onChange={(dataInicial) => updateRow(index, { dataInicial })}
                                 />
                                 <DateField
                                   label="Data final"
+                                  required
                                   value={row.dataFinal}
                                   onChange={(dataFinal) => updateRow(index, { dataFinal })}
                                 />
                                 <Field
                                   label="Nº de dias"
+                                  required
                                   value={row.numeroDias}
                                   onChange={(numeroDias) => updateRow(index, { numeroDias })}
                                   styles={styles}
@@ -1978,6 +2030,7 @@ export default function DpRequestsScreen() {
                                 />
                                 <Field
                                   label="Motivo"
+                                  required
                                   value={row.motivo}
                                   onChange={(motivo) => updateRow(index, { motivo })}
                                   styles={styles}
@@ -1991,6 +2044,7 @@ export default function DpRequestsScreen() {
                               <>
                                 <SelectField
                                   label="Tipo de aviso"
+                                  required
                                   valueLabel={optionLabel(TIPO_AVISO_OPTIONS, row.tipoAviso)}
                                   placeholder="Selecionar tipo de aviso"
                                   colors={colors}
@@ -2008,6 +2062,7 @@ export default function DpRequestsScreen() {
                                 />
                                 <SelectField
                                   label="Tipo de rescisão"
+                                  required
                                   valueLabel={optionLabel(TIPO_RESCISAO_OPTIONS, row.tipoRescisao)}
                                   placeholder="Selecionar tipo de rescisão"
                                   colors={colors}
@@ -2025,6 +2080,7 @@ export default function DpRequestsScreen() {
                                 />
                                 <Field
                                   label="Motivo"
+                                  required
                                   value={row.motivo}
                                   onChange={(motivo) => updateRow(index, { motivo })}
                                   styles={styles}
@@ -2048,11 +2104,13 @@ export default function DpRequestsScreen() {
                               <>
                                 <DateField
                                   label="Data"
+                                  required
                                   value={row.dataInicial}
                                   onChange={(dataInicial) => updateRow(index, { dataInicial })}
                                 />
                                 <Field
                                   label="Justificativa"
+                                  required
                                   value={row.justificativa}
                                   onChange={(justificativa) => updateRow(index, { justificativa })}
                                   styles={styles}
@@ -2067,6 +2125,7 @@ export default function DpRequestsScreen() {
                               <>
                                 <Field
                                   label="Tipo de solicitação"
+                                  required
                                   value={row.tipoSolicitacao}
                                   onChange={(tipoSolicitacao) =>
                                     updateRow(index, { tipoSolicitacao })
@@ -2077,6 +2136,7 @@ export default function DpRequestsScreen() {
                                 />
                                 <Field
                                   label="Situação"
+                                  required
                                   value={row.situacao}
                                   onChange={(situacao) => updateRow(index, { situacao })}
                                   styles={styles}
@@ -2085,6 +2145,7 @@ export default function DpRequestsScreen() {
                                 />
                                 <Field
                                   label="Justificativa"
+                                  required
                                   value={row.justificativa}
                                   onChange={(justificativa) => updateRow(index, { justificativa })}
                                   styles={styles}
@@ -2113,7 +2174,7 @@ export default function DpRequestsScreen() {
 
                             {requestType === 'ADM_ASOS' ? (
                               <>
-                                <Text style={styles.fieldLabel}>Tipo ASO</Text>
+                                <FormFieldLabel label="Tipo ASO" required style={styles.fieldLabel} />
                                 <View style={styles.chipRow}>
                                   {(
                                     [
@@ -2141,6 +2202,7 @@ export default function DpRequestsScreen() {
                                 </View>
                                 <Field
                                   label="CPF"
+                                  required
                                   value={row.asoCpf}
                                   onChange={(asoCpf) => updateRow(index, { asoCpf })}
                                   styles={styles}
@@ -2150,6 +2212,7 @@ export default function DpRequestsScreen() {
                                 />
                                 <DateField
                                   label="Nascimento"
+                                  required
                                   value={row.asoNascimento}
                                   onChange={(asoNascimento) =>
                                     updateRow(index, { asoNascimento })
@@ -2157,6 +2220,7 @@ export default function DpRequestsScreen() {
                                 />
                                 <Field
                                   label="Setor"
+                                  required
                                   value={row.asoSetor}
                                   onChange={(asoSetor) => updateRow(index, { asoSetor })}
                                   styles={styles}
@@ -2165,6 +2229,7 @@ export default function DpRequestsScreen() {
                                 />
                                 <Field
                                   label="Cargo"
+                                  required
                                   value={row.asoCargo}
                                   onChange={(asoCargo) => updateRow(index, { asoCargo })}
                                   styles={styles}
@@ -2174,6 +2239,7 @@ export default function DpRequestsScreen() {
                                 {row.asoTipo === 'ALTERACAO_FUNCAO' ? (
                                   <Field
                                     label="Novo cargo"
+                                    required
                                     value={row.asoNovoCargo}
                                     onChange={(asoNovoCargo) =>
                                       updateRow(index, { asoNovoCargo })
@@ -2185,6 +2251,7 @@ export default function DpRequestsScreen() {
                                 ) : null}
                                 <Field
                                   label="Centro de custo"
+                                  required
                                   value={row.asoCentroCusto}
                                   onChange={(asoCentroCusto) =>
                                     updateRow(index, { asoCentroCusto })
@@ -2195,6 +2262,7 @@ export default function DpRequestsScreen() {
                                 />
                                 <Field
                                   label="Local de trabalho"
+                                  required
                                   value={row.asoLocal}
                                   onChange={(asoLocal) => updateRow(index, { asoLocal })}
                                   styles={styles}
@@ -2203,13 +2271,14 @@ export default function DpRequestsScreen() {
                                 />
                                 <Field
                                   label="Empresa"
+                                  required
                                   value={row.asoEmpresa}
                                   onChange={(asoEmpresa) => updateRow(index, { asoEmpresa })}
                                   styles={styles}
                                   colors={colors}
                                   isDark={isDark}
                                 />
-                                <Text style={styles.fieldLabel}>Seguir PCMSO</Text>
+                                <FormFieldLabel label="Seguir PCMSO" required style={styles.fieldLabel} />
                                 <View style={styles.segRow}>
                                   {(['SIM', 'NAO'] as const).map((p) => (
                                     <TouchableOpacity
@@ -2254,7 +2323,10 @@ export default function DpRequestsScreen() {
                 <View
                   style={[
                     styles.formFooter,
-                    { borderTopColor: isDark ? colors.border : 'rgba(0,0,0,0.06)' },
+                    {
+                      borderTopColor: isDark ? colors.border : 'rgba(0,0,0,0.06)',
+                      paddingBottom: formFooterBottomPad(insets.bottom),
+                    },
                   ]}
                 >
                   <TouchableOpacity
@@ -2304,73 +2376,74 @@ export default function DpRequestsScreen() {
                   },
                 ]}
               >
-                  <View style={styles.pickerHandle} />
-                  <View style={styles.pickerHeader}>
-                    <Text style={styles.pickerTitle}>{picker.title}</Text>
-                    <TouchableOpacity
-                      onPress={() => setPicker(null)}
-                      style={[styles.formCloseBtn, { width: 36, height: 36 }]}
-                      accessibilityLabel="Fechar"
-                    >
-                      <X size={18} color={colors.text} strokeWidth={2.2} />
-                    </TouchableOpacity>
-                  </View>
-                  <View style={[styles.pickerSearchBox, { marginBottom: 10 }]}>
-                    <Search size={16} color={colors.textSecondary} />
-                    <TextInput
-                      style={styles.pickerSearchInput}
-                      placeholder="Buscar..."
-                      placeholderTextColor={colors.textSecondary}
-                      value={pickerSearch}
-                      onChangeText={setPickerSearch}
-                    />
-                  </View>
-                  <FlatList
-                    style={{ flex: 1 }}
-                    data={pickerFiltered}
-                    keyExtractor={(item) => item.value}
-                    keyboardShouldPersistTaps="handled"
-                    showsVerticalScrollIndicator={false}
-                    renderItem={({ item }) =>
-                      'avatarUri' in item ? (
-                        <PersonPickerListRow
-                          label={item.label}
-                          subtitle={item.subtitle}
-                          avatarUri={item.avatarUri}
-                          colors={colors}
-                          isDark={isDark}
-                          onPress={() => {
-                            picker.onSelect(item.value);
-                            setPicker(null);
-                          }}
-                        />
-                      ) : (
-                        <TouchableOpacity
-                          style={[
-                            styles.pickerItem,
-                            { backgroundColor: isDark ? colors.surface : colors.background },
-                          ]}
-                          onPress={() => {
-                            picker.onSelect(item.value);
-                            setPicker(null);
-                          }}
-                          activeOpacity={0.75}
-                        >
-                          <Text style={styles.pickerItemLabel}>{item.label}</Text>
-                          {item.subtitle ? (
-                            <Text style={styles.pickerItemSub}>{item.subtitle}</Text>
-                          ) : null}
-                        </TouchableOpacity>
-                      )
-                    }
-                    ListEmptyComponent={
-                      <Text style={styles.pickerEmpty}>Nenhum resultado</Text>
-                    }
-                    contentContainerStyle={{ paddingBottom: 24, gap: 8 }}
+                <View style={styles.pickerHandle} />
+                <View style={styles.pickerHeader}>
+                  <Text style={styles.pickerTitle}>{picker.title}</Text>
+                  <TouchableOpacity
+                    onPress={() => setPicker(null)}
+                    style={[styles.formCloseBtn, { width: 36, height: 36 }]}
+                    accessibilityLabel="Fechar"
+                  >
+                    <X size={18} color={colors.text} strokeWidth={2.2} />
+                  </TouchableOpacity>
+                </View>
+                <View style={[styles.pickerSearchBox, { marginBottom: 10 }]}>
+                  <Search size={16} color={colors.textSecondary} />
+                  <TextInput
+                    style={styles.pickerSearchInput}
+                    placeholder="Buscar..."
+                    placeholderTextColor={colors.textSecondary}
+                    value={pickerSearch}
+                    onChangeText={setPickerSearch}
                   />
                 </View>
+                <FlatList
+                  style={{ flex: 1 }}
+                  data={pickerFiltered}
+                  keyExtractor={(item) => item.value}
+                  keyboardShouldPersistTaps="handled"
+                  showsVerticalScrollIndicator={false}
+                  renderItem={({ item }) =>
+                    'avatarUri' in item ? (
+                      <PersonPickerListRow
+                        label={item.label}
+                        subtitle={item.subtitle}
+                        avatarUri={item.avatarUri}
+                        colors={colors}
+                        isDark={isDark}
+                        onPress={() => {
+                          picker.onSelect(item.value);
+                          setPicker(null);
+                        }}
+                      />
+                    ) : (
+                      <TouchableOpacity
+                        style={[
+                          styles.pickerItem,
+                          { backgroundColor: isDark ? colors.surface : colors.background },
+                        ]}
+                        onPress={() => {
+                          picker.onSelect(item.value);
+                          setPicker(null);
+                        }}
+                        activeOpacity={0.75}
+                      >
+                        <Text style={styles.pickerItemLabel}>{item.label}</Text>
+                        {item.subtitle ? (
+                          <Text style={styles.pickerItemSub}>{item.subtitle}</Text>
+                        ) : null}
+                      </TouchableOpacity>
+                    )
+                  }
+                  ListEmptyComponent={
+                    <Text style={styles.pickerEmpty}>Nenhum resultado</Text>
+                  }
+                  contentContainerStyle={{ paddingBottom: 24, gap: 8 }}
+                />
+              </View>
             </View>
           ) : null}
+          <AppToastHost topOffset={Math.max(insets.top, 12) + 8} />
         </View>
       </Modal>
     </View>
@@ -2387,6 +2460,7 @@ function Field({
   multiline,
   keyboardType,
   placeholder,
+  required,
 }: {
   label: string;
   value: string;
@@ -2397,14 +2471,15 @@ function Field({
   multiline?: boolean;
   keyboardType?: 'default' | 'number-pad' | 'email-address' | 'phone-pad';
   placeholder?: string;
+  required?: boolean;
 }) {
   return (
     <View style={{ marginBottom: 14 }}>
-      <Text style={styles.fieldLabel}>{label}</Text>
+      <FormFieldLabel label={label} required={required} style={styles.fieldLabel} />
       <TextInput
         value={value}
         onChangeText={onChange}
-        placeholder={placeholder || label}
+        placeholder={placeholder || label.replace(/\s*\*\s*$/, '')}
         placeholderTextColor={colors.textSecondary}
         style={[
           styles.input,
@@ -2429,6 +2504,7 @@ function AttachButton({
   styles,
   colors,
   isDark,
+  required,
 }: {
   label: string;
   attached: boolean;
@@ -2436,6 +2512,7 @@ function AttachButton({
   styles: ReturnType<typeof getStyles>;
   colors: any;
   isDark: boolean;
+  required?: boolean;
 }) {
   return (
     <TouchableOpacity
@@ -2462,7 +2539,8 @@ function AttachButton({
         style={[styles.attachText, attached && { color: colors.success }]}
         numberOfLines={1}
       >
-        {label}
+        {label.replace(/\s*\*\s*$/, '')}
+        {required && !attached ? <Text style={{ color: '#dc2626' }}> *</Text> : null}
       </Text>
     </TouchableOpacity>
   );
@@ -2955,12 +3033,12 @@ function getStyles(colors: any, isDark: boolean) {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 8,
-      backgroundColor: isDark ? colors.card : colors.surface,
+      backgroundColor: colors.surface,
       borderRadius: 12,
       paddingHorizontal: 12,
       height: 40,
       borderWidth: StyleSheet.hairlineWidth * 1.5,
-      borderColor: isDark ? 'transparent' : 'rgba(15, 23, 42, 0.08)',
+      borderColor: isDark ? colors.border : 'rgba(15, 23, 42, 0.08)',
     },
     pickerSearchInput: {
       flex: 1,

@@ -9,22 +9,22 @@ import React, {
   ReactNode,
 } from 'react';
 import { AppState, AppStateStatus, Platform } from 'react-native';
-import * as Notifications from 'expo-notifications';
 import { useAuth } from '../context/AuthContext';
 import api from '../services/api';
 import {
   ActivityNotification,
   StatusSnapshot,
-  fuelStatusBody,
+  fuelStatusMessage,
   fuelStatusTitle,
   loadFeed,
   loadSnapshot,
-  reservationStatusBody,
+  reservationStatusMessage,
   reservationStatusTitle,
   saveFeed,
   saveSnapshot,
 } from './activityStorage';
 import {
+  addNotificationOpenListener,
   ensureSystemNotificationPermissions,
   presentSystemNotifications,
   syncAppIconBadge,
@@ -38,6 +38,8 @@ type NotificationsContextValue = {
   openSheet: () => void;
   closeSheet: () => void;
   markAllRead: () => void;
+  markAsRead: (id: string) => void;
+  removeNotification: (id: string) => void;
   refresh: () => Promise<void>;
 };
 
@@ -46,6 +48,7 @@ const NotificationsContext = createContext<NotificationsContextValue | null>(nul
 type FuelRow = {
   id: string;
   status: string;
+  displayNumber?: number | string | null;
   updatedAt?: string;
   createdAt?: string;
   vehiclePlate?: string | null;
@@ -55,6 +58,7 @@ type FuelRow = {
 type ReservationRow = {
   id: string;
   status: string;
+  code?: string | null;
   updatedAt?: string;
   createdAt?: string;
   createdById?: string | null;
@@ -91,7 +95,15 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const applyDiff = useCallback(
-    (rows: Array<{ kind: 'fuel' | 'reservation'; id: string; status: string; updatedAt: string; subtitle?: string }>) => {
+    (
+      rows: Array<{
+        kind: 'fuel' | 'reservation';
+        id: string;
+        status: string;
+        updatedAt: string;
+        displayCode?: string;
+      }>,
+    ) => {
       const prev = snapshotRef.current;
       const next: StatusSnapshot = { ...prev };
       const fresh: ActivityNotification[] = [];
@@ -107,10 +119,13 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
         if (before.status === row.status) continue;
 
         const title =
-          row.kind === 'fuel' ? fuelStatusTitle(row.status) : reservationStatusTitle(row.status);
-        const bodyBase =
-          row.kind === 'fuel' ? fuelStatusBody(row.status) : reservationStatusBody(row.status);
-        const body = row.subtitle ? `${bodyBase} · ${row.subtitle}` : bodyBase;
+          row.kind === 'fuel'
+            ? fuelStatusTitle(row.status)
+            : reservationStatusTitle(row.status);
+        const body =
+          row.kind === 'fuel'
+            ? fuelStatusMessage(row.status, row.displayCode)
+            : reservationStatusMessage(row.status, row.displayCode);
 
         fresh.push({
           id: `${key}:${row.status}:${row.updatedAt}`,
@@ -119,6 +134,7 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
           status: row.status,
           title,
           body,
+          displayCode: row.displayCode || null,
           updatedAt: row.updatedAt,
           detectedAt: now,
           read: false,
@@ -166,14 +182,17 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
           id: r.id,
           status: r.status,
           updatedAt: r.updatedAt || r.createdAt || new Date().toISOString(),
-          subtitle: r.vehiclePlate || r.route || undefined,
+          displayCode:
+            r.displayNumber != null && String(r.displayNumber).trim()
+              ? String(r.displayNumber)
+              : undefined,
         })),
         ...myReservations.map((r) => ({
           kind: 'reservation' as const,
           id: r.id,
           status: r.status,
           updatedAt: r.updatedAt || r.createdAt || new Date().toISOString(),
-          subtitle: r.veiculo?.plate || r.veiculoPlaca || r.veiculo?.model || undefined,
+          displayCode: r.code?.trim() || undefined,
         })),
       ];
 
@@ -183,7 +202,7 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
     } finally {
       pollingRef.current = false;
     }
-  }, [applyDiff, isAuthenticated, user?.id, user?.name]);
+  }, [applyDiff, isAuthenticated, user?.id]);
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -213,10 +232,25 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const markAsRead = useCallback((id: string) => {
+    setNotifications((curr) => {
+      const next = curr.map((n) => (n.id === id && !n.read ? { ...n, read: true } : n));
+      void saveFeed(next);
+      return next;
+    });
+  }, []);
+
+  const removeNotification = useCallback((id: string) => {
+    setNotifications((curr) => {
+      const next = curr.filter((n) => n.id !== id);
+      void saveFeed(next);
+      return next;
+    });
+  }, []);
+
   const openSheet = useCallback(() => {
     setSheetVisible(true);
-    markAllRead();
-  }, [markAllRead]);
+  }, []);
 
   const closeSheet = useCallback(() => {
     setSheetVisible(false);
@@ -224,13 +258,11 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (Platform.OS === 'web') return;
-    const sub = Notifications.addNotificationResponseReceivedListener(() => {
-      openSheet();
-    });
-    return () => sub.remove();
+    return addNotificationOpenListener(openSheet);
   }, [openSheet]);
 
-  const unreadCount = useMemo(    () => notifications.reduce((acc, n) => acc + (n.read ? 0 : 1), 0),
+  const unreadCount = useMemo(
+    () => notifications.reduce((acc, n) => acc + (n.read ? 0 : 1), 0),
     [notifications],
   );
 
@@ -245,16 +277,29 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
     }
   }, [isAuthenticated]);
 
-  const value = useMemo(    () => ({
+  const value = useMemo(
+    () => ({
       notifications,
       unreadCount,
       sheetVisible,
       openSheet,
       closeSheet,
       markAllRead,
+      markAsRead,
+      removeNotification,
       refresh,
     }),
-    [notifications, unreadCount, sheetVisible, openSheet, closeSheet, markAllRead, refresh],
+    [
+      notifications,
+      unreadCount,
+      sheetVisible,
+      openSheet,
+      closeSheet,
+      markAllRead,
+      markAsRead,
+      removeNotification,
+      refresh,
+    ],
   );
 
   return (
@@ -272,6 +317,8 @@ export function useNotifications() {
       openSheet: () => undefined,
       closeSheet: () => undefined,
       markAllRead: () => undefined,
+      markAsRead: (_id: string) => undefined,
+      removeNotification: (_id: string) => undefined,
       refresh: async () => undefined,
     };
   }

@@ -58,27 +58,36 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
       if (token && userData) {
         setUser(JSON.parse(userData));
-        // Atualiza perfil (inclui foto) em background
-        try {
-          const res = await fetch(buildApiUrl('/api/auth/me'), {
-            headers: { Authorization: `Bearer ${token}` },
-          });
-          if (res.ok) {
-            const json = await res.json();
-            const fresh = (json?.data ?? json) as User;
-            if (fresh?.id) {
-              setUser(fresh);
-              await storage.setItem('user', JSON.stringify(fresh));
-            }
-          }
-        } catch {
-          // mantém usuário do storage
-        }
       }
     } catch (error) {
       console.error('Erro ao carregar dados de autenticação:', error);
     } finally {
       setLoading(false);
+    }
+
+    // Atualiza perfil em background (não bloqueia a abertura do app)
+    try {
+      const token = await storage.getItem('token');
+      if (!token) return;
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
+      const res = await fetch(buildApiUrl('/api/auth/me'), {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+
+      if (res.ok) {
+        const json = await res.json();
+        const fresh = (json?.data ?? json) as User;
+        if (fresh?.id) {
+          setUser(fresh);
+          await storage.setItem('user', JSON.stringify(fresh));
+        }
+      }
+    } catch {
+      // mantém usuário do storage
     }
   };
 

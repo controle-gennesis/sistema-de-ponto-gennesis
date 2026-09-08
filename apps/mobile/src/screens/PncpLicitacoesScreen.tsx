@@ -33,6 +33,7 @@ import Toast from 'react-native-toast-message';
 import { useTheme } from '../context/ThemeContext';
 import api from '../services/api';
 import AppHeader from '../components/AppHeader';
+import { useChromeScroll } from '../navigation/ChromeVisibilityContext';
 import DateField from '../components/DateField';
 import { usePermissions } from '../hooks/usePermissions';
 
@@ -246,6 +247,7 @@ export default function PncpLicitacoesScreen() {
   const { canSeePncp, isLoading: permissionsLoading } = usePermissions();
   const insets = useSafeAreaInsets();
   const styles = getStyles(colors, isDark);
+  const { scrollProps: chromeScroll, headerOffset } = useChromeScroll();
   const defaults = useMemo(() => defaultRange(), []);
 
   useEffect(() => {
@@ -573,7 +575,12 @@ export default function PncpLicitacoesScreen() {
 
       <ScrollView
         style={styles.container}
-        contentContainerStyle={[styles.scrollContent, isTabScreen && { paddingBottom: 110 }]}
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingTop: isTabScreen ? headerOffset + 8 : 8 },
+          isTabScreen && { paddingBottom: 110 },
+        ]}
+        {...chromeScroll}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}

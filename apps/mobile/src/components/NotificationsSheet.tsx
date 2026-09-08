@@ -10,11 +10,12 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
-import { Bell, Droplets, CalendarCheck, X } from 'lucide-react-native';
+import { Bell, X, Trash2 } from 'lucide-react-native';
 import { useTheme } from '../context/ThemeContext';
 import { useNotifications } from '../notifications/NotificationsContext';
 import {
   ActivityNotification,
+  activitySubtitle,
   formatRelativeTime,
 } from '../notifications/activityStorage';
 
@@ -22,7 +23,13 @@ export default function NotificationsSheet() {
   const { colors, isDark } = useTheme();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<any>();
-  const { notifications, sheetVisible, closeSheet } = useNotifications();
+  const {
+    notifications,
+    sheetVisible,
+    closeSheet,
+    markAsRead,
+    removeNotification,
+  } = useNotifications();
   const styles = useMemo(() => getStyles(colors, isDark), [colors, isDark]);
   const canDismissRef = useRef(false);
 
@@ -44,6 +51,7 @@ export default function NotificationsSheet() {
   };
 
   const openItem = (item: ActivityNotification) => {
+    markAsRead(item.id);
     closeSheet();
     setTimeout(() => {
       const screen = item.kind === 'fuel' ? 'Combustivel' : 'Reservas';
@@ -83,14 +91,8 @@ export default function NotificationsSheet() {
           </View>
 
           <View style={styles.header}>
-            <View>
-              <Text style={[styles.title, { color: colors.text }]}>Notificações</Text>
-            </View>
-            <TouchableOpacity
-              onPress={closeSheet}
-              style={styles.closeBtn}
-              hitSlop={8}
-            >
+            <Text style={[styles.title, { color: colors.text }]}>Notificações</Text>
+            <TouchableOpacity onPress={closeSheet} style={styles.closeBtn} hitSlop={8}>
               <X size={18} color={colors.text} strokeWidth={2.2} />
             </TouchableOpacity>
           </View>
@@ -108,7 +110,7 @@ export default function NotificationsSheet() {
                 <View
                   style={[
                     styles.emptyIcon,
-                    { backgroundColor: isDark ? colors.card : colors.surface },
+                    { backgroundColor: isDark ? colors.surface : colors.background },
                   ]}
                 >
                   <Bell size={22} color={colors.textSecondary} strokeWidth={2} />
@@ -120,50 +122,60 @@ export default function NotificationsSheet() {
               </View>
             }
             renderItem={({ item }) => {
-              const Icon = item.kind === 'fuel' ? Droplets : CalendarCheck;
+              const isNew = !item.read;
+              const subtitle = activitySubtitle(item);
               return (
-                <TouchableOpacity
+                <View
                   style={[
                     styles.item,
                     {
                       backgroundColor: isDark ? colors.surface : colors.background,
-                      borderColor: isDark ? colors.border : 'rgba(15,23,42,0.06)',
+                      borderColor: isNew
+                        ? 'rgba(206,55,54,0.32)'
+                        : isDark
+                          ? colors.border
+                          : 'rgba(15,23,42,0.06)',
                     },
-                    !item.read && styles.itemUnread,
                   ]}
-                  onPress={() => openItem(item)}
-                  activeOpacity={0.8}
                 >
-                  <View
-                    style={[
-                      styles.itemIcon,
-                      {
-                        backgroundColor: isDark
-                          ? 'rgba(239,68,68,0.14)'
-                          : colors.iconBackground,
-                      },
-                    ]}
+                  <TouchableOpacity
+                    style={styles.itemBody}
+                    onPress={() => openItem(item)}
+                    activeOpacity={0.82}
                   >
-                    <Icon size={18} color={colors.primary} strokeWidth={2.1} />
-                  </View>
-                  <View style={styles.itemBody}>
-                    <Text style={[styles.itemTitle, { color: colors.text }]} numberOfLines={2}>
-                      {item.title}
-                    </Text>
+                    <View style={styles.titleRow}>
+                      <Text
+                        style={[styles.itemTitle, { color: colors.text }]}
+                        numberOfLines={2}
+                      >
+                        {item.title}
+                      </Text>
+                      {isNew ? (
+                        <View style={[styles.newBadge, { backgroundColor: colors.primary }]}>
+                          <Text style={styles.newBadgeText}>Nova</Text>
+                        </View>
+                      ) : null}
+                    </View>
                     <Text
                       style={[styles.itemBodyText, { color: colors.textSecondary }]}
                       numberOfLines={2}
                     >
-                      {item.body}
+                      {subtitle}
                     </Text>
                     <Text style={[styles.itemTime, { color: colors.textSecondary }]}>
                       {formatRelativeTime(item.detectedAt || item.updatedAt)}
                     </Text>
-                  </View>
-                  {!item.read ? (
-                    <View style={[styles.dot, { backgroundColor: colors.primary }]} />
-                  ) : null}
-                </TouchableOpacity>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    onPress={() => removeNotification(item.id)}
+                    style={styles.deleteBtn}
+                    hitSlop={10}
+                    accessibilityLabel="Apagar notificação"
+                  >
+                    <Trash2 size={17} color={colors.primary} strokeWidth={2.1} />
+                  </TouchableOpacity>
+                </View>
               );
             }}
           />
@@ -173,7 +185,7 @@ export default function NotificationsSheet() {
   );
 }
 
-const getStyles = (colors: any, isDark: boolean) =>
+const getStyles = (_colors: any, _isDark: boolean) =>
   StyleSheet.create({
     overlay: {
       flex: 1,
@@ -216,7 +228,7 @@ const getStyles = (colors: any, isDark: boolean) =>
       alignItems: 'center',
       justifyContent: 'center',
     },
-    listContent: { gap: 8, paddingBottom: 12 },
+    listContent: { gap: 10, paddingBottom: 12 },
     emptyWrap: { flexGrow: 1, justifyContent: 'center', paddingVertical: 48 },
     empty: { alignItems: 'center', paddingHorizontal: 28 },
     emptyIcon: {
@@ -241,27 +253,24 @@ const getStyles = (colors: any, isDark: boolean) =>
     item: {
       flexDirection: 'row',
       alignItems: 'flex-start',
-      gap: 12,
+      gap: 10,
       borderRadius: 16,
-      padding: 14,
-      borderWidth: StyleSheet.hairlineWidth,
-    },
-    itemUnread: {
-      borderColor: 'rgba(206,55,54,0.28)',
-    },
-    itemIcon: {
-      width: 40,
-      height: 40,
-      borderRadius: 12,
-      alignItems: 'center',
-      justifyContent: 'center',
+      paddingVertical: 14,
+      paddingHorizontal: 14,
+      borderWidth: StyleSheet.hairlineWidth * 1.5,
     },
     itemBody: { flex: 1, minWidth: 0 },
+    titleRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: 8,
+      marginBottom: 3,
+    },
     itemTitle: {
+      flex: 1,
       fontSize: 14,
       fontWeight: '700',
       letterSpacing: -0.2,
-      marginBottom: 3,
     },
     itemBodyText: {
       fontSize: 12.5,
@@ -269,14 +278,27 @@ const getStyles = (colors: any, isDark: boolean) =>
       lineHeight: 17,
       marginBottom: 6,
     },
+    newBadge: {
+      borderRadius: 999,
+      paddingHorizontal: 7,
+      paddingVertical: 2,
+      marginTop: 1,
+    },
+    newBadgeText: {
+      color: '#fff',
+      fontSize: 9,
+      fontWeight: '800',
+      letterSpacing: 0.3,
+      textTransform: 'uppercase',
+    },
     itemTime: {
       fontSize: 11,
       fontWeight: '600',
     },
-    dot: {
-      width: 8,
-      height: 8,
-      borderRadius: 4,
-      marginTop: 6,
+    deleteBtn: {
+      padding: 4,
+      marginTop: 0,
+      alignItems: 'center',
+      justifyContent: 'center',
     },
   });

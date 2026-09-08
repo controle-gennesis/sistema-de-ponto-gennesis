@@ -4,8 +4,8 @@ import { Platform } from 'react-native';
 /** Backend de produção (Play Store / builds release). */
 const PRODUCTION_API = 'https://sistema-pontobackend-production.up.railway.app';
 
-/** IP do PC na Wi-Fi — só para desenvolvimento com `__DEV__` (Expo Go no celular). */
-const LOCAL_LAN_API = 'http://192.168.15.93:5000';
+/** Fallback se o Expo não expor o host (dev). */
+const LOCAL_LAN_API_FALLBACK = 'http://192.168.1.84:5000';
 
 function normalizeBaseUrl(url: string) {
   return url.replace(/\/$/, '');
@@ -13,6 +13,29 @@ function normalizeBaseUrl(url: string) {
 
 function isRemoteProductionUrl(url: string) {
   return /railway\.app|gennesisconecta\.com/i.test(url);
+}
+
+/** Extrai o IP do PC a partir do Metro/Expo Go (ex.: 192.168.1.84:8081). */
+function getDevHostIp(): string | null {
+  const candidates = [
+    Constants.expoConfig?.hostUri,
+    (Constants as any).expoGoConfig?.debuggerHost,
+    (Constants as any).manifest2?.extra?.expoGo?.debuggerHost,
+    (Constants as any).manifest?.debuggerHost,
+    (Constants as any).linkingUri,
+  ].filter(Boolean) as string[];
+
+  for (const raw of candidates) {
+    const match = String(raw).match(/(\d{1,3}(?:\.\d{1,3}){3})/);
+    if (match?.[1]) return match[1];
+  }
+  return null;
+}
+
+function getDevLanApi() {
+  const ip = getDevHostIp();
+  if (ip) return `http://${ip}:5000`;
+  return LOCAL_LAN_API_FALLBACK;
 }
 
 const getApiBaseUrl = () => {
@@ -29,7 +52,7 @@ const getApiBaseUrl = () => {
     if (configured && !isRemoteProductionUrl(configured)) {
       return normalizeBaseUrl(configured);
     }
-    return normalizeBaseUrl(LOCAL_LAN_API);
+    return normalizeBaseUrl(getDevLanApi());
   }
 
   if (configured) {
