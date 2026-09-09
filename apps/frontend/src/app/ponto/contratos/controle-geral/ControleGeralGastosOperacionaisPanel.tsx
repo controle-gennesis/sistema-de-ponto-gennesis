@@ -831,7 +831,7 @@ export function ControleGeralGastosOperacionaisPanel({
   }, [enableRowExclusion]);
 
   const [selectedRowKeys, setSelectedRowKeys] = useState<Set<string>>(() => new Set());
-  const [hiddenContractsListMinimized, setHiddenContractsListMinimized] = useState(false);
+  const [hiddenContractsListMinimized, setHiddenContractsListMinimized] = useState(true);
   const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
   const [tetoModalOpen, setTetoModalOpen] = useState(false);
   const [tetoModalPrefill, setTetoModalPrefill] = useState<TetoOrcamentarioFormPrefill | null>(null);
@@ -1480,6 +1480,7 @@ export function ControleGeralGastosOperacionaisPanel({
     const contracts = selectedRows.map((row) => row.contract);
     setExcludedContracts((prev) => addControleGeralExcludedContracts(contracts, prev));
     setSelectedRowKeys(new Set());
+    setHiddenContractsListMinimized(true);
 
     toast.success(
       contracts.length === 1
@@ -2197,7 +2198,6 @@ export function ControleGeralGastosOperacionaisPanel({
                             />
                           </th>
                         ) : null}
-                        <th className={contractThClassName}>Contrato</th>
                         <th className={dataCenterThClassName}>Mês de apuração</th>
                         <th className={dataCenterThClassName}>Ano de apuração</th>
                         {!hideLocalityColumn ? (
@@ -2205,6 +2205,7 @@ export function ControleGeralGastosOperacionaisPanel({
                             {readOnlyPoloColumn ? 'Polo' : 'Localidade'}
                           </th>
                         ) : null}
+                        <th className={contractThClassName}>Contrato</th>
                         {showFaturamentoColumn ? (
                           <th className={amountCurrencyThClassName}>Faturamento</th>
                         ) : null}
@@ -2275,6 +2276,32 @@ export function ControleGeralGastosOperacionaisPanel({
                                   </div>
                                 </td>
                               ) : null}
+                              <td className={dataCenterCellClassName}>
+                                {buildMesesLabel(row)}
+                              </td>
+                              <td className={dataCenterCellClassName}>
+                                {buildAnoLabel(row)}
+                              </td>
+                              {!hideLocalityColumn ? (
+                                <td className={`${dataCenterCellClassName} text-gray-700 dark:text-gray-300`}>
+                                  {readOnlyPoloColumn ? (
+                                    row.polo?.trim() || '—'
+                                  ) : (
+                                    <StringSingleSelectDropdown
+                                      value={getEffectiveContractLocality(row.contract, inferredLocalityOverrides)}
+                                      onChange={(value) =>
+                                        handleContractLocalityChange(row.contract, value)
+                                      }
+                                      options={localityTableSelectOptions}
+                                      allowEmpty={false}
+                                      disableSearch
+                                      hideChevron
+                                      className={localitySelectWrapperClassName}
+                                      triggerClassName={localitySelectTriggerClassName}
+                                    />
+                                  )}
+                                </td>
+                              ) : null}
                               <td className={contractCellClassName}>
                                 <div className="flex items-center gap-2">
                                   {enableContractFluxoModal ? (
@@ -2322,32 +2349,6 @@ export function ControleGeralGastosOperacionaisPanel({
                                   ) : null}
                                 </div>
                               </td>
-                              <td className={dataCenterCellClassName}>
-                                {buildMesesLabel(row)}
-                              </td>
-                              <td className={dataCenterCellClassName}>
-                                {buildAnoLabel(row)}
-                              </td>
-                              {!hideLocalityColumn ? (
-                                <td className={`${dataCenterCellClassName} text-gray-700 dark:text-gray-300`}>
-                                  {readOnlyPoloColumn ? (
-                                    row.polo?.trim() || '—'
-                                  ) : (
-                                    <StringSingleSelectDropdown
-                                      value={getEffectiveContractLocality(row.contract, inferredLocalityOverrides)}
-                                      onChange={(value) =>
-                                        handleContractLocalityChange(row.contract, value)
-                                      }
-                                      options={localityTableSelectOptions}
-                                      allowEmpty={false}
-                                      disableSearch
-                                      hideChevron
-                                      className={localitySelectWrapperClassName}
-                                      triggerClassName={localitySelectTriggerClassName}
-                                    />
-                                  )}
-                                </td>
-                              ) : null}
                               {showFaturamentoColumn ? (
                                 <td className={`${amountCurrencyCellClassName} text-green-600 dark:text-green-400`}>
                                   {formatCurrency(row.faturamentoAcumulado ?? 0)}

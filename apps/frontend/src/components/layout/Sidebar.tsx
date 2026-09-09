@@ -72,6 +72,7 @@ import {
   Boxes,
   Workflow,
   ChevronDown,
+  Calculator,
   type LucideIcon,
 } from 'lucide-react';
 import { pathToModuleKey } from '@sistema-ponto/permission-modules';
@@ -563,6 +564,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
   
   // Verificar se é do departamento Financeiro
   const isDepartmentFinanceiro = userDepartment?.toLowerCase().includes('financeiro');
+  const isDepartmentContabil = userDepartment?.toLowerCase().includes('contabil');
 
   // Verificar se é do departamento Jurídico
   const isDepartmentJuridico = userDepartment?.toLowerCase().includes('jurídico') ||
@@ -723,6 +725,18 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             description: 'Tramitar solicitações do Departamento Pessoal',
             permission:
               isAdministrator || isDepartmentPessoal || can(pk('/ponto/gerenciar-solicitacoes-dp')),
+          },
+          {
+            name: 'DP/Contabilidade',
+            href: '/ponto/dp-contabilidade',
+            icon: Calculator,
+            description: 'Solicitações do DP para a contabilidade',
+            permission:
+              isAdministrator ||
+              isDepartmentPessoal ||
+              isDepartmentFinanceiro ||
+              isDepartmentContabil ||
+              can(pk('/ponto/dp-contabilidade')),
           },
           {
             name: 'Central de Atendimentos',
