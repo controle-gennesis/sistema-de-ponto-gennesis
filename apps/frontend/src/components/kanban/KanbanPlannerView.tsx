@@ -994,6 +994,49 @@ export function KanbanPlannerView({
     router.replace(qs ? `${path}?${qs}` : path);
   }, [searchParams, pathname, router, rangeFrom, rangeTo, queryClient]);
 
+  const googleAutoSyncedRef = useRef(false);
+  useEffect(() => {
+    if (googleAutoSyncedRef.current) return;
+    if (!isOwnerEffective) return;
+    if (!googleStatus?.configured || !googleStatus.connected) return;
+    if (searchParams?.get('googleCalendar')) return;
+
+    const storageKey = 'google-calendar-auto-sync-at';
+    try {
+      const last = Number(sessionStorage.getItem(storageKey) || '0');
+      if (last && Date.now() - last < 5 * 60 * 1000) {
+        googleAutoSyncedRef.current = true;
+        return;
+      }
+      sessionStorage.setItem(storageKey, String(Date.now()));
+    } catch {
+      /* ignore */
+    }
+
+    googleAutoSyncedRef.current = true;
+    void (async () => {
+      try {
+        setSyncingGoogle(true);
+        const syncFrom = addDays(rangeFrom, -7);
+        const syncTo = addDays(rangeTo, 14);
+        await syncGoogleCalendar(syncFrom, syncTo);
+        queryClient.invalidateQueries({ queryKey: ['planner-events'] });
+      } catch {
+        /* automático: o botão manual continua disponível */
+      } finally {
+        setSyncingGoogle(false);
+      }
+    })();
+  }, [
+    isOwnerEffective,
+    googleStatus?.configured,
+    googleStatus?.connected,
+    searchParams,
+    rangeFrom,
+    rangeTo,
+    queryClient,
+  ]);
+
   const handleGoogleSyncClick = async () => {
     if (!isOwnerEffective) {
       toast.error('Só o dono da agenda pode sincronizar o Google Calendar');
