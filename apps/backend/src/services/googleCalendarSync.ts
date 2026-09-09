@@ -428,3 +428,100 @@ export async function isGoogleCalendarConnected(userId: string): Promise<boolean
 export async function disconnectGoogleCalendar(userId: string): Promise<void> {
   await prisma.googleCalendarConnection.deleteMany({ where: { userId } });
 }
+
+function envBool(name: string, fallback: boolean): boolean {
+  const raw = process.env[name]?.trim().toLowerCase();
+  if (!raw) return fallback;
+  if (['1', 'true', 'yes', 'on'].includes(raw)) return true;
+  if (['0', 'false', 'no', 'off'].includes(raw)) return false;
+  return fallback;
+}
+
+function envInt(name: string, fallback: number): number {
+  const n = Number(process.env[name]);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+function autoSyncWindow(): { from: Date; to: Date } {
+  const from = new Date();
+  from.setHours(0, 0, 0, 0);
+  from.setDate(from.getDate() - 14);
+  const to = new Date();
+  to.setHours(23, 59, 59, 999);
+  to.setDate(to.getDate() + 90);
+  return { from, to };
+}
+
+let autoSyncStarted = false;
+let autoSyncRunning = false;
+let autoSyncTimer: ReturnType<typeof setInterval> | null = null;
+
+/** Sincroniza todas as contas Google já conectadas (janela: 14 dias atrás → 90 à frente). */
+export async function syncAllConnectedGoogleCalendars(): Promise<void> {
+  if (autoSyncRunning) {
+    console.log('[google-sync] auto: já em andamento, pulando');
+    return;
+  }
+  if (!isGoogleCalendarConfigured()) return;
+
+  autoSyncRunning = true;
+  try {
+    const connections = await prisma.googleCalendarConnection.findMany({
+      select: { userId: true },
+    });
+    if (connections.length === 0) return;
+
+    const { from, to } = autoSyncWindow();
+    console.log(`[google-sync] auto: ${connections.length} conta(s)`);
+
+    for (const { userId } of connections) {
+      try {
+        const result = await syncGoogleCalendarEvents(userId, from, to);
+        console.log(
+          `[google-sync] auto user=${userId}: +${result.imported} ~${result.updated} agendas=${result.calendars}`
+        );
+      } catch (e) {
+        console.warn(
+          `[google-sync] auto user=${userId} falhou:`,
+          e instanceof Error ? e.message : e
+        );
+      }
+    }
+  } finally {
+    autoSyncRunning = false;
+  }
+}
+
+export function startGoogleCalendarAutoSyncScheduler(): void {
+  if (autoSyncStarted) return;
+  if (!isGoogleCalendarConfigured()) {
+    console.log('[google-sync] auto: desligado (faltam chaves OAuth)');
+    return;
+  }
+  if (!envBool('GOOGLE_CALENDAR_AUTO_SYNC', true)) {
+    console.log('[google-sync] auto: desabilitado (GOOGLE_CALENDAR_AUTO_SYNC=false)');
+    return;
+  }
+
+  autoSyncStarted = true;
+  const intervalMs = envInt('GOOGLE_CALENDAR_AUTO_SYNC_INTERVAL_MS', 15 * 60 * 1000);
+  const bootDelayMs = envInt('GOOGLE_CALENDAR_AUTO_SYNC_BOOT_DELAY_MS', 45_000);
+
+  console.log(
+    `[google-sync] auto: primeira em ${Math.round(bootDelayMs / 1000)}s, depois a cada ${Math.round(
+      intervalMs / 60000
+    )} min`
+  );
+
+  setTimeout(() => {
+    void syncAllConnectedGoogleCalendars();
+  }, bootDelayMs);
+
+  autoSyncTimer = setInterval(() => {
+    void syncAllConnectedGoogleCalendars();
+  }, intervalMs);
+
+  if (typeof autoSyncTimer.unref === 'function') {
+    autoSyncTimer.unref();
+  }
+}
