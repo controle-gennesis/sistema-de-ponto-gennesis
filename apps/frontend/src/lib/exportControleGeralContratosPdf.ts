@@ -270,10 +270,12 @@ function drawPageHeader(
 }
 
 function buildColumns(contentW: number): PdfColumn[] {
-  // Colunas numéricas mais largas; Contrato absorve o restante (menor).
-  const fixed = [
+  // Mês/ano à esquerda do contrato; colunas numéricas mais largas.
+  const leading = [
     { key: 'mes', label: 'Mês', width: 10, align: 'left' as const },
-    { key: 'ano', label: 'Ano', width: 7, align: 'left' as const },
+    { key: 'ano', label: 'Ano', width: 7, align: 'left' as const }
+  ];
+  const amounts = [
     { key: 'fat', label: 'Faturamento', width: 22, align: 'right' as const },
     { key: 'liq', label: 'Líquido', width: 19, align: 'right' as const },
     { key: 'rec', label: 'Recebido', width: 19, align: 'right' as const },
@@ -287,10 +289,16 @@ function buildColumns(contentW: number): PdfColumn[] {
     { key: 'cvinc', label: 'SALDO TOTAL - CV', width: 27, align: 'right' as const }
   ];
 
-  const fixedWidth = fixed.reduce((sum, col) => sum + col.width, 0);
-  const contractWidth = Math.max(32, contentW - fixedWidth);
+  const usedWidth =
+    leading.reduce((sum, col) => sum + col.width, 0) +
+    amounts.reduce((sum, col) => sum + col.width, 0);
+  const contractWidth = Math.max(32, contentW - usedWidth);
 
-  return [{ key: 'contract', label: 'Contrato', width: contractWidth, align: 'left' }, ...fixed];
+  return [
+    ...leading,
+    { key: 'contract', label: 'Contrato', width: contractWidth, align: 'left' },
+    ...amounts
+  ];
 }
 
 const PDF_CELL_PAD_X = 3.2;
@@ -381,8 +389,9 @@ function drawDataRow(
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(6.2);
 
+  const contractCol = columns.find((col) => col.key === 'contract') ?? columns[0];
   const values: Record<string, string> = {
-    contract: truncateText(doc, row.contract, columns[0].width - PDF_CELL_PAD_X * 2),
+    contract: truncateText(doc, row.contract, contractCol.width - PDF_CELL_PAD_X * 2),
     mes: row.mesesLabel,
     ano: row.anoLabel,
     fat: formatCurrencyCell(row.faturamento),
@@ -449,7 +458,13 @@ function drawSummaryRow(
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(6.5);
   doc.setTextColor(...TEXT_BLACK);
-  doc.text(truncateText(doc, label, columns[0].width - PDF_CELL_PAD_X * 2), colX[0] + PDF_CELL_PAD_X, y + 5);
+  const contractIdx = columns.findIndex((col) => col.key === 'contract');
+  const labelIdx = contractIdx >= 0 ? contractIdx : 0;
+  doc.text(
+    truncateText(doc, label, columns[labelIdx].width - PDF_CELL_PAD_X * 2),
+    colX[labelIdx] + PDF_CELL_PAD_X,
+    y + 5
+  );
 
   const summaryValues: Record<string, { text: string; color: [number, number, number] }> = {
     mes: { text: '', color: TEXT_BLACK },
@@ -488,7 +503,8 @@ function drawSummaryRow(
     }
   };
 
-  for (let i = 1; i < columns.length; i++) {
+  for (let i = 0; i < columns.length; i++) {
+    if (i === labelIdx) continue;
     const col = columns[i];
     const item = summaryValues[col.key];
     if (!item?.text) continue;

@@ -73,6 +73,7 @@ import {
   ChevronDown,
   HelpCircle,
   Newspaper,
+  Calculator,
   type LucideIcon,
 } from 'lucide-react';
 import { pathToModuleKey } from '@sistema-ponto/permission-modules';
@@ -262,6 +263,9 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
     fluigApproverFullAccess,
     canAccessFluigApproversRoute,
     canAccessCollaborationTools,
+    isDepartmentPessoal,
+    isDepartmentFinanceiro,
+    isDepartmentContabil,
   } = usePermissions();
   const { logoSrc, logoAlt } = useBrandingLogo();
   const sidebarRef = useRef<HTMLDivElement>(null);
@@ -642,7 +646,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
 
   // Verificar se o funcionário precisa bater ponto
   const requiresTimeClock = user?.employee?.requiresTimeClock !== false;
-  
+
   const isEmployee = userRole === 'EMPLOYEE';
 
   // Menu items agrupados por categoria
@@ -799,6 +803,18 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             description: 'Tramitar solicitações do Departamento Pessoal',
             permission:
               isAdministrator || can(pk('/ponto/gerenciar-solicitacoes-dp')),
+          },
+          {
+            name: 'DP/Contabilidade',
+            href: '/ponto/dp-contabilidade',
+            icon: Calculator,
+            description: 'Solicitações do DP para a contabilidade',
+            permission:
+              isAdministrator ||
+              isDepartmentPessoal ||
+              isDepartmentFinanceiro ||
+              isDepartmentContabil ||
+              can(pk('/ponto/dp-contabilidade')),
           },
           {
             name: 'Central de Atendimentos',

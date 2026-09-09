@@ -5,7 +5,6 @@ import {
   isContractExcludedFromPresentation,
   listContractsForLocalities,
   normalizeContractOrderKey,
-  normalizeGastosOperacionaisContractName,
   resolveCanonicalGastosContractName,
   resolveVisibleLocalityItems,
   sortContractNamesByCustomOrder,
@@ -768,7 +767,7 @@ function mergeContractNameIntoRows(
   byKey: Map<string, GastosOperacionaisRow>,
   contract: string
 ): void {
-  const canonical = normalizeGastosOperacionaisContractName(contract);
+  const canonical = resolveCanonicalGastosContractName(contract);
   const key = normalizeContractOrderKey(canonical);
   if (byKey.has(key)) return;
 
@@ -823,7 +822,10 @@ export function mergeCatalogContractsIntoGastosRows(
 ): GastosOperacionaisRow[] {
   const byKey = new Map<string, GastosOperacionaisRow>();
   for (const row of rows) {
-    byKey.set(normalizeContractOrderKey(row.contract), row);
+    const canonical = resolveCanonicalGastosContractName(row.contract);
+    const key = normalizeContractOrderKey(canonical);
+    if (byKey.has(key)) continue;
+    byKey.set(key, { ...row, contract: canonical, rowKey: canonical });
   }
 
   const localityOverrides = options?.localityOverrides ?? {};
@@ -1003,8 +1005,8 @@ export function buildGastosRowsFromApiPayload(payload?: GastosApiPayload): Gasto
   return sortContractsByCustomOrder(
     source
       .map((item) => ({
-        rowKey: normalizeGastosOperacionaisContractName(item.contract),
-        contract: normalizeGastosOperacionaisContractName(item.contract),
+        rowKey: resolveCanonicalGastosContractName(item.contract),
+        contract: resolveCanonicalGastosContractName(item.contract),
         mesesApuracao: item.mesesApuracao ?? 0,
         anoMin: item.anoMin ?? 0,
         anoMax: item.anoMax ?? 0,

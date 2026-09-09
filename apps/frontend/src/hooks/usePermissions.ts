@@ -203,6 +203,8 @@ export function usePermissions() {
 
   const isDepartmentFinanceiro = userDepartment?.toLowerCase().includes('financeiro');
 
+  const isDepartmentContabil = userDepartment?.toLowerCase().includes('contabil');
+
   const isDepartmentCompras = userDepartment?.toLowerCase().includes('compras');
 
   const isDepartmentJuridico =
@@ -494,6 +496,7 @@ export function usePermissions() {
     isDepartmentPessoal,
     isDepartmentProjetos,
     isDepartmentFinanceiro,
+    isDepartmentContabil,
     isDepartmentCompras,
     isDepartmentJuridico,
     isDepartmentSocios,
@@ -572,6 +575,12 @@ export function useRoutePermission(route: string) {
     permissions,
     isLoading,
     isElevatedUser,
+    isDepartmentPessoal,
+    isDepartmentProjetos,
+    isDepartmentFinanceiro,
+    isDepartmentContabil,
+    isDepartmentCompras,
+    isDepartmentJuridico,
     canAccessCollaborationTools,
     can,
     canAccessContract,
@@ -640,6 +649,12 @@ export function useRoutePermission(route: string) {
       isAdministrator || can(pk('/ponto/gerenciar-solicitacoes-dp')),
     '/ponto/gerenciar-solicitacoes-adm-tst':
       isAdministrator || can(pk('/ponto/gerenciar-solicitacoes-adm-tst')),
+    '/ponto/dp-contabilidade':
+      isAdministrator ||
+      isDepartmentPessoal ||
+      isDepartmentFinanceiro ||
+      isDepartmentContabil ||
+      can(pk('/ponto/dp-contabilidade')),
     '/ponto/ferias': isAdministrator || can(pk('/ponto/ferias')),
     '/ponto/gerenciar-ferias': isAdministrator || permissions.canManageVacations,
     '/ponto/gerenciar-feriados': isAdministrator || can(pk('/ponto/gerenciar-feriados')),

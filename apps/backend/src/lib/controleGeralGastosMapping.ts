@@ -8,7 +8,7 @@ export const NFS_TAB_GASTOS_COST_CENTERS: Record<string, readonly string[]> = {
   bbgo: ['BBGO - MANUTENÇÃO'],
   codevasf: ['CODEVASF'],
   'capitania-fluvial': ['CAPITANIA FLUVIAL - GO'],
-  confea: ['CONFEA - 508 NORTE', 'CONFEA - 516 NORTE'],
+  confea: ['CONFEA - 508 NORTE', 'CONFEA - 516 NORTE', 'CONFEA 508', 'CONFEA 516'],
   mapa: ['MAPA - UMIPI DE JEQUIE'],
   'fhe-df': ['FHE - DF'],
   hfa: ['HFA - MÃO DE OBRA', 'HFA - SERVIÇOS EVENTUAIS'],
@@ -20,7 +20,7 @@ export const NFS_TAB_GASTOS_COST_CENTERS: Record<string, readonly string[]> = {
   'seinfra-aparecida': ['SEINFRA - APARECIDA'],
   'senac-df': ['SENAC - DF'],
   ses: ['SES - LOTE 10', 'SES - LOTE 12', 'SES - LOTE 14', 'SES - LOTE 17'],
-  stm: ['STM - DF'],
+  stm: ['STM - DF', 'STM'],
   'tjgo-manutencao': [
     'TJ MANUTENÇÃO CALDAS NOVAS - CORRETIVA',
     'TJ MANUTENÇÃO RIO VERDE - CORRETIVA',

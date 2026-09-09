@@ -793,6 +793,77 @@ model DpRequest {
   @@map("dp_requests")
 }
 
+enum DpContabilidadeRequestType {
+  ADMISSAO
+  AFASTAMENTO
+  ALTERACAO_FUNCAO
+  ALTERACAO_SALARIAL
+  CONVENCAO_COLETIVA
+  FECHAMENTO_FOLHA
+  FERIAS
+  IMPOSTOS_ENCARGOS
+  REALOCACAO_COLABORADOR
+  RESCISAO
+  RETIFICACAO_RECALCULO
+  SOLICITACAO_GERAL
+}
+
+enum DpContabilidadeRequestStatus {
+  OPEN
+  IN_PROGRESS
+  CONCLUDED
+  CANCELLED
+}
+
+/// Comunicação DP ↔ Contabilidade (sem fluxo de aprovação; histórico permanente).
+model DpContabilidadeRequest {
+  id            String @id @default(cuid())
+  displayNumber Int    @unique
+
+  createdByUserId String
+  createdByName   String
+  createdByEmail  String
+  sector          String?
+
+  requestType DpContabilidadeRequestType
+  title       String
+  description String @db.Text
+
+  contractId   String?
+  contractName String?
+
+  status            DpContabilidadeRequestStatus @default(OPEN)
+  concludedAt       DateTime?
+  concludedByUserId String?
+  cancelledAt       DateTime?
+  cancelledByUserId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  comments DpContabilidadeComment[]
+
+  @@index([status])
+  @@index([requestType])
+  @@index([createdByUserId])
+  @@index([createdAt])
+  @@map("dp_contabilidade_requests")
+}
+
+model DpContabilidadeComment {
+  id         String @id @default(cuid())
+  requestId  String
+  request    DpContabilidadeRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  userId     String
+  userName   String
+  body       String                 @db.Text
+  createdAt  DateTime               @default(now())
+
+  @@index([requestId])
+  @@index([createdAt])
+  @@map("dp_contabilidade_comments")
+}
+
 // Modelo de Feriados
 model Holiday {
   id          String      @id @default(cuid())
