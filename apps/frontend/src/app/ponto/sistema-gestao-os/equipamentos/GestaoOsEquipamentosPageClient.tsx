@@ -19,6 +19,7 @@ import {
 } from '@/components/ui/RowActionMenu';
 import { ListRowNavigableLabel } from '@/components/ui/listTableUi';
 import { useRowActionMenu } from '@/hooks/useRowActionMenu';
+import { useCadastroCrudPermissions } from '@/hooks/useCadastroCrudPermissions';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
@@ -208,6 +209,8 @@ function flattenCatalog(tree: CatalogGroup[]) {
 export default function GestaoOsEquipamentosPageClient() {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const { canCreate, canEdit, canDelete } = useCadastroCrudPermissions('/ponto/sistema-gestao-os/equipamentos');
+  const showActions = canEdit || canDelete;
   const [tab, setTab] = useState<EquipmentTab>('equipamentos');
   const [searchTerm, setSearchTerm] = useState('');
   const [showForm, setShowForm] = useState(false);
@@ -532,6 +535,12 @@ export default function GestaoOsEquipamentosPageClient() {
   };
 
   const save = () => {
+    if (editingId ? !canEdit : !canCreate) {
+      toast.error(
+        editingId ? 'Você não tem permissão para editar.' : 'Você não tem permissão para criar.'
+      );
+      return;
+    }
     if (tab === 'grupos') {
       if (!groupForm.name.trim()) return toast.error('Nome do grupo é obrigatório.');
       if (editingId) return updateGroup.mutate(editingId);
@@ -659,6 +668,7 @@ export default function GestaoOsEquipamentosPageClient() {
                       </button>
                     ) : null}
                   </div>
+                  {canCreate && (
                   <button
                     type="button"
                     onClick={openCreate}
@@ -667,6 +677,7 @@ export default function GestaoOsEquipamentosPageClient() {
                     <Plus className="h-4 w-4 shrink-0" />
                     {novoLabel}
                   </button>
+                  )}
                 </div>
               </div>
             </CardHeader>
@@ -713,14 +724,18 @@ export default function GestaoOsEquipamentosPageClient() {
                           {tab === 'grupos' ? (
                             <>
                               <th className={`${cadastroListClasses.th} !pl-2 sm:!pl-3`}>Nome</th>
-                              <th className={cadastroListClasses.thRight}>Ação</th>
+                              {showActions ? (
+                                <th className={cadastroListClasses.thRight}>Ação</th>
+                              ) : null}
                             </>
                           ) : null}
                           {tab === 'subgrupos' ? (
                             <>
                               <th className={`${cadastroListClasses.th} !pl-2 sm:!pl-3`}>Nome</th>
                               <th className={cadastroListClasses.thCenter}>Grupo</th>
-                              <th className={cadastroListClasses.thRight}>Ação</th>
+                              {showActions ? (
+                                <th className={cadastroListClasses.thRight}>Ação</th>
+                              ) : null}
                             </>
                           ) : null}
                           {tab === 'equipamentos' ? (
@@ -728,7 +743,9 @@ export default function GestaoOsEquipamentosPageClient() {
                               <th className={`${cadastroListClasses.th} !pl-2 sm:!pl-3`}>Nome</th>
                               <th className={cadastroListClasses.thCenter}>Subgrupo</th>
                               <th className={cadastroListClasses.thCenter}>Grupo</th>
-                              <th className={cadastroListClasses.thRight}>Ação</th>
+                              {showActions ? (
+                                <th className={cadastroListClasses.thRight}>Ação</th>
+                              ) : null}
                             </>
                           ) : null}
                         </tr>
@@ -757,15 +774,17 @@ export default function GestaoOsEquipamentosPageClient() {
                                     {row.name}
                                   </ListRowNavigableLabel>
                                 </td>
-                                <RowActionMenuCell
-                                  isOpen={isRowMenuOpen(row.id)}
-                                  onToggle={(e) =>
-                                    toggleRowActionMenu(
-                                      row.id,
-                                      e.currentTarget as HTMLButtonElement
-                                    )
-                                  }
-                                />
+                                {showActions ? (
+                                  <RowActionMenuCell
+                                    isOpen={isRowMenuOpen(row.id)}
+                                    onToggle={(e) =>
+                                      toggleRowActionMenu(
+                                        row.id,
+                                        e.currentTarget as HTMLButtonElement
+                                      )
+                                    }
+                                  />
+                                ) : null}
                               </tr>
                             ))
                           : null}
@@ -793,15 +812,17 @@ export default function GestaoOsEquipamentosPageClient() {
                                   </ListRowNavigableLabel>
                                 </td>
                                 <td className={cadastroListClasses.tdCenter}>{row.groupName}</td>
-                                <RowActionMenuCell
-                                  isOpen={isRowMenuOpen(row.id)}
-                                  onToggle={(e) =>
-                                    toggleRowActionMenu(
-                                      row.id,
-                                      e.currentTarget as HTMLButtonElement
-                                    )
-                                  }
-                                />
+                                {showActions ? (
+                                  <RowActionMenuCell
+                                    isOpen={isRowMenuOpen(row.id)}
+                                    onToggle={(e) =>
+                                      toggleRowActionMenu(
+                                        row.id,
+                                        e.currentTarget as HTMLButtonElement
+                                      )
+                                    }
+                                  />
+                                ) : null}
                               </tr>
                             ))
                           : null}
@@ -830,15 +851,17 @@ export default function GestaoOsEquipamentosPageClient() {
                                 </td>
                                 <td className={cadastroListClasses.tdCenter}>{row.subgroupName}</td>
                                 <td className={cadastroListClasses.tdCenter}>{row.groupName}</td>
-                                <RowActionMenuCell
-                                  isOpen={isRowMenuOpen(row.id)}
-                                  onToggle={(e) =>
-                                    toggleRowActionMenu(
-                                      row.id,
-                                      e.currentTarget as HTMLButtonElement
-                                    )
-                                  }
-                                />
+                                {showActions ? (
+                                  <RowActionMenuCell
+                                    isOpen={isRowMenuOpen(row.id)}
+                                    onToggle={(e) =>
+                                      toggleRowActionMenu(
+                                        row.id,
+                                        e.currentTarget as HTMLButtonElement
+                                      )
+                                    }
+                                  />
+                                ) : null}
                               </tr>
                             ))
                           : null}
@@ -852,7 +875,7 @@ export default function GestaoOsEquipamentosPageClient() {
                 <RowActionMenuPortal
                   menu={rowActionMenu}
                   onClose={closeRowActionMenu}
-                  onEdit={() => {
+                  onEdit={canEdit ? () => {
                     if (tab === 'grupos') {
                       const row = groupRows.find((x) => x.id === rowForActionMenu.id);
                       if (row) openEditGroup(row);
@@ -863,8 +886,8 @@ export default function GestaoOsEquipamentosPageClient() {
                       const row = equipmentRows.find((x) => x.id === rowForActionMenu.id);
                       if (row) openEditEquipment(row);
                     }
-                  }}
-                  onDelete={() =>
+                  } : undefined}
+                  onDelete={canDelete ? () =>
                     setDeleteTarget({
                       kind: tab,
                       id: rowForActionMenu.id,
@@ -873,7 +896,7 @@ export default function GestaoOsEquipamentosPageClient() {
                           ? String((rowForActionMenu as { name?: string }).name ?? '')
                           : ''
                     })
-                  }
+                   : undefined}
                 />
               ) : null}
             </CardContent>

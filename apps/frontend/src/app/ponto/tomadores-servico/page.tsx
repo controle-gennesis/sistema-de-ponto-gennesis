@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { CadastroListEmpty, CadastroListLoading, CadastroListSummary, formatCadastroListId } from '@/components/ui/CadastroListSummary';
 import { RowActionMenuCell, RowActionMenuPortal, cadastroListClasses, listTableRowClasses } from '@/components/ui/RowActionMenu';
 import { useRowActionMenu } from '@/hooks/useRowActionMenu';
+import { useCadastroCrudPermissions } from '@/hooks/useCadastroCrudPermissions';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
@@ -70,6 +71,8 @@ function emptyForm() {
 export default function TomadoresEspelhoNfPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const { canCreate, canEdit, canDelete } = useCadastroCrudPermissions('/ponto/espelho-nf/tomadores-servico');
+  const showActions = canEdit || canDelete;
   const [searchTerm, setSearchTerm] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<ServiceTakerRow | null>(null);
@@ -271,8 +274,16 @@ export default function TomadoresEspelhoNfPage() {
       name: formData.name.trim() || formData.corporateName.trim()
     };
     if (editing) {
+      if (!canEdit) {
+        toast.error('Você não tem permissão para editar.');
+        return;
+      }
       updateMutation.mutate({ id: editing.id, data: payload });
     } else {
+      if (!canCreate) {
+        toast.error('Você não tem permissão para criar.');
+        return;
+      }
       createMutation.mutate(payload);
     }
   };
@@ -342,6 +353,7 @@ export default function TomadoresEspelhoNfPage() {
                       </button>
                     ) : null}
                   </div>
+                  {canCreate && (
                   <button
                     type="button"
                     onClick={() => {
@@ -354,6 +366,7 @@ export default function TomadoresEspelhoNfPage() {
                     <Plus className="h-4 w-4 shrink-0" />
                     Novo Tomador de Serviço
                   </button>
+                  )}
                 </div>
               </div>
             </CardHeader>
@@ -394,7 +407,9 @@ export default function TomadoresEspelhoNfPage() {
                         <th className={cadastroListClasses.th}>Centro de Custo</th>
                         <th className={cadastroListClasses.th}>Cód. Tributário</th>
                         <th className={cadastroListClasses.th}>Conta</th>
-                        <th className={cadastroListClasses.thRight}>Ação</th>
+                        {showActions ? (
+                          <th className={cadastroListClasses.thRight}>Ação</th>
+                        ) : null}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
@@ -426,12 +441,14 @@ export default function TomadoresEspelhoNfPage() {
                                 {bankLabelById.get(t.bankAccountId) || t.bankAccountId || '—'}
                               </span>
                             </td>
-                            <RowActionMenuCell
-                              isOpen={isRowMenuOpen(t.id)}
-                              onToggle={(e) =>
-                                toggleRowActionMenu(t.id, e.currentTarget as HTMLButtonElement)
-                              }
-                            />
+                            {showActions ? (
+                              <RowActionMenuCell
+                                isOpen={isRowMenuOpen(t.id)}
+                                onToggle={(e) =>
+                                  toggleRowActionMenu(t.id, e.currentTarget as HTMLButtonElement)
+                                }
+                              />
+                            ) : null}
                           </tr>
                         ))}
                     </tbody>
@@ -443,8 +460,8 @@ export default function TomadoresEspelhoNfPage() {
                 <RowActionMenuPortal
                   menu={rowActionMenu}
                   onClose={closeRowActionMenu}
-                  onEdit={() => openEdit(rowForActionMenu)}
-                  onDelete={() => setShowDeleteModal(rowForActionMenu.id)}
+                  onEdit={canEdit ? () => openEdit(rowForActionMenu) : undefined}
+                  onDelete={canDelete ? () => setShowDeleteModal(rowForActionMenu.id) : undefined}
                 />
               )}
             </CardContent>

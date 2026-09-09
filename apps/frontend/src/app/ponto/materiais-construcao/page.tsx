@@ -27,6 +27,7 @@ import {
   getCadastroListRange
 } from '@/components/ui/CadastroListSummary';
 import { RowActionMenuCell, RowActionMenuPortal, cadastroListClasses, listTableRowClasses } from '@/components/ui/RowActionMenu';
+import { useCadastroCrudPermissions } from '@/hooks/useCadastroCrudPermissions';
 import { useRowActionMenu } from '@/hooks/useRowActionMenu';
 import { Modal } from '@/components/ui/Modal';
 import { AppModalTabButton } from '@/components/ui/AppTabButton';
@@ -425,6 +426,8 @@ export default function MateriaisConstrucaoPage() {
 
   const router = useRouter();
   const queryClient = useQueryClient();
+  const { canCreate, canEdit, canDelete } = useCadastroCrudPermissions('/ponto/materiais-construcao');
+  const showActions = canEdit || canDelete;
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(20);
@@ -645,6 +648,10 @@ export default function MateriaisConstrucaoPage() {
   });
 
   const handleImport = async () => {
+    if (!canCreate) {
+      toast.error('Você não tem permissão para importar.');
+      return;
+    }
     try {
       const materials = JSON.parse(importData);
       if (!Array.isArray(materials) || materials.length === 0) {
@@ -808,13 +815,25 @@ export default function MateriaisConstrucaoPage() {
     rememberCustomUnit(unit);
 
     if (editingMaterial) {
+      if (!canEdit) {
+        toast.error('Você não tem permissão para editar.');
+        return;
+      }
       updateMutation.mutate({ id: editingMaterial.id, data: dataToSend });
     } else {
+      if (!canCreate) {
+        toast.error('Você não tem permissão para criar.');
+        return;
+      }
       createMutation.mutate(dataToSend);
     }
   };
 
   const handleDelete = (id: string) => {
+    if (!canDelete) {
+      toast.error('Você não tem permissão para excluir.');
+      return;
+    }
     deleteMutation.mutate(id);
   };
 
@@ -1240,7 +1259,7 @@ export default function MateriaisConstrucaoPage() {
                   </div>
                 </div>
                 <div className={cadastroListClasses.cardToolbar}>
-                  {selectedCount > 0 ? (
+                  {canDelete && selectedCount > 0 ? (
                     <button
                       type="button"
                       onClick={() => setShowBulkDeleteModal(true)}
@@ -1295,6 +1314,7 @@ export default function MateriaisConstrucaoPage() {
                     <Download className="h-4 w-4 shrink-0" />
                     <span>{isExporting ? 'Exportando...' : 'Exportar'}</span>
                   </button>
+                  {canCreate && (
                   <button
                     type="button"
                     onClick={() => {
@@ -1310,6 +1330,8 @@ export default function MateriaisConstrucaoPage() {
                     <Upload className="h-4 w-4 shrink-0" />
                     <span>Importar</span>
                   </button>
+                  )}
+                  {canCreate && (
                   <button
                     type="button"
                     onClick={() => {
@@ -1321,6 +1343,7 @@ export default function MateriaisConstrucaoPage() {
                     <Plus className="h-4 w-4 shrink-0" />
                     <span>Novo cadastro</span>
                   </button>
+                  )}
                 </div>
               </div>
             </CardHeader>
@@ -1401,9 +1424,11 @@ export default function MateriaisConstrucaoPage() {
                       >
                         Status
                       </th>
-                      <th scope="col" className={cadastroListClasses.thRight}>
-                        Ação
-                      </th>
+                      {showActions ? (
+                        <th scope="col" className={cadastroListClasses.thRight}>
+                          Ação
+                        </th>
+                      ) : null}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
@@ -1471,12 +1496,14 @@ export default function MateriaisConstrucaoPage() {
                               </span>
                             </div>
                           </td>
-                          <RowActionMenuCell
-                            isOpen={isRowMenuOpen(material.id)}
-                            onToggle={(e) =>
-                              toggleRowActionMenu(material.id, e.currentTarget as HTMLButtonElement)
-                            }
-                          />
+                          {showActions ? (
+                            <RowActionMenuCell
+                              isOpen={isRowMenuOpen(material.id)}
+                              onToggle={(e) =>
+                                toggleRowActionMenu(material.id, e.currentTarget as HTMLButtonElement)
+                              }
+                            />
+                          ) : null}
                         </tr>
                       ))}
                   </tbody>
@@ -1487,8 +1514,8 @@ export default function MateriaisConstrucaoPage() {
                 <RowActionMenuPortal
                   menu={rowActionMenu}
                   onClose={closeRowActionMenu}
-                  onEdit={() => handleEdit(rowForActionMenu)}
-                  onDelete={() => setShowDeleteModal(rowForActionMenu.id)}
+                  onEdit={canEdit ? () => handleEdit(rowForActionMenu) : undefined}
+                  onDelete={canDelete ? () => setShowDeleteModal(rowForActionMenu.id) : undefined}
                   extraItems={[
                     {
                       label: 'Ver detalhes',

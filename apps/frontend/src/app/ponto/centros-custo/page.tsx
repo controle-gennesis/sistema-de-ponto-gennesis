@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/CadastroListSummary';
 import { RowActionMenuCell, RowActionMenuPortal, cadastroListClasses, listTableRowClasses } from '@/components/ui/RowActionMenu';
 import { useRowActionMenu } from '@/hooks/useRowActionMenu';
+import { useCadastroCrudPermissions } from '@/hooks/useCadastroCrudPermissions';
 import { useModalCloseConfirm } from '@/hooks/useModalCloseConfirm';
 import { Modal } from '@/components/ui/Modal';
 import { MainLayout } from '@/components/layout/MainLayout';
@@ -58,6 +59,8 @@ const ESTADOS_LIST = ['DF', 'GO'];
 export default function CentrosCustoPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const { canCreate, canEdit, canDelete } = useCadastroCrudPermissions('/ponto/centros-custo');
+  const showActions = canEdit || canDelete;
   const [searchTerm, setSearchTerm] = useState('');
   const [isActiveFilter, setIsActiveFilter] = useState<string>('all'); // 'all', 'true', 'false'
   const [stateFilter, setStateFilter] = useState<string>('all'); // 'all', 'DF', 'GO'
@@ -195,6 +198,10 @@ export default function CentrosCustoPage() {
     }
     
     if (editingCostCenter) {
+      if (!canEdit) {
+        toast.error('Você não tem permissão para editar.');
+        return;
+      }
       updateMutation.mutate({ 
         id: editingCostCenter.id, 
         data: {
@@ -205,6 +212,10 @@ export default function CentrosCustoPage() {
         }
       });
     } else {
+      if (!canCreate) {
+        toast.error('Você não tem permissão para criar.');
+        return;
+      }
       createMutation.mutate({
         code: formData.code.trim() || undefined,
         name: formData.name.trim(),
@@ -215,6 +226,10 @@ export default function CentrosCustoPage() {
   };
 
   const handleDelete = (id: string) => {
+    if (!canDelete) {
+      toast.error('Você não tem permissão para excluir.');
+      return;
+    }
     deleteMutation.mutate(id);
   };
 
@@ -405,6 +420,7 @@ export default function CentrosCustoPage() {
                       <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
                     ) : null}
                   </button>
+                  {canCreate && (
                   <button
                     type="button"
                     onClick={() => setIsImportModalOpen(true)}
@@ -413,6 +429,8 @@ export default function CentrosCustoPage() {
                     <Upload className="h-4 w-4 shrink-0" />
                     <span>Importar</span>
                   </button>
+                  )}
+                  {canCreate && (
                   <button
                     type="button"
                     onClick={() => {
@@ -424,6 +442,7 @@ export default function CentrosCustoPage() {
                     <Plus className="h-4 w-4 shrink-0" />
                     <span>Novo Centro de Custo</span>
                   </button>
+                  )}
                 </div>
               </div>
             </CardHeader>
@@ -467,9 +486,11 @@ export default function CentrosCustoPage() {
                       <th scope="col" className={cadastroListClasses.thCenter}>
                         Status
                       </th>
-                      <th scope="col" className={cadastroListClasses.thRight}>
-                        Ação
-                      </th>
+                      {showActions ? (
+                        <th scope="col" className={cadastroListClasses.thRight}>
+                          Ação
+                        </th>
+                      ) : null}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
@@ -493,12 +514,14 @@ export default function CentrosCustoPage() {
                               {cc.isActive ? 'Ativo' : 'Inativo'}
                             </span>
                           </td>
-                          <RowActionMenuCell
-                            isOpen={isRowMenuOpen(cc.id)}
-                            onToggle={(e) =>
-                              toggleRowActionMenu(cc.id, e.currentTarget as HTMLButtonElement)
-                            }
-                          />
+                          {showActions ? (
+                            <RowActionMenuCell
+                              isOpen={isRowMenuOpen(cc.id)}
+                              onToggle={(e) =>
+                                toggleRowActionMenu(cc.id, e.currentTarget as HTMLButtonElement)
+                              }
+                            />
+                          ) : null}
                         </tr>
                       ))}
                   </tbody>
@@ -509,8 +532,8 @@ export default function CentrosCustoPage() {
                 <RowActionMenuPortal
                   menu={rowActionMenu}
                   onClose={closeRowActionMenu}
-                  onEdit={() => handleEdit(rowForActionMenu)}
-                  onDelete={() => setShowDeleteModal(rowForActionMenu.id)}
+                  onEdit={canEdit ? () => handleEdit(rowForActionMenu) : undefined}
+                  onDelete={canDelete ? () => setShowDeleteModal(rowForActionMenu.id) : undefined}
                 />
               )}
               

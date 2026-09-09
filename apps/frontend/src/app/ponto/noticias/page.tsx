@@ -37,6 +37,7 @@ import { DEPARTMENTS_LIST } from '@/constants/payrollFilters';
 import { CARGOS_AVAILABLE } from '@/constants/cargos';
 import { toPersonSelectOptions } from '@/lib/personSelectOptions';
 import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
+import { useCadastroCrudPermissions } from '@/hooks/useCadastroCrudPermissions';
 
 type ScheduledNewsStatus = 'DRAFT' | 'SCHEDULED' | 'PUBLISHED' | 'CANCELLED';
 type ScheduledNewsAudienceType = 'ALL' | 'DEPARTMENTS' | 'POSITIONS' | 'USERS';
@@ -207,6 +208,7 @@ function formatDateTime(value?: string | null): string {
 export default function NoticiasPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const { canCreate, canEdit } = useCadastroCrudPermissions('/ponto/noticias');
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
@@ -260,6 +262,9 @@ export default function NoticiasPage() {
 
   const saveMutation = useMutation({
     mutationFn: async () => {
+      if (editing ? !canEdit : !canCreate) {
+        throw new Error(editing ? 'Você não tem permissão para editar.' : 'Você não tem permissão para criar.');
+      }
       const payload = {
         title: form.title,
         summary: form.summary,
@@ -300,7 +305,10 @@ export default function NoticiasPage() {
   });
 
   const publishMutation = useMutation({
-    mutationFn: async (id: string) => api.post(`/news/admin/${id}/publish`),
+    mutationFn: async (id: string) => {
+      if (!canEdit) throw new Error('Você não tem permissão para editar.');
+      return api.post(`/news/admin/${id}/publish`);
+    },
     onSuccess: () => {
       toast.success('Notícia publicada');
       void queryClient.invalidateQueries({ queryKey: ['scheduled-news-admin'] });
@@ -311,7 +319,10 @@ export default function NoticiasPage() {
   });
 
   const cancelMutation = useMutation({
-    mutationFn: async (id: string) => api.post(`/news/admin/${id}/cancel`),
+    mutationFn: async (id: string) => {
+      if (!canEdit) throw new Error('Você não tem permissão para editar.');
+      return api.post(`/news/admin/${id}/cancel`);
+    },
     onSuccess: () => {
       toast.success('Notícia cancelada');
       void queryClient.invalidateQueries({ queryKey: ['scheduled-news-admin'] });
@@ -424,6 +435,7 @@ export default function NoticiasPage() {
                       placeholder="Filtrar status"
                     />
                   </div>
+                  {canCreate && (
                   <button
                     type="button"
                     onClick={openCreate}
@@ -432,6 +444,7 @@ export default function NoticiasPage() {
                     <Plus className="h-4 w-4" />
                     Nova notícia
                   </button>
+                  )}
                 </div>
               </div>
             </CardHeader>
@@ -481,6 +494,7 @@ export default function NoticiasPage() {
                               <span>Visualizações: {row.viewsCount}</span>
                             </div>
                           </div>
+                          {canEdit && (
                           <div className="flex flex-wrap items-center gap-2">
                             <button
                               type="button"
@@ -509,6 +523,7 @@ export default function NoticiasPage() {
                               Cancelar
                             </button>
                           </div>
+                          )}
                         </div>
                       </div>
                     ))}

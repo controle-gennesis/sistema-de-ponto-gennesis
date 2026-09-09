@@ -28,6 +28,7 @@ import {
   PERMISSION_MODULE_KEYS_MANAGED_ONLY_ON_CONTRACT_MATRIX,
   PERMISSION_MODULE_KEYS_OPEN_ACCESS,
   PERMISSION_MODULES,
+  isCadastroCrudModuleKey,
   pathToModuleKey,
   type PermissionModuleDef,
 } from '@sistema-ponto/permission-modules';
@@ -139,6 +140,44 @@ function serializeModuleFlags(flags: Record<string, ContractModuleFlags>): strin
     .join(',');
 }
 
+type CadastroCrudMap = Record<string, Set<ContractAction>>;
+
+/** Serialização estável do mapa de CRUD dos Cadastros para baseline. */
+function serializeCadastroCrud(map: CadastroCrudMap): string {
+  return Object.keys(map)
+    .sort()
+    .map((k) => {
+      const actions = map[k];
+      if (!actions || actions.size === 0) return null;
+      return `${k}:${Array.from(actions).sort().join('.')}`;
+    })
+    .filter((v): v is string => v !== null)
+    .join(',');
+}
+
+/** Extrai apenas ações granulares de módulos de Cadastros das permissões cruas. */
+function parseCadastroCrudFromPerms(perms: PermissionItem[]): CadastroCrudMap {
+  const out: CadastroCrudMap = {};
+  for (const p of perms) {
+    if (!isCadastroCrudModuleKey(p.module)) continue;
+    if (!CONTRACT_ACTIONS.includes(p.action as ContractAction)) continue;
+    if (!out[p.module]) out[p.module] = new Set<ContractAction>();
+    out[p.module].add(p.action as ContractAction);
+  }
+  return out;
+}
+
+/** Achata o mapa de CRUD de Cadastros em itens {module, action} para o payload. */
+function flattenCadastroCrud(map: CadastroCrudMap): { module: string; action: ContractAction }[] {
+  const out: { module: string; action: ContractAction }[] = [];
+  for (const moduleKey of Object.keys(map)) {
+    for (const action of Array.from(map[moduleKey])) {
+      out.push({ module: moduleKey, action });
+    }
+  }
+  return out;
+}
+
 function serializeFullBaseline(
   selected: Set<string>,
   contractActions: Set<ContractAction>,
@@ -147,9 +186,10 @@ function serializeFullBaseline(
   dpApprovalContractIds: Set<string>,
   moduleFlags: Record<string, ContractModuleFlags>,
   restrictedDpApprovalCostCenterIds: Set<string> = new Set(),
-  dpRequestViewCostCenterIds: Set<string> = new Set()
+  dpRequestViewCostCenterIds: Set<string> = new Set(),
+  cadastroCrud: CadastroCrudMap = {}
 ): string {
-  return `${serializePermissionSet(selected)}|ca:${serializeContractActions(contractActions)}|cid:${serializeContractIds(contractIds)}|ea:${serializeContractActions(employeeActions)}|dp:${serializeContractIds(dpApprovalContractIds)}|mf:${serializeModuleFlags(moduleFlags)}|rdp:${serializeContractIds(restrictedDpApprovalCostCenterIds)}|vcc:${serializeContractIds(dpRequestViewCostCenterIds)}`;
+  return `${serializePermissionSet(selected)}|ca:${serializeContractActions(contractActions)}|cid:${serializeContractIds(contractIds)}|ea:${serializeContractActions(employeeActions)}|dp:${serializeContractIds(dpApprovalContractIds)}|mf:${serializeModuleFlags(moduleFlags)}|rdp:${serializeContractIds(restrictedDpApprovalCostCenterIds)}|vcc:${serializeContractIds(dpRequestViewCostCenterIds)}|cc:${serializeCadastroCrud(cadastroCrud)}`;
 }
 
 const EMPTY_PERMISSION_BASELINE = serializeFullBaseline(
@@ -159,20 +199,24 @@ const EMPTY_PERMISSION_BASELINE = serializeFullBaseline(
   new Set(),
   new Set(),
   {},
-  new Set()
+  new Set(),
+  new Set(),
+  {}
 );
 
 function isEmptyPermissionBaseline(
   selected: Set<string>,
   contractActions: Set<ContractAction>,
   contractIds: Set<string>,
-  employeeActions: Set<ContractAction>
+  employeeActions: Set<ContractAction>,
+  cadastroCrud: CadastroCrudMap = {}
 ): boolean {
   return (
     selected.size === 0 &&
     contractActions.size === 0 &&
     contractIds.size === 0 &&
-    employeeActions.size === 0
+    employeeActions.size === 0 &&
+    Object.keys(cadastroCrud).length === 0
   );
 }
 
@@ -181,7 +225,8 @@ function buildPermissionsSnapshotForCache(
   selected: Set<string>,
   contractActions: Set<ContractAction>,
   contractIds: Set<string>,
-  employeeActions: Set<ContractAction>
+  employeeActions: Set<ContractAction>,
+  cadastroCrud: CadastroCrudMap = {}
 ): PermissionItem[] {
   const hasAnyContractsData =
     selected.has(CONTRACTS_MODULE_KEY) ||
@@ -196,6 +241,12 @@ function buildPermissionsSnapshotForCache(
   if (hasAnyEmployeesData) {
     modules.add(EMPLOYEES_MODULE_KEY);
   }
+  // Módulo de Cadastro com qualquer CRUD granular deve manter o acesso base.
+  for (const moduleKey of Object.keys(cadastroCrud)) {
+    if ((cadastroCrud[moduleKey]?.size ?? 0) > 0) {
+      modules.add(moduleKey);
+    }
+  }
   const out: PermissionItem[] = [];
   for (const module of Array.from(modules)) {
     if (DEPRECATED_CONTROLE_KEYS.has(module)) continue;
@@ -206,6 +257,9 @@ function buildPermissionsSnapshotForCache(
   }
   for (const action of Array.from(employeeActions)) {
     out.push({ module: EMPLOYEES_MODULE_KEY, action });
+  }
+  for (const { module, action } of flattenCadastroCrud(cadastroCrud)) {
+    out.push({ module, action });
   }
   return out;
 }
@@ -571,6 +625,7 @@ export function UserPermissionsEditor({
   const [selectedDpRequestViewCostCenterIds, setSelectedDpRequestViewCostCenterIds] =
     useState<Set<string>>(new Set());
   const [contractModuleFlags, setContractModuleFlags] = useState<Record<string, ContractModuleFlags>>({});
+  const [cadastroCrudByModule, setCadastroCrudByModule] = useState<CadastroCrudMap>({});
   const [permissionActionModal, setPermissionActionModal] = useState<'menu' | 'copy' | 'restore' | null>(
     null
   );
@@ -597,6 +652,8 @@ export function UserPermissionsEditor({
   selectedDpRequestViewCostCenterIdsRef.current = selectedDpRequestViewCostCenterIds;
   const contractModuleFlagsRef = useRef(contractModuleFlags);
   contractModuleFlagsRef.current = contractModuleFlags;
+  const cadastroCrudByModuleRef = useRef(cadastroCrudByModule);
+  cadastroCrudByModuleRef.current = cadastroCrudByModule;
 
   /** Serialização estável para comparar com o último estado vindo do servidor (evita PUT na hidratação). */
   const baselineSerializedRef = useRef<string | null>(null);
@@ -753,6 +810,7 @@ export function UserPermissionsEditor({
     for (const id of Array.from(nextContractIds)) {
       nextFlags[id] = rawFlags[id] ?? emptyFlags();
     }
+    const nextCadastroCrud = parseCadastroCrudFromPerms(perms);
     setSelectedSet(next);
     setContractActionsSet(nextContract);
     setEmployeeActionsSet(nextEmployee);
@@ -761,6 +819,7 @@ export function UserPermissionsEditor({
     setSelectedRestrictedDpApprovalCostCenterIds(nextRestrictedCc);
     setSelectedDpRequestViewCostCenterIds(nextViewCc);
     setContractModuleFlags(nextFlags);
+    setCadastroCrudByModule(nextCadastroCrud);
     baselineSerializedRef.current = serializeFullBaseline(
       next,
       nextContract,
@@ -769,7 +828,8 @@ export function UserPermissionsEditor({
       nextDpApproval,
       nextFlags,
       nextRestrictedCc,
-      nextViewCc
+      nextViewCc,
+      nextCadastroCrud
     );
     hydratedRef.current = true;
   }, [userPermissionData]);
@@ -785,6 +845,8 @@ export function UserPermissionsEditor({
       const currentContractActions = Array.from(contractActionsRef.current);
       const currentEmployeeActions = Array.from(employeeActionsRef.current);
       const currentContractIds = Array.from(selectedContractIdsRef.current);
+      const currentCadastroCrud = cadastroCrudByModuleRef.current;
+      const cadastroCrudPermissions = flattenCadastroCrud(currentCadastroCrud);
       const hasAnyContractsData =
         currentSelected.has(CONTRACTS_MODULE_KEY) ||
         currentContractActions.length > 0 ||
@@ -799,6 +861,12 @@ export function UserPermissionsEditor({
       if (hasAnyEmployeesData) {
         currentSelected.add(EMPLOYEES_MODULE_KEY);
       }
+      // Módulo de Cadastro com qualquer CRUD granular mantém o acesso base.
+      for (const moduleKey of Object.keys(currentCadastroCrud)) {
+        if ((currentCadastroCrud[moduleKey]?.size ?? 0) > 0) {
+          currentSelected.add(moduleKey);
+        }
+      }
 
       const basePermissions = Array.from(currentSelected)
         .filter((module) => !DEPRECATED_CONTROLE_KEYS.has(module))
@@ -811,7 +879,12 @@ export function UserPermissionsEditor({
         module: EMPLOYEES_MODULE_KEY,
         action,
       }));
-      const permissions = [...basePermissions, ...contractActionPermissions, ...employeeActionPermissions];
+      const permissions = [
+        ...basePermissions,
+        ...contractActionPermissions,
+        ...employeeActionPermissions,
+        ...cadastroCrudPermissions,
+      ];
       const wouldClearAll =
         permissions.length === 0 &&
         currentContractIds.length === 0 &&
@@ -862,7 +935,8 @@ export function UserPermissionsEditor({
         selectedDpApprovalContractIdsRef.current,
         contractModuleFlagsRef.current,
         selectedRestrictedDpApprovalCostCenterIdsRef.current,
-        selectedDpRequestViewCostCenterIdsRef.current
+        selectedDpRequestViewCostCenterIdsRef.current,
+        cadastroCrudByModuleRef.current
       );
       await queryClient.invalidateQueries({ queryKey: ['permission-users'] });
       await queryClient.invalidateQueries({ queryKey: ['me-permissions'] });
@@ -877,7 +951,8 @@ export function UserPermissionsEditor({
           selectedSetRef.current,
           contractActionsRef.current,
           selectedContractIdsRef.current,
-          employeeActionsRef.current
+          employeeActionsRef.current,
+          cadastroCrudByModuleRef.current
         );
         queryClient.setQueryData<UserPermissionPayload | undefined>(['permission-user', userId], (old) => {
           if (!old) return old;
@@ -923,7 +998,8 @@ export function UserPermissionsEditor({
         selectedSetRef.current,
         contractActionsRef.current,
         selectedContractIdsRef.current,
-        employeeActionsRef.current
+        employeeActionsRef.current,
+        cadastroCrudByModuleRef.current
       ) &&
       baselineSerializedRef.current !== null &&
       baselineSerializedRef.current !== EMPTY_PERMISSION_BASELINE &&
@@ -969,7 +1045,8 @@ export function UserPermissionsEditor({
       selectedDpApprovalContractIds,
       contractModuleFlags,
       selectedRestrictedDpApprovalCostCenterIds,
-      selectedDpRequestViewCostCenterIds
+      selectedDpRequestViewCostCenterIds,
+      cadastroCrudByModule
     );
     if (serialized === baselineSerializedRef.current) return;
 
@@ -982,7 +1059,8 @@ export function UserPermissionsEditor({
         selectedDpApprovalContractIdsRef.current,
         contractModuleFlagsRef.current,
         selectedRestrictedDpApprovalCostCenterIdsRef.current,
-        selectedDpRequestViewCostCenterIdsRef.current
+        selectedDpRequestViewCostCenterIdsRef.current,
+        cadastroCrudByModuleRef.current
       );
       if (latest === baselineSerializedRef.current) return;
       enqueuePersistPermissions();
@@ -998,6 +1076,7 @@ export function UserPermissionsEditor({
     selectedRestrictedDpApprovalCostCenterIds,
     selectedDpRequestViewCostCenterIds,
     contractModuleFlags,
+    cadastroCrudByModule,
     loadingPermissions,
     permissionError,
     enqueuePersistPermissions,
@@ -1017,7 +1096,8 @@ export function UserPermissionsEditor({
         selectedDpApprovalContractIdsRef.current,
         contractModuleFlagsRef.current,
         selectedRestrictedDpApprovalCostCenterIdsRef.current,
-        selectedDpRequestViewCostCenterIdsRef.current
+        selectedDpRequestViewCostCenterIdsRef.current,
+        cadastroCrudByModuleRef.current
       );
       if (latest === baselineSerializedRef.current) return;
       enqueuePersistPermissions();
@@ -1155,6 +1235,65 @@ export function UserPermissionsEditor({
     });
   };
 
+  const toggleCadastroAction = (moduleKey: string, action: ContractAction) => {
+    setCadastroCrudByModule((prev) => {
+      const next = { ...prev };
+      const current = new Set(next[moduleKey] ?? []);
+      const isTurningOn = !current.has(action);
+
+      if (!isTurningOn) current.delete(action);
+      else current.add(action);
+
+      // Mesmas regras de contratos/funcionários:
+      // - marcar criar/editar/excluir também marca "ver";
+      // - desmarcar "ver" limpa as ações dependentes.
+      if (isTurningOn && action !== 'ver') {
+        current.add('ver');
+      }
+      if (!isTurningOn && action === 'ver') {
+        current.delete('criar');
+        current.delete('editar');
+        current.delete('excluir');
+      }
+
+      if (current.size > 0) {
+        next[moduleKey] = current;
+        // Garante o acesso base ao módulo quando há qualquer ação granular.
+        setSelectedSet((s) => {
+          const m = new Set(s);
+          m.add(moduleKey);
+          return m;
+        });
+      } else {
+        delete next[moduleKey];
+      }
+      return next;
+    });
+  };
+
+  /** Coluna "Ver" de um cadastro: liga/desliga o acesso e limpa CRUD quando desligado. */
+  const toggleCadastroVerCell = (moduleKey: string) => {
+    const hasAny = selectedSet.has(moduleKey) || (cadastroCrudByModule[moduleKey]?.size ?? 0) > 0;
+    if (hasAny) {
+      setSelectedSet((prev) => {
+        const next = new Set(prev);
+        next.delete(moduleKey);
+        return next;
+      });
+      setCadastroCrudByModule((prev) => {
+        const next = { ...prev };
+        delete next[moduleKey];
+        return next;
+      });
+      return;
+    }
+    setSelectedSet((prev) => {
+      const next = new Set(prev);
+      next.add(moduleKey);
+      return next;
+    });
+  };
+
   const toggleContract = (contractId: string) => {
     setSelectedContractIds((prev) => {
       const n = new Set(prev);
@@ -1275,6 +1414,7 @@ export function UserPermissionsEditor({
     setSelectedRestrictedDpApprovalCostCenterIds(nextRestrictedCc);
     setSelectedDpRequestViewCostCenterIds(nextViewCc);
     setContractModuleFlags(nextFlags);
+    setCadastroCrudByModule(parseCadastroCrudFromPerms(perms));
   };
 
   const copyGeneralFromUser = async (sourceUserId: string) => {
@@ -1309,6 +1449,7 @@ export function UserPermissionsEditor({
     setSelectedSet(nextGeneral);
     setContractActionsSet(nextContractActions);
     setEmployeeActionsSet(nextEmployeeActions);
+    setCadastroCrudByModule(parseCadastroCrudFromPerms(source.permissions || []));
     const allowedSrc = new Set(source.allowedContractIds ?? []);
     setSelectedDpApprovalContractIds(
       new Set(
@@ -1442,7 +1583,8 @@ export function UserPermissionsEditor({
       selectedDpApprovalContractIds,
       contractModuleFlags,
       selectedRestrictedDpApprovalCostCenterIds,
-      selectedDpRequestViewCostCenterIds
+      selectedDpRequestViewCostCenterIds,
+      cadastroCrudByModule
     ) !== baselineSerializedRef.current;
 
   const handleBackWithSave = async () => {
@@ -1767,12 +1909,16 @@ export function UserPermissionsEditor({
                             const lbl = labelFor(mod);
                             const isContracts = mod.key === CONTRACTS_MODULE_KEY;
                             const isEmployees = mod.key === EMPLOYEES_MODULE_KEY;
-                            const granularRow = isContracts || isEmployees;
+                            const isCadastro = isCadastroCrudModuleKey(mod.key);
+                            const granularRow = isContracts || isEmployees || isCadastro;
+                            const cadastroActions = cadastroCrudByModule[mod.key];
                             const verOn = isContracts
                               ? contractVerChecked
                               : isEmployees
                                 ? employeeVerChecked
-                                : selectedSet.has(mod.key);
+                                : isCadastro
+                                  ? selectedSet.has(mod.key) || (cadastroActions?.has('ver') ?? false)
+                                  : selectedSet.has(mod.key);
                             return (
                               <tr
                                 key={mod.key}
@@ -1796,6 +1942,7 @@ export function UserPermissionsEditor({
                                         if (next === verOn) return;
                                         if (isContracts) toggleContractVerCell();
                                         else if (isEmployees) toggleEmployeeVerCell();
+                                        else if (isCadastro) toggleCadastroVerCell(mod.key);
                                         else toggleModule(mod.key);
                                       }}
                                       aria-label={
@@ -1818,7 +1965,9 @@ export function UserPermissionsEditor({
                                             ? contractActionsSet.has(gran)
                                             : isEmployees
                                               ? employeeActionsSet.has(gran)
-                                              : false
+                                              : isCadastro
+                                                ? (cadastroActions?.has(gran) ?? false)
+                                                : false
                                         }
                                         onCheckedChange={(next) => {
                                           if (!granularRow) return;
@@ -1828,6 +1977,9 @@ export function UserPermissionsEditor({
                                           } else if (isEmployees) {
                                             if (next === employeeActionsSet.has(gran)) return;
                                             toggleEmployeeAction(gran);
+                                          } else if (isCadastro) {
+                                            if (next === (cadastroActions?.has(gran) ?? false)) return;
+                                            toggleCadastroAction(mod.key, gran);
                                           }
                                         }}
                                         aria-label={`${gran} — ${lbl}`}

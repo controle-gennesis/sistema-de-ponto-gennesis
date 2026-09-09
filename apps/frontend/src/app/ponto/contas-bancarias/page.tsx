@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { CadastroListEmpty, CadastroListLoading, CadastroListSummary, formatCadastroListId } from '@/components/ui/CadastroListSummary';
 import { RowActionMenuCell, RowActionMenuPortal, cadastroListClasses, listTableRowClasses } from '@/components/ui/RowActionMenu';
 import { useRowActionMenu } from '@/hooks/useRowActionMenu';
+import { useCadastroCrudPermissions } from '@/hooks/useCadastroCrudPermissions';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
@@ -32,6 +33,8 @@ function emptyForm() {
 export default function ContasBancariasEspelhoNfPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const { canCreate, canEdit, canDelete } = useCadastroCrudPermissions('/ponto/espelho-nf/contas-bancarias');
+  const showActions = canEdit || canDelete;
   const [searchTerm, setSearchTerm] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<BankAccountRow | null>(null);
@@ -150,8 +153,16 @@ export default function ContasBancariasEspelhoNfPage() {
       return;
     }
     if (editing) {
+      if (!canEdit) {
+        toast.error('Você não tem permissão para editar.');
+        return;
+      }
       updateMutation.mutate({ id: editing.id, data: formData });
     } else {
+      if (!canCreate) {
+        toast.error('Você não tem permissão para criar.');
+        return;
+      }
       createMutation.mutate(formData);
     }
   };
@@ -221,6 +232,7 @@ export default function ContasBancariasEspelhoNfPage() {
                       </button>
                     ) : null}
                   </div>
+                  {canCreate && (
                   <button
                     type="button"
                     onClick={() => {
@@ -233,6 +245,7 @@ export default function ContasBancariasEspelhoNfPage() {
                     <Plus className="h-4 w-4 shrink-0" />
                     Nova Conta Bancária
                   </button>
+                  )}
                 </div>
               </div>
             </CardHeader>
@@ -272,7 +285,9 @@ export default function ContasBancariasEspelhoNfPage() {
                         <th className={cadastroListClasses.th}>Banco</th>
                         <th className={cadastroListClasses.th}>Agência</th>
                         <th className={cadastroListClasses.th}>Conta</th>
-                        <th className={cadastroListClasses.thRight}>Ação</th>
+                        {showActions ? (
+                          <th className={cadastroListClasses.thRight}>Ação</th>
+                        ) : null}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
@@ -295,12 +310,14 @@ export default function ContasBancariasEspelhoNfPage() {
                             <td className="whitespace-nowrap px-3 py-4 font-mono text-sm text-gray-600 dark:text-gray-400 sm:px-6">
                               {b.account || '—'}
                             </td>
-                            <RowActionMenuCell
-                              isOpen={isRowMenuOpen(b.id)}
-                              onToggle={(e) =>
-                                toggleRowActionMenu(b.id, e.currentTarget as HTMLButtonElement)
-                              }
-                            />
+                            {showActions ? (
+                              <RowActionMenuCell
+                                isOpen={isRowMenuOpen(b.id)}
+                                onToggle={(e) =>
+                                  toggleRowActionMenu(b.id, e.currentTarget as HTMLButtonElement)
+                                }
+                              />
+                            ) : null}
                           </tr>
                         ))}
                     </tbody>
@@ -312,8 +329,8 @@ export default function ContasBancariasEspelhoNfPage() {
                 <RowActionMenuPortal
                   menu={rowActionMenu}
                   onClose={closeRowActionMenu}
-                  onEdit={() => openEdit(rowForActionMenu)}
-                  onDelete={() => setShowDeleteModal(rowForActionMenu.id)}
+                  onEdit={canEdit ? () => openEdit(rowForActionMenu) : undefined}
+                  onDelete={canDelete ? () => setShowDeleteModal(rowForActionMenu.id) : undefined}
                 />
               )}
             </CardContent>

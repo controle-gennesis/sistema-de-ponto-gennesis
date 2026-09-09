@@ -21,6 +21,7 @@ import {
   listTableRowClasses
 } from '@/components/ui/RowActionMenu';
 import { useRowActionMenu } from '@/hooks/useRowActionMenu';
+import { useCadastroCrudPermissions } from '@/hooks/useCadastroCrudPermissions';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
@@ -154,6 +155,8 @@ function extractBaseModelName(fullName: string): string {
 export default function VeiculosPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const { canCreate, canEdit, canDelete } = useCadastroCrudPermissions('/ponto/veiculos');
+  const showActions = canEdit || canDelete;
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage] = useState(20);
@@ -605,8 +608,16 @@ export default function VeiculosPage() {
 
     const payload = buildPayload();
     if (editing) {
+      if (!canEdit) {
+        toast.error('Você não tem permissão para editar.');
+        return;
+      }
       updateMutation.mutate({ id: editing.id, data: payload });
     } else {
+      if (!canCreate) {
+        toast.error('Você não tem permissão para criar.');
+        return;
+      }
       createMutation.mutate(payload);
     }
   };
@@ -659,7 +670,7 @@ export default function VeiculosPage() {
                   </div>
                 </div>
                 <div className={cadastroListClasses.cardToolbar}>
-                  {selectedCount > 0 ? (
+                  {canDelete && selectedCount > 0 ? (
                     <button
                       type="button"
                       onClick={() => setShowBulkDeleteModal(true)}
@@ -689,6 +700,7 @@ export default function VeiculosPage() {
                       </button>
                     ) : null}
                   </div>
+                  {canCreate && (
                   <button
                     type="button"
                     onClick={() => setShowImportModal(true)}
@@ -697,6 +709,8 @@ export default function VeiculosPage() {
                     <Upload className="h-4 w-4 shrink-0" />
                     <span>Importar</span>
                   </button>
+                  )}
+                  {canCreate && (
                   <button
                     type="button"
                     onClick={() => {
@@ -709,6 +723,7 @@ export default function VeiculosPage() {
                     <Plus className="h-4 w-4 shrink-0" />
                     <span>Novo veículo</span>
                   </button>
+                  )}
                 </div>
               </div>
             </CardHeader>
@@ -756,7 +771,9 @@ export default function VeiculosPage() {
                           <th className={cadastroListClasses.thCenter}>Contrato</th>
                           <th className={cadastroListClasses.thCenter}>Responsável</th>
                           <th className={cadastroListClasses.thCenter}>Frota / Particular</th>
-                          <th className={cadastroListClasses.thRight}>Ação</th>
+                          {showActions ? (
+                            <th className={cadastroListClasses.thRight}>Ação</th>
+                          ) : null}
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
@@ -811,12 +828,14 @@ export default function VeiculosPage() {
                             <td className={cadastroListClasses.tdCenter}>
                               {formatFrotaPartic(vehicle.frotaPartic)}
                             </td>
-                            <RowActionMenuCell
-                              isOpen={isRowMenuOpen(vehicle.id)}
-                              onToggle={(e) =>
-                                toggleRowActionMenu(vehicle.id, e.currentTarget as HTMLButtonElement)
-                              }
-                            />
+                            {showActions ? (
+                              <RowActionMenuCell
+                                isOpen={isRowMenuOpen(vehicle.id)}
+                                onToggle={(e) =>
+                                  toggleRowActionMenu(vehicle.id, e.currentTarget as HTMLButtonElement)
+                                }
+                              />
+                            ) : null}
                           </tr>
                         ))}
                       </tbody>
@@ -852,8 +871,8 @@ export default function VeiculosPage() {
                     <RowActionMenuPortal
                       menu={rowActionMenu}
                       onClose={closeRowActionMenu}
-                      onEdit={() => openEdit(rowForActionMenu as Vehicle)}
-                      onDelete={() => setDeleteId((rowForActionMenu as Vehicle).id)}
+                      onEdit={canEdit ? () => openEdit(rowForActionMenu as Vehicle) : undefined}
+                      onDelete={canDelete ? () => setDeleteId((rowForActionMenu as Vehicle).id) : undefined}
                     />
                   )}
                 </>

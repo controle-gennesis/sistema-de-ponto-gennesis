@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { CadastroListEmpty, CadastroListLoading, CadastroListSummary, formatCadastroListId } from '@/components/ui/CadastroListSummary';
 import { RowActionMenuCell, RowActionMenuPortal, cadastroListClasses, listTableRowClasses } from '@/components/ui/RowActionMenu';
 import { useRowActionMenu } from '@/hooks/useRowActionMenu';
+import { useCadastroCrudPermissions } from '@/hooks/useCadastroCrudPermissions';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
 
 const ITEMS_PER_PAGE = 20;
@@ -36,6 +37,8 @@ const PAYMENT_TYPE_OPTIONS = labeledToSelectOptions([
 export default function CondicoesPagamentoPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const { canCreate, canEdit, canDelete } = useCadastroCrudPermissions('/ponto/condicoes-pagamento');
+  const showActions = canEdit || canDelete;
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [showForm, setShowForm] = useState(false);
@@ -179,6 +182,10 @@ export default function CondicoesPagamentoPage() {
   });
 
   const handleDelete = (id: string) => {
+    if (!canDelete) {
+      toast.error('Você não tem permissão para excluir.');
+      return;
+    }
     deleteMutation.mutate(id);
   };
 
@@ -287,6 +294,7 @@ export default function CondicoesPagamentoPage() {
                       </button>
                     ) : null}
                   </div>
+                  {canCreate && (
                   <button
                     type="button"
                     onClick={() => {
@@ -299,6 +307,7 @@ export default function CondicoesPagamentoPage() {
                     <Plus className="h-4 w-4 shrink-0" />
                     <span>Nova condição</span>
                   </button>
+                  )}
                 </div>
               </div>
             </CardHeader>
@@ -337,7 +346,9 @@ export default function CondicoesPagamentoPage() {
                         <th className={cadastroListClasses.thNumeric}>Ordem</th>
                         <th className={cadastroListClasses.thCenter}>Ativo</th>
                         <th className={cadastroListClasses.thCenter}>Sistema</th>
-                        <th className={cadastroListClasses.thRight}>Ação</th>
+                        {showActions ? (
+                          <th className={cadastroListClasses.thRight}>Ação</th>
+                        ) : null}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
@@ -365,12 +376,14 @@ export default function CondicoesPagamentoPage() {
                           <td className={cadastroListClasses.tdCenter}>
                             {r.isSystem ? 'Sim' : 'Não'}
                           </td>
-                          <RowActionMenuCell
-                            isOpen={isRowMenuOpen(r.id)}
-                            onToggle={(e) =>
-                              toggleRowActionMenu(r.id, e.currentTarget as HTMLButtonElement)
-                            }
-                          />
+                          {showActions ? (
+                            <RowActionMenuCell
+                              isOpen={isRowMenuOpen(r.id)}
+                              onToggle={(e) =>
+                                toggleRowActionMenu(r.id, e.currentTarget as HTMLButtonElement)
+                              }
+                            />
+                          ) : null}
                         </tr>
                       ))}
                     </tbody>
@@ -387,14 +400,14 @@ export default function CondicoesPagamentoPage() {
                   <RowActionMenuPortal
                     menu={rowActionMenu}
                     onClose={closeRowActionMenu}
-                    onEdit={() => openEdit(rowForActionMenu)}
-                    onDelete={() => {
+                    onEdit={canEdit ? () => openEdit(rowForActionMenu) : undefined}
+                    onDelete={canDelete ? () => {
                       if (rowForActionMenu.isSystem) {
                         toast.error('Condição padrão do sistema não pode ser excluída.');
                         return;
                       }
                       setDeleteId(rowForActionMenu.id);
-                    }}
+                    } : undefined}
                     deleteDisabled={rowForActionMenu.isSystem}
                     deleteDisabledTitle="Condição do sistema não pode ser excluída"
                   />
@@ -525,6 +538,10 @@ export default function CondicoesPagamentoPage() {
                       type="button"
                       disabled={!formLabel.trim() || updateMutation.isPending}
                       onClick={() => {
+                        if (!canEdit) {
+                          toast.error('Você não tem permissão para editar.');
+                          return;
+                        }
                         const days = parseDaysFromForm();
                         if (formPaymentType === 'BOLETO') {
                           if (!days || days.length !== formParcelCount) {
@@ -563,6 +580,10 @@ export default function CondicoesPagamentoPage() {
                       type="button"
                       disabled={!formLabel.trim() || createMutation.isPending}
                       onClick={() => {
+                        if (!canCreate) {
+                          toast.error('Você não tem permissão para criar.');
+                          return;
+                        }
                         if (formPaymentType === 'AVISTA') {
                           createMutation.mutate({
                             label: formLabel.trim(),

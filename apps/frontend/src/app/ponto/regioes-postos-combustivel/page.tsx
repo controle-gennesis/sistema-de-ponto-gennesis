@@ -36,6 +36,7 @@ import {
   getListTableRowClassName,
 } from '@/components/ui/RowActionMenu';
 import { useRowActionMenu } from '@/hooks/useRowActionMenu';
+import { useCadastroCrudPermissions } from '@/hooks/useCadastroCrudPermissions';
 import {
   FUEL_STATION_IMPORT_COLUMNS,
   downloadFuelStationImportTemplate,
@@ -90,6 +91,8 @@ const ITEMS_PER_PAGE = 20;
 export default function RegioesPostosCombustivelPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const { canCreate, canEdit, canDelete } = useCadastroCrudPermissions('/ponto/regioes-postos-combustivel');
+  const showActions = canEdit || canDelete;
   const [stateFilter, setStateFilter] = useState<FuelStateCode>('DF');
   const [cityFilter, setCityFilter] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
@@ -409,6 +412,7 @@ export default function RegioesPostosCombustivelPage() {
                       <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
                     ) : null}
                   </button>
+                  {canCreate && (
                   <button
                     type="button"
                     onClick={() => setShowImportModal(true)}
@@ -417,6 +421,8 @@ export default function RegioesPostosCombustivelPage() {
                     <Upload className="h-4 w-4 shrink-0" />
                     <span>Importar</span>
                   </button>
+                  )}
+                  {canCreate && (
                   <button
                     type="button"
                     onClick={openCreateStation}
@@ -425,6 +431,7 @@ export default function RegioesPostosCombustivelPage() {
                     <Plus className="h-4 w-4 shrink-0" />
                     <span>Novo posto</span>
                   </button>
+                  )}
                 </div>
               </div>
             </CardHeader>
@@ -479,9 +486,11 @@ export default function RegioesPostosCombustivelPage() {
                           <th scope="col" className={`${cadastroListClasses.thCenter} w-[7.5rem]`}>
                             Status
                           </th>
-                          <th scope="col" className={cadastroListClasses.thRight}>
-                            Ação
-                          </th>
+                          {showActions ? (
+                            <th scope="col" className={cadastroListClasses.thRight}>
+                              Ação
+                            </th>
+                          ) : null}
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
@@ -525,12 +534,14 @@ export default function RegioesPostosCombustivelPage() {
                                 {station.isActive ? 'Ativo' : 'Inativo'}
                               </span>
                             </td>
-                            <RowActionMenuCell
-                              isOpen={isRowMenuOpen(station.id)}
-                              onToggle={(e) =>
-                                toggleRowActionMenu(station.id, e.currentTarget)
-                              }
-                            />
+                            {showActions ? (
+                              <RowActionMenuCell
+                                isOpen={isRowMenuOpen(station.id)}
+                                onToggle={(e) =>
+                                  toggleRowActionMenu(station.id, e.currentTarget)
+                                }
+                              />
+                            ) : null}
                           </tr>
                         ))}
                       </tbody>
@@ -547,8 +558,8 @@ export default function RegioesPostosCombustivelPage() {
                     <RowActionMenuPortal
                       menu={rowActionMenu}
                       onClose={closeRowActionMenu}
-                      onEdit={() => openEditStation(rowForActionMenu as GasStation)}
-                      onDelete={() => setDeleteStationId((rowForActionMenu as GasStation).id)}
+                      onEdit={canEdit ? () => openEditStation(rowForActionMenu as GasStation) : undefined}
+                      onDelete={canDelete ? () => setDeleteStationId((rowForActionMenu as GasStation).id) : undefined}
                       deleteDisabled={((rowForActionMenu as GasStation)._count?.requests ?? 0) > 0}
                       deleteDisabledTitle="Posto com solicitações vinculadas"
                     />
@@ -748,6 +759,13 @@ export default function RegioesPostosCombustivelPage() {
               e.preventDefault();
               if (!stationForm.cityCode.trim() || !stationForm.name.trim()) {
                 return toast.error('Selecione a cidade e informe o nome do posto');
+              }
+              if (editingStation ? !canEdit : !canCreate) {
+                return toast.error(
+                  editingStation
+                    ? 'Você não tem permissão para editar.'
+                    : 'Você não tem permissão para criar.'
+                );
               }
               saveStationMutation.mutate();
             }}

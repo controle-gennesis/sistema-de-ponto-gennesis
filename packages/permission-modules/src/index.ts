@@ -1,7 +1,7 @@
 /**
  * Registro central de módulos do sistema para permissões.
  * Cada item corresponde a um submenu (rota) — uma entrada na matriz “Acesso”.
- * Ação base no banco: `acesso` (libera o módulo). Módulos Contratos e Funcionários também
+ * Ação base no banco: `acesso` (libera o módulo). Módulos Contratos, Funcionários e Cadastros também
  * aceitam ações granulares: `ver`, `criar`, `editar`, `excluir` (ver `PERMISSION_MODULE_CRUD_ACTIONS`).
  */
 
@@ -470,6 +470,17 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
     group: 'Gestão de OS',
   },
 ] as const;
+
+/** Módulos da categoria Cadastros — matriz Ver/Criar/Editar/Excluir na aba Acesso. */
+export const PERMISSION_CADASTRO_MODULE_KEYS: readonly string[] = PERMISSION_MODULES.filter(
+  (m) => m.category === 'Cadastros'
+).map((m) => m.key);
+
+const CADASTRO_MODULE_KEY_SET = new Set(PERMISSION_CADASTRO_MODULE_KEYS);
+
+export function isCadastroCrudModuleKey(moduleKey: string): boolean {
+  return CADASTRO_MODULE_KEY_SET.has(moduleKey);
+}
 
 /**
  * Módulos com acesso (VER) concedido por padrão a todo usuário do sistema —

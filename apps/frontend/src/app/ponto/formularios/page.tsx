@@ -22,6 +22,7 @@ import {
   listTableRowClasses,
 } from '@/components/ui/RowActionMenu';
 import { useRowActionMenu } from '@/hooks/useRowActionMenu';
+import { useCadastroCrudPermissions } from '@/hooks/useCadastroCrudPermissions';
 import { ListPagination } from '@/components/ui/ListPagination';
 import api from '@/lib/api';
 import type { FormTemplateSummary } from '@/components/forms/formStructureTypes';
@@ -44,6 +45,8 @@ function formatDate(value?: string) {
 export default function FormulariosPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const { canCreate, canEdit, canDelete } = useCadastroCrudPermissions('/ponto/formularios');
+  const showActions = canEdit || canDelete;
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
 
@@ -68,6 +71,7 @@ export default function FormulariosPage() {
 
   const createMutation = useMutation({
     mutationFn: async () => {
+      if (!canCreate) throw new Error('Você não tem permissão para criar.');
       const res = await api.post('/formularios', { name: 'Novo formulário' });
       return res.data?.data as FormTemplateSummary;
     },
@@ -81,6 +85,7 @@ export default function FormulariosPage() {
 
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
+      if (!canDelete) throw new Error('Você não tem permissão para excluir.');
       await api.delete(`/formularios/${id}`);
     },
     onSuccess: () => {
@@ -169,6 +174,7 @@ export default function FormulariosPage() {
                       className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
                     />
                   </div>
+                  {canCreate && (
                   <button
                     type="button"
                     onClick={() => createMutation.mutate()}
@@ -180,6 +186,7 @@ export default function FormulariosPage() {
                       {createMutation.isPending ? 'Criando…' : 'Novo formulário'}
                     </span>
                   </button>
+                  )}
                 </div>
               </div>
             </CardHeader>
@@ -214,7 +221,9 @@ export default function FormulariosPage() {
                           <th className={cadastroListClasses.th}>Nome</th>
                           <th className={cadastroListClasses.th}>Descrição</th>
                           <th className={cadastroListClasses.th}>Atualizado</th>
-                          <th className={cadastroListClasses.thRight}>Ação</th>
+                          {showActions ? (
+                            <th className={cadastroListClasses.thRight}>Ação</th>
+                          ) : null}
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
@@ -235,15 +244,17 @@ export default function FormulariosPage() {
                             <td className={cadastroListClasses.td}>
                               {formatDate(row.updatedAt)}
                             </td>
-                            <RowActionMenuCell
-                              isOpen={isRowMenuOpen(row.id)}
-                              onToggle={(e) =>
-                                toggleRowActionMenu(
-                                  row.id,
-                                  e.currentTarget as HTMLButtonElement
-                                )
-                              }
-                            />
+                            {showActions ? (
+                              <RowActionMenuCell
+                                isOpen={isRowMenuOpen(row.id)}
+                                onToggle={(e) =>
+                                  toggleRowActionMenu(
+                                    row.id,
+                                    e.currentTarget as HTMLButtonElement
+                                  )
+                                }
+                              />
+                            ) : null}
                           </tr>
                         ))}
                       </tbody>
@@ -260,10 +271,10 @@ export default function FormulariosPage() {
                     <RowActionMenuPortal
                       menu={rowActionMenu}
                       onClose={closeRowActionMenu}
-                      onEdit={() =>
+                      onEdit={canEdit ? () =>
                         router.push(`/ponto/formularios/${rowForActionMenu.id}`)
-                      }
-                      onDelete={() => {
+                      : undefined}
+                      onDelete={canDelete ? () => {
                         if (
                           confirm(
                             `Excluir o formulário "${rowForActionMenu.name}"? Esta ação não pode ser desfeita.`
@@ -271,7 +282,7 @@ export default function FormulariosPage() {
                         ) {
                           deleteMutation.mutate(rowForActionMenu.id);
                         }
-                      }}
+                      } : undefined}
                     />
                   ) : null}
                 </>

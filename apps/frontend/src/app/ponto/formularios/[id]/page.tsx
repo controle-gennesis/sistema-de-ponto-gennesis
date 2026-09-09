@@ -19,11 +19,13 @@ import {
 } from '@/components/forms/formStructureTypes';
 import api from '@/lib/api';
 import { useBreadcrumbEntity } from '@/hooks/useBreadcrumbEntity';
+import { useCadastroCrudPermissions } from '@/hooks/useCadastroCrudPermissions';
 
 export default function FormularioEditorPage() {
   const params = useParams();
   const router = useRouter();
   const queryClient = useQueryClient();
+  const { canEdit } = useCadastroCrudPermissions('/ponto/formularios');
   const rawId = params?.id;
   const formId =
     typeof rawId === 'string' ? rawId : Array.isArray(rawId) ? rawId[0] ?? '' : '';
@@ -65,6 +67,7 @@ export default function FormularioEditorPage() {
 
   const saveMutation = useMutation({
     mutationFn: async () => {
+      if (!canEdit) throw new Error('Você não tem permissão para editar.');
       const res = await api.put(`/formularios/${formId}`, {
         name,
         description,
@@ -157,14 +160,16 @@ export default function FormularioEditorPage() {
                   type="button"
                   variant="primary"
                   loading={saveMutation.isPending}
-                  disabled={!dirty}
+                  disabled={!dirty || !canEdit}
                   onClick={() => saveMutation.mutate()}
                   title={
-                    saveMutation.isPending
-                      ? 'Salvando…'
-                      : dirty
-                        ? 'Salvar formulário'
-                        : 'Nenhuma alteração para salvar'
+                    !canEdit
+                      ? 'Você não tem permissão para editar'
+                      : saveMutation.isPending
+                        ? 'Salvando…'
+                        : dirty
+                          ? 'Salvar formulário'
+                          : 'Nenhuma alteração para salvar'
                   }
                   className="!bg-red-600 hover:!bg-red-700 active:!bg-red-800"
                 >

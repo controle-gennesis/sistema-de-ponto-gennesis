@@ -30,6 +30,7 @@ import {
 } from '@/components/ui/RowActionMenu';
 import { ListRowNavigableLabel } from '@/components/ui/listTableUi';
 import { useRowActionMenu } from '@/hooks/useRowActionMenu';
+import { useCadastroCrudPermissions } from '@/hooks/useCadastroCrudPermissions';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
@@ -224,9 +225,11 @@ function flattenTree(tree: LocationAdminTree) {
 export default function GestaoOsLocaisPageClient() {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const { canCreate, canEdit, canDelete } = useCadastroCrudPermissions('/ponto/sistema-gestao-os/locais');
   const { logoAlt, useUnbBranding } = useBrandingLogo();
   const printLogoSrc = useUnbBranding ? '/predialpreto.png' : '/logopv.png';
   const [tab, setTab] = useState<LocaisTab>('ativos');
+  const showActions = canEdit || canDelete || tab === 'predios' || tab === 'ativos';
   const [searchTerm, setSearchTerm] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -779,6 +782,12 @@ export default function GestaoOsLocaisPageClient() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (editingId ? !canEdit : !canCreate) {
+      toast.error(
+        editingId ? 'Você não tem permissão para editar.' : 'Você não tem permissão para criar.'
+      );
+      return;
+    }
     if (tab === 'predios') {
       if (!buildingForm.name.trim()) return toast.error('Nome do prédio é obrigatório.');
       if (editingId) updateBuilding.mutate(editingId);
@@ -946,6 +955,7 @@ export default function GestaoOsLocaisPageClient() {
                       <Printer className="h-4 w-4" />
                     </button>
                   ) : null}
+                  {canCreate && (
                   <button
                     type="button"
                     onClick={openNew}
@@ -954,6 +964,7 @@ export default function GestaoOsLocaisPageClient() {
                     <Plus className="h-4 w-4 shrink-0" />
                     {novoLabel}
                   </button>
+                  )}
                 </div>
               </div>
             </CardHeader>
@@ -1003,7 +1014,9 @@ export default function GestaoOsLocaisPageClient() {
                             <>
                               <th className={`${cadastroListClasses.th} !pl-2 sm:!pl-3`}>Nome</th>
                               <th className={`${cadastroListClasses.thCenter} w-28`}>Código</th>
-                              <th className={cadastroListClasses.thRight}>Ação</th>
+                              {showActions ? (
+                                <th className={cadastroListClasses.thRight}>Ação</th>
+                              ) : null}
                             </>
                           ) : null}
                           {tab === 'setores' ? (
@@ -1011,7 +1024,9 @@ export default function GestaoOsLocaisPageClient() {
                               <th className={`${cadastroListClasses.th} !pl-2 sm:!pl-3`}>Nome</th>
                               <th className={`${cadastroListClasses.thCenter} w-28`}>Código</th>
                               <th className={cadastroListClasses.thCenter}>Prédio</th>
-                              <th className={cadastroListClasses.thRight}>Ação</th>
+                              {showActions ? (
+                                <th className={cadastroListClasses.thRight}>Ação</th>
+                              ) : null}
                             </>
                           ) : null}
                           {tab === 'locais' ? (
@@ -1020,7 +1035,9 @@ export default function GestaoOsLocaisPageClient() {
                               <th className={`${cadastroListClasses.thCenter} w-28`}>Código</th>
                               <th className={cadastroListClasses.thCenter}>Andar</th>
                               <th className={cadastroListClasses.thCenter}>Prédio</th>
-                              <th className={cadastroListClasses.thRight}>Ação</th>
+                              {showActions ? (
+                                <th className={cadastroListClasses.thRight}>Ação</th>
+                              ) : null}
                             </>
                           ) : null}
                           {tab === 'ativos' ? (
@@ -1029,7 +1046,9 @@ export default function GestaoOsLocaisPageClient() {
                               <th className={`${cadastroListClasses.thCenter} w-28`}>Código</th>
                               <th className={`${cadastroListClasses.thCenter} w-36`}>Categoria</th>
                               <th className={cadastroListClasses.th}>Local</th>
-                              <th className={cadastroListClasses.thRight}>Ação</th>
+                              {showActions ? (
+                                <th className={cadastroListClasses.thRight}>Ação</th>
+                              ) : null}
                             </>
                           ) : null}
                         </tr>
@@ -1059,12 +1078,14 @@ export default function GestaoOsLocaisPageClient() {
                                   </ListRowNavigableLabel>
                                 </td>
                                 <td className={cadastroListClasses.tdCenter}>{r.code || '—'}</td>
-                                <RowActionMenuCell
-                                  isOpen={isRowMenuOpen(r.id)}
-                                  onToggle={(e) =>
-                                    toggleRowActionMenu(r.id, e.currentTarget as HTMLButtonElement)
-                                  }
-                                />
+                                {showActions ? (
+                                  <RowActionMenuCell
+                                    isOpen={isRowMenuOpen(r.id)}
+                                    onToggle={(e) =>
+                                      toggleRowActionMenu(r.id, e.currentTarget as HTMLButtonElement)
+                                    }
+                                  />
+                                ) : null}
                               </tr>
                             ))
                           : null}
@@ -1095,12 +1116,14 @@ export default function GestaoOsLocaisPageClient() {
                                 <td className={cadastroListClasses.tdCenter}>
                                   <span className="block truncate">{r.buildingName}</span>
                                 </td>
-                                <RowActionMenuCell
-                                  isOpen={isRowMenuOpen(r.id)}
-                                  onToggle={(e) =>
-                                    toggleRowActionMenu(r.id, e.currentTarget as HTMLButtonElement)
-                                  }
-                                />
+                                {showActions ? (
+                                  <RowActionMenuCell
+                                    isOpen={isRowMenuOpen(r.id)}
+                                    onToggle={(e) =>
+                                      toggleRowActionMenu(r.id, e.currentTarget as HTMLButtonElement)
+                                    }
+                                  />
+                                ) : null}
                               </tr>
                             ))
                           : null}
@@ -1134,12 +1157,14 @@ export default function GestaoOsLocaisPageClient() {
                                 <td className={cadastroListClasses.tdCenter}>
                                   <span className="block truncate">{r.buildingName}</span>
                                 </td>
-                                <RowActionMenuCell
-                                  isOpen={isRowMenuOpen(r.id)}
-                                  onToggle={(e) =>
-                                    toggleRowActionMenu(r.id, e.currentTarget as HTMLButtonElement)
-                                  }
-                                />
+                                {showActions ? (
+                                  <RowActionMenuCell
+                                    isOpen={isRowMenuOpen(r.id)}
+                                    onToggle={(e) =>
+                                      toggleRowActionMenu(r.id, e.currentTarget as HTMLButtonElement)
+                                    }
+                                  />
+                                ) : null}
                               </tr>
                             ))
                           : null}
@@ -1173,12 +1198,14 @@ export default function GestaoOsLocaisPageClient() {
                                     {r.buildingName} › {r.sectorName} › {r.placeName}
                                   </span>
                                 </td>
-                                <RowActionMenuCell
-                                  isOpen={isRowMenuOpen(r.id)}
-                                  onToggle={(e) =>
-                                    toggleRowActionMenu(r.id, e.currentTarget as HTMLButtonElement)
-                                  }
-                                />
+                                {showActions ? (
+                                  <RowActionMenuCell
+                                    isOpen={isRowMenuOpen(r.id)}
+                                    onToggle={(e) =>
+                                      toggleRowActionMenu(r.id, e.currentTarget as HTMLButtonElement)
+                                    }
+                                  />
+                                ) : null}
                               </tr>
                             ))
                           : null}
@@ -1192,7 +1219,7 @@ export default function GestaoOsLocaisPageClient() {
                 <RowActionMenuPortal
                   menu={rowActionMenu}
                   onClose={closeRowActionMenu}
-                  onEdit={() => {
+                  onEdit={canEdit ? () => {
                     if (tab === 'predios') {
                       const row = buildingRows.find((x) => x.id === rowForActionMenu.id);
                       if (row) openEditBuilding(row);
@@ -1206,15 +1233,15 @@ export default function GestaoOsLocaisPageClient() {
                       const row = assetRows.find((x) => x.id === rowForActionMenu.id);
                       if (row) openEditAsset(row);
                     }
-                  }}
-                  onDelete={() =>
+                  } : undefined}
+                  onDelete={canDelete ? () =>
                     openDeleteForRow(
                       rowForActionMenu.id,
                       'name' in rowForActionMenu
                         ? String((rowForActionMenu as { name?: string }).name ?? '')
                         : ''
                     )
-                  }
+                   : undefined}
                   extraItems={
                     tab === 'ativos'
                       ? [

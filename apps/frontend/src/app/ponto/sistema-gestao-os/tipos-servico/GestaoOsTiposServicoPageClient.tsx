@@ -19,6 +19,7 @@ import {
 } from '@/components/ui/RowActionMenu';
 import { ListRowNavigableLabel } from '@/components/ui/listTableUi';
 import { useRowActionMenu } from '@/hooks/useRowActionMenu';
+import { useCadastroCrudPermissions } from '@/hooks/useCadastroCrudPermissions';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
@@ -36,6 +37,8 @@ function emptyForm() {
 export default function GestaoOsTiposServicoPageClient() {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const { canCreate, canEdit, canDelete } = useCadastroCrudPermissions('/ponto/sistema-gestao-os/tipos-servico');
+  const showActions = canEdit || canDelete;
   const [searchTerm, setSearchTerm] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<GestaoOsServiceCategory | null>(null);
@@ -202,8 +205,16 @@ export default function GestaoOsTiposServicoPageClient() {
       checklistItems: formData.checklistText
     };
     if (editing) {
+      if (!canEdit) {
+        toast.error('Você não tem permissão para editar.');
+        return;
+      }
       updateMutation.mutate({ id: editing.id, data: payload });
     } else {
+      if (!canCreate) {
+        toast.error('Você não tem permissão para criar.');
+        return;
+      }
       createMutation.mutate(payload);
     }
   };
@@ -269,6 +280,7 @@ export default function GestaoOsTiposServicoPageClient() {
                       </button>
                     ) : null}
                   </div>
+                  {canCreate && (
                   <button
                     type="button"
                     onClick={openCreate}
@@ -277,6 +289,7 @@ export default function GestaoOsTiposServicoPageClient() {
                     <Plus className="h-4 w-4 shrink-0" />
                     Novo Tipo de Serviço
                   </button>
+                  )}
                 </div>
               </div>
             </CardHeader>
@@ -318,7 +331,9 @@ export default function GestaoOsTiposServicoPageClient() {
                           <th className={`${cadastroListClasses.th} w-28`}>Código</th>
                           <th className={cadastroListClasses.th}>Descrição</th>
                           <th className={`${cadastroListClasses.thCenter} w-28`}>Status</th>
-                          <th className={cadastroListClasses.thRight}>Ação</th>
+                          {showActions ? (
+                            <th className={cadastroListClasses.thRight}>Ação</th>
+                          ) : null}
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
@@ -361,12 +376,14 @@ export default function GestaoOsTiposServicoPageClient() {
                                 {row.isActive ? 'Ativo' : 'Inativo'}
                               </span>
                             </td>
-                            <RowActionMenuCell
-                              isOpen={isRowMenuOpen(row.id)}
-                              onToggle={(e) =>
-                                toggleRowActionMenu(row.id, e.currentTarget as HTMLButtonElement)
-                              }
-                            />
+                            {showActions ? (
+                              <RowActionMenuCell
+                                isOpen={isRowMenuOpen(row.id)}
+                                onToggle={(e) =>
+                                  toggleRowActionMenu(row.id, e.currentTarget as HTMLButtonElement)
+                                }
+                              />
+                            ) : null}
                           </tr>
                         ))}
                       </tbody>
@@ -378,9 +395,9 @@ export default function GestaoOsTiposServicoPageClient() {
                 <RowActionMenuPortal
                   menu={rowActionMenu}
                   onClose={closeRowActionMenu}
-                  onEdit={() => openEdit(rowForActionMenu)}
-                  onDelete={() => setDeleteTarget(rowForActionMenu)}
-                  extraItems={[
+                  onEdit={canEdit ? () => openEdit(rowForActionMenu) : undefined}
+                  onDelete={canDelete ? () => setDeleteTarget(rowForActionMenu) : undefined}
+                  extraItems={canEdit ? [
                     {
                       label: rowForActionMenu.isActive ? 'Desativar' : 'Ativar',
                       icon: <Power className="h-4 w-4 shrink-0" />,
@@ -391,7 +408,7 @@ export default function GestaoOsTiposServicoPageClient() {
                           isActive: !rowForActionMenu.isActive
                         })
                     }
-                  ]}
+                  ] : []}
                 />
               ) : null}
             </CardContent>

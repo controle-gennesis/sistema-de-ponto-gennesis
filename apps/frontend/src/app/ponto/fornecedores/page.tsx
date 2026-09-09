@@ -29,6 +29,7 @@ import {
 } from '@/components/ui/RowActionMenu';
 import { getListTableRowClassName, ListRowNavigableLabel } from '@/components/ui/listTableUi';
 import { useRowActionMenu } from '@/hooks/useRowActionMenu';
+import { useCadastroCrudPermissions } from '@/hooks/useCadastroCrudPermissions';
 import { Modal } from '@/components/ui/Modal';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { MainLayout } from '@/components/layout/MainLayout';
@@ -288,6 +289,8 @@ function supplierToForm(s: Supplier): SupplierFormState {
 export default function FornecedoresPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const { canCreate, canEdit, canDelete } = useCadastroCrudPermissions('/ponto/fornecedores');
+  const showActions = canEdit || canDelete;
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [searchTerm, setSearchTerm] = useState('');
@@ -432,8 +435,16 @@ export default function FornecedoresPage() {
       return;
     }
     if (editingSupplier) {
+      if (!canEdit) {
+        toast.error('Você não tem permissão para editar.');
+        return;
+      }
       updateMutation.mutate({ id: editingSupplier.id, data: formData });
     } else {
+      if (!canCreate) {
+        toast.error('Você não tem permissão para criar.');
+        return;
+      }
       createMutation.mutate(formData);
     }
   };
@@ -508,6 +519,10 @@ export default function FornecedoresPage() {
   };
 
   const handleImport = async () => {
+    if (!canCreate) {
+      toast.error('Você não tem permissão para importar.');
+      return;
+    }
     try {
       const suppliers = JSON.parse(importData);
       if (!Array.isArray(suppliers) || suppliers.length === 0) {
@@ -732,6 +747,7 @@ export default function FornecedoresPage() {
                       <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
                     ) : null}
                   </button>
+                  {canCreate && (
                   <button
                     type="button"
                     onClick={() => {
@@ -747,6 +763,8 @@ export default function FornecedoresPage() {
                     <Upload className="h-4 w-4 shrink-0" />
                     <span>Importar</span>
                   </button>
+                  )}
+                  {canCreate && (
                   <button
                     type="button"
                     onClick={() => {
@@ -759,6 +777,7 @@ export default function FornecedoresPage() {
                     <Plus className="h-4 w-4 shrink-0" />
                     <span>Novo Fornecedor</span>
                   </button>
+                  )}
                 </div>
               </div>
             </CardHeader>
@@ -812,7 +831,9 @@ export default function FornecedoresPage() {
                           <th scope="col" className={cadastroListClasses.thCenter}>CPF/CNPJ</th>
                           <th scope="col" className={cadastroListClasses.thCenter}>Categoria</th>
                           <th scope="col" className={cadastroListClasses.thCenter}>Ativo</th>
-                          <th scope="col" className={cadastroListClasses.thRight}>Ação</th>
+                          {showActions ? (
+                            <th scope="col" className={cadastroListClasses.thRight}>Ação</th>
+                          ) : null}
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
@@ -849,12 +870,14 @@ export default function FornecedoresPage() {
                                 {s.isActive ? 'Sim' : 'Não'}
                               </span>
                             </td>
-                            <RowActionMenuCell
-                              isOpen={isRowMenuOpen(s.id)}
-                              onToggle={(e) =>
-                                toggleRowActionMenu(s.id, e.currentTarget as HTMLButtonElement)
-                              }
-                            />
+                            {showActions ? (
+                              <RowActionMenuCell
+                                isOpen={isRowMenuOpen(s.id)}
+                                onToggle={(e) =>
+                                  toggleRowActionMenu(s.id, e.currentTarget as HTMLButtonElement)
+                                }
+                              />
+                            ) : null}
                           </tr>
                         ))}
                       </tbody>
@@ -872,8 +895,8 @@ export default function FornecedoresPage() {
                 <RowActionMenuPortal
                   menu={rowActionMenu}
                   onClose={closeRowActionMenu}
-                  onEdit={() => handleEdit(rowForActionMenu)}
-                  onDelete={() => setShowDeleteModal(rowForActionMenu.id)}
+                  onEdit={canEdit ? () => handleEdit(rowForActionMenu) : undefined}
+                  onDelete={canDelete ? () => setShowDeleteModal(rowForActionMenu.id) : undefined}
                 />
               )}
             </CardContent>

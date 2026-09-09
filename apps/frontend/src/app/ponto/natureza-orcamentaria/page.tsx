@@ -7,6 +7,7 @@ import { Plus, Upload, Search, X, Download, BookPlus, FileSpreadsheet, CheckCirc
 import { CadastroListEmpty, CadastroListLoading, CadastroListSummary, formatCadastroListId } from '@/components/ui/CadastroListSummary';
 import { RowActionMenuCell, RowActionMenuPortal, cadastroListClasses, listTableRowClasses } from '@/components/ui/RowActionMenu';
 import { useRowActionMenu } from '@/hooks/useRowActionMenu';
+import { useCadastroCrudPermissions } from '@/hooks/useCadastroCrudPermissions';
 import * as XLSX from 'xlsx';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
@@ -26,6 +27,8 @@ interface BudgetNature {
 export default function NaturezaOrcamentariaPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const { canCreate, canEdit, canDelete } = useCadastroCrudPermissions('/ponto/natureza-orcamentaria');
+  const showActions = canEdit || canDelete;
   const [searchTerm, setSearchTerm] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [editingItem, setEditingItem] = useState<BudgetNature | null>(null);
@@ -120,8 +123,16 @@ export default function NaturezaOrcamentariaPage() {
       return;
     }
     if (editingItem) {
+      if (!canEdit) {
+        toast.error('Você não tem permissão para editar.');
+        return;
+      }
       updateMutation.mutate({ id: editingItem.id, data: { name: formData.name.trim(), code: formData.code.trim() || undefined } });
     } else {
+      if (!canCreate) {
+        toast.error('Você não tem permissão para criar.');
+        return;
+      }
       createMutation.mutate({ name: formData.name.trim(), code: formData.code.trim() || undefined });
     }
   };
@@ -145,6 +156,10 @@ export default function NaturezaOrcamentariaPage() {
   };
 
   const handleImport = async () => {
+    if (!canCreate) {
+      toast.error('Você não tem permissão para importar.');
+      return;
+    }
     if (!file) {
       toast.error('Selecione um arquivo');
       return;
@@ -310,6 +325,7 @@ export default function NaturezaOrcamentariaPage() {
                       className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
                     />
                   </div>
+                  {canCreate && (
                   <button
                     type="button"
                     onClick={() => setIsImportOpen(true)}
@@ -318,6 +334,8 @@ export default function NaturezaOrcamentariaPage() {
                     <Upload className="h-4 w-4 shrink-0" />
                     <span>Importar</span>
                   </button>
+                  )}
+                  {canCreate && (
                   <button
                     type="button"
                     onClick={() => { setShowForm(true); setEditingItem(null); setFormData({ code: '', name: '' }); }}
@@ -326,6 +344,7 @@ export default function NaturezaOrcamentariaPage() {
                     <Plus className="h-4 w-4 shrink-0" />
                     <span>Nova Natureza</span>
                   </button>
+                  )}
                 </div>
               </div>
             </CardHeader>
@@ -357,7 +376,9 @@ export default function NaturezaOrcamentariaPage() {
                       <tr>
                         <th className={cadastroListClasses.th}>ID</th>
                         <th className={cadastroListClasses.th}>Natureza Orçamentária</th>
-                        <th className={cadastroListClasses.thRight}>Ação</th>
+                        {showActions ? (
+                          <th className={cadastroListClasses.thRight}>Ação</th>
+                        ) : null}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
@@ -369,12 +390,14 @@ export default function NaturezaOrcamentariaPage() {
                           <td className="px-3 py-4 sm:px-6">
                             <span className="text-sm text-gray-900 dark:text-gray-100">{it.name}</span>
                           </td>
-                          <RowActionMenuCell
-                            isOpen={isRowMenuOpen(it.id)}
-                            onToggle={(e) =>
-                              toggleRowActionMenu(it.id, e.currentTarget as HTMLButtonElement)
-                            }
-                          />
+                          {showActions ? (
+                            <RowActionMenuCell
+                              isOpen={isRowMenuOpen(it.id)}
+                              onToggle={(e) =>
+                                toggleRowActionMenu(it.id, e.currentTarget as HTMLButtonElement)
+                              }
+                            />
+                          ) : null}
                         </tr>
                       ))}
                     </tbody>
@@ -386,8 +409,8 @@ export default function NaturezaOrcamentariaPage() {
                 <RowActionMenuPortal
                   menu={rowActionMenu}
                   onClose={closeRowActionMenu}
-                  onEdit={() => handleEdit(rowForActionMenu)}
-                  onDelete={() => setShowDeleteId(rowForActionMenu.id)}
+                  onEdit={canEdit ? () => handleEdit(rowForActionMenu) : undefined}
+                  onDelete={canDelete ? () => setShowDeleteId(rowForActionMenu.id) : undefined}
                 />
               )}
             </CardContent>
