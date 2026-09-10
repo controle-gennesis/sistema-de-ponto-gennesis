@@ -35,7 +35,7 @@ const SUB_PATH_TITLES: Record<string, string> = {
   faturamento: 'Faturamento',
   relatorios: 'Relatórios Fotográficos',
   'acompanhamento-mensal': 'Relatório Mensal',
-  reunioes: 'Reuniões Quinzenais',
+  reunioes: 'Reuniões de Contrato',
 };
 
 const MODULES_BY_HREF_LENGTH = [...PERMISSION_MODULES].sort(

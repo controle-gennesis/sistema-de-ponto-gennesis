@@ -13,6 +13,7 @@ import {
   ExternalLink,
 } from 'lucide-react';
 import { Modal, useModalRequestClose } from '@/components/ui/Modal';
+import { ModalCloseConfirm } from '@/components/ui/ModalCloseConfirm';
 import { Loading } from '@/components/ui/Loading';
 import { DatePickerField } from '@/components/ui/DatePickerField';
 import { DateTimePickerField } from '@/components/ui/DateTimePickerField';
@@ -670,12 +671,15 @@ function QuestionField({
   );
 }
 
-function ReuniaoFormCloseButton() {
+function ReuniaoFormCloseButton({ onClick }: { onClick?: () => void }) {
   const requestClose = useModalRequestClose();
   return (
     <button
       type="button"
-      onClick={() => requestClose?.()}
+      onClick={() => {
+        if (onClick) onClick();
+        else requestClose?.();
+      }}
       className="shrink-0 rounded-lg p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-300"
       aria-label="Fechar"
     >
@@ -692,6 +696,11 @@ type Props = {
   reuniaoId: string | null;
   /** Atualiza a linha na lista em tempo real */
   onListPatch?: (reuniaoId: string, patch: ReuniaoListPatch) => void;
+  /**
+   * `inline`: formulário no painel da página (tela dividida).
+   * `modal`: overlay em tela cheia (comportamento original).
+   */
+  variant?: 'modal' | 'inline';
 };
 
 function ReuniaoAnexosSection({
@@ -844,14 +853,17 @@ export function ReuniaoFormModal({
   kind,
   reuniaoId,
   onListPatch,
+  variant = 'modal',
 }: Props) {
   const queryClient = useQueryClient();
   const [form, setForm] = useState<ReuniaoData>(EMPTY_DATA);
   const [saving, setSaving] = useState(false);
   const [hydrated, setHydrated] = useState(false);
   const [activeFillStep, setActiveFillStep] = useState(0);
+  const [confirmInlineClose, setConfirmInlineClose] = useState(false);
   const seededRef = useRef(false);
   const hydratedReuniaoIdRef = useRef<string | null>(null);
+  const compact = variant === 'inline';
 
   const { data: templateRes, isLoading: loadingTemplate } = useQuery({
     queryKey: ['reuniao-template'],
@@ -907,6 +919,7 @@ export function ReuniaoFormModal({
       setForm(EMPTY_DATA);
       setSaving(false);
       setActiveFillStep(0);
+      setConfirmInlineClose(false);
       return;
     }
   }, [isOpen]);
@@ -1146,11 +1159,11 @@ export function ReuniaoFormModal({
           <p className="text-sm text-gray-500 dark:text-gray-400">{section.description}</p>
         ) : null}
       </div>
-      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+      <div className={`grid grid-cols-1 gap-5 ${compact ? '' : 'sm:grid-cols-2'}`}>
         {section.questions.map((q) => {
           const full = resolveFieldWidth(q as FormQuestion) === 'full';
           return (
-            <div key={q.id} className={`min-w-0 ${full ? 'sm:col-span-2' : ''}`}>
+            <div key={q.id} className={`min-w-0 ${!compact && full ? 'sm:col-span-2' : ''}`}>
               <QuestionField
                 question={q}
                 answer={form.answers[q.id]}
@@ -1175,6 +1188,117 @@ export function ReuniaoFormModal({
     </section>
   );
 
+  const formBody = loading ? (
+    <div className={compact ? 'py-10' : 'py-16'}>
+      <Loading message="Carregando formulário…" size="md" />
+    </div>
+  ) : (
+    <div className={compact ? 'space-y-6 pb-2' : 'space-y-8 pb-2'}>
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0 flex-1">
+          <h2
+            className={
+              compact
+                ? 'text-lg font-bold text-gray-900 dark:text-gray-100 sm:text-xl'
+                : 'text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl'
+            }
+          >
+            {formTitle}
+          </h2>
+          {formDescription ? (
+            <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">{formDescription}</p>
+          ) : null}
+        </div>
+        <ReuniaoFormCloseButton onClick={compact ? () => setConfirmInlineClose(true) : undefined} />
+      </div>
+
+      <div className={compact ? 'space-y-6' : 'space-y-8'}>
+        {multiStep ? (
+          <FormStepsStepper
+            steps={formSteps.map((step, index) => ({
+              id: step.id,
+              label: step.title.trim() || `Etapa ${index + 1}`,
+            }))}
+            currentIndex={activeFillStep}
+            mode="progress"
+            onSelect={handleStepSelect}
+          />
+        ) : null}
+
+        {visibleSections.length > 0 ? (
+          visibleSections.map(renderSection)
+        ) : (
+          <p className="py-8 text-center text-sm text-gray-500 dark:text-gray-400">
+            Nenhuma pergunta neste formulário.
+          </p>
+        )}
+
+        {kind === 'semanal' && reuniaoId ? (
+          <ReuniaoAnexosSection
+            contractId={contractId}
+            kind={kind}
+            reuniaoId={reuniaoId}
+            ata={form.ata}
+            video={form.video}
+            onAnexoChange={(tipo, value) =>
+              updateForm((prev) => ({ ...prev, [tipo]: value }))
+            }
+          />
+        ) : null}
+      </div>
+
+      <div className="flex justify-end gap-2 border-t border-gray-200 pt-6 dark:border-gray-700">
+        {multiStep && activeFillStep > 0 ? (
+          <button
+            type="button"
+            onClick={() => setActiveFillStep((prev) => Math.max(prev - 1, 0))}
+            disabled={saving}
+            className="inline-flex h-10 items-center rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-800 transition-colors hover:bg-gray-50 disabled:opacity-60 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
+          >
+            Anterior
+          </button>
+        ) : null}
+        {multiStep && activeFillStep < formSteps.length - 1 ? (
+          <button
+            type="button"
+            onClick={handleNextStep}
+            disabled={saving}
+            className="inline-flex h-10 items-center rounded-lg bg-red-600 px-5 text-sm font-semibold text-white transition-colors hover:bg-red-700 disabled:opacity-60"
+          >
+            Próxima etapa
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => void handleFinish()}
+            disabled={saving}
+            className="inline-flex h-10 items-center gap-2 rounded-lg bg-red-600 px-5 text-sm font-semibold text-white transition-colors hover:bg-red-700 disabled:opacity-60"
+          >
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            Salvar
+          </button>
+        )}
+      </div>
+    </div>
+  );
+
+  if (variant === 'inline') {
+    if (!isOpen) return null;
+    return (
+      <>
+        {formBody}
+        <ModalCloseConfirm
+          isOpen={confirmInlineClose}
+          onCancel={() => setConfirmInlineClose(false)}
+          onConfirm={() => {
+            setConfirmInlineClose(false);
+            onClose();
+          }}
+        />
+      </>
+    );
+  }
+
   return (
     <Modal
       isOpen={isOpen}
@@ -1186,95 +1310,7 @@ export function ReuniaoFormModal({
       confirmBeforeClose
       showCloseButton={false}
     >
-      {loading ? (
-        <div className="py-16">
-          <Loading message="Carregando formulário…" size="md" />
-        </div>
-      ) : (
-        <div className="space-y-8 pb-2">
-          <div className="flex items-start justify-between gap-4">
-            <div className="min-w-0 flex-1">
-              <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
-                {formTitle}
-              </h2>
-              {formDescription ? (
-                <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
-                  {formDescription}
-                </p>
-              ) : null}
-            </div>
-            <ReuniaoFormCloseButton />
-          </div>
-
-          <div className="space-y-8">
-            {multiStep ? (
-              <FormStepsStepper
-                steps={formSteps.map((step, index) => ({
-                  id: step.id,
-                  label: step.title.trim() || `Etapa ${index + 1}`,
-                }))}
-                currentIndex={activeFillStep}
-                mode="progress"
-                onSelect={handleStepSelect}
-              />
-            ) : null}
-
-            {visibleSections.length > 0 ? (
-              visibleSections.map(renderSection)
-            ) : (
-              <p className="py-8 text-center text-sm text-gray-500 dark:text-gray-400">
-                Nenhuma pergunta neste formulário.
-              </p>
-            )}
-
-            {kind === 'semanal' && reuniaoId ? (
-              <ReuniaoAnexosSection
-                contractId={contractId}
-                kind={kind}
-                reuniaoId={reuniaoId}
-                ata={form.ata}
-                video={form.video}
-                onAnexoChange={(tipo, value) =>
-                  updateForm((prev) => ({ ...prev, [tipo]: value }))
-                }
-              />
-            ) : null}
-          </div>
-
-          <div className="flex justify-end gap-2 border-t border-gray-200 pt-6 dark:border-gray-700">
-            {multiStep && activeFillStep > 0 ? (
-              <button
-                type="button"
-                onClick={() => setActiveFillStep((prev) => Math.max(prev - 1, 0))}
-                disabled={saving}
-                className="inline-flex h-10 items-center rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-800 transition-colors hover:bg-gray-50 disabled:opacity-60 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
-              >
-                Anterior
-              </button>
-            ) : null}
-            {multiStep && activeFillStep < formSteps.length - 1 ? (
-              <button
-                type="button"
-                onClick={handleNextStep}
-                disabled={saving}
-                className="inline-flex h-10 items-center rounded-lg bg-red-600 px-5 text-sm font-semibold text-white transition-colors hover:bg-red-700 disabled:opacity-60"
-              >
-                Próxima etapa
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => void handleFinish()}
-                disabled={saving}
-                className="inline-flex h-10 items-center gap-2 rounded-lg bg-red-600 px-5 text-sm font-semibold text-white transition-colors hover:bg-red-700 disabled:opacity-60"
-              >
-                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                Salvar
-              </button>
-            )}
-          </div>
-        </div>
-      )}
+      {formBody}
     </Modal>
   );
 }

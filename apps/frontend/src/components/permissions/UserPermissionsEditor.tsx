@@ -58,7 +58,16 @@ type ContractModuleFlags = {
   relatorios: boolean;
   ordemServico: boolean;
   producaoSemanal: boolean;
+  reunioes: boolean;
 };
+
+const emptyContractModuleFlags = (): ContractModuleFlags => ({
+  orcamento: false,
+  relatorios: false,
+  ordemServico: false,
+  producaoSemanal: false,
+  reunioes: false,
+});
 
 type UserPermissionPayload = {
   user: {
@@ -135,7 +144,7 @@ function serializeModuleFlags(flags: Record<string, ContractModuleFlags>): strin
     .sort()
     .map((id) => {
       const f = flags[id];
-      return `${id}:${f.orcamento ? 1 : 0}${f.relatorios ? 1 : 0}${f.ordemServico ? 1 : 0}${f.producaoSemanal ? 1 : 0}`;
+      return `${id}:${f.orcamento ? 1 : 0}${f.relatorios ? 1 : 0}${f.ordemServico ? 1 : 0}${f.producaoSemanal ? 1 : 0}${f.reunioes ? 1 : 0}`;
     })
     .join(',');
 }
@@ -801,15 +810,9 @@ export function UserPermissionsEditor({
     const nextRestrictedCc = new Set(userPermissionData.restrictedDpApprovalCostCenterIds ?? []);
     const nextViewCc = new Set(userPermissionData.dpRequestViewCostCenterIds ?? []);
     const rawFlags = userPermissionData.contractModuleFlags ?? {};
-    const emptyFlags = (): ContractModuleFlags => ({
-      orcamento: false,
-      relatorios: false,
-      ordemServico: false,
-      producaoSemanal: false,
-    });
     const nextFlags: Record<string, ContractModuleFlags> = {};
     for (const id of Array.from(nextContractIds)) {
-      nextFlags[id] = rawFlags[id] ?? emptyFlags();
+      nextFlags[id] = rawFlags[id] ?? emptyContractModuleFlags();
     }
     const nextCadastroCrud = parseCadastroCrudFromPerms(perms);
     setSelectedSet(next);
@@ -1314,12 +1317,7 @@ export function UserPermissionsEditor({
         n.add(contractId);
         setContractModuleFlags((f) => ({
           ...f,
-          [contractId]: f[contractId] ?? {
-            orcamento: false,
-            relatorios: false,
-            ordemServico: false,
-            producaoSemanal: false,
-          },
+          [contractId]: f[contractId] ?? emptyContractModuleFlags(),
         }));
       }
       return n;
@@ -1331,12 +1329,7 @@ export function UserPermissionsEditor({
       setSelectedContractIds((prev) => new Set(prev).add(contractId));
     }
     setContractModuleFlags((prev) => {
-      const current = prev[contractId] ?? {
-        orcamento: false,
-        relatorios: false,
-        ordemServico: false,
-        producaoSemanal: false,
-      };
+      const current = prev[contractId] ?? emptyContractModuleFlags();
       return { ...prev, [contractId]: { ...current, [key]: value } };
     });
   };
@@ -1397,15 +1390,9 @@ export function UserPermissionsEditor({
     const nextRestrictedCc = new Set(source.restrictedDpApprovalCostCenterIds ?? []);
     const nextViewCc = new Set(source.dpRequestViewCostCenterIds ?? []);
     const rawFlags = source.contractModuleFlags ?? {};
-    const emptyFlags = (): ContractModuleFlags => ({
-      orcamento: false,
-      relatorios: false,
-      ordemServico: false,
-      producaoSemanal: false,
-    });
     const nextFlags: Record<string, ContractModuleFlags> = {};
     for (const id of Array.from(nextContractIds)) {
-      nextFlags[id] = rawFlags[id] ?? emptyFlags();
+      nextFlags[id] = rawFlags[id] ?? emptyContractModuleFlags();
     }
     setSelectedSet(next);
     setContractActionsSet(nextContract);
@@ -1489,12 +1476,7 @@ export function UserPermissionsEditor({
     const nextDp = new Set(Array.from(rawDp).filter((id) => nextContractIds.has(id)));
     const sourceHasContractsModule = (source.permissions || []).some((p) => p.module === CONTRACTS_MODULE_KEY);
     const srcFlags = source.contractModuleFlags ?? {};
-    const defaultFlags: ContractModuleFlags = {
-      orcamento: false,
-      relatorios: false,
-      ordemServico: false,
-      producaoSemanal: false,
-    };
+    const defaultFlags: ContractModuleFlags = emptyContractModuleFlags();
     const nextFlags: Record<string, ContractModuleFlags> = {};
     for (const id of Array.from(nextContractIds)) {
       nextFlags[id] = srcFlags[id] ?? { ...defaultFlags };
@@ -2025,7 +2007,7 @@ export function UserPermissionsEditor({
             ) : (
               <div>
                 <div className="overflow-x-auto overscroll-x-contain">
-                  <table className="w-full min-w-[760px] text-sm">
+                  <table className="w-full min-w-[960px] text-sm">
                     <thead>
                       <tr className="border-b border-gray-100 align-bottom dark:border-gray-700/80">
                         <th
@@ -2075,18 +2057,20 @@ export function UserPermissionsEditor({
                         >
                           Prod. Sem.
                         </th>
+                        <th
+                          scope="col"
+                          className="px-1 pb-3 text-center text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-400 dark:text-gray-500"
+                          title="Acesso à aba Reuniões (quinzenais). Relatório Mensal fica liberado com o contrato."
+                        >
+                          Reuniões
+                        </th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100 dark:divide-gray-700/60">
                       {contractsList.map((c) => {
                         const liberado = selectedContractIds.has(c.id);
                         const gestorDp = selectedDpApprovalContractIds.has(c.id);
-                        const flags = contractModuleFlags[c.id] ?? {
-                          orcamento: false,
-                          relatorios: false,
-                          ordemServico: false,
-                          producaoSemanal: false,
-                        };
+                        const flags = contractModuleFlags[c.id] ?? emptyContractModuleFlags();
                         return (
                           <tr
                             key={c.id}
@@ -2167,6 +2151,15 @@ export function UserPermissionsEditor({
                                   checked={flags.producaoSemanal}
                                   onCheckedChange={(next) => setContractModuleFlag(c.id, 'producaoSemanal', next)}
                                   aria-label={`Produção Semanal — ${c.name}`}
+                                />
+                              </div>
+                            </td>
+                            <td className="px-1 py-3.5 text-center align-middle">
+                              <div className="flex justify-center">
+                                <PermissionMatrixCheckbox
+                                  checked={flags.reunioes}
+                                  onCheckedChange={(next) => setContractModuleFlag(c.id, 'reunioes', next)}
+                                  aria-label={`Reuniões — ${c.name}`}
                                 />
                               </div>
                             </td>

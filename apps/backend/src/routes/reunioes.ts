@@ -1,6 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import multer from 'multer';
 import { authenticate } from '../middleware/auth';
+import { assertContractAccess, assertContractModulePermission } from '../lib/contractAccess';
 import { ReuniaoController, parseReuniaoKindParam } from '../controllers/ReuniaoController';
 
 const router = Router();
@@ -55,7 +56,20 @@ router.post('/template/reset', (req, res, next) => controller.resetTemplate(req 
 router.get('/mensal/overview', (req, res, next) => controller.getMensalOverview(req as any, res, next));
 router.get('/semanal/overview', (req, res, next) => controller.getSemanalOverview(req as any, res, next));
 
-router.use('/:contractId/:kind', parseReuniaoKindParam);
+router.use('/:contractId/:kind', parseReuniaoKindParam, async (req, res, next) => {
+  try {
+    const kind = (req as { reuniaoKind?: 'mensal' | 'semanal' }).reuniaoKind;
+    const contractId = req.params.contractId;
+    if (kind === 'semanal') {
+      await assertContractModulePermission(req as any, contractId, 'reunioes');
+    } else {
+      await assertContractAccess(req as any, contractId);
+    }
+    next();
+  } catch (err) {
+    next(err);
+  }
+});
 
 router.get('/:contractId/:kind', (req, res, next) => controller.getList(req as any, res, next));
 router.get('/:contractId/:kind/config', (req, res, next) => controller.getConfig(req as any, res, next));

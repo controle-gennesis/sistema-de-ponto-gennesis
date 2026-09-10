@@ -38,6 +38,7 @@ import { Button } from '@/components/ui/Button';
 import { TableCheckbox } from '@/components/ui/Checkbox';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { cadastroListClasses, RowActionMenuCell, RowActionMenuPortal } from '@/components/ui/RowActionMenu';
+import { CONTRACT_PAGE_ACCENTS, CONTRACT_PAGE_SURFACE } from '@/lib/contractPageSurface';
 import { listTableRowClasses, rowActionMenuButtonClass } from '@/components/ui/listTableUi';
 import { CadastroListSummary, getCadastroListRange } from '@/components/ui/CadastroListSummary';
 import { ListPagination } from '@/components/ui/ListPagination';
@@ -608,11 +609,12 @@ export function ContractHistoricoPleitosPanel({ contractId }: { contractId: stri
 
   return (
     <>
-      <Card>
-        <CardHeader className={cadastroListClasses.cardHeader}>
+      <Card className={CONTRACT_PAGE_SURFACE}>
+        <div className={`pointer-events-none absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${CONTRACT_PAGE_ACCENTS.indigo}`} />
+        <CardHeader className={`${cadastroListClasses.cardHeader} !pt-5`}>
           <div className={cadastroListClasses.cardHeaderRow}>
             <div className={cadastroListClasses.cardHeaderIconRow}>
-              <div className="rounded-lg bg-violet-100 p-2 sm:p-3 dark:bg-violet-900/30">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-violet-100 text-violet-600 ring-1 ring-violet-200/80 dark:bg-violet-500/15 dark:text-violet-300 dark:ring-violet-400/20">
                 <FileText className="h-5 w-5 text-violet-600 dark:text-violet-400 sm:h-6 sm:w-6" />
               </div>
               <div className="min-w-0">

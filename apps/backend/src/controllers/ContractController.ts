@@ -435,8 +435,9 @@ export class ContractController {
             where: year
               ? {
                   fillingDate: {
-                    gte: new Date(filterYear, 0, 1),
-                    lt: new Date(filterYear + 1, 0, 1)
+                    // Semana = preenchimento + 7 dias
+                    gte: new Date(filterYear, 0, 1 - 7),
+                    lt: new Date(filterYear + 1, 0, 1 - 7)
                   }
                 }
               : undefined,
@@ -512,7 +513,11 @@ export class ContractController {
         : Array.from(
             new Set<number>([
               ...allBillingsDates.map((b) => new Date(b.issueDate).getFullYear()),
-              ...allProductionsDates.map((p) => new Date(p.fillingDate).getFullYear()),
+              ...allProductionsDates.map((p) => {
+                const d = new Date(p.fillingDate);
+                d.setDate(d.getDate() + 7);
+                return d.getFullYear();
+              }),
               new Date().getFullYear(),
               ...(yearValid ? [yearParam as number] : [])
             ])

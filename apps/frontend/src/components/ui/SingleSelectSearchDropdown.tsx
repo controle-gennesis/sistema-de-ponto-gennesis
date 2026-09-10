@@ -453,7 +453,24 @@ export function SingleSelectSearchDropdown({
         className="overflow-y-auto overflow-x-hidden px-2 py-2"
       >
         {options.length === 0 ? (
-          <p className="py-6 text-center text-sm text-gray-500 dark:text-gray-400">{emptyOptionsMessage}</p>
+          <div>
+            {allowEmpty && !search.trim() ? (
+              <button
+                type="button"
+                role="option"
+                aria-selected={!value}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => pickValue('')}
+                className={optionClassName(!value)}
+              >
+                <span className={`min-w-0 flex-1 ${disableSearch ? 'whitespace-nowrap' : 'truncate'}`}>
+                  {emptyOptionLabel}
+                </span>
+                {!value ? <Check className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" aria-hidden /> : null}
+              </button>
+            ) : null}
+            <p className="py-6 text-center text-sm text-gray-500 dark:text-gray-400">{emptyOptionsMessage}</p>
+          </div>
         ) : filtered.length === 0 ? (
           <p className="py-6 text-center text-sm text-gray-500 dark:text-gray-400">{emptySearchMessage}</p>
         ) : (

@@ -74,8 +74,13 @@ export async function assertContractAccess(req: AuthRequest, contractId: string)
   }
 }
 
-/** Flags da aba «Contratos» em permissões (orçamento, relatórios, OS, produção semanal). */
-export type ContractScopedModuleFlag = 'orcamento' | 'relatorios' | 'ordemServico' | 'producaoSemanal';
+/** Flags da aba «Contratos» em permissões (orçamento, relatórios, OS, produção semanal, reuniões). */
+export type ContractScopedModuleFlag =
+  | 'orcamento'
+  | 'relatorios'
+  | 'ordemServico'
+  | 'producaoSemanal'
+  | 'reunioes';
 
 export async function assertRecebimentoEntregasOnContract(
   req: AuthRequest,
@@ -107,6 +112,7 @@ export async function assertContractModulePermission(
       accessRelatorios: true,
       accessOrdemServico: true,
       accessProducaoSemanal: true,
+      accessReunioes: true,
     },
   });
 
@@ -117,17 +123,21 @@ export async function assertContractModulePermission(
         ? row?.accessRelatorios === true
         : module === 'ordemServico'
           ? row?.accessOrdemServico === true
-          : row?.accessProducaoSemanal === true;
+          : module === 'producaoSemanal'
+            ? row?.accessProducaoSemanal === true
+            : row?.accessReunioes === true;
 
   if (!ok) {
     const msg =
-      module === 'producaoSemanal'
-        ? 'Sem permissão de Produção Semanal neste contrato'
-        : module === 'ordemServico'
-          ? 'Sem permissão de Ordem de Serviço neste contrato'
-          : module === 'relatorios'
-            ? 'Sem permissão de Relatórios neste contrato'
-            : 'Sem permissão de Orçamento neste contrato';
+      module === 'reunioes'
+        ? 'Sem permissão da aba Reuniões neste contrato'
+        : module === 'producaoSemanal'
+          ? 'Sem permissão de Produção Semanal neste contrato'
+          : module === 'ordemServico'
+            ? 'Sem permissão de Ordem de Serviço neste contrato'
+            : module === 'relatorios'
+              ? 'Sem permissão de Relatórios neste contrato'
+              : 'Sem permissão de Orçamento neste contrato';
     throw createError(msg, 403);
   }
 }

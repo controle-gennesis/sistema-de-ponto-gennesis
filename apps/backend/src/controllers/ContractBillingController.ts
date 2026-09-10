@@ -73,12 +73,6 @@ export class ContractBillingController {
       if (!invoiceNumber?.trim()) {
         throw createError('Número da nota fiscal é obrigatório', 400);
       }
-      if (!serviceOrder?.trim()) {
-        throw createError('Ordem de serviço é obrigatória', 400);
-      }
-      if (!pleitoId?.trim()) {
-        throw createError('Selecione o pleito vinculado ao faturamento', 400);
-      }
 
       const gross = parseRequiredMoney(grossValue, 'Valor bruto');
       const net = parseRequiredMoney(netValue, 'Valor líquido');
@@ -90,41 +84,49 @@ export class ContractBillingController {
         throw createError('Contrato não encontrado', 404);
       }
 
-      const pleito = await prisma.pleito.findUnique({ where: { id: String(pleitoId).trim() } });
-      if (!pleito) {
+      const serviceOrderTrimmed = String(serviceOrder ?? '').trim();
+      const pleitoIdTrimmed = String(pleitoId ?? '').trim();
+
+      const pleito = pleitoIdTrimmed
+        ? await prisma.pleito.findUnique({ where: { id: pleitoIdTrimmed } })
+        : null;
+      if (pleitoIdTrimmed && !pleito) {
         throw createError('Pleito não encontrado', 404);
       }
 
-      const serviceOrderTrimmed = String(serviceOrder).trim();
-      const pleitoOs = (pleito.divSe || '').trim();
-      if (pleitoOs && pleitoOs !== serviceOrderTrimmed) {
+      const pleitoOs = (pleito?.divSe || '').trim();
+      if (pleito && pleitoOs && serviceOrderTrimmed && pleitoOs !== serviceOrderTrimmed) {
         throw createError('A OS/SE informada não corresponde ao pleito selecionado', 400);
       }
 
       const billing = await prisma.$transaction(async (tx) => {
-        await assertPleitoBillingAmount(tx, pleito, contractId, gross);
+        if (pleito) {
+          await assertPleitoBillingAmount(tx, pleito, contractId, gross);
+        }
 
         const created = await tx.contractBilling.create({
           data: {
             contractId,
-            pleitoId: pleito.id,
+            pleitoId: pleito?.id ?? null,
             issueDate: parseDateInput(issueDate),
             invoiceNumber: String(invoiceNumber).trim(),
             serviceOrder: serviceOrderTrimmed,
-            divSe: serviceOrderTrimmed,
+            divSe: serviceOrderTrimmed || null,
             grossValue: gross,
             netValue: net
           }
         });
 
-        await syncPleitoFromBillings(tx, pleito.id);
+        if (pleito) {
+          await syncPleitoFromBillings(tx, pleito.id);
 
-        const invoiceTrimmed = String(invoiceNumber).trim();
-        if (invoiceTrimmed) {
-          await tx.pleito.update({
-            where: { id: pleito.id },
-            data: { invoiceNumber: invoiceTrimmed }
-          });
+          const invoiceTrimmed = String(invoiceNumber).trim();
+          if (invoiceTrimmed) {
+            await tx.pleito.update({
+              where: { id: pleito.id },
+              data: { invoiceNumber: invoiceTrimmed }
+            });
+          }
         }
 
         return created;

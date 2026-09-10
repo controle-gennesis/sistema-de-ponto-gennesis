@@ -140,6 +140,7 @@ export function usePermissions() {
     relatorios: boolean;
     ordemServico: boolean;
     producaoSemanal: boolean;
+    reunioes: boolean;
   };
   const contractModuleFlags: Record<string, ContractModuleFlagRow> =
     (permissionData?.contractModuleFlags as Record<string, ContractModuleFlagRow> | undefined) ?? {};
@@ -462,6 +463,13 @@ export function usePermissions() {
     );
   };
 
+  const canAccessContractReunioesTab = (contractId: string) => {
+    if (isElevatedUser) return true;
+    return (
+      canAccessContract(contractId) && contractModuleFlags[contractId]?.reunioes === true
+    );
+  };
+
   const finalPermissions = {
     canAccessPayroll: can(pk('/ponto/folha-pagamento')) || can(pk('/relatorios/alocacao')),
     /** Acesso ao módulo Funcionários (inclui granularidade definida na tela de permissões). */
@@ -542,6 +550,7 @@ export function usePermissions() {
     canAccessRecebimentoEntregasRoutePage,
     canAccessContractOrcamentoTab,
     canAccessContractRelatoriosTab,
+    canAccessContractReunioesTab,
     canAccessContractOrdemServicoTab,
     canAccessContractProducaoSemanalTab,
     fluigApproverFullAccess,

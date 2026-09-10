@@ -110,7 +110,7 @@ export function getDateMonth(dateStr: string | null | undefined): number | null 
   return d.getMonth() + 1;
 }
 
-export function isPleitoHistorico(p: ContractPleitoHistorico): boolean {
+export function isPleitoHistorico(p: Pick<ContractPleitoHistorico, 'reportsBilling'>): boolean {
   const marker = (p.reportsBilling || '').trim();
   return marker === PLEITO_HISTORY_MARKER || marker.startsWith(PLEITO_HISTORY_MARKER);
 }
