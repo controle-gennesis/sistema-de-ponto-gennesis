@@ -71,6 +71,7 @@ import materialRequestRoutes from './routes/materialRequests';
 import financialAnalysisRoutes from './routes/financialAnalysis';
 import financialControlRoutes from './routes/financialControl';
 import extratoCaixaRoutes from './routes/extratoCaixa';
+import ocsBoletoPixRoutes from './routes/ocsBoletoPix';
 import controleNfsRoutes from './routes/controleNfs';
 import nfeRecebidasRoutes from './routes/nfeRecebidas';
 import controleGeralRoutes from './routes/controleGeral';
@@ -86,6 +87,7 @@ import toolRentalRequestRoutes from './routes/toolRentalRequests';
 import paymentConditionRoutes from './routes/paymentConditions';
 import purchaseOrderRoutes from './routes/purchaseOrders';
 import budgetNatureRoutes from './routes/budgetNatures';
+import obraRoutes from './routes/obras';
 import orcamentoRoutes from './routes/orcamento';
 import pleitoRoutes from './routes/pleitos';
 import demandSheetApprovalRoutes from './routes/demandSheetApprovals';
@@ -387,6 +389,7 @@ app.use('/api/material-requests', materialRequestRoutes);
 app.use('/api/financial-analysis', financialAnalysisRoutes);
 app.use('/api/financial-control', financialControlRoutes);
 app.use('/api/extrato-caixa', extratoCaixaRoutes);
+app.use('/api/ocs-boleto-pix', ocsBoletoPixRoutes);
 app.use('/api/controle-nfs', controleNfsRoutes);
 app.use('/api/nfe-recebidas', nfeRecebidasRoutes);
 /** Teto orçamentário mensal (Controle Geral de Contratos). */
@@ -404,6 +407,7 @@ app.use('/api/payment-conditions', paymentConditionRoutes);
 app.use('/api/purchase-orders', purchaseOrderRoutes);
 app.use('/api/quote-maps', quoteMapRoutes);
 app.use('/api/budget-natures', budgetNatureRoutes);
+app.use('/api/obras', obraRoutes);
 app.use('/api/orcamento', orcamentoRoutes);
 app.use('/api/pleitos', pleitoRoutes);
 app.use('/api/demand-sheet-approvals', demandSheetApprovalRoutes);
@@ -580,14 +584,18 @@ try {
 
     // Pré-aquecer os datasets Fluig em background para carregamento instantâneo
     if (process.env.FLUIG_CONSUMER_KEY && process.env.FLUIG_ACCESS_TOKEN) {
-      const FLUIG_APPROVAL_DATASETS = [
+      const FLUIG_WARM_DATASETS = [
         'Processos_Workflow_Aprovacao_G3',
         'Processos_Workflow_Aprovacao_G5',
+        'DataSet_G3FollowUp',
+        'DataSet_G4FollowUp',
+        'G5-Relatorio-DF-GO-TODOS-SETORES',
+        'G5-Relatorio-DF-GO-DP',
       ];
       // Aguarda 10s para o servidor estabilizar antes de chamar o Fluig
       setTimeout(() => {
-        void fluigService.warmupDatasets(FLUIG_APPROVAL_DATASETS);
-        fluigService.startPeriodicRefresh(FLUIG_APPROVAL_DATASETS, 8 * 60 * 1000);
+        void fluigService.warmupDatasets(FLUIG_WARM_DATASETS);
+        fluigService.startPeriodicRefresh(FLUIG_WARM_DATASETS, 8 * 60 * 1000);
       }, 10_000);
     }
   });

@@ -104,12 +104,22 @@ const FLUIG_APPROVAL_DATASET_IDS = [
   'Processos_Workflow_Aprovacao_G3',
   'Processos_Workflow_Aprovacao_G5',
 ];
+const FLUIG_PROCESSOS_DATASET_IDS = [
+  'DataSet_G3FollowUp',
+  'DataSet_G4FollowUp',
+  'G5-Relatorio-DF-GO-TODOS-SETORES',
+];
+const FLUIG_DP_DATASET_IDS = ['G5-Relatorio-DF-GO-DP'];
 const FLUIG_PREFETCH_HREFS = new Set([
   '/ponto/fluig/aprovacoes-workflow',
   '/ponto/fluig/aprovadores',
 ]);
+const FLUIG_PROCESSOS_HREF = '/ponto/financeiro/gestao-solicitacoes';
+const FLUIG_DP_HREF = '/ponto/solicitacoes-fluig';
 const GASTOS_OPERACIONAIS_HREF = '/ponto/contratos/gastos-operacionais';
 const GASTOS_OPERACIONAIS_MODULE_KEY = pathToModuleKey(GASTOS_OPERACIONAIS_HREF);
+const FLUIG_PROCESSOS_MODULE_KEY = pathToModuleKey(FLUIG_PROCESSOS_HREF);
+const FLUIG_DP_MODULE_KEY = pathToModuleKey(FLUIG_DP_HREF);
 
 const pk = pathToModuleKey;
 
@@ -216,8 +226,12 @@ function SidebarRailTooltip({
               transform: 'translateY(-50%)',
               zIndex: 9999,
             }}
-            className="pointer-events-none max-w-[14rem] whitespace-nowrap rounded-md bg-slate-800/90 px-2.5 py-1.5 text-xs font-medium text-white shadow-md backdrop-blur-sm"
+            className="pointer-events-none relative max-w-[16rem] whitespace-nowrap rounded-lg border border-gray-200 bg-white px-3.5 py-2 text-sm font-medium text-gray-900 dark:border-transparent dark:bg-slate-800/90 dark:text-white dark:backdrop-blur-sm"
           >
+            <span
+              aria-hidden
+              className="absolute left-0 top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rotate-45 border-b border-l border-gray-200 bg-white dark:border-transparent dark:bg-slate-800/90"
+            />
             {label}
           </div>,
           document.body
@@ -301,6 +315,27 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
     }
   }, [queryClient, router, fluigApproverFullAccess, fluigApproverNameKeys]);
 
+  const prefetchFluigProcessDatasets = useCallback(
+    (datasetIds: readonly string[], routeHref: string) => {
+      router.prefetch(routeHref);
+      for (const id of datasetIds) {
+        void queryClient.prefetchQuery({
+          queryKey: ['fluig-dataset', id],
+          queryFn: async () => {
+            const res = await api.post(
+              `/fluig/datasets/${encodeURIComponent(id)}/data`,
+              {},
+              { timeout: 130000 }
+            );
+            return res.data;
+          },
+          staleTime: 7 * 60 * 1000,
+        });
+      }
+    },
+    [queryClient, router]
+  );
+
   const prefetchGastosOperacionais = useCallback(() => {
     router.prefetch(GASTOS_OPERACIONAIS_HREF);
 
@@ -330,10 +365,16 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
   const navDataPrefetchForHref = useCallback(
     (href: string) => {
       if (FLUIG_PREFETCH_HREFS.has(href)) return prefetchFluigDatasets;
+      if (href === FLUIG_PROCESSOS_HREF || href === '/ponto/gestao-solicitacoes') {
+        return () => prefetchFluigProcessDatasets(FLUIG_PROCESSOS_DATASET_IDS, FLUIG_PROCESSOS_HREF);
+      }
+      if (href === FLUIG_DP_HREF) {
+        return () => prefetchFluigProcessDatasets(FLUIG_DP_DATASET_IDS, FLUIG_DP_HREF);
+      }
       if (href === GASTOS_OPERACIONAIS_HREF) return prefetchGastosOperacionais;
       return undefined;
     },
-    [prefetchFluigDatasets, prefetchGastosOperacionais]
+    [prefetchFluigDatasets, prefetchFluigProcessDatasets, prefetchGastosOperacionais]
   );
 
   // Prefetch automático: pré-carrega rotas e dados Fluig assim que o usuário faz login.
@@ -346,6 +387,10 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
     });
     const canPrefetchGastos =
       userPosition === 'Administrador' || can(GASTOS_OPERACIONAIS_MODULE_KEY);
+    const canPrefetchProcessos =
+      userPosition === 'Administrador' || can(FLUIG_PROCESSOS_MODULE_KEY);
+    const canPrefetchDp =
+      userPosition === 'Administrador' || can(FLUIG_DP_MODULE_KEY);
 
     const timer = setTimeout(() => {
       router.prefetch('/ponto/fluig/aprovacoes-workflow');
@@ -368,6 +413,14 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
         }
       }
 
+      if (canPrefetchProcessos) {
+        prefetchFluigProcessDatasets(FLUIG_PROCESSOS_DATASET_IDS, FLUIG_PROCESSOS_HREF);
+      }
+
+      if (canPrefetchDp) {
+        prefetchFluigProcessDatasets(FLUIG_DP_DATASET_IDS, FLUIG_DP_HREF);
+      }
+
       if (canPrefetchGastos) {
         prefetchGastosOperacionais();
       }
@@ -385,6 +438,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
     userPosition,
     can,
     prefetchGastosOperacionais,
+    prefetchFluigProcessDatasets,
   ]);
 
   // Verificar se é administrador
@@ -824,6 +878,13 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             permission: isAdministrator || can(pk('/ponto/conversas-whatsapp'))
           },
           {
+            name: 'Solicitações - Fluig',
+            href: '/ponto/solicitacoes-fluig',
+            icon: Workflow,
+            description: 'Solicitações do Departamento Pessoal no Fluig',
+            permission: isAdministrator || can(pk('/ponto/solicitacoes-fluig')),
+          },
+          {
             name: 'Férias',
             href: '/ponto/ferias',
             icon: ImagePlus,
@@ -877,7 +938,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
       },
       {
         id: 'adm-tst',
-        name: 'ADM/TST',
+        name: 'Administração',
         icon: ClipboardList,
         items: [
           {
@@ -976,6 +1037,13 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
               can(pk('/ponto/metricas/relatorios-contrato')) ||
               can(pk('/ponto/contratos/controle-geral')) ||
               can(pk('/ponto/contratos'))
+          },
+          {
+            name: 'OCs Boleto e Pix',
+            href: '/ponto/metricas/ocs-boleto-pix',
+            icon: CreditCard,
+            description: 'Ordens de compra do TOTVS (consulta OCSBOLETOPIX)',
+            permission: isAdministrator || can(pk('/ponto/metricas/ocs-boleto-pix'))
           },
         ]
       },
@@ -1205,10 +1273,10 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             permission: isAdministrator || can(pk('/ponto/ajuste-estoque'))
           },
           {
-            name: "FD's Aprovadas",
+            name: 'Fichas de Demanda',
             href: '/ponto/fds-aprovadas',
             icon: ClipboardCheck,
-            description: "FD's aprovadas — status de compras",
+            description: 'Fichas aprovadas — status de compras',
             permission:
               isAdministrator || can(pk('/ponto/fds-aprovadas'))
           },
@@ -1296,6 +1364,14 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             description: 'Condições para ordens de compra',
             permission: isAdministrator || can(pk('/ponto/condicoes-pagamento')),
             section: 'Compras'
+          },
+          {
+            name: 'Obras',
+            href: '/ponto/obras',
+            icon: DraftingCompass,
+            description: 'Cadastro de obras para Fichas de Demanda',
+            permission: isAdministrator || can(pk('/ponto/obras')),
+            section: 'Engenharia'
           },
           {
             name: 'Veículos',

@@ -19,7 +19,7 @@ import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { cadastroListClasses } from '@/components/ui/RowActionMenu';
-import { JuridicoFileCard } from '@/components/juridico/JuridicoFileCard';
+import { FilePreviewCard } from '@/components/ui/FilePreviewCard';
 import { JuridicoProcessoEditModal } from '@/components/juridico/JuridicoProcessoEditModal';
 import { useBreadcrumbEntity } from '@/hooks/useBreadcrumbEntity';
 import api from '@/lib/api';
@@ -340,7 +340,7 @@ export default function ProcessoAtivoDetailPage() {
                   ) : (
                     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
                       {processo.anexos.map((file) => (
-                        <JuridicoFileCard
+                        <FilePreviewCard
                           key={file.id}
                           file={file}
                           removing={removingId === file.id}
@@ -395,7 +395,7 @@ export default function ProcessoAtivoDetailPage() {
                   ) : (
                     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
                       {processo.comprovantes.map((file) => (
-                        <JuridicoFileCard
+                        <FilePreviewCard
                           key={file.id}
                           file={file}
                           extra={

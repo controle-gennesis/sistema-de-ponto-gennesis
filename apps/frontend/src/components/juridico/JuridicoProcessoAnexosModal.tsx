@@ -5,7 +5,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { Loader2, Paperclip, Plus, Receipt } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
-import { JuridicoFileCard } from '@/components/juridico/JuridicoFileCard';
+import { FilePreviewCard } from '@/components/ui/FilePreviewCard';
 import api from '@/lib/api';
 import type { JuridicoProcesso } from '@/data/juridico-processos-ativos';
 
@@ -162,7 +162,7 @@ export function JuridicoProcessoAnexosModal({
               ) : (
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                   {anexos.map((file) => (
-                    <JuridicoFileCard
+                    <FilePreviewCard
                       key={file.id}
                       file={file}
                       removing={removingId === file.id}
@@ -210,7 +210,7 @@ export function JuridicoProcessoAnexosModal({
               ) : (
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                   {comprovantes.map((file) => (
-                    <JuridicoFileCard
+                    <FilePreviewCard
                       key={file.id}
                       file={file}
                       extra={

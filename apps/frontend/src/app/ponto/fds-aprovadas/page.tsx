@@ -138,10 +138,10 @@ export default function FdsAprovadasPage() {
         <div className="space-y-6">
           <div className="text-center">
             <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
-              FD&apos;s Aprovadas
+              Fichas de Demanda
             </h1>
             <p className="mx-auto mt-2 max-w-2xl text-sm text-gray-600 dark:text-gray-400 sm:text-base">
-              Fichas de demanda aprovadas pelo gestor. O compras define o status de atendimento.
+              Fichas aprovadas pelo gestor. O compras define o status de atendimento.
             </p>
           </div>
 
@@ -154,10 +154,10 @@ export default function FdsAprovadasPage() {
                   </div>
                   <div>
                     <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                      FD&apos;s Aprovadas
+                      Fichas de Demanda
                     </h3>
                     <p className="text-sm text-gray-600 dark:text-gray-400">
-                      Atualize o status de compras de cada ficha
+                      Atualize o status de compras de cada ficha aprovada
                     </p>
                   </div>
                 </div>
@@ -224,25 +224,25 @@ export default function FdsAprovadasPage() {
                     <table className="w-full text-sm">
                       <thead className="border-b border-gray-200 dark:border-gray-700">
                         <tr>
-                          <th className="px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
-                            Cód. FD
+                          <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                            Código da FD
                           </th>
-                          <th className="px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                          <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
                             Contrato
                           </th>
-                          <th className="px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                          <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
                             Obra
                           </th>
-                          <th className="px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                          <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
                             Solicitante
                           </th>
-                          <th className="px-3 py-4 text-right text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                          <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
                             Faturamento
                           </th>
                           <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
                             Status compras
                           </th>
-                          <th className="min-w-[7rem] px-3 py-4 text-right text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                          <th className="min-w-[7rem] px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
                             Ação
                           </th>
                         </tr>
@@ -254,22 +254,19 @@ export default function FdsAprovadasPage() {
                             onClick={() => setSelectedRecord(row)}
                             className={getListTableRowClassName(true)}
                           >
-                            <td className="px-3 py-4 sm:px-6">
+                            <td className="px-3 py-4 text-center sm:px-6">
                               <ListRowNavigableLabel className="font-medium">{row.codFichaDemanda}</ListRowNavigableLabel>
                             </td>
-                            <td
-                              className="max-w-[220px] truncate px-3 py-4 text-gray-900 dark:text-gray-100 sm:px-6"
-                              title={row.contratoNome}
-                            >
+                            <td className="whitespace-nowrap px-3 py-4 text-center text-gray-900 dark:text-gray-100 sm:px-6">
                               {row.contratoNome}
                             </td>
-                            <td className="px-3 py-4 text-gray-900 dark:text-gray-100 sm:px-6">
+                            <td className="px-3 py-4 text-center text-gray-900 dark:text-gray-100 sm:px-6">
                               {row.obra}
                             </td>
-                            <td className="px-3 py-4 text-gray-900 dark:text-gray-100 sm:px-6">
+                            <td className="px-3 py-4 text-center text-gray-900 dark:text-gray-100 sm:px-6">
                               {row.solicitanteNome}
                             </td>
-                            <td className="px-3 py-4 text-right tabular-nums text-gray-900 dark:text-gray-100 sm:px-6">
+                            <td className="px-3 py-4 text-center tabular-nums text-gray-900 dark:text-gray-100 sm:px-6">
                               {formatCurrencyDisplay(row.faturamentoEstimado)}
                             </td>
                             <td className="px-3 py-4 text-center sm:px-6">
@@ -280,15 +277,17 @@ export default function FdsAprovadasPage() {
                                 {purchaseStatusLabel(row.purchaseStatus)}
                               </span>
                             </td>
-                            <td className="px-3 py-4 text-right sm:px-6" onClick={(e) => e.stopPropagation()}>
-                              <button
-                                type="button"
-                                onClick={() => setSelectedRecord(row)}
-                                className={rowActionMenuButtonClass(false)}
-                                aria-label="Atualizar status de compras"
-                              >
-                                <FileText className="h-4 w-4" />
-                              </button>
+                            <td className="px-3 py-4 text-center sm:px-6" onClick={(e) => e.stopPropagation()}>
+                              <div className="flex justify-center">
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedRecord(row)}
+                                  className={rowActionMenuButtonClass(false)}
+                                  aria-label="Atualizar status de compras"
+                                >
+                                  <FileText className="h-4 w-4" />
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         ))}
@@ -320,7 +319,7 @@ export default function FdsAprovadasPage() {
         <Modal
           isOpen={isFiltersOpen}
           onClose={() => setIsFiltersOpen(false)}
-          title="Filtros — FD's Aprovadas"
+          title="Filtros — Fichas de Demanda"
           size="md"
         >
           <div className="space-y-4">

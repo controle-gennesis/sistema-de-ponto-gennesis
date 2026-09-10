@@ -62,10 +62,16 @@ function DpFileAttachmentField({
   onFileSelect: (file: File | null) => void;
 }) {
   const inputRef = React.useRef<HTMLInputElement>(null);
+  const [dragging, setDragging] = React.useState(false);
 
   const clearFile = () => {
     onFileSelect(null);
     if (inputRef.current) inputRef.current.value = '';
+  };
+
+  const takeFirstFile = (list: FileList | null | undefined) => {
+    const file = list?.[0] ?? null;
+    if (file) onFileSelect(file);
   };
 
   return (
@@ -76,7 +82,10 @@ function DpFileAttachmentField({
         type="file"
         className="hidden"
         accept={accept}
-        onChange={(e) => onFileSelect(e.target.files?.[0] ?? null)}
+        onChange={(e) => {
+          takeFirstFile(e.target.files);
+          e.target.value = '';
+        }}
       />
       {fileName ? (
         <div className="flex overflow-hidden rounded-lg border border-gray-300 bg-white dark:border-gray-600 dark:bg-gray-800">
@@ -110,12 +119,44 @@ function DpFileAttachmentField({
           type="button"
           data-form-field-shell="true"
           onClick={() => inputRef.current?.click()}
-          className="flex w-full flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-gray-300 bg-gray-50/60 px-4 py-6 text-center transition-colors hover:border-red-400 hover:bg-red-50/40 dark:border-gray-600 dark:bg-gray-800/40 dark:hover:border-red-500/50 dark:hover:bg-red-950/20"
+          onDragEnter={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setDragging(true);
+          }}
+          onDragOver={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setDragging(true);
+          }}
+          onDragLeave={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setDragging(false);
+          }}
+          onDrop={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setDragging(false);
+            takeFirstFile(e.dataTransfer.files);
+          }}
+          className={`flex w-full flex-col items-center justify-center gap-2 rounded-lg border border-dashed px-4 py-6 text-center transition-colors ${
+            dragging
+              ? 'border-red-500 bg-red-50/70 dark:border-red-500 dark:bg-red-950/30'
+              : 'border-gray-300 bg-gray-50/60 hover:border-red-400 hover:bg-red-50/40 dark:border-gray-600 dark:bg-gray-800/40 dark:hover:border-red-500/50 dark:hover:bg-red-950/20'
+          }`}
         >
           <span className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-white text-gray-500 shadow-sm dark:bg-gray-700 dark:text-gray-300">
             <Upload className="h-5 w-5" />
           </span>
-          <span className="text-sm font-medium text-gray-800 dark:text-gray-200">Escolher arquivo</span>
+          <span className="text-sm font-medium text-gray-800 dark:text-gray-200">
+            {dragging ? 'Solte o arquivo aqui' : 'Escolher arquivo'}
+          </span>
+          {!dragging ? (
+            <span className="text-xs text-gray-500 dark:text-gray-400">
+              Ou arraste e solte o anexo nesta área
+            </span>
+          ) : null}
         </button>
       )}
     </div>
@@ -992,7 +1033,7 @@ export function AtestadoMedicoRepeatableFields({
             label="Colaborador *"
             value={row.employeeId}
             onChange={(employeeId) => updateItem(index, { employeeId })}
-            options={rowEmployeeOptions(employeeOptions, atestados, index)}
+            options={employeeOptions}
             placeholder="Selecionar colaborador..."
           />
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

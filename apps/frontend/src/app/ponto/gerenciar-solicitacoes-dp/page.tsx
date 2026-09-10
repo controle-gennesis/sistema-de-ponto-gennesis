@@ -294,8 +294,8 @@ const MANAGE_SCOPE_CONFIG: Record<
     queryKeyPrefix: 'dp-manage-adm-tst',
     pageTitle: 'Gerenciar Solicitações',
     pageSubtitle: 'Registre retornos e altere etapas das solicitações administrativas.',
-    pendingListSubtitle: 'Solicitações ADM/TST em tramitação.',
-    concludedListSubtitle: 'Histórico de solicitações ADM/TST finalizadas.',
+    pendingListSubtitle: 'Solicitações da Administração em tramitação.',
+    concludedListSubtitle: 'Histórico de solicitações da Administração finalizadas.',
     typeFilterOptions: ADM_TST_TYPE_FILTER_OPTIONS,
     statusFilterOptions: ADM_TST_STATUS_FILTER_OPTIONS,
     feedbackSelectOptions: ADM_TST_FEEDBACK_SELECT_OPTIONS,
@@ -1085,7 +1085,7 @@ export function GerenciarSolicitacoesGeraisPage({
 
                   {scopeConfig.canSendFeedbackStatuses.includes(historyRequest.status) ? (
                     <DpRequestHistorySectionCard
-                      title={scope === 'ADM_TST' ? 'Feedback ADM/TST' : 'Registrar feedback'}
+                      title={scope === 'ADM_TST' ? 'Feedback Administração' : 'Registrar feedback'}
                     >
                       <div className="space-y-3">
                         <div>

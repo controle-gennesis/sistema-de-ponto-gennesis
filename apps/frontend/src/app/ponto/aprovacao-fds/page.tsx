@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { ClipboardCheck, Edit, MoreVertical, Plus, Search, Trash2, X } from 'lucide-react';
+import { ClipboardCheck, Edit, Eye, MoreVertical, Plus, Search, Trash2, Upload, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
@@ -11,10 +11,17 @@ import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import { CadastroListLoading } from '@/components/ui/CadastroListSummary';
 import { FichaDemandaApprovalFormModal } from '@/components/engenharia/FichaDemandaApprovalFormModal';
+import { FichaDemandaDetailModal } from '@/components/engenharia/FichaDemandaDetailModal';
+import { FichaDemandaImportModal } from '@/components/engenharia/FichaDemandaImportModal';
 import { FdStatusBadges } from '@/components/engenharia/FdStatusBadges';
 import api from '@/lib/api';
 import { ActionMenuOverlay } from '@/components/ui/ActionMenuOverlay';
-import { listTableRowClasses, rowActionMenuButtonClass } from '@/components/ui/listTableUi';
+import {
+  getListTableRowClassName,
+  ListRowNavigableLabel,
+  listTableRowClasses,
+  rowActionMenuButtonClass,
+} from '@/components/ui/listTableUi';
 import {
   formatCurrencyDisplay,
   formToApiPayload,
@@ -33,7 +40,9 @@ export default function AprovacaoFdsPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [showForm, setShowForm] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   const [editingRecord, setEditingRecord] = useState<FichaDemandaApprovalRecord | null>(null);
+  const [detailRecord, setDetailRecord] = useState<FichaDemandaApprovalRecord | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [rowActionMenu, setRowActionMenu] = useState<{
     rowId: string;
@@ -103,7 +112,7 @@ export default function AprovacaoFdsPage() {
     }
   }, [rowActionMenu, records]);
 
-  const modalOpen = showForm || deleteId != null;
+  const modalOpen = showForm || deleteId != null || detailRecord != null;
 
   useEffect(() => {
     if (!modalOpen) return;
@@ -183,6 +192,10 @@ export default function AprovacaoFdsPage() {
     setShowForm(true);
   };
 
+  const openDetail = (row: FichaDemandaApprovalRecord) => {
+    setDetailRecord(row);
+  };
+
   const openEdit = (row: FichaDemandaApprovalRecord) => {
     if (row.status !== 'WAITING_MANAGER') {
       toast.error('Somente fichas aguardando aprovação podem ser editadas.');
@@ -237,7 +250,7 @@ export default function AprovacaoFdsPage() {
                   <div className="relative min-w-[240px] flex-1 sm:w-[320px] sm:flex-none">
                     <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
                     <input
-                      type="search"
+                      type="text"
                       placeholder="Buscar por código FD, pedido, contrato..."
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
@@ -254,6 +267,15 @@ export default function AprovacaoFdsPage() {
                       </button>
                     ) : null}
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowImport(true)}
+                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                    aria-label="Importar"
+                    title="Importar"
+                  >
+                    <Upload className="h-4 w-4" />
+                  </button>
                   <button
                     type="button"
                     onClick={openCreate}
@@ -294,15 +316,15 @@ export default function AprovacaoFdsPage() {
                       <thead className="border-b border-gray-200 dark:border-gray-700">
                         <tr>
                           <th className="px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
-                            Cód. FD
+                            Código da FD
                           </th>
-                          <th className="px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                          <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
                             Pedido
                           </th>
-                          <th className="px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                          <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
                             Contrato
                           </th>
-                          <th className="px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                          <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
                             Solicitante
                           </th>
                           <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
@@ -311,10 +333,10 @@ export default function AprovacaoFdsPage() {
                           <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
                             Status
                           </th>
-                          <th className="px-3 py-4 text-right text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                          <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
                             Faturamento
                           </th>
-                          <th className="min-w-[7rem] px-3 py-4 text-right text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                          <th className={`${listTableRowClasses.actionTh} text-center`}>
                             Ação
                           </th>
                         </tr>
@@ -323,36 +345,45 @@ export default function AprovacaoFdsPage() {
                         {paginatedRows.map((row) => (
                           <tr
                             key={row.id}
-                            className={listTableRowClasses.tr}
+                            onClick={() => openDetail(row)}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter' || event.key === ' ') {
+                                event.preventDefault();
+                                openDetail(row);
+                              }
+                            }}
+                            tabIndex={0}
+                            role="button"
+                            className={getListTableRowClassName(true, listTableRowClasses.tr)}
                           >
-                            <td className="px-3 py-4 sm:px-6">
-                              <span className="text-sm text-gray-900 dark:text-gray-100 font-medium">{row.codFichaDemanda}</span>
+                            <td className="px-3 py-4 text-left sm:px-6">
+                              <ListRowNavigableLabel className="text-sm font-medium">
+                                {row.codFichaDemanda}
+                              </ListRowNavigableLabel>
                             </td>
-                            <td className="px-3 py-4 text-gray-900 dark:text-gray-100 sm:px-6">
+                            <td className="px-3 py-4 text-center text-gray-900 dark:text-gray-100 sm:px-6">
                               {row.codigoPedido}
                             </td>
-                            <td
-                              className="max-w-[220px] truncate px-3 py-4 text-gray-900 dark:text-gray-100 sm:px-6"
-                              title={row.contratoNome}
-                            >
+                            <td className="whitespace-nowrap px-3 py-4 text-center text-gray-900 dark:text-gray-100 sm:px-6">
                               {row.contratoNome}
                             </td>
-                            <td className="px-3 py-4 text-gray-900 dark:text-gray-100 sm:px-6">
+                            <td className="px-3 py-4 text-center text-gray-900 dark:text-gray-100 sm:px-6">
                               {row.solicitanteNome}
                             </td>
-                            <td className="px-3 py-4 text-center sm:px-6">
-                              <span className="inline-flex rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-semibold text-red-700 dark:bg-red-900/30 dark:text-red-300">
-                                {row.polo}
-                              </span>
+                            <td className="px-3 py-4 text-center text-sm text-gray-900 dark:text-gray-100 sm:px-6">
+                              {row.polo}
                             </td>
                             <td className="px-3 py-4 text-center sm:px-6">
                               <FdStatusBadges record={row} />
                             </td>
-                            <td className="px-3 py-4 text-right tabular-nums text-gray-900 dark:text-gray-100 sm:px-6">
+                            <td className="px-3 py-4 text-center tabular-nums text-gray-900 dark:text-gray-100 sm:px-6">
                               {formatCurrencyDisplay(row.faturamentoEstimado)}
                             </td>
-                            <td className="px-3 py-4 text-right sm:px-6">
-                              <div className="flex justify-end">
+                            <td
+                              className={`${listTableRowClasses.actionTd} text-center`}
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <div className="flex justify-center">
                                 <button
                                   type="button"
                                   onClick={(e) => {
@@ -400,6 +431,19 @@ export default function AprovacaoFdsPage() {
                         onClick={(e) => {
                           e.stopPropagation();
                           setRowActionMenu(null);
+                          openDetail(rowForActionMenu);
+                        }}
+                        className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700"
+                      >
+                        <Eye className="h-4 w-4 shrink-0 text-gray-600 dark:text-gray-300" />
+                        <span>Ver detalhes</span>
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setRowActionMenu(null);
                           openEdit(rowForActionMenu);
                         }}
                         disabled={rowForActionMenu.status !== 'WAITING_MANAGER'}
@@ -434,6 +478,12 @@ export default function AprovacaoFdsPage() {
           </Card>
         </div>
 
+        <FichaDemandaDetailModal
+          isOpen={detailRecord != null}
+          record={detailRecord}
+          onClose={() => setDetailRecord(null)}
+        />
+
         <FichaDemandaApprovalFormModal
           isOpen={showForm}
           onClose={() => {
@@ -445,6 +495,14 @@ export default function AprovacaoFdsPage() {
           editingRecord={editingRecord}
           onSave={handleSave}
           isSaving={isSaving}
+        />
+
+        <FichaDemandaImportModal
+          isOpen={showImport}
+          onClose={() => setShowImport(false)}
+          onImported={() => {
+            queryClient.invalidateQueries({ queryKey: ['demand-sheet-approvals'] });
+          }}
         />
 
         {deleteId ? (

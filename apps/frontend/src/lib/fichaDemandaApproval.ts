@@ -60,6 +60,8 @@ export interface FdAnexo {
   id: string;
   name: string;
   url?: string;
+  kind?: string;
+  sourcePath?: string;
 }
 
 export interface FichaDemandaApprovalRecord {
@@ -107,7 +109,7 @@ export interface FichaDemandaApprovalFormState {
 }
 
 export const FD_STATUS_LABELS: Record<DemandSheetApprovalStatus, string> = {
-  WAITING_MANAGER: 'Aguardando aprovação do gestor',
+  WAITING_MANAGER: 'Pendente de aprovação',
   APPROVED: 'Aprovada',
   REJECTED: 'Reprovada',
   CANCELLED: 'Cancelada',
@@ -214,15 +216,15 @@ export function recordToForm(record: FichaDemandaApprovalRecord): FichaDemandaAp
 }
 
 export function validateFichaDemandaForm(form: FichaDemandaApprovalFormState): string | null {
-  if (!form.numMovRm.trim()) return 'Informe o NUM MOV RM.';
-  if (!form.idMovRm.trim()) return 'Informe o ID MOV RM.';
-  if (!form.codigoPedido.trim()) return 'Informe o código do pedido.';
+  if (!form.numMovRm.trim()) return 'Informe o Número de Movimento da RM.';
+  if (!form.idMovRm.trim()) return 'Informe o ID de Movimento da RM.';
+  if (!form.codigoPedido.trim()) return 'Informe o Código do Pedido.';
   if (!form.solicitanteId.trim()) return 'Selecione o solicitante.';
   if (!form.contratoId.trim()) return 'Selecione o contrato.';
   if (!form.obra.trim()) return 'Selecione a obra.';
-  if (!form.codFichaDemanda.trim()) return 'Informe o código da ficha de demanda.';
-  if (!form.faturamentoEstimado.trim()) return 'Informe o faturamento estimado.';
-  if (!form.custoEstimado.trim()) return 'Informe o custo estimado.';
+  if (!form.codFichaDemanda.trim()) return 'Informe o Código da Ficha de Demanda.';
+  if (!form.faturamentoEstimado.trim()) return 'Informe o Faturamento Estimado.';
+  if (!form.custoEstimado.trim()) return 'Informe o Custo Estimado.';
   if (!form.observacao.trim()) return 'Informe a observação.';
   if (!form.polo) return 'Selecione o polo.';
   return null;

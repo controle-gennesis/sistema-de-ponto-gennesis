@@ -75,6 +75,12 @@ function saveLocally(folder: string, fileName: string, buffer: Buffer): void {
   fs.writeFileSync(path.join(uploadsDir, fileName), buffer);
 }
 
+function saveLocallyFromPath(folder: string, fileName: string, sourcePath: string): void {
+  const uploadsDir = path.join(backendUploadsRoot, folder);
+  fs.mkdirSync(uploadsDir, { recursive: true });
+  fs.copyFileSync(sourcePath, path.join(uploadsDir, fileName));
+}
+
 /**
  * Grava anexo de forma persistente (S3, como Tasks/Kanban).
  * Em dev sem AWS, ou se o S3 falhar, grava no disco local.
@@ -114,6 +120,55 @@ export async function savePersistentUpload(input: UploadFileInput): Promise<Uplo
   }
 
   saveLocally(folder, fileName, input.buffer);
+  return { url, key, fileName, originalName };
+}
+
+/** Igual a savePersistentUpload, mas lê do disco (stream) — evita carregar ZIPs grandes na RAM. */
+export async function savePersistentUploadFromPath(input: {
+  folder: string;
+  diskPath: string;
+  originalName?: string;
+  mimeType?: string;
+  includeSafeOriginalName?: boolean;
+}): Promise<UploadFileResult> {
+  const folder = String(input.folder || '')
+    .replace(/^\/+|\/+$/g, '')
+    .replace(/\.\./g, '');
+  if (!folder) throw new Error('Pasta de upload inválida');
+  if (!input.diskPath || !fs.existsSync(input.diskPath)) {
+    throw new Error('Arquivo de origem não encontrado');
+  }
+
+  const originalName = fixMulterOriginalName(input.originalName);
+  const fileName = buildFileName({
+    folder,
+    buffer: Buffer.alloc(0),
+    originalName,
+    includeSafeOriginalName: input.includeSafeOriginalName,
+  });
+  const key = `${folder}/${fileName}`;
+  const url = `/uploads/${key}`;
+  const contentType = input.mimeType || 'application/octet-stream';
+
+  const s3 = getS3();
+  if (s3) {
+    try {
+      await s3.client
+        .upload({
+          Bucket: s3.bucket,
+          Key: key,
+          Body: fs.createReadStream(input.diskPath),
+          ContentType: contentType,
+          ACL: 'private',
+        })
+        .promise();
+      return { url, key, fileName, originalName };
+    } catch (error) {
+      console.warn(`[persistentUpload] Falha S3 em ${key}. Gravando local.`, error);
+    }
+  }
+
+  saveLocallyFromPath(folder, fileName, input.diskPath);
   return { url, key, fileName, originalName };
 }
 

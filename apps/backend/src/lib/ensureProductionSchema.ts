@@ -346,6 +346,14 @@ async function ensureDemandSheetApprovals(prisma: PrismaClient): Promise<void> {
       END $$;
     `);
   }
+
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "demand_sheet_approvals" ADD COLUMN IF NOT EXISTS "externalId" TEXT;
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE UNIQUE INDEX IF NOT EXISTS "demand_sheet_approvals_externalId_key"
+    ON "demand_sheet_approvals"("externalId");
+  `);
 }
 
 async function ensurePurchaseOrderStageApprovals(prisma: PrismaClient): Promise<void> {
@@ -1549,6 +1557,117 @@ async function ensureUnaccentExtension(prisma: PrismaClient): Promise<void> {
   }
 }
 
+async function ensureOcsBoletoPixExtrasTable(prisma: PrismaClient): Promise<void> {
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "ocs_boleto_pix_extras" (
+      "id" TEXT NOT NULL,
+      "coligada" INTEGER NOT NULL,
+      "idMov" INTEGER NOT NULL,
+      "filial" INTEGER,
+      "dataVencimento" DATE,
+      "numeroNf" TEXT,
+      "dataEmissaoNf" DATE,
+      "updatedById" TEXT,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "ocs_boleto_pix_extras_pkey" PRIMARY KEY ("id")
+    );
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    CREATE UNIQUE INDEX IF NOT EXISTS "ocs_boleto_pix_extras_coligada_idMov_key"
+    ON "ocs_boleto_pix_extras"("coligada", "idMov");
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "ocs_boleto_pix_extras_idMov_idx"
+    ON "ocs_boleto_pix_extras"("idMov");
+  `);
+}
+
+async function ensureObrasTable(prisma: PrismaClient): Promise<void> {
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "obras" (
+      "id" TEXT NOT NULL,
+      "name" TEXT NOT NULL,
+      "contratoId" TEXT,
+      "isActive" BOOLEAN NOT NULL DEFAULT true,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "obras_pkey" PRIMARY KEY ("id")
+    );
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "obras" ADD COLUMN IF NOT EXISTS "contratoId" TEXT;
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "obras_name_idx" ON "obras"("name");
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "obras_isActive_idx" ON "obras"("isActive");
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "obras_contratoId_idx" ON "obras"("contratoId");
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "obras" ADD COLUMN IF NOT EXISTS "externalId" TEXT;
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE UNIQUE INDEX IF NOT EXISTS "obras_externalId_key" ON "obras"("externalId");
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "contracts" ADD COLUMN IF NOT EXISTS "externalId" TEXT;
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE UNIQUE INDEX IF NOT EXISTS "contracts_externalId_key" ON "contracts"("externalId");
+  `);
+
+  // Remove obras órfãs antes de exigir FK (ambiente novo / dados de teste)
+  await prisma.$executeRawUnsafe(`
+    DELETE FROM "obras"
+    WHERE "contratoId" IS NULL
+       OR NOT EXISTS (SELECT 1 FROM "contracts" c WHERE c."id" = "obras"."contratoId");
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'obras' AND column_name = 'contratoId'
+      ) AND NOT EXISTS (
+        SELECT 1 FROM "obras" WHERE "contratoId" IS NULL
+      ) THEN
+        ALTER TABLE "obras" ALTER COLUMN "contratoId" SET NOT NULL;
+      END IF;
+    EXCEPTION WHEN others THEN
+      NULL;
+    END $$;
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'obras_contratoId_fkey'
+      ) THEN
+        ALTER TABLE "obras"
+          ADD CONSTRAINT "obras_contratoId_fkey"
+          FOREIGN KEY ("contratoId") REFERENCES "contracts"("id")
+          ON DELETE RESTRICT ON UPDATE CASCADE;
+      END IF;
+    EXCEPTION WHEN others THEN
+      NULL;
+    END $$;
+  `);
+}
+
 export async function ensureProductionSchema(prisma: PrismaClient): Promise<void> {
   try {
     await ensureUnaccentExtension(prisma);
@@ -1590,6 +1709,8 @@ export async function ensureProductionSchema(prisma: PrismaClient): Promise<void
     await ensureGestaoOsSchema(prisma);
     await ensureSupportTicketsSchema(prisma);
     await ensureJuridicoProcessosTables(prisma);
+    await ensureOcsBoletoPixExtrasTable(prisma);
+    await ensureObrasTable(prisma);
     console.log('[Schema] Verificação de tabelas/colunas críticas concluída.');
   } catch (e) {
     console.error('[Schema] Falha ao garantir esquema de produção:', e);

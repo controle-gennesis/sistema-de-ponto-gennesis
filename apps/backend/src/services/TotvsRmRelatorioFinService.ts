@@ -1032,6 +1032,17 @@ export class TotvsRmRelatorioFinService {
     throw lastError ?? new Error('Falha ao buscar PRODUTOSATIVOS no TOTVS RM');
   }
 
+  defaultOcsBoletoPixPath(): string {
+    return (
+      (process.env.TOTVS_RM_OCSBOLETOPIX_PATH || '').trim() ||
+      '/api/framework/v1/consultaSQLServer/RealizaConsulta/OCSBOLETOPIX/1/G'
+    );
+  }
+
+  async fetchOcsBoletoPixRows(): Promise<Record<string, unknown>[]> {
+    return this.getRowsForPathCached(this.defaultOcsBoletoPixPath());
+  }
+
   private static readonly EXTRATO_CAIXA_DEFAULT_CONSULTA = 'EXTRATOCX2026';
 
   /** Ano configurado para o extrato (env ou extraído do path EXTRATOCX{ano}). */

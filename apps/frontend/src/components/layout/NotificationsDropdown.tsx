@@ -233,7 +233,7 @@ export function NotificationsDropdown({ chatUnreadCount = 0 }: NotificationsDrop
     if (canSeeFdAprovadas && fdNotificationCounts.pendingPurchase > 0) {
       list.push({
         id: 'fd-compras',
-        title: "FD's Aprovadas",
+        title: 'Fichas de Demanda',
         description: 'Pendentes em compras',
         count: fdNotificationCounts.pendingPurchase,
         href: '/ponto/fds-aprovadas',

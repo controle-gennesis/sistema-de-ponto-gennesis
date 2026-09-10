@@ -14,6 +14,10 @@ import {
 } from '../lib/dpApprovalAccess';
 import { getContractAccessForUser } from '../lib/contractAccess';
 import { pathToModuleKey, PERMISSION_ACCESS_ACTION } from '@sistema-ponto/permission-modules';
+import {
+  importDemandSheets,
+  type FdImportRow,
+} from '../services/demandSheetImport';
 
 const fdModuleKey = pathToModuleKey('/ponto/aprovacao-fds');
 const fdsAprovadasModuleKey = pathToModuleKey('/ponto/fds-aprovadas');
@@ -95,6 +99,7 @@ function serializeRow(row: {
   idMovRm: string;
   codigoPedido: string;
   solicitanteId: string;
+  solicitanteNome?: string | null;
   contratoId: string;
   obra: string;
   codFichaDemanda: string;
@@ -127,8 +132,8 @@ function serializeRow(row: {
     faturamentoEstimado: Number(row.faturamentoEstimado),
     custoEstimado: Number(row.custoEstimado),
     dataHora: row.dataHora.toLocaleString('pt-BR'),
-    solicitanteNome: row.solicitante?.name ?? '',
-    contratoNome: row.contrato ? `${row.contrato.number} — ${row.contrato.name}` : '',
+    solicitanteNome: row.solicitanteNome?.trim() || row.solicitante?.name || '',
+    contratoNome: row.contrato ? row.contrato.name : '',
     creatorNome: row.creator?.name ?? '',
     managerApproverNome: row.managerApprover?.name ?? '',
     purchaseStatusUpdaterNome: row.purchaseStatusUpdater?.name ?? '',
@@ -221,6 +226,7 @@ export class DemandSheetApprovalController {
               { codigoPedido: { contains: search, mode: 'insensitive' } },
               { numMovRm: { contains: search, mode: 'insensitive' } },
               { obra: { contains: search, mode: 'insensitive' } },
+              { solicitanteNome: { contains: search, mode: 'insensitive' } },
             ],
           },
         ];
@@ -548,6 +554,7 @@ export class DemandSheetApprovalController {
               { codigoPedido: { contains: search, mode: 'insensitive' } },
               { numMovRm: { contains: search, mode: 'insensitive' } },
               { obra: { contains: search, mode: 'insensitive' } },
+              { solicitanteNome: { contains: search, mode: 'insensitive' } },
             ],
           },
         ];
@@ -606,6 +613,59 @@ export class DemandSheetApprovalController {
         return res.status(err.statusCode).json({ error: err.message || 'Erro' });
       }
       return res.status(500).json({ error: 'Erro ao atualizar status de compras' });
+    }
+  }
+
+  async importMany(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user) throw createError('Usuário não autenticado', 401);
+      const canImport =
+        req.user.isAdmin || (await userCanAccessFdModule(req.user.id, req.user.isAdmin));
+      if (!canImport) {
+        throw createError('Sem permissão para importar fichas de demanda', 403);
+      }
+
+      let payload: { fichas?: unknown[]; mode?: string } = {};
+      const rawPayload = String((req.body as { payload?: unknown })?.payload || '').trim();
+      if (rawPayload) {
+        try {
+          payload = JSON.parse(rawPayload) as { fichas?: unknown[]; mode?: string };
+        } catch {
+          throw createError('Payload da importação inválido.', 400);
+        }
+      }
+
+      const rows = Array.isArray(payload.fichas) ? (payload.fichas as FdImportRow[]) : [];
+      const linkOnly =
+        String(payload.mode || '').trim().toLowerCase() === 'link-anexos' ||
+        String((req.body as { mode?: unknown })?.mode || '').trim().toLowerCase() === 'link-anexos';
+      const files = (req.files || {}) as Record<string, Express.Multer.File[]>;
+      const result = await importDemandSheets({
+        userId: req.user.id,
+        rows,
+        files,
+        linkOnly,
+      });
+
+      console.log(
+        `[FD import] user=${req.user.id} rows=${rows.length} linkOnly=${linkOnly}` +
+          ` created=${result.created} updated=${result.updated} failed=${result.failed}` +
+          ` anexos=${result.anexosLinked}` +
+          (result.errors[0] ? ` firstError=${result.errors[0].message}` : ''),
+      );
+
+      return res.json({
+        success: true,
+        data: result,
+        message: `Importação: ${result.created} nova(s), ${result.updated} atualizada(s), ${result.failed} falha(s).`,
+      });
+    } catch (e: unknown) {
+      const err = e as { statusCode?: number; message?: string };
+      if (err?.statusCode) {
+        return res.status(err.statusCode).json({ error: err.message || 'Erro' });
+      }
+      console.error('[FD import]', e);
+      return res.status(500).json({ error: 'Erro ao importar fichas de demanda' });
     }
   }
 }
