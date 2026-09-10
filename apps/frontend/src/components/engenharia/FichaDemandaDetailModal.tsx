@@ -64,8 +64,12 @@ export function FichaDemandaDetailModal({ isOpen, record, onClose }: Props) {
         <dl className="grid gap-4 sm:grid-cols-2">
           <Field label="Código da FD">{record.codFichaDemanda || '—'}</Field>
           <Field label="Pedido">{record.codigoPedido || '—'}</Field>
-          <Field label="Contrato">{record.contratoNome || '—'}</Field>
-          <Field label="Obra">{record.obra || '—'}</Field>
+          <Field label="Contrato">
+            <span className="uppercase">{record.contratoNome || '—'}</span>
+          </Field>
+          <Field label="Obra">
+            <span className="uppercase">{record.obra || '—'}</span>
+          </Field>
           <Field label="Solicitante">{record.solicitanteNome || '—'}</Field>
           <Field label="Polo">{record.polo || '—'}</Field>
           <Field label="Nº Mov RM">{record.numMovRm || '—'}</Field>

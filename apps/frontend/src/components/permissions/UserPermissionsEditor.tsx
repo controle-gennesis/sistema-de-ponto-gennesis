@@ -73,6 +73,7 @@ type UserPermissionPayload = {
   allowedContractIds: string[];
   dpApprovalContractIds?: string[];
   restrictedDpApprovalCostCenterIds?: string[];
+  fdApprovalContractIds?: string[];
   dpRequestViewCostCenterIds?: string[];
   contractModuleFlags?: Record<string, ContractModuleFlags>;
 };
@@ -112,6 +113,7 @@ const DEPRECATED_DP_APPROVE_CONTROLE_KEY = pathToModuleKey('/ponto/controle/apro
 const DEPRECATED_RM_APPROVE_CONTROLE_KEY = pathToModuleKey('/ponto/controle/aprovar-requisicoes-materiais');
 const DEPRECATED_OC_GESTOR_APPROVE_CONTROLE_KEY = pathToModuleKey('/ponto/controle/aprovar-oc-gestor');
 const RESTRICTED_DP_APPROVE_KEY = pathToModuleKey('/ponto/controle/aprovar-solicitacoes-restritas-dp');
+const FD_APPROVE_KEY = pathToModuleKey('/ponto/controle/aprovar-fichas-demanda');
 const DP_REQUEST_VIEW_CC_KEY = pathToModuleKey('/ponto/controle/ver-solicitacoes-internas-cc');
 
 const DEPRECATED_CONTROLE_KEYS = new Set([
@@ -186,10 +188,11 @@ function serializeFullBaseline(
   dpApprovalContractIds: Set<string>,
   moduleFlags: Record<string, ContractModuleFlags>,
   restrictedDpApprovalCostCenterIds: Set<string> = new Set(),
+  fdApprovalContractIds: Set<string> = new Set(),
   dpRequestViewCostCenterIds: Set<string> = new Set(),
   cadastroCrud: CadastroCrudMap = {}
 ): string {
-  return `${serializePermissionSet(selected)}|ca:${serializeContractActions(contractActions)}|cid:${serializeContractIds(contractIds)}|ea:${serializeContractActions(employeeActions)}|dp:${serializeContractIds(dpApprovalContractIds)}|mf:${serializeModuleFlags(moduleFlags)}|rdp:${serializeContractIds(restrictedDpApprovalCostCenterIds)}|vcc:${serializeContractIds(dpRequestViewCostCenterIds)}|cc:${serializeCadastroCrud(cadastroCrud)}`;
+  return `${serializePermissionSet(selected)}|ca:${serializeContractActions(contractActions)}|cid:${serializeContractIds(contractIds)}|ea:${serializeContractActions(employeeActions)}|dp:${serializeContractIds(dpApprovalContractIds)}|mf:${serializeModuleFlags(moduleFlags)}|rdp:${serializeContractIds(restrictedDpApprovalCostCenterIds)}|fd:${serializeContractIds(fdApprovalContractIds)}|vcc:${serializeContractIds(dpRequestViewCostCenterIds)}|cc:${serializeCadastroCrud(cadastroCrud)}`;
 }
 
 const EMPTY_PERMISSION_BASELINE = serializeFullBaseline(
@@ -199,6 +202,7 @@ const EMPTY_PERMISSION_BASELINE = serializeFullBaseline(
   new Set(),
   new Set(),
   {},
+  new Set(),
   new Set(),
   new Set(),
   {}
@@ -627,6 +631,9 @@ export function UserPermissionsEditor({
   const [selectedDpApprovalContractIds, setSelectedDpApprovalContractIds] = useState<Set<string>>(new Set());
   const [selectedRestrictedDpApprovalCostCenterIds, setSelectedRestrictedDpApprovalCostCenterIds] =
     useState<Set<string>>(new Set());
+  const [selectedFdApprovalContractIds, setSelectedFdApprovalContractIds] = useState<Set<string>>(
+    new Set()
+  );
   const [selectedDpRequestViewCostCenterIds, setSelectedDpRequestViewCostCenterIds] =
     useState<Set<string>>(new Set());
   const [contractModuleFlags, setContractModuleFlags] = useState<Record<string, ContractModuleFlags>>({});
@@ -653,6 +660,8 @@ export function UserPermissionsEditor({
   selectedDpApprovalContractIdsRef.current = selectedDpApprovalContractIds;
   const selectedRestrictedDpApprovalCostCenterIdsRef = useRef(selectedRestrictedDpApprovalCostCenterIds);
   selectedRestrictedDpApprovalCostCenterIdsRef.current = selectedRestrictedDpApprovalCostCenterIds;
+  const selectedFdApprovalContractIdsRef = useRef(selectedFdApprovalContractIds);
+  selectedFdApprovalContractIdsRef.current = selectedFdApprovalContractIds;
   const selectedDpRequestViewCostCenterIdsRef = useRef(selectedDpRequestViewCostCenterIds);
   selectedDpRequestViewCostCenterIdsRef.current = selectedDpRequestViewCostCenterIds;
   const contractModuleFlagsRef = useRef(contractModuleFlags);
@@ -683,6 +692,7 @@ export function UserPermissionsEditor({
           allowedContractIds: string[];
           dpApprovalContractIds?: string[];
           restrictedDpApprovalCostCenterIds?: string[];
+          fdApprovalContractIds?: string[];
           dpRequestViewCostCenterIds?: string[];
           contractModuleFlags?: Record<string, ContractModuleFlags>;
         };
@@ -698,6 +708,7 @@ export function UserPermissionsEditor({
           allowedContractIds: d.allowedContractIds ?? [],
           dpApprovalContractIds: d.dpApprovalContractIds ?? [],
           restrictedDpApprovalCostCenterIds: d.restrictedDpApprovalCostCenterIds ?? [],
+          fdApprovalContractIds: d.fdApprovalContractIds ?? [],
           dpRequestViewCostCenterIds: d.dpRequestViewCostCenterIds ?? [],
           contractModuleFlags: d.contractModuleFlags ?? {},
         } as UserPermissionPayload;
@@ -715,7 +726,7 @@ export function UserPermissionsEditor({
       (isPositionMode || !!userId) &&
       !!userPermissionData &&
       !userPermissionData.isAdmin &&
-      activeTab === 'contratos',
+      (activeTab === 'contratos' || activeTab === 'controle'),
     staleTime: 60_000,
     refetchOnWindowFocus: false,
   });
@@ -803,6 +814,7 @@ export function UserPermissionsEditor({
     const rawDp = new Set(userPermissionData.dpApprovalContractIds ?? []);
     const nextDpApproval = new Set(Array.from(rawDp).filter((id) => nextContractIds.has(id)));
     const nextRestrictedCc = new Set(userPermissionData.restrictedDpApprovalCostCenterIds ?? []);
+    const nextFdContracts = new Set(userPermissionData.fdApprovalContractIds ?? []);
     const nextViewCc = new Set(userPermissionData.dpRequestViewCostCenterIds ?? []);
     const rawFlags = userPermissionData.contractModuleFlags ?? {};
     const emptyFlags = (): ContractModuleFlags => ({
@@ -822,6 +834,7 @@ export function UserPermissionsEditor({
     setSelectedContractIds(nextContractIds);
     setSelectedDpApprovalContractIds(nextDpApproval);
     setSelectedRestrictedDpApprovalCostCenterIds(nextRestrictedCc);
+    setSelectedFdApprovalContractIds(nextFdContracts);
     setSelectedDpRequestViewCostCenterIds(nextViewCc);
     setContractModuleFlags(nextFlags);
     setCadastroCrudByModule(nextCadastroCrud);
@@ -833,6 +846,7 @@ export function UserPermissionsEditor({
       nextDpApproval,
       nextFlags,
       nextRestrictedCc,
+      nextFdContracts,
       nextViewCc,
       nextCadastroCrud
     );
@@ -905,6 +919,9 @@ export function UserPermissionsEditor({
       const restrictedDpApprovalCostCenterIds = currentSelected.has(RESTRICTED_DP_APPROVE_KEY)
         ? Array.from(selectedRestrictedDpApprovalCostCenterIdsRef.current)
         : [];
+      const fdApprovalContractIds = currentSelected.has(FD_APPROVE_KEY)
+        ? Array.from(selectedFdApprovalContractIdsRef.current)
+        : [];
       const dpRequestViewCostCenterIds = currentSelected.has(DP_REQUEST_VIEW_CC_KEY)
         ? Array.from(selectedDpRequestViewCostCenterIdsRef.current)
         : [];
@@ -916,6 +933,7 @@ export function UserPermissionsEditor({
           allowedContractIds,
           dpApprovalContractIds,
           restrictedDpApprovalCostCenterIds,
+          fdApprovalContractIds,
           dpRequestViewCostCenterIds,
           contractModuleFlags: contractModuleFlagsPayload,
         });
@@ -925,6 +943,7 @@ export function UserPermissionsEditor({
           allowedContractIds,
           dpApprovalContractIds,
           restrictedDpApprovalCostCenterIds,
+          fdApprovalContractIds,
           dpRequestViewCostCenterIds,
           contractModuleFlags: contractModuleFlagsPayload,
         });
@@ -940,6 +959,7 @@ export function UserPermissionsEditor({
         selectedDpApprovalContractIdsRef.current,
         contractModuleFlagsRef.current,
         selectedRestrictedDpApprovalCostCenterIdsRef.current,
+        selectedFdApprovalContractIdsRef.current,
         selectedDpRequestViewCostCenterIdsRef.current,
         cadastroCrudByModuleRef.current
       );
@@ -970,6 +990,7 @@ export function UserPermissionsEditor({
             restrictedDpApprovalCostCenterIds: Array.from(
               selectedRestrictedDpApprovalCostCenterIdsRef.current
             ),
+            fdApprovalContractIds: Array.from(selectedFdApprovalContractIdsRef.current),
             dpRequestViewCostCenterIds: Array.from(selectedDpRequestViewCostCenterIdsRef.current),
             contractModuleFlags: updatedFlags,
           };
@@ -1050,6 +1071,7 @@ export function UserPermissionsEditor({
       selectedDpApprovalContractIds,
       contractModuleFlags,
       selectedRestrictedDpApprovalCostCenterIds,
+      selectedFdApprovalContractIds,
       selectedDpRequestViewCostCenterIds,
       cadastroCrudByModule
     );
@@ -1064,6 +1086,7 @@ export function UserPermissionsEditor({
         selectedDpApprovalContractIdsRef.current,
         contractModuleFlagsRef.current,
         selectedRestrictedDpApprovalCostCenterIdsRef.current,
+        selectedFdApprovalContractIdsRef.current,
         selectedDpRequestViewCostCenterIdsRef.current,
         cadastroCrudByModuleRef.current
       );
@@ -1079,6 +1102,7 @@ export function UserPermissionsEditor({
     selectedContractIds,
     selectedDpApprovalContractIds,
     selectedRestrictedDpApprovalCostCenterIds,
+    selectedFdApprovalContractIds,
     selectedDpRequestViewCostCenterIds,
     contractModuleFlags,
     cadastroCrudByModule,
@@ -1101,6 +1125,7 @@ export function UserPermissionsEditor({
         selectedDpApprovalContractIdsRef.current,
         contractModuleFlagsRef.current,
         selectedRestrictedDpApprovalCostCenterIdsRef.current,
+        selectedFdApprovalContractIdsRef.current,
         selectedDpRequestViewCostCenterIdsRef.current,
         cadastroCrudByModuleRef.current
       );
@@ -1161,6 +1186,16 @@ export function UserPermissionsEditor({
     [costCentersList]
   );
 
+  const fdApprovalContractOptions = useMemo(
+    () =>
+      contractsList.map((c) => ({
+        value: c.id,
+        label: c.name,
+        searchText: [c.name, c.number].filter(Boolean).join(' '),
+      })),
+    [contractsList]
+  );
+
   const toggleModule = (key: string) => {
     setSelectedSet((prev) => {
       const n = new Set(prev);
@@ -1175,6 +1210,9 @@ export function UserPermissionsEditor({
         }
         if (key === RESTRICTED_DP_APPROVE_KEY) {
           setSelectedRestrictedDpApprovalCostCenterIds(new Set());
+        }
+        if (key === FD_APPROVE_KEY) {
+          setSelectedFdApprovalContractIds(new Set());
         }
       } else {
         n.add(key);
@@ -1375,6 +1413,7 @@ export function UserPermissionsEditor({
     allowedContractIds?: string[];
     dpApprovalContractIds?: string[];
     restrictedDpApprovalCostCenterIds?: string[];
+    fdApprovalContractIds?: string[];
     dpRequestViewCostCenterIds?: string[];
     contractModuleFlags?: Record<string, ContractModuleFlags>;
   }) => {
@@ -1399,6 +1438,7 @@ export function UserPermissionsEditor({
     const rawDp = new Set(source.dpApprovalContractIds ?? []);
     const nextDpApproval = new Set(Array.from(rawDp).filter((id) => nextContractIds.has(id)));
     const nextRestrictedCc = new Set(source.restrictedDpApprovalCostCenterIds ?? []);
+    const nextFdContracts = new Set(source.fdApprovalContractIds ?? []);
     const nextViewCc = new Set(source.dpRequestViewCostCenterIds ?? []);
     const rawFlags = source.contractModuleFlags ?? {};
     const emptyFlags = (): ContractModuleFlags => ({
@@ -1417,6 +1457,7 @@ export function UserPermissionsEditor({
     setSelectedContractIds(nextContractIds);
     setSelectedDpApprovalContractIds(nextDpApproval);
     setSelectedRestrictedDpApprovalCostCenterIds(nextRestrictedCc);
+    setSelectedFdApprovalContractIds(nextFdContracts);
     setSelectedDpRequestViewCostCenterIds(nextViewCc);
     setContractModuleFlags(nextFlags);
     setCadastroCrudByModule(parseCadastroCrudFromPerms(perms));
@@ -1466,6 +1507,7 @@ export function UserPermissionsEditor({
     setSelectedRestrictedDpApprovalCostCenterIds(
       new Set(source.restrictedDpApprovalCostCenterIds ?? [])
     );
+    setSelectedFdApprovalContractIds(new Set(source.fdApprovalContractIds ?? []));
     setSelectedDpRequestViewCostCenterIds(new Set(source.dpRequestViewCostCenterIds ?? []));
     toast.success('Permissões de acesso copiadas. Salvamento automático em andamento.');
   };
@@ -1554,6 +1596,7 @@ export function UserPermissionsEditor({
         allowedContractIds?: string[];
         dpApprovalContractIds?: string[];
         restrictedDpApprovalCostCenterIds?: string[];
+        fdApprovalContractIds?: string[];
         dpRequestViewCostCenterIds?: string[];
         contractModuleFlags?: Record<string, ContractModuleFlags>;
       };
@@ -1562,6 +1605,7 @@ export function UserPermissionsEditor({
         allowedContractIds: data?.allowedContractIds ?? [],
         dpApprovalContractIds: data?.dpApprovalContractIds ?? [],
         restrictedDpApprovalCostCenterIds: data?.restrictedDpApprovalCostCenterIds ?? [],
+        fdApprovalContractIds: data?.fdApprovalContractIds ?? [],
         dpRequestViewCostCenterIds: data?.dpRequestViewCostCenterIds ?? [],
         contractModuleFlags: data?.contractModuleFlags ?? {},
       });
@@ -1588,6 +1632,7 @@ export function UserPermissionsEditor({
       selectedDpApprovalContractIds,
       contractModuleFlags,
       selectedRestrictedDpApprovalCostCenterIds,
+      selectedFdApprovalContractIds,
       selectedDpRequestViewCostCenterIds,
       cadastroCrudByModule
     ) !== baselineSerializedRef.current;
@@ -1812,6 +1857,7 @@ export function UserPermissionsEditor({
                             const lbl = labelFor(mod);
                             const liberado = selectedSet.has(mod.key);
                             const isRestrictedApprove = mod.key === RESTRICTED_DP_APPROVE_KEY;
+                            const isFdApprove = mod.key === FD_APPROVE_KEY;
                             const isViewByCostCenter = mod.key === DP_REQUEST_VIEW_CC_KEY;
                             return (
                               <tr
@@ -1845,6 +1891,25 @@ export function UserPermissionsEditor({
                                             placeholder="Selecionar centros de custo..."
                                             searchPlaceholder="Pesquisar centro de custo..."
                                             emptyOptionsMessage="Nenhum centro de custo ativo"
+                                            noFocusRing
+                                          />
+                                        </div>
+                                      ) : null}
+                                      {isFdApprove && liberado ? (
+                                        <div className="mt-2 max-w-xl">
+                                          <p className="mb-1.5 text-xs text-gray-500 dark:text-gray-400">
+                                            Contratos que esta pessoa pode aprovar nas fichas de
+                                            demanda
+                                          </p>
+                                          <MultiSelectSearchDropdown
+                                            selected={Array.from(selectedFdApprovalContractIds)}
+                                            onChange={(ids) =>
+                                              setSelectedFdApprovalContractIds(new Set(ids))
+                                            }
+                                            options={fdApprovalContractOptions}
+                                            placeholder="Selecionar contratos..."
+                                            searchPlaceholder="Pesquisar contrato..."
+                                            emptyOptionsMessage="Nenhum contrato cadastrado"
                                             noFocusRing
                                           />
                                         </div>
@@ -2048,7 +2113,7 @@ export function UserPermissionsEditor({
                         <th
                           scope="col"
                           className="px-1 pb-3 text-center text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-400 dark:text-gray-500"
-                          title="Gestor do contrato: aprova solicitações DP/FD, requisições de materiais e OCs na fase gestor deste contrato"
+                          title="Gestor do contrato: aprova solicitações internas, requisições de materiais e OCs na fase gestor deste contrato"
                         >
                           Gestor
                         </th>

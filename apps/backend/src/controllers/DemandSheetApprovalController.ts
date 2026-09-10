@@ -9,15 +9,18 @@ import { prisma } from '../lib/prisma';
 import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import {
-  assertManagerCanActOnDpContract,
-  getManagerDpApprovalContractScope,
-} from '../lib/dpApprovalAccess';
+  assertUserCanApproveFd,
+  fdApprovalVisibilityWhere,
+  getFdApprovalContractIds,
+  getFdManagerApprovalVisibilityWhere,
+} from '../lib/fdApprovalAccess';
 import { getContractAccessForUser } from '../lib/contractAccess';
 import { pathToModuleKey, PERMISSION_ACCESS_ACTION } from '@sistema-ponto/permission-modules';
 import {
   importDemandSheets,
   type FdImportRow,
 } from '../services/demandSheetImport';
+import { getManagerDpApprovalContractScope } from '../lib/dpApprovalAccess';
 
 const fdModuleKey = pathToModuleKey('/ponto/aprovacao-fds');
 const fdsAprovadasModuleKey = pathToModuleKey('/ponto/fds-aprovadas');
@@ -190,6 +193,7 @@ async function listWhereForUser(userId: string, isAdmin: boolean): Promise<Prism
   const hasModule = await userCanAccessFdModule(userId, isAdmin);
   const access = await getContractAccessForUser(userId, false);
   const scope = await getManagerDpApprovalContractScope(userId, isAdmin);
+  const fdContractIds = await getFdApprovalContractIds(userId, false);
 
   const or: Prisma.DemandSheetApprovalWhereInput[] = [{ createdBy: userId }];
   if (hasModule && access.filter === 'ids' && access.ids.length > 0) {
@@ -198,6 +202,9 @@ async function listWhereForUser(userId: string, isAdmin: boolean): Promise<Prism
   const managerScope = mapManagerScopeToFdWhere(scope);
   if (Object.keys(managerScope).length > 0) {
     or.push(managerScope);
+  }
+  if (fdContractIds && fdContractIds.length > 0) {
+    or.push(fdApprovalVisibilityWhere(fdContractIds));
   }
   return { OR: or };
 }
@@ -368,12 +375,11 @@ export class DemandSheetApprovalController {
     try {
       if (!req.user) throw createError('Usuário não autenticado', 401);
 
-      const scope = await getManagerDpApprovalContractScope(req.user.id, req.user.isAdmin);
-      if (scope === null) {
-        return res.json({ success: true, data: [] });
-      }
+      const managerScope = await getFdManagerApprovalVisibilityWhere(
+        req.user.id,
+        req.user.isAdmin,
+      );
 
-      const managerScope = mapManagerScopeToFdWhere(scope);
       const rawPhase = String(req.query.phase ?? 'PENDING').toUpperCase();
       type Phase = 'PENDING' | 'APPROVED' | 'REJECTED' | 'ALL';
       const phase: Phase = (['PENDING', 'APPROVED', 'REJECTED', 'ALL'] as const).includes(
@@ -419,7 +425,7 @@ export class DemandSheetApprovalController {
         throw createError('A ficha não está aguardando aprovação do gestor', 400);
       }
 
-      await assertManagerCanActOnDpContract(req.user.id, req.user.isAdmin, row.contratoId);
+      await assertUserCanApproveFd(req.user.id, req.user.isAdmin, row.contratoId);
 
       const payload = managerDecisionSchema.parse(req.body);
 
@@ -458,7 +464,7 @@ export class DemandSheetApprovalController {
         throw createError('A ficha não está aguardando aprovação do gestor', 400);
       }
 
-      await assertManagerCanActOnDpContract(req.user.id, req.user.isAdmin, row.contratoId);
+      await assertUserCanApproveFd(req.user.id, req.user.isAdmin, row.contratoId);
 
       const payload = managerDecisionSchema.parse(req.body);
       const reason = payload.comment?.trim() || 'Reprovada pelo gestor';
@@ -490,14 +496,13 @@ export class DemandSheetApprovalController {
     try {
       if (!req.user) throw createError('Usuário não autenticado', 401);
 
-      let pendingManager = 0;
-      const scope = await getManagerDpApprovalContractScope(req.user.id, req.user.isAdmin);
-      if (scope !== null) {
-        const managerScope = mapManagerScopeToFdWhere(scope);
-        pendingManager = await prisma.demandSheetApproval.count({
-          where: { status: 'WAITING_MANAGER', ...managerScope },
-        });
-      }
+      const managerScope = await getFdManagerApprovalVisibilityWhere(
+        req.user.id,
+        req.user.isAdmin,
+      );
+      const pendingManager = await prisma.demandSheetApproval.count({
+        where: { status: 'WAITING_MANAGER', ...managerScope },
+      });
 
       let pendingPurchase = 0;
       const canPurchase = await userCanAccessFdsAprovadasModule(req.user.id, req.user.isAdmin);

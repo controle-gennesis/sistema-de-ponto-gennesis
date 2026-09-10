@@ -5,7 +5,7 @@ import os from 'os';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { authenticate } from '../middleware/auth';
-import { requireDpApproverAccess, requireModuleAccess } from '../middleware/permissionAuth';
+import { requireFdApproverAccess, requireModuleAccess } from '../middleware/permissionAuth';
 import { pathToModuleKey } from '@sistema-ponto/permission-modules';
 import { DemandSheetApprovalController } from '../controllers/DemandSheetApprovalController';
 
@@ -122,7 +122,7 @@ router.get(
   requireModuleAccess(fdsAprovadasModule),
   controller.listApprovedForPurchasing.bind(controller)
 );
-router.get('/aprovacoes', requireDpApproverAccess, controller.getManagerApprovals.bind(controller));
+router.get('/aprovacoes', requireFdApproverAccess, controller.getManagerApprovals.bind(controller));
 
 router.patch(
   '/:id/purchase-status',
@@ -131,7 +131,7 @@ router.patch(
 );
 router.patch('/:id', requireModuleAccess(fdModule), controller.update.bind(controller));
 router.delete('/:id', requireModuleAccess(fdModule), controller.remove.bind(controller));
-router.put('/:id/manager-approve', requireDpApproverAccess, controller.approveManager.bind(controller));
-router.put('/:id/manager-reject', requireDpApproverAccess, controller.rejectManager.bind(controller));
+router.put('/:id/manager-approve', requireFdApproverAccess, controller.approveManager.bind(controller));
+router.put('/:id/manager-reject', requireFdApproverAccess, controller.rejectManager.bind(controller));
 
 export default router;

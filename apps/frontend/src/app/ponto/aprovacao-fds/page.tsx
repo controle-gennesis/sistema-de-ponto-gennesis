@@ -226,7 +226,7 @@ export default function AprovacaoFdsPage() {
               Fichas de Demanda
             </h1>
             <p className="mx-auto mt-2 max-w-2xl text-sm text-gray-600 dark:text-gray-400 sm:text-base">
-              Cadastre fichas de demanda. Após o envio, o gestor do contrato analisa e decide.
+              Cadastre fichas de demanda. Após o envio, o aprovador do contrato analisa e decide.
             </p>
           </div>
 
@@ -364,7 +364,7 @@ export default function AprovacaoFdsPage() {
                             <td className="px-3 py-4 text-center text-gray-900 dark:text-gray-100 sm:px-6">
                               {row.codigoPedido}
                             </td>
-                            <td className="whitespace-nowrap px-3 py-4 text-center text-gray-900 dark:text-gray-100 sm:px-6">
+                            <td className="whitespace-nowrap px-3 py-4 text-center uppercase text-gray-900 dark:text-gray-100 sm:px-6">
                               {row.contratoNome}
                             </td>
                             <td className="px-3 py-4 text-center text-gray-900 dark:text-gray-100 sm:px-6">

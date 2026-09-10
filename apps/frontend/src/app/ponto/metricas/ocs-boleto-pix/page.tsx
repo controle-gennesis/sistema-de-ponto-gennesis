@@ -493,17 +493,20 @@ export default function OcsBoletoPixPage() {
 
   if (loadingUser) {
     return (
-      <MainLayout user={null} onLogout={handleLogout}>
-        <Loading />
-      </MainLayout>
+      <ProtectedRoute route={ROUTE}>
+        <MainLayout userRole="EMPLOYEE" userName="Usuário" onLogout={handleLogout}>
+          <Loading message="Carregando..." fullScreen size="lg" />
+        </MainLayout>
+      </ProtectedRoute>
     );
   }
 
+  const user = userData?.data || { name: 'Usuário', role: 'EMPLOYEE' };
   const editingHasExtras = editingItem ? hasExtraData(editingItem) : false;
 
   return (
     <ProtectedRoute route={ROUTE}>
-      <MainLayout user={userData?.data || null} onLogout={handleLogout}>
+      <MainLayout userRole="EMPLOYEE" userName={user.name || 'Usuário'} onLogout={handleLogout}>
         <div className="space-y-6">
           <div className="flex w-full flex-col items-center text-center">
             <h1 className="w-full text-center text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">

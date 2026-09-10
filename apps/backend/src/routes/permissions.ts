@@ -1,4 +1,4 @@
-import express from 'express';
+﻿import express from 'express';
 import { Prisma } from '@prisma/client';
 import { PERMISSION_ACCESS_ACTION, PERMISSION_MODULES } from '@sistema-ponto/permission-modules';
 import {
@@ -18,6 +18,7 @@ import {
   DP_RESTRICTED_APPROVE_MODULE_KEY,
   DP_REQUEST_VIEW_CC_MODULE_KEY,
 } from '../lib/dpApprovalAccess';
+import { FD_APPROVE_MODULE_KEY } from '../lib/fdApprovalAccess';
 
 function asStringIdArray(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
@@ -95,6 +96,7 @@ router.get('/me', async (req: AuthRequest, res, next) => {
           allowedContractIds: [],
           dpApprovalContractIds: [],
           restrictedDpApprovalCostCenterIds: [],
+          fdApprovalContractIds: [],
           dpRequestViewCostCenterIds: [],
           gestorCostCenterIds: [],
           isUnbUser: false,
@@ -136,6 +138,11 @@ router.get('/me', async (req: AuthRequest, res, next) => {
       select: { costCenterId: true },
     });
 
+    const fdApprovalContractIds = await prisma.userFdApprovalContract.findMany({
+      where: { userId: req.user.id },
+      select: { contractId: true },
+    });
+
     const dpRequestViewCostCenterIds = await prisma.userDpRequestViewCostCenter.findMany({
       where: { userId: req.user.id },
       select: { costCenterId: true },
@@ -174,6 +181,7 @@ router.get('/me', async (req: AuthRequest, res, next) => {
         allowedContractIds: allowedContractIds.map((r) => r.contractId),
         dpApprovalContractIds: dpApprovalContractIds.map((r) => r.contractId),
         restrictedDpApprovalCostCenterIds: restrictedDpApprovalCostCenterIds.map((r) => r.costCenterId),
+        fdApprovalContractIds: fdApprovalContractIds.map((r) => r.contractId),
         dpRequestViewCostCenterIds: dpRequestViewCostCenterIds.map((r) => r.costCenterId),
         gestorCostCenterIds,
         isUnbUser,
@@ -350,6 +358,13 @@ router.get('/users/:userId', requirePermissionManagerOrAdministrator, async (req
           select: { costCenterId: true },
         });
 
+    const fdApprovalContractIds = isAdmin
+      ? []
+      : await prisma.userFdApprovalContract.findMany({
+          where: { userId },
+          select: { contractId: true },
+        });
+
     const dpRequestViewCostCenterIds = isAdmin
       ? []
       : await prisma.userDpRequestViewCostCenter.findMany({
@@ -378,6 +393,7 @@ router.get('/users/:userId', requirePermissionManagerOrAdministrator, async (req
         allowedContractIds: contractPermRows.map((r) => r.contractId),
         dpApprovalContractIds: dpApprovalContractIds.map((r) => r.contractId),
         restrictedDpApprovalCostCenterIds: restrictedDpApprovalCostCenterIds.map((r) => r.costCenterId),
+        fdApprovalContractIds: fdApprovalContractIds.map((r) => r.contractId),
         dpRequestViewCostCenterIds: dpRequestViewCostCenterIds.map((r) => r.costCenterId),
         contractModuleFlags,
       },
@@ -397,6 +413,8 @@ router.put('/users/:userId', requirePermissionManagerOrAdministrator, async (req
     const shouldSyncDpApproval = Array.isArray(rawDpApproval);
     const rawRestrictedCc = req.body?.restrictedDpApprovalCostCenterIds;
     const shouldSyncRestrictedCc = Array.isArray(rawRestrictedCc);
+    const rawFdContracts = req.body?.fdApprovalContractIds;
+    const shouldSyncFdContracts = Array.isArray(rawFdContracts);
     const rawViewCc = req.body?.dpRequestViewCostCenterIds;
     const shouldSyncViewCc = Array.isArray(rawViewCc);
     type ContractFlags = { orcamento?: boolean; relatorios?: boolean; ordemServico?: boolean; producaoSemanal?: boolean };
@@ -506,6 +524,20 @@ router.put('/users/:userId', requirePermissionManagerOrAdministrator, async (req
       }
     }
 
+    let fdContractIdsToSave: string[] = [];
+    if (shouldSyncFdContracts) {
+      const hasFdPerm = normalized.some((p) => p.module === FD_APPROVE_MODULE_KEY);
+      fdContractIdsToSave = hasFdPerm ? asStringIdArray(rawFdContracts) : [];
+      if (fdContractIdsToSave.length > 0) {
+        const existing = await prisma.contract.findMany({
+          where: { id: { in: fdContractIdsToSave } },
+          select: { id: true },
+        });
+        const ok = new Set(existing.map((c) => c.id));
+        fdContractIdsToSave = fdContractIdsToSave.filter((id) => ok.has(id));
+      }
+    }
+
     let viewCcIdsToSave: string[] = [];
     if (shouldSyncViewCc) {
       const hasViewPerm = normalized.some((p) => p.module === DP_REQUEST_VIEW_CC_MODULE_KEY);
@@ -580,6 +612,19 @@ router.put('/users/:userId', requirePermissionManagerOrAdministrator, async (req
             data: restrictedCcIdsToSave.map((costCenterId) => ({
               userId,
               costCenterId,
+              updatedBy: req.user!.id,
+            })),
+          });
+        }
+      }
+
+      if (shouldSyncFdContracts) {
+        await tx.userFdApprovalContract.deleteMany({ where: { userId } });
+        if (fdContractIdsToSave.length > 0) {
+          await tx.userFdApprovalContract.createMany({
+            data: fdContractIdsToSave.map((contractId) => ({
+              userId,
+              contractId,
               updatedBy: req.user!.id,
             })),
           });
@@ -693,6 +738,7 @@ router.get('/position-template', requireAdministrator, async (req, res, next) =>
           allowedContractIds: [],
           dpApprovalContractIds: [],
           restrictedDpApprovalCostCenterIds: [],
+          fdApprovalContractIds: [],
           dpRequestViewCostCenterIds: [],
           contractModuleFlags: {},
         },
@@ -710,6 +756,7 @@ router.get('/position-template', requireAdministrator, async (req, res, next) =>
           allowedContractIds: [],
           dpApprovalContractIds: [],
           restrictedDpApprovalCostCenterIds: [],
+          fdApprovalContractIds: [],
           dpRequestViewCostCenterIds: [],
           contractModuleFlags: {},
         },
@@ -730,6 +777,10 @@ router.get('/position-template', requireAdministrator, async (req, res, next) =>
     const restrictedDpApprovalCostCenterIds = Array.isArray(idsRawRestricted)
       ? idsRawRestricted.filter((x): x is string => typeof x === 'string')
       : [];
+    const idsRawFdContracts = (row as { fdApprovalContractIds?: unknown }).fdApprovalContractIds;
+    const fdApprovalContractIds = Array.isArray(idsRawFdContracts)
+      ? idsRawFdContracts.filter((x): x is string => typeof x === 'string')
+      : [];
     const idsRawView = (row as { dpRequestViewCostCenterIds?: unknown }).dpRequestViewCostCenterIds;
     const dpRequestViewCostCenterIds = Array.isArray(idsRawView)
       ? idsRawView.filter((x): x is string => typeof x === 'string')
@@ -747,6 +798,7 @@ router.get('/position-template', requireAdministrator, async (req, res, next) =>
         allowedContractIds,
         dpApprovalContractIds,
         restrictedDpApprovalCostCenterIds,
+        fdApprovalContractIds,
         dpRequestViewCostCenterIds,
         contractModuleFlags,
       },
@@ -779,6 +831,8 @@ router.put('/position-template', requireAdministrator, async (req: AuthRequest, 
     const shouldSyncDpApproval = Array.isArray(rawDpApproval);
     const rawRestrictedCc = req.body?.restrictedDpApprovalCostCenterIds;
     const shouldSyncRestrictedCc = Array.isArray(rawRestrictedCc);
+    const rawFdContracts = req.body?.fdApprovalContractIds;
+    const shouldSyncFdContracts = Array.isArray(rawFdContracts);
     const rawViewCc = req.body?.dpRequestViewCostCenterIds;
     const shouldSyncViewCc = Array.isArray(rawViewCc);
     type PosContractFlags = { orcamento?: boolean; relatorios?: boolean; ordemServico?: boolean; producaoSemanal?: boolean };
@@ -861,6 +915,20 @@ router.put('/position-template', requireAdministrator, async (req: AuthRequest, 
       }
     }
 
+    let fdContractIdsToSave: string[] = [];
+    if (shouldSyncFdContracts) {
+      const hasFdPerm = normalized.some((p) => p.module === FD_APPROVE_MODULE_KEY);
+      fdContractIdsToSave = hasFdPerm ? asStringIdArray(rawFdContracts) : [];
+      if (fdContractIdsToSave.length > 0) {
+        const existing = await prisma.contract.findMany({
+          where: { id: { in: fdContractIdsToSave } },
+          select: { id: true },
+        });
+        const ok = new Set(existing.map((c) => c.id));
+        fdContractIdsToSave = fdContractIdsToSave.filter((id) => ok.has(id));
+      }
+    }
+
     let viewCcIdsToSave: string[] = [];
     if (shouldSyncViewCc) {
       const hasViewPerm = normalized.some((p) => p.module === DP_REQUEST_VIEW_CC_MODULE_KEY);
@@ -893,6 +961,7 @@ router.put('/position-template', requireAdministrator, async (req: AuthRequest, 
     const restrictedCcJson = (
       shouldSyncRestrictedCc ? restrictedCcIdsToSave : []
     ) as unknown as Prisma.InputJsonValue;
+    const fdContractsJson = (shouldSyncFdContracts ? fdContractIdsToSave : []) as unknown as Prisma.InputJsonValue;
     const viewCcJson = (shouldSyncViewCc ? viewCcIdsToSave : []) as unknown as Prisma.InputJsonValue;
     const moduleFlagsJson = builtModuleFlags as unknown as Prisma.InputJsonValue;
 
@@ -904,6 +973,7 @@ router.put('/position-template', requireAdministrator, async (req: AuthRequest, 
         allowedContractIds: contractIdsJson,
         dpApprovalContractIds: dpApprovalJson,
         restrictedDpApprovalCostCenterIds: restrictedCcJson,
+        fdApprovalContractIds: fdContractsJson,
         dpRequestViewCostCenterIds: viewCcJson,
         contractModuleFlags: moduleFlagsJson,
       },
@@ -912,6 +982,7 @@ router.put('/position-template', requireAdministrator, async (req: AuthRequest, 
         allowedContractIds: contractIdsJson,
         ...(shouldSyncDpApproval ? { dpApprovalContractIds: dpApprovalJson } : {}),
         ...(shouldSyncRestrictedCc ? { restrictedDpApprovalCostCenterIds: restrictedCcJson } : {}),
+        ...(shouldSyncFdContracts ? { fdApprovalContractIds: fdContractsJson } : {}),
         ...(shouldSyncViewCc ? { dpRequestViewCostCenterIds: viewCcJson } : {}),
         ...(shouldSyncContracts ? { contractModuleFlags: moduleFlagsJson } : {}),
       },

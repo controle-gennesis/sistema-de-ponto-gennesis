@@ -40,6 +40,7 @@ export function NavSearch({ inputRef }: NavSearchProps) {
     can,
     isAdministrator,
     canAccessDpApproverPages,
+    canApproveFd,
     canApproveEspelhoNf,
     canApproveFuel,
     canApproveOc,
@@ -79,6 +80,7 @@ export function NavSearch({ inputRef }: NavSearchProps) {
 
   const canSeeApprovals =
     canAccessDpApproverPages ||
+    canApproveFd ||
     canApproveEspelhoNf ||
     canApproveFuel ||
     canApproveOc ||

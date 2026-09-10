@@ -131,6 +131,8 @@ export function usePermissions() {
   const restrictedDpApprovalCostCenterIds: string[] =
     permissionData?.restrictedDpApprovalCostCenterIds ?? [];
   const restrictedDpApprovalCostCenterIdSet = new Set(restrictedDpApprovalCostCenterIds);
+  const fdApprovalContractIds: string[] = permissionData?.fdApprovalContractIds ?? [];
+  const fdApprovalContractIdSet = new Set(fdApprovalContractIds);
   const gestorCostCenterIds: string[] = permissionData?.gestorCostCenterIds ?? [];
   const isUnbUser = !!permissionData?.isUnbUser;
   const unbCostCenterIds: string[] = permissionData?.unbCostCenterIds ?? [];
@@ -299,6 +301,13 @@ export function usePermissions() {
     dpApprovalContractIds.length > 0 ||
     canApproveRestrictedDpRequests ||
     can(pk('/ponto/controle/aprovar-solicitacoes-dp'));
+
+  /** Aprovação de fichas de demanda por contrato (ou gestor de contrato legado). */
+  const canApproveFd =
+    isAdministrator ||
+    !!permissionData?.isAdmin ||
+    can(pk('/ponto/controle/aprovar-fichas-demanda')) ||
+    dpApprovalContractIds.length > 0;
 
   /** Bloco «Espelhos da Nota Fiscal» na tela de Aprovações: aprovação pelo Controle. */
   const canApproveEspelhoNf =
@@ -508,6 +517,8 @@ export function usePermissions() {
     dpApprovalContractIds,
     restrictedDpApprovalCostCenterIds,
     restrictedDpApprovalCostCenterIdSet,
+    fdApprovalContractIds,
+    fdApprovalContractIdSet,
     canApproveRestrictedDpRequests,
     gestorCostCenterIds,
     isUnbUser,
@@ -516,6 +527,7 @@ export function usePermissions() {
     ocGestorScopedCostCenterIds,
     canCreateSensitiveDpRequestType,
     canAccessDpApproverPages,
+    canApproveFd,
     canApproveEspelhoNf,
     canApproveOc,
     canApproveOcCompras,

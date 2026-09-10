@@ -50,6 +50,7 @@ export function NotificationsDropdown({ chatUnreadCount = 0 }: NotificationsDrop
     isAdministrator,
     can,
     canAccessDpApproverPages,
+    canApproveFd,
     canApproveEspelhoNf,
     canApproveFuel,
     canApproveOc,
@@ -190,7 +191,7 @@ export function NotificationsDropdown({ chatUnreadCount = 0 }: NotificationsDrop
         Icon: FileText,
       });
     }
-    if (canAccessDpApproverPages && counts.fd > 0) {
+    if (canApproveFd && counts.fd > 0) {
       list.push({
         id: 'fd',
         title: 'Fichas de Demanda',
@@ -386,6 +387,7 @@ export function NotificationsDropdown({ chatUnreadCount = 0 }: NotificationsDrop
     return list;
   }, [
     canAccessDpApproverPages,
+    canApproveFd,
     canApproveEspelhoNf,
     canApproveFuel,
     canApproveOc,

@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { ClipboardCheck, FileText, Filter, Search, X } from 'lucide-react';
+import { ClipboardCheck, Eye, Filter, MoreVertical, Search, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Modal } from '@/components/ui/Modal';
@@ -13,8 +13,15 @@ import { Loading } from '@/components/ui/Loading';
 import { CadastroListLoading } from '@/components/ui/CadastroListSummary';
 import { ListPagination } from '@/components/ui/ListPagination';
 import { FichaDemandaPurchaseStatusModal } from '@/components/suprimentos/FichaDemandaPurchaseStatusModal';
+import { FichaDemandaDetailModal } from '@/components/engenharia/FichaDemandaDetailModal';
 import api from '@/lib/api';
-import { getListTableRowClassName, ListRowNavigableLabel, rowActionMenuButtonClass } from '@/components/ui/listTableUi';
+import { ActionMenuOverlay } from '@/components/ui/ActionMenuOverlay';
+import {
+  getListTableRowClassName,
+  ListRowNavigableLabel,
+  listTableRowClasses,
+  rowActionMenuButtonClass,
+} from '@/components/ui/listTableUi';
 import {
   fdPurchaseStatusBadgeClass,
   formatCurrencyDisplay,
@@ -26,6 +33,7 @@ import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDr
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 
 const ITEMS_PER_PAGE = 20;
+const ROW_ACTION_MENU_WIDTH_PX = 224;
 
 type PurchaseStatusFilter = 'ALL' | 'NONE' | DemandSheetPurchaseStatus;
 
@@ -49,6 +57,12 @@ export default function FdsAprovadasPage() {
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedRecord, setSelectedRecord] = useState<FichaDemandaApprovalRecord | null>(null);
+  const [detailRecord, setDetailRecord] = useState<FichaDemandaApprovalRecord | null>(null);
+  const [rowActionMenu, setRowActionMenu] = useState<{
+    rowId: string;
+    top: number;
+    left: number;
+  } | null>(null);
 
   const handleLogout = () => {
     localStorage.removeItem('token');
@@ -87,6 +101,9 @@ export default function FdsAprovadasPage() {
   const endItem = Math.min(startIndex + ITEMS_PER_PAGE, totalFiltered);
   const isListEmpty = !loadingList && totalFiltered === 0;
   const hasActiveFilter = purchaseStatusFilter !== 'ALL';
+  const rowForActionMenu = rowActionMenu
+    ? records.find((r) => r.id === rowActionMenu.rowId) ?? null
+    : null;
 
   useEffect(() => {
     setCurrentPage(1);
@@ -95,6 +112,29 @@ export default function FdsAprovadasPage() {
   useEffect(() => {
     if (currentPage > totalPages) setCurrentPage(totalPages);
   }, [currentPage, totalPages]);
+
+  useEffect(() => {
+    if (!rowActionMenu) return;
+    const onScroll = () => setRowActionMenu(null);
+    window.addEventListener('scroll', onScroll, true);
+    return () => window.removeEventListener('scroll', onScroll, true);
+  }, [rowActionMenu]);
+
+  useEffect(() => {
+    if (rowActionMenu && !records.some((r) => r.id === rowActionMenu.rowId)) {
+      setRowActionMenu(null);
+    }
+  }, [rowActionMenu, records]);
+
+  const openDetail = (row: FichaDemandaApprovalRecord) => {
+    setRowActionMenu(null);
+    setDetailRecord(row);
+  };
+
+  const openPurchaseStatus = (row: FichaDemandaApprovalRecord) => {
+    setRowActionMenu(null);
+    setSelectedRecord(row);
+  };
 
   const updateStatusMutation = useMutation({
     mutationFn: async ({
@@ -141,7 +181,7 @@ export default function FdsAprovadasPage() {
               Fichas de Demanda
             </h1>
             <p className="mx-auto mt-2 max-w-2xl text-sm text-gray-600 dark:text-gray-400 sm:text-base">
-              Fichas aprovadas pelo gestor. O compras define o status de atendimento.
+              Consulte e acompanhe as fichas de demanda aprovadas.
             </p>
           </div>
 
@@ -157,7 +197,7 @@ export default function FdsAprovadasPage() {
                       Fichas de Demanda
                     </h3>
                     <p className="text-sm text-gray-600 dark:text-gray-400">
-                      Atualize o status de compras de cada ficha aprovada
+                      Lista de fichas aprovadas
                     </p>
                   </div>
                 </div>
@@ -165,7 +205,7 @@ export default function FdsAprovadasPage() {
                   <div className="relative min-w-[240px] flex-1 sm:w-[320px] sm:flex-none">
                     <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
                     <input
-                      type="search"
+                      type="text"
                       placeholder="Buscar por código FD, pedido, contrato..."
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
@@ -224,7 +264,7 @@ export default function FdsAprovadasPage() {
                     <table className="w-full text-sm">
                       <thead className="border-b border-gray-200 dark:border-gray-700">
                         <tr>
-                          <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                          <th className="px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
                             Código da FD
                           </th>
                           <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
@@ -242,7 +282,7 @@ export default function FdsAprovadasPage() {
                           <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
                             Status compras
                           </th>
-                          <th className="min-w-[7rem] px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                          <th className={`${listTableRowClasses.actionTh} text-center`}>
                             Ação
                           </th>
                         </tr>
@@ -251,16 +291,26 @@ export default function FdsAprovadasPage() {
                         {paginatedRows.map((row) => (
                           <tr
                             key={row.id}
-                            onClick={() => setSelectedRecord(row)}
-                            className={getListTableRowClassName(true)}
+                            onClick={() => openDetail(row)}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter' || event.key === ' ') {
+                                event.preventDefault();
+                                openDetail(row);
+                              }
+                            }}
+                            tabIndex={0}
+                            role="button"
+                            className={getListTableRowClassName(true, listTableRowClasses.tr)}
                           >
-                            <td className="px-3 py-4 text-center sm:px-6">
-                              <ListRowNavigableLabel className="font-medium">{row.codFichaDemanda}</ListRowNavigableLabel>
+                            <td className="px-3 py-4 text-left sm:px-6">
+                              <ListRowNavigableLabel className="text-sm font-medium">
+                                {row.codFichaDemanda}
+                              </ListRowNavigableLabel>
                             </td>
-                            <td className="whitespace-nowrap px-3 py-4 text-center text-gray-900 dark:text-gray-100 sm:px-6">
+                            <td className="whitespace-nowrap px-3 py-4 text-center uppercase text-gray-900 dark:text-gray-100 sm:px-6">
                               {row.contratoNome}
                             </td>
-                            <td className="px-3 py-4 text-center text-gray-900 dark:text-gray-100 sm:px-6">
+                            <td className="px-3 py-4 text-center uppercase text-gray-900 dark:text-gray-100 sm:px-6">
                               {row.obra}
                             </td>
                             <td className="px-3 py-4 text-center text-gray-900 dark:text-gray-100 sm:px-6">
@@ -277,15 +327,42 @@ export default function FdsAprovadasPage() {
                                 {purchaseStatusLabel(row.purchaseStatus)}
                               </span>
                             </td>
-                            <td className="px-3 py-4 text-center sm:px-6" onClick={(e) => e.stopPropagation()}>
+                            <td
+                              className={`${listTableRowClasses.actionTd} text-center`}
+                              onClick={(e) => e.stopPropagation()}
+                            >
                               <div className="flex justify-center">
                                 <button
                                   type="button"
-                                  onClick={() => setSelectedRecord(row)}
-                                  className={rowActionMenuButtonClass(false)}
-                                  aria-label="Atualizar status de compras"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    const rect = (
+                                      e.currentTarget as HTMLButtonElement
+                                    ).getBoundingClientRect();
+                                    setRowActionMenu((prev) => {
+                                      if (prev?.rowId === row.id) return null;
+                                      let left = rect.right - ROW_ACTION_MENU_WIDTH_PX;
+                                      left = Math.max(
+                                        8,
+                                        Math.min(
+                                          left,
+                                          window.innerWidth - ROW_ACTION_MENU_WIDTH_PX - 8,
+                                        ),
+                                      );
+                                      return {
+                                        rowId: row.id,
+                                        top: rect.bottom + 4,
+                                        left,
+                                      };
+                                    });
+                                  }}
+                                  className={rowActionMenuButtonClass(
+                                    rowActionMenu?.rowId === row.id,
+                                  )}
+                                  aria-label="Abrir menu de ações"
+                                  title="Ações"
                                 >
-                                  <FileText className="h-4 w-4" />
+                                  <MoreVertical className="h-4 w-4" strokeWidth={2} />
                                 </button>
                               </div>
                             </td>
@@ -299,11 +376,51 @@ export default function FdsAprovadasPage() {
                     totalPages={totalPages}
                     onPageChange={setCurrentPage}
                   />
+
+                  {rowActionMenu && rowForActionMenu && (
+                    <ActionMenuOverlay
+                      open
+                      onClose={() => setRowActionMenu(null)}
+                      top={rowActionMenu.top}
+                      left={rowActionMenu.left}
+                    >
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openDetail(rowForActionMenu);
+                        }}
+                        className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700"
+                      >
+                        <Eye className="h-4 w-4 shrink-0 text-gray-600 dark:text-gray-300" />
+                        <span>Ver detalhes</span>
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openPurchaseStatus(rowForActionMenu);
+                        }}
+                        className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700"
+                      >
+                        <ClipboardCheck className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
+                        <span>Atualizar status</span>
+                      </button>
+                    </ActionMenuOverlay>
+                  )}
                 </>
               )}
             </CardContent>
           </Card>
         </div>
+
+        <FichaDemandaDetailModal
+          isOpen={detailRecord != null}
+          record={detailRecord}
+          onClose={() => setDetailRecord(null)}
+        />
 
         <FichaDemandaPurchaseStatusModal
           record={selectedRecord}

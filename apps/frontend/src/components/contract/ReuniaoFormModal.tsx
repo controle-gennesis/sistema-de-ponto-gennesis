@@ -260,19 +260,19 @@ function PillGroup({
   value: string;
   onChange: (v: string) => void;
 }) {
-  return (
+    return (
     <div className="flex gap-2 pt-1">
       {options.map((opt) => (
         <ButtonSeg
-          key={opt}
+              key={opt}
           active={value === opt}
           onClick={() => onChange(value === opt ? '' : opt)}
           label={opt}
         />
       ))}
-    </div>
-  );
-}
+      </div>
+    );
+  }
 
 function SimNaoGroup({
   options,
@@ -310,7 +310,7 @@ function SimNaoGroup({
               ) : null}
             </span>
             <span className="text-sm font-medium uppercase tracking-wide text-gray-800 dark:text-gray-200">
-              {opt}
+            {opt}
             </span>
           </button>
         );
@@ -413,28 +413,28 @@ function QuestionField({
         <SimNaoGroup options={options} value={String(value ?? '')} onChange={setValue} />
       )}
       {question.type === 'pills' && (
-        <PillGroup options={options} value={String(value ?? '')} onChange={setValue} />
-      )}
-      {question.type === 'rating' && (
-        <RatingPills value={typeof value === 'number' ? value : null} onChange={setValue} />
-      )}
-      {question.type === 'text' && (
-        <input
-          type="text"
-          value={String(value ?? '')}
+            <PillGroup options={options} value={String(value ?? '')} onChange={setValue} />
+          )}
+          {question.type === 'rating' && (
+            <RatingPills value={typeof value === 'number' ? value : null} onChange={setValue} />
+          )}
+          {question.type === 'text' && (
+            <input
+              type="text"
+              value={String(value ?? '')}
           readOnly={locked}
           disabled={locked}
-          onChange={(e) => setValue(e.target.value)}
+              onChange={(e) => setValue(e.target.value)}
           placeholder={question.placeholder || 'Texto curto'}
           className={`${inputClasse} ${locked ? readOnlyInputCls : ''}`}
-        />
-      )}
-      {question.type === 'textarea' && (
-        <textarea
-          value={String(value ?? '')}
+            />
+          )}
+          {question.type === 'textarea' && (
+            <textarea
+              value={String(value ?? '')}
           readOnly={locked}
           disabled={locked}
-          onChange={(e) => setValue(e.target.value)}
+              onChange={(e) => setValue(e.target.value)}
           placeholder={question.placeholder || 'Texto longo'}
           rows={4}
           className={`${FORM_FIELD_TEXTAREA_CLS} min-h-[140px] ${locked ? readOnlyInputCls : ''}`}
@@ -633,39 +633,39 @@ function QuestionField({
         <SignatureField
           value={typeof value === 'string' ? value : ''}
           onChange={(v) => setValue(v)}
-        />
-      )}
-      {showFollowUp && question.followUp && (
-        <div className="mt-2 rounded-lg border border-dashed border-gray-200 bg-gray-50/80 p-3 dark:border-gray-600 dark:bg-gray-900/40">
-          {question.followUp.type === 'pills' ? (
-            <PillGroup
-              options={question.followUp.options || []}
-              value={followUpValue}
-              onChange={(v) => onChange({ value: answer?.value ?? '', followUp: v })}
-            />
-          ) : question.followUp.type === 'text' ? (
-            <input
-              type="text"
-              value={followUpValue}
-              onChange={(e) =>
-                onChange({ value: answer?.value ?? '', followUp: e.target.value })
-              }
-              placeholder={question.followUp.placeholder}
-              className={inputClasse}
-            />
-          ) : (
-            <textarea
-              value={followUpValue}
-              onChange={(e) =>
-                onChange({ value: answer?.value ?? '', followUp: e.target.value })
-              }
-              placeholder={question.followUp.placeholder}
-              rows={2}
-              className={`${FORM_FIELD_TEXTAREA_CLS} min-h-[3.5rem]`}
             />
           )}
-        </div>
-      )}
+          {showFollowUp && question.followUp && (
+        <div className="mt-2 rounded-lg border border-dashed border-gray-200 bg-gray-50/80 p-3 dark:border-gray-600 dark:bg-gray-900/40">
+              {question.followUp.type === 'pills' ? (
+                <PillGroup
+                  options={question.followUp.options || []}
+                  value={followUpValue}
+                  onChange={(v) => onChange({ value: answer?.value ?? '', followUp: v })}
+                />
+              ) : question.followUp.type === 'text' ? (
+                <input
+                  type="text"
+                  value={followUpValue}
+              onChange={(e) =>
+                onChange({ value: answer?.value ?? '', followUp: e.target.value })
+              }
+                  placeholder={question.followUp.placeholder}
+                  className={inputClasse}
+                />
+              ) : (
+                <textarea
+                  value={followUpValue}
+              onChange={(e) =>
+                onChange({ value: answer?.value ?? '', followUp: e.target.value })
+              }
+                  placeholder={question.followUp.placeholder}
+                  rows={2}
+              className={`${FORM_FIELD_TEXTAREA_CLS} min-h-[3.5rem]`}
+                />
+              )}
+            </div>
+          )}
     </div>
   );
 }
@@ -759,7 +759,7 @@ function ReuniaoAnexosSection({
           <Video className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
         )}
         <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">{label}</h4>
-      </div>
+        </div>
       {info?.url ? (
         <div className="flex flex-wrap items-center gap-2">
           <a
@@ -771,19 +771,19 @@ function ReuniaoAnexosSection({
             <ExternalLink className="h-4 w-4" />
             {info.originalName || (tipo === 'ata' ? 'Ata' : 'Vídeo')}
           </a>
-          <button
-            type="button"
+                <button
+                  type="button"
             onClick={() => void handleRemove(tipo)}
             disabled={uploading === tipo}
             className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-sm text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/30"
           >
             <Trash2 className="h-4 w-4" />
             Remover
-          </button>
+                </button>
         </div>
       ) : (
-        <button
-          type="button"
+                <button
+                  type="button"
           onClick={() => (tipo === 'ata' ? ataInputRef : videoInputRef).current?.click()}
           disabled={uploading === tipo}
           className="inline-flex items-center gap-2 rounded-lg border border-dashed border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800"
@@ -794,9 +794,9 @@ function ReuniaoAnexosSection({
             <Upload className="h-4 w-4" />
           )}
           Enviar {tipo === 'ata' ? 'ata (PDF/Word)' : 'vídeo'}
-        </button>
+                </button>
       )}
-    </div>
+              </div>
   );
 
   return (
@@ -808,18 +808,18 @@ function ReuniaoAnexosSection({
         <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
           Anexe a ata e o vídeo gravado nesta reunião quinzenal.
         </p>
-      </div>
+            </div>
       <div className="grid gap-4 sm:grid-cols-2">
         {renderAnexo('ata', ata, 'Ata da reunião')}
         {renderAnexo('video', video, 'Vídeo da reunião')}
-      </div>
-      <input
+          </div>
+            <input
         ref={ataInputRef}
-        type="file"
+              type="file"
         accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        className="hidden"
-        onChange={(e) => {
-          const file = e.target.files?.[0];
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
           if (file) void handleUpload('ata', file);
         }}
       />
@@ -1142,27 +1142,27 @@ export function ReuniaoFormModal({
         <h4 className="text-sm font-semibold uppercase tracking-wide text-gray-800 dark:text-gray-200">
           {section.title}
         </h4>
-        {section.description ? (
+      {section.description ? (
           <p className="text-sm text-gray-500 dark:text-gray-400">{section.description}</p>
-        ) : null}
+      ) : null}
       </div>
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
         {section.questions.map((q) => {
           const full = resolveFieldWidth(q as FormQuestion) === 'full';
           return (
             <div key={q.id} className={`min-w-0 ${full ? 'sm:col-span-2' : ''}`}>
-              <QuestionField
-                question={q}
-                answer={form.answers[q.id]}
+          <QuestionField
+            question={q}
+            answer={form.answers[q.id]}
                 allAnswers={form.answers}
                 profileOptions={profileSelectOptions}
-                onChange={(ans) =>
-                  updateForm((prev) => ({
-                    ...prev,
-                    answers: { ...prev.answers, [q.id]: ans },
-                  }))
-                }
-              />
+            onChange={(ans) =>
+              updateForm((prev) => ({
+                ...prev,
+                answers: { ...prev.answers, [q.id]: ans },
+              }))
+            }
+          />
             </div>
           );
         })}
@@ -1202,9 +1202,9 @@ export function ReuniaoFormModal({
                   {formDescription}
                 </p>
               ) : null}
-            </div>
+                </div>
             <ReuniaoFormCloseButton />
-          </div>
+                    </div>
 
           <div className="space-y-8">
             {multiStep ? (
@@ -1221,8 +1221,8 @@ export function ReuniaoFormModal({
 
             {visibleSections.length > 0 ? (
               visibleSections.map(renderSection)
-            ) : (
-              <p className="py-8 text-center text-sm text-gray-500 dark:text-gray-400">
+              ) : (
+                <p className="py-8 text-center text-sm text-gray-500 dark:text-gray-400">
                 Nenhuma pergunta neste formulário.
               </p>
             )}
@@ -1239,18 +1239,18 @@ export function ReuniaoFormModal({
                 }
               />
             ) : null}
-          </div>
+                </div>
 
           <div className="flex justify-end gap-2 border-t border-gray-200 pt-6 dark:border-gray-700">
             {multiStep && activeFillStep > 0 ? (
-              <button
-                type="button"
+            <button
+              type="button"
                 onClick={() => setActiveFillStep((prev) => Math.max(prev - 1, 0))}
                 disabled={saving}
                 className="inline-flex h-10 items-center rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-800 transition-colors hover:bg-gray-50 disabled:opacity-60 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
               >
                 Anterior
-              </button>
+            </button>
             ) : null}
             {multiStep && activeFillStep < formSteps.length - 1 ? (
               <button

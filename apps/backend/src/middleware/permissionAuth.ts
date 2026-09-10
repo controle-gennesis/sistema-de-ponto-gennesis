@@ -2,6 +2,7 @@ import { Response, NextFunction } from 'express';
 import { PERMISSION_ACCESS_ACTION } from '@sistema-ponto/permission-modules';
 import { prisma } from '../lib/prisma';
 import { userHasAnyDpApproverAccess } from '../lib/dpApprovalAccess';
+import { userHasAnyFdApproverAccess } from '../lib/fdApprovalAccess';
 import { userHasFuelApprovePermission } from '../lib/fuelApprovalAccess';
 import { userHasFuelSuppliesAccess } from '../lib/fuelSuppliesAccess';
 import { userHasVehicleReservationSuppliesAccess } from '../lib/vehicleReservationSuppliesAccess';
@@ -157,6 +158,25 @@ export const requireDpApproverAccess = async (req: AuthRequest, res: Response, n
       return next();
     }
     const ok = await userHasAnyDpApproverAccess(req.user.id);
+    if (!ok) {
+      return next(createError('Você não tem permissão para esta ação', 403));
+    }
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+};
+
+/** Aprovação de Fichas de Demanda: CCs liberados, gestor de contrato legado ou admin. */
+export const requireFdApproverAccess = async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    if (!req.user) {
+      return next(createError('Usuário não autenticado', 401));
+    }
+    if (req.user.isAdmin) {
+      return next();
+    }
+    const ok = await userHasAnyFdApproverAccess(req.user.id);
     if (!ok) {
       return next(createError('Você não tem permissão para esta ação', 403));
     }

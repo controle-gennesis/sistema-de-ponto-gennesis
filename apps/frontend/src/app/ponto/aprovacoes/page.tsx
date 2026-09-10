@@ -553,15 +553,13 @@ function AprovacoesPage() {
 
   const {
     canAccessDpApproverPages,
+    canApproveFd,
     canApproveEspelhoNf,
     canApproveOc,
     canApproveFuel,
     canApproveMaterialRequests,
-    dpApprovalContractIds,
-    isAdministrator,
   } = usePermissions();
   const canApproveDp = canAccessDpApproverPages;
-  const canApproveFd = isAdministrator || dpApprovalContractIds.length > 0;
   const searchParams = useSearchParams();
   const tabFromUrl = searchParams?.get('tab') ?? null;
   const initialTab: AprovacaoTabId =

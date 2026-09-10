@@ -38,7 +38,7 @@ const FD_PHASE_FILTER_OPTIONS = labeledToSelectOptions([
 ]);
 
 const FD_PHASE_SUBTITLE: Record<FdPhaseFilter, string> = {
-  PENDING: 'Pendentes de decisão do gestor do contrato',
+  PENDING: 'Pendentes de decisão por contrato',
   APPROVED: 'Fichas já aprovadas',
   REJECTED: 'Fichas canceladas',
   ALL: 'Todas as fichas da sua área',
@@ -46,8 +46,7 @@ const FD_PHASE_SUBTITLE: Record<FdPhaseFilter, string> = {
 
 export function FdApprovalsSection() {
   const queryClient = useQueryClient();
-  const { canAccessDpApproverPages } = usePermissions();
-  const canApproveFd = canAccessDpApproverPages;
+  const { canApproveFd } = usePermissions();
 
   const [searchFd, setSearchFd] = useState('');
   const [fdPhase, setFdPhase] = useState<FdPhaseFilter>('PENDING');

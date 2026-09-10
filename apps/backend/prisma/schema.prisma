@@ -73,6 +73,8 @@ model User {
   updatedDpApprovalContracts                UserDpApprovalContract[]             @relation("UserDpApprovalContractUpdatedBy")
   userRestrictedDpApprovalCostCenters       UserRestrictedDpApprovalCostCenter[] @relation("UserRestrictedDpApprovalCostCenterUser")
   updatedRestrictedDpApprovalCostCenters    UserRestrictedDpApprovalCostCenter[] @relation("UserRestrictedDpApprovalCostCenterUpdatedBy")
+  userFdApprovalContracts                   UserFdApprovalContract[]             @relation("UserFdApprovalContractUser")
+  updatedFdApprovalContracts                UserFdApprovalContract[]             @relation("UserFdApprovalContractUpdatedBy")
   userDpRequestViewCostCenters              UserDpRequestViewCostCenter[]        @relation("UserDpRequestViewCostCenterUser")
   updatedDpRequestViewCostCenters           UserDpRequestViewCostCenter[]        @relation("UserDpRequestViewCostCenterUpdatedBy")
   stockMovements                            StockMovement[]
@@ -1352,6 +1354,7 @@ model Contract {
   weeklyProductions         ContractWeeklyProduction[]
   userPermissions           UserContractPermission[]
   dpApprovalUsers           UserDpApprovalContract[]
+  fdApprovalUsers           UserFdApprovalContract[]
   demandSheetApprovals      DemandSheetApproval[]
   materialDeliveries        MaterialDelivery[]
   fuelRefuelRequests        FuelRefuelRequest[]
@@ -2560,6 +2563,25 @@ model UserRestrictedDpApprovalCostCenter {
   @@map("user_restricted_dp_approval_cost_centers")
 }
 
+/// Contratos em que o usuário pode aprovar Fichas de Demanda.
+model UserFdApprovalContract {
+  id         String   @id @default(cuid())
+  userId     String
+  contractId String
+  updatedBy  String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user     User     @relation("UserFdApprovalContractUser", fields: [userId], references: [id], onDelete: Cascade)
+  contract Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  updater  User?    @relation("UserFdApprovalContractUpdatedBy", fields: [updatedBy], references: [id], onDelete: SetNull)
+
+  @@unique([userId, contractId])
+  @@index([userId])
+  @@index([contractId])
+  @@map("user_fd_approval_contracts")
+}
+
 /// Centros de custo cujas solicitações internas o usuário pode ver (além das próprias).
 model UserDpRequestViewCostCenter {
   id           String   @id @default(cuid())
@@ -2606,6 +2628,7 @@ model PositionPermissionTemplate {
   allowedContractIds                Json     @default("[]")
   dpApprovalContractIds             Json     @default("[]")
   restrictedDpApprovalCostCenterIds Json     @default("[]")
+  fdApprovalContractIds             Json     @default("[]")
   dpRequestViewCostCenterIds        Json     @default("[]")
   /// Map contractId -> { orcamento, relatorios, ordemServico, producaoSemanal, recebimentoEntregas }
   contractModuleFlags               Json     @default("{}")

@@ -267,6 +267,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
     user,
     can,
     canAccessDpApproverPages,
+    canApproveFd,
     canApproveEspelhoNf,
     canApproveOc,
     canApproveFuel,
@@ -571,6 +572,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
     if (href === '/ponto/gerenciar-materiais' && canApproveMaterialRequests) {
       const aprovacoesVisible =
         canAccessDpApproverPages ||
+        canApproveFd ||
         canApproveEspelhoNf ||
         canApproveOc ||
         canApproveFuel ||
@@ -752,6 +754,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             // ou tem a permissão «Aprovar Espelho da Nota Fiscal» (Controle).
             permission:
               canAccessDpApproverPages ||
+              canApproveFd ||
               canApproveEspelhoNf ||
               canApproveOc ||
               canApproveFuel ||

@@ -31,6 +31,7 @@ export function useApprovalNotificationCounts() {
   const {
     isLoading,
     canAccessDpApproverPages,
+    canApproveFd,
     canApproveEspelhoNf,
     canApproveFuel,
     canApproveOc,
@@ -39,6 +40,7 @@ export function useApprovalNotificationCounts() {
 
   const canFetch =
     canAccessDpApproverPages ||
+    canApproveFd ||
     canApproveEspelhoNf ||
     canApproveFuel ||
     canApproveOc ||
@@ -88,7 +90,7 @@ export function useApprovalNotificationCounts() {
     const base = mainQuery.data;
     const espelho = canApproveEspelhoNf ? (espelhoQuery.data ?? 0) : 0;
     const dp = canAccessDpApproverPages ? (base?.dp ?? 0) : 0;
-    const fd = canAccessDpApproverPages ? (base?.fd ?? 0) : 0;
+    const fd = canApproveFd ? (base?.fd ?? 0) : 0;
     const fuel = canApproveFuel ? (base?.fuel ?? 0) : 0;
     const oc = canApproveOc ? (base?.oc ?? 0) : 0;
     const rm = canApproveMaterialRequests ? (base?.rm ?? 0) : 0;
@@ -98,6 +100,7 @@ export function useApprovalNotificationCounts() {
     mainQuery.data,
     espelhoQuery.data,
     canAccessDpApproverPages,
+    canApproveFd,
     canApproveEspelhoNf,
     canApproveFuel,
     canApproveOc,
