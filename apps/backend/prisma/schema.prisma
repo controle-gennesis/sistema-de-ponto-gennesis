@@ -1320,6 +1320,8 @@ model DemandSheetApproval {
   idMovRm                 String
   codigoPedido            String
   solicitanteId           String
+  /// Nome exibido do solicitante (ex.: import da aba COLABORADORES). Se vazio, usa User.name.
+  solicitanteNome         String?
   contratoId              String
   obra                    String
   codFichaDemanda         String

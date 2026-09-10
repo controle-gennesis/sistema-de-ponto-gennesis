@@ -99,6 +99,7 @@ function serializeRow(row: {
   idMovRm: string;
   codigoPedido: string;
   solicitanteId: string;
+  solicitanteNome?: string | null;
   contratoId: string;
   obra: string;
   codFichaDemanda: string;
@@ -131,7 +132,7 @@ function serializeRow(row: {
     faturamentoEstimado: Number(row.faturamentoEstimado),
     custoEstimado: Number(row.custoEstimado),
     dataHora: row.dataHora.toLocaleString('pt-BR'),
-    solicitanteNome: row.solicitante?.name ?? '',
+    solicitanteNome: row.solicitanteNome?.trim() || row.solicitante?.name || '',
     contratoNome: row.contrato ? row.contrato.name : '',
     creatorNome: row.creator?.name ?? '',
     managerApproverNome: row.managerApprover?.name ?? '',
@@ -225,6 +226,7 @@ export class DemandSheetApprovalController {
               { codigoPedido: { contains: search, mode: 'insensitive' } },
               { numMovRm: { contains: search, mode: 'insensitive' } },
               { obra: { contains: search, mode: 'insensitive' } },
+              { solicitanteNome: { contains: search, mode: 'insensitive' } },
             ],
           },
         ];
@@ -552,6 +554,7 @@ export class DemandSheetApprovalController {
               { codigoPedido: { contains: search, mode: 'insensitive' } },
               { numMovRm: { contains: search, mode: 'insensitive' } },
               { obra: { contains: search, mode: 'insensitive' } },
+              { solicitanteNome: { contains: search, mode: 'insensitive' } },
             ],
           },
         ];

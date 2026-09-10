@@ -21,7 +21,11 @@ export type FdImportRow = {
   idMovRm: string;
   codigoPedido: string;
   solicitanteRef: string;
+  /** Nome do colaborador (aba COLABORADORES), Title Case. */
+  solicitanteNome: string;
   contratoExternalId: string;
+  /** Nome do contrato (aba CONTRATOS). */
+  contratoNome: string;
   obraExternalId: string;
   obraNome: string;
   codFichaDemanda: string;
@@ -112,6 +116,81 @@ function getDate(row: unknown[], index: number | undefined): string {
 
 function usefulRow(row: unknown[]): boolean {
   return row.some((c) => cellToString(c));
+}
+
+const PERSON_NAME_PARTICLES = new Set([
+  'de',
+  'da',
+  'do',
+  'das',
+  'dos',
+  'e',
+  'di',
+  'del',
+]);
+
+/** Ex.: "ADAO BERNARDES DA SILVA" → "Adao Bernardes da Silva". */
+export function formatFdDisplayName(value: string): string {
+  const words = value
+    .trim()
+    .toLocaleLowerCase('pt-BR')
+    .replace(/\s+/g, ' ')
+    .split(' ')
+    .filter(Boolean);
+  return words
+    .map((word, index) => {
+      if (index > 0 && PERSON_NAME_PARTICLES.has(word)) return word;
+      return word
+        .split('-')
+        .map((part) =>
+          part ? part.charAt(0).toLocaleUpperCase('pt-BR') + part.slice(1) : part,
+        )
+        .join('-');
+    })
+    .join(' ');
+}
+
+function buildLookupMap(
+  matrix: unknown[][],
+  idKeys: string[],
+  nameKeys: string[],
+): Map<string, string> {
+  const map = new Map<string, string>();
+  if (!matrix.length) return map;
+  const headers = headerMap(matrix[0] || []);
+  const idIdx = pick(headers, ...idKeys);
+  const nameIdx = pick(headers, ...nameKeys);
+  if (idIdx === undefined || nameIdx === undefined) return map;
+  for (const row of matrix.slice(1)) {
+    if (!usefulRow(row)) continue;
+    const id = get(row, idIdx);
+    const name = get(row, nameIdx);
+    if (!id || !name) continue;
+    for (const key of idLookupKeys(id)) map.set(key, name);
+  }
+  return map;
+}
+
+/** Variantes de ID para casar CPF com/sem zero à esquerda e caixa. */
+function idLookupKeys(id: string): string[] {
+  const raw = id.trim();
+  if (!raw) return [];
+  const keys = new Set<string>([raw, raw.toLowerCase()]);
+  const digits = raw.replace(/\D/g, '');
+  if (digits) {
+    keys.add(digits);
+    keys.add(digits.replace(/^0+/, '') || '0');
+    if (digits.length <= 11) keys.add(digits.padStart(11, '0'));
+  }
+  return Array.from(keys);
+}
+
+function lookupName(map: Map<string, string>, id: string): string {
+  for (const key of idLookupKeys(id)) {
+    const hit = map.get(key);
+    if (hit) return hit;
+  }
+  return '';
 }
 
 function sheetMatrix(sheet: XLSX.WorkSheet): unknown[][] {
@@ -274,6 +353,9 @@ export async function parseFichaDemandaImportFromFile(file: File): Promise<FdImp
     headerIndex: number;
     sheet: XLSX.WorkSheet;
   } | null = null;
+  let colaboradoresMatrix: unknown[][] | null = null;
+  let contratosMatrix: unknown[][] | null = null;
+  let obrasMatrix: unknown[][] | null = null;
 
   for (const name of workbook.SheetNames) {
     const sheet = workbook.Sheets[name];
@@ -286,7 +368,23 @@ export async function parseFichaDemandaImportFromFile(file: File): Promise<FdImp
       /anexo/i.test(name) ||
       headers.includes('id anexo ficha demanda') ||
       headers.some((h) => /\banexo\b/.test(h) && /(fd|rm|croqui|oc|path|arquivo|caminho)/.test(h));
+    const isColaboradores =
+      /colaborador/i.test(name) ||
+      (headers.includes('id colaborador') &&
+        (headers.includes('nomecolaborador') || headers.includes('nome colaborador')));
+    const isContratos =
+      /^contratos?$/i.test(name.trim()) ||
+      (headers.includes('id contrato') &&
+        headers.includes('contrato') &&
+        !headers.includes('id ficha demanda') &&
+        !headers.includes('num mov rm'));
+    const isObras =
+      /^obras?$/i.test(name.trim()) ||
+      (headers.includes('id obra') && headers.includes('obra') && !headers.includes('id ficha demanda'));
     const isAuxiliar =
+      isColaboradores ||
+      isContratos ||
+      isObras ||
       /aprovacao|status|compra/i.test(name) ||
       (headers.includes('status compras') && !headers.includes('num mov rm'));
     const isFicha =
@@ -297,7 +395,16 @@ export async function parseFichaDemandaImportFromFile(file: File): Promise<FdImp
         (/ficha/i.test(name) && /demanda/i.test(name)));
 
     const dataRows = matrix.slice(1).filter(usefulRow).length;
-    if (isAnexo) {
+    if (isColaboradores) {
+      sheets.push({ name, kind: 'colaboradores', rows: dataRows });
+      colaboradoresMatrix = matrix;
+    } else if (isContratos) {
+      sheets.push({ name, kind: 'contratos', rows: dataRows });
+      contratosMatrix = matrix;
+    } else if (isObras) {
+      sheets.push({ name, kind: 'obras', rows: dataRows });
+      obrasMatrix = matrix;
+    } else if (isAnexo) {
       sheets.push({ name, kind: 'anexos', rows: dataRows });
       if (
         !anexoSheet ||
@@ -442,21 +549,44 @@ export async function parseFichaDemandaImportFromFile(file: File): Promise<FdImp
     }
   }
 
+  const colaboradorById = buildLookupMap(
+    colaboradoresMatrix || [],
+    ['id colaborador', 'id_colaborador', 'colaborador', 'id'],
+    ['nome colaborador', 'nomecolaborador', 'nome', 'colaborador nome'],
+  );
+  const contratoById = buildLookupMap(
+    contratosMatrix || [],
+    ['id contrato', 'id_contrato', 'contrato id'],
+    ['contrato', 'nome contrato', 'nome'],
+  );
+  const obraById = buildLookupMap(
+    obrasMatrix || [],
+    ['id obra', 'id_obra', 'obra id'],
+    ['obra', 'nome obra', 'nome'],
+  );
+
   const fichas: FdImportRow[] = [];
   for (const row of fichaSheet.matrix.slice(fichaSheet.headerIndex + 1)) {
     if (!usefulRow(row)) continue;
     const externalId = get(row, idx.id);
     if (!externalId) continue;
     const obraRef = get(row, idx.obra);
+    const solicitanteRef = get(row, idx.solicitante);
+    const contratoRef = get(row, idx.contrato);
+    const colaboradorRaw = lookupName(colaboradorById, solicitanteRef);
+    const contratoRaw = lookupName(contratoById, contratoRef);
+    const obraRaw = lookupName(obraById, obraRef);
     fichas.push({
       externalId,
       numMovRm: get(row, idx.numMov),
       idMovRm: get(row, idx.idMov),
       codigoPedido: get(row, idx.pedido),
-      solicitanteRef: get(row, idx.solicitante),
-      contratoExternalId: get(row, idx.contrato),
+      solicitanteRef,
+      solicitanteNome: colaboradorRaw ? formatFdDisplayName(colaboradorRaw) : '',
+      contratoExternalId: contratoRef,
+      contratoNome: contratoRaw ? formatFdDisplayName(contratoRaw) : '',
       obraExternalId: obraRef,
-      obraNome: obraRef,
+      obraNome: obraRaw ? formatFdDisplayName(obraRaw) : obraRef,
       codFichaDemanda: get(row, idx.codFd),
       faturamentoEstimado: get(row, idx.fat) || 0,
       custoEstimado: get(row, idx.custo) || 0,

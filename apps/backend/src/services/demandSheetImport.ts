@@ -26,7 +26,11 @@ export type FdImportRow = {
   idMovRm?: string;
   codigoPedido?: string;
   solicitanteRef?: string;
+  /** Nome do colaborador da planilha (não precisa ser User do sistema). */
+  solicitanteNome?: string;
   contratoExternalId?: string;
+  /** Nome amigável do contrato (aba CONTRATOS). */
+  contratoNome?: string;
   obraExternalId?: string;
   obraNome?: string;
   codFichaDemanda?: string;
@@ -511,7 +515,10 @@ export async function importDemandSheets(params: {
           }
           const stub = await prisma.contract.create({
             data: {
-              name: fdContratoName(contratoRef) || `Contrato importado (${contratoRef})`,
+              name:
+                opt(row.contratoNome) ||
+                fdContratoName(contratoRef) ||
+                `Contrato importado (${contratoRef})`,
               number,
               startDate: new Date(),
               endDate: new Date(new Date().setFullYear(new Date().getFullYear() + 5)),
@@ -524,16 +531,32 @@ export async function importDemandSheets(params: {
           contractByExternal.set(contratoRef, stub.id);
           contractById.set(stub.id, stub.id);
           warnings += 1;
+        } else {
+          const contratoNome = opt(row.contratoNome) || fdContratoName(contratoRef);
+          if (contratoNome) {
+            const current = await prisma.contract.findUnique({
+              where: { id: contratoId },
+              select: { name: true },
+            });
+            if (current && /^Contrato importado \(/.test(current.name)) {
+              await prisma.contract.update({
+                where: { id: contratoId },
+                data: { name: contratoNome },
+              });
+            }
+          }
         }
 
         const solicitanteRef = opt(row.solicitanteRef) || '';
+        const solicitanteNomePlanilha = opt(row.solicitanteNome);
         let solicitanteId =
           userById.get(solicitanteRef) ||
           userByCpf.get(cpfDigits(solicitanteRef)) ||
           null;
         if (!solicitanteId) {
+          // Colaboradores da planilha não são Users do sistema — mantém FK no importador.
           solicitanteId = userId;
-          warnings += 1;
+          if (!solicitanteNomePlanilha) warnings += 1;
         }
 
         const obraRef = opt(row.obraExternalId) || opt(row.obraNome) || 'Sem obra';
@@ -571,6 +594,7 @@ export async function importDemandSheets(params: {
           idMovRm: opt(row.idMovRm) || '-',
           codigoPedido: opt(row.codigoPedido) || '-',
           solicitanteId,
+          solicitanteNome: solicitanteNomePlanilha || null,
           contratoId,
           obra: obraName,
           codFichaDemanda: opt(row.codFichaDemanda) || externalId,
