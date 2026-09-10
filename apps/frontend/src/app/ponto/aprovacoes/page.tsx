@@ -194,6 +194,9 @@ type DpRequest = {
   costCenter?: { id: string; name?: string | null; code?: string | null } | null;
   company?: string | null;
   polo?: string | null;
+  managerApprovedBy?: string | null;
+  managerApprovedByName?: string | null;
+  managerApprovedAt?: string | null;
   managerApprovalComment?: string | null;
   managerRejectionReason?: string | null;
   createdAt?: string;
@@ -733,6 +736,12 @@ function AprovacoesPage() {
     };
 
     push('status', 'Status', STATUS_LABELS[detailRequest.status] ?? detailRequest.status);
+    push('aprovadoPor', 'Aprovado por', detailRequest.managerApprovedByName);
+    push(
+      'aprovadoEm',
+      'Aprovado em',
+      detailRequest.managerApprovedAt ? formatDateTime(detailRequest.managerApprovedAt) : null
+    );
     push('urgency', 'Urgência', URGENCY_LABELS[detailRequest.urgency]);
     push('tipo', 'Tipo', TYPE_LABELS[detailRequest.requestType] ?? detailRequest.requestType);
     push('criadaEm', 'Criada em', formatDateTime(detailRequest.createdAt));

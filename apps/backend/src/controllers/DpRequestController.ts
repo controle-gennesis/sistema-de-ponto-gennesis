@@ -227,15 +227,49 @@ type DpCostCenterSummary = {
   polo: string | null;
 };
 
+function approverNameFromStatusHistory(history: unknown): string | null {
+  if (!Array.isArray(history)) return null;
+  for (let i = history.length - 1; i >= 0; i -= 1) {
+    const entry = history[i] as { status?: unknown; actorName?: unknown };
+    if (
+      entry &&
+      typeof entry === 'object' &&
+      entry.status === 'IN_REVIEW_DP' &&
+      typeof entry.actorName === 'string' &&
+      entry.actorName.trim()
+    ) {
+      return entry.actorName.trim();
+    }
+  }
+  return null;
+}
+
 async function attachDpContractSummaries<
-  T extends { contractId: string | null; costCenterId?: string | null },
->(rows: T[]): Promise<(T & { contract: DpContractSummary | null; costCenter: DpCostCenterSummary | null })[]> {
+  T extends {
+    contractId: string | null;
+    costCenterId?: string | null;
+    managerApprovedBy?: string | null;
+    statusHistory?: unknown;
+  },
+>(
+  rows: T[]
+): Promise<
+  (T & {
+    contract: DpContractSummary | null;
+    costCenter: DpCostCenterSummary | null;
+    managerApprovedByName: string | null;
+  })[]
+> {
   const contractIds = [...new Set(rows.map((r) => r.contractId).filter((id): id is string => !!id))];
   const costCenterIds = [
     ...new Set(rows.map((r) => r.costCenterId).filter((id): id is string => !!id)),
   ];
 
-  const [contracts, costCenters] = await Promise.all([
+  const approverIds = [
+    ...new Set(rows.map((r) => r.managerApprovedBy).filter((id): id is string => !!id)),
+  ];
+
+  const [contracts, costCenters, approvers] = await Promise.all([
     contractIds.length
       ? prisma.contract.findMany({
           where: { id: { in: contractIds } },
@@ -248,7 +282,17 @@ async function attachDpContractSummaries<
           select: { id: true, name: true, code: true, company: true, polo: true },
         })
       : Promise.resolve([]),
+    approverIds.length
+      ? prisma.user.findMany({
+          where: { id: { in: approverIds } },
+          select: { id: true, name: true, email: true },
+        })
+      : Promise.resolve([]),
   ]);
+
+  const approverNameById = new Map(
+    approvers.map((u) => [u.id, (u.name || '').trim() || u.email || u.id])
+  );
 
   const contractById = new Map(contracts.map((c) => [c.id, c]));
   const extraCcIds = contracts
@@ -285,10 +329,12 @@ async function attachDpContractSummaries<
         : null
       : null;
     const ccId = r.costCenterId || (r.contractId ? contractById.get(r.contractId)?.costCenterId : null);
+    const fromUser = r.managerApprovedBy ? approverNameById.get(r.managerApprovedBy) ?? null : null;
     return {
       ...r,
       contract,
       costCenter: ccId ? centerById.get(ccId) ?? null : null,
+      managerApprovedByName: fromUser || approverNameFromStatusHistory(r.statusHistory),
     };
   });
 }
