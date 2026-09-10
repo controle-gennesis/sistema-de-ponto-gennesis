@@ -22,7 +22,12 @@ const importUpload = multer({
       cb(null, `${Date.now()}-${uuidv4()}${ext}`);
     },
   }),
-  limits: { fileSize: 8 * 1024 * 1024 * 1024, files: 400 },
+  limits: {
+    fileSize: 8 * 1024 * 1024 * 1024,
+    files: 400,
+    fieldSize: 256 * 1024 * 1024,
+    fields: 40,
+  },
 });
 
 function handleJuridicoImportUploadError(

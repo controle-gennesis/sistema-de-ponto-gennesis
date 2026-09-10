@@ -19,7 +19,7 @@ import {
 export const MODULE_CATEGORY_ICONS: Record<string, LucideIcon> = {
   Principal: Home,
   'Departamento Pessoal': Users,
-  'ADM/TST': ClipboardList,
+  Administração: ClipboardList,
   Financeiro: Landmark,
   Métricas: BarChart3,
   Engenharia: DraftingCompass,

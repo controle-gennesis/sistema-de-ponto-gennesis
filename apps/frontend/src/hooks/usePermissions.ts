@@ -631,6 +631,7 @@ export function useRoutePermission(route: string) {
     '/ponto/funcionarios': isAdministrator || permissions.canManageEmployees,
     '/ponto/aniversariantes': isAdministrator || can(pk('/ponto/aniversariantes')),
     '/ponto/seguranca-do-trabalho': isAdministrator || can(pk('/ponto/seguranca-do-trabalho')),
+    '/ponto/solicitacoes-fluig': isAdministrator || can(pk('/ponto/solicitacoes-fluig')),
     '/ponto/atestados': isAdministrator || can(pk('/ponto/atestados')),
     '/ponto/gerenciar-atestados': isAdministrator || can(pk('/ponto/gerenciar-atestados')),
     '/ponto/solicitacoes': isAdministrator || can(pk('/ponto/solicitacoes')),
@@ -682,6 +683,8 @@ export function useRoutePermission(route: string) {
       can(pk('/ponto/metricas/relatorios-contrato')) ||
       can(pk('/ponto/contratos/controle-geral')) ||
       can(pk('/ponto/contratos')),
+    '/ponto/metricas/ocs-boleto-pix':
+      isAdministrator || can(pk('/ponto/metricas/ocs-boleto-pix')),
     '/ponto/pleitos-gerados': isAdministrator || can(pk('/ponto/pleitos-gerados')),
     '/ponto/aprovacao-fds': isAdministrator || can(pk('/ponto/aprovacao-fds')),
     '/ponto/recebimento-entregas': canAccessRecebimentoEntregasRoutePage,
@@ -726,6 +729,7 @@ export function useRoutePermission(route: string) {
     '/ponto/reserva-veiculos': isAdministrator || can(pk('/ponto/reserva-veiculos')),
     '/ponto/solicitar-combustivel': isAdministrator || can(pk('/ponto/solicitar-combustivel')),
     '/ponto/condicoes-pagamento': isAdministrator || can(pk('/ponto/condicoes-pagamento')),
+    '/ponto/obras': isAdministrator || can(pk('/ponto/obras')),
     '/ponto/natureza-orcamentaria': isAdministrator || can(pk('/ponto/natureza-orcamentaria')),
     '/ponto/formularios': isAdministrator || can(pk('/ponto/formularios')),
     '/ponto/noticias': isAdministrator || can(pk('/ponto/noticias')),

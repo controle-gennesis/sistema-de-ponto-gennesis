@@ -13,6 +13,8 @@ type Options = {
   isParentOpen?: boolean;
   message?: string;
   title?: string;
+  /** z-index do overlay de confirmação (acima do modal pai). */
+  className?: string;
 };
 
 /**
@@ -27,7 +29,7 @@ export function useModalCloseConfirm(
   showConfirm: boolean;
   setShowConfirm: React.Dispatch<React.SetStateAction<boolean>>;
 } {
-  const { enabled = true, isParentOpen = true, message, title } = options;
+  const { enabled = true, isParentOpen = true, message, title, className } = options;
   const [showConfirm, setShowConfirm] = useState(false);
 
   useEffect(() => {
@@ -53,6 +55,7 @@ export function useModalCloseConfirm(
     onConfirm: handleConfirm,
     message,
     title,
+    className,
   };
 
   const confirmUi = React.createElement(ModalCloseConfirm, confirmProps);

@@ -145,7 +145,7 @@ export function isAdmTstRequestType(requestType: string): boolean {
 }
 
 export function destinationLabel(requestType: string): string {
-  return isAdmTstRequestType(requestType) ? 'ADM/TST' : 'Departamento Pessoal';
+  return isAdmTstRequestType(requestType) ? 'Administração' : 'Departamento Pessoal';
 }
 
 export async function fetchMyDpRequests(status = 'all'): Promise<DpRequest[]> {

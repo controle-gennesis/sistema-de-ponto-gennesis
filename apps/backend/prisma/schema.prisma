@@ -1267,6 +1267,8 @@ model Contract {
   endDate          DateTime // Fim da vigÃªncia
   costCenterId     String // Centro de custo associado
   valuePlusAddenda Decimal  @db.Decimal(15, 2) // Valor mais aditivos
+  /// ID legado (AppSheet / importações)
+  externalId       String?  @unique
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
@@ -1284,6 +1286,7 @@ model Contract {
   fuelRefuelRequests        FuelRefuelRequest[]
   logisticsDeliveryRequests LogisticsDeliveryRequest[]
   fuelGasStations           FuelGasStationContract[]
+  obras                     Obra[]
 
   @@index([costCenterId])
   @@index([number])
@@ -1311,6 +1314,8 @@ enum DemandSheetPurchaseStatus {
 /// Ficha de demanda (FD) â fluxo de aprovaÃ§Ã£o pelo gestor do contrato (mesmo escopo das solicitaÃ§Ãµes DP).
 model DemandSheetApproval {
   id                      String                     @id @default(cuid())
+  /// ID legado da planilha (ID_FICHA_DEMANDA)
+  externalId              String?                    @unique
   numMovRm                String
   idMovRm                 String
   codigoPedido            String
@@ -2170,6 +2175,25 @@ model BudgetNature {
   @@index([code])
   @@index([isActive])
   @@map("budget_natures")
+}
+
+// Cadastro de Obra (Fichas de Demanda e demais telas)
+model Obra {
+  id         String   @id @default(cuid())
+  name       String
+  contratoId String
+  /// ID legado (AppSheet / importações)
+  externalId String?  @unique
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  contrato Contract @relation(fields: [contratoId], references: [id], onDelete: Restrict)
+
+  @@index([name])
+  @@index([isActive])
+  @@index([contratoId])
+  @@map("obras")
 }
 
 // Modelo de Material de Engenharia (SINAPI)
@@ -4773,4 +4797,22 @@ model SupportTicket {
   @@index([assigneeId])
   @@index([createdAt])
   @@map("support_tickets")
+}
+
+/// Campos editáveis locais sobrepostos às linhas da consulta TOTVS OCSBOLETOPIX.
+model OcsBoletoPixExtra {
+  id             String    @id @default(cuid())
+  coligada       Int
+  idMov          Int
+  filial         Int?
+  dataVencimento DateTime? @db.Date
+  numeroNf       String?
+  dataEmissaoNf  DateTime? @db.Date
+  updatedById    String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@unique([coligada, idMov])
+  @@index([idMov])
+  @@map("ocs_boleto_pix_extras")
 }

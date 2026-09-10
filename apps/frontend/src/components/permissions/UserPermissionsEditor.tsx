@@ -320,6 +320,7 @@ function inferCategoryFromHref(href: string): string {
       '/relatorios/alocacao',
       '/ponto/aniversariantes',
       '/ponto/seguranca-do-trabalho',
+      '/ponto/solicitacoes-fluig',
     ].some((p) => h === p)
   ) {
     return 'Departamento Pessoal';
@@ -330,7 +331,9 @@ function inferCategoryFromHref(href: string): string {
     h === '/ponto/financeiro/nfs-recebidas' ||
     h === '/ponto/contratos/controle-geral' ||
     h === '/ponto/contratos/socios' ||
-    h === '/ponto/contratos/gastos-operacionais'
+    h === '/ponto/contratos/gastos-operacionais' ||
+    h === '/ponto/metricas/relatorios-contrato' ||
+    h === '/ponto/metricas/ocs-boleto-pix'
   ) {
     return 'Métricas';
   }
@@ -389,6 +392,7 @@ function inferCategoryFromHref(href: string): string {
       '/ponto/veiculos',
       '/ponto/regioes-postos-combustivel',
       '/ponto/condicoes-pagamento',
+      '/ponto/obras',
       '/ponto/natureza-orcamentaria',
       '/ponto/formularios',
       '/ponto/prestadores-servico',

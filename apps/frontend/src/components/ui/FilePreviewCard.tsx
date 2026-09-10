@@ -6,19 +6,21 @@ import { Download, Eye, FileText, Loader2, Trash2, X } from 'lucide-react';
 import { loadPdfjs } from '@/lib/loadPdfjs';
 import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
 import { Z_LIGHTBOX } from '@/lib/zIndex';
-import type {
-  JuridicoProcessoAnexo,
-  JuridicoProcessoComprovante,
-} from '@/data/juridico-processos-ativos';
 
-function isImageFile(file: JuridicoProcessoAnexo): boolean {
+export type FilePreviewCardFile = {
+  originalName: string;
+  fileUrl?: string | null;
+  mimeType?: string | null;
+};
+
+function isImageFile(file: FilePreviewCardFile): boolean {
   return (
     !!file.mimeType?.startsWith('image/') ||
     /\.(png|jpe?g|webp|gif|bmp|svg)$/i.test(file.originalName || '')
   );
 }
 
-function isPdfFile(file: JuridicoProcessoAnexo): boolean {
+function isPdfFile(file: FilePreviewCardFile): boolean {
   return (
     !!file.mimeType?.includes('pdf') || /\.pdf$/i.test(file.originalName || '')
   );
@@ -35,14 +37,14 @@ const cardActionBtnCls =
 type PreviewKind = 'image' | 'pdf' | 'other';
 
 type Props = {
-  file: JuridicoProcessoAnexo | JuridicoProcessoComprovante;
+  file: FilePreviewCardFile;
   extra?: string;
   /** Quando informado, exibe botão de lixeira no card. */
   onRemove?: () => void;
   removing?: boolean;
 };
 
-export function JuridicoFileCard({ file, extra, onRemove, removing }: Props) {
+export function FilePreviewCard({ file, extra, onRemove, removing }: Props) {
   const href = resolveApiMediaUrl(file.fileUrl);
   const image = isImageFile(file);
   const pdf = isPdfFile(file);

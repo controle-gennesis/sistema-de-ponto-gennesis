@@ -3,12 +3,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Calendar, Loader2, Minus, Paperclip, Plus, Trash2, X } from 'lucide-react';
+import { Loader2, Minus, Paperclip, Plus, Trash2, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '@/lib/api';
 import { useModalCloseConfirm } from '@/hooks/useModalCloseConfirm';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
+import { toPersonSelectOptions } from '@/lib/personSelectOptions';
 import {
   adjustCurrency,
   currencyDigitsToFormatted,
@@ -23,18 +24,19 @@ import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
 interface UserOption {
   id: string;
   name: string;
+  cpf?: string | null;
+  profilePhotoUrl?: string | null;
 }
 
 interface ContractOption {
   id: string;
   name: string;
-  number: string;
 }
 
-interface PleitoObraOption {
+interface ObraOption {
   id: string;
-  location: string | null;
-  serviceDescription: string;
+  name: string;
+  contratoId: string;
 }
 
 const fieldClass =
@@ -151,7 +153,26 @@ export function FichaDemandaApprovalFormModal({
     onClose();
   }, [onClose]);
 
-  const { requestClose, confirmUi } = useModalCloseConfirm(closeForm, { isParentOpen: isOpen });
+  const formHasData = Boolean(
+    form.numMovRm.trim() ||
+      form.idMovRm.trim() ||
+      form.codigoPedido.trim() ||
+      form.solicitanteId.trim() ||
+      form.contratoId.trim() ||
+      form.obra.trim() ||
+      form.codFichaDemanda.trim() ||
+      form.faturamentoEstimado.trim() ||
+      form.custoEstimado.trim() ||
+      form.observacao.trim() ||
+      form.polo ||
+      form.anexos.length > 0
+  );
+
+  const { requestClose, confirmUi } = useModalCloseConfirm(closeForm, {
+    isParentOpen: isOpen,
+    enabled: formHasData,
+    className: '!z-[2200]',
+  });
 
   useEffect(() => {
     if (!isOpen) return;
@@ -165,7 +186,7 @@ export function FichaDemandaApprovalFormModal({
   useEffect(() => {
     if (!isOpen) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !isSaving) onClose();
+      if (e.key === 'Escape' && !isSaving) requestClose();
     };
     document.addEventListener('keydown', onKey);
     document.body.classList.add('modal-open');
@@ -173,7 +194,7 @@ export function FichaDemandaApprovalFormModal({
       document.removeEventListener('keydown', onKey);
       document.body.classList.remove('modal-open');
     };
-  }, [isOpen, isSaving, onClose]);
+  }, [isOpen, isSaving, requestClose]);
 
   const { data: usersData } = useQuery({
     queryKey: ['users-fd-approval'],
@@ -193,11 +214,16 @@ export function FichaDemandaApprovalFormModal({
     enabled: isOpen,
   });
 
-  const { data: pleitosData, isLoading: loadingObras } = useQuery({
-    queryKey: ['pleitos-fd-approval', form.contratoId],
+  const { data: obrasData, isLoading: loadingObras } = useQuery({
+    queryKey: ['obras-fd-approval', form.contratoId],
     queryFn: async () => {
-      const res = await api.get('/pleitos', {
-        params: { contractId: form.contratoId, limit: 500, page: 1 },
+      const res = await api.get('/obras', {
+        params: {
+          isActive: 'true',
+          contratoId: form.contratoId,
+          limit: 500,
+          page: 1,
+        },
       });
       return res.data;
     },
@@ -214,50 +240,43 @@ export function FichaDemandaApprovalFormModal({
   }, [contractsData]);
 
   const obras = useMemo(() => {
-    const pleitos = (pleitosData?.data || []) as PleitoObraOption[];
-    const seen = new Set<string>();
-    const options: string[] = [];
-    for (const p of pleitos) {
-      const label = (p.location || p.serviceDescription || '').trim();
-      if (!label || seen.has(label)) continue;
-      seen.add(label);
-      options.push(label);
-    }
-    return options;
-  }, [pleitosData]);
+    return ((obrasData?.data || []) as ObraOption[]).filter((o) => o.id && o.name?.trim());
+  }, [obrasData]);
 
   const solicitanteSelectOptions = useMemo(
     () =>
-      labeledToSelectOptions([
-        { value: '', label: 'Selecione o solicitante' },
-        ...users.map((u) => ({ value: u.id, label: u.name })),
-      ]),
+      toPersonSelectOptions(
+        users.map((u) => ({
+          value: u.id,
+          name: u.name,
+          cpf: u.cpf,
+          profilePhotoUrl: u.profilePhotoUrl,
+        }))
+      ),
     [users]
   );
 
   const contratoSelectOptions = useMemo(
     () =>
-      labeledToSelectOptions([
-        { value: '', label: 'Selecione o contrato' },
-        ...contracts.map((c) => ({
+      labeledToSelectOptions(
+        contracts.map((c) => ({
           value: c.id,
-          label: `${c.number} — ${c.name}`,
-        })),
-      ]),
+          label: c.name,
+        }))
+      ),
     [contracts]
   );
 
-  const obraSelectOptions = useMemo(() => {
-    const emptyLabel = !form.contratoId
-      ? 'Selecione um contrato primeiro'
-      : loadingObras
-        ? 'Carregando obras...'
-        : 'Selecione a obra';
-    return labeledToSelectOptions([
-      { value: '', label: emptyLabel },
-      ...obras.map((obra) => ({ value: obra, label: obra })),
-    ]);
-  }, [form.contratoId, loadingObras, obras]);
+  const obraSelectOptions = useMemo(
+    () => labeledToSelectOptions(obras.map((obra) => ({ value: obra.name, label: obra.name }))),
+    [obras]
+  );
+
+  const obraPlaceholder = !form.contratoId
+    ? 'Selecione um contrato primeiro'
+    : loadingObras
+      ? 'Carregando obras...'
+      : 'Selecione a obra';
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -284,14 +303,9 @@ export function FichaDemandaApprovalFormModal({
       <div className="absolute inset-0 bg-black/50" aria-hidden onClick={isSaving ? undefined : requestClose} />
       <div className="relative z-[1101] flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-lg bg-white shadow-xl dark:bg-gray-800">
         <div className="sticky top-0 z-10 flex shrink-0 items-center justify-between border-b border-gray-200 bg-white px-6 py-4 dark:border-gray-700 dark:bg-gray-800">
-          <div>
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-              {editingRecord ? 'Editar Ficha de Demanda' : 'Nova Ficha de Demanda'}
-            </h3>
-            <p className="mt-0.5 text-sm text-gray-600 dark:text-gray-400">
-              Preencha os dados para registro e aprovação da FD
-            </p>
-          </div>
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+            {editingRecord ? 'Editar Ficha de Demanda' : 'Nova Ficha de Demanda'}
+          </h3>
           <button
             type="button"
             onClick={requestClose}
@@ -311,32 +325,35 @@ export function FichaDemandaApprovalFormModal({
         >
           <div className="space-y-6">
             <div className="space-y-4">
-              <SectionTitle>Dados do movimento</SectionTitle>
+              <SectionTitle>Dados do Movimento</SectionTitle>
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
-                  <FieldLabel required>Num. mov. RM</FieldLabel>
+                  <FieldLabel required>Número de Movimento da RM</FieldLabel>
                   <input
                     type="text"
                     value={form.numMovRm}
                     onChange={(e) => setForm({ ...form, numMovRm: e.target.value })}
+                    placeholder="Ex.: 123456"
                     className={fieldClass}
                   />
                 </div>
                 <div>
-                  <FieldLabel required>ID mov. RM</FieldLabel>
+                  <FieldLabel required>ID de Movimento da RM</FieldLabel>
                   <input
                     type="text"
                     value={form.idMovRm}
                     onChange={(e) => setForm({ ...form, idMovRm: e.target.value })}
+                    placeholder="Ex.: 89660"
                     className={fieldClass}
                   />
                 </div>
                 <div className="sm:col-span-2">
-                  <FieldLabel required>Código do pedido</FieldLabel>
+                  <FieldLabel required>Código do Pedido</FieldLabel>
                   <input
                     type="text"
                     value={form.codigoPedido}
                     onChange={(e) => setForm({ ...form, codigoPedido: e.target.value })}
+                    placeholder="Ex.: PED-001"
                     className={fieldClass}
                   />
                 </div>
@@ -352,7 +369,9 @@ export function FichaDemandaApprovalFormModal({
                     value={form.solicitanteId}
                     onChange={(v) => setForm({ ...form, solicitanteId: v })}
                     options={solicitanteSelectOptions}
-                    allowEmpty={false}
+                    placeholder="Selecione o solicitante"
+                    emptyOptionLabel="Selecione o solicitante"
+                    matchTriggerWidth
                   />
                 </div>
                 <div>
@@ -361,7 +380,9 @@ export function FichaDemandaApprovalFormModal({
                     value={form.contratoId}
                     onChange={(v) => setForm({ ...form, contratoId: v, obra: '' })}
                     options={contratoSelectOptions}
-                    allowEmpty={false}
+                    placeholder="Selecione o contrato"
+                    emptyOptionLabel="Selecione o contrato"
+                    matchTriggerWidth
                   />
                 </div>
                 <div>
@@ -371,33 +392,36 @@ export function FichaDemandaApprovalFormModal({
                     onChange={(v) => setForm({ ...form, obra: v })}
                     options={obraSelectOptions}
                     disabled={!form.contratoId || loadingObras}
-                    allowEmpty={false}
+                    placeholder={obraPlaceholder}
+                    emptyOptionLabel={obraPlaceholder}
+                    matchTriggerWidth
                   />
                 </div>
               </div>
             </div>
 
             <div className="space-y-4">
-              <SectionTitle>Valores e identificação</SectionTitle>
+              <SectionTitle>Valores e Identificação</SectionTitle>
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div className="sm:col-span-2">
-                  <FieldLabel required>Cód. ficha de demanda</FieldLabel>
+                  <FieldLabel required>Código da Ficha de Demanda</FieldLabel>
                   <input
                     type="text"
                     value={form.codFichaDemanda}
                     onChange={(e) => setForm({ ...form, codFichaDemanda: e.target.value })}
+                    placeholder="Ex.: FD-001"
                     className={fieldClass}
                   />
                 </div>
                 <div>
-                  <FieldLabel required>Faturamento estimado</FieldLabel>
+                  <FieldLabel required>Faturamento Estimado</FieldLabel>
                   <CurrencyStepperInput
                     value={form.faturamentoEstimado}
                     onChange={(faturamentoEstimado) => setForm({ ...form, faturamentoEstimado })}
                   />
                 </div>
                 <div>
-                  <FieldLabel required>Custo estimado</FieldLabel>
+                  <FieldLabel required>Custo Estimado</FieldLabel>
                   <CurrencyStepperInput
                     value={form.custoEstimado}
                     onChange={(custoEstimado) => setForm({ ...form, custoEstimado })}
@@ -407,7 +431,7 @@ export function FichaDemandaApprovalFormModal({
             </div>
 
             <div className="space-y-4">
-              <SectionTitle>Informações adicionais</SectionTitle>
+              <SectionTitle>Informações Adicionais</SectionTitle>
               <div className="grid grid-cols-1 gap-4">
                 <div>
                   <FieldLabel required>Observação</FieldLabel>
@@ -416,38 +440,29 @@ export function FichaDemandaApprovalFormModal({
                     value={form.observacao}
                     onChange={(e) => setForm({ ...form, observacao: e.target.value })}
                     className={fieldClass}
-                    placeholder="Descreva observações relevantes para a aprovação"
+                    placeholder="Descreva observações relevantes"
                   />
                 </div>
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <div>
-                    <FieldLabel>Data e hora</FieldLabel>
-                    <div className="relative">
-                      <input type="text" readOnly value={form.dataHora} className={`${fieldClass} pr-10`} />
-                      <Calendar className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-                    </div>
-                  </div>
-                  <div>
-                    <FieldLabel required>Polo</FieldLabel>
-                    <div className="grid grid-cols-2 gap-2">
-                      {(['DF', 'GO'] as const).map((polo) => {
-                        const selected = form.polo === polo;
-                        return (
-                          <button
-                            key={polo}
-                            type="button"
-                            onClick={() => setForm({ ...form, polo })}
-                            className={`rounded-lg border py-2.5 text-sm font-semibold transition-colors ${
-                              selected
-                                ? 'border-red-600 bg-red-600 text-white'
-                                : 'border-gray-300 bg-white text-gray-900 hover:border-red-400 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100'
-                            }`}
-                          >
-                            {polo}
-                          </button>
-                        );
-                      })}
-                    </div>
+                <div>
+                  <FieldLabel required>Polo</FieldLabel>
+                  <div className="grid grid-cols-2 gap-2">
+                    {(['DF', 'GO'] as const).map((polo) => {
+                      const selected = form.polo === polo;
+                      return (
+                        <button
+                          key={polo}
+                          type="button"
+                          onClick={() => setForm({ ...form, polo })}
+                          className={`rounded-lg border py-2.5 text-sm font-semibold transition-colors ${
+                            selected
+                              ? 'border-red-600 bg-red-600 text-white'
+                              : 'border-gray-300 bg-white text-gray-900 hover:border-red-400 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100'
+                          }`}
+                        >
+                          {polo}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               </div>
@@ -499,7 +514,7 @@ export function FichaDemandaApprovalFormModal({
           <div className="mt-6 flex justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
             <button
               type="button"
-              onClick={onClose}
+              onClick={requestClose}
               disabled={isSaving}
               className="rounded-lg bg-gray-100 px-4 py-2 text-sm text-gray-800 transition-colors hover:bg-gray-200 disabled:opacity-50 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
             >

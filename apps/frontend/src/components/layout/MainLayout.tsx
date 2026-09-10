@@ -51,7 +51,12 @@ interface MainLayoutProps {
   onLogout?: () => void;
 }
 
-function resolveInitialSidebarCollapsed(pathname: string | null): boolean {
+/** Só regras de rota — sem localStorage (SSR e 1º paint precisam coincidir). */
+function resolveSsrSidebarCollapsed(pathname: string | null): boolean {
+  return shouldForceSidebarCollapsed(pathname);
+}
+
+function resolveClientSidebarCollapsed(pathname: string | null): boolean {
   if (shouldForceSidebarCollapsed(pathname)) return true;
   return readSidebarCollapsed();
 }
@@ -111,7 +116,8 @@ function MainLayoutShell({ children, userRole, userName, onLogout }: MainLayoutP
   const queryClient = useQueryClient();
   const defaultLogout = useLogout();
   const handleLogout = onLogout ?? defaultLogout;
-  const [isCollapsed, setIsCollapsed] = useState(() => resolveInitialSidebarCollapsed(pathname));
+  // SSR + hidratação: mesmo valor (só pathname). localStorage entra no useLayoutEffect.
+  const [isCollapsed, setIsCollapsed] = useState(() => resolveSsrSidebarCollapsed(pathname));
   const [layoutSynced, setLayoutSynced] = useState(false);
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
   const [pageRevealReady, setPageRevealReady] = useState(false);
@@ -161,7 +167,7 @@ function MainLayoutShell({ children, userRole, userName, onLogout }: MainLayoutP
   }, [permissionsLoading, canAccessCollaborationTools, pathname, router]);
 
   useLayoutEffect(() => {
-    setIsCollapsed(resolveInitialSidebarCollapsed(pathname));
+    setIsCollapsed(resolveClientSidebarCollapsed(pathname));
     setLayoutSynced(true);
     // Garante que a sidebar não fique bloqueada se um overlay ficou preso no DOM.
     syncModalOpenClass();

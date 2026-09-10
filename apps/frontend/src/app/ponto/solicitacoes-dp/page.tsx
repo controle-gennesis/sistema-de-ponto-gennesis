@@ -70,7 +70,7 @@ type CreateTargetDepartment = 'DP' | 'ADM_TST' | null;
 
 const CREATE_TARGET_DEPARTMENT_LABELS: Record<'DP' | 'ADM_TST', string> = {
   DP: 'Departamento Pessoal',
-  ADM_TST: 'ADM/TST',
+  ADM_TST: 'Administração',
 };
 
 const CREATE_TARGET_DEPARTMENT_OPTIONS: Array<{
@@ -237,8 +237,8 @@ const DESTINATION_LIST_CONFIG: Record<
     iconColor: 'text-red-600 dark:text-red-400',
   },
   ADM_TST: {
-    title: 'ADM/TST',
-    subtitle: 'Solicitações enviadas ao ADM/TST.',
+    title: 'Administração',
+    subtitle: 'Solicitações enviadas à Administração.',
     Icon: ClipboardList,
     iconBg: 'bg-indigo-100 dark:bg-indigo-900/30',
     iconColor: 'text-indigo-600 dark:text-indigo-400',
@@ -271,7 +271,7 @@ const DESTINATION_STAT_CARDS: {
   },
   {
     filter: 'ADM_TST',
-    label: 'ADM/TST',
+    label: 'Administração',
     iconBg: 'bg-indigo-100 dark:bg-indigo-900/30',
     iconColor: 'text-indigo-600 dark:text-indigo-400',
     Icon: ClipboardList,
@@ -1038,7 +1038,7 @@ export function SolicitacoesGeraisPage() {
               Solicitações Internas
             </h1>
             <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400">
-              Crie e acompanhe pedidos para Departamento Pessoal e ADM/TST
+              Crie e acompanhe pedidos para Departamento Pessoal e Administração
             </p>
           </div>
 
@@ -1706,7 +1706,7 @@ export function SolicitacoesGeraisPage() {
                     <DpRequestHistorySectionCard
                       title={
                         historyRequest.requestType.startsWith('ADM_')
-                          ? 'Feedback ADM/TST'
+                          ? 'Feedback Administração'
                           : 'Feedback do DP'
                       }
                     >

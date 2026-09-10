@@ -515,7 +515,7 @@ export default function DpRequestsScreen() {
       [
         { key: 'all' as const, label: 'Todas', count: stats.total },
         { key: 'DP' as const, label: 'DP', count: stats.dp },
-        { key: 'ADM_TST' as const, label: 'ADM/TST', count: stats.admTst },
+        { key: 'ADM_TST' as const, label: 'Administração', count: stats.admTst },
       ] as const,
     [stats],
   );
@@ -973,7 +973,7 @@ export default function DpRequestsScreen() {
           <Text style={styles.pageTitle}>Solicitações Internas</Text>
         ) : null}
         <Text style={styles.pageSubtitle}>
-          Crie e acompanhe pedidos ao DP e ADM/TST
+          Crie e acompanhe pedidos ao DP e Administração
         </Text>
 
         <ScrollView
@@ -1047,7 +1047,7 @@ export default function DpRequestsScreen() {
             </View>
             <Text style={styles.emptyTitle}>Nenhuma solicitação</Text>
             <Text style={styles.emptyText}>
-              Toque no + para criar um pedido ao DP ou ADM/TST.
+              Toque no + para criar um pedido ao DP ou Administração.
             </Text>
           </View>
         ) : (
@@ -1376,7 +1376,7 @@ export default function DpRequestsScreen() {
                     ? 'Selecione o destino da solicitação'
                     : createTarget === 'DP'
                       ? 'Departamento Pessoal'
-                      : 'ADM/TST'}
+                      : 'Administração'}
                 </Text>
               </View>
               <TouchableOpacity
@@ -1429,7 +1429,7 @@ export default function DpRequestsScreen() {
                     <ClipboardList size={20} color={colors.primary} strokeWidth={2.2} />
                   </View>
                   <View style={{ flex: 1, minWidth: 0 }}>
-                    <Text style={styles.targetTitle}>ADM/TST</Text>
+                    <Text style={styles.targetTitle}>Administração</Text>
                     <Text style={styles.targetSub}>Viagens, EPI, material, informática…</Text>
                   </View>
                   <ChevronRight size={18} color={colors.textSecondary} strokeWidth={2.2} />

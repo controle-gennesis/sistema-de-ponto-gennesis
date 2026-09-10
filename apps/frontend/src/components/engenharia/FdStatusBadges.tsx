@@ -11,18 +11,19 @@ import {
 
 const badgeBase = 'inline-flex max-w-[220px] rounded-full px-2.5 py-0.5 text-xs font-semibold';
 
+/**
+ * Um único status na linha do tempo:
+ * Pendente de aprovação → Aprovada → status de compras (quando houver).
+ */
 export function FdStatusBadges({ record }: { record: FichaDemandaApprovalRecord }) {
   if (record.status === 'APPROVED' && record.purchaseStatus) {
     return (
-      <div className="flex flex-col items-center gap-1">
-        <span
-          className={`${badgeBase} ${fdPurchaseStatusBadgeClass(record.purchaseStatus)}`}
-          title={purchaseStatusLabel(record.purchaseStatus)}
-        >
-          {purchaseStatusLabel(record.purchaseStatus)}
-        </span>
-        <span className="text-[10px] font-medium text-gray-500 dark:text-gray-400">Gestor: Aprovada</span>
-      </div>
+      <span
+        className={`${badgeBase} ${fdPurchaseStatusBadgeClass(record.purchaseStatus)}`}
+        title={purchaseStatusLabel(record.purchaseStatus)}
+      >
+        {purchaseStatusLabel(record.purchaseStatus)}
+      </span>
     );
   }
 

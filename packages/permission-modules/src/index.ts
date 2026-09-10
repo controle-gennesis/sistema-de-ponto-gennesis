@@ -97,12 +97,18 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
     href: '/ponto/conversas-whatsapp',
     category: 'Departamento Pessoal',
   },
-  // ADM/TST
+  {
+    key: pathToModuleKey('/ponto/solicitacoes-fluig'),
+    name: 'Solicitações - Fluig',
+    href: '/ponto/solicitacoes-fluig',
+    category: 'Departamento Pessoal',
+  },
+  // Administração (ex-ADM/TST)
   {
     key: pathToModuleKey('/ponto/gerenciar-solicitacoes-adm-tst'),
     name: 'Gerenciar Solicitações',
     href: '/ponto/gerenciar-solicitacoes-adm-tst',
-    category: 'ADM/TST',
+    category: 'Administração',
   },
   { key: pathToModuleKey('/ponto/ferias'), name: 'Férias', href: '/ponto/ferias', category: 'Departamento Pessoal' },
   { key: pathToModuleKey('/ponto/gerenciar-ferias'), name: 'Gerenciar Férias', href: '/ponto/gerenciar-ferias', category: 'Departamento Pessoal' },
@@ -131,6 +137,7 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
   { key: pathToModuleKey('/ponto/contratos/socios'), name: 'Contratos Sócios', href: '/ponto/contratos/socios', category: 'Métricas' },
   { key: pathToModuleKey('/ponto/contratos/gastos-operacionais'), name: 'Gastos Operacionais', href: '/ponto/contratos/gastos-operacionais', category: 'Métricas' },
   { key: pathToModuleKey('/ponto/metricas/relatorios-contrato'), name: 'Relatórios de Contrato', href: '/ponto/metricas/relatorios-contrato', category: 'Métricas' },
+  { key: pathToModuleKey('/ponto/metricas/ocs-boleto-pix'), name: 'OCs Boleto e Pix', href: '/ponto/metricas/ocs-boleto-pix', category: 'Métricas' },
   { key: pathToModuleKey('/ponto/andamento-da-os'), name: 'Ordem de Serviço', href: '/ponto/andamento-da-os', category: 'Engenharia' },
   { key: pathToModuleKey('/ponto/sistema-gestao-os'), name: 'Central de Chamados', href: '/ponto/sistema-gestao-os', category: 'Engenharia' },
   {
@@ -215,7 +222,7 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
   { key: pathToModuleKey('/ponto/estoque'), name: 'Estoque', href: '/ponto/estoque', category: 'Suprimentos' },
   { key: pathToModuleKey('/ponto/furo-estoque'), name: 'Furo de Estoque', href: '/ponto/furo-estoque', category: 'Suprimentos' },
   { key: pathToModuleKey('/ponto/ajuste-estoque'), name: 'Ajuste de Estoque', href: '/ponto/ajuste-estoque', category: 'Suprimentos' },
-  { key: pathToModuleKey('/ponto/fds-aprovadas'), name: "FD's Aprovadas", href: '/ponto/fds-aprovadas', category: 'Suprimentos' },
+  { key: pathToModuleKey('/ponto/fds-aprovadas'), name: 'Fichas de Demanda', href: '/ponto/fds-aprovadas', category: 'Suprimentos' },
   {
     key: pathToModuleKey('/ponto/solicitacoes-combustivel'),
     name: 'Fila de Abastecimento',
@@ -246,6 +253,7 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
     category: 'Cadastros',
   },
   { key: pathToModuleKey('/ponto/condicoes-pagamento'), name: 'Condições de Pagamento', href: '/ponto/condicoes-pagamento', category: 'Cadastros' },
+  { key: pathToModuleKey('/ponto/obras'), name: 'Obras', href: '/ponto/obras', category: 'Cadastros' },
   { key: pathToModuleKey('/ponto/natureza-orcamentaria'), name: 'Natureza Orçamentária', href: '/ponto/natureza-orcamentaria', category: 'Cadastros' },
   { key: pathToModuleKey('/ponto/formularios'), name: 'Formulários', href: '/ponto/formularios', category: 'Cadastros' },
   { key: pathToModuleKey('/ponto/noticias'), name: 'Notícias', href: '/ponto/noticias', category: 'Cadastros' },

@@ -38,6 +38,21 @@ export function extractZipArchive(zipPath: string): { dir: string; cleanup: () =
     return { dir, cleanup };
   }
 
+  // Windows: tar (built-in) e Expand-Archive lidam melhor com ZIP grande / ZIP64.
+  if (process.platform === 'win32') {
+    if (tryExtractWithCommand('tar', ['-xf', zipPath, '-C', dir], dir)) {
+      return { dir, cleanup };
+    }
+    const ps = [
+      '-NoProfile',
+      '-Command',
+      `Expand-Archive -LiteralPath '${zipPath.replace(/'/g, "''")}' -DestinationPath '${dir.replace(/'/g, "''")}' -Force`,
+    ];
+    if (tryExtractWithCommand('powershell', ps, dir)) {
+      return { dir, cleanup };
+    }
+  }
+
   try {
     extractZipFromDisk(zipPath, dir);
     if (walkFilesRecursive(dir).length > 0) {

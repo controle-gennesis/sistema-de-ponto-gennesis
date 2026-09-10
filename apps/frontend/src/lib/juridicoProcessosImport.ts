@@ -1,9 +1,9 @@
 import * as XLSX from 'xlsx';
 import {
   basenamePath,
-  fileMatchesRecord,
   isZipFile,
   listZipEntryNames,
+  normalizeMatchKey,
 } from '@/lib/zipEntryNames';
 import { resolveContratoNome } from '@/data/juridico-contratos';
 
@@ -569,10 +569,30 @@ export async function inspectJuridicoFilePack(
     }
   }
 
+  const expectedBases = new Set<string>();
+  const expectedNoExt = new Set<string>();
+  const expectedIds: string[] = [];
+  for (const r of records) {
+    if (r.sourcePath) {
+      const base = normalizeMatchKey(basenamePath(r.sourcePath));
+      if (base) {
+        expectedBases.add(base);
+        expectedNoExt.add(base.replace(/\.[a-z0-9]+$/, ''));
+      }
+    }
+    const id = normalizeMatchKey(r.externalId || '');
+    if (id) expectedIds.push(id);
+  }
+
   let matched = 0;
   const unmatched: string[] = [];
   for (const name of names) {
-    const hit = records.some((r) => fileMatchesRecord(name, r.sourcePath, r.externalId));
+    const base = normalizeMatchKey(basenamePath(name));
+    const noExt = base.replace(/\.[a-z0-9]+$/, '');
+    const hit =
+      expectedBases.has(base) ||
+      expectedNoExt.has(noExt) ||
+      expectedIds.some((id) => base.includes(id));
     if (hit) matched += 1;
     else unmatched.push(basenamePath(name));
   }

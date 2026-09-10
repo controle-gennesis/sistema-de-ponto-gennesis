@@ -21,8 +21,13 @@ const EXTRA_PAGE_TITLES: Record<string, { title: string; category?: string; href
   '/ponto/veiculos': { title: 'Veículos', category: 'Cadastros' },
   '/ponto/formularios': { title: 'Formulários', category: 'Cadastros' },
   '/ponto/metricas/relatorios-contrato': { title: 'Relatórios de Contrato', category: 'Métricas' },
+  '/ponto/metricas/ocs-boleto-pix': { title: 'OCs Boleto e Pix', category: 'Métricas' },
   '/ponto/seguranca-do-trabalho': {
     title: 'Segurança do Trabalho',
+    category: 'Departamento Pessoal',
+  },
+  '/ponto/solicitacoes-fluig': {
+    title: 'Solicitações - Fluig',
     category: 'Departamento Pessoal',
   },
   '/auth/login': { title: 'Login' },
@@ -124,6 +129,9 @@ export function resolveBreadcrumbs(pathname: string): BreadcrumbItem[] {
       return [{ label: moduleLabel, href: module.href }];
     }
 
+    // `/ponto` é a página "Registros de Ponto" — não pode ser pai de todo o menu.
+    if (module.href === '/ponto') continue;
+
     if (path.startsWith(`${module.href}/`)) {
       const suffix = path.slice(module.href.length + 1);
       const segments = suffix.split('/').filter(Boolean);
@@ -160,7 +168,12 @@ export function resolveModuleCategory(pathname: string): string | null {
   if (path === '/ponto/home') return 'Principal';
 
   for (const module of MODULES_BY_HREF_LENGTH) {
-    if (path === module.href || path.startsWith(`${module.href}/`)) {
+    if (path === module.href) {
+      return module.category || null;
+    }
+    // `/ponto` não é categoria-pai de todas as rotas do sistema.
+    if (module.href === '/ponto') continue;
+    if (path.startsWith(`${module.href}/`)) {
       return module.category || null;
     }
   }

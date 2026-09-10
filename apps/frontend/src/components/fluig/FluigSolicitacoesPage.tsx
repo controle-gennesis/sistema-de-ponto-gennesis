@@ -16,6 +16,7 @@ import {
   Layers,
   Truck,
   Users,
+  User,
   Landmark,
   FileText,
   ExternalLink,
@@ -188,6 +189,52 @@ function isCreationDateInRange(date: Date | null, fromIso: string, toIso: string
   return true;
 }
 
+/** Detecta coluna do responsável / solicitante da solicitação (não setor). */
+function matchResponsavelSolicitacaoColumnKey(key: string): boolean {
+  const raw = key.trim();
+  const n = raw
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
+  if (!n) return false;
+  if (/setor|email|e-mail|cpf|cnpj|matricula|login|telefone|celular|ramal|departamento|filial|centro\s*de\s*custo|\bcc\b/i.test(n)) {
+    return false;
+  }
+  if (/^responsavel$|^solicitante$/.test(n)) return true;
+  if (/nome\s*(do\s*)?(responsavel|solicitante)|(responsavel|solicitante)\s*(da\s*)?solicitacao/.test(n)) {
+    return true;
+  }
+  if (/^(nm|nome)[_\s-]?(responsavel|solicitante)$/.test(n.replace(/\s+/g, '_'))) return true;
+  if (/responsavel.*solicit|solicit.*responsavel/.test(n)) return true;
+  const compact = raw.toLowerCase().replace(/\s+/g, '_');
+  if (/^(nm_?)?(responsavel|solicitante)$/.test(compact)) return true;
+  if (/nome_?(responsavel|solicitante)|(responsavel|solicitante)_?(nome|completo)/.test(compact)) return true;
+  return false;
+}
+
+function pickResponsavelSolicitacaoColumn(
+  columns: string[],
+  firstRow?: Record<string, unknown>
+): string | null {
+  const pool = Array.from(
+    new Set([
+      ...columns,
+      ...(firstRow ? Object.keys(firstRow) : []),
+    ])
+  );
+  const exactResponsavel =
+    pool.find((c) => /^responsavel[_\s-]?solicitacao$/i.test(c.trim())) ??
+    pool.find((c) => /^responsavel$/i.test(c.trim())) ??
+    pool.find((c) => matchResponsavelSolicitacaoColumnKey(c) && /responsavel/i.test(c));
+  if (exactResponsavel) return exactResponsavel;
+  return (
+    pool.find((c) => /^solicitante$/i.test(c.trim())) ??
+    pool.find(matchResponsavelSolicitacaoColumnKey) ??
+    null
+  );
+}
+
 /** Detecta coluna de natureza orçamentária com nomes variados no Fluig/G5. */
 function matchNaturezaOrcamentariaColumnKey(key: string): boolean {
   const raw = key.trim();
@@ -281,8 +328,11 @@ function isEtapaSemLeadTime(etapaLabel: string): boolean {
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase();
+  if (n === 'todos') return true;
   return /\bfinalizad[oa]\b/.test(n) || n.includes('finaliz');
 }
+
+const FLUIG_TODOS_ETAPA_LABEL = 'Todos';
 
 function formatCreationDateDisplay(from: Date | null): string {
   if (!from) return '—';
@@ -325,6 +375,183 @@ function formatValue(val: unknown): string {
 
 function stripDiacriticsKey(s: string): string {
   return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
+/** Chave estável p/ unificar "Letícia" / "LETICIA" / "leticia lopes". */
+function normalizePersonNameKey(value: string): string {
+  return stripDiacriticsKey(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function levenshteinDistance(a: string, b: string, max = Infinity): number {
+  if (a === b) return 0;
+  if (Math.abs(a.length - b.length) > max) return max + 1;
+  const m = a.length;
+  const n = b.length;
+  if (m === 0) return n;
+  if (n === 0) return m;
+  let prev = Array.from({ length: n + 1 }, (_, i) => i);
+  let curr = new Array<number>(n + 1);
+  for (let i = 1; i <= m; i += 1) {
+    curr[0] = i;
+    let rowMin = curr[0];
+    const ca = a.charCodeAt(i - 1);
+    for (let j = 1; j <= n; j += 1) {
+      const cost = ca === b.charCodeAt(j - 1) ? 0 : 1;
+      curr[j] = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost);
+      if (curr[j] < rowMin) rowMin = curr[j];
+    }
+    if (rowMin > max) return max + 1;
+    [prev, curr] = [curr, prev];
+  }
+  return prev[n];
+}
+
+function shouldMergePersonNameKeys(a: string, b: string): boolean {
+  if (a === b) return true;
+  const [shorter, longer] = a.length <= b.length ? [a, b] : [b, a];
+  // "isabelli" ⊂ "isabelli cardoso"
+  if (shorter.length >= 6 && longer.startsWith(`${shorter} `)) return true;
+  const maxDist = longer.length >= 14 ? 2 : longer.length >= 8 ? 1 : 0;
+  if (maxDist === 0) return false;
+  return levenshteinDistance(a, b, maxDist) <= maxDist;
+}
+
+function scorePersonDisplayName(name: string, count: number): number {
+  let score = count * 20;
+  const letters = name.replace(/[^a-zA-ZÀ-ÿ]/g, '');
+  const upper = (letters.match(/[A-ZÀ-Ý]/g) || []).length;
+  const lower = (letters.match(/[a-zà-ÿ]/g) || []).length;
+  if (upper > 0 && lower > 0) score += 80;
+  else if (lower > upper) score += 20;
+  if (/[À-ÿ]/.test(name)) score += 30;
+  score += Math.min(name.length, 48);
+  return score;
+}
+
+const PERSON_NAME_PARTICLES = new Set([
+  'de',
+  'da',
+  'do',
+  'das',
+  'dos',
+  'e',
+  'di',
+  'del',
+]);
+
+/** Ex.: "WANDERLAN FERNANDES DE OLIVEIRA" → "Wanderlan Fernandes de Oliveira". */
+function formatPersonDisplayName(value: string): string {
+  const words = value
+    .trim()
+    .toLocaleLowerCase('pt-BR')
+    .replace(/\s+/g, ' ')
+    .split(' ')
+    .filter(Boolean);
+  return words
+    .map((word, index) => {
+      if (index > 0 && PERSON_NAME_PARTICLES.has(word)) return word;
+      return word
+        .split('-')
+        .map((part) =>
+          part ? part.charAt(0).toLocaleUpperCase('pt-BR') + part.slice(1) : part,
+        )
+        .join('-');
+    })
+    .join(' ');
+}
+
+type PersonNameGroup = {
+  key: string;
+  label: string;
+  members: string[];
+};
+
+/** Agrupa variantes de caixa/acento/typos leves num único rótulo de filtro. */
+function buildPersonNameGroups(rawNames: string[]): PersonNameGroup[] {
+  const counts = new Map<string, number>();
+  for (const raw of rawNames) {
+    const name = raw.trim();
+    if (!name) continue;
+    counts.set(name, (counts.get(name) || 0) + 1);
+  }
+  if (counts.size === 0) return [];
+
+  type Bucket = { key: string; variants: Map<string, number> };
+  const buckets = new Map<string, Bucket>();
+  for (const [name, count] of counts) {
+    const key = normalizePersonNameKey(name);
+    if (!key) continue;
+    let bucket = buckets.get(key);
+    if (!bucket) {
+      bucket = { key, variants: new Map() };
+      buckets.set(key, bucket);
+    }
+    bucket.variants.set(name, (bucket.variants.get(name) || 0) + count);
+  }
+
+  const list = Array.from(buckets.values());
+  const parent = list.map((_, i) => i);
+  const find = (i: number): number => {
+    let cur = i;
+    while (parent[cur] !== cur) cur = parent[cur]!;
+    let x = i;
+    while (parent[x] !== x) {
+      const next = parent[x]!;
+      parent[x] = cur;
+      x = next;
+    }
+    return cur;
+  };
+  const unite = (i: number, j: number) => {
+    const a = find(i);
+    const b = find(j);
+    if (a !== b) parent[b] = a;
+  };
+
+  for (let i = 0; i < list.length; i += 1) {
+    for (let j = i + 1; j < list.length; j += 1) {
+      if (shouldMergePersonNameKeys(list[i]!.key, list[j]!.key)) unite(i, j);
+    }
+  }
+
+  const merged = new Map<number, Bucket>();
+  for (let i = 0; i < list.length; i += 1) {
+    const root = find(i);
+    const src = list[i]!;
+    let dest = merged.get(root);
+    if (!dest) {
+      dest = { key: src.key, variants: new Map() };
+      merged.set(root, dest);
+    }
+    if (src.key.length > dest.key.length) dest.key = src.key;
+    for (const [name, count] of src.variants) {
+      dest.variants.set(name, (dest.variants.get(name) || 0) + count);
+    }
+  }
+
+  const groups: PersonNameGroup[] = [];
+  for (const bucket of merged.values()) {
+    let bestLabel = '';
+    let bestScore = -1;
+    for (const [name, count] of bucket.variants) {
+      const score = scorePersonDisplayName(name, count);
+      if (score > bestScore) {
+        bestScore = score;
+        bestLabel = name;
+      }
+    }
+    groups.push({
+      key: bucket.key,
+      label: formatPersonDisplayName(bestLabel),
+      members: Array.from(bucket.variants.keys()),
+    });
+  }
+
+  return groups.sort((a, b) => a.label.localeCompare(b.label, 'pt-BR'));
 }
 
 /** Colunas onde vem "3.03.01.32-SALÁRIOS…" sem o rótulo "natureza" (relatório G5 DF). */
@@ -532,6 +759,7 @@ type FluigSolicitacoesPageConfig = {
   allowedFiliaisDatasets?: readonly string[];
   excludedFiliais?: readonly string[];
   hideFilialFilter?: boolean;
+  hideSetorSolicitanteFilter?: boolean;
   showProcessCard?: boolean;
   useEmployeeListLayout?: boolean;
   showExportButton?: boolean;
@@ -539,6 +767,8 @@ type FluigSolicitacoesPageConfig = {
   leadTimeColumn?: string;
   /** Nome exato da coluna Fluig de natureza orçamentária (opcional). */
   naturezaOrcamentariaColumn?: string;
+  /** Nome exato da coluna Fluig do responsável/solicitante (opcional). */
+  responsavelColumn?: string;
 };
 
 /** Histórico / título com “Ver mais”, no padrão PNCP. */
@@ -606,6 +836,7 @@ type FluigFilterCategory =
   | 'filial'
   | 'cc'
   | 'setorSolicitante'
+  | 'responsavel'
   | 'urgencia'
   | 'fornecedor'
   | 'naturezaOrcamentaria';
@@ -614,6 +845,7 @@ const NO_TOUCHED_FILTERS: Record<FluigFilterCategory, boolean> = {
   filial: false,
   cc: false,
   setorSolicitante: false,
+  responsavel: false,
   urgencia: false,
   fornecedor: false,
   naturezaOrcamentaria: false,
@@ -629,6 +861,7 @@ export function FluigSolicitacoesPage({
   const [selectedFiliais, setSelectedFiliais] = useState<string[]>([]);
   const [selectedCCs, setSelectedCCs] = useState<string[]>([]);
   const [selectedSetoresSolicitantes, setSelectedSetoresSolicitantes] = useState<string[]>([]);
+  const [selectedResponsaveis, setSelectedResponsaveis] = useState<string[]>([]);
   const [selectedUrgencias, setSelectedUrgencias] = useState<string[]>([]);
   const [selectedFornecedores, setSelectedFornecedores] = useState<string[]>([]);
   const [selectedNaturezasOrcamentarias, setSelectedNaturezasOrcamentarias] = useState<string[]>([]);
@@ -703,6 +936,7 @@ export function FluigSolicitacoesPage({
     [config?.excludedFiliais]
   );
   const hideFilialFilter = config?.hideFilialFilter ?? false;
+  const hideSetorSolicitanteFilter = config?.hideSetorSolicitanteFilter ?? false;
   const showProcessCard = config?.showProcessCard ?? true;
   const useEmployeeListLayout = config?.useEmployeeListLayout ?? false;
   const showExportButton = config?.showExportButton ?? false;
@@ -754,6 +988,9 @@ export function FluigSolicitacoesPage({
     }
 
     if (datasetId.startsWith('G5-Relatorio-DF')) {
+      if (/Etapa\s*176\b/i.test(s)) {
+        return { key: 'G5_DF_ETAPA_176_SERVICO_ATRIBUICAO', label: 'Serviço de Atribuição' };
+      }
       if (/Etapa\s*390\b/i.test(s)) {
         return { key: 'G5_DF_ETAPA_390_ANEXAR_NF', label: 'Anexar NF' };
       }
@@ -875,6 +1112,7 @@ export function FluigSolicitacoesPage({
         });
         return res.data;
       },
+      staleTime: 7 * 60 * 1000,
     })),
   });
 
@@ -1102,6 +1340,15 @@ export function FluigSolicitacoesPage({
     () => buildStatusList(currentValuesFilteredByFilial, currentColumns),
     [currentValuesFilteredByFilial, currentColumns, datasetId]
   );
+
+  /** Rótulo de etapa por linha (para a coluna na visão Todos). */
+  const etapaLabelByRow = useMemo(() => {
+    const map = new WeakMap<Record<string, unknown>, string>();
+    for (const [etapa, rows] of fullStatusList) {
+      for (const row of rows) map.set(row, etapa);
+    }
+    return map;
+  }, [fullStatusList]);
   const ccColFromColumns = currentColumns.find((c: string) => {
     const t = c.trim();
     return (
@@ -1140,6 +1387,69 @@ export function FluigSolicitacoesPage({
     const first = currentValuesFilteredByFilial[0] as Record<string, unknown> | undefined;
     return pickBestNaturezaOrcamentariaColumn(currentColumns, first, currentValuesFilteredByFilial);
   }, [currentColumns, currentValuesFilteredByFilial, config?.naturezaOrcamentariaColumn]);
+
+  const responsavelCol = useMemo(() => {
+    const override = config?.responsavelColumn?.trim();
+    if (override) {
+      const exact = currentColumns.find((c) => c === override);
+      if (exact) return exact;
+      const low = override.toLowerCase();
+      const byName = currentColumns.find((c) => c.toLowerCase() === low);
+      if (byName) return byName;
+      const firstRow = currentValuesFilteredByFilial[0] as Record<string, unknown> | undefined;
+      if (firstRow) {
+        const fromKey = Object.keys(firstRow).find((k) => k === override || k.toLowerCase() === low);
+        if (fromKey) return fromKey;
+      }
+    }
+    const first = currentValuesFilteredByFilial[0] as Record<string, unknown> | undefined;
+    return pickResponsavelSolicitacaoColumn(currentColumns, first);
+  }, [currentColumns, currentValuesFilteredByFilial, config?.responsavelColumn]);
+
+  const getResponsavelValue = (row: Record<string, unknown>): string => {
+    if (!responsavelCol) return '';
+    const val = row[responsavelCol];
+    if (val != null && typeof val === 'object') {
+      const o = val as Record<string, unknown>;
+      return String(o.display ?? o.displayValue ?? o.value ?? o.internalValue ?? val).trim();
+    }
+    return String(val ?? '').trim();
+  };
+
+  const responsavelGroups = useMemo(() => {
+    if (!responsavelCol) return [] as PersonNameGroup[];
+    const raw: string[] = [];
+    currentValuesFilteredByFilial.forEach((row: Record<string, unknown>) => {
+      const v = getResponsavelValue(row);
+      if (v) raw.push(v);
+    });
+    return buildPersonNameGroups(raw);
+  }, [currentValuesFilteredByFilial, responsavelCol]);
+
+  const responsaveis = useMemo(
+    () => responsavelGroups.map((g) => g.label),
+    [responsavelGroups],
+  );
+
+  const responsavelMemberToLabel = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const group of responsavelGroups) {
+      for (const member of group.members) {
+        map.set(member, group.label);
+        map.set(normalizePersonNameKey(member), group.label);
+      }
+    }
+    return map;
+  }, [responsavelGroups]);
+
+  const resolveResponsavelFilterLabel = (raw: string): string => {
+    if (!raw) return '';
+    return (
+      responsavelMemberToLabel.get(raw) ||
+      responsavelMemberToLabel.get(normalizePersonNameKey(raw)) ||
+      raw
+    );
+  };
 
   // Resolve coluna CC: usa columns, ou busca nas chaves reais das linhas (G4 usa "Centro De Custo Mecanismo")
   const ccColumnsCandidates = useMemo(() => {
@@ -1322,6 +1632,19 @@ export function FluigSolicitacoesPage({
   }, [setoresSolicitantes, touchedFilters.setorSolicitante]);
 
   useEffect(() => {
+    if (!touchedFilters.responsavel) {
+      setSelectedResponsaveis(responsaveis);
+      return;
+    }
+    setSelectedResponsaveis((prev) => {
+      const mapped = prev
+        .map((v) => responsavelMemberToLabel.get(v) || responsavelMemberToLabel.get(normalizePersonNameKey(v)) || v)
+        .filter((v) => responsaveis.includes(v));
+      return Array.from(new Set(mapped));
+    });
+  }, [responsaveis, responsavelMemberToLabel, touchedFilters.responsavel]);
+
+  useEffect(() => {
     if (!touchedFilters.urgencia) setSelectedUrgencias(urgencias);
   }, [urgencias, touchedFilters.urgencia]);
 
@@ -1345,11 +1668,18 @@ export function FluigSolicitacoesPage({
     hasPeriodFilter ||
     isCategoryFiltered(touchedFilters.filial, filialCol, filiais, selectedFiliais) ||
     isCategoryFiltered(touchedFilters.cc, ccColResolved, centrosCusto, selectedCCs) ||
+    (!hideSetorSolicitanteFilter &&
+      isCategoryFiltered(
+        touchedFilters.setorSolicitante,
+        setorSolicitanteCol,
+        setoresSolicitantes,
+        selectedSetoresSolicitantes
+      )) ||
     isCategoryFiltered(
-      touchedFilters.setorSolicitante,
-      setorSolicitanteCol,
-      setoresSolicitantes,
-      selectedSetoresSolicitantes
+      touchedFilters.responsavel,
+      responsavelCol,
+      responsaveis,
+      selectedResponsaveis
     ) ||
     isCategoryFiltered(touchedFilters.urgencia, urgenciaCol, urgencias, selectedUrgencias) ||
     isCategoryFiltered(touchedFilters.fornecedor, fornecedorCol, fornecedores, selectedFornecedores) ||
@@ -1370,9 +1700,14 @@ export function FluigSolicitacoesPage({
     const applyCC =
       !!ccColResolved && centrosCusto.length > 0 && (touchedFilters.cc || selectedCCs.length > 0);
     const applySetorSolicitante =
-      !!setorSolicitanteCol
+      !hideSetorSolicitanteFilter
+      && !!setorSolicitanteCol
       && setoresSolicitantes.length > 0
       && (touchedFilters.setorSolicitante || selectedSetoresSolicitantes.length > 0);
+    const applyResponsavel =
+      !!responsavelCol
+      && responsaveis.length > 0
+      && (touchedFilters.responsavel || selectedResponsaveis.length > 0);
     const applyUrgencia =
       !!urgenciaCol && urgencias.length > 0 && (touchedFilters.urgencia || selectedUrgencias.length > 0);
     const applyFornecedor =
@@ -1387,6 +1722,7 @@ export function FluigSolicitacoesPage({
     const byFiliais = applyFilial ? new Set(selectedFiliais) : null;
     const byCCs = applyCC ? new Set(selectedCCs) : null;
     const bySetoresSolicitantes = applySetorSolicitante ? new Set(selectedSetoresSolicitantes) : null;
+    const byResponsaveis = applyResponsavel ? new Set(selectedResponsaveis) : null;
     const byUrgencias = applyUrgencia ? new Set(selectedUrgencias) : null;
     const byFornecedores = applyFornecedor ? new Set(selectedFornecedores) : null;
     const byNaturezasOrcamentarias = applyNaturezaOrcamentaria
@@ -1397,6 +1733,10 @@ export function FluigSolicitacoesPage({
       if (byFiliais && !byFiliais.has(getFilialValue(row))) return false;
       if (byCCs && !byCCs.has(getCCValue(row))) return false;
       if (bySetoresSolicitantes && !bySetoresSolicitantes.has(getSetorSolicitanteValue(row))) return false;
+      if (byResponsaveis) {
+        const label = resolveResponsavelFilterLabel(getResponsavelValue(row));
+        if (!label || !byResponsaveis.has(label)) return false;
+      }
       if (byUrgencias && !byUrgencias.has(getUrgenciaValue(row))) return false;
       if (byFornecedores && fornecedorCol && !byFornecedores.has(String(row[fornecedorCol] ?? '').trim()))
         return false;
@@ -1421,15 +1761,26 @@ export function FluigSolicitacoesPage({
       return true;
     };
 
-    return fullStatusList.map(([etapa, rows]) => {
+    const byEtapa = fullStatusList.map(([etapa, rows]) => {
       const filtered = rows.filter(matchRow);
       return [etapa, filtered] as const;
     });
+
+    const allRows = byEtapa.flatMap(([, rows]) => rows);
+    const creationTs = (row: Record<string, unknown>) => {
+      if (!movimentoDataHoraCol) return 0;
+      const d = parseCellDate(row[movimentoDataHoraCol]);
+      return d ? d.getTime() : 0;
+    };
+    const todosRows = [...allRows].sort((a, b) => creationTs(b) - creationTs(a));
+
+    return [[FLUIG_TODOS_ETAPA_LABEL, todosRows] as const, ...byEtapa];
   }, [
     fullStatusList,
     selectedFiliais,
     selectedCCs,
     selectedSetoresSolicitantes,
+    selectedResponsaveis,
     selectedUrgencias,
     selectedFornecedores,
     selectedNaturezasOrcamentarias,
@@ -1438,12 +1789,16 @@ export function FluigSolicitacoesPage({
     filialCol,
     ccColResolved,
     setorSolicitanteCol,
+    hideSetorSolicitanteFilter,
+    responsavelCol,
+    responsavelMemberToLabel,
     urgenciaCol,
     fornecedorCol,
     naturezaOrcamentariaCol,
     filiais.length,
     centrosCusto.length,
     setoresSolicitantes.length,
+    responsaveis.length,
     urgencias.length,
     fornecedores.length,
     naturezasOrcamentarias.length,
@@ -1476,6 +1831,7 @@ export function FluigSolicitacoesPage({
     setSelectedFiliais([...filiais]);
     setSelectedCCs([...centrosCusto]);
     setSelectedSetoresSolicitantes([...setoresSolicitantes]);
+    setSelectedResponsaveis([...responsaveis]);
     setSelectedUrgencias([...urgencias]);
     setSelectedFornecedores([...fornecedores]);
     setSelectedNaturezasOrcamentarias([...naturezasOrcamentarias]);
@@ -1595,7 +1951,7 @@ export function FluigSolicitacoesPage({
                     noFocusRing
                   />
                 ) : null}
-                {setorSolicitanteCol ? (
+                {!hideSetorSolicitanteFilter && setorSolicitanteCol ? (
                   <MultiSelectSearchDropdown
                     label="Setor solicitante"
                     options={setoresSolicitantes.map((s) => ({ value: s, label: s }))}
@@ -1607,6 +1963,21 @@ export function FluigSolicitacoesPage({
                     placeholder="Todos"
                     searchPlaceholder="Pesquisar..."
                     icon={<Users className="h-4 w-4" />}
+                    noFocusRing
+                  />
+                ) : null}
+                {responsavelCol ? (
+                  <MultiSelectSearchDropdown
+                    label="Responsável"
+                    options={responsaveis.map((r) => ({ value: r, label: r }))}
+                    selected={selectedResponsaveis}
+                    onChange={(next) => {
+                      markFilterTouched('responsavel');
+                      setSelectedResponsaveis(next);
+                    }}
+                    placeholder="Todos"
+                    searchPlaceholder="Pesquisar..."
+                    icon={<User className="h-4 w-4" />}
                     noFocusRing
                   />
                 ) : null}
@@ -1774,6 +2145,7 @@ export function FluigSolicitacoesPage({
             {!error && !isEmpty && filteredStatusList.length > 0 && (() => {
               const [etapaAtual, rowsAtuais] = filteredStatusList[selectedEtapaIndex] ?? filteredStatusList[0];
               const showCreationDateColumn = !!movimentoDataHoraCol;
+              const showEtapaColumn = etapaAtual === FLUIG_TODOS_ETAPA_LABEL;
               const showLeadTimeColumn = !!movimentoDataHoraCol && !isEtapaSemLeadTime(etapaAtual);
               const getHistText = (r: Record<string, unknown>) => {
                 const val = r[historicoCol];
@@ -1794,19 +2166,29 @@ export function FluigSolicitacoesPage({
                       >
                         {filteredStatusList.map(([etapa, rows], idx) => {
                           const active = idx === selectedEtapaIndex;
+                          const isTodos = etapa === FLUIG_TODOS_ETAPA_LABEL;
                           return (
-                            <AppTabButton
-                              key={`${datasetId}-${etapa}`}
-                              active={active}
-                              onClick={() => setSelectedEtapaIndex(idx)}
-                              className="flex items-center gap-1.5 whitespace-nowrap px-2 py-2 text-xs font-medium sm:px-3 sm:text-sm"
-                              title={`${etapa} — ${rows.length} registro(s)`}
-                            >
-                              {etapa}
-                              <span className="app-tab__badge">
-                                <TabCountBadge count={rows.length} active={active} tone="red" />
-                              </span>
-                            </AppTabButton>
+                            <React.Fragment key={`${datasetId}-${etapa}`}>
+                              <AppTabButton
+                                active={active}
+                                onClick={() => setSelectedEtapaIndex(idx)}
+                                className="flex items-center gap-1.5 whitespace-nowrap px-2 py-2 text-xs font-medium sm:px-3 sm:text-sm"
+                                title={`${etapa} — ${rows.length} registro(s)`}
+                              >
+                                {etapa}
+                                <span className="app-tab__badge">
+                                  <TabCountBadge count={rows.length} active={active} tone="red" />
+                                </span>
+                              </AppTabButton>
+                              {isTodos && filteredStatusList.length > 1 ? (
+                                <span
+                                  aria-hidden
+                                  className="mx-0.5 inline-flex select-none items-center self-center text-sm font-light text-gray-300 dark:text-gray-600 sm:mx-1"
+                                >
+                                  |
+                                </span>
+                              ) : null}
+                            </React.Fragment>
                           );
                         })}
                       </nav>
@@ -1820,13 +2202,24 @@ export function FluigSolicitacoesPage({
                             <FileText className="h-5 w-5 text-red-600 sm:h-6 sm:w-6 dark:text-red-400" />
                           </div>
                           <div>
-                            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 truncate" title={etapaAtual}>
-                              {etapaAtual}
+                            <h3
+                              className="text-lg font-semibold text-gray-900 dark:text-gray-100 truncate"
+                              title={
+                                etapaAtual === FLUIG_TODOS_ETAPA_LABEL
+                                  ? 'Todas as Solicitações'
+                                  : etapaAtual
+                              }
+                            >
+                              {etapaAtual === FLUIG_TODOS_ETAPA_LABEL
+                                ? 'Todas as Solicitações'
+                                : etapaAtual}
                             </h3>
                             <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
                               {rowsAtuais.length === 0
                                 ? 'Nenhuma solicitação'
-                                : `${rowsAtuais.length} registro(s) nesta etapa`}
+                                : etapaAtual === FLUIG_TODOS_ETAPA_LABEL
+                                  ? `${rowsAtuais.length} solicitação(ões)`
+                                  : `${rowsAtuais.length} registro(s) nesta etapa`}
                             </p>
                           </div>
                         </div>
@@ -1900,18 +2293,22 @@ export function FluigSolicitacoesPage({
                       const listShowCC = useEmployeeListLayout && !!ccColResolved;
                       const listShowNatureza = useEmployeeListLayout && !!naturezaOrcamentariaCol;
                       const listShowFornecedor = useEmployeeListLayout && !!fornecedorCol;
+                      const listShowResponsavel = useEmployeeListLayout && !!responsavelCol;
                       const thPad = 'py-4';
                       const tdPad = 'py-3';
                       const solicitacaoHeader = g5TitleDatasets.has(datasetId) ? 'Título da Solicitação' : 'Histórico';
                       const emptyColSpan = useEmployeeListLayout
                         ? 4 +
+                          (showEtapaColumn ? 1 : 0) +
                           (listShowFilial ? 1 : 0) +
                           (listShowCC ? 1 : 0) +
                           (listShowNatureza ? 1 : 0) +
                           (listShowFornecedor ? 1 : 0) +
+                          (listShowResponsavel ? 1 : 0) +
                           (showCreationDateColumn ? 1 : 0) +
                           (showLeadTimeColumn ? 1 : 0)
                         : 4 +
+                          (showEtapaColumn ? 1 : 0) +
                           (showCreationDateColumn ? 1 : 0) +
                           (showLeadTimeColumn ? 1 : 0);
                       return (
@@ -1942,13 +2339,27 @@ export function FluigSolicitacoesPage({
                                       <th
                                         className={`px-3 sm:px-4 ${thPad} text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-24 sm:w-28 shrink-0`}
                                       >
-                                        IdMov
+                                        ID
                                       </th>
                                       <th
                                         className={`px-3 sm:px-6 ${thPad} text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider min-w-[18rem]`}
                                       >
                                         {solicitacaoHeader}
                                       </th>
+                                      {showEtapaColumn && (
+                                        <th
+                                          className={`px-3 sm:px-6 ${thPad} text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider min-w-[10rem]`}
+                                        >
+                                          Etapa
+                                        </th>
+                                      )}
+                                      {listShowResponsavel && (
+                                        <th
+                                          className={`px-3 sm:px-6 ${thPad} text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider min-w-[10rem]`}
+                                        >
+                                          Responsável
+                                        </th>
+                                      )}
                                       {listShowCC && (
                                         <th
                                           className={`px-3 sm:px-6 ${thPad} text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider min-w-[10rem]`}
@@ -2003,13 +2414,20 @@ export function FluigSolicitacoesPage({
                                       <th
                                         className="px-5 py-3 text-left font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-28"
                                       >
-                                        IdMov
+                                        ID
                                       </th>
                                       <th
                                         className="px-5 py-3 text-left font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider min-w-[18rem]"
                                       >
                                         {solicitacaoHeader}
                                       </th>
+                                      {showEtapaColumn && (
+                                        <th
+                                          className="px-5 py-3 text-center font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider min-w-[10rem]"
+                                        >
+                                          Etapa
+                                        </th>
+                                      )}
                                       <th
                                         className="px-5 py-3 text-center font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-32"
                                       >
@@ -2047,7 +2465,11 @@ export function FluigSolicitacoesPage({
                                       colSpan={emptyColSpan}
                                       className="px-5 py-12 text-center text-gray-500 dark:text-gray-400 text-sm"
                                     >
-                                      Nenhuma solicitação nesta etapa. Tente outro termo na busca ou limpe os filtros.
+                                      Nenhuma solicitação
+                                      {etapaAtual === FLUIG_TODOS_ETAPA_LABEL
+                                        ? '.'
+                                        : ' nesta etapa.'}{' '}
+                                      Tente outro termo na busca ou limpe os filtros.
                                     </td>
                                   </tr>
                                 ) : (
@@ -2083,6 +2505,36 @@ export function FluigSolicitacoesPage({
                                           <td className={`px-3 sm:px-6 ${tdPad} align-middle text-left`}>
                                             <FluigHistoricoExpandable text={hist} />
                                           </td>
+                                          {showEtapaColumn && (
+                                            <td
+                                              className={`px-3 sm:px-6 ${tdPad} align-middle text-sm text-center text-gray-700 dark:text-gray-300`}
+                                            >
+                                              <span
+                                                className="line-clamp-2 mx-auto inline-block max-w-[14rem] text-center align-middle"
+                                                title={etapaLabelByRow.get(row) || undefined}
+                                              >
+                                                {etapaLabelByRow.get(row) || '—'}
+                                              </span>
+                                            </td>
+                                          )}
+                                          {listShowResponsavel && (
+                                            <td
+                                              className={`px-3 sm:px-6 ${tdPad} align-middle text-sm text-center text-gray-700 dark:text-gray-300`}
+                                            >
+                                              <span
+                                                className="line-clamp-2 mx-auto inline-block max-w-[14rem] text-center align-middle"
+                                                title={
+                                                  resolveResponsavelFilterLabel(getResponsavelValue(row)) ||
+                                                  getResponsavelValue(row) ||
+                                                  undefined
+                                                }
+                                              >
+                                                {resolveResponsavelFilterLabel(getResponsavelValue(row)) ||
+                                                  formatPersonDisplayName(getResponsavelValue(row)) ||
+                                                  '—'}
+                                              </span>
+                                            </td>
+                                          )}
                                           {listShowCC && (
                                             <td
                                               className={`px-3 sm:px-6 ${tdPad} align-middle text-sm text-center text-gray-700 dark:text-gray-300`}
@@ -2198,6 +2650,16 @@ export function FluigSolicitacoesPage({
                                         <td className="px-5 py-3 text-gray-800 dark:text-gray-200 align-middle overflow-hidden leading-relaxed">
                                           <FluigHistoricoExpandable text={hist} />
                                         </td>
+                                        {showEtapaColumn && (
+                                          <td className="px-5 py-3 text-gray-800 dark:text-gray-200 align-middle text-center">
+                                            <span
+                                              className="line-clamp-2 mx-auto inline-block max-w-[14rem] text-center"
+                                              title={etapaLabelByRow.get(row) || undefined}
+                                            >
+                                              {etapaLabelByRow.get(row) || '—'}
+                                            </span>
+                                          </td>
+                                        )}
                                         <td className="px-5 py-3 text-gray-900 dark:text-gray-100 align-middle whitespace-nowrap text-center tabular-nums">
                                           {getRowValorDisplay(row)}
                                         </td>
