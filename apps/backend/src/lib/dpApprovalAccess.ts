@@ -89,6 +89,51 @@ export async function getRestrictedDpApprovalCostCenterIds(
   return rows.map((r) => r.costCenterId);
 }
 
+async function resolveDpRequestCostCenterId(
+  contractId: string | null | undefined,
+  costCenterId?: string | null
+): Promise<string | null> {
+  if (costCenterId) return costCenterId;
+  if (!contractId) return null;
+  const contract = await prisma.contract.findUnique({
+    where: { id: contractId },
+    select: { costCenterId: true },
+  });
+  return contract?.costCenterId ?? null;
+}
+
+async function userHasRestrictedApproveForCostCenter(
+  userId: string,
+  costCenterId: string | null | undefined
+): Promise<boolean> {
+  if (!costCenterId) return false;
+  const hasPerm = await userHasRestrictedDpApprovePermission(userId);
+  if (!hasPerm) return false;
+  const ok = await prisma.userRestrictedDpApprovalCostCenter.findFirst({
+    where: { userId, costCenterId },
+    select: { id: true },
+  });
+  return !!ok;
+}
+
+/** Pedidos dos CCs liberados — com ou sem contrato cadastrado. */
+async function restrictedDpApprovalVisibilityWhere(
+  costCenterIds: string[]
+): Promise<Record<string, unknown>> {
+  if (costCenterIds.length === 0) return { id: { in: [] } };
+  const contracts = await prisma.contract.findMany({
+    where: { costCenterId: { in: costCenterIds } },
+    select: { id: true },
+  });
+  const contractIds = contracts.map((c) => c.id);
+  if (contractIds.length === 0) {
+    return { costCenterId: { in: costCenterIds } };
+  }
+  return {
+    OR: [{ costCenterId: { in: costCenterIds } }, { contractId: { in: contractIds } }],
+  };
+}
+
 /** Gestor DP comum ou aprovador de solicitações restritas (para entrar na API de aprovações). */
 export async function userHasAnyDpApproverAccess(userId: string): Promise<boolean> {
   if (await userHasDpApprovePermission(userId)) return true;
@@ -187,10 +232,7 @@ export async function getDpManagerApprovalVisibilityWhere(
     });
   }
   if (hasRestricted && restrictedCcIds && restrictedCcIds.length > 0) {
-    orParts.push({
-      requestType: { in: [...SENSITIVE_DP_REQUEST_TYPES] },
-      costCenterId: { in: restrictedCcIds },
-    });
+    orParts.push(await restrictedDpApprovalVisibilityWhere(restrictedCcIds));
   }
   if (orParts.length === 0) return null;
   return { OR: orParts };
@@ -273,27 +315,25 @@ export async function assertManagerCanApproveDpRequest(
   costCenterId?: string | null
 ): Promise<void> {
   if (isAdmin) return;
+
+  const resolvedCostCenterId = await resolveDpRequestCostCenterId(contractId, costCenterId);
+  const restrictedOk = await userHasRestrictedApproveForCostCenter(userId, resolvedCostCenterId);
+
   if (isSensitiveDpRequestType(requestType)) {
-    const hasPerm = await userHasRestrictedDpApprovePermission(userId);
-    if (!hasPerm) {
-      throw createError('Sem permissão para aprovar solicitações internas restritas', 403);
-    }
-    if (!costCenterId) {
-      throw createError('Solicitação sem centro de custo para aprovação restrita', 403);
-    }
-    const ok = await prisma.userRestrictedDpApprovalCostCenter.findFirst({
-      where: { userId, costCenterId },
-      select: { id: true },
-    });
-    if (!ok) {
+    if (!restrictedOk) {
       throw createError(
-        'Sem permissão para aprovar solicitações restritas deste centro de custo',
+        resolvedCostCenterId
+          ? 'Sem permissão para aprovar solicitações restritas deste centro de custo'
+          : 'Solicitação sem centro de custo para aprovação restrita',
         403
       );
     }
     return;
   }
-  await assertManagerCanActOnDpContract(userId, isAdmin, contractId, costCenterId);
+
+  if (restrictedOk) return;
+
+  await assertManagerCanActOnDpContract(userId, isAdmin, contractId, resolvedCostCenterId);
 }
 
 /** Pode vincular centro de custo ao formulário de solicitação DP. */

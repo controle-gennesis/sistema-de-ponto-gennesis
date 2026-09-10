@@ -1827,7 +1827,8 @@ export function UserPermissionsEditor({
                                         <div className="mt-2 max-w-xl">
                                           <p className="mb-1.5 text-xs text-gray-500 dark:text-gray-400">
                                             Centros de custo que esta pessoa pode aprovar nas
-                                            solicitações internas restritas
+                                            solicitações internas — não precisa existir contrato
+                                            cadastrado
                                           </p>
                                           <MultiSelectSearchDropdown
                                             selected={Array.from(
