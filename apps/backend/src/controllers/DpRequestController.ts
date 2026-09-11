@@ -23,6 +23,7 @@ import {
   ADM_TST_MAY_ACT_STATUSES,
 } from '../lib/dpRequestAdmTst';
 import { assertUserCanManageDpRequest } from '../lib/dpApprovalAccess';
+import { createDpContabilidadeFromConcludedInterna } from '../lib/dpContabilidadeFromInterna';
 
 const DP_REQUEST_TYPES = [
   'ADMISSAO',
@@ -981,7 +982,19 @@ export class DpRequestController {
         data,
       });
 
-      return res.json({ success: true, data: updated });
+      let contabilidadeCreated = false;
+      if (next === 'CONCLUDED') {
+        try {
+          contabilidadeCreated = await createDpContabilidadeFromConcludedInterna(updated, {
+            id: req.user.id,
+            name: dpActorName,
+          });
+        } catch (mirrorErr) {
+          console.error('[dp-contabilidade] falha ao espelhar solicitação interna:', mirrorErr);
+        }
+      }
+
+      return res.json({ success: true, data: updated, contabilidadeCreated });
     } catch (e: unknown) {
       if (e instanceof z.ZodError) {
         return res.status(400).json({ error: 'Dados inválidos', details: e.issues });

@@ -840,6 +840,9 @@ model DpContabilidadeRequest {
   cancelledAt       DateTime?
   cancelledByUserId String?
 
+  /// Solicitação interna (Gerenciar Solicitações) que originou este card.
+  sourceDpRequestId String? @unique
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

@@ -90,6 +90,7 @@ type DpContabilidadeRequest = {
   status: RequestStatus;
   concludedAt: string | null;
   cancelledAt: string | null;
+  sourceDpRequestId?: string | null;
   createdAt: string;
   updatedAt: string;
   comments: Comment[];
@@ -409,10 +410,10 @@ export default function DpContabilidadePage() {
         <div className="space-y-6">
           <div className="text-center">
             <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
-              DP/Contabilidade
+              Comunicação Contábil
             </h1>
             <p className="mt-2 text-sm text-gray-600 dark:text-gray-400 sm:text-base">
-              Comunicação do Departamento Pessoal com a Contabilidade. As solicitações ficam
+              Canal do Departamento Pessoal com a Contabilidade. As solicitações ficam
               registradas para consulta e não passam por aprovação.
             </p>
           </div>
@@ -807,6 +808,16 @@ export default function DpContabilidadePage() {
                     {selected.contractName || '—'}
                   </p>
                 </div>
+                {selected.sourceDpRequestId ? (
+                  <div className="sm:col-span-2">
+                    <p className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                      Origem
+                    </p>
+                    <p className="mt-1 text-gray-900 dark:text-gray-100">
+                      Enviada automaticamente ao finalizar a solicitação interna no DP.
+                    </p>
+                  </div>
+                ) : null}
                 <div>
                   <p className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
                     Aberta em

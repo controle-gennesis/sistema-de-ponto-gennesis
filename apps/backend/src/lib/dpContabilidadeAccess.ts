@@ -41,7 +41,7 @@ export async function userHasDpContabilidadeAccess(userId: string, isAdmin: bool
 
 export async function assertDpContabilidadeAccess(userId: string, isAdmin: boolean): Promise<void> {
   const ok = await userHasDpContabilidadeAccess(userId, isAdmin);
-  if (!ok) throw createError('Sem permissão para o módulo DP/Contabilidade.', 403);
+  if (!ok) throw createError('Sem permissão para o módulo Comunicação Contábil.', 403);
 }
 
 export const requireDpContabilidadeAccess = async (
