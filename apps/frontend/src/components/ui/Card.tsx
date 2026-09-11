@@ -1,13 +1,13 @@
 import React from 'react';
 import { clsx } from 'clsx';
-import { CARD_ACCENT_DEFAULT, CARD_SURFACE } from '@/lib/cardSurface';
+import { CARD_SURFACE_DEFAULT } from '@/lib/cardSurface';
 
 export interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
   children: React.ReactNode;
   className?: string;
   padding?: 'none' | 'sm' | 'md' | 'lg';
-  /** Faixa no topo. `false` esconde. String = classes `from-… via-… to-…`. */
-  accent?: string | false;
+  /** Faixa colorida no topo. Só Contratos passam isso. */
+  accent?: string;
 }
 
 export const Card: React.FC<CardProps> = ({
@@ -24,15 +24,13 @@ export const Card: React.FC<CardProps> = ({
     lg: 'p-5 sm:p-8',
   };
 
-  const classes = clsx('card', CARD_SURFACE, paddingClasses[padding], className);
+  const classes = clsx('card', CARD_SURFACE_DEFAULT, paddingClasses[padding], className);
 
   return (
     <div className={classes} {...rest}>
-      {accent !== false ? (
+      {accent ? (
         <div
-          className={`pointer-events-none absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${
-            accent || CARD_ACCENT_DEFAULT
-          }`}
+          className={`pointer-events-none absolute inset-x-0 top-0 z-[1] h-1 bg-gradient-to-r ${accent}`}
         />
       ) : null}
       {children}
@@ -48,7 +46,7 @@ export interface CardHeaderProps {
 export const CardHeader: React.FC<CardHeaderProps> = ({ children, className }) => {
   return (
     <div
-      className={clsx('card-header pb-4 border-b border-gray-100 dark:border-white/10', className)}
+      className={clsx('card-header pb-4 border-b border-gray-200 dark:border-gray-700', className)}
     >
       {children}
     </div>
@@ -80,7 +78,7 @@ export interface CardFooterProps {
 export const CardFooter: React.FC<CardFooterProps> = ({ children, className }) => {
   return (
     <div
-      className={clsx('card-footer pt-4 border-t border-gray-100 dark:border-white/10', className)}
+      className={clsx('card-footer pt-4 border-t border-gray-200 dark:border-gray-700', className)}
     >
       {children}
     </div>

@@ -294,7 +294,7 @@
   }
   
   .card {
-    @apply rounded-2xl border border-gray-200/80 bg-white shadow-sm dark:border-white/10 dark:bg-gray-900/70;
+    @apply rounded-lg border border-secondary-200 bg-white shadow-sm;
   }
   
   .card-header {
