@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Loader2, Minus, Paperclip, Plus, Trash2, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '@/lib/api';
@@ -26,6 +26,7 @@ interface UserOption {
   name: string;
   cpf?: string | null;
   profilePhotoUrl?: string | null;
+  employee?: { position?: string | null } | null;
 }
 
 interface ContractOption {
@@ -146,7 +147,10 @@ export function FichaDemandaApprovalFormModal({
   onSave,
   isSaving = false,
 }: FichaDemandaApprovalFormModalProps) {
+  const queryClient = useQueryClient();
   const [form, setForm] = useState<FichaDemandaApprovalFormState>(() => emptyFichaDemandaForm());
+  const [showCreateObra, setShowCreateObra] = useState(false);
+  const [novaObraNome, setNovaObraNome] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const closeForm = useCallback(() => {
@@ -181,6 +185,8 @@ export function FichaDemandaApprovalFormModal({
     } else {
       setForm(emptyFichaDemandaForm());
     }
+    setShowCreateObra(false);
+    setNovaObraNome('');
   }, [isOpen, editingRecord]);
 
   useEffect(() => {
@@ -197,9 +203,11 @@ export function FichaDemandaApprovalFormModal({
   }, [isOpen, isSaving, requestClose]);
 
   const { data: usersData } = useQuery({
-    queryKey: ['users-fd-approval'],
+    queryKey: ['users-fd-approval', 'exclude-admin'],
     queryFn: async () => {
-      const res = await api.get('/users', { params: { limit: 500, page: 1 } });
+      const res = await api.get('/users', {
+        params: { limit: 500, page: 1, excludeAdmin: 1 },
+      });
       return res.data;
     },
     enabled: isOpen,
@@ -232,7 +240,16 @@ export function FichaDemandaApprovalFormModal({
 
   const users = useMemo(() => {
     const rows = (usersData?.data || usersData?.users || []) as UserOption[];
-    return rows.filter((u) => u.id && u.name);
+    return rows.filter((u) => {
+      if (!u.id || !u.name?.trim()) return false;
+      if (u.employee?.position === 'Administrador') return false;
+      if (
+        u.name.trim().localeCompare('Administrador', 'pt-BR', { sensitivity: 'accent' }) === 0
+      ) {
+        return false;
+      }
+      return true;
+    });
   }, [usersData]);
 
   const contracts = useMemo(() => {
@@ -277,6 +294,33 @@ export function FichaDemandaApprovalFormModal({
     : loadingObras
       ? 'Carregando obras...'
       : 'Selecione a obra';
+
+  const createObraMutation = useMutation({
+    mutationFn: async (name: string) => {
+      const res = await api.post('/obras', {
+        name,
+        contratoId: form.contratoId,
+      });
+      return res.data?.data as ObraOption | undefined;
+    },
+    onSuccess: async (created) => {
+      const nome = created?.name?.trim() || novaObraNome.trim();
+      toast.success('Obra criada');
+      setShowCreateObra(false);
+      setNovaObraNome('');
+      await queryClient.invalidateQueries({ queryKey: ['obras-fd-approval', form.contratoId] });
+      if (nome) setForm((prev) => ({ ...prev, obra: nome }));
+    },
+    onError: (err: unknown) => {
+      const msg =
+        err && typeof err === 'object' && 'response' in err
+          ? (err as { response?: { data?: { error?: string; message?: string } } }).response?.data
+              ?.error ||
+            (err as { response?: { data?: { message?: string } } }).response?.data?.message
+          : undefined;
+      toast.error(msg || 'Não foi possível criar a obra.');
+    },
+  });
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -378,7 +422,11 @@ export function FichaDemandaApprovalFormModal({
                   <FieldLabel required>Contrato</FieldLabel>
                   <StringSingleSelectDropdown
                     value={form.contratoId}
-                    onChange={(v) => setForm({ ...form, contratoId: v, obra: '' })}
+                    onChange={(v) => {
+                      setShowCreateObra(false);
+                      setNovaObraNome('');
+                      setForm({ ...form, contratoId: v, obra: '' });
+                    }}
                     options={contratoSelectOptions}
                     placeholder="Selecione o contrato"
                     emptyOptionLabel="Selecione o contrato"
@@ -393,8 +441,24 @@ export function FichaDemandaApprovalFormModal({
                     options={obraSelectOptions}
                     disabled={!form.contratoId || loadingObras}
                     placeholder={obraPlaceholder}
-                    emptyOptionLabel={obraPlaceholder}
+                    allowEmpty={false}
                     matchTriggerWidth
+                    menuFooter={
+                      form.contratoId ? (
+                        <button
+                          type="button"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => {
+                            setNovaObraNome('');
+                            setShowCreateObra(true);
+                          }}
+                          className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm font-medium text-red-600 transition-colors hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/30"
+                        >
+                          <Plus className="h-4 w-4 shrink-0" />
+                          Criar nova obra neste contrato
+                        </button>
+                      ) : null
+                    }
                   />
                 </div>
               </div>
@@ -546,6 +610,77 @@ export function FichaDemandaApprovalFormModal({
     <>
       {modalContent}
       {confirmUi}
+      {showCreateObra ? (
+        <AppModalOverlay className="app-modal-overlay fixed inset-0 z-[2200] flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/50"
+            aria-hidden
+            onClick={() => {
+              if (createObraMutation.isPending) return;
+              setShowCreateObra(false);
+            }}
+          />
+          <div className="relative z-[2201] w-full max-w-md rounded-lg bg-white p-5 shadow-xl dark:bg-gray-800">
+            <h4 className="text-base font-semibold text-gray-900 dark:text-gray-100">
+              Nova obra
+            </h4>
+            <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
+              A obra será vinculada ao contrato selecionado na ficha.
+            </p>
+            <div className="mt-4">
+              <FieldLabel required>Nome da obra</FieldLabel>
+              <input
+                type="text"
+                value={novaObraNome}
+                onChange={(e) => setNovaObraNome(e.target.value.toLocaleUpperCase('pt-BR'))}
+                placeholder="EX.: UNIDADE CENTRO"
+                className={`${fieldClass} uppercase`}
+                autoFocus
+                disabled={createObraMutation.isPending}
+                autoCapitalize="characters"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    const name = novaObraNome.trim().toLocaleUpperCase('pt-BR');
+                    if (name && !createObraMutation.isPending) {
+                      createObraMutation.mutate(name);
+                    }
+                  }
+                }}
+              />
+            </div>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={createObraMutation.isPending}
+                onClick={() => setShowCreateObra(false)}
+                className="rounded-lg bg-gray-100 px-4 py-2 text-sm text-gray-800 transition-colors hover:bg-gray-200 disabled:opacity-50 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={createObraMutation.isPending || !novaObraNome.trim()}
+                onClick={() => {
+                  const name = novaObraNome.trim().toLocaleUpperCase('pt-BR');
+                  if (!name) return;
+                  createObraMutation.mutate(name);
+                }}
+                className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-red-700 disabled:opacity-50"
+              >
+                {createObraMutation.isPending ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Criando...
+                  </>
+                ) : (
+                  'Criar obra'
+                )}
+              </button>
+            </div>
+          </div>
+        </AppModalOverlay>
+      ) : null}
     </>,
     document.body
   );

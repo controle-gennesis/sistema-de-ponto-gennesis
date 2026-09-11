@@ -36,9 +36,17 @@ export default function LoginPage() {
 
   useEffect(() => {
     let cancelled = false;
+    let settled = false;
+    const safety = window.setTimeout(() => {
+      if (cancelled || settled) return;
+      // Backend lento/offline: não fica eternamente em "Restaurando sessão..."
+      authService.clearAuth();
+      setCheckingSession(false);
+    }, 12_000);
 
     void (async () => {
       if (!authService.isAuthenticated()) {
+        settled = true;
         if (!cancelled) setCheckingSession(false);
         return;
       }
@@ -46,6 +54,7 @@ export default function LoginPage() {
       try {
         const user = await authService.getProfile();
         if (cancelled) return;
+        settled = true;
         const remember = Boolean(
           typeof window !== 'undefined' && localStorage.getItem('token')
         );
@@ -55,6 +64,7 @@ export default function LoginPage() {
         router.replace('/ponto/home');
         // Mantém loading até a navegação; evita flash do formulário
       } catch {
+        settled = true;
         if (!cancelled) {
           authService.clearAuth();
           setCheckingSession(false);
@@ -64,6 +74,7 @@ export default function LoginPage() {
 
     return () => {
       cancelled = true;
+      window.clearTimeout(safety);
     };
   }, [queryClient, router]);
 

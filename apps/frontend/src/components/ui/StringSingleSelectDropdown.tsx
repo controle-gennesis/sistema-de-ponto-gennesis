@@ -24,6 +24,7 @@ export type StringSingleSelectDropdownProps = {
   menuAlign?: 'start' | 'end';
   matchTriggerWidth?: boolean;
   menuMinWidth?: number;
+  menuFooter?: React.ReactNode;
 };
 
 export function StringSingleSelectDropdown({
@@ -45,6 +46,7 @@ export function StringSingleSelectDropdown({
   menuAlign = 'start',
   matchTriggerWidth = false,
   menuMinWidth,
+  menuFooter,
 }: StringSingleSelectDropdownProps) {
   const dropdownOptions = useMemo((): MultiSelectSearchOption[] => {
     if (!options.length) return [];
@@ -74,6 +76,7 @@ export function StringSingleSelectDropdown({
       menuAlign={menuAlign}
       matchTriggerWidth={matchTriggerWidth}
       menuMinWidth={menuMinWidth}
+      menuFooter={menuFooter}
     />
   );
 }

@@ -39,6 +39,8 @@ export type SingleSelectSearchDropdownProps = {
   menuAlign?: 'start' | 'end';
   matchTriggerWidth?: boolean;
   menuMinWidth?: number;
+  /** Conteúdo fixo no rodapé do menu (ex.: ação "Criar…"). */
+  menuFooter?: React.ReactNode;
 };
 
 type FloatingPos = {
@@ -265,6 +267,7 @@ export function SingleSelectSearchDropdown({
   menuAlign = 'start',
   matchTriggerWidth = false,
   menuMinWidth,
+  menuFooter,
 }: SingleSelectSearchDropdownProps) {
   const listCap = listMaxHeightProp ?? LIST_MAX;
   const [open, setOpen] = useState(false);
@@ -532,6 +535,17 @@ export function SingleSelectSearchDropdown({
           </div>
         )}
       </div>
+      {menuFooter ? (
+        <div
+          className="shrink-0 border-t border-gray-100 px-2 py-2 dark:border-gray-700"
+          onClick={() => {
+            setOpen(false);
+            setSearch('');
+          }}
+        >
+          {menuFooter}
+        </div>
+      ) : null}
     </div>
   );
 
