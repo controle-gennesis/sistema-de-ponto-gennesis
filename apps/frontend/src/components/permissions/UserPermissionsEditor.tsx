@@ -218,6 +218,7 @@ const EMPTY_PERMISSION_BASELINE = serializeFullBaseline(
   new Set(),
   new Set(),
   new Set(),
+  new Set(),
   {}
 );
 

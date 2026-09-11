@@ -164,7 +164,81 @@ function ChartCard({
 }
 
 function ChartEmpty({ icon, hint }: { icon: LucideIcon; hint: string }) {
-  return <CadastroListEmpty icon={icon} title="Sem dados no filtro atual" hint={hint} />;
+  return <CadastroListEmpty icon={icon} hint={hint} title="Sem dados no filtro atual" />;
+}
+
+/** Listinha de ranking (nome + valor + barra) — mesmo ritmo visual da legenda do donut. */
+function ChartDataList({
+  data,
+  formatValue,
+  maxItems = 8,
+}: {
+  data: JuridicoRankItem[];
+  formatValue: (value: number) => string;
+  maxItems?: number;
+}) {
+  if (!data.length) return null;
+  const total = data.reduce((sum, item) => sum + item.value, 0);
+  const max = Math.max(...data.map((item) => item.value), 1);
+
+  return (
+    <ul className="mt-4 space-y-2.5 border-t border-gray-100 pt-4 dark:border-gray-700/70">
+      {data.slice(0, maxItems).map((item, index) => {
+        const color = CHART_PALETTE[index % CHART_PALETTE.length];
+        const barPct = Math.max(4, Math.round((item.value / max) * 100));
+        const sharePct = total > 0 ? Math.round((item.value / total) * 1000) / 10 : 0;
+        return (
+          <li key={item.key} className="min-w-0 space-y-1">
+            <div className="flex items-center gap-2 text-xs">
+              <span
+                className="h-2.5 w-2.5 shrink-0 rounded-sm"
+                style={{ backgroundColor: color }}
+                aria-hidden
+              />
+              <span
+                className="min-w-0 flex-1 truncate font-medium text-gray-800 dark:text-gray-100"
+                title={item.label}
+              >
+                {item.label}
+              </span>
+              <span className="shrink-0 font-semibold tabular-nums text-gray-700 dark:text-gray-200">
+                {formatValue(item.value)}
+              </span>
+              {total > 0 ? (
+                <span className="w-12 shrink-0 text-right tabular-nums text-gray-500 dark:text-gray-400">
+                  {sharePct.toLocaleString('pt-BR')}%
+                </span>
+              ) : null}
+            </div>
+            <div className="h-1.5 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800">
+              <div
+                className="h-full rounded-full transition-all duration-500"
+                style={{ width: `${barPct}%`, backgroundColor: color }}
+              />
+            </div>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+/** Combina o gráfico com a listinha de detalhe. */
+function ChartWithList({
+  data,
+  formatValue,
+  children,
+}: {
+  data: JuridicoRankItem[];
+  formatValue: (value: number) => string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="min-h-0 flex-1">{children}</div>
+      <ChartDataList data={data} formatValue={formatValue} />
+    </div>
+  );
 }
 
 /** Barras horizontais — os nomes de contrato/empresa são longos e não caberiam no eixo X. */
@@ -235,6 +309,199 @@ function RankBarChart({
               dataKey="value"
               position="right"
               offset={8}
+              fill={theme.chartLabel}
+              fontSize={11}
+              formatter={(value: number) => formatValue(Number(value))}
+            />
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+/** Colunas verticais — contraste visual com o ranking horizontal. */
+function VerticalRankBarChart({
+  data,
+  color,
+  formatValue,
+  icon,
+  emptyHint,
+}: {
+  data: JuridicoRankItem[];
+  color?: string;
+  formatValue: (value: number) => string;
+  icon: LucideIcon;
+  emptyHint: string;
+}) {
+  const theme = useChartTheme();
+  if (!data.length) return <ChartEmpty icon={icon} hint={emptyHint} />;
+
+  return (
+    <div className="h-[280px] w-full">
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={data} margin={{ top: 18, right: 8, bottom: 48, left: 4 }} barCategoryGap="22%">
+          <CartesianGrid strokeDasharray="3 3" stroke={theme.chartGrid} vertical={false} />
+          <XAxis
+            dataKey="label"
+            interval={0}
+            tickLine={false}
+            axisLine={{ stroke: theme.chartGrid }}
+            tick={{ fill: theme.chartTick, fontSize: 10 }}
+            tickFormatter={(value: string) => truncateLabel(value, 10)}
+            angle={-28}
+            textAnchor="end"
+            height={52}
+          />
+          <YAxis
+            tickLine={false}
+            axisLine={false}
+            width={44}
+            tick={{ fill: theme.chartTick, fontSize: 10 }}
+            tickFormatter={(value: number) => formatValue(Number(value))}
+          />
+          <Tooltip
+            contentStyle={theme.tipStyle}
+            labelStyle={theme.tipLabelStyle}
+            itemStyle={theme.tipItemStyle}
+            cursor={{ fill: theme.barCursor }}
+            formatter={(value: number) => [formatValue(value), 'Total']}
+            labelFormatter={(label: string) => String(label)}
+          />
+          <Bar dataKey="value" radius={[8, 8, 0, 0]} maxBarSize={42} animationDuration={650}>
+            {data.map((item, index) => (
+              <Cell key={item.key} fill={color ?? CHART_PALETTE[index % CHART_PALETTE.length]} />
+            ))}
+            <LabelList
+              dataKey="value"
+              position="top"
+              offset={6}
+              fill={theme.chartLabel}
+              fontSize={10}
+              formatter={(value: number) => formatValue(Number(value))}
+            />
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+/**
+ * Blocos proporcionais — leitura rápida de participação sem eixo.
+ * Área relativa ao valor (mínimo visual para itens pequenos).
+ */
+function ShareBlocks({
+  data,
+  formatValue,
+  icon,
+  emptyHint,
+}: {
+  data: JuridicoRankItem[];
+  formatValue: (value: number) => string;
+  icon: LucideIcon;
+  emptyHint: string;
+}) {
+  const total = data.reduce((sum, item) => sum + item.value, 0);
+  if (!data.length || total <= 0) return <ChartEmpty icon={icon} hint={emptyHint} />;
+
+  return (
+    <div className="flex min-h-[240px] flex-col gap-2 sm:flex-row sm:flex-wrap">
+      {data.map((item, index) => {
+        const pct = Math.round((item.value / total) * 1000) / 10;
+        const flexGrow = Math.max(item.value / total, 0.08);
+        const color = CHART_PALETTE[index % CHART_PALETTE.length];
+        return (
+          <div
+            key={item.key}
+            className="flex min-h-[112px] min-w-[140px] flex-col justify-between rounded-2xl p-3.5 text-white shadow-sm sm:flex-1"
+            style={{
+              background: `linear-gradient(145deg, ${color} 0%, ${color}cc 100%)`,
+              flexGrow,
+              flexBasis: `${Math.max(pct, 12)}%`,
+            }}
+            title={`${item.label}: ${formatValue(item.value)} (${pct.toLocaleString('pt-BR')}%)`}
+          >
+            <span className="line-clamp-2 text-xs font-semibold leading-snug opacity-95">
+              {item.label}
+            </span>
+            <div>
+              <p className="text-lg font-bold tabular-nums leading-none tracking-tight">
+                {formatValue(item.value)}
+              </p>
+              <p className="mt-1 text-[11px] font-medium tabular-nums opacity-85">
+                {pct.toLocaleString('pt-BR')}% do total
+              </p>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Lollipop — hastes finas com ponto; outro ritmo visual para rankings. */
+function LollipopChart({
+  data,
+  color,
+  formatValue,
+  icon,
+  emptyHint,
+}: {
+  data: JuridicoRankItem[];
+  color?: string;
+  formatValue: (value: number) => string;
+  icon: LucideIcon;
+  emptyHint: string;
+}) {
+  const theme = useChartTheme();
+  if (!data.length) return <ChartEmpty icon={icon} hint={emptyHint} />;
+
+  const max = Math.max(...data.map((item) => item.value), 1);
+  const height = Math.max(220, data.length * 40 + 12);
+  const longestLabelChars = Math.max(...data.map((item) => item.label.length), 1);
+  const yAxisWidth = Math.min(168, Math.max(68, Math.round(longestLabelChars * 6.4)));
+  const longestValueChars = Math.max(...data.map((item) => formatValue(item.value).length), 4);
+  const rightMargin = Math.min(108, Math.max(52, Math.round(longestValueChars * 7)));
+  const labelMaxChars = Math.max(10, Math.floor(yAxisWidth / 6.2));
+
+  return (
+    <div className="w-full" style={{ height }}>
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart
+          data={data}
+          layout="vertical"
+          margin={{ top: 4, right: rightMargin, bottom: 4, left: 0 }}
+          barCategoryGap="28%"
+        >
+          <CartesianGrid strokeDasharray="3 3" stroke={theme.chartGrid} horizontal={false} />
+          <XAxis type="number" hide domain={[0, max]} />
+          <YAxis
+            type="category"
+            dataKey="label"
+            width={yAxisWidth}
+            tickLine={false}
+            axisLine={false}
+            tickMargin={4}
+            tick={{ fill: theme.chartTick, fontSize: 11 }}
+            tickFormatter={(value: string) => truncateLabel(value, labelMaxChars)}
+          />
+          <Tooltip
+            contentStyle={theme.tipStyle}
+            labelStyle={theme.tipLabelStyle}
+            itemStyle={theme.tipItemStyle}
+            cursor={{ fill: theme.barCursor }}
+            formatter={(value: number) => [formatValue(value), 'Total']}
+            labelFormatter={(label: string) => String(label)}
+          />
+          <Bar dataKey="value" radius={[999, 999, 999, 999]} maxBarSize={5} animationDuration={650}>
+            {data.map((item, index) => (
+              <Cell key={item.key} fill={color ?? CHART_PALETTE[index % CHART_PALETTE.length]} />
+            ))}
+            <LabelList
+              dataKey="value"
+              position="right"
+              offset={10}
               fill={theme.chartLabel}
               fontSize={11}
               formatter={(value: number) => formatValue(Number(value))}
@@ -689,23 +956,27 @@ export function JuridicoProcessosDashboard() {
             title="Índice de processos por empresa"
             subtitle="Quantidade de processos"
           >
-            <RankBarChart
+            <ChartWithList
               data={rankBuckets(empresas, (b) => b.processos, 8)}
-              color={SERIES.processos}
               formatValue={formatCount}
-              icon={Briefcase}
-              emptyHint="Ajuste os filtros para ver os processos"
-            />
+            >
+              <RankBarChart
+                data={rankBuckets(empresas, (b) => b.processos, 8)}
+                color={SERIES.processos}
+                formatValue={formatCount}
+                icon={Briefcase}
+                emptyHint="Ajuste os filtros para ver os processos"
+              />
+            </ChartWithList>
           </ChartCard>
 
           <ChartCard
             icon={FileCheck2}
             title="Índice de acordos fechados por empresa"
-            subtitle="Quantidade de acordos"
+            subtitle="Distribuição da quantidade de acordos"
           >
-            <RankBarChart
+            <DonutChart
               data={rankBuckets(empresas, (b) => b.acordos, 8)}
-              color={SERIES.acordosQtd}
               formatValue={formatCount}
               icon={FileCheck2}
               emptyHint="Nenhum acordo fechado no filtro atual"
@@ -713,29 +984,37 @@ export function JuridicoProcessosDashboard() {
           </ChartCard>
 
           <ChartCard icon={Scale} title="Total causa por empresa" subtitle="Valor da causa">
-            <RankBarChart
+            <ChartWithList
               data={rankBuckets(empresas, (b) => b.valorCausa, 8)}
-              color={SERIES.causa}
               formatValue={formatCompactBRL}
-              icon={Scale}
-              emptyHint="Sem valores de causa no filtro atual"
-            />
+            >
+              <VerticalRankBarChart
+                data={rankBuckets(empresas, (b) => b.valorCausa, 8)}
+                color={SERIES.causa}
+                formatValue={formatCompactBRL}
+                icon={Scale}
+                emptyHint="Sem valores de causa no filtro atual"
+              />
+            </ChartWithList>
           </ChartCard>
 
           <ChartCard icon={Gavel} title="Total sentença por empresa" subtitle="Valor de sentença">
-            <RankBarChart
+            <ChartWithList
               data={rankBuckets(empresas, (b) => b.valorSentenca, 8)}
-              color={SERIES.sentenca}
               formatValue={formatCompactBRL}
-              icon={Gavel}
-              emptyHint="Sem valores de sentença no filtro atual"
-            />
+            >
+              <ShareBlocks
+                data={rankBuckets(empresas, (b) => b.valorSentenca, 8)}
+                formatValue={formatCompactBRL}
+                icon={Gavel}
+                emptyHint="Sem valores de sentença no filtro atual"
+              />
+            </ChartWithList>
           </ChartCard>
 
           <ChartCard icon={Coins} title="Total acordado por empresa" subtitle="Valor de acordo">
-            <RankBarChart
+            <RankingList
               data={rankBuckets(empresas, (b) => b.valorAcordo, 8)}
-              color={SERIES.acordoValor}
               formatValue={formatCompactBRL}
               icon={Coins}
               emptyHint="Sem valores de acordo no filtro atual"
@@ -743,13 +1022,18 @@ export function JuridicoProcessosDashboard() {
           </ChartCard>
 
           <ChartCard icon={TrendingUp} title="Total RO por empresa" subtitle="Recurso ordinário">
-            <RankBarChart
+            <ChartWithList
               data={rankBuckets(empresas, (b) => b.valorRO, 8)}
-              color={SERIES.ro}
               formatValue={formatCompactBRL}
-              icon={TrendingUp}
-              emptyHint="Sem valores de RO no filtro atual"
-            />
+            >
+              <LollipopChart
+                data={rankBuckets(empresas, (b) => b.valorRO, 8)}
+                color={SERIES.ro}
+                formatValue={formatCompactBRL}
+                icon={TrendingUp}
+                emptyHint="Sem valores de RO no filtro atual"
+              />
+            </ChartWithList>
           </ChartCard>
 
           <ChartCard
@@ -775,23 +1059,27 @@ export function JuridicoProcessosDashboard() {
             title="Contratos com mais processos"
             subtitle="Top 8 por quantidade de processos"
           >
-            <RankBarChart
+            <ChartWithList
               data={rankBuckets(contratos, (b) => b.processos, 8)}
-              color={SERIES.processos}
               formatValue={formatCount}
-              icon={ScrollText}
-              emptyHint="Ajuste os filtros para ver os contratos"
-            />
+            >
+              <RankBarChart
+                data={rankBuckets(contratos, (b) => b.processos, 8)}
+                color={SERIES.processos}
+                formatValue={formatCount}
+                icon={ScrollText}
+                emptyHint="Ajuste os filtros para ver os contratos"
+              />
+            </ChartWithList>
           </ChartCard>
 
           <ChartCard
             icon={FileCheck2}
             title="Acordos fechados por contrato"
-            subtitle="Quantidade de acordos"
+            subtitle="Distribuição da quantidade de acordos"
           >
-            <RankBarChart
+            <DonutChart
               data={rankBuckets(contratos, (b) => b.acordos, 8)}
-              color={SERIES.acordosQtd}
               formatValue={formatCount}
               icon={FileCheck2}
               emptyHint="Nenhum acordo fechado no filtro atual"
@@ -799,23 +1087,32 @@ export function JuridicoProcessosDashboard() {
           </ChartCard>
 
           <ChartCard icon={Coins} title="Total acordado por contrato" subtitle="Valor de acordo">
-            <RankBarChart
+            <ChartWithList
               data={rankBuckets(contratos, (b) => b.valorAcordo, 8)}
-              color={SERIES.acordoValor}
               formatValue={formatCompactBRL}
-              icon={Coins}
-              emptyHint="Sem valores de acordo no filtro atual"
-            />
+            >
+              <ShareBlocks
+                data={rankBuckets(contratos, (b) => b.valorAcordo, 8)}
+                formatValue={formatCompactBRL}
+                icon={Coins}
+                emptyHint="Sem valores de acordo no filtro atual"
+              />
+            </ChartWithList>
           </ChartCard>
 
           <ChartCard icon={TrendingUp} title="Total RO por contrato" subtitle="Recurso ordinário">
-            <RankBarChart
+            <ChartWithList
               data={rankBuckets(contratos, (b) => b.valorRO, 8)}
-              color={SERIES.ro}
               formatValue={formatCompactBRL}
-              icon={TrendingUp}
-              emptyHint="Sem valores de RO no filtro atual"
-            />
+            >
+              <VerticalRankBarChart
+                data={rankBuckets(contratos, (b) => b.valorRO, 8)}
+                color={SERIES.ro}
+                formatValue={formatCompactBRL}
+                icon={TrendingUp}
+                emptyHint="Sem valores de RO no filtro atual"
+              />
+            </ChartWithList>
           </ChartCard>
 
           <ChartCard
@@ -892,48 +1189,57 @@ export function JuridicoProcessosDashboard() {
             {acordosMes.length === 0 ? (
               <ChartEmpty icon={Coins} hint="Nenhum acordo com data no filtro atual" />
             ) : (
-              <div className="h-[300px] w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={acordosMes} margin={{ top: 12, right: 16, bottom: 4, left: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke={theme.chartGrid} vertical={false} />
-                    <XAxis
-                      dataKey="label"
-                      tick={{ fill: theme.chartTick, fontSize: 11 }}
-                      tickLine={false}
-                      axisLine={{ stroke: theme.chartGrid }}
-                      interval="preserveStartEnd"
-                    />
-                    <YAxis
-                      allowDecimals={false}
-                      width={32}
-                      tick={{ fill: theme.chartTick, fontSize: 11 }}
-                      tickLine={false}
-                      axisLine={false}
-                    />
-                    <Tooltip
-                      contentStyle={theme.tipStyle}
-                      labelStyle={theme.tipLabelStyle}
-                      itemStyle={theme.tipItemStyle}
-                      formatter={(value: number) => [formatCount(value), 'Acordos']}
-                      labelFormatter={(label: string) => {
-                        const mes = acordosMes.find((item) => item.label === label);
-                        return mes && mes.valor > 0
-                          ? `${label} · ${formatFullBRL(mes.valor)}`
-                          : String(label);
-                      }}
-                    />
-                    <Line
-                      type="monotone"
-                      dataKey="quantidade"
-                      stroke={SERIES.acordosQtd}
-                      strokeWidth={2.5}
-                      dot={{ r: 3, fill: SERIES.acordosQtd, strokeWidth: 0 }}
-                      activeDot={{ r: 5 }}
-                      animationDuration={650}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
+              <ChartWithList
+                data={acordosMes.map((item) => ({
+                  key: item.label,
+                  label: item.label,
+                  value: item.quantidade,
+                }))}
+                formatValue={formatCount}
+              >
+                <div className="h-[300px] w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={acordosMes} margin={{ top: 12, right: 16, bottom: 4, left: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke={theme.chartGrid} vertical={false} />
+                      <XAxis
+                        dataKey="label"
+                        tick={{ fill: theme.chartTick, fontSize: 11 }}
+                        tickLine={false}
+                        axisLine={{ stroke: theme.chartGrid }}
+                        interval="preserveStartEnd"
+                      />
+                      <YAxis
+                        allowDecimals={false}
+                        width={32}
+                        tick={{ fill: theme.chartTick, fontSize: 11 }}
+                        tickLine={false}
+                        axisLine={false}
+                      />
+                      <Tooltip
+                        contentStyle={theme.tipStyle}
+                        labelStyle={theme.tipLabelStyle}
+                        itemStyle={theme.tipItemStyle}
+                        formatter={(value: number) => [formatCount(value), 'Acordos']}
+                        labelFormatter={(label: string) => {
+                          const mes = acordosMes.find((item) => item.label === label);
+                          return mes && mes.valor > 0
+                            ? `${label} · ${formatFullBRL(mes.valor)}`
+                            : String(label);
+                        }}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="quantidade"
+                        stroke={SERIES.acordosQtd}
+                        strokeWidth={2.5}
+                        dot={{ r: 3, fill: SERIES.acordosQtd, strokeWidth: 0 }}
+                        activeDot={{ r: 5 }}
+                        animationDuration={650}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </ChartWithList>
             )}
           </ChartCard>
 
@@ -955,13 +1261,18 @@ export function JuridicoProcessosDashboard() {
             title="Valor de acordos por contrato"
             subtitle="Soma dos valores acordados"
           >
-            <RankBarChart
+            <ChartWithList
               data={rankBuckets(contratos, (b) => b.valorAcordo, 8)}
-              color={SERIES.acordoValor}
               formatValue={formatCompactBRL}
-              icon={Coins}
-              emptyHint="Sem valores de acordo no filtro atual"
-            />
+            >
+              <LollipopChart
+                data={rankBuckets(contratos, (b) => b.valorAcordo, 8)}
+                color={SERIES.acordoValor}
+                formatValue={formatCompactBRL}
+                icon={Coins}
+                emptyHint="Sem valores de acordo no filtro atual"
+              />
+            </ChartWithList>
           </ChartCard>
 
           <ChartCard
