@@ -8,7 +8,7 @@ import {
   Trash2, AlertTriangle, X, Clock, Calendar, User, Download, Edit, Save, Camera,
   FileCheck, Eye, EyeOff, Plus, ChevronDown, ChevronUp, CheckCircle, Upload,
   FileSpreadsheet, Loader2, MoreVertical, DoorOpen, DoorClosed, Utensils,
-  UtensilsCrossed, XCircle, UserX, KeyRound, Pencil,
+  UtensilsCrossed, XCircle, UserX, KeyRound, Pencil, LogIn,
   Briefcase, Building2, Wallet, type LucideIcon,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
@@ -39,6 +39,7 @@ import {
 } from '@/types';
 import toast from 'react-hot-toast';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
+import { authService } from '@/lib/auth';
 
 const MONTH_SELECT_OPTIONS = labeledToSelectOptions([
   { value: '1', label: 'Janeiro' },
@@ -1100,6 +1101,7 @@ export function EmployeeDetailView({
     isAdministrator,
     can,
     canAction,
+    user,
   } = usePermissions();
 
   /** Mesma ideia da página de contratos: matriz (Permissões / Controle), não só cargo Administrador. */
@@ -1274,6 +1276,32 @@ export function EmployeeDetailView({
                 >
                   <KeyRound className="h-4 w-4 shrink-0 text-amber-500" />
                   Alterar senha
+                </button>
+              )}
+              {isAdministrator &&
+                selectedEmployee.isActive &&
+                selectedEmployee.id !== user?.id &&
+                (selectedEmployee.employee?.position || '').toLowerCase() !== 'administrador' && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setHeaderMoreOpen(false);
+                    try {
+                      const result = await authService.startImpersonation(selectedEmployee.id);
+                      await queryClient.clear();
+                      toast.success(`Entrando como ${result.targetName || selectedEmployee.name}`);
+                      router.replace('/ponto/home');
+                      router.refresh();
+                    } catch (error: unknown) {
+                      const msg =
+                        error instanceof Error ? error.message : 'Erro ao entrar como usuário';
+                      toast.error(msg);
+                    }
+                  }}
+                  className="flex w-full items-center gap-2 border-t border-gray-100 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-700"
+                >
+                  <LogIn className="h-4 w-4 shrink-0 text-sky-600 dark:text-sky-400" />
+                  Entrar como
                 </button>
               )}
               {showDeleteButton && selectedEmployee.isActive && canDeleteEmployees && (

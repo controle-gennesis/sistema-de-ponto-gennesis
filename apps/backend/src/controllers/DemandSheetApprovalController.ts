@@ -10,8 +10,6 @@ import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import {
   assertUserCanApproveFd,
-  fdApprovalVisibilityWhere,
-  getFdApprovalContractIds,
   getFdManagerApprovalVisibilityWhere,
 } from '../lib/fdApprovalAccess';
 import { getContractAccessForUser } from '../lib/contractAccess';
@@ -177,7 +175,7 @@ async function userCanAccessFdsAprovadasModule(userId: string, isAdmin: boolean)
   return !!perm;
 }
 
-/** Escopo de listagem: próprias + contratos Liberados (módulo FD) + contratos liberados em Aprovar FD. */
+/** Escopo da página Fichas de Demanda: próprias + contratos Liberados. Aprovar FD não lista aqui. */
 async function listWhereForUser(userId: string, isAdmin: boolean): Promise<Prisma.DemandSheetApprovalWhereInput> {
   if (isAdmin) return {};
 
@@ -192,11 +190,6 @@ async function listWhereForUser(userId: string, isAdmin: boolean): Promise<Prism
     if (access.filter === 'ids' && access.ids.length > 0) {
       or.push({ contratoId: { in: access.ids } });
     }
-  }
-
-  const fdContractIds = await getFdApprovalContractIds(userId, false);
-  if (fdContractIds && fdContractIds.length > 0) {
-    or.push(fdApprovalVisibilityWhere(fdContractIds));
   }
 
   return { OR: or };
