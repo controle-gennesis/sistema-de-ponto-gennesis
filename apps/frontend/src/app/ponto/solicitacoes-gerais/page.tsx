@@ -1,1 +1,1 @@
-export { SolicitacoesGeraisPage as default } from '../solicitacoes-dp/page';
+export { SolicitacoesGeraisPage as default } from '../solicitacoes-dp/SolicitacoesGeraisPage';
