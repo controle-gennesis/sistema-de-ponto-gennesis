@@ -23,6 +23,7 @@ import {
 import { getManagerDpApprovalContractScope } from '../lib/dpApprovalAccess';
 import { savePersistentUpload } from '../lib/persistentUpload';
 import { fixMulterOriginalName } from '../lib/fixUploadFileName';
+import { gennecyBotUserWhereExclude } from '../lib/gennecyBotUser';
 
 const fdModuleKey = pathToModuleKey('/ponto/aprovacao-fds');
 const fdsAprovadasModuleKey = pathToModuleKey('/ponto/fds-aprovadas');
@@ -796,6 +797,88 @@ export class DemandSheetApprovalController {
         return res.status(err.statusCode).json({ error: err.message || 'Erro' });
       }
       return res.status(500).json({ error: 'Erro ao enviar anexo da ficha de demanda' });
+    }
+  }
+
+  /** Opções de solicitante para o formulário de FD (sem depender do módulo Funcionários). */
+  async listSolicitanteOptions(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user) throw createError('Usuário não autenticado', 401);
+
+      const users = await prisma.user.findMany({
+        where: {
+          ...gennecyBotUserWhereExclude(),
+          isActive: true,
+        },
+        select: {
+          id: true,
+          name: true,
+          cpf: true,
+          profilePhotoUrl: true,
+          employee: { select: { position: true } },
+        },
+        orderBy: { name: 'asc' },
+        take: 2000,
+      });
+
+      const data = users.filter((u) => {
+        const name = String(u.name || '').trim();
+        if (!name) return false;
+        if (u.employee?.position?.trim().toLowerCase() === 'administrador') return false;
+        if (name.localeCompare('Administrador', 'pt-BR', { sensitivity: 'accent' }) === 0) {
+          return false;
+        }
+        if (name.localeCompare('Gennecy', 'pt-BR', { sensitivity: 'accent' }) === 0) {
+          return false;
+        }
+        return true;
+      });
+
+      return res.json({ success: true, data });
+    } catch (e: unknown) {
+      const err = e as { statusCode?: number; message?: string };
+      if (err?.statusCode) {
+        return res.status(err.statusCode).json({ error: err.message || 'Erro' });
+      }
+      return res.status(500).json({ error: 'Erro ao listar solicitantes' });
+    }
+  }
+
+  /** Todos os contratos para vincular na FD (não restringe às permissões de contrato). */
+  async listContratoOptions(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user) throw createError('Usuário não autenticado', 401);
+
+      const search = String(req.query.search ?? '').trim();
+      const where = search
+        ? {
+            OR: [
+              { name: { contains: search, mode: 'insensitive' as const } },
+              { number: { contains: search, mode: 'insensitive' as const } },
+            ],
+          }
+        : undefined;
+
+      const rows = await prisma.contract.findMany({
+        where,
+        orderBy: [{ name: 'asc' }, { number: 'asc' }],
+        select: { id: true, name: true, number: true },
+      });
+
+      return res.json({
+        success: true,
+        data: rows.map((row) => ({
+          id: row.id,
+          name: row.name.trim() || row.number,
+          number: row.number,
+        })),
+      });
+    } catch (e: unknown) {
+      const err = e as { statusCode?: number; message?: string };
+      if (err?.statusCode) {
+        return res.status(err.statusCode).json({ error: err.message || 'Erro' });
+      }
+      return res.status(500).json({ error: 'Erro ao listar contratos' });
     }
   }
 }

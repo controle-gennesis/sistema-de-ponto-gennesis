@@ -203,20 +203,18 @@ export function FichaDemandaApprovalFormModal({
   }, [isOpen, isSaving, requestClose]);
 
   const { data: usersData } = useQuery({
-    queryKey: ['users-fd-approval', 'exclude-admin'],
+    queryKey: ['fd-approval-solicitante-options'],
     queryFn: async () => {
-      const res = await api.get('/users', {
-        params: { limit: 500, page: 1, excludeAdmin: 1 },
-      });
+      const res = await api.get('/demand-sheet-approvals/options/solicitantes');
       return res.data;
     },
     enabled: isOpen,
   });
 
   const { data: contractsData } = useQuery({
-    queryKey: ['contracts-fd-approval'],
+    queryKey: ['fd-approval-contrato-options'],
     queryFn: async () => {
-      const res = await api.get('/contracts', { params: { limit: 500, page: 1 } });
+      const res = await api.get('/demand-sheet-approvals/options/contratos');
       return res.data;
     },
     enabled: isOpen,
@@ -239,17 +237,8 @@ export function FichaDemandaApprovalFormModal({
   });
 
   const users = useMemo(() => {
-    const rows = (usersData?.data || usersData?.users || []) as UserOption[];
-    return rows.filter((u) => {
-      if (!u.id || !u.name?.trim()) return false;
-      if (u.employee?.position === 'Administrador') return false;
-      if (
-        u.name.trim().localeCompare('Administrador', 'pt-BR', { sensitivity: 'accent' }) === 0
-      ) {
-        return false;
-      }
-      return true;
-    });
+    const rows = (usersData?.data || []) as UserOption[];
+    return rows.filter((u) => u.id && u.name?.trim());
   }, [usersData]);
 
   const contracts = useMemo(() => {

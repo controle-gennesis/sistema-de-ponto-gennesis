@@ -84,6 +84,17 @@ function cleanupUploadedFiles(req: Request) {
 
 router.use(authenticate);
 
+router.get(
+  '/options/solicitantes',
+  requireModuleAccess(fdModule),
+  controller.listSolicitanteOptions.bind(controller)
+);
+router.get(
+  '/options/contratos',
+  requireModuleAccess(fdModule),
+  controller.listContratoOptions.bind(controller)
+);
+
 router.get('/', requireModuleAccess(fdModule), controller.list.bind(controller));
 router.post('/', requireModuleAccess(fdModule), controller.create.bind(controller));
 
