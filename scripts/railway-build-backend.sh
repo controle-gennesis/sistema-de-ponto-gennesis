@@ -8,7 +8,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 echo "==> Backend: npm install + build"
-npm install
+npm install --include=dev
 npm run build:permission-modules
 npm run build -w @sistema-ponto/backend
 

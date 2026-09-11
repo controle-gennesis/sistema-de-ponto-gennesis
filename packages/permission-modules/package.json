@@ -16,7 +16,7 @@
     "prepare": "npm run build",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
-  "devDependencies": {
+  "dependencies": {
     "typescript": "^5.3.3"
   }
 }

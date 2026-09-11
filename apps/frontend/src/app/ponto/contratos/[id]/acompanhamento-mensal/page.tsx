@@ -14,7 +14,7 @@ export default function AcompanhamentoMensalRedirectPage() {
 
   useEffect(() => {
     if (!contractId) return;
-    const qs = new URLSearchParams(searchParams.toString());
+    const qs = new URLSearchParams(searchParams?.toString() ?? '');
     qs.set('aba', 'relatorio-mensal');
     const query = qs.toString();
     router.replace(`/ponto/contratos/${contractId}/reunioes${query ? `?${query}` : ''}`);
