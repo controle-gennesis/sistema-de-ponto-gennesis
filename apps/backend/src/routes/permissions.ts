@@ -34,6 +34,27 @@ async function safePermissionRows<T>(label: string, query: () => Promise<T[]>): 
   }
 }
 
+async function publicTableExists(tableName: string): Promise<boolean> {
+  const rows = await prisma.$queryRaw<{ c: bigint }[]>`
+    SELECT COUNT(*)::bigint AS c
+    FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_name = ${tableName}
+  `;
+  return (rows[0]?.c ?? BigInt(0)) > BigInt(0);
+}
+
+function hasPrismaDelegate(name: string): boolean {
+  return typeof (prisma as any)[name]?.deleteMany === 'function';
+}
+
+function prismaModelHasField(modelName: string, fieldName: string): boolean {
+  return (
+    Prisma.dmmf.datamodel.models
+      .find((m) => m.name === modelName)
+      ?.fields.some((f) => f.name === fieldName) === true
+  );
+}
+
 const router = express.Router();
 
 const MODULES = PERMISSION_MODULES.map((m) => ({ key: m.key, name: m.name, href: m.href }));
@@ -118,52 +139,95 @@ router.get('/me', async (req: AuthRequest, res, next) => {
       });
     }
 
+    const meUserId = req.user.id;
+
     const permissions = await prisma.userPermission.findMany({
-      where: { userId: req.user.id, allowed: true },
+      where: { userId: meUserId, allowed: true },
       select: {
         module: true,
         action: true,
       },
     });
 
-    const allowedContractIds = await prisma.userContractPermission.findMany({
-      where: { userId: req.user.id },
-      select: {
-        contractId: true,
-        accessOrcamento: true,
-        accessRelatorios: true,
-        accessOrdemServico: true,
-        accessProducaoSemanal: true,
-        accessReunioes: true,
-      },
-    });
+    const allowedContractIds = await (async () => {
+      const withReunioes = await safePermissionRows('me/userContractPermission+reunioes', () =>
+        prisma.userContractPermission.findMany({
+          where: { userId: meUserId },
+          select: {
+            contractId: true,
+            accessOrcamento: true,
+            accessRelatorios: true,
+            accessOrdemServico: true,
+            accessProducaoSemanal: true,
+            accessReunioes: true,
+          },
+        })
+      );
+      if (withReunioes.length > 0) return withReunioes;
+      const withoutReunioes = await safePermissionRows('me/userContractPermission', () =>
+        prisma.userContractPermission.findMany({
+          where: { userId: meUserId },
+          select: {
+            contractId: true,
+            accessOrcamento: true,
+            accessRelatorios: true,
+            accessOrdemServico: true,
+            accessProducaoSemanal: true,
+          },
+        })
+      );
+      return withoutReunioes.map((r) => ({ ...r, accessReunioes: false }));
+    })();
 
-    const dpApprovalContractIds = await prisma.userDpApprovalContract.findMany({
-      where: { userId: req.user.id },
-      select: { contractId: true },
-    });
+    const dpApprovalContractIds = await safePermissionRows('me/userDpApprovalContract', () =>
+      prisma.userDpApprovalContract.findMany({
+        where: { userId: meUserId },
+        select: { contractId: true },
+      })
+    );
 
-    const restrictedDpApprovalCostCenterIds = await prisma.userRestrictedDpApprovalCostCenter.findMany({
-      where: { userId: req.user.id },
-      select: { costCenterId: true },
-    });
+    const restrictedDpApprovalCostCenterIds = await safePermissionRows<{ costCenterId: string }>(
+      'me/userRestrictedDpApprovalCostCenter',
+      async () => {
+        const delegate = (prisma as any).userRestrictedDpApprovalCostCenter;
+        if (!delegate?.findMany) return [];
+        return delegate.findMany({
+          where: { userId: meUserId },
+          select: { costCenterId: true },
+        });
+      }
+    );
 
-    const fdApprovalContractIds = await prisma.userFdApprovalContract.findMany({
-      where: { userId: req.user.id },
-      select: { contractId: true },
-    });
+    const fdApprovalContractIds = await safePermissionRows<{ contractId: string }>(
+      'me/userFdApprovalContract',
+      async () => {
+        const delegate = (prisma as any).userFdApprovalContract;
+        if (!delegate?.findMany) return [];
+        return delegate.findMany({
+          where: { userId: meUserId },
+          select: { contractId: true },
+        });
+      }
+    );
 
-    const dpRequestViewCostCenterIds = await prisma.userDpRequestViewCostCenter.findMany({
-      where: { userId: req.user.id },
-      select: { costCenterId: true },
-    });
+    const dpRequestViewCostCenterIds = await safePermissionRows<{ costCenterId: string }>(
+      'me/userDpRequestViewCostCenter',
+      async () => {
+        const delegate = (prisma as any).userDpRequestViewCostCenter;
+        if (!delegate?.findMany) return [];
+        return delegate.findMany({
+          where: { userId: meUserId },
+          select: { costCenterId: true },
+        });
+      }
+    );
 
-    const gestorCostCenterIds = await getContractGestorCostCenterIds(req.user.id);
-    const unbCostCenterScope = await getUserUnbCostCenterScope(req.user.id, false);
+    const gestorCostCenterIds = await getContractGestorCostCenterIds(meUserId);
+    const unbCostCenterScope = await getUserUnbCostCenterScope(meUserId, false);
     const isUnbUser = unbCostCenterScope !== null;
     const unbCostCenterIds = unbCostCenterScope ?? [];
-    const fluigApproverAccess = await getFluigApproverAccessForUser(req.user.id, false);
-    const canManageFluigApproverViewers = await userCanManageFluigApproverViewers(req.user.id, false);
+    const fluigApproverAccess = await getFluigApproverAccessForUser(meUserId, false);
+    const canManageFluigApproverViewers = await userCanManageFluigApproverViewers(meUserId, false);
 
     const contractModuleFlags: Record<
       string,
@@ -181,7 +245,7 @@ router.get('/me', async (req: AuthRequest, res, next) => {
         relatorios: r.accessRelatorios,
         ordemServico: r.accessOrdemServico,
         producaoSemanal: r.accessProducaoSemanal,
-        reunioes: r.accessReunioes,
+        reunioes: Boolean((r as { accessReunioes?: boolean }).accessReunioes),
       };
     }
 
@@ -386,7 +450,7 @@ router.get('/users/:userId', requirePermissionManagerOrAdministrator, async (req
 
     const restrictedDpApprovalCostCenterIds = isAdmin
       ? []
-      : await safePermissionRows('userRestrictedDpApprovalCostCenter', async () => {
+      : await safePermissionRows<{ costCenterId: string }>('userRestrictedDpApprovalCostCenter', async () => {
           const delegate = (prisma as any).userRestrictedDpApprovalCostCenter;
           if (!delegate?.findMany) return [];
           return delegate.findMany({
@@ -397,7 +461,7 @@ router.get('/users/:userId', requirePermissionManagerOrAdministrator, async (req
 
     const fdApprovalContractIds = isAdmin
       ? []
-      : await safePermissionRows('userFdApprovalContract', async () => {
+      : await safePermissionRows<{ contractId: string }>('userFdApprovalContract', async () => {
           const delegate = (prisma as any).userFdApprovalContract;
           if (!delegate?.findMany) return [];
           return delegate.findMany({
@@ -408,7 +472,7 @@ router.get('/users/:userId', requirePermissionManagerOrAdministrator, async (req
 
     const dpRequestViewCostCenterIds = isAdmin
       ? []
-      : await safePermissionRows('userDpRequestViewCostCenter', async () => {
+      : await safePermissionRows<{ costCenterId: string }>('userDpRequestViewCostCenter', async () => {
           const delegate = (prisma as any).userDpRequestViewCostCenter;
           if (!delegate?.findMany) return [];
           return delegate.findMany({
@@ -604,6 +668,20 @@ router.put('/users/:userId', requirePermissionManagerOrAdministrator, async (req
       }
     }
 
+    const canWriteReunioes = prismaModelHasField('UserContractPermission', 'accessReunioes');
+    const canSyncRestrictedCcTable =
+      shouldSyncRestrictedCc &&
+      hasPrismaDelegate('userRestrictedDpApprovalCostCenter') &&
+      (await publicTableExists('user_restricted_dp_approval_cost_centers'));
+    const canSyncFdContractsTable =
+      shouldSyncFdContracts &&
+      hasPrismaDelegate('userFdApprovalContract') &&
+      (await publicTableExists('user_fd_approval_contracts'));
+    const canSyncViewCcTable =
+      shouldSyncViewCc &&
+      hasPrismaDelegate('userDpRequestViewCostCenter') &&
+      (await publicTableExists('user_dp_request_view_cost_centers'));
+
     await prisma.$transaction(async (tx) => {
       // Serializa saves concorrentes do mesmo usuário (auto-save com debounce no front).
       await tx.$queryRaw`SELECT id FROM users WHERE id = ${userId} FOR UPDATE`;
@@ -638,7 +716,7 @@ router.put('/users/:userId', requirePermissionManagerOrAdministrator, async (req
                 accessRelatorios: flags.relatorios !== false,
                 accessOrdemServico: flags.ordemServico !== false,
                 accessProducaoSemanal: flags.producaoSemanal !== false,
-                accessReunioes: flags.reunioes === true,
+                ...(canWriteReunioes ? { accessReunioes: flags.reunioes === true } : {}),
               };
             }),
           });
@@ -658,7 +736,7 @@ router.put('/users/:userId', requirePermissionManagerOrAdministrator, async (req
         }
       }
 
-      if (shouldSyncRestrictedCc) {
+      if (canSyncRestrictedCcTable) {
         await tx.userRestrictedDpApprovalCostCenter.deleteMany({ where: { userId } });
         if (restrictedCcIdsToSave.length > 0) {
           await tx.userRestrictedDpApprovalCostCenter.createMany({
@@ -671,7 +749,7 @@ router.put('/users/:userId', requirePermissionManagerOrAdministrator, async (req
         }
       }
 
-      if (shouldSyncFdContracts) {
+      if (canSyncFdContractsTable) {
         await tx.userFdApprovalContract.deleteMany({ where: { userId } });
         if (fdContractIdsToSave.length > 0) {
           await tx.userFdApprovalContract.createMany({
@@ -684,7 +762,7 @@ router.put('/users/:userId', requirePermissionManagerOrAdministrator, async (req
         }
       }
 
-      if (shouldSyncViewCc) {
+      if (canSyncViewCcTable) {
         await tx.userDpRequestViewCostCenter.deleteMany({ where: { userId } });
         if (viewCcIdsToSave.length > 0) {
           await tx.userDpRequestViewCostCenter.createMany({
