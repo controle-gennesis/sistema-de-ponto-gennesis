@@ -2,6 +2,7 @@
 'use client';
 
 import React from 'react';
+import { Download, Eye, X } from 'lucide-react';
 import { formatDateTimeBr } from '@/lib/dateTimeBr';
 import { ASO_TIPO_LABELS } from '@/app/ponto/solicitacoes-dp/dpSolicitacaoRepeatableFields';
 
@@ -27,9 +28,117 @@ function renderValueOrDash(value: string | null | undefined) {
   return value && value.trim() ? value : '—';
 }
 
-function dpAttachmentFileName(raw: unknown): string {
-  if (!raw || typeof raw !== 'object') return '';
-  return String((raw as Record<string, unknown>).fileName ?? '').trim();
+export type DpPreviewAttachment = {
+  fileName: string;
+  mimeType: string;
+  previewUrl: string;
+};
+
+export function parseDpAttachment(raw: unknown): DpPreviewAttachment | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const o = raw as Record<string, unknown>;
+  const fileName = String(o.fileName || 'anexo').trim() || 'anexo';
+  const mimeType = String(o.mimeType || 'application/octet-stream').trim() || 'application/octet-stream';
+  const fileUrl = String(o.fileUrl || '').trim();
+  if (fileUrl) return { fileName, mimeType, previewUrl: fileUrl };
+  const dataBase64 = String(o.dataBase64 || '').trim();
+  if (!dataBase64) return null;
+  return { fileName, mimeType, previewUrl: `data:${mimeType};base64,${dataBase64}` };
+}
+
+function downloadDpAttachment(att: DpPreviewAttachment) {
+  const a = document.createElement('a');
+  a.href = att.previewUrl;
+  a.download = att.fileName;
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
+function DpAttachmentRow({
+  attachment,
+  onPreview,
+}: {
+  attachment: DpPreviewAttachment;
+  onPreview: (att: DpPreviewAttachment) => void;
+}) {
+  return (
+    <div className="mt-2 flex items-center justify-between gap-3 rounded-md border border-gray-200 px-2.5 py-2 dark:border-gray-600">
+      <div className="min-w-0">
+        <p className="truncate text-xs font-medium text-gray-800 dark:text-gray-200">
+          {attachment.fileName}
+        </p>
+        <p className="text-[11px] text-gray-500 dark:text-gray-400">{attachment.mimeType}</p>
+      </div>
+      <div className="flex shrink-0 items-center gap-1.5">
+        <button
+          type="button"
+          onClick={() => onPreview(attachment)}
+          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-gray-300 text-gray-700 transition-colors hover:bg-gray-100 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
+          title="Ver anexo"
+          aria-label="Ver anexo"
+        >
+          <Eye className="h-4 w-4" />
+        </button>
+        <button
+          type="button"
+          onClick={() => downloadDpAttachment(attachment)}
+          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-gray-300 text-gray-700 transition-colors hover:bg-gray-100 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
+          title="Baixar anexo"
+          aria-label="Baixar anexo"
+        >
+          <Download className="h-4 w-4" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function DpAttachmentLightbox({
+  attachment,
+  onClose,
+}: {
+  attachment: DpPreviewAttachment;
+  onClose: () => void;
+}) {
+  const isPdf = attachment.mimeType.toLowerCase().includes('pdf');
+  return (
+    <div
+      className="fixed inset-0 z-[2200] flex items-center justify-center bg-black/85 p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Visualizar anexo"
+      onClick={onClose}
+    >
+      <button
+        type="button"
+        onClick={onClose}
+        className="absolute right-4 top-4 z-10 rounded-full bg-black/50 p-2 text-white hover:bg-black/70"
+        aria-label="Fechar"
+      >
+        <X className="h-5 w-5" />
+      </button>
+      <div
+        className="flex max-h-[88vh] max-w-[92vw] items-center justify-center"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {isPdf ? (
+          <iframe
+            title={attachment.fileName}
+            src={attachment.previewUrl}
+            className="h-[88vh] w-[92vw] rounded-md bg-white"
+          />
+        ) : (
+          <img
+            src={attachment.previewUrl}
+            alt={attachment.fileName}
+            className="max-h-[88vh] max-w-[92vw] rounded-md object-contain"
+          />
+        )}
+      </div>
+    </div>
+  );
 }
 
 function parseRangeRaw(raw: string): [string, string] {
@@ -72,21 +181,87 @@ type PreviewListProps = {
   employeeNameById?: Map<string, string>;
   personItemCls: string;
   formatSubtitle: (row: Record<string, unknown>) => string;
+  getAttachment?: (row: Record<string, unknown>) => unknown;
 };
 
-function PreviewItemList({ items, employeeNameById, personItemCls, formatSubtitle }: PreviewListProps) {
+function PreviewItemList({
+  items,
+  employeeNameById,
+  personItemCls,
+  formatSubtitle,
+  getAttachment,
+}: PreviewListProps) {
+  const [preview, setPreview] = React.useState<DpPreviewAttachment | null>(null);
   if (!items.length) return <div className="text-sm text-gray-700 dark:text-gray-300">—</div>;
   return (
-    <ul className="space-y-3">
-      {items.map((row, index) => (
-        <li key={index} className={personItemCls}>
-          <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-            {employeeName(row, employeeNameById)}
-          </div>
-          <div className="mt-1 text-xs text-gray-600 dark:text-gray-300">{formatSubtitle(row)}</div>
-        </li>
-      ))}
-    </ul>
+    <>
+      <ul className="space-y-3">
+        {items.map((row, index) => {
+          const attachment = getAttachment ? parseDpAttachment(getAttachment(row)) : null;
+          return (
+            <li key={index} className={personItemCls}>
+              <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                {employeeName(row, employeeNameById)}
+              </div>
+              <div className="mt-1 text-xs text-gray-600 dark:text-gray-300">{formatSubtitle(row)}</div>
+              {attachment ? (
+                <DpAttachmentRow attachment={attachment} onPreview={setPreview} />
+              ) : null}
+            </li>
+          );
+        })}
+      </ul>
+      {preview ? <DpAttachmentLightbox attachment={preview} onClose={() => setPreview(null)} /> : null}
+    </>
+  );
+}
+
+function AdmissaoCandidatosList({
+  shown,
+  personItemCls,
+  motivoLabels,
+}: {
+  shown: Record<string, unknown>[];
+  personItemCls: string;
+  motivoLabels: Record<string, string>;
+}) {
+  const [preview, setPreview] = React.useState<DpPreviewAttachment | null>(null);
+  return (
+    <>
+      <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        {shown.map((c, idx) => {
+          const attachment = parseDpAttachment(c.anexoDocumento);
+          return (
+            <li key={idx} className={personItemCls}>
+              <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                {renderValueOrDash(toTrimmedString(c.nome))}
+              </div>
+              <div className="mt-1 text-xs text-gray-600 dark:text-gray-300">
+                {renderValueOrDash(toTrimmedString(c.funcao))}
+                {toTrimmedString(c.contato) ? ` (${toTrimmedString(c.contato)})` : ''}
+              </div>
+              <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                Motivo:{' '}
+                {toTrimmedString(c.motivoContratacao)
+                  ? motivoLabels[toTrimmedString(c.motivoContratacao)] ??
+                    toTrimmedString(c.motivoContratacao)
+                  : '—'}
+              </div>
+              <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                Setor: {renderValueOrDash(toTrimmedString(c.setor))}
+              </div>
+              {toTrimmedString(c.observacao) ? (
+                <div className="mt-1 whitespace-pre-wrap break-words text-xs text-gray-500 dark:text-gray-400">
+                  Obs.: {toTrimmedString(c.observacao)}
+                </div>
+              ) : null}
+              {attachment ? <DpAttachmentRow attachment={attachment} onPreview={setPreview} /> : null}
+            </li>
+          );
+        })}
+      </ul>
+      {preview ? <DpAttachmentLightbox attachment={preview} onClose={() => setPreview(null)} /> : null}
+    </>
   );
 }
 
@@ -153,38 +328,11 @@ export function DpRequestDetailsPreview({ requestType, details, employeeNameById
             ) : null}
           </div>
           {candidatos.length ? (
-            <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              {shown.map((c, idx) => (
-                <li key={idx} className={personItemCls}>
-                  <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-                    {renderValueOrDash(c.nome)}
-                  </div>
-                  <div className="mt-1 text-xs text-gray-600 dark:text-gray-300">
-                    {renderValueOrDash(c.funcao)}
-                    {c.contato ? ` (${c.contato})` : ''}
-                  </div>
-                  <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                    Motivo:{' '}
-                    {c.motivoContratacao
-                      ? MOTIVO_CONTRATACAO_LABELS[c.motivoContratacao] ?? c.motivoContratacao
-                      : '—'}
-                  </div>
-                  <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                    Setor: {renderValueOrDash(c.setor)}
-                  </div>
-                  {c.observacao ? (
-                    <div className="mt-1 text-xs text-gray-500 dark:text-gray-400 whitespace-pre-wrap break-words">
-                      Obs.: {c.observacao}
-                    </div>
-                  ) : null}
-                  {dpAttachmentFileName(c.anexoDocumento) ? (
-                    <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                      Anexo: {dpAttachmentFileName(c.anexoDocumento)}
-                    </div>
-                  ) : null}
-                </li>
-              ))}
-            </ul>
+            <AdmissaoCandidatosList
+              shown={shown}
+              personItemCls={personItemCls}
+              motivoLabels={MOTIVO_CONTRATACAO_LABELS}
+            />
           ) : (
             <div className={keyValueCls}>—</div>
           )}
@@ -243,11 +391,9 @@ export function DpRequestDetailsPreview({ requestType, details, employeeNameById
               toTrimmedString(row.motivo),
             ].filter(Boolean);
             const obs = toTrimmedString(row.observacoes);
-            const doc = dpAttachmentFileName(row.anexoDocumento);
-            let text = obs ? `${parts.join(' — ')} — ${obs}` : parts.join(' — ') || '—';
-            if (doc) text = `${text} — Anexo: ${doc}`;
-            return text;
+            return obs ? `${parts.join(' — ')} — ${obs}` : parts.join(' — ') || '—';
           }}
+          getAttachment={(row) => row.anexoDocumento}
         />
       </div>
     );
@@ -309,6 +455,7 @@ export function DpRequestDetailsPreview({ requestType, details, employeeNameById
             dataInicial: d.dataInicial,
             dataFinal: d.dataFinal,
             numeroDias: d.numeroDias,
+            anexoAtestado: d.anexoAtestado,
           });
     return (
       <div className={sectionBaseCls}>
@@ -320,6 +467,7 @@ export function DpRequestDetailsPreview({ requestType, details, employeeNameById
           formatSubtitle={(row) =>
             `${formatYmdToBr(row.dataInicial)} à ${formatYmdToBr(row.dataFinal)} — ${renderValueOrDash(toTrimmedString(row.numeroDias))} dia(s)`
           }
+          getAttachment={(row) => row.anexoAtestado ?? d.anexoAtestado}
         />
       </div>
     );
@@ -349,7 +497,11 @@ export function DpRequestDetailsPreview({ requestType, details, employeeNameById
     const horasExtras =
       parseObjectArray(d, 'horasExtras').length > 0
         ? parseObjectArray(d, 'horasExtras')
-        : legacyEmployeeRows({ datas: d.datas, justificativa: d.justificativa });
+        : legacyEmployeeRows({
+            datas: d.datas,
+            justificativa: d.justificativa,
+            anexoAutorizacao: d.anexoAutorizacao,
+          });
     return (
       <div className={sectionBaseCls}>
         <h3 className={titleCls}>Detalhes de hora extra</h3>
@@ -357,6 +509,7 @@ export function DpRequestDetailsPreview({ requestType, details, employeeNameById
           items={horasExtras}
           employeeNameById={employeeNameById}
           personItemCls={personItemCls}
+          getAttachment={(row) => row.anexoAutorizacao ?? d.anexoAutorizacao}
           formatSubtitle={(row) => {
             const rawDatas = toTrimmedString(row.datas);
             const [inicioRaw, fimRaw] = rawDatas ? parseRangeRaw(rawDatas) : ['', ''];

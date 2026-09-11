@@ -17,6 +17,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'react-hot-toast';
 import { formatDateTimeBr } from '@/lib/dateTimeBr';
 import { formatIsoDateRangeToBr } from '@/lib/dpSolicitacoesUi';
+import { parseDpAttachment } from '@/lib/dpRequestDetailsPreview';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { usePermissions } from '@/hooks/usePermissions';
 import { Check, Download, Eye, FileText, Filter, MoreVertical, Wrench, Search, X, CheckCircle, Clock, LayoutList, XCircle } from 'lucide-react';
@@ -425,15 +426,17 @@ function extractAtestadoAttachment(
   details: Record<string, unknown> | null | undefined
 ): { fileName: string; mimeType: string; previewUrl: string } | null {
   if (!details || typeof details !== 'object') return null;
-  const raw = (details as any).anexoAtestado;
-  if (!raw || typeof raw !== 'object') return null;
-  const fileName = String(raw.fileName || 'atestado').trim() || 'atestado';
-  const mimeType = String(raw.mimeType || 'application/octet-stream').trim() || 'application/octet-stream';
-  const fileUrl = String(raw.fileUrl || '').trim();
-  if (fileUrl) return { fileName, mimeType, previewUrl: fileUrl };
-  const dataBase64 = String(raw.dataBase64 || '').trim();
-  if (!dataBase64) return null;
-  return { fileName, mimeType, previewUrl: `data:${mimeType};base64,${dataBase64}` };
+  const fromTop = parseDpAttachment((details as { anexoAtestado?: unknown }).anexoAtestado);
+  if (fromTop) return fromTop;
+  const atestados = Array.isArray((details as { atestados?: unknown }).atestados)
+    ? ((details as { atestados: unknown[] }).atestados)
+    : [];
+  for (const row of atestados) {
+    if (!row || typeof row !== 'object') continue;
+    const att = parseDpAttachment((row as { anexoAtestado?: unknown }).anexoAtestado);
+    if (att) return att;
+  }
+  return null;
 }
 
 function getDetailString(details: Record<string, unknown> | null | undefined, key: string): string | null {
