@@ -233,10 +233,8 @@ function ContractSurfaceCard({
     <Card
       className={[CONTRACT_PAGE_SURFACE, className].filter(Boolean).join(' ')}
       {...rest}
+      accent={accent}
     >
-      {accent ? (
-        <div className={`pointer-events-none absolute inset-x-0 top-0 z-10 h-1 bg-gradient-to-r ${accent}`} />
-      ) : null}
       {children}
     </Card>
   );

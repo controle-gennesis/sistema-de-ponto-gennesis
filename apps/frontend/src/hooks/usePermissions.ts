@@ -303,12 +303,11 @@ export function usePermissions() {
     canApproveRestrictedDpRequests ||
     can(pk('/ponto/controle/aprovar-solicitacoes-dp'));
 
-  /** Aprovação de fichas de demanda por contrato (ou gestor de contrato legado). */
+  /** Aprovação de FD: admin, ou permissão Controle + ao menos um contrato/CC liberado. */
   const canApproveFd =
     isAdministrator ||
     !!permissionData?.isAdmin ||
-    can(pk('/ponto/controle/aprovar-fichas-demanda')) ||
-    dpApprovalContractIds.length > 0;
+    (can(pk('/ponto/controle/aprovar-fichas-demanda')) && fdApprovalContractIds.length > 0);
 
   /** Bloco «Espelhos da Nota Fiscal» na tela de Aprovações: aprovação pelo Controle. */
   const canApproveEspelhoNf =

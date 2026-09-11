@@ -1880,8 +1880,9 @@ export function UserPermissionsEditor({
                                       {isFdApprove && liberado ? (
                                         <div className="mt-2 max-w-xl">
                                           <p className="mb-1.5 text-xs text-gray-500 dark:text-gray-400">
-                                            Contratos que esta pessoa pode aprovar nas fichas de
-                                            demanda
+                                            Contratos/centros de custo das fichas de demanda que
+                                            esta pessoa pode aprovar. Sem seleção, a aba não
+                                            aparece.
                                           </p>
                                           <MultiSelectSearchDropdown
                                             selected={Array.from(selectedFdApprovalContractIds)}

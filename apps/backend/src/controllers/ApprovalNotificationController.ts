@@ -4,11 +4,9 @@ import { pathToModuleKey, PERMISSION_ACCESS_ACTION } from '@sistema-ponto/permis
 import { AuthRequest } from '../middleware/auth';
 import { createError } from '../middleware/errorHandler';
 import { prisma } from '../lib/prisma';
-import {
-  getDpManagerApprovalVisibilityWhere,
-  getManagerDpApprovalContractScope,
-} from '../lib/dpApprovalAccess';
+import { getDpManagerApprovalVisibilityWhere } from '../lib/dpApprovalAccess';
 import { admTstManagerApprovalExclusionWhere } from '../lib/dpRequestAdmTst';
+import { getFdManagerApprovalVisibilityWhere } from '../lib/fdApprovalAccess';
 import { getManagerFuelApprovalContractScope } from '../lib/fuelApprovalAccess';
 import {
   userHasOcComprasApprovePermission,
@@ -21,17 +19,6 @@ import { getContractGestorListScopeCostCenterIds } from '../lib/contractGestorAp
 import { fuelRefuelRequestService } from '../services/FuelRefuelRequestService';
 
 const ESPELHO_APPROVE_MODULE_KEY = pathToModuleKey('/ponto/controle/aprovar-espelho-nf');
-
-function mapManagerScopeToFdWhere(
-  scope: Record<string, unknown> | null,
-): Prisma.DemandSheetApprovalWhereInput {
-  if (!scope || Object.keys(scope).length === 0) return {};
-  const contractFilter = scope.contractId as { in?: string[] } | undefined;
-  if (contractFilter?.in?.length) {
-    return { contratoId: { in: contractFilter.in } };
-  }
-  return {};
-}
 
 function mapManagerScopeToFuelWhere(
   scope: Record<string, unknown>,
@@ -76,15 +63,11 @@ export class ApprovalNotificationController {
         });
       }
 
-      const dpScope = await getManagerDpApprovalContractScope(userId, isAdmin);
-
       let fd = 0;
-      if (dpScope !== null) {
-        const managerScope = mapManagerScopeToFdWhere(dpScope);
-        fd = await prisma.demandSheetApproval.count({
-          where: { status: 'WAITING_MANAGER', ...managerScope },
-        });
-      }
+      const fdScope = await getFdManagerApprovalVisibilityWhere(userId, isAdmin);
+      fd = await prisma.demandSheetApproval.count({
+        where: { status: 'WAITING_MANAGER', ...fdScope },
+      });
 
       let fuel = 0;
       const fuelScope = await getManagerFuelApprovalContractScope(userId, isAdmin);
