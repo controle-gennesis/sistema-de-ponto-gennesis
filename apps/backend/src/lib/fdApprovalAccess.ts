@@ -2,11 +2,6 @@ import { pathToModuleKey, PERMISSION_ACCESS_ACTION } from '@sistema-ponto/permis
 import { Prisma } from '@prisma/client';
 import { prisma } from './prisma';
 import { createError } from '../middleware/errorHandler';
-import {
-  assertManagerCanActOnDpContract,
-  getManagerDpApprovalContractScope,
-  userHasDpApprovePermission,
-} from './dpApprovalAccess';
 
 export const FD_APPROVE_MODULE_KEY = pathToModuleKey('/ponto/controle/aprovar-fichas-demanda');
 
@@ -44,15 +39,17 @@ export function fdApprovalVisibilityWhere(
   return { contratoId: { in: contractIds } };
 }
 
-/** Pode ver/atuar na fila de aprovação de FD (contratos FD, gestor legado ou admin). */
+/** Pode ver/atuar na fila de aprovação de FD (permissão Controle + contratos liberados). */
 export async function userHasAnyFdApproverAccess(userId: string): Promise<boolean> {
-  if (await userHasFdApprovePermission(userId)) return true;
-  return userHasDpApprovePermission(userId);
+  const hasPerm = await userHasFdApprovePermission(userId);
+  if (!hasPerm) return false;
+  const ids = await getFdApprovalContractIds(userId, false);
+  return !!ids && ids.length > 0;
 }
 
 /**
  * Escopo de listagem na aba Aprovações > Fichas de Demanda.
- * Admin: sem filtro. Caso contrário: contratos FD e/ou contratos de gestor DP.
+ * Admin: sem filtro. Demais: só contratos/CCs marcados na permissão de FD.
  */
 export async function getFdManagerApprovalVisibilityWhere(
   userId: string,
@@ -60,24 +57,14 @@ export async function getFdManagerApprovalVisibilityWhere(
 ): Promise<Prisma.DemandSheetApprovalWhereInput> {
   if (isAdmin) return {};
 
-  const or: Prisma.DemandSheetApprovalWhereInput[] = [];
-
   const contractIds = await getFdApprovalContractIds(userId, false);
   if (contractIds && contractIds.length > 0) {
-    or.push(fdApprovalVisibilityWhere(contractIds));
+    return fdApprovalVisibilityWhere(contractIds);
   }
-
-  const contractScope = await getManagerDpApprovalContractScope(userId, false);
-  const contractFilter = contractScope?.contractId as { in?: string[] } | undefined;
-  if (contractFilter?.in?.length) {
-    or.push({ contratoId: { in: contractFilter.in } });
-  }
-
-  if (!or.length) return { id: { in: [] } };
-  return { OR: or };
+  return { id: { in: [] } };
 }
 
-/** Valida se o usuário pode aprovar/reprovar a FD (pelo contrato liberado ou gestor legado). */
+/** Valida se o usuário pode aprovar/reprovar a FD (pelo contrato/CC liberado). */
 export async function assertUserCanApproveFd(
   userId: string,
   isAdmin: boolean,
@@ -90,8 +77,7 @@ export async function assertUserCanApproveFd(
     return;
   }
 
-  // Fallback: mesmo vínculo de gestor de contrato das solicitações DP / OC.
-  await assertManagerCanActOnDpContract(userId, false, contratoId);
+  throw createError('Sem permissão para aprovar fichas de demanda deste contrato', 403);
 }
 
 export function assertFdApproverOrThrow(ok: boolean): void {

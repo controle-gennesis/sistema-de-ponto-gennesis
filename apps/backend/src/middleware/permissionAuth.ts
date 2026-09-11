@@ -167,7 +167,7 @@ export const requireDpApproverAccess = async (req: AuthRequest, res: Response, n
   }
 };
 
-/** Aprovação de Fichas de Demanda: CCs liberados, gestor de contrato legado ou admin. */
+/** Aprovação de Fichas de Demanda: permissão Controle + contratos/CCs liberados, ou admin. */
 export const requireFdApproverAccess = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     if (!req.user) {
