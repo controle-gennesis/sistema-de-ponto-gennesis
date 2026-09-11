@@ -9,7 +9,6 @@ import api from '@/lib/api';
 import { useModalCloseConfirm } from '@/hooks/useModalCloseConfirm';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
-import { toPersonSelectOptions } from '@/lib/personSelectOptions';
 import {
   adjustCurrency,
   currencyDigitsToFormatted,
@@ -20,14 +19,6 @@ import {
   type FichaDemandaApprovalRecord,
 } from '@/lib/fichaDemandaApproval';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
-
-interface UserOption {
-  id: string;
-  name: string;
-  cpf?: string | null;
-  profilePhotoUrl?: string | null;
-  employee?: { position?: string | null } | null;
-}
 
 interface ContractOption {
   id: string;
@@ -151,6 +142,7 @@ export function FichaDemandaApprovalFormModal({
   const [form, setForm] = useState<FichaDemandaApprovalFormState>(() => emptyFichaDemandaForm());
   const [showCreateObra, setShowCreateObra] = useState(false);
   const [novaObraNome, setNovaObraNome] = useState('');
+  const [uploadingAnexo, setUploadingAnexo] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const closeForm = useCallback(() => {
@@ -161,7 +153,6 @@ export function FichaDemandaApprovalFormModal({
     form.numMovRm.trim() ||
       form.idMovRm.trim() ||
       form.codigoPedido.trim() ||
-      form.solicitanteId.trim() ||
       form.contratoId.trim() ||
       form.obra.trim() ||
       form.codFichaDemanda.trim() ||
@@ -202,15 +193,6 @@ export function FichaDemandaApprovalFormModal({
     };
   }, [isOpen, isSaving, requestClose]);
 
-  const { data: usersData } = useQuery({
-    queryKey: ['fd-approval-solicitante-options'],
-    queryFn: async () => {
-      const res = await api.get('/demand-sheet-approvals/options/solicitantes');
-      return res.data;
-    },
-    enabled: isOpen,
-  });
-
   const { data: contractsData } = useQuery({
     queryKey: ['fd-approval-contrato-options'],
     queryFn: async () => {
@@ -236,11 +218,6 @@ export function FichaDemandaApprovalFormModal({
     enabled: isOpen && !!form.contratoId,
   });
 
-  const users = useMemo(() => {
-    const rows = (usersData?.data || []) as UserOption[];
-    return rows.filter((u) => u.id && u.name?.trim());
-  }, [usersData]);
-
   const contracts = useMemo(() => {
     return ((contractsData?.data || []) as ContractOption[]).filter((c) => c.id);
   }, [contractsData]);
@@ -248,19 +225,6 @@ export function FichaDemandaApprovalFormModal({
   const obras = useMemo(() => {
     return ((obrasData?.data || []) as ObraOption[]).filter((o) => o.id && o.name?.trim());
   }, [obrasData]);
-
-  const solicitanteSelectOptions = useMemo(
-    () =>
-      toPersonSelectOptions(
-        users.map((u) => ({
-          value: u.id,
-          name: u.name,
-          cpf: u.cpf,
-          profilePhotoUrl: u.profilePhotoUrl,
-        }))
-      ),
-    [users]
-  );
 
   const contratoSelectOptions = useMemo(
     () =>
@@ -321,12 +285,40 @@ export function FichaDemandaApprovalFormModal({
     onSave(form);
   };
 
-  const handleAnexoFile = (file: File | null) => {
-    if (!file) return;
-    setForm((prev) => ({
-      ...prev,
-      anexos: [...prev.anexos, { id: crypto.randomUUID(), name: file.name, url: undefined }],
-    }));
+  const handleAnexoFile = async (file: File | null) => {
+    if (!file || uploadingAnexo || isSaving) return;
+    setUploadingAnexo(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await api.post('/demand-sheet-approvals/upload-attachment', fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      const uploaded = res.data?.data as { url?: string; originalName?: string } | undefined;
+      const url = String(uploaded?.url || '').trim();
+      if (!url) throw new Error('Upload sem URL');
+      setForm((prev) => ({
+        ...prev,
+        anexos: [
+          ...prev.anexos,
+          {
+            id: crypto.randomUUID(),
+            name: uploaded?.originalName || file.name,
+            url,
+          },
+        ],
+      }));
+    } catch (err: unknown) {
+      const msg =
+        err && typeof err === 'object' && 'response' in err
+          ? (err as { response?: { data?: { error?: string; message?: string } } }).response?.data
+              ?.error ||
+            (err as { response?: { data?: { message?: string } } }).response?.data?.message
+          : undefined;
+      toast.error(msg || 'Não foi possível enviar o anexo.');
+    } finally {
+      setUploadingAnexo(false);
+    }
   };
 
   if (!isOpen) return null;
@@ -396,17 +388,6 @@ export function FichaDemandaApprovalFormModal({
             <div className="space-y-4">
               <SectionTitle>Vínculos</SectionTitle>
               <div className="grid grid-cols-1 gap-4">
-                <div>
-                  <FieldLabel required>Solicitante</FieldLabel>
-                  <StringSingleSelectDropdown
-                    value={form.solicitanteId}
-                    onChange={(v) => setForm({ ...form, solicitanteId: v })}
-                    options={solicitanteSelectOptions}
-                    placeholder="Selecione o solicitante"
-                    emptyOptionLabel="Selecione o solicitante"
-                    matchTriggerWidth
-                  />
-                </div>
                 <div>
                   <FieldLabel required>Contrato</FieldLabel>
                   <StringSingleSelectDropdown
@@ -521,19 +502,32 @@ export function FichaDemandaApprovalFormModal({
               </div>
             </div>
 
-            <SubSection title="Anexos" addLabel="Adicionar anexo" onAdd={() => fileInputRef.current?.click()}>
+            <SubSection
+              title="Anexos"
+              addLabel={uploadingAnexo ? 'Enviando anexo...' : 'Adicionar anexo'}
+              onAdd={() => {
+                if (!uploadingAnexo && !isSaving) fileInputRef.current?.click();
+              }}
+            >
               <input
                 ref={fileInputRef}
                 type="file"
                 className="hidden"
+                disabled={uploadingAnexo || isSaving}
                 onChange={(e) => {
-                  handleAnexoFile(e.target.files?.[0] ?? null);
+                  void handleAnexoFile(e.target.files?.[0] ?? null);
                   e.target.value = '';
                 }}
               />
-              {form.anexos.length === 0 ? (
+              {uploadingAnexo ? (
+                <p className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Enviando anexo...
+                </p>
+              ) : null}
+              {form.anexos.length === 0 && !uploadingAnexo ? (
                 <p className="text-sm text-gray-500 dark:text-gray-400">Nenhum anexo adicionado.</p>
-              ) : (
+              ) : form.anexos.length > 0 ? (
                 <ul className="space-y-2">
                   {form.anexos.map((anexo) => (
                     <li
@@ -560,7 +554,7 @@ export function FichaDemandaApprovalFormModal({
                     </li>
                   ))}
                 </ul>
-              )}
+              ) : null}
             </SubSection>
           </div>
 
@@ -575,7 +569,7 @@ export function FichaDemandaApprovalFormModal({
             </button>
             <button
               type="submit"
-              disabled={isSaving}
+              disabled={isSaving || uploadingAnexo}
               className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-red-700 disabled:opacity-50"
             >
               {isSaving ? (

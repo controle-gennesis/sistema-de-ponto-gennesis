@@ -1895,9 +1895,8 @@ export function UserPermissionsEditor({
                                       {isFdApprove && liberado ? (
                                         <div className="mt-2 max-w-xl">
                                           <p className="mb-1.5 text-xs text-gray-500 dark:text-gray-400">
-                                            Contratos/centros de custo das fichas de demanda que
-                                            esta pessoa pode aprovar. Sem seleção, a aba não
-                                            aparece.
+                                            Contratos que esta pessoa pode aprovar. Sem seleção,
+                                            a aba não aparece.
                                           </p>
                                           <MultiSelectSearchDropdown
                                             selected={Array.from(selectedFdApprovalContractIds)}
@@ -2111,7 +2110,7 @@ export function UserPermissionsEditor({
                         <th
                           scope="col"
                           className="px-1 pb-3 text-center text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-400 dark:text-gray-500"
-                          title="Gestor do contrato: aprova solicitações internas, requisições de materiais e OCs na fase gestor deste contrato"
+                          title="Gestor do contrato: aprova solicitações internas, requisições de materiais e OCs na fase gestor deste contrato."
                         >
                           Gestor
                         </th>

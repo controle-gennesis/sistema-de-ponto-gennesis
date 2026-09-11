@@ -85,11 +85,6 @@ function cleanupUploadedFiles(req: Request) {
 router.use(authenticate);
 
 router.get(
-  '/options/solicitantes',
-  requireModuleAccess(fdModule),
-  controller.listSolicitanteOptions.bind(controller)
-);
-router.get(
   '/options/contratos',
   requireModuleAccess(fdModule),
   controller.listContratoOptions.bind(controller)
@@ -135,16 +130,39 @@ router.get(
 );
 router.get('/aprovacoes', requireFdApproverAccess, controller.getManagerApprovals.bind(controller));
 
+const anexoUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 80 * 1024 * 1024, files: 1 },
+});
+
+router.post(
+  '/upload-attachment',
+  requireAnyModuleAccess([fdModule, fdsAprovadasModule]),
+  (req, res, next) => {
+    anexoUpload.single('file')(req, res, (err) => {
+      if (err instanceof multer.MulterError) {
+        if (err.code === 'LIMIT_FILE_SIZE') {
+          res.status(413).json({
+            success: false,
+            message: 'Arquivo grande demais (máx. 80 MB).',
+          });
+          return;
+        }
+        res.status(400).json({ success: false, message: err.message || 'Erro no upload.' });
+        return;
+      }
+      if (err) return next(err);
+      return next();
+    });
+  },
+  controller.uploadDraftAttachment.bind(controller)
+);
+
 router.patch(
   '/:id/purchase-status',
   requireModuleAccess(fdsAprovadasModule),
   controller.updatePurchaseStatus.bind(controller)
 );
-
-const anexoUpload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 80 * 1024 * 1024, files: 1 },
-});
 
 router.post(
   '/:id/anexos',

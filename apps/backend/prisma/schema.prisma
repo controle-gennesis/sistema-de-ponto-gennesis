@@ -1385,7 +1385,7 @@ enum DemandSheetPurchaseStatus {
   FINISHED
 }
 
-/// Ficha de demanda (FD) â fluxo de aprovaÃ§Ã£o pelo gestor do contrato (mesmo escopo das solicitaÃ§Ãµes DP).
+/// Ficha de demanda (FD) — aprovação via Controle (Aprovar Fichas de Demanda + contratos liberados).
 model DemandSheetApproval {
   id                      String                     @id @default(cuid())
   /// ID legado da planilha (ID_FICHA_DEMANDA)

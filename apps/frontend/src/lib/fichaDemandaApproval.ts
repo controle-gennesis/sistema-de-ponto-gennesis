@@ -219,7 +219,6 @@ export function validateFichaDemandaForm(form: FichaDemandaApprovalFormState): s
   if (!form.numMovRm.trim()) return 'Informe o Número de Movimento da RM.';
   if (!form.idMovRm.trim()) return 'Informe o ID de Movimento da RM.';
   if (!form.codigoPedido.trim()) return 'Informe o Código do Pedido.';
-  if (!form.solicitanteId.trim()) return 'Selecione o solicitante.';
   if (!form.contratoId.trim()) return 'Selecione o contrato.';
   if (!form.obra.trim()) return 'Selecione a obra.';
   if (!form.codFichaDemanda.trim()) return 'Informe o Código da Ficha de Demanda.';
@@ -235,7 +234,6 @@ export function formToApiPayload(form: FichaDemandaApprovalFormState) {
     numMovRm: form.numMovRm.trim(),
     idMovRm: form.idMovRm.trim(),
     codigoPedido: form.codigoPedido.trim(),
-    solicitanteId: form.solicitanteId,
     contratoId: form.contratoId,
     obra: form.obra.trim(),
     codFichaDemanda: form.codFichaDemanda.trim(),

@@ -20,10 +20,8 @@ import {
   importDemandSheets,
   type FdImportRow,
 } from '../services/demandSheetImport';
-import { getManagerDpApprovalContractScope } from '../lib/dpApprovalAccess';
 import { savePersistentUpload } from '../lib/persistentUpload';
 import { fixMulterOriginalName } from '../lib/fixUploadFileName';
-import { gennecyBotUserWhereExclude } from '../lib/gennecyBotUser';
 
 const fdModuleKey = pathToModuleKey('/ponto/aprovacao-fds');
 const fdsAprovadasModuleKey = pathToModuleKey('/ponto/fds-aprovadas');
@@ -48,7 +46,7 @@ const formSchema = z.object({
   numMovRm: z.string().min(1),
   idMovRm: z.string().min(1),
   codigoPedido: z.string().min(1),
-  solicitanteId: z.string().min(1),
+  solicitanteId: z.string().optional(),
   contratoId: z.string().min(1),
   obra: z.string().min(1),
   codFichaDemanda: z.string().min(1),
@@ -179,36 +177,28 @@ async function userCanAccessFdsAprovadasModule(userId: string, isAdmin: boolean)
   return !!perm;
 }
 
-/** Escopo de gestor DP usa `contractId`; a tabela de FD usa `contratoId`. */
-function mapManagerScopeToFdWhere(
-  scope: Record<string, unknown> | null
-): Prisma.DemandSheetApprovalWhereInput {
-  if (!scope || Object.keys(scope).length === 0) return {};
-  const contractFilter = scope.contractId as { in?: string[] } | undefined;
-  if (contractFilter?.in?.length) {
-    return { contratoId: { in: contractFilter.in } };
-  }
-  return {};
-}
-
+/** Escopo de listagem: próprias + contratos Liberados (módulo FD) + contratos liberados em Aprovar FD. */
 async function listWhereForUser(userId: string, isAdmin: boolean): Promise<Prisma.DemandSheetApprovalWhereInput> {
   if (isAdmin) return {};
-  const hasModule = await userCanAccessFdModule(userId, isAdmin);
-  const access = await getContractAccessForUser(userId, false);
-  const scope = await getManagerDpApprovalContractScope(userId, isAdmin);
-  const fdContractIds = await getFdApprovalContractIds(userId, false);
 
   const or: Prisma.DemandSheetApprovalWhereInput[] = [{ createdBy: userId }];
-  if (hasModule && access.filter === 'ids' && access.ids.length > 0) {
-    or.push({ contratoId: { in: access.ids } });
+
+  const hasModule = await userCanAccessFdModule(userId, isAdmin);
+  if (hasModule) {
+    const access = await getContractAccessForUser(userId, false);
+    if (access.filter === 'all') {
+      return {};
+    }
+    if (access.filter === 'ids' && access.ids.length > 0) {
+      or.push({ contratoId: { in: access.ids } });
+    }
   }
-  const managerScope = mapManagerScopeToFdWhere(scope);
-  if (Object.keys(managerScope).length > 0) {
-    or.push(managerScope);
-  }
+
+  const fdContractIds = await getFdApprovalContractIds(userId, false);
   if (fdContractIds && fdContractIds.length > 0) {
     or.push(fdApprovalVisibilityWhere(fdContractIds));
   }
+
   return { OR: or };
 }
 
@@ -275,7 +265,7 @@ export class DemandSheetApprovalController {
           numMovRm: body.numMovRm.trim(),
           idMovRm: body.idMovRm.trim(),
           codigoPedido: body.codigoPedido.trim(),
-          solicitanteId: body.solicitanteId,
+          solicitanteId: req.user.id,
           contratoId: body.contratoId,
           obra: body.obra.trim(),
           codFichaDemanda: body.codFichaDemanda.trim(),
@@ -324,7 +314,6 @@ export class DemandSheetApprovalController {
           numMovRm: body.numMovRm.trim(),
           idMovRm: body.idMovRm.trim(),
           codigoPedido: body.codigoPedido.trim(),
-          solicitanteId: body.solicitanteId,
           contratoId: body.contratoId,
           obra: body.obra.trim(),
           codFichaDemanda: body.codFichaDemanda.trim(),
@@ -677,6 +666,41 @@ export class DemandSheetApprovalController {
     }
   }
 
+  /** Upload de anexo antes de salvar a ficha (rascunho). */
+  async uploadDraftAttachment(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user) throw createError('Usuário não autenticado', 401);
+      const file = (req.file || (Array.isArray(req.files) ? req.files[0] : undefined)) as
+        | Express.Multer.File
+        | undefined;
+      if (!file?.buffer?.length) throw createError('Selecione um arquivo', 400);
+
+      const originalName =
+        fixMulterOriginalName(file.originalname) || file.originalname || 'anexo';
+      const saved = await savePersistentUpload({
+        folder: `demand-sheet-approvals/drafts/${req.user.id}`,
+        buffer: file.buffer,
+        originalName,
+        mimeType: file.mimetype,
+        includeSafeOriginalName: true,
+      });
+
+      return res.json({
+        success: true,
+        data: {
+          url: saved.url,
+          originalName: saved.originalName || originalName,
+        },
+      });
+    } catch (e: unknown) {
+      const err = e as { statusCode?: number; message?: string };
+      if (err?.statusCode) {
+        return res.status(err.statusCode).json({ error: err.message || 'Erro' });
+      }
+      return res.status(500).json({ error: 'Erro ao enviar anexo da ficha de demanda' });
+    }
+  }
+
   /** Vincula arquivo a um anexo pendente (da planilha) ou adiciona um anexo novo. */
   async uploadAnexo(req: AuthRequest, res: Response) {
     try {
@@ -797,50 +821,6 @@ export class DemandSheetApprovalController {
         return res.status(err.statusCode).json({ error: err.message || 'Erro' });
       }
       return res.status(500).json({ error: 'Erro ao enviar anexo da ficha de demanda' });
-    }
-  }
-
-  /** Opções de solicitante para o formulário de FD (sem depender do módulo Funcionários). */
-  async listSolicitanteOptions(req: AuthRequest, res: Response) {
-    try {
-      if (!req.user) throw createError('Usuário não autenticado', 401);
-
-      const users = await prisma.user.findMany({
-        where: {
-          ...gennecyBotUserWhereExclude(),
-          isActive: true,
-        },
-        select: {
-          id: true,
-          name: true,
-          cpf: true,
-          profilePhotoUrl: true,
-          employee: { select: { position: true } },
-        },
-        orderBy: { name: 'asc' },
-        take: 2000,
-      });
-
-      const data = users.filter((u) => {
-        const name = String(u.name || '').trim();
-        if (!name) return false;
-        if (u.employee?.position?.trim().toLowerCase() === 'administrador') return false;
-        if (name.localeCompare('Administrador', 'pt-BR', { sensitivity: 'accent' }) === 0) {
-          return false;
-        }
-        if (name.localeCompare('Gennecy', 'pt-BR', { sensitivity: 'accent' }) === 0) {
-          return false;
-        }
-        return true;
-      });
-
-      return res.json({ success: true, data });
-    } catch (e: unknown) {
-      const err = e as { statusCode?: number; message?: string };
-      if (err?.statusCode) {
-        return res.status(err.statusCode).json({ error: err.message || 'Erro' });
-      }
-      return res.status(500).json({ error: 'Erro ao listar solicitantes' });
     }
   }
 

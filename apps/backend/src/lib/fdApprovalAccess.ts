@@ -49,7 +49,8 @@ export async function userHasAnyFdApproverAccess(userId: string): Promise<boolea
 
 /**
  * Escopo de listagem na aba Aprovações > Fichas de Demanda.
- * Admin: sem filtro. Demais: só contratos/CCs marcados na permissão de FD.
+ * Admin: sem filtro. Demais: só contratos marcados em Controle → Aprovar Fichas de Demanda.
+ * Não herda a coluna Gestor do contrato.
  */
 export async function getFdManagerApprovalVisibilityWhere(
   userId: string,

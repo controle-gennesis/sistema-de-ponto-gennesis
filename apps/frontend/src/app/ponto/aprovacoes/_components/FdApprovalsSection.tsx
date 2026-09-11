@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ClipboardCheck, FileText, Filter, Search, X } from 'lucide-react';
+import { Check, ClipboardCheck, Eye, Filter, MoreVertical, Search, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '@/lib/api';
 import { textMatchesSearch } from '@/lib/normalizeSearchText';
@@ -11,9 +11,16 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { CadastroListLoading } from '@/components/ui/CadastroListSummary';
 import { Modal } from '@/components/ui/Modal';
+import { ActionMenuOverlay } from '@/components/ui/ActionMenuOverlay';
 import { usePermissions } from '@/hooks/usePermissions';
 import { formatCurrencyDisplay, type FichaDemandaApprovalRecord } from '@/lib/fichaDemandaApproval';
-import { listTableRowClasses, rowActionMenuButtonClass } from '@/components/ui/listTableUi';
+import { FichaDemandaDetailModal } from '@/components/engenharia/FichaDemandaDetailModal';
+import {
+  getListTableRowClassName,
+  ListRowNavigableLabel,
+  listTableRowClasses,
+  rowActionMenuButtonClass,
+} from '@/components/ui/listTableUi';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import {
@@ -38,11 +45,16 @@ const FD_PHASE_FILTER_OPTIONS = labeledToSelectOptions([
 ]);
 
 const FD_PHASE_SUBTITLE: Record<FdPhaseFilter, string> = {
-  PENDING: 'Pendentes de decisão por contrato',
-  APPROVED: 'Fichas já aprovadas',
-  REJECTED: 'Fichas canceladas',
-  ALL: 'Todas as fichas da sua área',
+  PENDING: 'Aguardando aprovação',
+  APPROVED: 'Já aprovadas',
+  REJECTED: 'Canceladas',
+  ALL: 'Todas as fichas',
 };
+
+const FD_ACTION_MENU_WIDTH_PX = 224;
+const MENU_ITEM_CLASS =
+  'w-full flex items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700';
+const MENU_ITEM_BORDER_CLASS = `${MENU_ITEM_CLASS} border-t border-gray-200 dark:border-gray-700`;
 
 export function FdApprovalsSection() {
   const queryClient = useQueryClient();
@@ -53,6 +65,11 @@ export function FdApprovalsSection() {
   const [isFdFiltersOpen, setIsFdFiltersOpen] = useState(false);
   const [detailFd, setDetailFd] = useState<FichaDemandaApprovalRecord | null>(null);
   const [managerComment, setManagerComment] = useState<Record<string, string>>({});
+  const [actionMenu, setActionMenu] = useState<{
+    requestId: string;
+    top: number;
+    left: number;
+  } | null>(null);
 
   const { data: fdResp, isLoading: loadingFd, isError: fdError } = useQuery({
     queryKey: ['approvals', 'fd', fdPhase],
@@ -85,6 +102,19 @@ export function FdApprovalsSection() {
       );
     });
   }, [fdList, searchFd]);
+
+  const requestForMenu = actionMenu
+    ? fdFiltered.find((r) => r.id === actionMenu.requestId) ?? null
+    : null;
+
+  useEffect(() => {
+    if (!actionMenu) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setActionMenu(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [actionMenu]);
 
   const approveMutation = useMutation({
     mutationFn: async ({ id }: { id: string }) => {
@@ -229,24 +259,24 @@ export function FdApprovalsSection() {
                   <thead className="border-b border-gray-200 dark:border-gray-700">
                     <tr>
                       <th className="px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
-                        Cód. FD
+                        Código da FD
                       </th>
-                      <th className="px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                      <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
                         Contrato
                       </th>
-                      <th className="px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                      <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
                         Obra
                       </th>
-                      <th className="px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                      <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
                         Solicitante
                       </th>
-                      <th className="px-3 py-4 text-right text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                      <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
                         Faturamento
                       </th>
                       <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
                         {APPROVAL_STATUS_COLUMN_TITLE}
                       </th>
-                      <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                      <th className={`${listTableRowClasses.actionTh} text-center`}>
                         Ação
                       </th>
                     </tr>
@@ -255,42 +285,61 @@ export function FdApprovalsSection() {
                     {fdFiltered.map((r) => (
                       <tr
                         key={r.id}
-                        className={listTableRowClasses.tr}
+                        className={getListTableRowClassName(true)}
+                        onClick={() => setDetailFd(r)}
                       >
-                        <td className="px-3 py-3 align-middle text-sm sm:px-6">
-                          <span className="text-sm text-gray-900 dark:text-gray-100 font-medium">{r.codFichaDemanda}</span>
+                        <td className="px-3 py-4 text-left sm:px-6">
+                          <ListRowNavigableLabel className="text-sm font-medium">
+                            {r.codFichaDemanda}
+                          </ListRowNavigableLabel>
                         </td>
                         <td
-                          className="max-w-[200px] truncate px-3 py-3 align-middle text-sm text-gray-700 dark:text-gray-300 sm:px-6"
+                          className="whitespace-nowrap px-3 py-4 text-center uppercase text-gray-900 dark:text-gray-100 sm:px-6"
                           title={r.contratoNome}
                         >
                           {r.contratoNome}
                         </td>
                         <td
-                          className="max-w-[160px] truncate px-3 py-3 align-middle text-sm text-gray-700 dark:text-gray-300 sm:px-6"
+                          className="px-3 py-4 text-center uppercase text-gray-900 dark:text-gray-100 sm:px-6"
                           title={r.obra}
                         >
                           {r.obra}
                         </td>
-                        <td className="px-3 py-3 align-middle text-sm text-gray-700 dark:text-gray-300 sm:px-6">
+                        <td className="px-3 py-4 text-center text-gray-900 dark:text-gray-100 sm:px-6">
                           {r.solicitanteNome}
                         </td>
-                        <td className="px-3 py-3 align-middle text-right text-sm tabular-nums text-gray-900 dark:text-gray-100 sm:px-6">
+                        <td className="px-3 py-4 text-center tabular-nums text-gray-900 dark:text-gray-100 sm:px-6">
                           {formatCurrencyDisplay(r.faturamentoEstimado)}
                         </td>
-                        <td className="px-3 py-3 align-middle text-center sm:px-6">
+                        <td className="px-3 py-4 text-center sm:px-6">
                           <ApprovalStatusBadge kind={fdToApprovalStatus(r.status)} />
                         </td>
-                        <td className="px-3 py-3 align-middle text-center sm:px-6">
+                        <td
+                          className={`${listTableRowClasses.actionTd} text-center`}
+                          onClick={(e) => e.stopPropagation()}
+                        >
                           <div className="flex justify-center">
                             <button
                               type="button"
-                              onClick={() => setDetailFd(r)}
-                              className={rowActionMenuButtonClass(false)}
-                              title="Ver detalhes"
-                              aria-label="Ver detalhes da ficha"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const rect = e.currentTarget.getBoundingClientRect();
+                                setActionMenu((prev) => {
+                                  if (prev?.requestId === r.id) return null;
+                                  let left = rect.right - FD_ACTION_MENU_WIDTH_PX;
+                                  left = Math.max(
+                                    8,
+                                    Math.min(left, window.innerWidth - FD_ACTION_MENU_WIDTH_PX - 8)
+                                  );
+                                  return { requestId: r.id, top: rect.bottom + 4, left };
+                                });
+                              }}
+                              className={rowActionMenuButtonClass(actionMenu?.requestId === r.id)}
+                              aria-label="Menu de ações"
+                              aria-expanded={actionMenu?.requestId === r.id}
+                              aria-haspopup="menu"
                             >
-                              <FileText className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden />
+                              <MoreVertical className="h-4 w-4" />
                             </button>
                           </div>
                         </td>
@@ -305,110 +354,111 @@ export function FdApprovalsSection() {
       </Card>
       </div>
 
-      <Modal
-        isOpen={!!detailFd}
-        onClose={() => setDetailFd(null)}
-        title="Detalhes da Ficha de Demanda"
-        size="lg"
+      <ActionMenuOverlay
+        open={!!actionMenu && !!requestForMenu}
+        onClose={() => setActionMenu(null)}
+        top={actionMenu?.top ?? 0}
+        left={actionMenu?.left ?? 0}
       >
-        {detailFd ? (
-          <div className="space-y-4 text-sm">
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div>
-                <p className="text-xs text-gray-500 dark:text-gray-400">Cód. ficha de demanda</p>
-                <p className="font-medium text-gray-900 dark:text-gray-100">{detailFd.codFichaDemanda}</p>
-              </div>
-              <div>
-                <p className="text-xs text-gray-500 dark:text-gray-400">Código do pedido</p>
-                <p className="font-medium text-gray-900 dark:text-gray-100">{detailFd.codigoPedido}</p>
-              </div>
-              <div>
-                <p className="text-xs text-gray-500 dark:text-gray-400">Contrato</p>
-                <p className="font-medium text-gray-900 dark:text-gray-100">{detailFd.contratoNome}</p>
-              </div>
-              <div>
-                <p className="text-xs text-gray-500 dark:text-gray-400">Obra</p>
-                <p className="font-medium text-gray-900 dark:text-gray-100">{detailFd.obra}</p>
-              </div>
-              <div>
-                <p className="text-xs text-gray-500 dark:text-gray-400">Solicitante</p>
-                <p className="font-medium text-gray-900 dark:text-gray-100">{detailFd.solicitanteNome}</p>
-              </div>
-              <div>
-                <p className="text-xs text-gray-500 dark:text-gray-400">Polo</p>
-                <p className="font-medium text-gray-900 dark:text-gray-100">{detailFd.polo}</p>
-              </div>
-              <div>
-                <p className="text-xs text-gray-500 dark:text-gray-400">Faturamento estimado</p>
-                <p className="font-medium text-gray-900 dark:text-gray-100">
-                  {formatCurrencyDisplay(detailFd.faturamentoEstimado)}
-                </p>
-              </div>
-              <div>
-                <p className="text-xs text-gray-500 dark:text-gray-400">Custo estimado</p>
-                <p className="font-medium text-gray-900 dark:text-gray-100">
-                  {formatCurrencyDisplay(detailFd.custoEstimado)}
-                </p>
-              </div>
-              <div>
-                <p className="text-xs text-gray-500 dark:text-gray-400">Num. mov. RM</p>
-                <p className="font-medium text-gray-900 dark:text-gray-100">{detailFd.numMovRm}</p>
-              </div>
-              <div>
-                <p className="text-xs text-gray-500 dark:text-gray-400">ID mov. RM</p>
-                <p className="font-medium text-gray-900 dark:text-gray-100">{detailFd.idMovRm}</p>
-              </div>
-            </div>
-            <div>
-              <p className="text-xs text-gray-500 dark:text-gray-400">Observação</p>
-              <p className="text-gray-900 dark:text-gray-100">{detailFd.observacao}</p>
-            </div>
+        {requestForMenu ? (
+          <>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setActionMenu(null);
+                setDetailFd(requestForMenu);
+              }}
+              className={MENU_ITEM_CLASS}
+            >
+              <Eye className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
+              <span>Ver detalhes</span>
+            </button>
+            {requestForMenu.status === 'WAITING_MANAGER' ? (
+              <>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setActionMenu(null);
+                    approveMutation.mutate({ id: requestForMenu.id });
+                  }}
+                  disabled={approveMutation.isPending || rejectMutation.isPending}
+                  className={MENU_ITEM_BORDER_CLASS}
+                >
+                  <Check className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                  <span>Aprovar</span>
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setActionMenu(null);
+                    rejectMutation.mutate({ id: requestForMenu.id });
+                  }}
+                  disabled={approveMutation.isPending || rejectMutation.isPending}
+                  className={MENU_ITEM_BORDER_CLASS}
+                >
+                  <X className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
+                  <span>Rejeitar</span>
+                </button>
+              </>
+            ) : null}
+          </>
+        ) : null}
+      </ActionMenuOverlay>
 
-            {detailFd.status === 'WAITING_MANAGER' ? (
-              <div className="border-t border-gray-200 pt-4 dark:border-gray-700">
-                <h3 className="mb-3 text-sm font-semibold text-gray-900 dark:text-gray-100">Decisão</h3>
-                <div className="space-y-3">
-                  <Input
-                    value={managerComment[detailFd.id] || ''}
-                    onChange={(e) =>
-                      setManagerComment((p) => ({ ...p, [detailFd.id]: e.target.value }))
-                    }
-                    placeholder="Comentário (opcional)"
-                  />
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <Button type="button" variant="outline" onClick={() => setDetailFd(null)}>
-                      Fechar
+      <FichaDemandaDetailModal
+        isOpen={!!detailFd}
+        record={detailFd}
+        onClose={() => setDetailFd(null)}
+        onRecordUpdated={(updated) => setDetailFd(updated)}
+        allowPendingUpload={false}
+        footer={
+          detailFd?.status === 'WAITING_MANAGER' ? (
+            <div className="border-t border-gray-200 pt-4 dark:border-gray-700">
+              <h3 className="mb-3 text-sm font-semibold text-gray-900 dark:text-gray-100">Decisão</h3>
+              <div className="space-y-3">
+                <Input
+                  value={managerComment[detailFd.id] || ''}
+                  onChange={(e) =>
+                    setManagerComment((p) => ({ ...p, [detailFd.id]: e.target.value }))
+                  }
+                  placeholder="Comentário (opcional)"
+                />
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <Button type="button" variant="outline" onClick={() => setDetailFd(null)}>
+                    Fechar
+                  </Button>
+                  <div className="flex flex-wrap items-center justify-end gap-2">
+                    <Button
+                      type="button"
+                      variant="error"
+                      onClick={() => rejectMutation.mutate({ id: detailFd.id })}
+                      disabled={approveMutation.isPending || rejectMutation.isPending}
+                    >
+                      {rejectMutation.isPending ? 'Rejeitando…' : 'Rejeitar'}
                     </Button>
-                    <div className="flex flex-wrap items-center justify-end gap-2">
-                      <Button
-                        type="button"
-                        variant="error"
-                        onClick={() => rejectMutation.mutate({ id: detailFd.id })}
-                        disabled={approveMutation.isPending || rejectMutation.isPending}
-                      >
-                        {rejectMutation.isPending ? 'Rejeitando…' : 'Rejeitar'}
-                      </Button>
-                      <Button
-                        type="button"
-                        onClick={() => approveMutation.mutate({ id: detailFd.id })}
-                        disabled={approveMutation.isPending || rejectMutation.isPending}
-                      >
-                        {approveMutation.isPending ? 'Aprovando…' : 'Aprovar'}
-                      </Button>
-                    </div>
+                    <Button
+                      type="button"
+                      onClick={() => approveMutation.mutate({ id: detailFd.id })}
+                      disabled={approveMutation.isPending || rejectMutation.isPending}
+                    >
+                      {approveMutation.isPending ? 'Aprovando…' : 'Aprovar'}
+                    </Button>
                   </div>
                 </div>
               </div>
-            ) : (
-              <div className="flex justify-end border-t border-gray-200 pt-4 dark:border-gray-700">
-                <Button type="button" variant="outline" onClick={() => setDetailFd(null)}>
-                  Fechar
-                </Button>
-              </div>
-            )}
-          </div>
-        ) : null}
-      </Modal>
+            </div>
+          ) : (
+            <div className="flex justify-end border-t border-gray-200 pt-4 dark:border-gray-700">
+              <Button type="button" variant="outline" onClick={() => setDetailFd(null)}>
+                Fechar
+              </Button>
+            </div>
+          )
+        }
+      />
 
       <Modal isOpen={isFdFiltersOpen} onClose={() => setIsFdFiltersOpen(false)} title="Filtro — Fichas de Demanda" size="sm">
         <div className="space-y-4">

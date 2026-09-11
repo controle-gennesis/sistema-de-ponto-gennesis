@@ -128,7 +128,7 @@ export default function AprovacaoFdsPage() {
       return res.data;
     },
     onSuccess: () => {
-      toast.success('Ficha registrada. Aguardando aprovação do gestor.');
+      toast.success('Ficha registrada. Aguardando aprovação.');
       void queryClient.invalidateQueries({ queryKey: ['demand-sheet-approvals'] });
       void queryClient.invalidateQueries({ queryKey: ['fd-notification-counts'] });
       setShowForm(false);
@@ -226,7 +226,7 @@ export default function AprovacaoFdsPage() {
               Fichas de Demanda
             </h1>
             <p className="mx-auto mt-2 max-w-2xl text-sm text-gray-600 dark:text-gray-400 sm:text-base">
-              Cadastre fichas de demanda. Após o envio, o aprovador do contrato analisa e decide.
+              Cadastre e acompanhe as fichas de demanda.
             </p>
           </div>
 

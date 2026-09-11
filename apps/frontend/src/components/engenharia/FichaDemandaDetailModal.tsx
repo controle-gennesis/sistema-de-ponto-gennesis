@@ -23,6 +23,8 @@ type Props = {
   onRecordUpdated?: (record: FichaDemandaApprovalRecord) => void;
   /** Permite upload em anexos pendentes (padrão: true). */
   allowPendingUpload?: boolean;
+  /** Rodapé extra (ex.: aprovar/rejeitar). Substitui o botão Fechar padrão. */
+  footer?: React.ReactNode;
 };
 
 function formatDateTime(value: string | null | undefined): string {
@@ -49,6 +51,7 @@ export function FichaDemandaDetailModal({
   onClose,
   onRecordUpdated,
   allowPendingUpload = true,
+  footer,
 }: Props) {
   const queryClient = useQueryClient();
   const [uploadingAnexoId, setUploadingAnexoId] = useState<string | null>(null);
@@ -193,15 +196,19 @@ export function FichaDemandaDetailModal({
           )}
         </div>
 
-        <div className="flex justify-end border-t border-gray-200 pt-4 dark:border-gray-700">
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-lg bg-gray-100 px-4 py-2 text-sm text-gray-800 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200"
-          >
-            Fechar
-          </button>
-        </div>
+        {footer ? (
+          footer
+        ) : (
+          <div className="flex justify-end border-t border-gray-200 pt-4 dark:border-gray-700">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-lg bg-gray-100 px-4 py-2 text-sm text-gray-800 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200"
+            >
+              Fechar
+            </button>
+          </div>
+        )}
       </div>
     </Modal>
   );
