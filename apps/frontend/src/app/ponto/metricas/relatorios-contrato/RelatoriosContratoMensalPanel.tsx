@@ -32,6 +32,7 @@ import api from '@/lib/api';
 import { textMatchesSearch } from '@/lib/normalizeSearchText';
 import { formatMonthLabel, getIsoMonthKey, shiftIsoMonthKey } from '@/lib/monthPeriod';
 import { getListTableRowClassName } from '@/components/ui/listTableUi';
+import { useCadastroCrudPermissions } from '@/hooks/useCadastroCrudPermissions';
 
 type MensalReportStatus = 'sem_formulario' | 'pendente' | 'preenchido';
 type StatusFilter = 'todos' | MensalReportStatus;
@@ -170,6 +171,8 @@ function formatDateTime(iso?: string) {
 export function RelatoriosContratoMensalPanel() {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const { canCreate, canEdit } = useCadastroCrudPermissions('/ponto/metricas/relatorios-contrato');
+  const canWrite = canCreate || canEdit;
   const [monthKey, setMonthKey] = useState(getIsoMonthKey());
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('todos');
@@ -439,13 +442,17 @@ export function RelatoriosContratoMensalPanel() {
                   onClose={closeRowActionMenu}
                   hideDefaultActions
                   extraItems={[
-                    {
-                      label: 'Configurar formulário',
-                      icon: (
-                        <Settings2 className="h-4 w-4 shrink-0 text-gray-600 dark:text-gray-400" />
-                      ),
-                      onClick: () => openConfig([rowForActionMenu.contractId]),
-                    },
+                    ...(canWrite
+                      ? [
+                          {
+                            label: 'Configurar formulário',
+                            icon: (
+                              <Settings2 className="h-4 w-4 shrink-0 text-gray-600 dark:text-gray-400" />
+                            ),
+                            onClick: () => openConfig([rowForActionMenu.contractId]),
+                          },
+                        ]
+                      : []),
                     {
                       label: 'Ver relatório do mês',
                       icon: (
@@ -627,6 +634,7 @@ export function RelatoriosContratoMensalPanel() {
         contractId={viewContractId || ''}
         kind="mensal"
         reuniaoId={viewEntryId}
+        readOnly={!canWrite}
       />
     </>
   );

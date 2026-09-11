@@ -28,8 +28,9 @@ import {
   PERMISSION_MODULE_KEYS_MANAGED_ONLY_ON_CONTRACT_MATRIX,
   PERMISSION_MODULE_KEYS_OPEN_ACCESS,
   PERMISSION_MODULES,
-  isCadastroCrudModuleKey,
+  isGranularCrudModuleKey,
   pathToModuleKey,
+  RELATORIOS_CONTRATO_MODULE_KEY,
   type PermissionModuleDef,
 } from '@sistema-ponto/permission-modules';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
@@ -166,11 +167,11 @@ function serializeCadastroCrud(map: CadastroCrudMap): string {
     .join(',');
 }
 
-/** Extrai apenas ações granulares de módulos de Cadastros das permissões cruas. */
+/** Extrai ações granulares de Cadastros e Relatórios de Contrato. */
 function parseCadastroCrudFromPerms(perms: PermissionItem[]): CadastroCrudMap {
   const out: CadastroCrudMap = {};
   for (const p of perms) {
-    if (!isCadastroCrudModuleKey(p.module)) continue;
+    if (!isGranularCrudModuleKey(p.module)) continue;
     if (!CONTRACT_ACTIONS.includes(p.action as ContractAction)) continue;
     if (!out[p.module]) out[p.module] = new Set<ContractAction>();
     out[p.module].add(p.action as ContractAction);
@@ -1338,6 +1339,13 @@ export function UserPermissionsEditor({
       next.add(moduleKey);
       return next;
     });
+    // Relatórios de Contrato: Ver sozinho = só visualizar. Editar/Criar/Excluir à parte.
+    if (moduleKey === RELATORIOS_CONTRATO_MODULE_KEY) {
+      setCadastroCrudByModule((prev) => ({
+        ...prev,
+        [moduleKey]: new Set<ContractAction>(['ver']),
+      }));
+    }
   };
 
   const toggleContract = (contractId: string) => {
@@ -1648,12 +1656,19 @@ export function UserPermissionsEditor({
   }
 
   if (permissionError) {
+    const apiMsg =
+      permissionError && typeof permissionError === 'object' && 'response' in permissionError
+        ? (permissionError as { response?: { data?: { message?: string } } }).response?.data?.message
+        : undefined;
     return (
       <Card>
         <CardContent className="text-center">
           <p className="text-gray-700 dark:text-gray-300">
             Não foi possível carregar as permissões. Verifique se você é administrador e se o usuário existe.
           </p>
+          {apiMsg ? (
+            <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">{apiMsg}</p>
+          ) : null}
           <button
             type="button"
             onClick={onBack}
@@ -1963,7 +1978,7 @@ export function UserPermissionsEditor({
                             const lbl = labelFor(mod);
                             const isContracts = mod.key === CONTRACTS_MODULE_KEY;
                             const isEmployees = mod.key === EMPLOYEES_MODULE_KEY;
-                            const isCadastro = isCadastroCrudModuleKey(mod.key);
+                            const isCadastro = isGranularCrudModuleKey(mod.key);
                             const granularRow = isContracts || isEmployees || isCadastro;
                             const cadastroActions = cadastroCrudByModule[mod.key];
                             const verOn = isContracts

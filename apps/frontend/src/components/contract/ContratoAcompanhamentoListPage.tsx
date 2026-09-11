@@ -30,6 +30,7 @@ import { getListTableRowClassName, ListRowNavigableLabel, rowActionMenuButtonCla
 import { ReuniaoFormModal, type ReuniaoListPatch } from '@/components/contract/ReuniaoFormModal';
 import { ContratoControleGeralMensalCard } from '@/components/contract/ContratoControleGeralMensalCard';
 import { ContratoReunioesLancamentosBar } from '@/components/contract/ContratoReunioesLancamentosBar';
+import { useCadastroCrudPermissions } from '@/hooks/useCadastroCrudPermissions';
 import { entryMonthLabel, formatMonthLabel, getIsoMonthKey } from '@/lib/monthPeriod';
 import { entryWeekLabel, formatWeekLabel, getFortnightKey } from '@/lib/weekPeriod';
 import type { AcompanhamentoKind } from '@/lib/acompanhamentoTypes';
@@ -193,6 +194,11 @@ function ContratoAcompanhamentoPanel({
     openSuccessToast,
     backHref,
   } = config;
+
+  const relatoriosCrud = useCadastroCrudPermissions('/ponto/metricas/relatorios-contrato');
+  const fromMetricasPage = config.protectedRoute === '/ponto/metricas/relatorios-contrato';
+  const canWrite = !fromMetricasPage || relatoriosCrud.canEdit || relatoriosCrud.canCreate;
+  const canRemove = !fromMetricasPage || relatoriosCrud.canDelete;
 
   const router = useRouter();
   const pathname = usePathname();
@@ -524,6 +530,7 @@ function ContratoAcompanhamentoPanel({
             <Eye className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
             <span>Abrir formulário</span>
           </button>
+          {canRemove ? (
           <button
             type="button"
             role="menuitem"
@@ -540,6 +547,7 @@ function ContratoAcompanhamentoPanel({
             <Trash2 className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
             <span>Excluir</span>
           </button>
+          ) : null}
         </ActionMenuOverlay>
       )}
     </>
@@ -592,6 +600,7 @@ function ContratoAcompanhamentoPanel({
                   />
                 </div>
               )}
+              {canWrite ? (
               <button
                 type="button"
                 onClick={() => setConfigModalOpen(true)}
@@ -600,6 +609,8 @@ function ContratoAcompanhamentoPanel({
                 <Settings2 className="h-4 w-4 shrink-0" />
                 {compact ? 'Formulário' : 'Configurar formulário'}
               </button>
+              ) : null}
+              {canWrite || currentPeriodEntry ? (
               <button
                 type="button"
                 onClick={() => {
@@ -607,14 +618,20 @@ function ContratoAcompanhamentoPanel({
                     setModalReuniaoId(currentPeriodEntry.id);
                     return;
                   }
+                  if (!canWrite) return;
                   periodoAtualMutation.mutate();
                 }}
                 disabled={periodoAtualMutation.isPending || loadingConfig}
                 className="inline-flex h-10 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-red-600 px-4 text-sm font-semibold text-white shadow-sm shadow-red-600/25 transition-colors hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 disabled:opacity-70"
               >
                 <PenLine className="h-4 w-4 shrink-0" />
-                {currentPeriodEntry ? fillButtonContinueLabel : fillButtonLabel}
+                {currentPeriodEntry
+                  ? canWrite
+                    ? fillButtonContinueLabel
+                    : 'Visualizar quinzena'
+                  : fillButtonLabel}
               </button>
+              ) : null}
             </div>
           </div>
         </CardHeader>
@@ -634,6 +651,7 @@ function ContratoAcompanhamentoPanel({
               reuniaoId={modalReuniaoId}
               onListPatch={handleListPatch}
               variant="inline"
+              readOnly={!canWrite}
             />
           ) : (
             listMarkup
@@ -725,6 +743,7 @@ function ContratoAcompanhamentoPanel({
           kind={kind}
           reuniaoId={modalReuniaoId}
           onListPatch={handleListPatch}
+          readOnly={!canWrite}
         />
       ) : null}
     </>

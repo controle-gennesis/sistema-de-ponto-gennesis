@@ -1,8 +1,9 @@
 /**
  * Registro central de módulos do sistema para permissões.
  * Cada item corresponde a um submenu (rota) — uma entrada na matriz “Acesso”.
- * Ação base no banco: `acesso` (libera o módulo). Módulos Contratos, Funcionários e Cadastros também
- * aceitam ações granulares: `ver`, `criar`, `editar`, `excluir` (ver `PERMISSION_MODULE_CRUD_ACTIONS`).
+ * Ação base no banco: `acesso` (libera o módulo). Módulos Contratos, Funcionários, Cadastros e
+ * Relatórios de Contrato também aceitam ações granulares: `ver`, `criar`, `editar`, `excluir`
+ * (ver `PERMISSION_MODULE_CRUD_ACTIONS`).
  */
 
 export type PermissionModuleDef = {
@@ -496,6 +497,17 @@ const CADASTRO_MODULE_KEY_SET = new Set(PERMISSION_CADASTRO_MODULE_KEYS);
 
 export function isCadastroCrudModuleKey(moduleKey: string): boolean {
   return CADASTRO_MODULE_KEY_SET.has(moduleKey);
+}
+
+/** Relatórios de Contrato (Métricas) — Ver só visualiza; Editar preenche reuniões. */
+export const RELATORIOS_CONTRATO_MODULE_KEY = pathToModuleKey('/ponto/metricas/relatorios-contrato');
+
+/**
+ * Módulos com Ver/Criar/Editar/Excluir na matriz Acesso
+ * (Cadastros + Relatórios de Contrato).
+ */
+export function isGranularCrudModuleKey(moduleKey: string): boolean {
+  return isCadastroCrudModuleKey(moduleKey) || moduleKey === RELATORIOS_CONTRATO_MODULE_KEY;
 }
 
 /**

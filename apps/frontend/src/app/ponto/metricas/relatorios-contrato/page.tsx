@@ -15,6 +15,7 @@ import {
   Settings2,
   AlertCircle,
   MinusCircle,
+  Eye,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { MainLayout } from '@/components/layout/MainLayout';
@@ -29,6 +30,7 @@ import { ReuniaoFormModal } from '@/components/contract/ReuniaoFormModal';
 import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import { RelatoriosContratoMensalPanel } from './RelatoriosContratoMensalPanel';
 import { useRowActionMenu } from '@/hooks/useRowActionMenu';
+import { useCadastroCrudPermissions } from '@/hooks/useCadastroCrudPermissions';
 import api from '@/lib/api';
 import {
   formatWeekLabel,
@@ -181,6 +183,8 @@ type PageTab = 'semanal' | 'mensal';
 export default function RelatoriosContratoPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const { canCreate, canEdit } = useCadastroCrudPermissions('/ponto/metricas/relatorios-contrato');
+  const canWrite = canCreate || canEdit;
   const [pageTab, setPageTab] = useState<PageTab>('semanal');
   const [weekKey, setWeekKey] = useState(getFortnightKey());
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('todos');
@@ -290,6 +294,15 @@ export default function RelatoriosContratoPage() {
   };
 
   const handleFill = (row: SemanalOverviewRow) => {
+    if (!canWrite) {
+      if (row.entryId) {
+        setFillContractId(row.contractId);
+        setFillEntryId(row.entryId);
+        return;
+      }
+      toast.error('Você só pode visualizar as reuniões quinzenais.');
+      return;
+    }
     if (row.status === 'sem_formulario') {
       toast.error('Configure um formulário antes de preencher.');
       openConfig([row.contractId]);
@@ -327,7 +340,9 @@ export default function RelatoriosContratoPage() {
             </h1>
             <p className="mx-auto mt-2 max-w-2xl text-sm text-gray-600 dark:text-gray-400 sm:text-base">
               {pageTab === 'semanal'
-                ? 'Registre as reuniões quinzenais com a equipe de cada contrato.'
+                ? canWrite
+                  ? 'Registre as reuniões quinzenais com a equipe de cada contrato.'
+                  : 'Acompanhe as reuniões quinzenais de cada contrato.'
                 : 'Acompanhe os relatórios mensais preenchidos pelas equipes dos contratos.'}
             </p>
             <div className="mt-4 flex justify-center">
@@ -497,23 +512,35 @@ export default function RelatoriosContratoPage() {
                       onClose={closeRowActionMenu}
                       hideDefaultActions
                       extraItems={[
+                        ...(canWrite
+                          ? [
+                              {
+                                label: 'Configurar formulário',
+                                icon: (
+                                  <Settings2 className="h-4 w-4 shrink-0 text-gray-600 dark:text-gray-400" />
+                                ),
+                                onClick: () => openConfig([rowForActionMenu.contractId]),
+                              },
+                            ]
+                          : []),
                         {
-                          label: 'Configurar formulário',
-                          icon: (
-                            <Settings2 className="h-4 w-4 shrink-0 text-gray-600 dark:text-gray-400" />
-                          ),
-                          onClick: () => openConfig([rowForActionMenu.contractId]),
-                        },
-                        {
-                          label: rowForActionMenu.entryId
-                            ? 'Continuar reunião da quinzena'
-                            : 'Registrar reunião da quinzena',
-                          icon: (
+                          label: canWrite
+                            ? rowForActionMenu.entryId
+                              ? 'Continuar reunião da quinzena'
+                              : 'Registrar reunião da quinzena'
+                            : 'Visualizar reunião',
+                          icon: canWrite ? (
                             <PenLine className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
+                          ) : (
+                            <Eye className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
                           ),
                           onClick: () => handleFill(rowForActionMenu),
-                          disabled: openPeriodMutation.isPending,
-                          disabledTitle: 'Abrindo período...',
+                          disabled: canWrite
+                            ? openPeriodMutation.isPending
+                            : !rowForActionMenu.entryId,
+                          disabledTitle: canWrite
+                            ? 'Abrindo período...'
+                            : 'Ainda não há reunião registrada',
                         },
                         {
                           label: 'Histórico',
@@ -637,6 +664,7 @@ export default function RelatoriosContratoPage() {
           contractId={fillContractId || ''}
           kind="semanal"
           reuniaoId={fillEntryId}
+          readOnly={!canWrite}
         />
       </MainLayout>
     </ProtectedRoute>

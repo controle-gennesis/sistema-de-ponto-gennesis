@@ -25,6 +25,15 @@ function asStringIdArray(raw: unknown): string[] {
   return raw.filter((id): id is string => typeof id === 'string' && id.length > 0);
 }
 
+async function safePermissionRows<T>(label: string, query: () => Promise<T[]>): Promise<T[]> {
+  try {
+    return await query();
+  } catch (err) {
+    console.warn(`[permissions] ${label}:`, err instanceof Error ? err.message : err);
+    return [];
+  }
+}
+
 const router = express.Router();
 
 const MODULES = PERMISSION_MODULES.map((m) => ({ key: m.key, name: m.name, href: m.href }));
@@ -336,44 +345,76 @@ router.get('/users/:userId', requirePermissionManagerOrAdministrator, async (req
 
     const contractPermRows = isAdmin
       ? []
-      : await prisma.userContractPermission.findMany({
-          where: { userId },
-          select: {
-            contractId: true,
-            accessOrcamento: true,
-            accessRelatorios: true,
-            accessOrdemServico: true,
-            accessProducaoSemanal: true,
-            accessReunioes: true,
-          },
-        });
+      : await (async () => {
+          const withReunioes = await safePermissionRows('userContractPermission+reunioes', () =>
+            prisma.userContractPermission.findMany({
+              where: { userId },
+              select: {
+                contractId: true,
+                accessOrcamento: true,
+                accessRelatorios: true,
+                accessOrdemServico: true,
+                accessProducaoSemanal: true,
+                accessReunioes: true,
+              },
+            })
+          );
+          if (withReunioes.length > 0) return withReunioes;
+          const withoutReunioes = await safePermissionRows('userContractPermission', () =>
+            prisma.userContractPermission.findMany({
+              where: { userId },
+              select: {
+                contractId: true,
+                accessOrcamento: true,
+                accessRelatorios: true,
+                accessOrdemServico: true,
+                accessProducaoSemanal: true,
+              },
+            })
+          );
+          return withoutReunioes.map((r) => ({ ...r, accessReunioes: false }));
+        })();
 
     const dpApprovalContractIds = isAdmin
       ? []
-      : await prisma.userDpApprovalContract.findMany({
-          where: { userId },
-          select: { contractId: true },
-        });
+      : await safePermissionRows('userDpApprovalContract', () =>
+          prisma.userDpApprovalContract.findMany({
+            where: { userId },
+            select: { contractId: true },
+          })
+        );
 
     const restrictedDpApprovalCostCenterIds = isAdmin
       ? []
-      : await prisma.userRestrictedDpApprovalCostCenter.findMany({
-          where: { userId },
-          select: { costCenterId: true },
+      : await safePermissionRows('userRestrictedDpApprovalCostCenter', async () => {
+          const delegate = (prisma as any).userRestrictedDpApprovalCostCenter;
+          if (!delegate?.findMany) return [];
+          return delegate.findMany({
+            where: { userId },
+            select: { costCenterId: true },
+          });
         });
 
     const fdApprovalContractIds = isAdmin
       ? []
-      : await prisma.userFdApprovalContract.findMany({
-          where: { userId },
-          select: { contractId: true },
+      : await safePermissionRows('userFdApprovalContract', async () => {
+          const delegate = (prisma as any).userFdApprovalContract;
+          if (!delegate?.findMany) return [];
+          return delegate.findMany({
+            where: { userId },
+            select: { contractId: true },
+          });
         });
 
     const dpRequestViewCostCenterIds = isAdmin
       ? []
-      : await prisma.userDpRequestViewCostCenter.findMany({
-          where: { userId },
-          select: { costCenterId: true },
+      : await safePermissionRows('userDpRequestViewCostCenter', async () => {
+          const delegate = (prisma as any).userDpRequestViewCostCenter;
+          if (!delegate?.findMany) return [];
+          return delegate.findMany({
+            where: { userId },
+            select: { costCenterId: true },
+          });
         });
 
     const contractModuleFlags: Record<string, {
@@ -385,7 +426,7 @@ router.get('/users/:userId', requirePermissionManagerOrAdministrator, async (req
         relatorios: r.accessRelatorios,
         ordemServico: r.accessOrdemServico,
         producaoSemanal: r.accessProducaoSemanal,
-        reunioes: r.accessReunioes,
+        reunioes: Boolean((r as { accessReunioes?: boolean }).accessReunioes),
       };
     }
 

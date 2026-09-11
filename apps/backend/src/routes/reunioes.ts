@@ -1,7 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import multer from 'multer';
 import { authenticate } from '../middleware/auth';
-import { assertContractAccess, assertContractModulePermission } from '../lib/contractAccess';
+import { assertContractAccess, assertContractModulePermission, assertRelatoriosContratoMutation } from '../lib/contractAccess';
 import { ReuniaoController, parseReuniaoKindParam } from '../controllers/ReuniaoController';
 
 const router = Router();
@@ -48,6 +48,17 @@ function handleReuniaoUploadError(error: unknown, req: Request, res: Response, n
   return next(error);
 }
 
+function mutateRelatorioContrato(action: 'criar' | 'editar' | 'excluir') {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      await assertRelatoriosContratoMutation(req as any, action);
+      next();
+    } catch (err) {
+      next(err);
+    }
+  };
+}
+
 router.use(authenticate);
 
 router.get('/template', (req, res, next) => controller.getTemplate(req as any, res, next));
@@ -73,22 +84,35 @@ router.use('/:contractId/:kind', parseReuniaoKindParam, async (req, res, next) =
 
 router.get('/:contractId/:kind', (req, res, next) => controller.getList(req as any, res, next));
 router.get('/:contractId/:kind/config', (req, res, next) => controller.getConfig(req as any, res, next));
-router.put('/:contractId/:kind/config', (req, res, next) => controller.saveConfig(req as any, res, next));
-router.post('/:contractId/:kind/periodo-atual', (req, res, next) =>
-  controller.ensurePeriodoAtual(req as any, res, next)
+router.put('/:contractId/:kind/config', mutateRelatorioContrato('editar'), (req, res, next) =>
+  controller.saveConfig(req as any, res, next)
 );
-router.post('/:contractId/:kind', (req, res, next) => controller.create(req as any, res, next));
+router.post(
+  '/:contractId/:kind/periodo-atual',
+  mutateRelatorioContrato('criar'),
+  (req, res, next) => controller.ensurePeriodoAtual(req as any, res, next)
+);
+router.post('/:contractId/:kind', mutateRelatorioContrato('criar'), (req, res, next) =>
+  controller.create(req as any, res, next)
+);
 router.get('/:contractId/:kind/:reuniaoId', (req, res, next) => controller.get(req as any, res, next));
-router.put('/:contractId/:kind/:reuniaoId', (req, res, next) => controller.save(req as any, res, next));
-router.delete('/:contractId/:kind/:reuniaoId', (req, res, next) => controller.delete(req as any, res, next));
+router.put('/:contractId/:kind/:reuniaoId', mutateRelatorioContrato('editar'), (req, res, next) =>
+  controller.save(req as any, res, next)
+);
+router.delete('/:contractId/:kind/:reuniaoId', mutateRelatorioContrato('excluir'), (req, res, next) =>
+  controller.delete(req as any, res, next)
+);
 router.post(
   '/:contractId/:kind/:reuniaoId/anexo/:tipo',
+  mutateRelatorioContrato('editar'),
   upload.single('file'),
   handleReuniaoUploadError,
   (req: Request, res: Response, next: NextFunction) => controller.uploadAnexo(req as any, res, next)
 );
-router.delete('/:contractId/:kind/:reuniaoId/anexo/:tipo', (req, res, next) =>
-  controller.deleteAnexo(req as any, res, next)
+router.delete(
+  '/:contractId/:kind/:reuniaoId/anexo/:tipo',
+  mutateRelatorioContrato('editar'),
+  (req, res, next) => controller.deleteAnexo(req as any, res, next)
 );
 
 export default router;

@@ -356,12 +356,14 @@ function QuestionField({
   allAnswers,
   onChange,
   profileOptions,
+  formReadOnly = false,
 }: {
   question: Question;
   answer: ReuniaoAnswer | undefined;
   allAnswers: Record<string, ReuniaoAnswer>;
   onChange: (next: ReuniaoAnswer) => void;
   profileOptions: MultiSelectSearchOption[];
+  formReadOnly?: boolean;
 }) {
   const normalizedQuestion = normalizeFormQuestion(question as Parameters<typeof normalizeFormQuestion>[0]);
   const value = answer?.value ?? (normalizedQuestion.type === 'rating' ? null : '');
@@ -379,7 +381,12 @@ function QuestionField({
         : [];
 
   const setValue = (v: string | number | null) => {
+    if (formReadOnly) return;
     onChange({ value: v, followUp: answer?.followUp });
+  };
+  const setFollowUp = (v: string) => {
+    if (formReadOnly) return;
+    onChange({ value: answer?.value ?? '', followUp: v });
   };
 
   const showFollowUp =
@@ -403,7 +410,7 @@ function QuestionField({
       : ((sliderValue - sliderMin) / (sliderMax - sliderMin)) * 100;
   const thumbPx = 16;
   const sliderFill = `calc((100% - ${thumbPx}px) * ${sliderPct / 100} + ${thumbPx / 2}px)`;
-  const locked = isQuestionReadOnly(normalizedQuestion);
+  const locked = isQuestionReadOnly(normalizedQuestion) || formReadOnly;
   const displayValue = hasFormula ? computedValue : value;
 
   return (
@@ -624,6 +631,8 @@ function QuestionField({
           <input
             type="text"
             value={String(value ?? '')}
+            readOnly={locked}
+            disabled={locked}
             onChange={(e) => setValue(e.target.value)}
             placeholder={question.placeholder || 'Código do QR…'}
             className={`min-w-0 flex-1 ${inputClasse}`}
@@ -642,24 +651,20 @@ function QuestionField({
                 <PillGroup
                   options={question.followUp.options || []}
                   value={followUpValue}
-                  onChange={(v) => onChange({ value: answer?.value ?? '', followUp: v })}
+                  onChange={(v) => setFollowUp(v)}
                 />
               ) : question.followUp.type === 'text' ? (
                 <input
                   type="text"
                   value={followUpValue}
-              onChange={(e) =>
-                onChange({ value: answer?.value ?? '', followUp: e.target.value })
-              }
+              onChange={(e) => setFollowUp(e.target.value)}
                   placeholder={question.followUp.placeholder}
                   className={inputClasse}
                 />
               ) : (
                 <textarea
                   value={followUpValue}
-              onChange={(e) =>
-                onChange({ value: answer?.value ?? '', followUp: e.target.value })
-              }
+              onChange={(e) => setFollowUp(e.target.value)}
                   placeholder={question.followUp.placeholder}
                   rows={2}
               className={`${FORM_FIELD_TEXTAREA_CLS} min-h-[3.5rem]`}
@@ -701,6 +706,8 @@ type Props = {
    * `modal`: overlay em tela cheia (comportamento original).
    */
   variant?: 'modal' | 'inline';
+  /** Só visualizar — sem salvar, anexar ou alterar campos. */
+  readOnly?: boolean;
 };
 
 function ReuniaoAnexosSection({
@@ -710,6 +717,7 @@ function ReuniaoAnexosSection({
   ata,
   video,
   onAnexoChange,
+  readOnly = false,
 }: {
   contractId: string;
   kind: AcompanhamentoKind;
@@ -717,6 +725,7 @@ function ReuniaoAnexosSection({
   ata: ReuniaoAnexoInfo | null;
   video: ReuniaoAnexoInfo | null;
   onAnexoChange: (tipo: 'ata' | 'video', value: ReuniaoAnexoInfo | null) => void;
+  readOnly?: boolean;
 }) {
   const [uploading, setUploading] = useState<'ata' | 'video' | null>(null);
   const ataInputRef = useRef<HTMLInputElement>(null);
@@ -780,6 +789,7 @@ function ReuniaoAnexosSection({
             <ExternalLink className="h-4 w-4" />
             {info.originalName || (tipo === 'ata' ? 'Ata' : 'Vídeo')}
           </a>
+          {!readOnly ? (
                 <button
                   type="button"
             onClick={() => void handleRemove(tipo)}
@@ -789,7 +799,10 @@ function ReuniaoAnexosSection({
             <Trash2 className="h-4 w-4" />
             Remover
                 </button>
+          ) : null}
         </div>
+      ) : readOnly ? (
+        <p className="text-sm text-gray-500 dark:text-gray-400">Nenhum arquivo anexado.</p>
       ) : (
                 <button
                   type="button"
@@ -854,6 +867,7 @@ export function ReuniaoFormModal({
   reuniaoId,
   onListPatch,
   variant = 'modal',
+  readOnly = false,
 }: Props) {
   const queryClient = useQueryClient();
   const [form, setForm] = useState<ReuniaoData>(EMPTY_DATA);
@@ -1137,6 +1151,7 @@ export function ReuniaoFormModal({
   };
 
   const handleFinish = async () => {
+    if (readOnly) return;
     const validation = findFirstValidationError();
     if (validation) {
       if (multiStep) setActiveFillStep(validation.stepIndex);
@@ -1169,6 +1184,7 @@ export function ReuniaoFormModal({
                 answer={form.answers[q.id]}
                 allAnswers={form.answers}
                 profileOptions={profileSelectOptions}
+                formReadOnly={readOnly}
             onChange={(ans) =>
               updateForm((prev) => ({
                 ...prev,
@@ -1240,6 +1256,7 @@ export function ReuniaoFormModal({
             reuniaoId={reuniaoId}
             ata={form.ata}
             video={form.video}
+            readOnly={readOnly}
             onAnexoChange={(tipo, value) =>
               updateForm((prev) => ({ ...prev, [tipo]: value }))
             }
@@ -1248,6 +1265,16 @@ export function ReuniaoFormModal({
       </div>
 
       <div className="flex justify-end gap-2 border-t border-gray-200 pt-6 dark:border-gray-700">
+        {readOnly ? (
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-10 items-center rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-800 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
+          >
+            Fechar
+          </button>
+        ) : (
+          <>
         {multiStep && activeFillStep > 0 ? (
           <button
             type="button"
@@ -1277,6 +1304,8 @@ export function ReuniaoFormModal({
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
             Salvar
           </button>
+        )}
+          </>
         )}
       </div>
     </div>

@@ -1,4 +1,4 @@
-import { PERMISSION_ACCESS_ACTION } from '@sistema-ponto/permission-modules';
+import { PERMISSION_ACCESS_ACTION, PERMISSION_MODULE_CRUD_ACTIONS } from '@sistema-ponto/permission-modules';
 import { prisma } from './prisma';
 import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
@@ -7,6 +7,8 @@ import { AuthRequest } from '../middleware/auth';
 export const CONTRACTS_MODULE_KEY = 'ponto_contratos';
 /** Igual a pathToModuleKey('/ponto/contratos/socios'). */
 export const CONTRACTS_SOCIOS_MODULE_KEY = 'ponto_contratos_socios';
+/** Igual a pathToModuleKey('/ponto/metricas/relatorios-contrato'). */
+export const RELATORIOS_CONTRATO_MODULE_KEY = 'ponto_metricas_relatorios-contrato';
 
 export type ContractAccessFilter =
   | { filter: 'all' }
@@ -212,4 +214,51 @@ export async function assertUserCanDeleteContract(userId: string, isAdmin: boole
     'excluir',
     'Sem permissão para excluir contratos',
   );
+}
+
+export async function userHasContractsModuleAccess(userId: string, isAdmin: boolean): Promise<boolean> {
+  if (isAdmin) return true;
+  const row = await prisma.userPermission.findFirst({
+    where: {
+      userId,
+      module: CONTRACTS_MODULE_KEY,
+      allowed: true,
+      action: { in: [PERMISSION_ACCESS_ACTION, ...PERMISSION_MODULE_CRUD_ACTIONS] },
+    },
+    select: { id: true },
+  });
+  return Boolean(row);
+}
+
+/**
+ * Mutação em reunião/relatório.
+ * Métricas → Relatórios de Contrato: só quem tem Criar/Editar/Excluir nessa linha.
+ * Quem tem o módulo Contratos continua preenchendo pela aba do contrato.
+ */
+export async function assertRelatoriosContratoMutation(
+  req: AuthRequest,
+  action: 'criar' | 'editar' | 'excluir'
+): Promise<void> {
+  if (!req.user) throw createError('Usuário não autenticado', 401);
+  if (req.user.isAdmin) return;
+  if (await userHasContractsModuleAccess(req.user.id, false)) return;
+
+  const rows = await prisma.userPermission.findMany({
+    where: {
+      userId: req.user.id,
+      module: RELATORIOS_CONTRATO_MODULE_KEY,
+      allowed: true,
+    },
+    select: { action: true },
+  });
+  const actions = new Set(rows.map((r) => r.action));
+  if (action === 'excluir') {
+    if (!actions.has('excluir')) {
+      throw createError('Você não tem permissão para excluir reuniões', 403);
+    }
+    return;
+  }
+  if (!actions.has('editar') && !actions.has('criar')) {
+    throw createError('Você só pode visualizar as reuniões quinzenais', 403);
+  }
 }
