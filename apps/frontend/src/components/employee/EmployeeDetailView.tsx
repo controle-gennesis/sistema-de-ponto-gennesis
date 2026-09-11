@@ -1197,7 +1197,13 @@ export function EmployeeDetailView({
       {/* z-50 com menu aberto: a animação page-enter deixa transform nas seções e as abas ficavam por cima do dropdown */}
       <div className={`flex items-center gap-5 ${headerMoreOpen ? 'relative z-50' : ''}`}>
         <div className="relative shrink-0">
-          <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-full bg-red-600 text-xl font-semibold text-white sm:h-24 sm:w-24 sm:text-2xl">
+          <div
+            className={`flex h-20 w-20 items-center justify-center overflow-hidden rounded-full text-xl font-semibold sm:h-24 sm:w-24 sm:text-2xl ${
+              selectedEmployeePhotoHref
+                ? 'bg-gray-200 dark:bg-gray-700'
+                : 'bg-red-600 text-white'
+            }`}
+          >
             {selectedEmployeePhotoHref ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img

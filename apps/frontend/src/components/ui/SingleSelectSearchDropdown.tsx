@@ -130,7 +130,11 @@ function OptionAvatar({
 }) {
   if (!url && !fallback) return null;
   return (
-    <span className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-red-600 text-xs font-semibold text-white">
+    <span
+      className={`flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full text-xs font-semibold ${
+        url ? 'bg-gray-200 dark:bg-gray-700' : 'bg-red-600 text-white'
+      }`}
+    >
       {url ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img src={url} alt="" className="h-full w-full object-cover" referrerPolicy="no-referrer" />

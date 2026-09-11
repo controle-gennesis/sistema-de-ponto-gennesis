@@ -411,7 +411,9 @@ export function TopNavbar({
                   onClick={() => {
                     profileAvatarInputRef.current?.click();
                   }}
-                  className="group relative flex size-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-red-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40"
+                  className={`group relative flex size-11 shrink-0 items-center justify-center overflow-hidden rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40 ${
+                    profilePhotoHref ? 'bg-gray-200 dark:bg-gray-700' : 'bg-red-600'
+                  }`}
                   aria-label="Carregar foto"
                   title="Carregar foto"
                 >

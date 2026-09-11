@@ -1185,7 +1185,11 @@ export function EmployeeList({
                         <td className="px-3 sm:px-6 py-3 align-middle text-left">
                           <div className="flex items-center gap-3">
                             <div
-                              className="w-11 h-11 rounded-full shrink-0 flex items-center justify-center overflow-hidden bg-red-600"
+                              className={`flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full ${
+                                profilePhotoHref
+                                  ? 'bg-gray-200 dark:bg-gray-700'
+                                  : 'bg-red-600'
+                              }`}
                             >
                               {profilePhotoHref ? (
                                 // eslint-disable-next-line @next/next/no-img-element
