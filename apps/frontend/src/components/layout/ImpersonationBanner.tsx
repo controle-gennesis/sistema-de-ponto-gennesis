@@ -28,10 +28,11 @@ export function ImpersonationBanner() {
     if (busy) return;
     setBusy(true);
     try {
+      const returnTo = authService.getImpersonationReturnPath() || '/ponto/funcionarios';
       await authService.stopImpersonation();
       await queryClient.clear();
       toast.success('Você voltou à sua conta de administrador');
-      router.replace('/ponto/funcionarios');
+      router.replace(returnTo);
       router.refresh();
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : 'Erro ao encerrar impersonação';

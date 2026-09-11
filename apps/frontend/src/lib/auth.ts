@@ -234,11 +234,13 @@ class AuthService {
 
   private impersonationAdminTokenKey = 'impersonationAdminToken';
   private impersonationTargetNameKey = 'impersonationTargetName';
+  private impersonationReturnPathKey = 'impersonationReturnPath';
 
   private clearImpersonationMeta(): void {
     if (typeof window === 'undefined') return;
     sessionStorage.removeItem(this.impersonationAdminTokenKey);
     sessionStorage.removeItem(this.impersonationTargetNameKey);
+    sessionStorage.removeItem(this.impersonationReturnPathKey);
   }
 
   isImpersonating(): boolean {
@@ -249,6 +251,14 @@ class AuthService {
   getImpersonationTargetName(): string | null {
     if (typeof window === 'undefined') return null;
     return sessionStorage.getItem(this.impersonationTargetNameKey);
+  }
+
+  /** Rota de onde o admin entrou como outro usuário (para voltar ao sair). */
+  getImpersonationReturnPath(): string | null {
+    if (typeof window === 'undefined') return null;
+    const path = sessionStorage.getItem(this.impersonationReturnPathKey);
+    if (!path || !path.startsWith('/') || path.startsWith('//')) return null;
+    return path;
   }
 
   async startImpersonation(userId: string): Promise<AuthResponse & { targetName?: string }> {
@@ -280,6 +290,12 @@ class AuthService {
 
     sessionStorage.setItem(this.impersonationAdminTokenKey, adminToken);
     sessionStorage.setItem(this.impersonationTargetNameKey, targetName);
+    if (typeof window !== 'undefined') {
+      const returnPath = `${window.location.pathname}${window.location.search}`;
+      if (returnPath.startsWith('/') && !returnPath.startsWith('//')) {
+        sessionStorage.setItem(this.impersonationReturnPathKey, returnPath);
+      }
+    }
 
     // Impersonação fica só na sessão do navegador (aba)
     this.setToken(body.data.token, false);
