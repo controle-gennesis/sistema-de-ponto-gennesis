@@ -3,7 +3,7 @@ import { PERMISSION_ACCESS_ACTION } from '@sistema-ponto/permission-modules';
 import { prisma } from '../lib/prisma';
 import { userHasAnyDpApproverAccess } from '../lib/dpApprovalAccess';
 import { userHasAnyFdApproverAccess } from '../lib/fdApprovalAccess';
-import { userHasFuelApprovePermission } from '../lib/fuelApprovalAccess';
+import { userHasAnyFuelApproverAccess } from '../lib/fuelApprovalAccess';
 import { userHasFuelSuppliesAccess } from '../lib/fuelSuppliesAccess';
 import { userHasVehicleReservationSuppliesAccess } from '../lib/vehicleReservationSuppliesAccess';
 import { userHasToolRentalSuppliesAccess } from '../lib/toolRentalSuppliesAccess';
@@ -186,7 +186,7 @@ export const requireFdApproverAccess = async (req: AuthRequest, res: Response, n
   }
 };
 
-/** Aprovação de abastecimento: permissão Controle ou gestor de contrato. */
+/** Aprovação de abastecimento: permissão Controle + contratos liberados. */
 export const requireFuelApproverAccess = async (
   req: AuthRequest,
   res: Response,
@@ -199,7 +199,7 @@ export const requireFuelApproverAccess = async (
     if (req.user.isAdmin) {
       return next();
     }
-    const ok = await userHasFuelApprovePermission(req.user.id);
+    const ok = await userHasAnyFuelApproverAccess(req.user.id);
     if (!ok) {
       return next(createError('Você não tem permissão para esta ação', 403));
     }

@@ -133,6 +133,8 @@ export function usePermissions() {
   const restrictedDpApprovalCostCenterIdSet = new Set(restrictedDpApprovalCostCenterIds);
   const fdApprovalContractIds: string[] = permissionData?.fdApprovalContractIds ?? [];
   const fdApprovalContractIdSet = new Set(fdApprovalContractIds);
+  const fuelApprovalContractIds: string[] = permissionData?.fuelApprovalContractIds ?? [];
+  const fuelApprovalContractIdSet = new Set(fuelApprovalContractIds);
   const gestorCostCenterIds: string[] = permissionData?.gestorCostCenterIds ?? [];
   const isUnbUser = !!permissionData?.isUnbUser;
   const unbCostCenterIds: string[] = permissionData?.unbCostCenterIds ?? [];
@@ -404,11 +406,11 @@ export function usePermissions() {
   /** Alias legado — mesmo escopo da RM (aprovação por contrato). */
   const gestorScopedCostCenterIds = rmGestorScopedCostCenterIds;
 
-  /** Bloco «Fila de Abastecimento» na tela de Aprovações (somente permissão Controle). */
+  /** Bloco «Fila de Abastecimento» na tela de Aprovações (permissão Controle + contratos). */
   const canApproveFuel =
     isAdministrator ||
     !!permissionData?.isAdmin ||
-    can(pk('/ponto/controle/aprovar-combustivel'));
+    (can(pk('/ponto/controle/aprovar-combustivel')) && fuelApprovalContractIds.length > 0);
 
   /** Custos/valores nos cards do Kanban (permissão Controle ou admin). */
   const canViewKanbanValues =
@@ -526,6 +528,8 @@ export function usePermissions() {
     restrictedDpApprovalCostCenterIdSet,
     fdApprovalContractIds,
     fdApprovalContractIdSet,
+    fuelApprovalContractIds,
+    fuelApprovalContractIdSet,
     canApproveRestrictedDpRequests,
     gestorCostCenterIds,
     isUnbUser,
@@ -651,7 +655,7 @@ export function useRoutePermission(route: string) {
       can(pk('/ponto/controle/aprovar-solicitacoes-dp')) ||
       canApproveFd ||
       canApproveEspelhoNf ||
-      can(pk('/ponto/controle/aprovar-combustivel')) ||
+      canApproveFuel ||
       can(pk('/ponto/controle/aprovar-oc-compras')) ||
       can(pk('/ponto/controle/aprovar-oc-diretoria')) ||
       can(pk('/ponto/controle/aprovar-requisicoes-materiais')),
