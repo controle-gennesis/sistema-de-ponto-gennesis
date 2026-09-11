@@ -125,6 +125,7 @@ router.get('/me', async (req: AuthRequest, res, next) => {
         accessRelatorios: true,
         accessOrdemServico: true,
         accessProducaoSemanal: true,
+        accessReunioes: true,
       },
     });
 
@@ -162,6 +163,7 @@ router.get('/me', async (req: AuthRequest, res, next) => {
         relatorios: boolean;
         ordemServico: boolean;
         producaoSemanal: boolean;
+        reunioes: boolean;
       }
     > = {};
     for (const r of allowedContractIds) {
@@ -170,6 +172,7 @@ router.get('/me', async (req: AuthRequest, res, next) => {
         relatorios: r.accessRelatorios,
         ordemServico: r.accessOrdemServico,
         producaoSemanal: r.accessProducaoSemanal,
+        reunioes: r.accessReunioes,
       };
     }
 
@@ -341,6 +344,7 @@ router.get('/users/:userId', requirePermissionManagerOrAdministrator, async (req
             accessRelatorios: true,
             accessOrdemServico: true,
             accessProducaoSemanal: true,
+            accessReunioes: true,
           },
         });
 
@@ -373,7 +377,7 @@ router.get('/users/:userId', requirePermissionManagerOrAdministrator, async (req
         });
 
     const contractModuleFlags: Record<string, {
-      orcamento: boolean; relatorios: boolean; ordemServico: boolean; producaoSemanal: boolean;
+      orcamento: boolean; relatorios: boolean; ordemServico: boolean; producaoSemanal: boolean; reunioes: boolean;
     }> = {};
     for (const r of contractPermRows) {
       contractModuleFlags[r.contractId] = {
@@ -381,6 +385,7 @@ router.get('/users/:userId', requirePermissionManagerOrAdministrator, async (req
         relatorios: r.accessRelatorios,
         ordemServico: r.accessOrdemServico,
         producaoSemanal: r.accessProducaoSemanal,
+        reunioes: r.accessReunioes,
       };
     }
 
@@ -417,7 +422,13 @@ router.put('/users/:userId', requirePermissionManagerOrAdministrator, async (req
     const shouldSyncFdContracts = Array.isArray(rawFdContracts);
     const rawViewCc = req.body?.dpRequestViewCostCenterIds;
     const shouldSyncViewCc = Array.isArray(rawViewCc);
-    type ContractFlags = { orcamento?: boolean; relatorios?: boolean; ordemServico?: boolean; producaoSemanal?: boolean };
+    type ContractFlags = {
+      orcamento?: boolean;
+      relatorios?: boolean;
+      ordemServico?: boolean;
+      producaoSemanal?: boolean;
+      reunioes?: boolean;
+    };
     const rawModuleFlags: Record<string, ContractFlags> =
       req.body?.contractModuleFlags && typeof req.body.contractModuleFlags === 'object'
         ? (req.body.contractModuleFlags as Record<string, ContractFlags>)
@@ -586,6 +597,7 @@ router.put('/users/:userId', requirePermissionManagerOrAdministrator, async (req
                 accessRelatorios: flags.relatorios !== false,
                 accessOrdemServico: flags.ordemServico !== false,
                 accessProducaoSemanal: flags.producaoSemanal !== false,
+                accessReunioes: flags.reunioes === true,
               };
             }),
           });
@@ -835,7 +847,13 @@ router.put('/position-template', requireAdministrator, async (req: AuthRequest, 
     const shouldSyncFdContracts = Array.isArray(rawFdContracts);
     const rawViewCc = req.body?.dpRequestViewCostCenterIds;
     const shouldSyncViewCc = Array.isArray(rawViewCc);
-    type PosContractFlags = { orcamento?: boolean; relatorios?: boolean; ordemServico?: boolean; producaoSemanal?: boolean };
+    type PosContractFlags = {
+      orcamento?: boolean;
+      relatorios?: boolean;
+      ordemServico?: boolean;
+      producaoSemanal?: boolean;
+      reunioes?: boolean;
+    };
     const rawModuleFlagsPos: Record<string, PosContractFlags> =
       req.body?.contractModuleFlags && typeof req.body.contractModuleFlags === 'object'
         ? (req.body.contractModuleFlags as Record<string, PosContractFlags>)
@@ -944,7 +962,13 @@ router.put('/position-template', requireAdministrator, async (req: AuthRequest, 
     }
 
     // Monta flags de módulo por contrato para salvar no JSON
-    const builtModuleFlags: Record<string, { orcamento: boolean; relatorios: boolean; ordemServico: boolean; producaoSemanal: boolean }> = {};
+    const builtModuleFlags: Record<string, {
+      orcamento: boolean;
+      relatorios: boolean;
+      ordemServico: boolean;
+      producaoSemanal: boolean;
+      reunioes: boolean;
+    }> = {};
     for (const contractId of contractIdsToSave) {
       const f = rawModuleFlagsPos[contractId] ?? {};
       builtModuleFlags[contractId] = {
@@ -952,6 +976,7 @@ router.put('/position-template', requireAdministrator, async (req: AuthRequest, 
         relatorios: f.relatorios !== false,
         ordemServico: f.ordemServico !== false,
         producaoSemanal: f.producaoSemanal !== false,
+        reunioes: f.reunioes === true,
       };
     }
 

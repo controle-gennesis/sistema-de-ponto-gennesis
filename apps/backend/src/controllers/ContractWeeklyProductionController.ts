@@ -6,6 +6,7 @@ import { parseDateInput } from '../utils/dateInput';
 import { assertContractModulePermission } from '../lib/contractAccess';
 
 export class ContractWeeklyProductionController {
+  /** Cadastro de produção semanal: OS / SE é opcional. */
   async getProductionsByContract(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { contractId } = req.params;
@@ -39,17 +40,17 @@ export class ContractWeeklyProductionController {
 
       const contract = await prisma.contract.findUnique({ where: { id: contractId } });
       if (!contract) throw createError('Contrato não encontrado', 404);
-      if (!divSe?.trim()) throw createError('OS / SE é obrigatório', 400);
       if (!responsiblePerson?.trim()) throw createError('Responsável pelo preenchimento é obrigatório', 400);
       const value = Number(weeklyProductionValue);
       if (isNaN(value) || value < 0) throw createError('Valor da produção semanal inválido', 400);
 
       const fillingDateValue = fillingDate ? parseDateInput(fillingDate) : new Date();
+      const divSeValue = String(divSe ?? '').trim();
       const row = await prisma.contractWeeklyProduction.create({
         data: {
           contractId,
           fillingDate: fillingDateValue,
-          divSe: divSe.trim(),
+          divSe: divSeValue,
           weeklyProductionValue: value,
           responsiblePerson: responsiblePerson.trim()
         }

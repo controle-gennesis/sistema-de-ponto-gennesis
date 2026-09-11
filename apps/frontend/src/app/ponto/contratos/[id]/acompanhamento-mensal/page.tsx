@@ -1,34 +1,24 @@
 'use client';
 
-import { FileText } from 'lucide-react';
-import {
-  ContratoAcompanhamentoListPage,
-  type ContratoAcompanhamentoListConfig,
-} from '@/components/contract/ContratoAcompanhamentoListPage';
+import { useEffect } from 'react';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
+import { Loading } from '@/components/ui/Loading';
 
-const CONFIG: ContratoAcompanhamentoListConfig = {
-  kind: 'mensal',
-  pageTitle: 'Relatório Mensal',
-  sectionTitle: 'Relatório mensal',
-  sectionDescription:
-    'Preenchimento mensal feito pela equipe do contrato. Configure o formulário e registre o mês atual.',
-  Icon: FileText,
-  periodColumnLabel: 'Mês',
-  searchPlaceholder: 'Buscar por mês ou responsável...',
-  emptyMessage:
-    'Nenhum relatório mensal ainda. Configure o formulário e clique em "Preencher mês atual".',
-  configModalTitle: 'Formulário do relatório mensal',
-  configModalDescription:
-    'Escolha o formulário mensal deste contrato. Os templates vêm de Cadastros → Formulários.',
-  fillButtonLabel: 'Preencher mês atual',
-  fillButtonContinueLabel: 'Continuar mês atual',
-  currentPeriodSummaryLabel: 'Mês atual',
-  recordsCountLabel: (count) =>
-    `${count} ${count === 1 ? 'mês registrado' : 'meses registrados'}`,
-  saveSuccessToast: 'Formulário do relatório mensal configurado!',
-  openSuccessToast: 'Mês atual aberto para preenchimento.',
-};
+/** Mantém o link antigo apontando para a aba Relatório Mensal em Reuniões de Contrato. */
+export default function AcompanhamentoMensalRedirectPage() {
+  const params = useParams();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const rawId = params?.id;
+  const contractId = typeof rawId === 'string' ? rawId : Array.isArray(rawId) ? rawId[0] ?? '' : '';
 
-export default function AcompanhamentoMensalPage() {
-  return <ContratoAcompanhamentoListPage config={CONFIG} />;
+  useEffect(() => {
+    if (!contractId) return;
+    const qs = new URLSearchParams(searchParams.toString());
+    qs.set('aba', 'relatorio-mensal');
+    const query = qs.toString();
+    router.replace(`/ponto/contratos/${contractId}/reunioes${query ? `?${query}` : ''}`);
+  }, [contractId, router, searchParams]);
+
+  return <Loading message="Redirecionando..." fullScreen size="lg" />;
 }

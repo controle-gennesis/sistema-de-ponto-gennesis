@@ -26,7 +26,6 @@ import {
   Loader2,
   Eye,
   ChevronDown,
-  Info,
   Search,
   Filter,
   MoreVertical,
@@ -85,6 +84,8 @@ import { loadPdfBrandingLogoDataUrl } from '@/lib/loadPdfBrandingLogo';
 import { isUnbRelatedLabel } from '@/lib/unbBranding';
 import { exportHistoricoOsPdf, exportPleitosOsToXlsx, getOsFaturamentoAcumulado, getOsPleiteadoPct, getOsRestantePleitear, getOsStatus, getOsStatusFaturamento, isOsConcluida, isOsPleiteada100, osStatusBadgeClass, sumOsPleiteadoTotal, type BillingForOsCheck, type PleitoOsExportRow } from '@/lib/pleitoOsExport';
 import { exportContractBillingsToXlsx } from '@/lib/contractBillingExport';
+import { productionWeekDate, formatProductionWeekRange } from '@/lib/contractWeeklyProduction';
+import { CONTRACT_PAGE_ACCENTS, CONTRACT_PAGE_SECTION_LABEL, CONTRACT_PAGE_SURFACE } from '@/lib/contractPageSurface';
 import {
   billingAndamentoBadgeClass,
   buildDisplayIdMap,
@@ -118,6 +119,7 @@ import {
   type ControleGeralTetoOrcamentarioEntry
 } from '@/app/ponto/contratos/controle-geral/tetoOrcamentario';
 import { ContractGastosResumoModal } from '@/components/contract/ContractGastosResumoModal';
+import { ContratoFaturamentoCharts } from '@/components/contract/ContratoFaturamentoCharts';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
 
 interface ContractBilling {
@@ -208,18 +210,37 @@ const MESES = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'O
 
 const LIST_DISPLAY_LIMIT = 10;
 const LIST_SEARCH_INPUT_CLASS =
-  'h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100';
+  'h-10 w-full rounded-xl border border-gray-200 bg-white/80 py-2 pl-9 pr-9 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-white/10 dark:bg-gray-950/40 dark:text-gray-100';
 
 const OS_TOOLBAR_BTN_ICON = 'h-4 w-4 shrink-0 text-gray-500 dark:text-gray-400';
 
 const OS_TOOLBAR_BTN =
-  'inline-flex h-10 shrink-0 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700';
+  'inline-flex h-10 shrink-0 items-center gap-1.5 rounded-xl border border-gray-200 bg-white/80 px-3.5 text-sm font-semibold text-gray-700 shadow-sm transition-colors hover:border-gray-300 hover:bg-white disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/10 dark:bg-gray-950/40 dark:text-gray-200 dark:hover:border-white/20 dark:hover:bg-gray-900';
 
 const OS_TOOLBAR_BTN_DANGER =
-  'inline-flex h-10 shrink-0 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-red-600 transition-colors hover:border-red-200 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-red-400 dark:hover:border-red-900/50 dark:hover:bg-red-950/25';
+  'inline-flex h-10 shrink-0 items-center gap-1.5 rounded-xl border border-gray-200 bg-white/80 px-3.5 text-sm font-semibold text-red-600 shadow-sm transition-colors hover:border-red-200 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/10 dark:bg-gray-950/40 dark:text-red-400 dark:hover:border-red-900/50 dark:hover:bg-red-950/25';
 
 const OS_TOOLBAR_BTN_PRIMARY =
-  'inline-flex h-10 shrink-0 items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 text-sm font-semibold text-blue-700 transition-colors hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-blue-800/60 dark:bg-blue-950/30 dark:text-blue-300 dark:hover:bg-blue-900/40';
+  'inline-flex h-10 shrink-0 items-center gap-2 rounded-xl bg-red-600 px-4 text-sm font-semibold text-white shadow-sm shadow-red-600/25 transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50';
+
+function ContractSurfaceCard({
+  className,
+  accent,
+  children,
+  ...rest
+}: React.ComponentProps<typeof Card> & { accent?: string }) {
+  return (
+    <Card
+      className={[CONTRACT_PAGE_SURFACE, className].filter(Boolean).join(' ')}
+      {...rest}
+    >
+      {accent ? (
+        <div className={`pointer-events-none absolute inset-x-0 top-0 z-10 h-1 bg-gradient-to-r ${accent}`} />
+      ) : null}
+      {children}
+    </Card>
+  );
+}
 
 function pleitoMatchesSearchTerm(p: ContractPleito, term: string): boolean {
   const t = term.trim().toLowerCase();
@@ -249,6 +270,18 @@ function pleitoMatchesSearchTerm(p: ContractPleito, term: string): boolean {
   return haystack.includes(t);
 }
 
+function productionWeekFromFilling(fillingDate: string | Date | null | undefined): Date | null {
+  const d = parseDateSafe(fillingDate);
+  if (!d) return null;
+  return productionWeekDate(d);
+}
+
+function formatProductionWeekDate(fillingDate: string | Date | null | undefined): string {
+  const start = parseDateSafe(fillingDate);
+  if (!start) return '-';
+  return formatProductionWeekRange(start);
+}
+
 function productionMatchesSearchTerm(p: ContractWeeklyProduction, term: string): boolean {
   const t = term.trim().toLowerCase();
   if (!t) return true;
@@ -256,6 +289,7 @@ function productionMatchesSearchTerm(p: ContractWeeklyProduction, term: string):
     p.divSe,
     p.responsiblePerson,
     p.fillingDate,
+    formatProductionWeekDate(p.fillingDate),
     formatCurrencyInput(p.weeklyProductionValue),
   ]
     .filter(Boolean)
@@ -358,9 +392,6 @@ const FILTER_OS_STATUS_FATURAMENTO_OPTIONS = labeledToSelectOptions([
   { value: 'Faturado parcial', label: 'Faturado parcial' },
   { value: 'Faturado 100%', label: 'Faturado 100%' },
 ]);
-
-const CONTROLE_GERAL_META_AJUDA =
-  'Meta ideal = saldo ÷ meses restantes até o fim da vigência e permanece fixa até aditivo ou ajuste. Aditivos contratuais entram na data e vão até o fim da vigência. Ajuste do valor anual redistribui só o delta (+/−) somado às metas já planejadas do mês da data até dezembro daquele ano (não troca a base pela fatia anual inteira nem altera anos seguintes). Meta real = saldo contratual (base + aditivos − faturamento) ÷ meses restantes da vigência; com ajuste anual, aplica o mesmo pool (metas restantes do ano + delta) só até dezembro, reduzindo com o faturamento.';
 
 /** Oculta gasto total e linha Gastos na UI; dados RM continuam sendo carregados. */
 const EXIBIR_GASTOS_CONTRATO_NA_UI = false;
@@ -941,6 +972,7 @@ export default function ContractDetailPage() {
     canAccessContract,
     canAccessContractOrcamentoTab,
     canAccessContractRelatoriosTab,
+    canAccessContractReunioesTab,
     canAccessContractOrdemServicoTab,
     canAccessContractProducaoSemanalTab
   } = usePermissions();
@@ -949,7 +981,8 @@ export default function ContractDetailPage() {
     typeof idParam === 'string' ? idParam : Array.isArray(idParam) ? idParam[0] ?? '' : '';
   const canAccessOrcamento = canAccessContractOrcamentoTab(contractId);
   const canAccessRelatorios = canAccessContractRelatoriosTab(contractId);
-  const canAccessReunioes = true;
+  const canAccessReunioesDeContrato = isElevatedUser || canAccessContract(contractId);
+  const canAccessReunioesAba = canAccessContractReunioesTab(contractId);
   const canAccessOrdemServicoModulo = canAccessContractOrdemServicoTab(contractId);
   const canAccessProducaoSemanalModulo = canAccessContractProducaoSemanalTab(contractId);
   // Liberado na aba Contratos = pode cadastrar/editar neste contrato (sem exigir coluna Criar da aba Acesso)
@@ -966,8 +999,9 @@ export default function ContractDetailPage() {
   const containerRef = useRef<HTMLDivElement | null>(null);
 
   const currentYear = new Date().getFullYear();
+  const currentMonth = new Date().getMonth() + 1;
   const [selectedYear, setSelectedYear] = useState(currentYear);
-  const [selectedMonth, setSelectedMonth] = useState(0); // 0 = todos
+  const [selectedMonth, setSelectedMonth] = useState(currentMonth);
   const [showBillingModal, setShowBillingModal] = useState(false);
   const [showPleitoModal, setShowPleitoModal] = useState(false);
   const [showProductionModal, setShowProductionModal] = useState(false);
@@ -1499,13 +1533,13 @@ export default function ContractDetailPage() {
   const { data: semanalListaData, isLoading: loadingSemanalCount } = useQuery({
     queryKey: ['reunioes', 'semanal', contractId],
     queryFn: async () => (await api.get(`/reunioes/${contractId}/semanal`)).data,
-    enabled: !!contractId && canAccessReunioes,
+    enabled: !!contractId && canAccessReunioesAba,
   });
 
   const { data: mensalListaData, isLoading: loadingMensalCount } = useQuery({
     queryKey: ['reunioes', 'mensal', contractId],
     queryFn: async () => (await api.get(`/reunioes/${contractId}/mensal`)).data,
-    enabled: !!contractId && canAccessReunioes,
+    enabled: !!contractId && canAccessReunioesDeContrato,
   });
 
   const orcamentosCount = Array.isArray(orcamentosListaData?.orcamentos)
@@ -1834,11 +1868,11 @@ export default function ContractDetailPage() {
     return valorAnualBase + adj.delta;
   }, [valorAnualBase, annualAdjustByYear, safeSelectedYear]);
 
-  // Produção Semanal filtrada por Mês/Ano selecionados
+  // Produção Semanal filtrada por Mês/Ano da semana (preenchimento + 7 dias)
   const filteredProductions = useMemo(() => {
     return productions.filter((p) => {
       if (!p.fillingDate) return isAllYears && selectedMonth === 0;
-      const d = parseDateSafe(p.fillingDate);
+      const d = productionWeekFromFilling(p.fillingDate);
       if (!d) return isAllYears && selectedMonth === 0;
 
       if (!isAllYears && d.getFullYear() !== selectedYear) return false;
@@ -1944,12 +1978,12 @@ export default function ContractDetailPage() {
     return porMes;
   }, [billings, safeSelectedYear]);
 
-  // Soma da produção semanal por mês no ano selecionado (por fillingDate)
+  // Soma da produção semanal por mês no ano selecionado (semana = preenchimento + 7 dias)
   const producaoPorMes = useMemo(() => {
     const porMes: number[] = new Array(12).fill(0);
     const year = safeSelectedYear;
     productions.forEach((p) => {
-      const d = parseDateSafe(p.fillingDate);
+      const d = productionWeekFromFilling(p.fillingDate);
       if (!d) return;
       if (d.getFullYear() === year) {
         const mes = d.getMonth(); // 0-11
@@ -2027,6 +2061,18 @@ export default function ContractDetailPage() {
     }
     return m;
   }, [billings]);
+
+  /** Produção semanal preenchida por mês da semana (preenchimento + 7 dias). */
+  const producaoPorYmKey = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const p of productions) {
+      const d = productionWeekFromFilling(p.fillingDate);
+      if (!d) continue;
+      const k = toYearMonthKey(d.getFullYear(), d.getMonth() + 1);
+      m.set(k, (m.get(k) || 0) + p.weeklyProductionValue);
+    }
+    return m;
+  }, [productions]);
 
   const vigenciaMonthList = useMemo(() => {
     if (!contractVigenciaDates) return [] as VigenciaMonth[];
@@ -2452,7 +2498,7 @@ export default function ContractDetailPage() {
     const result: Record<number, number> = {};
     availableYears.forEach((year) => {
       result[year] = productions
-        .filter((p) => getDateYear(p.fillingDate) === year)
+        .filter((p) => productionWeekFromFilling(p.fillingDate)?.getFullYear() === year)
         .reduce((acc, p) => acc + p.weeklyProductionValue, 0);
     });
     return result;
@@ -2488,6 +2534,61 @@ export default function ContractDetailPage() {
     });
     return result;
   }, [availableYears, producaoPorAno, faturamentoPorAno]);
+
+  const faturamentoChartsYear = isAllYears
+    ? availableYears.includes(currentYear)
+      ? currentYear
+      : availableYears[availableYears.length - 1] ?? currentYear
+    : safeSelectedYear;
+
+  const faturamentoFluxoSeries = useMemo(() => {
+    const months: Array<{ y: number; m: number; key: string }> = isAllYears
+      ? vigenciaMonthList.length > 0
+        ? vigenciaMonthList
+        : availableYears.flatMap((y) =>
+            Array.from({ length: 12 }, (_, i) => ({
+              y,
+              m: i + 1,
+              key: toYearMonthKey(y, i + 1),
+            }))
+          )
+      : Array.from({ length: 12 }, (_, i) => ({
+          y: safeSelectedYear,
+          m: i + 1,
+          key: toYearMonthKey(safeSelectedYear, i + 1),
+        }));
+
+    const yearsInSeries = Array.from(new Set(months.map((item) => item.y)));
+    const gastosPorYm = new Map<string, number>();
+    for (const year of yearsInSeries) {
+      const porMes = aggregateGastosNaturezaMonthlyTotals(contractGastosNaturezaRows, year);
+      porMes.forEach((valor, idx) => {
+        gastosPorYm.set(toYearMonthKey(year, idx + 1), valor);
+      });
+    }
+
+    return months.map(({ y, m, key }) => {
+      const faturamento = faturamentoPorYmKey.get(key) || 0;
+      const gastos = Math.abs(gastosPorYm.get(key) || 0);
+      const producao = producaoPorYmKey.get(key) || 0;
+      return {
+        monthKey: key,
+        label: `${MESES[m - 1]}/${String(y).slice(-2)}`,
+        gastos,
+        faturamento,
+        producao,
+        diferenca: faturamento - gastos,
+      };
+    });
+  }, [
+    isAllYears,
+    vigenciaMonthList,
+    availableYears,
+    safeSelectedYear,
+    contractGastosNaturezaRows,
+    faturamentoPorYmKey,
+    producaoPorYmKey,
+  ]);
 
   // Faturamento filtrado por ano e mês (para exibição nas tabelas)
   const filteredBillings = useMemo(() => {
@@ -2772,12 +2873,8 @@ export default function ContractDetailPage() {
     }
     const gross = parseCurrencyInput(billingForm.grossValue);
     const net = parseCurrencyInput(billingForm.netValue);
-    if (!billingForm.issueDate || !billingForm.invoiceNumber.trim() || !billingForm.serviceOrder.trim()) {
+    if (!billingForm.issueDate || !billingForm.invoiceNumber.trim()) {
       toast.error('Preencha todos os campos obrigatórios');
-      return;
-    }
-    if (!billingForm.pleitoId.trim()) {
-      toast.error('Selecione o pleito vinculado ao faturamento');
       return;
     }
     if (gross === 0) {
@@ -2811,7 +2908,7 @@ export default function ContractDetailPage() {
     if (!selectedBilling) return;
     const gross = parseCurrencyInput(billingEditForm.grossValue);
     const net = parseCurrencyInput(billingEditForm.netValue);
-    if (!billingEditForm.issueDate || !billingEditForm.invoiceNumber.trim() || !billingEditForm.serviceOrder.trim()) {
+    if (!billingEditForm.issueDate || !billingEditForm.invoiceNumber.trim()) {
       toast.error('Preencha todos os campos obrigatórios');
       return;
     }
@@ -2844,7 +2941,7 @@ export default function ContractDetailPage() {
     const value = parseCurrencyInput(productionForm.weeklyProductionValue);
     const responsiblePerson =
       productionForm.responsiblePerson.trim() || defaultProductionResponsiblePerson;
-    if (!productionForm.divSe.trim() || !responsiblePerson) {
+    if (!responsiblePerson) {
       toast.error('Preencha todos os campos obrigatórios');
       return;
     }
@@ -2869,7 +2966,7 @@ export default function ContractDetailPage() {
     }
     if (!selectedProduction) return;
     const value = parseCurrencyInput(productionEditForm.weeklyProductionValue);
-    if (!productionEditForm.divSe.trim() || !productionEditForm.responsiblePerson.trim()) {
+    if (!productionEditForm.responsiblePerson.trim()) {
       toast.error('Preencha todos os campos obrigatórios');
       return;
     }
@@ -3463,14 +3560,14 @@ export default function ContractDetailPage() {
   return (
     <ProtectedRoute route="/ponto/contratos" contractId={contractId}>
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
-        <div ref={containerRef} className="space-y-6">
+        <div ref={containerRef} className="space-y-5">
           {/* Header */}
           <div className="space-y-4">
             <div className="relative flex min-h-[3.25rem] items-center justify-center py-1">
               <Link
                 href="/ponto/contratos"
                 aria-label="Voltar para contratos"
-                className="absolute left-0 top-1/2 z-10 inline-flex -translate-y-1/2 items-center gap-2 rounded-lg px-1 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-400 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100"
+                className="absolute left-0 top-1/2 z-10 inline-flex -translate-y-1/2 items-center gap-2 rounded-xl px-2 py-1.5 text-sm font-medium text-gray-500 transition-colors hover:bg-white/70 hover:text-gray-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-400 dark:text-gray-400 dark:hover:bg-white/10 dark:hover:text-gray-100"
               >
                 <ArrowLeft className="h-4 w-4 shrink-0" />
                 Voltar
@@ -3528,12 +3625,10 @@ export default function ContractDetailPage() {
                 )}
               </div>
               <div className="w-full max-w-3xl px-24 text-center sm:px-32">
-                <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl break-words">
+                <p className={CONTRACT_PAGE_SECTION_LABEL}>Contrato nº {contract.number}</p>
+                <h1 className="mt-1 break-words text-2xl font-semibold tracking-tight text-gray-900 dark:text-gray-50 sm:text-3xl">
                   {contract.name}
                 </h1>
-                <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400">
-                  Contrato nº {contract.number}
-                </p>
               </div>
             </div>
 
@@ -3559,15 +3654,14 @@ export default function ContractDetailPage() {
 
           </div>
 
-          <div className="space-y-8">
+          <div className="space-y-5">
           <div className="space-y-4">
-            <p className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">Contrato</p>
-          {/* Resumo do contrato */}
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 xl:grid-cols-3">
-            <Card>
+            <p className={CONTRACT_PAGE_SECTION_LABEL}>Contrato</p>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-5 xl:grid-cols-3">
+            <ContractSurfaceCard accent={CONTRACT_PAGE_ACCENTS.indigo}>
               <CardContent className="p-4 sm:p-6">
                 <div className="flex items-center">
-                  <div className="flex-shrink-0 rounded-lg bg-indigo-100 p-2 dark:bg-indigo-900/30 sm:p-3">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-indigo-100 text-indigo-600 ring-1 ring-indigo-200/80 dark:bg-indigo-500/15 dark:text-indigo-300 dark:ring-indigo-400/20">
                     <CalendarDays className="h-5 w-5 text-indigo-600 dark:text-indigo-400 sm:h-6 sm:w-6" />
                   </div>
                   <div className="ml-3 min-w-0 flex-1 sm:ml-4">
@@ -3575,7 +3669,7 @@ export default function ContractDetailPage() {
                       Vigência
                     </p>
                     <div className="group relative mt-1 w-fit max-w-full">
-                      <p className="cursor-default text-xl font-bold leading-snug text-gray-900 dark:text-gray-100 sm:text-2xl">
+                      <p className="cursor-default text-xl font-semibold tracking-tight leading-snug text-gray-900 dark:text-gray-50 sm:text-2xl">
                         {formatDate(contract.startDate)} até {formatDate(contract.endDate)}
                       </p>
                       <div
@@ -3592,13 +3686,13 @@ export default function ContractDetailPage() {
                   </div>
                 </div>
               </CardContent>
-            </Card>
+            </ContractSurfaceCard>
 
-            <Card>
+            <ContractSurfaceCard accent={CONTRACT_PAGE_ACCENTS.blue}>
               <CardContent className="p-4 sm:p-6">
                 <div className="flex items-start justify-between gap-2 sm:items-center sm:gap-3">
                   <div className="flex min-w-[120px] flex-1 items-center pr-2">
-                    <div className="flex-shrink-0 rounded-lg bg-blue-100 p-2 dark:bg-blue-900/30 sm:p-3">
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-100 text-blue-600 ring-1 ring-blue-200/80 dark:bg-blue-500/15 dark:text-blue-300 dark:ring-blue-400/20">
                       <Receipt className="h-5 w-5 text-blue-600 dark:text-blue-400 sm:h-6 sm:w-6" />
                     </div>
                     <div className="ml-3 min-w-0 flex-1 overflow-hidden sm:ml-4">
@@ -3606,7 +3700,7 @@ export default function ContractDetailPage() {
                         Valor + Aditivos
                       </p>
                       <div className="group relative mt-1 w-fit max-w-full">
-                        <p className="cursor-default text-xl font-bold text-gray-900 dark:text-gray-100 sm:text-2xl">
+                        <p className="cursor-default text-xl font-semibold tracking-tight text-gray-900 dark:text-gray-50 sm:text-2xl">
                           {formatCurrency(valorMaisAditivosTotal)}
                         </p>
                         <div
@@ -3640,13 +3734,13 @@ export default function ContractDetailPage() {
                   </button>
                 </div>
               </CardContent>
-            </Card>
+            </ContractSurfaceCard>
 
-            <Card>
+            <ContractSurfaceCard accent={CONTRACT_PAGE_ACCENTS.sky}>
               <CardContent className="p-4 sm:p-6">
                 <div className="flex items-start justify-between gap-2 sm:items-center sm:gap-3">
                   <div className="flex min-w-[120px] flex-1 items-center pr-2">
-                    <div className="flex-shrink-0 rounded-lg bg-sky-100 p-2 dark:bg-sky-900/30 sm:p-3">
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-sky-100 text-sky-600 ring-1 ring-sky-200/80 dark:bg-sky-500/15 dark:text-sky-300 dark:ring-sky-400/20">
                       <FileText className="h-5 w-5 text-sky-600 dark:text-sky-400 sm:h-6 sm:w-6" />
                     </div>
                     <div className="ml-3 min-w-0 flex-1 overflow-hidden sm:ml-4">
@@ -3654,10 +3748,10 @@ export default function ContractDetailPage() {
                         Valor anual
                       </p>
                       {isAllYears ? (
-                        <p className="mt-1 text-xl font-bold text-gray-900 dark:text-gray-100 sm:text-2xl">—</p>
+                        <p className="mt-1 text-xl font-semibold tracking-tight text-gray-900 dark:text-gray-50 sm:text-2xl">—</p>
                       ) : (
                         <div className="group relative mt-1 w-fit max-w-full">
-                          <p className="cursor-default text-xl font-bold text-gray-900 dark:text-gray-100 sm:text-2xl">
+                          <p className="cursor-default text-xl font-semibold tracking-tight text-gray-900 dark:text-gray-50 sm:text-2xl">
                             {valorAnualAjustado !== null ? formatCurrency(valorAnualAjustado) : '-'}
                           </p>
                           <div
@@ -3716,75 +3810,75 @@ export default function ContractDetailPage() {
                   </button>
                 </div>
               </CardContent>
-            </Card>
+            </ContractSurfaceCard>
           </div>
           </div>
 
           <div className="space-y-4">
-            <p className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">Faturamento</p>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 xl:grid-cols-4">
-            <Card>
+            <p className={CONTRACT_PAGE_SECTION_LABEL}>Faturamento</p>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-5 xl:grid-cols-4">
+            <ContractSurfaceCard accent={CONTRACT_PAGE_ACCENTS.green}>
               <CardContent className="p-4 sm:p-6">
                 <div className="flex items-center">
-                  <div className="flex-shrink-0 rounded-lg bg-green-100 p-2 dark:bg-green-900/30 sm:p-3">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-green-100 text-green-600 ring-1 ring-green-200/80 dark:bg-green-500/15 dark:text-green-300 dark:ring-green-400/20">
                     <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400 sm:h-6 sm:w-6" />
                   </div>
                   <div className="ml-3 min-w-0 flex-1 sm:ml-4">
                     <p className="whitespace-normal text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">
                       Saldo anual faturado
                     </p>
-                    <p className="mt-1 text-xl font-bold text-gray-900 dark:text-gray-100 sm:text-2xl">
+                    <p className="mt-1 text-xl font-semibold tracking-tight text-gray-900 dark:text-gray-50 sm:text-2xl">
                       {formatCurrency(isAllYears ? faturamentoTotalTodosAnos : faturamentoAnual)}
                     </p>
                   </div>
                 </div>
               </CardContent>
-            </Card>
-            <Card>
+            </ContractSurfaceCard>
+            <ContractSurfaceCard>
               <CardContent className="p-4 sm:p-6">
                 <div className="flex items-center">
-                  <div className="flex-shrink-0 rounded-lg bg-amber-100 p-2 dark:bg-amber-900/30 sm:p-3">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-amber-600 ring-1 ring-amber-200/80 dark:bg-amber-500/15 dark:text-amber-300 dark:ring-amber-400/20">
                     <Clock className="h-5 w-5 text-amber-600 dark:text-amber-400 sm:h-6 sm:w-6" />
                   </div>
                   <div className="ml-3 min-w-0 flex-1 sm:ml-4">
                     <p className="whitespace-normal text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">
                       Saldo anual pendente
                     </p>
-                    <p className="mt-1 text-xl font-bold text-gray-900 dark:text-gray-100 sm:text-2xl">
+                    <p className="mt-1 text-xl font-semibold tracking-tight text-gray-900 dark:text-gray-50 sm:text-2xl">
                       {isAllYears ? '—' : saldoAnual !== null ? formatCurrency(saldoAnual) : '-'}
                     </p>
                   </div>
                 </div>
               </CardContent>
-            </Card>
-            <Card>
+            </ContractSurfaceCard>
+            <ContractSurfaceCard>
               <CardContent className="p-4 sm:p-6">
                 <div className="flex items-center">
-                  <div className="flex-shrink-0 rounded-lg bg-green-100 p-2 dark:bg-green-900/30 sm:p-3">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-green-100 text-green-600 ring-1 ring-green-200/80 dark:bg-green-500/15 dark:text-green-300 dark:ring-green-400/20">
                     <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400 sm:h-6 sm:w-6" />
                   </div>
                   <div className="ml-3 min-w-0 flex-1 sm:ml-4">
                     <p className="whitespace-normal text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">
                       Saldo contratual faturado
                     </p>
-                    <p className="mt-1 text-xl font-bold text-gray-900 dark:text-gray-100 sm:text-2xl">
+                    <p className="mt-1 text-xl font-semibold tracking-tight text-gray-900 dark:text-gray-50 sm:text-2xl">
                       {formatCurrency(faturamentoTotalTodosAnos)}
                     </p>
                   </div>
                 </div>
               </CardContent>
-            </Card>
-            <Card>
+            </ContractSurfaceCard>
+            <ContractSurfaceCard>
               <CardContent className="p-4 sm:p-6">
                 <div className="flex items-center">
-                  <div className="flex-shrink-0 rounded-lg bg-amber-100 p-2 dark:bg-amber-900/30 sm:p-3">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-amber-600 ring-1 ring-amber-200/80 dark:bg-amber-500/15 dark:text-amber-300 dark:ring-amber-400/20">
                     <Clock className="h-5 w-5 text-amber-600 dark:text-amber-400 sm:h-6 sm:w-6" />
                   </div>
                   <div className="ml-3 min-w-0 flex-1 sm:ml-4">
                     <p className="whitespace-normal text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">
                       Saldo contratual pendente
                     </p>
-                    <p className="mt-1 text-xl font-bold text-gray-900 dark:text-gray-100 sm:text-2xl">
+                    <p className="mt-1 text-xl font-semibold tracking-tight text-gray-900 dark:text-gray-50 sm:text-2xl">
                       {pendenteParaFaturarTodosAnos !== null
                         ? formatCurrency(pendenteParaFaturarTodosAnos)
                         : '-'}
@@ -3792,129 +3886,103 @@ export default function ContractDetailPage() {
                   </div>
                 </div>
               </CardContent>
-            </Card>
+            </ContractSurfaceCard>
           </div>
           </div>
 
-          {(canAccessOrcamento || canAccessRelatorios || canAccessReunioes) && (
+          {(canAccessOrcamento || canAccessRelatorios || canAccessReunioesDeContrato) && (
             <div className="space-y-4">
-              <p className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">Documentos</p>
+              <p className={CONTRACT_PAGE_SECTION_LABEL}>Documentos</p>
               <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
                 {canAccessOrcamento ? (
-                  <Card>
-                    <CardContent className="p-4 sm:p-6">
-                      <div className="flex items-start justify-between gap-2 sm:items-center sm:gap-3">
-                        <div className="flex min-w-[120px] flex-1 items-center pr-2">
-                          <div className="flex-shrink-0 rounded-lg bg-emerald-100 p-2 dark:bg-emerald-900/30 sm:p-3">
-                            <Calculator className="h-5 w-5 text-emerald-600 dark:text-emerald-400 sm:h-6 sm:w-6" />
+                  <Link
+                    href={`/ponto/contratos/${contractId}/orcamento`}
+                    aria-label="Abrir orçamentos"
+                    className="block rounded-2xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-500"
+                  >
+                    <ContractSurfaceCard
+                      accent={CONTRACT_PAGE_ACCENTS.green}
+                      className="h-full cursor-pointer transition-colors hover:border-gray-300/80 hover:bg-white/70 dark:hover:border-white/20 dark:hover:bg-gray-900/80"
+                    >
+                      <CardContent className="p-4 sm:p-6">
+                        <div className="flex min-w-[120px] items-center">
+                          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-emerald-100 text-emerald-600 ring-1 ring-emerald-200/80 dark:bg-emerald-500/15 dark:text-emerald-300 dark:ring-emerald-400/20">
+                            <Calculator className="h-5 w-5" />
                           </div>
                           <div className="ml-3 min-w-0 flex-1 overflow-hidden sm:ml-4">
                             <p className="break-normal text-xs font-medium leading-tight text-gray-600 dark:text-gray-400 sm:text-sm">
                               Orçamentos
                             </p>
-                            <p className="mt-1 text-xl font-bold text-gray-900 dark:text-gray-100 sm:text-2xl">
+                            <p className="mt-1 text-xl font-semibold tracking-tight text-gray-900 dark:text-gray-50 sm:text-2xl">
                               {loadingOrcamentosCount ? '…' : orcamentosCount}
                             </p>
                           </div>
                         </div>
-                        <Link
-                          href={`/ponto/contratos/${contractId}/orcamento`}
-                          className="mt-1 flex-shrink-0 rounded-lg p-2 text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-100 sm:mt-0 sm:p-2.5"
-                          aria-label="Abrir orçamentos"
-                          title="Abrir orçamentos"
-                        >
-                          <Eye className="h-4 w-4 sm:h-5 sm:w-5" />
-                        </Link>
-                      </div>
-                    </CardContent>
-                  </Card>
+                      </CardContent>
+                    </ContractSurfaceCard>
+                  </Link>
                 ) : null}
                 {canAccessRelatorios ? (
-                  <Card>
-                    <CardContent className="p-4 sm:p-6">
-                      <div className="flex items-start justify-between gap-2 sm:items-center sm:gap-3">
-                        <div className="flex min-w-[120px] flex-1 items-center pr-2">
-                          <div className="flex-shrink-0 rounded-lg bg-rose-100 p-2 dark:bg-rose-900/30 sm:p-3">
-                            <FileImage className="h-5 w-5 text-rose-600 dark:text-rose-400 sm:h-6 sm:w-6" />
+                  <Link
+                    href={`/ponto/contratos/${contractId}/relatorios`}
+                    aria-label="Abrir relatórios fotográficos"
+                    className="block rounded-2xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-500"
+                  >
+                    <ContractSurfaceCard
+                      accent={CONTRACT_PAGE_ACCENTS.rose}
+                      className="h-full cursor-pointer transition-colors hover:border-gray-300/80 hover:bg-white/70 dark:hover:border-white/20 dark:hover:bg-gray-900/80"
+                    >
+                      <CardContent className="p-4 sm:p-6">
+                        <div className="flex min-w-[120px] items-center">
+                          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-rose-100 text-rose-600 ring-1 ring-rose-200/80 dark:bg-rose-500/15 dark:text-rose-300 dark:ring-rose-400/20">
+                            <FileImage className="h-5 w-5" />
                           </div>
                           <div className="ml-3 min-w-0 flex-1 overflow-hidden sm:ml-4">
                             <p className="break-normal text-xs font-medium leading-tight text-gray-600 dark:text-gray-400 sm:text-sm">
                               Relatórios Fotográficos
                             </p>
-                            <p className="mt-1 text-xl font-bold text-gray-900 dark:text-gray-100 sm:text-2xl">
+                            <p className="mt-1 text-xl font-semibold tracking-tight text-gray-900 dark:text-gray-50 sm:text-2xl">
                               {loadingRelatoriosCount ? '…' : relatoriosCount}
                             </p>
                           </div>
                         </div>
-                        <Link
-                          href={`/ponto/contratos/${contractId}/relatorios`}
-                          className="mt-1 flex-shrink-0 rounded-lg p-2 text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-100 sm:mt-0 sm:p-2.5"
-                          aria-label="Abrir relatórios fotográficos"
-                          title="Abrir relatórios fotográficos"
-                        >
-                          <Eye className="h-4 w-4 sm:h-5 sm:w-5" />
-                        </Link>
-                      </div>
-                    </CardContent>
-                  </Card>
+                      </CardContent>
+                    </ContractSurfaceCard>
+                  </Link>
                 ) : null}
-                {canAccessReunioes ? (
-                  <Card>
-                    <CardContent className="p-4 sm:p-6">
-                      <div className="flex items-start justify-between gap-2 sm:items-center sm:gap-3">
-                        <div className="flex min-w-[120px] flex-1 items-center pr-2">
-                          <div className="flex-shrink-0 rounded-lg bg-sky-100 p-2 dark:bg-sky-900/30 sm:p-3">
-                            <FileText className="h-5 w-5 text-sky-600 dark:text-sky-400 sm:h-6 sm:w-6" />
+                {canAccessReunioesDeContrato ? (
+                  <Link
+                    href={
+                      canAccessReunioesAba
+                        ? `/ponto/contratos/${contractId}/reunioes`
+                        : `/ponto/contratos/${contractId}/reunioes?aba=relatorio-mensal`
+                    }
+                    aria-label="Abrir reuniões de contrato"
+                    className="block rounded-2xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-500"
+                  >
+                    <ContractSurfaceCard
+                      accent={CONTRACT_PAGE_ACCENTS.indigo}
+                      className="h-full cursor-pointer transition-colors hover:border-gray-300/80 hover:bg-white/70 dark:hover:border-white/20 dark:hover:bg-gray-900/80"
+                    >
+                      <CardContent className="p-4 sm:p-6">
+                        <div className="flex min-w-[120px] items-center">
+                          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-indigo-100 text-indigo-600 ring-1 ring-indigo-200/80 dark:bg-indigo-500/15 dark:text-indigo-300 dark:ring-indigo-400/20">
+                            <Video className="h-5 w-5" />
                           </div>
                           <div className="ml-3 min-w-0 flex-1 overflow-hidden sm:ml-4">
                             <p className="break-normal text-xs font-medium leading-tight text-gray-600 dark:text-gray-400 sm:text-sm">
-                              Relatório Mensal
+                              Reuniões de Contrato
                             </p>
-                            <p className="mt-1 text-xl font-bold text-gray-900 dark:text-gray-100 sm:text-2xl">
-                              {loadingMensalCount ? '…' : mensalCount}
-                            </p>
-                          </div>
-                        </div>
-                        <Link
-                          href={`/ponto/contratos/${contractId}/acompanhamento-mensal`}
-                          className="mt-1 flex-shrink-0 rounded-lg p-2 text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-100 sm:mt-0 sm:p-2.5"
-                          aria-label="Abrir relatório mensal"
-                          title="Abrir relatório mensal"
-                        >
-                          <Eye className="h-4 w-4 sm:h-5 sm:w-5" />
-                        </Link>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ) : null}
-                {canAccessReunioes ? (
-                  <Card>
-                    <CardContent className="p-4 sm:p-6">
-                      <div className="flex items-start justify-between gap-2 sm:items-center sm:gap-3">
-                        <div className="flex min-w-[120px] flex-1 items-center pr-2">
-                          <div className="flex-shrink-0 rounded-lg bg-indigo-100 p-2 dark:bg-indigo-900/30 sm:p-3">
-                            <Video className="h-5 w-5 text-indigo-600 dark:text-indigo-400 sm:h-6 sm:w-6" />
-                          </div>
-                          <div className="ml-3 min-w-0 flex-1 overflow-hidden sm:ml-4">
-                            <p className="break-normal text-xs font-medium leading-tight text-gray-600 dark:text-gray-400 sm:text-sm">
-                              Reuniões Quinzenais
-                            </p>
-                            <p className="mt-1 text-xl font-bold text-gray-900 dark:text-gray-100 sm:text-2xl">
-                              {loadingSemanalCount ? '…' : semanalCount}
+                            <p className="mt-1 text-xl font-semibold tracking-tight text-gray-900 dark:text-gray-50 sm:text-2xl">
+                              {loadingMensalCount || (canAccessReunioesAba && loadingSemanalCount)
+                                ? '…'
+                                : mensalCount + (canAccessReunioesAba ? semanalCount : 0)}
                             </p>
                           </div>
                         </div>
-                        <Link
-                          href={`/ponto/contratos/${contractId}/reunioes`}
-                          className="mt-1 flex-shrink-0 rounded-lg p-2 text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-100 sm:mt-0 sm:p-2.5"
-                          aria-label="Abrir reuniões quinzenais"
-                          title="Abrir reuniões quinzenais"
-                        >
-                          <Eye className="h-4 w-4 sm:h-5 sm:w-5" />
-                        </Link>
-                      </div>
-                    </CardContent>
-                  </Card>
+                      </CardContent>
+                    </ContractSurfaceCard>
+                  </Link>
                 ) : null}
               </div>
             </div>
@@ -3923,11 +3991,11 @@ export default function ContractDetailPage() {
           </div>
 
           {/* Controle Geral - Metas Mensais ou Metas Anuais conforme filtro */}
-          <Card>
-            <CardHeader className="border-b-0 pb-1">
+          <ContractSurfaceCard accent={CONTRACT_PAGE_ACCENTS.indigo}>
+            <CardHeader className="border-b-0 pb-1 !pt-5">
               <div className="flex items-start justify-between gap-3">
                 <div className="flex items-center space-x-3 min-w-0">
-                  <div className="p-2 sm:p-3 bg-indigo-100 dark:bg-indigo-900/30 rounded-lg shrink-0">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-indigo-100 text-indigo-600 ring-1 ring-indigo-200/80 dark:bg-indigo-500/15 dark:text-indigo-300 dark:ring-indigo-400/20">
                     <BarChart3 className="w-5 h-5 sm:w-6 sm:h-6 text-indigo-600 dark:text-indigo-400" />
                   </div>
                   <div className="min-w-0">
@@ -3939,23 +4007,6 @@ export default function ContractDetailPage() {
                     </p>
                   </div>
                 </div>
-                {!isAllYears ? (
-                  <div className="relative shrink-0 group">
-                    <button
-                      type="button"
-                      className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-500 transition-colors hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-400 dark:hover:border-indigo-600 dark:hover:bg-indigo-950/40 dark:hover:text-indigo-300"
-                      aria-label="Como funcionam meta ideal e meta real"
-                    >
-                      <Info className="h-4 w-4 shrink-0" aria-hidden />
-                    </button>
-                    <div
-                      role="tooltip"
-                      className="pointer-events-none absolute right-0 top-full z-50 mt-2 w-[min(22rem,calc(100vw-2rem))] rounded-lg border border-gray-200 bg-white p-3 text-left text-xs leading-relaxed text-gray-600 opacity-0 shadow-lg transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300"
-                    >
-                      {CONTROLE_GERAL_META_AJUDA}
-                    </div>
-                  </div>
-                ) : null}
               </div>
               {EXIBIR_GASTOS_CONTRATO_NA_UI &&
               !isAllYears &&
@@ -4455,21 +4506,30 @@ export default function ContractDetailPage() {
                 )}
               </div>
             </CardContent>
-          </Card>
+          </ContractSurfaceCard>
+
+          <ContratoFaturamentoCharts
+            billings={billings}
+            year={faturamentoChartsYear}
+            monthlySeries={faturamentoFluxoSeries}
+            fluxoPeriodLabel={isAllYears ? 'Toda a vigência' : String(safeSelectedYear)}
+            loading={loadingBillings}
+            loadingFluxo={gastosOperacionaisCarregando}
+          />
 
           {canAccessProducaoSemanalModulo ? (
           <>
           {/* Produção Semanal */}
-          <Card>
-            <CardHeader className={cadastroListClasses.cardHeader}>
+          <ContractSurfaceCard accent={CONTRACT_PAGE_ACCENTS.amber}>
+            <CardHeader className={`${cadastroListClasses.cardHeader} !pt-5`}>
               <div className={cadastroListClasses.cardHeaderRow}>
                 <div className={cadastroListClasses.cardHeaderIconRow}>
-                  <div className="rounded-lg bg-amber-100 p-2 sm:p-3 dark:bg-amber-900/30">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-amber-600 ring-1 ring-amber-200/80 dark:bg-amber-500/15 dark:text-amber-300 dark:ring-amber-400/20">
                     <BarChart3 className="h-5 w-5 text-amber-600 dark:text-amber-400 sm:h-6 sm:w-6" />
                   </div>
                   <div className="min-w-0">
                     <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 sm:text-xl">
-                      Produção Semanal
+                      Produção Semanal - Cadastrar às sextas-feiras
                     </h3>
                     <p className="text-sm text-gray-500 dark:text-gray-400">
                       {loadingProductions
@@ -4504,7 +4564,7 @@ export default function ContractDetailPage() {
                   <button
                     type="button"
                     onClick={() => setShowProductionFilterModal(true)}
-                    className={`relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition-colors ${
+                    className={`relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border transition-colors ${
                       hasActiveProductionFilter
                         ? 'border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100 dark:border-amber-800/60 dark:bg-amber-950/30 dark:text-amber-300 dark:hover:bg-amber-900/40'
                         : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
@@ -4529,7 +4589,7 @@ export default function ContractDetailPage() {
                       setShowProductionModal(true);
                     }}
                     disabled={!canCreateContrato}
-                    className="flex h-10 items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-700 transition-colors hover:bg-amber-100 dark:border-amber-800/60 dark:bg-amber-950/30 dark:text-amber-300 dark:hover:bg-amber-900/40 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+                    className="flex h-10 shrink-0 items-center gap-2 rounded-xl bg-red-600 px-4 text-sm font-semibold text-white shadow-sm shadow-red-600/25 transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <Plus className="h-4 w-4 shrink-0" />
                     <span>Nova Produção Semanal</span>
@@ -4580,7 +4640,7 @@ export default function ContractDetailPage() {
                   <table className="w-full" data-cc-skip-column-customizer="1">
                     <thead className="border-b border-gray-200 dark:border-gray-700">
                       <tr>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Data</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Semana</th>
                         <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">OS / SE</th>
                         <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Valor da Produção Semanal</th>
                         <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Responsável pelo Preenchimento</th>
@@ -4594,7 +4654,9 @@ export default function ContractDetailPage() {
                           key={p.id}
                           className="hover:bg-gray-50 dark:hover:bg-gray-700/30"
                         >
-                          <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100">{p.fillingDate ? formatDate(p.fillingDate) : '-'}</td>
+                          <td className="px-4 py-3 text-sm whitespace-nowrap text-gray-900 dark:text-gray-100">
+                            {formatProductionWeekDate(p.fillingDate)}
+                          </td>
                           <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">
                             {formatOsSePastaOrDash(p.divSe, folderForDivSe(pleitos, p.divSe))}
                           </td>
@@ -4655,78 +4717,76 @@ export default function ContractDetailPage() {
                 </>
               )}
             </CardContent>
-          </Card>
+              </ContractSurfaceCard>
           </>
           ) : null}
 
           {canAccessOrdemServicoModulo ? (
           <>
           <div className="space-y-4">
-            <p className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
-              Resumo
-            </p>
+            <p className={CONTRACT_PAGE_SECTION_LABEL}>Resumo</p>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 xl:grid-cols-3">
-              <Card>
+              <ContractSurfaceCard>
                 <CardContent className="p-4 sm:p-6">
                   <div className="flex items-center">
-                    <div className="flex-shrink-0 rounded-lg bg-blue-100 p-2 dark:bg-blue-900/30 sm:p-3">
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-100 text-blue-600 ring-1 ring-blue-200/80 dark:bg-blue-500/15 dark:text-blue-300 dark:ring-blue-400/20">
                       <Calculator className="h-5 w-5 text-blue-600 dark:text-blue-400 sm:h-6 sm:w-6" />
                     </div>
                     <div className="ml-3 min-w-0 flex-1 sm:ml-4">
                       <p className="whitespace-normal text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">
                         Total Orçado
                       </p>
-                      <p className="mt-1 text-xl font-bold text-gray-900 dark:text-gray-100 sm:text-2xl">
+                      <p className="mt-1 text-xl font-semibold tracking-tight text-gray-900 dark:text-gray-50 sm:text-2xl">
                         {formatCurrency(osResumoTotals.totalOrcado)}
                       </p>
                     </div>
                   </div>
                 </CardContent>
-              </Card>
-              <Card>
+              </ContractSurfaceCard>
+              <ContractSurfaceCard>
                 <CardContent className="p-4 sm:p-6">
                   <div className="flex items-center">
-                    <div className="flex-shrink-0 rounded-lg bg-indigo-100 p-2 dark:bg-indigo-900/30 sm:p-3">
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-indigo-100 text-indigo-600 ring-1 ring-indigo-200/80 dark:bg-indigo-500/15 dark:text-indigo-300 dark:ring-indigo-400/20">
                       <FileText className="h-5 w-5 text-indigo-600 dark:text-indigo-400 sm:h-6 sm:w-6" />
                     </div>
                     <div className="ml-3 min-w-0 flex-1 sm:ml-4">
                       <p className="whitespace-normal text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">
                         Total Pleiteado
                       </p>
-                      <p className="mt-1 text-xl font-bold text-gray-900 dark:text-gray-100 sm:text-2xl">
+                      <p className="mt-1 text-xl font-semibold tracking-tight text-gray-900 dark:text-gray-50 sm:text-2xl">
                         {formatCurrency(osResumoTotals.totalPleiteado)}
                       </p>
                     </div>
                   </div>
                 </CardContent>
-              </Card>
-              <Card>
+              </ContractSurfaceCard>
+              <ContractSurfaceCard>
                 <CardContent className="p-4 sm:p-6">
                   <div className="flex items-center">
-                    <div className="flex-shrink-0 rounded-lg bg-green-100 p-2 dark:bg-green-900/30 sm:p-3">
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-green-100 text-green-600 ring-1 ring-green-200/80 dark:bg-green-500/15 dark:text-green-300 dark:ring-green-400/20">
                       <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400 sm:h-6 sm:w-6" />
                     </div>
                     <div className="ml-3 min-w-0 flex-1 sm:ml-4">
                       <p className="whitespace-normal text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">
                         Total Faturado
                       </p>
-                      <p className="mt-1 text-xl font-bold text-gray-900 dark:text-gray-100 sm:text-2xl">
+                      <p className="mt-1 text-xl font-semibold tracking-tight text-gray-900 dark:text-gray-50 sm:text-2xl">
                         {formatCurrency(osResumoTotals.totalFaturado)}
                       </p>
                     </div>
                   </div>
                 </CardContent>
-              </Card>
+              </ContractSurfaceCard>
             </div>
           </div>
 
           {/* Ordem de Serviço - Lista de pleitos do contrato */}
-          <Card>
-            <CardHeader className={cadastroListClasses.cardHeader}>
+          <ContractSurfaceCard accent={CONTRACT_PAGE_ACCENTS.blue}>
+            <CardHeader className={`${cadastroListClasses.cardHeader} !pt-5`}>
               <div className="flex flex-col gap-4">
                 <div className={cadastroListClasses.cardHeaderRow}>
                   <div className={cadastroListClasses.cardHeaderIconRow}>
-                    <div className="rounded-lg bg-blue-100 p-2 sm:p-3 dark:bg-blue-900/30">
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-100 text-blue-600 ring-1 ring-blue-200/80 dark:bg-blue-500/15 dark:text-blue-300 dark:ring-blue-400/20">
                       <ClipboardList className="h-5 w-5 text-blue-600 dark:text-blue-400 sm:h-6 sm:w-6" />
                     </div>
                     <div className="min-w-0">
@@ -4782,7 +4842,7 @@ export default function ContractDetailPage() {
                     <button
                       type="button"
                       onClick={() => setShowPleitosFilterModal(true)}
-                      className={`relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition-colors ${
+                      className={`relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border transition-colors ${
                         hasActivePleitosFilter
                           ? 'border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100 dark:border-blue-800/60 dark:bg-blue-950/30 dark:text-blue-300 dark:hover:bg-blue-900/40'
                           : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
@@ -5137,18 +5197,18 @@ export default function ContractDetailPage() {
                 </>
               )}
             </CardContent>
-          </Card>
+              </ContractSurfaceCard>
 
           <ContractHistoricoPleitosPanel contractId={contractId} />
           </>
           ) : null}
 
           {/* Faturamento - Lista de notas */}
-          <Card>
-            <CardHeader className={cadastroListClasses.cardHeader}>
+          <ContractSurfaceCard accent={CONTRACT_PAGE_ACCENTS.green}>
+            <CardHeader className={`${cadastroListClasses.cardHeader} !pt-5`}>
               <div className={cadastroListClasses.cardHeaderRow}>
                 <div className={cadastroListClasses.cardHeaderIconRow}>
-                  <div className="rounded-lg bg-green-100 p-2 sm:p-3 dark:bg-green-900/30">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-green-100 text-green-600 ring-1 ring-green-200/80 dark:bg-green-500/15 dark:text-green-300 dark:ring-green-400/20">
                     <Receipt className="h-5 w-5 text-green-600 dark:text-green-400 sm:h-6 sm:w-6" />
                   </div>
                   <div className="min-w-0">
@@ -5204,7 +5264,7 @@ export default function ContractDetailPage() {
                   <button
                     type="button"
                     onClick={() => setShowBillingFilterModal(true)}
-                    className={`relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition-colors ${
+                    className={`relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border transition-colors ${
                       hasActiveBillingFilter
                         ? 'border-green-300 bg-green-50 text-green-700 hover:bg-green-100 dark:border-green-800/60 dark:bg-green-950/30 dark:text-green-300 dark:hover:bg-green-900/40'
                         : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
@@ -5232,7 +5292,7 @@ export default function ContractDetailPage() {
                     type="button"
                     onClick={() => setShowBillingModal(true)}
                     disabled={!canCreateContrato}
-                    className="flex h-10 items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-4 py-2 text-sm font-semibold text-green-700 transition-colors hover:bg-green-100 dark:border-green-800/60 dark:bg-green-950/30 dark:text-green-300 dark:hover:bg-green-900/40 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+                    className="flex h-10 shrink-0 items-center gap-2 rounded-xl bg-red-600 px-4 text-sm font-semibold text-white shadow-sm shadow-red-600/25 transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <Plus className="h-4 w-4 shrink-0" />
                     <span>Novo Faturamento</span>
@@ -5427,7 +5487,7 @@ export default function ContractDetailPage() {
                 </>
               )}
             </CardContent>
-          </Card>
+              </ContractSurfaceCard>
 
           <ContractGastosResumoModal
             isOpen={gastosResumoModal != null}
@@ -6093,26 +6153,23 @@ export default function ContractDetailPage() {
                       aria-label="Data do preenchimento"
                     />
                     <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                      Data em que o preenchimento está sendo realizado
+                      Data em que o preenchimento está sendo realizado. Semana:{' '}
+                      {formatProductionWeekDate(productionForm.fillingDate || toInputDate(new Date()))}.
                     </p>
                   </div>
                   <div>
-                    <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">OS / SE *</label>
+                    <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">OS / SE</label>
                     <StringSingleSelectDropdown
                       value={productionForm.divSe}
                       onChange={(divSe) => setProductionForm({ ...productionForm, divSe })}
                       options={divSeSelectOptions}
-                      allowEmpty={false}
+                      allowEmpty
+                      emptyOptionLabel="Nenhuma"
                       placeholder="Selecionar OS / SE"
                       searchPlaceholder="Pesquisar OS / SE..."
                       emptyOptionsMessage="Nenhuma OS cadastrada neste contrato."
                       className="w-full"
                     />
-                    {divSeOptions.length === 0 && (
-                      <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
-                        Nenhuma OS cadastrada em Ordem de Serviço. Cadastre uma ordem de serviço com o campo OS / SE.
-                      </p>
-                    )}
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Valor da Produção Semanal *</label>
@@ -6183,16 +6240,21 @@ export default function ContractDetailPage() {
                       aria-label="Data do preenchimento"
                     />
                     <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                      Data em que o preenchimento foi realizado
+                      Data em que o preenchimento foi realizado. Semana:{' '}
+                      {formatProductionWeekDate(
+                        productionEditForm.fillingDate || selectedProduction?.fillingDate
+                      )}
+                      .
                     </p>
                   </div>
                   <div>
-                    <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">OS / SE *</label>
+                    <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">OS / SE</label>
                     <StringSingleSelectDropdown
                       value={productionEditForm.divSe}
                       onChange={(divSe) => setProductionEditForm({ ...productionEditForm, divSe })}
                       options={divSeSelectOptions}
-                      allowEmpty={false}
+                      allowEmpty
+                      emptyOptionLabel="Nenhuma"
                       placeholder="Selecionar OS / SE"
                       searchPlaceholder="Pesquisar OS / SE..."
                       emptyOptionsMessage="Nenhuma OS cadastrada neste contrato."
@@ -6288,7 +6350,7 @@ export default function ContractDetailPage() {
                     />
                   </div>
                   <div>
-                    <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">OS / SE *</label>
+                    <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">OS / SE</label>
                     <StringSingleSelectDropdown
                       value={billingForm.serviceOrder}
                       onChange={(serviceOrder) => {
@@ -6305,7 +6367,7 @@ export default function ContractDetailPage() {
                         });
                       }}
                       options={divSeSelectOptions}
-                      allowEmpty={false}
+                      allowEmpty
                       placeholder="Selecionar OS / SE"
                       searchPlaceholder="Pesquisar OS / SE..."
                       emptyOptionsMessage="Nenhuma OS cadastrada neste contrato."
@@ -6318,7 +6380,7 @@ export default function ContractDetailPage() {
                     )}
                   </div>
                   <div>
-                    <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Pleito vinculado *</label>
+                    <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Pleito vinculado</label>
                     <StringSingleSelectDropdown
                       value={billingForm.pleitoId}
                       onChange={(pleitoId) => {
@@ -6330,7 +6392,7 @@ export default function ContractDetailPage() {
                         }));
                       }}
                       options={pleitosForBillingSelectOptions}
-                      allowEmpty={false}
+                      allowEmpty
                       placeholder="Selecionar pleito"
                       searchPlaceholder="Pesquisar pleito..."
                       emptyOptionsMessage="Nenhum pleito apto para faturamento."
@@ -6676,14 +6738,14 @@ export default function ContractDetailPage() {
                       />
                     </div>
                     <div>
-                      <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">OS / SE *</label>
+                      <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">OS / SE</label>
                       <StringSingleSelectDropdown
                         value={billingEditForm.serviceOrder}
                         onChange={(serviceOrder) =>
                           setBillingEditForm({ ...billingEditForm, serviceOrder })
                         }
                         options={divSeSelectOptions}
-                        allowEmpty={false}
+                        allowEmpty
                         placeholder="Selecionar OS / SE"
                         searchPlaceholder="Pesquisar OS / SE..."
                         emptyOptionsMessage="Nenhuma OS cadastrada neste contrato."

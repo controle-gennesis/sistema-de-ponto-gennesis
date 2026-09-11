@@ -1668,6 +1668,13 @@ async function ensureObrasTable(prisma: PrismaClient): Promise<void> {
   `);
 }
 
+async function ensureUserContractReunioesColumn(prisma: PrismaClient): Promise<void> {
+  if (!(await tableExists(prisma, 'user_contract_permissions'))) return;
+  await prisma.$executeRawUnsafe(
+    `ALTER TABLE "user_contract_permissions" ADD COLUMN IF NOT EXISTS "accessReunioes" BOOLEAN NOT NULL DEFAULT false;`
+  );
+}
+
 export async function ensureProductionSchema(prisma: PrismaClient): Promise<void> {
   try {
     await ensureUnaccentExtension(prisma);
@@ -1703,6 +1710,7 @@ export async function ensureProductionSchema(prisma: PrismaClient): Promise<void
     await ensureControleGeralTetoOrcamentarioTable(prisma);
     await ensureDriveStarTrashColumns(prisma);
     await ensureUserActivityTracking(prisma);
+    await ensureUserContractReunioesColumn(prisma);
     await ensureAuditLogTracking(prisma);
     await ensureQuoteMapUnitPricePrecision(prisma);
     await ensureToolRentalRequestsSchema(prisma);
