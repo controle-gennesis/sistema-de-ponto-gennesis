@@ -606,6 +606,7 @@ export function useRoutePermission(route: string) {
     canAccessContract,
     dpApprovalContractIds,
     canApproveRestrictedDpRequests,
+    canApproveFd,
     canApproveEspelhoNf,
     canAccessOrcamentoRoutePage,
     canAccessOsRoutePage,
@@ -640,18 +641,15 @@ export function useRoutePermission(route: string) {
     /** Fallback se o dist de permission-modules estiver desatualizado (OPEN_ACCESS). */
     '/ponto/central-de-ajuda': true,
     /**
-     * Aprovações: a página agora aparece automaticamente para quem precisa decidir
-     * sobre algum bloco. Não há mais entrada na matriz de acessos.
-     *  - Gestor de algum contrato (decide Solicitações Gerais) → vê o bloco de Solicitações.
-     *  - Permissão «Aprovar Espelho da Nota Fiscal» (Controle) → vê o bloco de Espelhos da Nota Fiscal.
-     *  - Compras / Gerenciar materiais → vê o bloco de aprovação de OC.
-     * Cada bloco é renderizado independentemente dentro da própria página.
+     * Aprovações: a página aparece para quem precisa decidir algum bloco.
+     * Fichas de Demanda: só Controle → Aprovar Fichas de Demanda + contratos (não usa Gestor).
      */
     '/ponto/aprovacoes':
       isAdministrator ||
       dpApprovalContractIds.length > 0 ||
       canApproveRestrictedDpRequests ||
       can(pk('/ponto/controle/aprovar-solicitacoes-dp')) ||
+      canApproveFd ||
       canApproveEspelhoNf ||
       can(pk('/ponto/controle/aprovar-combustivel')) ||
       can(pk('/ponto/controle/aprovar-oc-compras')) ||
