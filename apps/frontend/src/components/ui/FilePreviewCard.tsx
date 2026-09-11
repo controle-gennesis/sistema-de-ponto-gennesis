@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Download, Eye, FileText, Loader2, Trash2, X } from 'lucide-react';
+import { Download, Eye, FileText, Loader2, Trash2, Upload, X } from 'lucide-react';
 import { loadPdfjs } from '@/lib/loadPdfjs';
 import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
 import { Z_LIGHTBOX } from '@/lib/zIndex';
@@ -42,12 +42,23 @@ type Props = {
   /** Quando informado, exibe botão de lixeira no card. */
   onRemove?: () => void;
   removing?: boolean;
+  /** Sem arquivo: clique no card abre seletor / envia o arquivo. */
+  onUpload?: (file: File) => void;
+  uploading?: boolean;
 };
 
-export function FilePreviewCard({ file, extra, onRemove, removing }: Props) {
+export function FilePreviewCard({
+  file,
+  extra,
+  onRemove,
+  removing,
+  onUpload,
+  uploading,
+}: Props) {
   const href = resolveApiMediaUrl(file.fileUrl);
   const image = isImageFile(file);
   const pdf = isPdfFile(file);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [lightbox, setLightbox] = useState<PreviewKind | null>(null);
   const [pdfThumb, setPdfThumb] = useState<string | null>(null);
   const [pdfThumbFailed, setPdfThumbFailed] = useState(false);
@@ -148,15 +159,42 @@ export function FilePreviewCard({ file, extra, onRemove, removing }: Props) {
     else setLightbox('other');
   };
 
+  const openUploadPicker = () => {
+    if (!onUpload || uploading || href) return;
+    fileInputRef.current?.click();
+  };
+
   return (
     <>
-      <div className="group relative overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-gray-600 dark:bg-gray-800">
+      <div
+        className={`group relative overflow-hidden rounded-lg border bg-white dark:bg-gray-800 ${
+          !href
+            ? 'border-amber-300 border-dashed dark:border-amber-700/70'
+            : 'border-gray-200 dark:border-gray-600'
+        }`}
+      >
+        {!href && onUpload ? (
+          <input
+            ref={fileInputRef}
+            type="file"
+            className="hidden"
+            onChange={(e) => {
+              const picked = e.target.files?.[0];
+              e.target.value = '';
+              if (picked) onUpload(picked);
+            }}
+          />
+        ) : null}
         <button
           type="button"
-          onClick={openPreview}
-          disabled={!href}
-          className="block h-28 w-full overflow-hidden bg-gray-50 text-left disabled:cursor-default dark:bg-gray-900/40"
-          title={href ? 'Pré-visualizar' : undefined}
+          onClick={href ? openPreview : openUploadPicker}
+          disabled={Boolean(href ? false : !onUpload || uploading)}
+          className={`block h-28 w-full overflow-hidden bg-gray-50 text-left dark:bg-gray-900/40 ${
+            !href && onUpload
+              ? 'cursor-pointer hover:bg-amber-50/80 dark:hover:bg-amber-950/20'
+              : 'disabled:cursor-default'
+          }`}
+          title={href ? 'Pré-visualizar' : onUpload ? 'Adicionar arquivo' : undefined}
         >
           {href && image ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -178,7 +216,13 @@ export function FilePreviewCard({ file, extra, onRemove, removing }: Props) {
             </div>
           ) : (
             <div className="flex h-full flex-col items-center justify-center gap-1.5">
-              <FileText className="h-8 w-8 text-gray-400 dark:text-gray-500" />
+              {uploading ? (
+                <Loader2 className="h-8 w-8 animate-spin text-amber-600 dark:text-amber-400" />
+              ) : !href && onUpload ? (
+                <Upload className="h-8 w-8 text-amber-600 dark:text-amber-400" />
+              ) : (
+                <FileText className="h-8 w-8 text-gray-400 dark:text-gray-500" />
+              )}
               <span className="rounded bg-gray-200 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-600 dark:bg-gray-700 dark:text-gray-300">
                 {fileExtLabel(file.originalName)}
               </span>
@@ -195,8 +239,12 @@ export function FilePreviewCard({ file, extra, onRemove, removing }: Props) {
           </p>
           {extra ? <p className="truncate text-[11px] text-gray-500">{extra}</p> : null}
           {!href ? (
-            <p className="text-[11px] text-amber-700 dark:text-amber-300">
-              Arquivo ainda não vinculado
+            <p className="text-[11px] font-medium text-amber-700 dark:text-amber-300">
+              {uploading
+                ? 'Enviando…'
+                : onUpload
+                  ? 'Pendente — clique para adicionar'
+                  : 'Pendente'}
             </p>
           ) : null}
         </div>

@@ -21,6 +21,8 @@ import {
   type FdImportRow,
 } from '../services/demandSheetImport';
 import { getManagerDpApprovalContractScope } from '../lib/dpApprovalAccess';
+import { savePersistentUpload } from '../lib/persistentUpload';
+import { fixMulterOriginalName } from '../lib/fixUploadFileName';
 
 const fdModuleKey = pathToModuleKey('/ponto/aprovacao-fds');
 const fdsAprovadasModuleKey = pathToModuleKey('/ponto/fds-aprovadas');
@@ -671,6 +673,129 @@ export class DemandSheetApprovalController {
       }
       console.error('[FD import]', e);
       return res.status(500).json({ error: 'Erro ao importar fichas de demanda' });
+    }
+  }
+
+  /** Vincula arquivo a um anexo pendente (da planilha) ou adiciona um anexo novo. */
+  async uploadAnexo(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user) throw createError('Usuário não autenticado', 401);
+      const id = String(req.params.id || '').trim();
+      if (!id) throw createError('ID inválido', 400);
+
+      const existing = await prisma.demandSheetApproval.findUnique({
+        where: { id },
+        select: { id: true, externalId: true, anexos: true, status: true, createdBy: true },
+      });
+      if (!existing) throw createError('Ficha de demanda não encontrada', 404);
+
+      if (!req.user.isAdmin) {
+        const accessWhere = await listWhereForUser(req.user.id, false);
+        const visible = await prisma.demandSheetApproval.findFirst({
+          where: { AND: [{ id }, accessWhere] },
+          select: { id: true },
+        });
+        if (!visible) {
+          const hasCompras = await userCanAccessFdsAprovadasModule(req.user.id, false);
+          if (!(hasCompras && existing.status === 'APPROVED')) {
+            throw createError('Ficha de demanda não encontrada', 404);
+          }
+        }
+      }
+
+      const file = (req.file || (Array.isArray(req.files) ? req.files[0] : undefined)) as
+        | Express.Multer.File
+        | undefined;
+      if (!file?.buffer?.length) throw createError('Selecione um arquivo', 400);
+
+      const anexoId = String((req.body as { anexoId?: unknown })?.anexoId ?? '').trim();
+      const originalName =
+        fixMulterOriginalName(file.originalname) || file.originalname || 'anexo';
+
+      const folder = `demand-sheet-approvals/${existing.externalId || existing.id}/anexos`;
+      const saved = await savePersistentUpload({
+        folder,
+        buffer: file.buffer,
+        originalName,
+        mimeType: file.mimetype,
+        includeSafeOriginalName: true,
+      });
+
+      type AnexoRow = {
+        id?: string;
+        name?: string;
+        url?: string;
+        kind?: string;
+        sourcePath?: string;
+      };
+      const list: AnexoRow[] = Array.isArray(existing.anexos)
+        ? (existing.anexos as AnexoRow[]).map((a) => ({ ...a }))
+        : [];
+
+      let updated = false;
+      if (anexoId) {
+        let idx = list.findIndex((a) => a.id === anexoId);
+        if (idx < 0) {
+          idx = list.findIndex(
+            (a) => !a.url && `${a.name || ''}-${a.sourcePath || ''}` === anexoId,
+          );
+        }
+        if (idx < 0) {
+          idx = list.findIndex(
+            (a) =>
+              !a.url &&
+              (a.name || '').toLowerCase() ===
+                (saved.originalName || originalName).toLowerCase(),
+          );
+        }
+        if (idx >= 0) {
+          list[idx] = {
+            ...list[idx]!,
+            id: list[idx]!.id || anexoId,
+            url: saved.url,
+            name: list[idx]!.name || saved.originalName || originalName,
+          };
+          updated = true;
+        }
+      }
+      if (!updated) {
+        // Preenche o primeiro pendente sem url, se houver.
+        const pendingIdx = list.findIndex((a) => !a.url);
+        if (pendingIdx >= 0) {
+          list[pendingIdx] = {
+            ...list[pendingIdx]!,
+            url: saved.url,
+            name: list[pendingIdx]!.name || saved.originalName || originalName,
+          };
+          updated = true;
+        }
+      }
+      if (!updated) {
+        list.push({
+          id: anexoId || saved.key || `anexo-${Date.now()}`,
+          name: saved.originalName || originalName,
+          url: saved.url,
+          kind: 'ANEXO',
+        });
+      }
+
+      const row = await prisma.demandSheetApproval.update({
+        where: { id: existing.id },
+        data: { anexos: list as unknown as Prisma.InputJsonValue },
+        include: includeDefault,
+      });
+
+      return res.json({
+        success: true,
+        data: serializeRow(row),
+        message: 'Anexo vinculado com sucesso',
+      });
+    } catch (e: unknown) {
+      const err = e as { statusCode?: number; message?: string };
+      if (err?.statusCode) {
+        return res.status(err.statusCode).json({ error: err.message || 'Erro' });
+      }
+      return res.status(500).json({ error: 'Erro ao enviar anexo da ficha de demanda' });
     }
   }
 }

@@ -5,7 +5,7 @@ import os from 'os';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { authenticate } from '../middleware/auth';
-import { requireFdApproverAccess, requireModuleAccess } from '../middleware/permissionAuth';
+import { requireFdApproverAccess, requireModuleAccess, requireAnyModuleAccess } from '../middleware/permissionAuth';
 import { pathToModuleKey } from '@sistema-ponto/permission-modules';
 import { DemandSheetApprovalController } from '../controllers/DemandSheetApprovalController';
 
@@ -129,6 +129,35 @@ router.patch(
   requireModuleAccess(fdsAprovadasModule),
   controller.updatePurchaseStatus.bind(controller)
 );
+
+const anexoUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 80 * 1024 * 1024, files: 1 },
+});
+
+router.post(
+  '/:id/anexos',
+  requireAnyModuleAccess([fdModule, fdsAprovadasModule]),
+  (req, res, next) => {
+    anexoUpload.single('file')(req, res, (err) => {
+      if (err instanceof multer.MulterError) {
+        if (err.code === 'LIMIT_FILE_SIZE') {
+          res.status(413).json({
+            success: false,
+            message: 'Arquivo grande demais (máx. 80 MB).',
+          });
+          return;
+        }
+        res.status(400).json({ success: false, message: err.message || 'Erro no upload.' });
+        return;
+      }
+      if (err) return next(err);
+      return next();
+    });
+  },
+  controller.uploadAnexo.bind(controller)
+);
+
 router.patch('/:id', requireModuleAccess(fdModule), controller.update.bind(controller));
 router.delete('/:id', requireModuleAccess(fdModule), controller.remove.bind(controller));
 router.put('/:id/manager-approve', requireFdApproverAccess, controller.approveManager.bind(controller));

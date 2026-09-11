@@ -474,20 +474,26 @@ export async function importDemandSheets(params: {
       select: { id: true, name: true, number: true, externalId: true },
     });
     const contractByExternal = new Map<string, string>();
-    const contractById = new Map<string, string>();
+    const contractByKey = new Map<string, string>();
+    const normKey = (s: string) => s.trim().toLowerCase();
     for (const c of contracts) {
-      contractById.set(c.id, c.id);
-      if (c.name?.trim()) contractById.set(c.name.trim(), c.id);
-      if (c.number?.trim()) contractById.set(c.number.trim(), c.id);
-      if (c.externalId?.trim()) contractByExternal.set(c.externalId.trim(), c.id);
+      contractByKey.set(c.id, c.id);
+      if (c.name?.trim()) contractByKey.set(normKey(c.name), c.id);
+      if (c.number?.trim()) contractByKey.set(normKey(c.number), c.id);
+      if (c.externalId?.trim()) {
+        contractByExternal.set(c.externalId.trim(), c.id);
+        contractByKey.set(normKey(c.externalId), c.id);
+      }
     }
 
     const obras = await prisma.obra.findMany({
       select: { id: true, name: true, externalId: true, contratoId: true },
     });
     const obraByExternal = new Map<string, { id: string; name: string; contratoId: string }>();
+    const obraByName = new Map<string, { id: string; name: string; contratoId: string }>();
     for (const o of obras) {
       if (o.externalId) obraByExternal.set(o.externalId, o);
+      if (o.name?.trim()) obraByName.set(normKey(o.name), o);
     }
 
     for (let i = 0; i < rows.length; i += 1) {
@@ -497,54 +503,18 @@ export async function importDemandSheets(params: {
         if (!externalId) throw new Error('ID_FICHA_DEMANDA ausente');
 
         const contratoRef = opt(row.contratoExternalId);
-        if (!contratoRef) throw new Error('CONTRATO ausente');
-        let contratoId =
-          contractByExternal.get(contratoRef) || contractById.get(contratoRef) || null;
+        const contratoNomePlanilha = opt(row.contratoNome) || fdContratoName(contratoRef) || '';
+        if (!contratoRef && !contratoNomePlanilha) throw new Error('CONTRATO ausente');
+        const contratoId =
+          (contratoRef
+            ? contractByExternal.get(contratoRef) || contractByKey.get(normKey(contratoRef))
+            : null) ||
+          (contratoNomePlanilha ? contractByKey.get(normKey(contratoNomePlanilha)) : null) ||
+          null;
         if (!contratoId) {
-          const cc = await prisma.costCenter.findFirst({ orderBy: { createdAt: 'asc' } });
-          if (!cc) {
-            throw new Error(
-              `Contrato "${contratoRef}" não encontrado e não há centro de custo para criar automaticamente.`,
-            );
-          }
-          const numberBase = `IMP-${contratoRef}`.slice(0, 40);
-          let number = numberBase;
-          let suffix = 1;
-          while (await prisma.contract.findUnique({ where: { number } })) {
-            number = `${numberBase}-${suffix++}`.slice(0, 40);
-          }
-          const stub = await prisma.contract.create({
-            data: {
-              name:
-                opt(row.contratoNome) ||
-                fdContratoName(contratoRef) ||
-                `Contrato importado (${contratoRef})`,
-              number,
-              startDate: new Date(),
-              endDate: new Date(new Date().setFullYear(new Date().getFullYear() + 5)),
-              costCenterId: cc.id,
-              valuePlusAddenda: 0,
-              externalId: contratoRef,
-            },
-          });
-          contratoId = stub.id;
-          contractByExternal.set(contratoRef, stub.id);
-          contractById.set(stub.id, stub.id);
-          warnings += 1;
-        } else {
-          const contratoNome = opt(row.contratoNome) || fdContratoName(contratoRef);
-          if (contratoNome) {
-            const current = await prisma.contract.findUnique({
-              where: { id: contratoId },
-              select: { name: true },
-            });
-            if (current && /^Contrato importado \(/.test(current.name)) {
-              await prisma.contract.update({
-                where: { id: contratoId },
-                data: { name: contratoNome },
-              });
-            }
-          }
+          throw new Error(
+            `Contrato "${contratoNomePlanilha || contratoRef}" não cadastrado no sistema. Cadastre em Engenharia > Contratos antes de importar.`,
+          );
         }
 
         const solicitanteRef = opt(row.solicitanteRef) || '';
@@ -559,29 +529,15 @@ export async function importDemandSheets(params: {
           if (!solicitanteNomePlanilha) warnings += 1;
         }
 
+        // Obra na FD é só texto — NÃO cria cadastro em Obras.
         const obraRef = opt(row.obraExternalId) || opt(row.obraNome) || 'Sem obra';
         let obraName = opt(row.obraNome) || obraRef;
-        const existingObra = obraByExternal.get(obraRef);
+        const existingObra =
+          obraByExternal.get(obraRef) ||
+          obraByName.get(normKey(obraRef)) ||
+          (opt(row.obraNome) ? obraByName.get(normKey(opt(row.obraNome)!)) : null);
         if (existingObra) {
           obraName = existingObra.name;
-        } else if (obraRef) {
-          const createdObra = await prisma.obra.upsert({
-            where: { externalId: obraRef },
-            create: {
-              name: obraName.length > 120 ? obraName.slice(0, 120) : obraName,
-              contratoId,
-              externalId: obraRef,
-            },
-            update: {
-              contratoId,
-            },
-          });
-          obraByExternal.set(obraRef, {
-            id: createdObra.id,
-            name: createdObra.name,
-            contratoId,
-          });
-          obraName = createdObra.name;
         }
 
         const status = mapStatusFd(row.statusFd);

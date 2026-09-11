@@ -420,6 +420,7 @@ export default function FdsAprovadasPage() {
           isOpen={detailRecord != null}
           record={detailRecord}
           onClose={() => setDetailRecord(null)}
+          onRecordUpdated={(updated) => setDetailRecord(updated)}
         />
 
         <FichaDemandaPurchaseStatusModal

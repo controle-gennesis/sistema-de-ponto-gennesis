@@ -1,20 +1,28 @@
 'use client';
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Paperclip } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { Modal } from '@/components/ui/Modal';
 import { FilePreviewCard } from '@/components/ui/FilePreviewCard';
 import { FdStatusBadges } from '@/components/engenharia/FdStatusBadges';
+import api from '@/lib/api';
 import {
   FD_STATUS_LABELS,
   formatCurrencyDisplay,
   purchaseStatusLabel,
   type FichaDemandaApprovalRecord,
 } from '@/lib/fichaDemandaApproval';
+
 type Props = {
   isOpen: boolean;
   record: FichaDemandaApprovalRecord | null;
   onClose: () => void;
+  /** Atualiza o registro na tela pai após vincular anexo. */
+  onRecordUpdated?: (record: FichaDemandaApprovalRecord) => void;
+  /** Permite upload em anexos pendentes (padrão: true). */
+  allowPendingUpload?: boolean;
 };
 
 function formatDateTime(value: string | null | undefined): string {
@@ -35,7 +43,16 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-export function FichaDemandaDetailModal({ isOpen, record, onClose }: Props) {
+export function FichaDemandaDetailModal({
+  isOpen,
+  record,
+  onClose,
+  onRecordUpdated,
+  allowPendingUpload = true,
+}: Props) {
+  const queryClient = useQueryClient();
+  const [uploadingAnexoId, setUploadingAnexoId] = useState<string | null>(null);
+
   const anexos = useMemo(() => {
     if (!record?.anexos?.length) return [];
     return record.anexos.filter((a) => a && (a.name || a.url));
@@ -43,6 +60,38 @@ export function FichaDemandaDetailModal({ isOpen, record, onClose }: Props) {
 
   const linkedCount = anexos.filter((a) => a.url).length;
   const pendingCount = anexos.length - linkedCount;
+
+  const uploadMutation = useMutation({
+    mutationFn: async ({ anexoId, file }: { anexoId: string; file: File }) => {
+      if (!record?.id) throw new Error('Ficha inválida');
+      const form = new FormData();
+      form.append('file', file);
+      form.append('anexoId', anexoId);
+      const res = await api.post(`/demand-sheet-approvals/${record.id}/anexos`, form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      return (res.data?.data ?? null) as FichaDemandaApprovalRecord | null;
+    },
+    onMutate: ({ anexoId }) => {
+      setUploadingAnexoId(anexoId);
+    },
+    onSuccess: async (updated) => {
+      toast.success('Anexo vinculado');
+      if (updated) onRecordUpdated?.(updated);
+      await queryClient.invalidateQueries({ queryKey: ['demand-sheet-approvals'] });
+      await queryClient.invalidateQueries({ queryKey: ['fds-aprovadas'] });
+    },
+    onError: (err: unknown) => {
+      const msg =
+        err && typeof err === 'object' && 'response' in err
+          ? (err as { response?: { data?: { error?: string; message?: string } } }).response?.data
+              ?.error ||
+            (err as { response?: { data?: { message?: string } } }).response?.data?.message
+          : undefined;
+      toast.error(msg || 'Não foi possível enviar o anexo.');
+    },
+    onSettled: () => setUploadingAnexoId(null),
+  });
 
   if (!record) return null;
 
@@ -106,26 +155,40 @@ export function FichaDemandaDetailModal({ isOpen, record, onClose }: Props) {
               {anexos.length === 0
                 ? 'Nenhum anexo'
                 : `${linkedCount} com arquivo` +
-                  (pendingCount ? ` · ${pendingCount} pendente(s) de vínculo` : '')}
+                  (pendingCount ? ` · ${pendingCount} pendente(s)` : '')}
             </p>
           </div>
 
           {anexos.length === 0 ? (
             <div className="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
-              Esta ficha ainda não tem anexos. Use Importar → só o ZIP para vincular.
+              Esta ficha ainda não tem anexos. Use Importar → só o ZIP para vincular, ou cadastre
+              anexos na planilha.
             </div>
           ) : (
             <div className="grid grid-cols-2 gap-3 p-4 sm:grid-cols-3 lg:grid-cols-4">
-              {anexos.map((anexo) => (
-                <FilePreviewCard
-                  key={anexo.id || `${anexo.name}-${anexo.sourcePath || ''}`}
-                  file={{
-                    originalName: anexo.name || 'Arquivo',
-                    fileUrl: anexo.url,
-                  }}
-                  extra={anexo.kind || undefined}
-                />
-              ))}
+              {anexos.map((anexo, index) => {
+                const anexoKey = anexo.id || `${anexo.name}-${anexo.sourcePath || index}`;
+                const isPending = !anexo.url;
+                return (
+                  <FilePreviewCard
+                    key={anexoKey}
+                    file={{
+                      originalName: anexo.name || 'Arquivo',
+                      fileUrl: anexo.url,
+                    }}
+                    extra={anexo.kind || undefined}
+                    uploading={uploadingAnexoId === anexoKey || uploadingAnexoId === anexo.id}
+                    onUpload={
+                      allowPendingUpload && isPending
+                        ? (file) => {
+                            const idForUpload = anexo.id || anexoKey;
+                            uploadMutation.mutate({ anexoId: idForUpload, file });
+                          }
+                        : undefined
+                    }
+                  />
+                );
+              })}
             </div>
           )}
         </div>

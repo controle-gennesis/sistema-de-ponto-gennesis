@@ -482,6 +482,7 @@ export default function AprovacaoFdsPage() {
           isOpen={detailRecord != null}
           record={detailRecord}
           onClose={() => setDetailRecord(null)}
+          onRecordUpdated={(updated) => setDetailRecord(updated)}
         />
 
         <FichaDemandaApprovalFormModal
