@@ -252,7 +252,7 @@ function ContratoAcompanhamentoPanel({
     const openId = searchParams?.get('open');
     if (!openId) return;
     setModalReuniaoId(openId);
-    const next = new URLSearchParams(searchParams.toString());
+    const next = new URLSearchParams(searchParams?.toString() ?? '');
     next.delete('open');
     const qs = next.toString();
     const path = pathname || backHref?.(contractId) || `/ponto/contratos/${contractId}/reunioes`;
@@ -777,7 +777,7 @@ export function ContratoAcompanhamentoListPage({
   const contractId = typeof rawId === 'string' ? rawId : Array.isArray(rawId) ? rawId[0] ?? '' : '';
   const isSplit = !!splitWith;
   const openKind: AcompanhamentoKind =
-    searchParams.get('aba') === 'relatorio-mensal' ? 'mensal' : 'semanal';
+    searchParams?.get('aba') === 'relatorio-mensal' ? 'mensal' : 'semanal';
 
   const { data: userData, isLoading: loadingUser } = useQuery({
     queryKey: ['user'],
