@@ -2,6 +2,7 @@
 # Build do backend no deploy (monorepo). Rode a partir da raiz do repositório.
 # Também instala JDK + Maven (se preciso) e compila o worker NF-e para a SEFAZ.
 # Inclui rebuild de @sistema-ponto/permission-modules.
+# Redeploy 2026-09-11.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
