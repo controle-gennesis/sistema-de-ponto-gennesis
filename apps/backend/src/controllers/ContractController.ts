@@ -145,7 +145,7 @@ export class ContractController {
           where,
           skip,
           take: limitNum,
-          orderBy: { createdAt: 'desc' },
+          orderBy: { name: 'asc' },
           include: {
             costCenter: {
               select: { id: true, code: true, name: true }

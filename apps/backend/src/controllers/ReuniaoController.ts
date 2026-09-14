@@ -199,7 +199,8 @@ export class ReuniaoController {
     try {
       const { contractId } = req.params;
       const kind = kindFromReq(req);
-      const entry = await service.ensurePeriodoAtual(contractId, kind);
+      const forceNew = Boolean((req.body as { forceNew?: boolean })?.forceNew);
+      const entry = await service.ensurePeriodoAtual(contractId, kind, { forceNew });
       return res.json({ success: true, data: entry });
     } catch (err) {
       const msg = err instanceof Error ? err.message : '';

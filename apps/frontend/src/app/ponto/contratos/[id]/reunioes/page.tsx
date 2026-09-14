@@ -25,11 +25,13 @@ const REUNIOES_CONFIG: ContratoAcompanhamentoListConfig = {
     'Escolha o formulário usado nas reuniões quinzenais gravadas com a equipe do contrato. Os templates vêm de Cadastros → Formulários.',
   fillButtonLabel: 'Registrar reunião da quinzena',
   fillButtonContinueLabel: 'Continuar reunião da quinzena',
+  fillButtonNewLabel: 'Nova reunião',
   currentPeriodSummaryLabel: 'Quinzena atual',
   recordsCountLabel: (count) =>
     `${count} ${count === 1 ? 'quinzena registrada' : 'quinzenas registradas'}`,
   saveSuccessToast: 'Formulário de reunião quinzenal configurado!',
   openSuccessToast: 'Reunião da quinzena aberta para registro.',
+  createSuccessToast: 'Nova reunião criada.',
 };
 
 const RELATORIO_MENSAL_CONFIG: ContratoAcompanhamentoListConfig = {
@@ -48,11 +50,13 @@ const RELATORIO_MENSAL_CONFIG: ContratoAcompanhamentoListConfig = {
     'Escolha o formulário mensal deste contrato. Os templates vêm de Cadastros → Formulários.',
   fillButtonLabel: 'Preencher mês atual',
   fillButtonContinueLabel: 'Continuar mês atual',
+  fillButtonNewLabel: 'Novo relatório',
   currentPeriodSummaryLabel: 'Mês atual',
   recordsCountLabel: (count) =>
     `${count} ${count === 1 ? 'mês registrado' : 'meses registrados'}`,
   saveSuccessToast: 'Formulário do relatório mensal configurado!',
   openSuccessToast: 'Mês atual aberto para preenchimento.',
+  createSuccessToast: 'Novo relatório criado.',
 };
 
 export default function ContratoReunioesDeContratoPage() {

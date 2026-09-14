@@ -14,6 +14,7 @@ import {
   ClipboardList,
   Settings2,
   PenLine,
+  Plus,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { AppUnderlineTabButton, AppUnderlineTabList } from '@/components/ui/AppTabButton';
@@ -26,6 +27,7 @@ import toast from 'react-hot-toast';
 import api from '@/lib/api';
 import { textMatchesSearch } from '@/lib/normalizeSearchText';
 import { ActionMenuOverlay } from '@/components/ui/ActionMenuOverlay';
+import { computeRowActionMenuPosition } from '@/lib/computeRowActionMenuPosition';
 import { getListTableRowClassName, ListRowNavigableLabel, rowActionMenuButtonClass } from '@/components/ui/listTableUi';
 import { ReuniaoFormModal, type ReuniaoListPatch } from '@/components/contract/ReuniaoFormModal';
 import { ContratoControleGeralMensalCard } from '@/components/contract/ContratoControleGeralMensalCard';
@@ -71,6 +73,8 @@ interface ReuniaoActionMenuState {
   reuniaoId: string;
   top: number;
   left: number;
+  maxHeight: number;
+  placement: 'below' | 'above';
 }
 
 export interface ContratoAcompanhamentoListConfig {
@@ -86,10 +90,12 @@ export interface ContratoAcompanhamentoListConfig {
   configModalDescription: string;
   fillButtonLabel: string;
   fillButtonContinueLabel: string;
+  fillButtonNewLabel?: string;
   currentPeriodSummaryLabel: string;
   recordsCountLabel: (count: number) => string;
   saveSuccessToast: string;
   openSuccessToast: string;
+  createSuccessToast?: string;
   backHref?: (contractId: string) => string;
   backLabel?: string;
   protectedRoute?: string;
@@ -187,10 +193,12 @@ function ContratoAcompanhamentoPanel({
     configModalDescription,
     fillButtonLabel,
     fillButtonContinueLabel,
+    fillButtonNewLabel,
     currentPeriodSummaryLabel,
     recordsCountLabel,
     saveSuccessToast,
     openSuccessToast,
+    createSuccessToast,
     backHref,
   } = config;
 
@@ -212,6 +220,11 @@ function ContratoAcompanhamentoPanel({
   const formOpen = !!modalReuniaoId;
   const showInlineForm = formVariant === 'inline' && formOpen;
   const tone = panelTone(kind);
+  const newRecordLabel =
+    fillButtonNewLabel || (kind === 'mensal' ? 'Novo relatório' : 'Nova reunião');
+  const newRecordToast =
+    createSuccessToast ||
+    (kind === 'mensal' ? 'Novo relatório criado.' : 'Nova reunião criada.');
 
   const { data: reunioesData, isLoading: loadingReunioes } = useQuery({
     queryKey: listQueryKey,
@@ -281,8 +294,9 @@ function ContratoAcompanhamentoPanel({
   });
 
   const periodoAtualMutation = useMutation({
-    mutationFn: async () => (await api.post(`${apiBase}/periodo-atual`)).data,
-    onSuccess: (res) => {
+    mutationFn: async (forceNew: boolean) =>
+      (await api.post(`${apiBase}/periodo-atual`, forceNew ? { forceNew: true } : {})).data,
+    onSuccess: (res, forceNew) => {
       const entry = res.data as ReuniaoEntry;
       queryClient.setQueryData(listQueryKey, (old: { data?: ReuniaoEntry[] } | undefined) => {
         const list = Array.isArray(old?.data) ? old!.data : [];
@@ -290,7 +304,7 @@ function ContratoAcompanhamentoPanel({
       });
       queryClient.invalidateQueries({ queryKey: listQueryKey });
       setModalReuniaoId(entry.id);
-      toast.success(openSuccessToast);
+      toast.success(forceNew ? newRecordToast : openSuccessToast);
     },
     onError: (err: unknown) => {
       const msg =
@@ -481,12 +495,11 @@ function ContratoAcompanhamentoPanel({
                             const bounds = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
                             setReuniaoActionMenu((prev) => {
                               if (prev?.reuniaoId === r.id) return null;
-                              let left = bounds.right - REUNIAO_MENU_WIDTH_PX;
-                              left = Math.max(
-                                8,
-                                Math.min(left, window.innerWidth - REUNIAO_MENU_WIDTH_PX - 8)
+                              const coords = computeRowActionMenuPosition(
+                                bounds,
+                                REUNIAO_MENU_WIDTH_PX
                               );
-                              return { reuniaoId: r.id, top: bounds.bottom + 4, left };
+                              return { reuniaoId: r.id, ...coords };
                             });
                           }}
                           className={rowActionMenuButtonClass(reuniaoActionMenu?.reuniaoId === r.id)}
@@ -505,43 +518,6 @@ function ContratoAcompanhamentoPanel({
           </div>
         </div>
       )}
-      {reuniaoActionMenu && (
-        <ActionMenuOverlay
-          open
-          onClose={() => setReuniaoActionMenu(null)}
-          top={reuniaoActionMenu.top}
-          left={reuniaoActionMenu.left}
-        >
-          <button
-            type="button"
-            role="menuitem"
-            onClick={(e) => {
-              e.stopPropagation();
-              openReuniao(reuniaoActionMenu.reuniaoId);
-            }}
-            className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700"
-          >
-            <Eye className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
-            <span>Abrir formulário</span>
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            onClick={(e) => {
-              e.stopPropagation();
-              const { reuniaoId } = reuniaoActionMenu;
-              setReuniaoActionMenu(null);
-              if (confirm('Excluir este registro? Esta ação não pode ser desfeita.')) {
-                deleteMutation.mutate(reuniaoId);
-              }
-            }}
-            className="flex w-full items-center gap-2 border-t border-gray-200 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-700"
-          >
-            <Trash2 className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
-            <span>Excluir</span>
-          </button>
-        </ActionMenuOverlay>
-      )}
     </>
   );
 
@@ -549,7 +525,7 @@ function ContratoAcompanhamentoPanel({
     <>
       <Card
         padding={compact ? 'none' : 'md'}
-        className={`relative w-full overflow-hidden !rounded-2xl border-gray-200/80 shadow-[0_18px_40px_-28px_rgba(15,23,42,0.55)] dark:border-white/10 dark:bg-gray-900/70 ${
+        className={`relative w-full !overflow-visible !rounded-2xl border-gray-200/80 shadow-[0_18px_40px_-28px_rgba(15,23,42,0.55)] dark:border-white/10 dark:bg-gray-900/70 ${
           compact ? 'flex min-h-0 flex-1 flex-col' : ''
         }`}
       >
@@ -607,7 +583,7 @@ function ContratoAcompanhamentoPanel({
                     setModalReuniaoId(currentPeriodEntry.id);
                     return;
                   }
-                  periodoAtualMutation.mutate();
+                  periodoAtualMutation.mutate(false);
                 }}
                 disabled={periodoAtualMutation.isPending || loadingConfig}
                 className="inline-flex h-10 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-red-600 px-4 text-sm font-semibold text-white shadow-sm shadow-red-600/25 transition-colors hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 disabled:opacity-70"
@@ -615,6 +591,17 @@ function ContratoAcompanhamentoPanel({
                 <PenLine className="h-4 w-4 shrink-0" />
                 {currentPeriodEntry ? fillButtonContinueLabel : fillButtonLabel}
               </button>
+              {currentPeriodEntry || showInlineForm ? (
+                <button
+                  type="button"
+                  onClick={() => periodoAtualMutation.mutate(true)}
+                  disabled={periodoAtualMutation.isPending || loadingConfig}
+                  className="inline-flex h-10 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-xl border border-gray-200 bg-white/80 px-3.5 text-sm font-semibold text-gray-700 shadow-sm transition-colors hover:border-gray-300 hover:bg-white focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 disabled:opacity-70 dark:border-white/10 dark:bg-gray-950/40 dark:text-gray-200 dark:hover:border-white/20 dark:hover:bg-gray-900"
+                >
+                  <Plus className="h-4 w-4 shrink-0" />
+                  {newRecordLabel}
+                </button>
+              ) : null}
             </div>
           </div>
         </CardHeader>
@@ -627,6 +614,7 @@ function ContratoAcompanhamentoPanel({
         >
           {showInlineForm ? (
             <ReuniaoFormModal
+              key={modalReuniaoId}
               isOpen={formOpen}
               onClose={() => setModalReuniaoId(null)}
               contractId={contractId}
@@ -640,6 +628,46 @@ function ContratoAcompanhamentoPanel({
           )}
         </CardContent>
       </Card>
+
+      {reuniaoActionMenu ? (
+        <ActionMenuOverlay
+          open
+          onClose={() => setReuniaoActionMenu(null)}
+          top={reuniaoActionMenu.top}
+          left={reuniaoActionMenu.left}
+          maxHeight={reuniaoActionMenu.maxHeight}
+          placement={reuniaoActionMenu.placement}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            onClick={(e) => {
+              e.stopPropagation();
+              openReuniao(reuniaoActionMenu.reuniaoId);
+            }}
+            className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700"
+          >
+            <Eye className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
+            <span>Abrir formulário</span>
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={(e) => {
+              e.stopPropagation();
+              const { reuniaoId } = reuniaoActionMenu;
+              setReuniaoActionMenu(null);
+              if (confirm('Excluir este registro? Esta ação não pode ser desfeita.')) {
+                deleteMutation.mutate(reuniaoId);
+              }
+            }}
+            className="flex w-full items-center gap-2 border-t border-gray-200 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-700"
+          >
+            <Trash2 className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
+            <span>Excluir</span>
+          </button>
+        </ActionMenuOverlay>
+      ) : null}
 
       <Modal
         isOpen={configModalOpen}
@@ -719,6 +747,7 @@ function ContratoAcompanhamentoPanel({
 
       {formVariant === 'modal' ? (
         <ReuniaoFormModal
+          key={modalReuniaoId}
           isOpen={formOpen}
           onClose={() => setModalReuniaoId(null)}
           contractId={contractId}
