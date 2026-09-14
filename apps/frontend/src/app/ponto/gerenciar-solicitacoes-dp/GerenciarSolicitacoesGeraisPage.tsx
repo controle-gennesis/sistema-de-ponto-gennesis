@@ -609,10 +609,14 @@ export function GerenciarSolicitacoesGeraisPage({
         responsibleNote: responsibleNote?.trim() || undefined,
         cancellationReason: cancellationReason?.trim() || undefined,
       });
-      return res.data?.data as DpRequest;
+      return res.data as { data: DpRequest; contabilidadeCreated?: boolean };
     },
-    onSuccess: async (_, vars) => {
-      toast.success('Feedback registrado');
+    onSuccess: async (payload, vars) => {
+      toast.success(
+        payload?.contabilidadeCreated
+          ? 'Finalizada e enviada à Comunicação Contábil.'
+          : 'Feedback registrado'
+      );
       cancelRowDraft(vars.id);
       closeHistoryRequest();
       await queryClient.invalidateQueries({ queryKey: [scopeConfig.queryKeyPrefix] });

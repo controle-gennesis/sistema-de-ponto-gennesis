@@ -1187,6 +1187,13 @@ async function ensureDpContabilidadeTables(prisma: PrismaClient): Promise<void> 
     CREATE INDEX IF NOT EXISTS "dp_contabilidade_requests_createdAt_idx"
     ON "dp_contabilidade_requests"("createdAt");
   `);
+  await prisma.$executeRawUnsafe(
+    `ALTER TABLE "dp_contabilidade_requests" ADD COLUMN IF NOT EXISTS "sourceDpRequestId" TEXT;`
+  );
+  await prisma.$executeRawUnsafe(`
+    CREATE UNIQUE INDEX IF NOT EXISTS "dp_contabilidade_requests_sourceDpRequestId_key"
+    ON "dp_contabilidade_requests"("sourceDpRequestId");
+  `);
 
   await prisma.$executeRawUnsafe(`
     CREATE TABLE IF NOT EXISTS "dp_contabilidade_comments" (
@@ -1675,6 +1682,106 @@ async function ensureUserContractReunioesColumn(prisma: PrismaClient): Promise<v
   );
 }
 
+async function addFkIfMissing(
+  prisma: PrismaClient,
+  table: string,
+  constraint: string,
+  sql: string
+): Promise<void> {
+  await prisma.$executeRawUnsafe(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = '${constraint}') THEN
+        ALTER TABLE "${table}" ${sql};
+      END IF;
+    END $$;
+  `);
+}
+
+async function ensureUserAccessJunctionTable(
+  prisma: PrismaClient,
+  opts: {
+    table: string;
+    secondCol: 'contractId' | 'costCenterId';
+    secondTable: 'contracts' | 'cost_centers';
+  }
+): Promise<void> {
+  const { table, secondCol, secondTable } = opts;
+  if (!(await tableExists(prisma, table))) {
+    console.warn(`[Schema] Tabela ${table} ausente — criando automaticamente.`);
+  }
+
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "${table}" (
+      "id" TEXT NOT NULL,
+      "userId" TEXT NOT NULL,
+      "${secondCol}" TEXT NOT NULL,
+      "updatedBy" TEXT,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" TIMESTAMP(3) NOT NULL,
+      CONSTRAINT "${table}_pkey" PRIMARY KEY ("id")
+    );
+  `);
+  await prisma.$executeRawUnsafe(
+    `CREATE UNIQUE INDEX IF NOT EXISTS "${table}_userId_${secondCol}_key" ON "${table}"("userId", "${secondCol}");`
+  );
+  await prisma.$executeRawUnsafe(
+    `CREATE INDEX IF NOT EXISTS "${table}_userId_idx" ON "${table}"("userId");`
+  );
+  await prisma.$executeRawUnsafe(
+    `CREATE INDEX IF NOT EXISTS "${table}_${secondCol}_idx" ON "${table}"("${secondCol}");`
+  );
+
+  await addFkIfMissing(
+    prisma,
+    table,
+    `${table}_userId_fkey`,
+    `ADD CONSTRAINT "${table}_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE`
+  );
+  await addFkIfMissing(
+    prisma,
+    table,
+    `${table}_${secondCol}_fkey`,
+    `ADD CONSTRAINT "${table}_${secondCol}_fkey" FOREIGN KEY ("${secondCol}") REFERENCES "${secondTable}"("id") ON DELETE CASCADE ON UPDATE CASCADE`
+  );
+  await addFkIfMissing(
+    prisma,
+    table,
+    `${table}_updatedBy_fkey`,
+    `ADD CONSTRAINT "${table}_updatedBy_fkey" FOREIGN KEY ("updatedBy") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE`
+  );
+}
+
+async function ensurePermissionAccessTables(prisma: PrismaClient): Promise<void> {
+  await ensureUserAccessJunctionTable(prisma, {
+    table: 'user_restricted_dp_approval_cost_centers',
+    secondCol: 'costCenterId',
+    secondTable: 'cost_centers',
+  });
+  await ensureUserAccessJunctionTable(prisma, {
+    table: 'user_dp_request_view_cost_centers',
+    secondCol: 'costCenterId',
+    secondTable: 'cost_centers',
+  });
+  await ensureUserAccessJunctionTable(prisma, {
+    table: 'user_fd_approval_contracts',
+    secondCol: 'contractId',
+    secondTable: 'contracts',
+  });
+
+  if (await tableExists(prisma, 'position_permission_templates')) {
+    await prisma.$executeRawUnsafe(
+      `ALTER TABLE "position_permission_templates" ADD COLUMN IF NOT EXISTS "restrictedDpApprovalCostCenterIds" JSONB NOT NULL DEFAULT '[]';`
+    );
+    await prisma.$executeRawUnsafe(
+      `ALTER TABLE "position_permission_templates" ADD COLUMN IF NOT EXISTS "dpRequestViewCostCenterIds" JSONB NOT NULL DEFAULT '[]';`
+    );
+    await prisma.$executeRawUnsafe(
+      `ALTER TABLE "position_permission_templates" ADD COLUMN IF NOT EXISTS "fdApprovalContractIds" JSONB NOT NULL DEFAULT '[]';`
+    );
+  }
+}
+
 export async function ensureProductionSchema(prisma: PrismaClient): Promise<void> {
   try {
     await ensureUnaccentExtension(prisma);
@@ -1711,6 +1818,7 @@ export async function ensureProductionSchema(prisma: PrismaClient): Promise<void
     await ensureDriveStarTrashColumns(prisma);
     await ensureUserActivityTracking(prisma);
     await ensureUserContractReunioesColumn(prisma);
+    await ensurePermissionAccessTables(prisma);
     await ensureAuditLogTracking(prisma);
     await ensureQuoteMapUnitPricePrecision(prisma);
     await ensureToolRentalRequestsSchema(prisma);

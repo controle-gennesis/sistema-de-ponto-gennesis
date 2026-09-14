@@ -92,6 +92,7 @@ function serializeRequest(
     concludedByUserId: row.concludedByUserId,
     cancelledAt: row.cancelledAt?.toISOString() ?? null,
     cancelledByUserId: row.cancelledByUserId,
+    sourceDpRequestId: (row as { sourceDpRequestId?: string | null }).sourceDpRequestId ?? null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
     comments: row.comments.map((c) => ({

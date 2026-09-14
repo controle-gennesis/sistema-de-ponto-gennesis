@@ -863,10 +863,10 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
               isAdministrator || can(pk('/ponto/gerenciar-solicitacoes-dp')),
           },
           {
-            name: 'DP/Contabilidade',
+            name: 'Comunicação Contábil',
             href: '/ponto/dp-contabilidade',
             icon: Calculator,
-            description: 'Solicitações do DP para a contabilidade',
+            description: 'Comunicação do DP com a Contabilidade',
             permission:
               isAdministrator ||
               isDepartmentPessoal ||
