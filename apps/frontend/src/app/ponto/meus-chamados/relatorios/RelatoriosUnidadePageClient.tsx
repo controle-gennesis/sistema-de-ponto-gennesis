@@ -237,8 +237,8 @@ export default function RelatoriosUnidadePageClient() {
           </div>
 
           {!loadingBuildings && unitBuildings.length === 0 ? (
-            <Card className="mx-auto max-w-2xl">
-              <CardContent className="p-8 text-center">
+            <Card className={`mx-auto max-w-2xl ${cadastroListClasses.card}`}>
+              <CardContent className={`${cadastroListClasses.cardContent} py-8 text-center`}>
                 <Building2 className="mx-auto mb-4 h-10 w-10 text-gray-400" />
                 <h2 className="mb-2 text-lg font-semibold text-gray-900 dark:text-gray-100">
                   Nenhuma localidade vinculada ao seu usuário

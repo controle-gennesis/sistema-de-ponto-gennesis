@@ -3,6 +3,28 @@ import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { cache } from '../lib/cache';
+import { normalizeGeofenceLocations } from '../services/LocationService';
+
+function sanitizeGeofenceLocationsPayload(raw: unknown) {
+  const locations = normalizeGeofenceLocations(raw).map((loc, index) => ({
+    id: loc.id || `loc-${index + 1}`,
+    name: loc.name.trim() || `Local ${index + 1}`,
+    latitude: loc.latitude,
+    longitude: loc.longitude,
+    radius: Math.max(10, Math.round(loc.radius) || 1000),
+  }));
+
+  for (const loc of locations) {
+    if (loc.latitude < -90 || loc.latitude > 90) {
+      throw createError(`Latitude inválida em "${loc.name}"`, 400);
+    }
+    if (loc.longitude < -180 || loc.longitude > 180) {
+      throw createError(`Longitude inválida em "${loc.name}"`, 400);
+    }
+  }
+
+  return locations;
+}
 
 export class CompanyController {
   async getCompanySettings(req: Request, res: Response, next: NextFunction) {
@@ -69,6 +91,7 @@ export class CompanyController {
         geofenceEnabled,
         geofenceBlockOutside,
         geofenceRequireLocation,
+        geofenceLocations,
         vacationDaysPerYear,
         fuelSuppliesSlaHours,
       } = req.body;
@@ -78,12 +101,35 @@ export class CompanyController {
         throw createError('CNPJ inválido', 400);
       }
 
+      const parsedGeofenceLocations =
+        geofenceLocations !== undefined
+          ? sanitizeGeofenceLocationsPayload(geofenceLocations)
+          : undefined;
+
+      // Compatibilidade: o 1º local vira a base legada (defaultLatitude/Longitude/raio)
+      const syncedFromLocations = parsedGeofenceLocations?.[0];
+      const nextDefaultLatitude =
+        syncedFromLocations?.latitude ??
+        (defaultLatitude !== undefined ? Number(defaultLatitude) : undefined);
+      const nextDefaultLongitude =
+        syncedFromLocations?.longitude ??
+        (defaultLongitude !== undefined ? Number(defaultLongitude) : undefined);
+      const nextMaxDistanceMeters =
+        syncedFromLocations?.radius ??
+        (maxDistanceMeters !== undefined ? Number(maxDistanceMeters) : undefined);
+
       // Validar coordenadas se fornecidas
-      if (defaultLatitude !== undefined && (defaultLatitude < -90 || defaultLatitude > 90)) {
+      if (
+        nextDefaultLatitude !== undefined &&
+        (nextDefaultLatitude < -90 || nextDefaultLatitude > 90)
+      ) {
         throw createError('Latitude deve estar entre -90 e 90', 400);
       }
 
-      if (defaultLongitude !== undefined && (defaultLongitude < -180 || defaultLongitude > 180)) {
+      if (
+        nextDefaultLongitude !== undefined &&
+        (nextDefaultLongitude < -180 || nextDefaultLongitude > 180)
+      ) {
         throw createError('Longitude deve estar entre -180 e 180', 400);
       }
 
@@ -129,11 +175,14 @@ export class CompanyController {
             ...(lunchEndTime && { lunchEndTime }),
             ...(toleranceMinutes !== undefined && { toleranceMinutes }),
             ...(maxOvertimeHours !== undefined && { maxOvertimeHours }),
-            ...(maxDistanceMeters !== undefined && {
-              maxDistanceMeters: Math.max(10, Number(maxDistanceMeters) || 1000),
+            ...(nextMaxDistanceMeters !== undefined && {
+              maxDistanceMeters: Math.max(10, Number(nextMaxDistanceMeters) || 1000),
             }),
-            ...(defaultLatitude !== undefined && { defaultLatitude }),
-            ...(defaultLongitude !== undefined && { defaultLongitude }),
+            ...(nextDefaultLatitude !== undefined && { defaultLatitude: nextDefaultLatitude }),
+            ...(nextDefaultLongitude !== undefined && { defaultLongitude: nextDefaultLongitude }),
+            ...(parsedGeofenceLocations !== undefined && {
+              geofenceLocations: parsedGeofenceLocations,
+            }),
             ...(geofenceEnabled !== undefined && { geofenceEnabled: !!geofenceEnabled }),
             ...(geofenceBlockOutside !== undefined && {
               geofenceBlockOutside: !!geofenceBlockOutside,
@@ -162,9 +211,13 @@ export class CompanyController {
             lunchEndTime: lunchEndTime || '13:00',
             toleranceMinutes: toleranceMinutes || 10,
             maxOvertimeHours: maxOvertimeHours || 2,
-            maxDistanceMeters: maxDistanceMeters || 1000,
-            defaultLatitude: defaultLatitude || -23.5505,
-            defaultLongitude: defaultLongitude || -46.6333,
+            maxDistanceMeters: Math.max(
+              10,
+              Number(nextMaxDistanceMeters ?? maxDistanceMeters) || 1000
+            ),
+            defaultLatitude: nextDefaultLatitude ?? defaultLatitude ?? -23.5505,
+            defaultLongitude: nextDefaultLongitude ?? defaultLongitude ?? -46.6333,
+            geofenceLocations: parsedGeofenceLocations ?? [],
             geofenceEnabled: !!geofenceEnabled,
             geofenceBlockOutside: geofenceBlockOutside === undefined ? true : !!geofenceBlockOutside,
             geofenceRequireLocation:
