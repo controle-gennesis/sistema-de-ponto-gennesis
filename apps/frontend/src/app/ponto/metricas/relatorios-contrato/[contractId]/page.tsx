@@ -21,11 +21,13 @@ const CONFIG: ContratoAcompanhamentoListConfig = {
     'Escolha o formulário usado nas reuniões quinzenais deste contrato. Você também pode atribuir em Métricas → Relatórios de Contrato.',
   fillButtonLabel: 'Registrar reunião da quinzena',
   fillButtonContinueLabel: 'Continuar reunião da quinzena',
+  fillButtonNewLabel: 'Nova reunião',
   currentPeriodSummaryLabel: 'Quinzena atual',
   recordsCountLabel: (count) =>
     `${count} ${count === 1 ? 'quinzena registrada' : 'quinzenas registradas'}`,
   saveSuccessToast: 'Formulário de reunião quinzenal configurado!',
   openSuccessToast: 'Reunião da quinzena aberta para registro.',
+  createSuccessToast: 'Nova reunião criada.',
   backHref: () => '/ponto/metricas/relatorios-contrato',
   backLabel: 'Voltar ao painel',
   protectedRoute: '/ponto/metricas/relatorios-contrato',

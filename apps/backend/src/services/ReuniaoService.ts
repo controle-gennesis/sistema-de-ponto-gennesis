@@ -523,7 +523,11 @@ export class ReuniaoService {
   }
 
   /** Abre ou cria o preenchimento do período corrente (mês ou quinzena). */
-  async ensurePeriodoAtual(contractId: string, kind: ReuniaoKind): Promise<ReuniaoIndexEntry> {
+  async ensurePeriodoAtual(
+    contractId: string,
+    kind: ReuniaoKind,
+    opts?: { forceNew?: boolean },
+  ): Promise<ReuniaoIndexEntry> {
     const config = await this.getContractConfig(contractId, kind);
     if (!config?.formularioId) {
       throw new Error(
@@ -535,9 +539,11 @@ export class ReuniaoService {
 
     if (kind === 'mensal') {
       const monthKey = getIsoMonthKey();
-      const idx = await this.getIndex(contractId, kind);
-      const existing = idx.reunioes.find((row) => row.monthKey === monthKey);
-      if (existing) return existing;
+      if (!opts?.forceNew) {
+        const idx = await this.getIndex(contractId, kind);
+        const existing = idx.reunioes.find((row) => row.monthKey === monthKey);
+        if (existing) return existing;
+      }
 
       return this.createReuniao(contractId, kind, {
         formularioId: config.formularioId,
@@ -547,9 +553,11 @@ export class ReuniaoService {
     }
 
     const weekKey = getFortnightKey();
-    const idx = await this.getIndex(contractId, kind);
-    const existing = idx.reunioes.find((row) => row.weekKey === weekKey);
-    if (existing) return existing;
+    if (!opts?.forceNew) {
+      const idx = await this.getIndex(contractId, kind);
+      const existing = idx.reunioes.find((row) => row.weekKey === weekKey);
+      if (existing) return existing;
+    }
 
     return this.createReuniao(contractId, kind, {
       formularioId: config.formularioId,

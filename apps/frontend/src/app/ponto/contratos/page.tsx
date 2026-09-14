@@ -508,11 +508,14 @@ export default function ContratosPage() {
 
   const contracts = useMemo(() => {
     const list = (contractsData?.data || []) as Contract[];
-    if (isElevatedUser) return list;
-    // Enquanto permissões carregam, não mostrar lista (evita flash de todos os contratos)
-    if (loadingPermissions) return [];
-    if (allowedContractIds.length === 0) return [];
-    return list.filter((c) => canAccessContract(c.id));
+    const visible = isElevatedUser
+      ? list
+      : loadingPermissions || allowedContractIds.length === 0
+        ? []
+        : list.filter((c) => canAccessContract(c.id));
+    return [...visible].sort((a, b) =>
+      (a.name || '').localeCompare(b.name || '', 'pt-BR', { sensitivity: 'base' })
+    );
   }, [contractsData?.data, isElevatedUser, loadingPermissions, allowedContractIds, canAccessContract]);
   const user = userData?.data || { name: 'Usuário', role: 'EMPLOYEE' };
   const totalFiltered = contracts.length;
