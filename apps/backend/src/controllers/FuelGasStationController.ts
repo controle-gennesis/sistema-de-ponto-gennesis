@@ -5,13 +5,13 @@ import { createError } from '../middleware/errorHandler';
 import { prisma } from '../lib/prisma';
 import { assertUserHasFuelSuppliesAccess } from '../lib/fuelSuppliesAccess';
 import {
-  FUEL_ABASTECIMENTO_STATE_CODES,
   assertValidSatelliteCityCode,
+  cityCodesForLookup,
   listActiveFuelGasStationsByContract,
   listFuelSatelliteCities,
   reserveFuelGasStationDisplayNumbers,
 } from '../lib/fuelAdministrativeRegions';
-import { getFuelSatelliteCityByCode } from '../constants/fuelSatelliteCities';
+import { getFuelSatelliteCityByCode, isBrazilStateCode } from '../constants/fuelSatelliteCities';
 
 const stationBodySchema = z.object({
   cityCode: z.string().min(1),
@@ -89,10 +89,8 @@ export class FuelGasStationController {
     try {
       await this.assertAccess(req);
       const stateCode = String(req.query.stateCode ?? '').trim().toUpperCase();
-      const cities = listFuelSatelliteCities(
-        stateCode && FUEL_ABASTECIMENTO_STATE_CODES.includes(stateCode as 'DF' | 'GO')
-          ? stateCode
-          : undefined,
+      const cities = await listFuelSatelliteCities(
+        stateCode && isBrazilStateCode(stateCode) ? stateCode : undefined,
       );
       res.json({ success: true, data: cities });
     } catch (error) {
@@ -125,17 +123,15 @@ export class FuelGasStationController {
         return res.json({ success: true, data: rows.map(mapStationRow) });
       }
 
-      const cityCodes = cityCode
-        ? [cityCode]
-        : listFuelSatelliteCities(
-            stateCode && FUEL_ABASTECIMENTO_STATE_CODES.includes(stateCode as 'DF' | 'GO')
-              ? stateCode
-              : undefined,
-          ).map((city) => city.code);
+      const cityFilter = cityCode
+        ? { cityCode: { in: cityCodesForLookup(cityCode) } }
+        : isBrazilStateCode(stateCode)
+          ? { cityCode: { startsWith: `${stateCode}_` } }
+          : {};
 
       const rows = await prisma.fuelGasStation.findMany({
         where: {
-          cityCode: { in: cityCodes },
+          ...cityFilter,
           ...(includeInactive ? {} : { isActive: true }),
         },
         orderBy: [{ displayNumber: 'asc' }],
@@ -152,7 +148,7 @@ export class FuelGasStationController {
     try {
       await this.assertAccess(req);
       const body = stationBodySchema.parse(req.body);
-      assertValidSatelliteCityCode(body.cityCode);
+      await assertValidSatelliteCityCode(body.cityCode);
       const contractIds = await assertContractIdsExist(body.contractIds ?? []);
 
       const [displayNumber] = await reserveFuelGasStationDisplayNumbers(1);
@@ -182,7 +178,7 @@ export class FuelGasStationController {
         data: mapStationRow(row),
       });
     } catch (error) {
-      if (error instanceof Error && error.message === 'Cidade satélite inválida') {
+      if (error instanceof Error && error.message === 'Cidade inválida') {
         return next(createError(error.message, 400));
       }
       next(error);
@@ -206,7 +202,7 @@ export class FuelGasStationController {
         const row = stations[i] as Record<string, unknown>;
         try {
           const body = stationBodySchema.parse(row);
-          assertValidSatelliteCityCode(body.cityCode);
+          await assertValidSatelliteCityCode(body.cityCode);
 
           const displayNumber = displayNumbers[i];
           if (!displayNumber) {
@@ -237,7 +233,7 @@ export class FuelGasStationController {
           }
           const message =
             err instanceof Error
-              ? err.message === 'Cidade satélite inválida'
+              ? err.message === 'Cidade inválida'
                 ? err.message
                 : err.message
               : 'Erro ao importar linha';
