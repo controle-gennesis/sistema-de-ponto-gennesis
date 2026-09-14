@@ -18,7 +18,7 @@ const TEAM_OPEN_STATUSES = [
 
 const TEAM_INCLUDE = {
   company: { select: { id: true, name: true } },
-  manager: { select: { id: true, name: true, email: true, profilePhotoUrl: true } },
+  manager: { select: { id: true, name: true, email: true, cpf: true, profilePhotoUrl: true } },
   members: {
     orderBy: [{ role: 'asc' as const }, { createdAt: 'asc' as const }],
     include: {
@@ -27,6 +27,7 @@ const TEAM_INCLUDE = {
           id: true,
           name: true,
           email: true,
+          cpf: true,
           profilePhotoUrl: true,
           employee: { select: { position: true, department: true, phone: true } }
         }

@@ -34,8 +34,13 @@ import { ListRowNavigableLabel, listTableRowClasses } from '@/components/ui/list
 import { useRowActionMenu } from '@/hooks/useRowActionMenu';
 import { useCadastroCrudPermissions } from '@/hooks/useCadastroCrudPermissions';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
+import { Checkbox, CheckboxIndicator } from '@/components/ui/Checkbox';
 import { useModalCloseConfirm } from '@/hooks/useModalCloseConfirm';
 import { FORM_FIELD_INPUT_CLS, FORM_FIELD_TEXTAREA_CLS } from '@/lib/formFieldUi';
+import { formatCpfInput } from '@/lib/cpf';
+import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
+import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import api from '@/lib/api';
 import toast from 'react-hot-toast';
 import {
@@ -45,6 +50,88 @@ import {
   type TrainingEnrollmentAdminRow,
   type TrainingQuestionOption
 } from '../trainingTypes';
+
+const VIDEO_PROVIDER_OPTIONS = labeledToSelectOptions([
+  { value: 'YOUTUBE', label: 'YouTube' },
+  { value: 'VIMEO', label: 'Vimeo' },
+  { value: 'URL', label: 'Link direto' }
+]);
+
+function sanitizeDecimalInput(value: string): string {
+  const cleaned = value.replace(/[^\d.,]/g, '').replace(',', '.');
+  const parts = cleaned.split('.');
+  if (parts.length <= 1) return cleaned;
+  return `${parts[0]}.${parts.slice(1).join('')}`;
+}
+
+function sanitizeIntegerInput(value: string, max?: number): string {
+  const digits = value.replace(/\D/g, '');
+  if (!digits) return '';
+  if (max == null) return digits;
+  const n = Number(digits);
+  if (!Number.isFinite(n)) return '';
+  return String(Math.min(n, max));
+}
+
+function formatPersonCpf(cpf?: string | null) {
+  const digits = (cpf || '').replace(/\D/g, '');
+  if (digits.length === 11) return formatCpfInput(digits);
+  return cpf?.trim() || '—';
+}
+
+function personInitials(name: string) {
+  return (
+    name
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((part) => part[0])
+      .join('')
+      .slice(0, 2)
+      .toUpperCase() || '?'
+  );
+}
+
+function PersonIdentity({
+  name,
+  cpf,
+  profilePhotoUrl
+}: {
+  name: string;
+  cpf?: string | null;
+  profilePhotoUrl?: string | null;
+}) {
+  const photoHref = resolveApiMediaUrl(profilePhotoUrl ?? null);
+  const initials = personInitials(name);
+  return (
+    <span className="flex min-w-0 flex-1 items-center gap-3 text-left">
+      <span
+        className={`flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full text-xs font-semibold ${
+          photoHref ? 'bg-gray-200 dark:bg-gray-700' : 'bg-red-600 text-white'
+        }`}
+      >
+        {photoHref ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={photoHref}
+            alt=""
+            className="h-full w-full object-cover"
+            referrerPolicy="no-referrer"
+          />
+        ) : (
+          initials
+        )}
+      </span>
+      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="truncate text-sm font-medium tracking-tight text-gray-900 dark:text-gray-100">
+          {name}
+        </span>
+        <span className="truncate text-[11px] font-normal leading-tight text-gray-500 dark:text-gray-400">
+          {formatPersonCpf(cpf)}
+        </span>
+      </span>
+    </span>
+  );
+}
 
 const COURSES_QUERY_KEY = ['training-admin-courses'] as const;
 
@@ -113,7 +200,13 @@ function emptyQuestionForm(): QuestionFormState {
   };
 }
 
-type Technician = { id: string; name: string; email?: string | null };
+type Technician = {
+  id: string;
+  name: string;
+  email?: string | null;
+  cpf?: string | null;
+  profilePhotoUrl?: string | null;
+};
 
 export default function TreinamentosAdminPageClient() {
   const router = useRouter();
@@ -392,6 +485,7 @@ export default function TreinamentosAdminPageClient() {
     onSuccess: () => {
       toast.success('Funcionários matriculados.');
       setEnrollPickerOpen(false);
+      setEnrollSearch('');
       setEnrollSelection([]);
       void queryClient.invalidateQueries({
         queryKey: ['training-admin-enrollments', detailCourseId]
@@ -480,15 +574,41 @@ export default function TreinamentosAdminPageClient() {
     saveQuestionMutation.mutate({ ...questionForm, options: filled });
   };
 
+  const enrollmentByUserId = useMemo(() => {
+    const map = new Map(enrollments.map((e) => [e.userId, e]));
+    return map;
+  }, [enrollments]);
+
   const filteredTechnicians = useMemo(() => {
-    const enrolledIds = new Set(enrollments.map((e) => e.userId));
     const q = enrollSearch.trim().toLowerCase();
-    return technicians
-      .filter((t) => !enrolledIds.has(t.id))
-      .filter((t) =>
-        q ? [t.name, t.email].filter(Boolean).join(' ').toLowerCase().includes(q) : true
-      );
-  }, [technicians, enrollments, enrollSearch]);
+    if (!q) return technicians;
+    return technicians.filter((t) =>
+      [t.name, t.email, t.cpf].filter(Boolean).join(' ').toLowerCase().includes(q)
+    );
+  }, [technicians, enrollSearch]);
+
+  const toggleEnrollSelection = (userId: string, checked: boolean) => {
+    const existing = enrollmentByUserId.get(userId);
+    if (existing) {
+      if (!checked && canDelete) {
+        removeEnrollmentMutation.mutate(existing.id);
+      }
+      return;
+    }
+    setEnrollSelection((prev) =>
+      checked
+        ? prev.includes(userId)
+          ? prev
+          : [...prev, userId]
+        : prev.filter((id) => id !== userId)
+    );
+  };
+
+  const closeEnrollPicker = () => {
+    setEnrollPickerOpen(false);
+    setEnrollSearch('');
+    setEnrollSelection([]);
+  };
 
   const loadError =
     isError &&
@@ -773,7 +893,10 @@ export default function TreinamentosAdminPageClient() {
                   <input
                     value={courseForm.workloadHours}
                     onChange={(e) =>
-                      setCourseForm({ ...courseForm, workloadHours: e.target.value })
+                      setCourseForm({
+                        ...courseForm,
+                        workloadHours: sanitizeDecimalInput(e.target.value)
+                      })
                     }
                     placeholder="Ex.: 8"
                     inputMode="decimal"
@@ -787,7 +910,10 @@ export default function TreinamentosAdminPageClient() {
                   <input
                     value={courseForm.passingScore}
                     onChange={(e) =>
-                      setCourseForm({ ...courseForm, passingScore: e.target.value })
+                      setCourseForm({
+                        ...courseForm,
+                        passingScore: sanitizeIntegerInput(e.target.value, 100)
+                      })
                     }
                     inputMode="numeric"
                     className={FORM_FIELD_INPUT_CLS}
@@ -806,29 +932,21 @@ export default function TreinamentosAdminPageClient() {
                     className={FORM_FIELD_INPUT_CLS}
                   />
                 </div>
-                <div className="sm:col-span-2 space-y-2">
-                  <label className="flex cursor-pointer items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
-                    <input
-                      type="checkbox"
-                      checked={courseForm.certificateEnabled}
-                      onChange={(e) =>
-                        setCourseForm({ ...courseForm, certificateEnabled: e.target.checked })
-                      }
-                      className="h-4 w-4 rounded border-gray-300 text-red-600 focus:ring-red-500"
-                    />
-                    Emitir certificado de conclusão
-                  </label>
-                  <label className="flex cursor-pointer items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
-                    <input
-                      type="checkbox"
-                      checked={courseForm.isPublished}
-                      onChange={(e) =>
-                        setCourseForm({ ...courseForm, isPublished: e.target.checked })
-                      }
-                      className="h-4 w-4 rounded border-gray-300 text-red-600 focus:ring-red-500"
-                    />
-                    Publicar para os funcionários
-                  </label>
+                <div className="sm:col-span-2 space-y-3">
+                  <Checkbox
+                    checked={courseForm.certificateEnabled}
+                    onChange={(checked) =>
+                      setCourseForm({ ...courseForm, certificateEnabled: checked })
+                    }
+                    label="Emitir certificado de conclusão"
+                  />
+                  <Checkbox
+                    checked={courseForm.isPublished}
+                    onChange={(checked) =>
+                      setCourseForm({ ...courseForm, isPublished: checked })
+                    }
+                    label="Publicar para os funcionários"
+                  />
                 </div>
                 <div className="sm:col-span-2 flex gap-3 pt-2">
                   <button
@@ -943,20 +1061,19 @@ export default function TreinamentosAdminPageClient() {
                           <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
                             Plataforma do vídeo
                           </label>
-                          <select
+                          <StringSingleSelectDropdown
                             value={lessonForm.videoProvider}
-                            onChange={(e) =>
+                            onChange={(v) =>
                               setLessonForm({
                                 ...lessonForm,
-                                videoProvider: e.target.value as LessonFormState['videoProvider']
+                                videoProvider: v as LessonFormState['videoProvider']
                               })
                             }
-                            className={FORM_FIELD_INPUT_CLS}
-                          >
-                            <option value="YOUTUBE">YouTube</option>
-                            <option value="VIMEO">Vimeo</option>
-                            <option value="URL">Link direto</option>
-                          </select>
+                            options={VIDEO_PROVIDER_OPTIONS}
+                            allowEmpty={false}
+                            disableSearch
+                            placeholder="Plataforma do vídeo"
+                          />
                         </div>
                         <div>
                           <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -965,7 +1082,10 @@ export default function TreinamentosAdminPageClient() {
                           <input
                             value={lessonForm.durationMinutes}
                             onChange={(e) =>
-                              setLessonForm({ ...lessonForm, durationMinutes: e.target.value })
+                              setLessonForm({
+                                ...lessonForm,
+                                durationMinutes: sanitizeIntegerInput(e.target.value)
+                              })
                             }
                             inputMode="numeric"
                             className={FORM_FIELD_INPUT_CLS}
@@ -1313,75 +1433,15 @@ export default function TreinamentosAdminPageClient() {
                       <button
                         type="button"
                         onClick={() => {
-                          setEnrollPickerOpen(true);
                           setEnrollSelection([]);
                           setEnrollSearch('');
+                          setEnrollPickerOpen(true);
                         }}
                         className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300"
                       >
                         <Plus className="h-4 w-4" />
                         Matricular funcionários
                       </button>
-                    ) : null}
-
-                    {enrollPickerOpen ? (
-                      <div className="space-y-3 rounded-lg border border-gray-200 p-4 dark:border-gray-700">
-                        <input
-                          value={enrollSearch}
-                          onChange={(e) => setEnrollSearch(e.target.value)}
-                          placeholder="Buscar funcionário..."
-                          className={FORM_FIELD_INPUT_CLS}
-                        />
-                        <div className="max-h-56 space-y-1 overflow-y-auto">
-                          {filteredTechnicians.length === 0 ? (
-                            <p className="py-3 text-center text-sm text-gray-500 dark:text-gray-400">
-                              Nenhum funcionário disponível.
-                            </p>
-                          ) : (
-                            filteredTechnicians.map((tech) => (
-                              <label
-                                key={tech.id}
-                                className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-700/50"
-                              >
-                                <input
-                                  type="checkbox"
-                                  checked={enrollSelection.includes(tech.id)}
-                                  onChange={() =>
-                                    setEnrollSelection((prev) =>
-                                      prev.includes(tech.id)
-                                        ? prev.filter((id) => id !== tech.id)
-                                        : [...prev, tech.id]
-                                    )
-                                  }
-                                  className="h-4 w-4 rounded border-gray-300 text-red-600 focus:ring-red-500"
-                                />
-                                <span className="min-w-0 truncate text-sm text-gray-900 dark:text-gray-100">
-                                  {tech.name}
-                                </span>
-                              </label>
-                            ))
-                          )}
-                        </div>
-                        <div className="flex gap-2">
-                          <button
-                            type="button"
-                            disabled={!enrollSelection.length || enrollMutation.isPending}
-                            onClick={() => enrollMutation.mutate(enrollSelection)}
-                            className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
-                          >
-                            {enrollMutation.isPending
-                              ? 'Matriculando...'
-                              : `Matricular (${enrollSelection.length})`}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setEnrollPickerOpen(false)}
-                            className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
-                          >
-                            Cancelar
-                          </button>
-                        </div>
-                      </div>
                     ) : null}
 
                     {enrollments.length === 0 ? (
@@ -1401,7 +1461,7 @@ export default function TreinamentosAdminPageClient() {
                               <th className={cadastroListClasses.thCenter}>Melhor nota</th>
                               <th className={cadastroListClasses.thCenter}>Certificado</th>
                               {canDelete ? (
-                                <th className={cadastroListClasses.thRight}>Ação</th>
+                                <th className={cadastroListClasses.thCenter}>Ação</th>
                               ) : null}
                             </tr>
                           </thead>
@@ -1440,9 +1500,11 @@ export default function TreinamentosAdminPageClient() {
                                     <button
                                       type="button"
                                       onClick={() => removeEnrollmentMutation.mutate(row.id)}
-                                      className="rounded-md border border-rose-300 px-2.5 py-1 text-xs font-medium text-rose-700 hover:bg-rose-50 dark:border-rose-800/60 dark:text-rose-300"
+                                      className="inline-flex items-center justify-center rounded-lg p-2 text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/30"
+                                      aria-label="Remover matrícula"
+                                      title="Remover"
                                     >
-                                      Remover
+                                      <Trash2 className="h-4 w-4" />
                                     </button>
                                   </td>
                                 ) : null}
@@ -1454,6 +1516,92 @@ export default function TreinamentosAdminPageClient() {
                     )}
                   </>
                 ) : null}
+              </div>
+            </div>
+          </AppModalOverlay>
+        ) : null}
+
+        {enrollPickerOpen ? (
+          <AppModalOverlay className="app-modal-overlay fixed inset-0 z-[2100] flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/50" onClick={closeEnrollPicker} />
+            <div className="relative flex max-h-[85vh] w-full max-w-md flex-col overflow-hidden rounded-lg bg-white shadow-xl dark:bg-gray-800">
+              <div className="flex items-center justify-between border-b border-gray-200 p-5 dark:border-gray-700">
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                  Matricular funcionários
+                </h2>
+                <button
+                  type="button"
+                  onClick={closeEnrollPicker}
+                  className="rounded-lg p-2 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              <div className="space-y-3 p-5">
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                  <input
+                    value={enrollSearch}
+                    onChange={(e) => setEnrollSearch(e.target.value)}
+                    placeholder="Buscar funcionário..."
+                    className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm text-gray-900 focus:outline-none dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                    autoFocus
+                  />
+                </div>
+                <div className="max-h-[50vh] space-y-2 overflow-y-auto pr-1">
+                  {filteredTechnicians.length === 0 ? (
+                    <p className="py-8 text-center text-sm text-gray-500 dark:text-gray-400">
+                      {technicians.length === 0
+                        ? 'Nenhum funcionário disponível.'
+                        : 'Nenhum funcionário encontrado.'}
+                    </p>
+                  ) : (
+                    filteredTechnicians.map((tech) => {
+                      const enrolled = enrollmentByUserId.has(tech.id);
+                      const checked = enrolled || enrollSelection.includes(tech.id);
+                      return (
+                        <label
+                          key={tech.id}
+                          className="group flex cursor-pointer items-center gap-3 rounded-md px-1 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-700/40"
+                        >
+                          <span className="relative inline-flex size-5 shrink-0 items-center justify-center">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={(e) => toggleEnrollSelection(tech.id, e.target.checked)}
+                              className="absolute inset-0 z-10 m-0 h-full w-full cursor-pointer opacity-0"
+                            />
+                            <CheckboxIndicator checked={checked} />
+                          </span>
+                          <PersonIdentity
+                            name={tech.name}
+                            cpf={tech.cpf}
+                            profilePhotoUrl={tech.profilePhotoUrl}
+                          />
+                        </label>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+              <div className="flex gap-2 border-t border-gray-200 p-4 dark:border-gray-700">
+                <button
+                  type="button"
+                  disabled={!enrollSelection.length || enrollMutation.isPending}
+                  onClick={() => enrollMutation.mutate(enrollSelection)}
+                  className="flex-1 rounded-lg bg-red-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+                >
+                  {enrollMutation.isPending
+                    ? 'Matriculando...'
+                    : `Matricular (${enrollSelection.length})`}
+                </button>
+                <button
+                  type="button"
+                  onClick={closeEnrollPicker}
+                  className="rounded-lg border border-gray-300 px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
+                >
+                  Concluir
+                </button>
               </div>
             </div>
           </AppModalOverlay>

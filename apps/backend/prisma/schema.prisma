@@ -349,6 +349,8 @@ model CompanySettings {
   maxDistanceMeters    Int      @default(1000)
   defaultLatitude      Float    @default(-23.5505)
   defaultLongitude     Float    @default(-46.6333)
+  /// Locais autorizados da empresa para bater ponto: [{ id, name, latitude, longitude, radius }]
+  geofenceLocations       Json?
   /// Liga a conferencia de presenca por geolocalizacao no registro de ponto
   geofenceEnabled         Boolean @default(false)
   /// true bloqueia a batida fora do raio; false apenas marca o registro como fora da area

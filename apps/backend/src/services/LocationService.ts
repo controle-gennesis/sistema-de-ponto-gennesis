@@ -23,9 +23,11 @@ export interface GeofencePolicy {
   maxDistanceMeters: number;
   defaultLatitude: number;
   defaultLongitude: number;
+  /** Locais da empresa (quando vazio, usa lat/lng padrão). */
+  locations: Location[];
 }
 
-/** Converte o Json `Employee.allowedLocations` em locais utilizáveis na validação. */
+/** Converte o Json `Employee.allowedLocations` / `CompanySettings.geofenceLocations`. */
 export function parseAllowedLocations(raw: unknown): Location[] {
   if (!Array.isArray(raw)) return [];
   return raw.flatMap((item) => {
@@ -45,6 +47,10 @@ export function parseAllowedLocations(raw: unknown): Location[] {
       },
     ];
   });
+}
+
+export function normalizeGeofenceLocations(raw: unknown): Location[] {
+  return parseAllowedLocations(raw);
 }
 
 export class LocationService {
@@ -82,21 +88,37 @@ export class LocationService {
    */
   async getGeofencePolicy(): Promise<GeofencePolicy> {
     const settings = await getCompanySettings(prisma);
+    const maxDistanceMeters =
+      Number(settings?.maxDistanceMeters) ||
+      parseInt(process.env.MAX_DISTANCE_METERS || '1000');
+    const defaultLatitude = Number.isFinite(Number(settings?.defaultLatitude))
+      ? Number(settings.defaultLatitude)
+      : parseFloat(process.env.DEFAULT_LATITUDE || '-23.5505');
+    const defaultLongitude = Number.isFinite(Number(settings?.defaultLongitude))
+      ? Number(settings.defaultLongitude)
+      : parseFloat(process.env.DEFAULT_LONGITUDE || '-46.6333');
+
+    let locations = normalizeGeofenceLocations(settings?.geofenceLocations);
+    if (locations.length === 0) {
+      locations = [
+        {
+          id: 'company-default',
+          name: 'Base da empresa',
+          latitude: defaultLatitude,
+          longitude: defaultLongitude,
+          radius: maxDistanceMeters,
+        },
+      ];
+    }
+
     return {
       enabled: settings?.geofenceEnabled ?? false,
       blockOutside: settings?.geofenceBlockOutside ?? true,
       requireLocation: settings?.geofenceRequireLocation ?? true,
-      maxDistanceMeters:
-        Number(settings?.maxDistanceMeters) ||
-        parseInt(process.env.MAX_DISTANCE_METERS || '1000'),
-      defaultLatitude:
-        Number.isFinite(Number(settings?.defaultLatitude))
-          ? Number(settings.defaultLatitude)
-          : parseFloat(process.env.DEFAULT_LATITUDE || '-23.5505'),
-      defaultLongitude:
-        Number.isFinite(Number(settings?.defaultLongitude))
-          ? Number(settings.defaultLongitude)
-          : parseFloat(process.env.DEFAULT_LONGITUDE || '-46.6333'),
+      maxDistanceMeters,
+      defaultLatitude,
+      defaultLongitude,
+      locations,
     };
   }
 
@@ -187,29 +209,62 @@ export class LocationService {
     policy?: GeofencePolicy
   ): Promise<LocationValidation> {
     const effectivePolicy = policy ?? (await this.getGeofencePolicy());
-    const defaultLatitude = effectivePolicy.defaultLatitude;
-    const defaultLongitude = effectivePolicy.defaultLongitude;
-    const maxDistance = Math.max(effectivePolicy.maxDistanceMeters, expandedRadius || 0);
+    const companyLocations = effectivePolicy.locations.length
+      ? effectivePolicy.locations
+      : [
+          {
+            id: 'company-default',
+            name: 'Base da empresa',
+            latitude: effectivePolicy.defaultLatitude,
+            longitude: effectivePolicy.defaultLongitude,
+            radius: effectivePolicy.maxDistanceMeters,
+          },
+        ];
 
-    const distance = this.calculateDistance(
+    for (const location of companyLocations) {
+      const distance = this.calculateDistance(
+        latitude,
+        longitude,
+        location.latitude,
+        location.longitude
+      );
+      const effectiveRadius = Math.max(location.radius, expandedRadius || 0);
+      if (distance <= effectiveRadius) {
+        return {
+          isValid: true,
+          reason: `Localização válida - dentro de ${location.name}`,
+          distance: Math.round(distance),
+        };
+      }
+    }
+
+    const nearestLocation = companyLocations.reduce((nearest, current) => {
+      const nearestDistance = this.calculateDistance(
+        latitude,
+        longitude,
+        nearest.latitude,
+        nearest.longitude
+      );
+      const currentDistance = this.calculateDistance(
+        latitude,
+        longitude,
+        current.latitude,
+        current.longitude
+      );
+      return currentDistance < nearestDistance ? current : nearest;
+    });
+
+    const distanceToNearest = this.calculateDistance(
       latitude,
       longitude,
-      defaultLatitude,
-      defaultLongitude
+      nearestLocation.latitude,
+      nearestLocation.longitude
     );
-
-    if (distance <= maxDistance) {
-      return {
-        isValid: true,
-        reason: 'Localização válida - dentro da área da empresa',
-        distance: Math.round(distance)
-      };
-    }
 
     return {
       isValid: false,
-      reason: `Localização inválida - ${Math.round(distance)}m de distância da empresa. Máximo permitido: ${maxDistance}m`,
-      distance: Math.round(distance)
+      reason: `Localização inválida - ${Math.round(distanceToNearest)}m de distância do local mais próximo (${nearestLocation.name}). Máximo permitido: ${nearestLocation.radius}m`,
+      distance: Math.round(distanceToNearest),
     };
   }
 

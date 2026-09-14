@@ -34,6 +34,10 @@ const EXTRA_PAGE_TITLES: Record<string, { title: string; category?: string; href
     title: 'Relatórios da Localidade',
     category: 'Principal',
   },
+  '/ponto/configuracoes-ponto': {
+    title: 'Configurações do Ponto',
+    category: 'Departamento Pessoal',
+  },
   '/auth/login': { title: 'Login' },
 };
 

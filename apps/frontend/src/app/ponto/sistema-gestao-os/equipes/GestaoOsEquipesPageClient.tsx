@@ -3,8 +3,22 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { AlertCircle, MapPin, Plus, Power, Search, Users, X } from 'lucide-react';
+import {
+  AlertCircle,
+  AlertTriangle,
+  CheckCircle2,
+  FolderKanban,
+  MapPin,
+  Plus,
+  Power,
+  Search,
+  Trash2,
+  Users,
+  X
+} from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
+import { FilterStatCard } from '@/components/ui/FilterStatCard';
+import { CheckboxIndicator } from '@/components/ui/Checkbox';
 import {
   CadastroListEmpty,
   CadastroListLoading,
@@ -27,7 +41,8 @@ import toast from 'react-hot-toast';
 import api from '@/lib/api';
 import { FORM_FIELD_INPUT_CLS, FORM_FIELD_TEXTAREA_CLS } from '@/lib/formFieldUi';
 import { useModalCloseConfirm } from '@/hooks/useModalCloseConfirm';
-import { displayPhoneBR } from '@/lib/phone';
+import { formatCpfInput } from '@/lib/cpf';
+import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
 import {
   GestaoOsLocationTree,
   GestaoOsTeam,
@@ -35,6 +50,13 @@ import {
   TEAM_MEMBER_ROLE_LABELS
 } from '../gestaoOsTypes';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
+import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
+
+const TEAM_MEMBER_ROLE_OPTIONS = labeledToSelectOptions([
+  { value: 'LEADER', label: TEAM_MEMBER_ROLE_LABELS.LEADER },
+  { value: 'MEMBER', label: TEAM_MEMBER_ROLE_LABELS.MEMBER }
+]);
 
 const TEAMS_QUERY_KEY = ['gestao-os-cadastros', 'teams'] as const;
 
@@ -42,8 +64,69 @@ type Technician = {
   id: string;
   name: string;
   email?: string | null;
+  cpf?: string | null;
   profilePhotoUrl?: string | null;
 };
+
+function formatPersonCpf(cpf?: string | null) {
+  const digits = (cpf || '').replace(/\D/g, '');
+  if (digits.length === 11) return formatCpfInput(digits);
+  return cpf?.trim() || '—';
+}
+
+function personInitials(name: string) {
+  return (
+    name
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((part) => part[0])
+      .join('')
+      .slice(0, 2)
+      .toUpperCase() || '?'
+  );
+}
+
+function PersonIdentity({
+  name,
+  cpf,
+  profilePhotoUrl
+}: {
+  name: string;
+  cpf?: string | null;
+  profilePhotoUrl?: string | null;
+}) {
+  const photoHref = resolveApiMediaUrl(profilePhotoUrl ?? null);
+  const initials = personInitials(name);
+  return (
+    <span className="flex min-w-0 flex-1 items-center gap-3 text-left">
+      <span
+        className={`flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full text-xs font-semibold ${
+          photoHref ? 'bg-gray-200 dark:bg-gray-700' : 'bg-red-600 text-white'
+        }`}
+      >
+        {photoHref ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={photoHref}
+            alt=""
+            className="h-full w-full object-cover"
+            referrerPolicy="no-referrer"
+          />
+        ) : (
+          initials
+        )}
+      </span>
+      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="truncate text-sm font-medium tracking-tight text-gray-900 dark:text-gray-100">
+          {name}
+        </span>
+        <span className="truncate text-[11px] font-normal leading-tight text-gray-500 dark:text-gray-400">
+          {formatPersonCpf(cpf)}
+        </span>
+      </span>
+    </span>
+  );
+}
 
 type TeamFormMember = { userId: string; role: GestaoOsTeamMemberRole };
 
@@ -84,12 +167,16 @@ export default function GestaoOsEquipesPageClient() {
   const [formData, setFormData] = useState<TeamFormState>(() => emptyForm());
   const [memberSearch, setMemberSearch] = useState('');
   const [buildingSearch, setBuildingSearch] = useState('');
+  const [addingMembers, setAddingMembers] = useState(false);
+  const [addingBuildings, setAddingBuildings] = useState(false);
 
   const closeForm = useCallback(() => {
     setShowForm(false);
     setEditing(null);
     setMemberSearch('');
     setBuildingSearch('');
+    setAddingMembers(false);
+    setAddingBuildings(false);
   }, []);
 
   const { requestClose: requestCloseForm, confirmUi: formConfirmUi } = useModalCloseConfirm(
@@ -279,6 +366,8 @@ export default function GestaoOsEquipesPageClient() {
   const openCreate = () => {
     setEditing(null);
     setFormData(emptyForm());
+    setAddingMembers(false);
+    setAddingBuildings(false);
     setShowForm(true);
   };
 
@@ -294,19 +383,9 @@ export default function GestaoOsEquipesPageClient() {
       members: row.members.map((m) => ({ userId: m.userId, role: m.role })),
       buildingIds: row.buildings.map((b) => b.buildingId)
     });
+    setAddingMembers(false);
+    setAddingBuildings(false);
     setShowForm(true);
-  };
-
-  const toggleMember = (userId: string) => {
-    setFormData((prev) => {
-      const exists = prev.members.some((m) => m.userId === userId);
-      return {
-        ...prev,
-        members: exists
-          ? prev.members.filter((m) => m.userId !== userId)
-          : [...prev.members, { userId, role: 'MEMBER' }]
-      };
-    });
   };
 
   const setMemberRole = (userId: string, role: GestaoOsTeamMemberRole) => {
@@ -316,20 +395,26 @@ export default function GestaoOsEquipesPageClient() {
     }));
   };
 
-  const toggleBuilding = (buildingId: string) => {
-    setFormData((prev) => ({
-      ...prev,
-      buildingIds: prev.buildingIds.includes(buildingId)
-        ? prev.buildingIds.filter((id) => id !== buildingId)
-        : [...prev.buildingIds, buildingId]
-    }));
-  };
+  const managerOptions = useMemo(
+    () => labeledToSelectOptions(technicians.map((t) => ({ value: t.id, label: t.name }))),
+    [technicians]
+  );
+
+  const technicianById = useMemo(() => {
+    const map = new Map(technicians.map((t) => [t.id, t]));
+    return map;
+  }, [technicians]);
+
+  const buildingById = useMemo(() => {
+    const map = new Map(buildings.map((b) => [b.id, b]));
+    return map;
+  }, [buildings]);
 
   const filteredTechnicians = useMemo(() => {
     const q = memberSearch.trim().toLowerCase();
     if (!q) return technicians;
     return technicians.filter((t) =>
-      [t.name, t.email].filter(Boolean).join(' ').toLowerCase().includes(q)
+      [t.name, t.email, t.cpf].filter(Boolean).join(' ').toLowerCase().includes(q)
     );
   }, [technicians, memberSearch]);
 
@@ -340,6 +425,61 @@ export default function GestaoOsEquipesPageClient() {
       [b.name, b.code].filter(Boolean).join(' ').toLowerCase().includes(q)
     );
   }, [buildings, buildingSearch]);
+
+  const selectedMemberIds = useMemo(
+    () => new Set(formData.members.map((m) => m.userId)),
+    [formData.members]
+  );
+
+  const selectedBuildingIds = useMemo(
+    () => new Set(formData.buildingIds),
+    [formData.buildingIds]
+  );
+
+  const toggleMember = (userId: string, checked: boolean) => {
+    if (checked) {
+      setFormData((prev) => {
+        if (prev.members.some((m) => m.userId === userId)) return prev;
+        return {
+          ...prev,
+          members: [...prev.members, { userId, role: 'MEMBER' }]
+        };
+      });
+      return;
+    }
+    setFormData((prev) => ({
+      ...prev,
+      members: prev.members.filter((m) => m.userId !== userId)
+    }));
+  };
+
+  const removeMember = (userId: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      members: prev.members.filter((m) => m.userId !== userId)
+    }));
+  };
+
+  const toggleBuilding = (buildingId: string, checked: boolean) => {
+    if (checked) {
+      setFormData((prev) => {
+        if (prev.buildingIds.includes(buildingId)) return prev;
+        return { ...prev, buildingIds: [...prev.buildingIds, buildingId] };
+      });
+      return;
+    }
+    setFormData((prev) => ({
+      ...prev,
+      buildingIds: prev.buildingIds.filter((id) => id !== buildingId)
+    }));
+  };
+
+  const removeBuilding = (buildingId: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      buildingIds: prev.buildingIds.filter((id) => id !== buildingId)
+    }));
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -391,23 +531,35 @@ export default function GestaoOsEquipesPageClient() {
             </p>
           </div>
 
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            {[
-              { label: 'Equipes ativas', value: totals.active, tone: 'text-emerald-600 dark:text-emerald-400' },
-              { label: 'Integrantes alocados', value: totals.members, tone: 'text-blue-600 dark:text-blue-400' },
-              { label: 'OS em andamento', value: totals.open, tone: 'text-amber-600 dark:text-amber-400' },
-              { label: 'OS em atraso', value: totals.overdue, tone: 'text-red-600 dark:text-red-400' }
-            ].map((item) => (
-              <div
-                key={item.label}
-                className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800"
-              >
-                <p className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                  {item.label}
-                </p>
-                <p className={`mt-1 text-2xl font-bold ${item.tone}`}>{item.value}</p>
-              </div>
-            ))}
+          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
+            <FilterStatCard
+              label="Equipes ativas"
+              count={totals.active}
+              icon={CheckCircle2}
+              iconBg="bg-emerald-100 dark:bg-emerald-900/30"
+              iconColor="text-emerald-600 dark:text-emerald-400"
+            />
+            <FilterStatCard
+              label="Integrantes alocados"
+              count={totals.members}
+              icon={Users}
+              iconBg="bg-sky-100 dark:bg-sky-900/30"
+              iconColor="text-sky-600 dark:text-sky-400"
+            />
+            <FilterStatCard
+              label="OS em andamento"
+              count={totals.open}
+              icon={FolderKanban}
+              iconBg="bg-amber-100 dark:bg-amber-900/30"
+              iconColor="text-amber-600 dark:text-amber-400"
+            />
+            <FilterStatCard
+              label="OS em atraso"
+              count={totals.overdue}
+              icon={AlertTriangle}
+              iconBg="bg-rose-100 dark:bg-rose-900/30"
+              iconColor="text-rose-600 dark:text-rose-400"
+            />
           </div>
 
           <Card className={cadastroListClasses.card}>
@@ -656,18 +808,16 @@ export default function GestaoOsEquipesPageClient() {
                     <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                       Gestor da equipe
                     </label>
-                    <select
+                    <StringSingleSelectDropdown
                       value={formData.managerUserId}
-                      onChange={(e) => setFormData({ ...formData, managerUserId: e.target.value })}
-                      className={FORM_FIELD_INPUT_CLS}
-                    >
-                      <option value="">Sem gestor definido</option>
-                      {technicians.map((t) => (
-                        <option key={t.id} value={t.id}>
-                          {t.name}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={(v) => setFormData({ ...formData, managerUserId: v })}
+                      options={managerOptions}
+                      placeholder="Sem gestor definido"
+                      emptyOptionLabel="Sem gestor definido"
+                      allowEmpty
+                      searchPlaceholder="Buscar gestor..."
+                      emptyOptionsMessage="Nenhum funcionário disponível."
+                    />
                   </div>
                   <div className="sm:col-span-2">
                     <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -688,54 +838,68 @@ export default function GestaoOsEquipesPageClient() {
                     <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
                       Integrantes ({formData.members.length})
                     </h3>
-                    <input
-                      value={memberSearch}
-                      onChange={(e) => setMemberSearch(e.target.value)}
-                      placeholder="Buscar funcionário..."
-                      className="h-9 w-full max-w-xs rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:outline-none dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMemberSearch('');
+                        setAddingMembers(true);
+                      }}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-sm font-semibold text-red-700 hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+                    >
+                      <Plus className="h-4 w-4" />
+                      Adicionar
+                    </button>
                   </div>
-                  <div className="max-h-64 space-y-1 overflow-y-auto">
-                    {filteredTechnicians.length === 0 ? (
-                      <p className="py-4 text-center text-sm text-gray-500 dark:text-gray-400">
-                        Nenhum funcionário encontrado.
-                      </p>
-                    ) : (
-                      filteredTechnicians.map((tech) => {
-                        const member = formData.members.find((m) => m.userId === tech.id);
+
+                  {formData.members.length === 0 ? (
+                    <p className="py-6 text-center text-sm text-gray-500 dark:text-gray-400">
+                      Nenhum integrante adicionado.
+                    </p>
+                  ) : (
+                    <ul className="divide-y divide-gray-200 rounded-lg border border-gray-200 dark:divide-gray-700 dark:border-gray-700">
+                      {formData.members.map((member) => {
+                        const tech = technicianById.get(member.userId);
                         return (
-                          <div
-                            key={tech.id}
-                            className="flex items-center justify-between gap-3 rounded-md px-2 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-700/50"
+                          <li
+                            key={member.userId}
+                            className="flex flex-wrap items-center justify-between gap-3 px-3 py-2.5"
                           >
-                            <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2">
-                              <input
-                                type="checkbox"
-                                checked={!!member}
-                                onChange={() => toggleMember(tech.id)}
-                                className="h-4 w-4 rounded border-gray-300 text-red-600 focus:ring-red-500"
+                            <div className="min-w-0 flex-1">
+                              <PersonIdentity
+                                name={tech?.name || 'Funcionário'}
+                                cpf={tech?.cpf}
+                                profilePhotoUrl={tech?.profilePhotoUrl}
                               />
-                              <span className="min-w-0 truncate text-sm text-gray-900 dark:text-gray-100">
-                                {tech.name}
-                              </span>
-                            </label>
-                            {member ? (
-                              <select
-                                value={member.role}
-                                onChange={(e) =>
-                                  setMemberRole(tech.id, e.target.value as GestaoOsTeamMemberRole)
-                                }
-                                className="h-8 shrink-0 rounded-md border border-gray-300 bg-white px-2 text-xs text-gray-900 focus:outline-none dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                            </div>
+                            <div className="flex shrink-0 items-center gap-2">
+                              <div className="w-36">
+                                <StringSingleSelectDropdown
+                                  value={member.role}
+                                  onChange={(v) =>
+                                    setMemberRole(member.userId, v as GestaoOsTeamMemberRole)
+                                  }
+                                  options={TEAM_MEMBER_ROLE_OPTIONS}
+                                  allowEmpty={false}
+                                  disableSearch
+                                  matchTriggerWidth
+                                  menuAlign="end"
+                                  placeholder="Função"
+                                />
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => removeMember(member.userId)}
+                                className="rounded-lg p-2 text-gray-400 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/30 dark:hover:text-rose-300"
+                                aria-label="Remover integrante"
                               >
-                                <option value="LEADER">{TEAM_MEMBER_ROLE_LABELS.LEADER}</option>
-                                <option value="MEMBER">{TEAM_MEMBER_ROLE_LABELS.MEMBER}</option>
-                              </select>
-                            ) : null}
-                          </div>
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </div>
+                          </li>
                         );
-                      })
-                    )}
-                  </div>
+                      })}
+                    </ul>
+                  )}
                 </div>
 
                 <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
@@ -743,46 +907,59 @@ export default function GestaoOsEquipesPageClient() {
                     <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
                       Localidades atendidas ({formData.buildingIds.length})
                     </h3>
-                    <input
-                      value={buildingSearch}
-                      onChange={(e) => setBuildingSearch(e.target.value)}
-                      placeholder="Buscar localidade..."
-                      className="h-9 w-full max-w-xs rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:outline-none dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setBuildingSearch('');
+                        setAddingBuildings(true);
+                      }}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-sm font-semibold text-red-700 hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+                    >
+                      <Plus className="h-4 w-4" />
+                      Adicionar
+                    </button>
                   </div>
-                  <p className="mb-2 text-xs text-gray-500 dark:text-gray-400">
+                  <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">
                     A primeira localidade vinculada sugere a equipe automaticamente na abertura da
                     OS, mas ela pode ser trocada no agendamento.
                   </p>
-                  <div className="max-h-56 space-y-1 overflow-y-auto">
-                    {filteredBuildings.length === 0 ? (
-                      <p className="py-4 text-center text-sm text-gray-500 dark:text-gray-400">
-                        Nenhuma localidade encontrada.
-                      </p>
-                    ) : (
-                      filteredBuildings.map((building) => (
-                        <label
-                          key={building.id}
-                          className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-700/50"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={formData.buildingIds.includes(building.id)}
-                            onChange={() => toggleBuilding(building.id)}
-                            className="h-4 w-4 rounded border-gray-300 text-red-600 focus:ring-red-500"
-                          />
-                          <span className="min-w-0 truncate text-sm text-gray-900 dark:text-gray-100">
-                            {building.name}
-                            {building.code ? (
-                              <span className="ml-1 text-xs text-gray-500 dark:text-gray-400">
-                                ({building.code})
-                              </span>
-                            ) : null}
-                          </span>
-                        </label>
-                      ))
-                    )}
-                  </div>
+
+                  {formData.buildingIds.length === 0 ? (
+                    <p className="py-6 text-center text-sm text-gray-500 dark:text-gray-400">
+                      Nenhuma localidade adicionada.
+                    </p>
+                  ) : (
+                    <ul className="divide-y divide-gray-200 rounded-lg border border-gray-200 dark:divide-gray-700 dark:border-gray-700">
+                      {formData.buildingIds.map((buildingId) => {
+                        const building = buildingById.get(buildingId);
+                        return (
+                          <li
+                            key={buildingId}
+                            className="flex items-center justify-between gap-3 px-3 py-2.5"
+                          >
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-medium text-gray-900 dark:text-gray-100">
+                                {building?.name || 'Localidade'}
+                              </p>
+                              {building?.code ? (
+                                <p className="truncate text-xs text-gray-500 dark:text-gray-400">
+                                  {building.code}
+                                </p>
+                              ) : null}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => removeBuilding(buildingId)}
+                              className="rounded-lg p-2 text-gray-400 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/30 dark:hover:text-rose-300"
+                              aria-label="Remover localidade"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
                 </div>
 
                 <div className="flex gap-3 pt-2">
@@ -802,6 +979,185 @@ export default function GestaoOsEquipesPageClient() {
                   </button>
                 </div>
               </form>
+            </div>
+          </AppModalOverlay>
+        ) : null}
+
+        {addingMembers ? (
+          <AppModalOverlay className="app-modal-overlay fixed inset-0 z-[2100] flex items-center justify-center p-4">
+            <div
+              className="absolute inset-0 bg-black/50"
+              onClick={() => {
+                setAddingMembers(false);
+                setMemberSearch('');
+              }}
+            />
+            <div className="relative flex max-h-[85vh] w-full max-w-md flex-col overflow-hidden rounded-lg bg-white shadow-xl dark:bg-gray-800">
+              <div className="flex items-center justify-between border-b border-gray-200 p-5 dark:border-gray-700">
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                  Adicionar integrantes
+                </h2>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAddingMembers(false);
+                    setMemberSearch('');
+                  }}
+                  className="rounded-lg p-2 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              <div className="space-y-3 p-5">
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                  <input
+                    value={memberSearch}
+                    onChange={(e) => setMemberSearch(e.target.value)}
+                    placeholder="Buscar funcionário..."
+                    className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm text-gray-900 focus:outline-none dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                    autoFocus
+                  />
+                </div>
+                <div className="max-h-[50vh] space-y-2 overflow-y-auto pr-1">
+                  {filteredTechnicians.length === 0 ? (
+                    <p className="py-8 text-center text-sm text-gray-500 dark:text-gray-400">
+                      {technicians.length === 0
+                        ? 'Nenhum funcionário disponível.'
+                        : 'Nenhum funcionário encontrado.'}
+                    </p>
+                  ) : (
+                    filteredTechnicians.map((tech) => {
+                      const checked = selectedMemberIds.has(tech.id);
+                      return (
+                        <label
+                          key={tech.id}
+                          className="group flex cursor-pointer items-center gap-3 rounded-md px-1 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-700/40"
+                        >
+                          <span className="relative inline-flex size-5 shrink-0 items-center justify-center">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={(e) => toggleMember(tech.id, e.target.checked)}
+                              className="absolute inset-0 z-10 m-0 h-full w-full cursor-pointer opacity-0"
+                            />
+                            <CheckboxIndicator checked={checked} />
+                          </span>
+                          <PersonIdentity
+                            name={tech.name}
+                            cpf={tech.cpf}
+                            profilePhotoUrl={tech.profilePhotoUrl}
+                          />
+                        </label>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+              <div className="border-t border-gray-200 p-4 dark:border-gray-700">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAddingMembers(false);
+                    setMemberSearch('');
+                  }}
+                  className="w-full rounded-lg bg-red-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-red-700"
+                >
+                  Concluir
+                </button>
+              </div>
+            </div>
+          </AppModalOverlay>
+        ) : null}
+
+        {addingBuildings ? (
+          <AppModalOverlay className="app-modal-overlay fixed inset-0 z-[2100] flex items-center justify-center p-4">
+            <div
+              className="absolute inset-0 bg-black/50"
+              onClick={() => {
+                setAddingBuildings(false);
+                setBuildingSearch('');
+              }}
+            />
+            <div className="relative flex max-h-[85vh] w-full max-w-md flex-col overflow-hidden rounded-lg bg-white shadow-xl dark:bg-gray-800">
+              <div className="flex items-center justify-between border-b border-gray-200 p-5 dark:border-gray-700">
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                  Adicionar localidades
+                </h2>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAddingBuildings(false);
+                    setBuildingSearch('');
+                  }}
+                  className="rounded-lg p-2 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              <div className="space-y-3 p-5">
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                  <input
+                    value={buildingSearch}
+                    onChange={(e) => setBuildingSearch(e.target.value)}
+                    placeholder="Buscar localidade..."
+                    className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm text-gray-900 focus:outline-none dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                    autoFocus
+                  />
+                </div>
+                <div className="max-h-[50vh] space-y-2 overflow-y-auto pr-1">
+                  {filteredBuildings.length === 0 ? (
+                    <p className="py-8 text-center text-sm text-gray-500 dark:text-gray-400">
+                      {buildings.length === 0
+                        ? 'Nenhuma localidade disponível.'
+                        : 'Nenhuma localidade encontrada.'}
+                    </p>
+                  ) : (
+                    filteredBuildings.map((building) => {
+                      const checked = selectedBuildingIds.has(building.id);
+                      return (
+                        <label
+                          key={building.id}
+                          className="group flex cursor-pointer items-center gap-3 rounded-md px-1 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-700/40"
+                        >
+                          <span className="relative inline-flex size-5 shrink-0 items-center justify-center">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={(e) => toggleBuilding(building.id, e.target.checked)}
+                              className="absolute inset-0 z-10 m-0 h-full w-full cursor-pointer opacity-0"
+                            />
+                            <CheckboxIndicator checked={checked} />
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-sm font-medium text-gray-900 dark:text-gray-100">
+                              {building.name}
+                            </span>
+                            {building.code ? (
+                              <span className="block truncate text-xs text-gray-500 dark:text-gray-400">
+                                {building.code}
+                              </span>
+                            ) : null}
+                          </span>
+                        </label>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+              <div className="border-t border-gray-200 p-4 dark:border-gray-700">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAddingBuildings(false);
+                    setBuildingSearch('');
+                  }}
+                  className="w-full rounded-lg bg-red-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-red-700"
+                >
+                  Concluir
+                </button>
+              </div>
             </div>
           </AppModalOverlay>
         ) : null}
@@ -884,18 +1240,12 @@ export default function GestaoOsEquipesPageClient() {
                           key={member.id}
                           className="flex flex-wrap items-center justify-between gap-2 px-3 py-2"
                         >
-                          <div className="min-w-0">
-                            <p className="truncate text-sm font-medium text-gray-900 dark:text-gray-100">
-                              {member.user?.name}
-                            </p>
-                            <p className="truncate text-xs text-gray-500 dark:text-gray-400">
-                              {[
-                                member.user?.employee?.position,
-                                displayPhoneBR(member.user?.employee?.phone)
-                              ]
-                                .filter(Boolean)
-                                .join(' · ') || '—'}
-                            </p>
+                          <div className="min-w-0 flex-1">
+                            <PersonIdentity
+                              name={member.user?.name || 'Funcionário'}
+                              cpf={member.user?.cpf}
+                              profilePhotoUrl={member.user?.profilePhotoUrl}
+                            />
                           </div>
                           <span
                             className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ${

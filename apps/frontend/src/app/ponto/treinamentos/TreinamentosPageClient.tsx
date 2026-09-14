@@ -9,6 +9,7 @@ import {
   Clock3,
   Download,
   FileText,
+  Filter,
   GraduationCap,
   ListChecks,
   PlayCircle,
@@ -19,12 +20,16 @@ import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
+import { FilterStatCard } from '@/components/ui/FilterStatCard';
+import { Modal } from '@/components/ui/Modal';
+import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import {
   CadastroListEmpty,
   CadastroListLoading
 } from '@/components/ui/CadastroListSummary';
 import { cadastroListClasses } from '@/components/ui/RowActionMenu';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
+import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import api from '@/lib/api';
 import toast from 'react-hot-toast';
 import { exportTrainingCertificatePdf } from '@/lib/exportTrainingCertificatePdf';
@@ -63,6 +68,7 @@ export default function TreinamentosPageClient() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
+  const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
   const [openCourseId, setOpenCourseId] = useState<string | null>(null);
   const [activeLessonId, setActiveLessonId] = useState<string | null>(null);
   const [quizOpen, setQuizOpen] = useState(false);
@@ -118,6 +124,13 @@ export default function TreinamentosPageClient() {
     () => [...new Set(courses.map((c) => c.category).filter(Boolean))] as string[],
     [courses]
   );
+
+  const categoryOptions = useMemo(
+    () => labeledToSelectOptions(categories.map((category) => ({ value: category, label: category }))),
+    [categories]
+  );
+
+  const hasActiveCategoryFilter = Boolean(categoryFilter);
 
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -251,23 +264,39 @@ export default function TreinamentosPageClient() {
             </p>
           </div>
 
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            {[
-              { label: 'Cursos disponíveis', value: totals.available, tone: 'text-blue-600 dark:text-blue-400' },
-              { label: 'Em andamento', value: totals.inProgress, tone: 'text-amber-600 dark:text-amber-400' },
-              { label: 'Concluídos', value: totals.completed, tone: 'text-emerald-600 dark:text-emerald-400' },
-              { label: 'Certificados', value: totals.certificates, tone: 'text-red-600 dark:text-red-400' }
-            ].map((item) => (
-              <div
-                key={item.label}
-                className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800"
-              >
-                <p className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                  {item.label}
-                </p>
-                <p className={`mt-1 text-2xl font-bold ${item.tone}`}>{item.value}</p>
-              </div>
-            ))}
+          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
+            <FilterStatCard
+              label="Cursos disponíveis"
+              count={totals.available}
+              subtitle="Publicados para você"
+              icon={GraduationCap}
+              iconBg="bg-red-100 dark:bg-red-900/30"
+              iconColor="text-red-600 dark:text-red-400"
+            />
+            <FilterStatCard
+              label="Em andamento"
+              count={totals.inProgress}
+              subtitle="Matriculados e não concluídos"
+              icon={Clock3}
+              iconBg="bg-amber-100 dark:bg-amber-900/30"
+              iconColor="text-amber-600 dark:text-amber-400"
+            />
+            <FilterStatCard
+              label="Concluídos"
+              count={totals.completed}
+              subtitle="Cursos finalizados"
+              icon={CheckCircle2}
+              iconBg="bg-emerald-100 dark:bg-emerald-900/30"
+              iconColor="text-emerald-600 dark:text-emerald-400"
+            />
+            <FilterStatCard
+              label="Certificados"
+              count={totals.certificates}
+              subtitle="Disponíveis para download"
+              icon={Award}
+              iconBg="bg-sky-100 dark:bg-sky-900/30"
+              iconColor="text-sky-600 dark:text-sky-400"
+            />
           </div>
 
           <Card className={cadastroListClasses.card}>
@@ -287,57 +316,50 @@ export default function TreinamentosPageClient() {
                   </div>
                 </div>
                 <div className={cadastroListClasses.cardToolbar}>
-                  <div className={cadastroListClasses.searchField}>
-                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
-                    <input
-                      type="text"
-                      placeholder="Buscar curso..."
-                      value={search}
-                      onChange={(e) => setSearch(e.target.value)}
-                      className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-                    />
-                    {search ? (
-                      <button
-                        type="button"
-                        onClick={() => setSearch('')}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"
-                        aria-label="Limpar busca"
-                      >
-                        <X className="h-4 w-4" />
-                      </button>
+                  <div className={cadastroListClasses.searchFilterGroup}>
+                    <div className={cadastroListClasses.searchFieldInGroup}>
+                      <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
+                      <input
+                        type="text"
+                        placeholder="Buscar curso..."
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                        className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                      />
+                      {search ? (
+                        <button
+                          type="button"
+                          onClick={() => setSearch('')}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"
+                          aria-label="Limpar busca"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      ) : null}
+                    </div>
+                    {categories.length > 0 ? (
+                      <div className={cadastroListClasses.filterIconButtonWrap}>
+                        <button
+                          type="button"
+                          onClick={() => setIsFiltersModalOpen(true)}
+                          className={`${cadastroListClasses.filterIconButton} transition-colors ${
+                            hasActiveCategoryFilter
+                              ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40'
+                              : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
+                          }`}
+                          aria-label="Abrir filtros"
+                          title={hasActiveCategoryFilter ? 'Filtros ativos' : 'Filtros'}
+                        >
+                          <Filter className="h-4 w-4" />
+                          {hasActiveCategoryFilter ? (
+                            <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
+                          ) : null}
+                        </button>
+                      </div>
                     ) : null}
                   </div>
                 </div>
               </div>
-              {categories.length > 0 ? (
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setCategoryFilter('')}
-                    className={`rounded-full border px-3 py-1 text-xs font-medium ${
-                      categoryFilter === ''
-                        ? 'border-red-300 bg-red-50 text-red-700 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300'
-                        : 'border-gray-300 bg-white text-gray-600 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300'
-                    }`}
-                  >
-                    Todas
-                  </button>
-                  {categories.map((category) => (
-                    <button
-                      key={category}
-                      type="button"
-                      onClick={() => setCategoryFilter(category)}
-                      className={`rounded-full border px-3 py-1 text-xs font-medium ${
-                        categoryFilter === category
-                          ? 'border-red-300 bg-red-50 text-red-700 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300'
-                          : 'border-gray-300 bg-white text-gray-600 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300'
-                      }`}
-                    >
-                      {category}
-                    </button>
-                  ))}
-                </div>
-              ) : null}
             </CardHeader>
             <CardContent className={cadastroListClasses.cardContent}>
               {isLoading ? (
@@ -358,10 +380,7 @@ export default function TreinamentosPageClient() {
                     const status = course.enrollment?.status;
                     const workload = formatWorkload(course.workloadHours);
                     return (
-                      <div
-                        key={course.id}
-                        className="flex flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800"
-                      >
+                      <Card key={course.id} padding="none" className="flex flex-col">
                         {course.coverImageUrl ? (
                           // eslint-disable-next-line @next/next/no-img-element
                           <img
@@ -457,7 +476,7 @@ export default function TreinamentosPageClient() {
                             ) : null}
                           </div>
                         </div>
-                      </div>
+                      </Card>
                     );
                   })}
                 </div>
@@ -465,6 +484,45 @@ export default function TreinamentosPageClient() {
             </CardContent>
           </Card>
         </div>
+
+        <Modal
+          isOpen={isFiltersModalOpen}
+          onClose={() => setIsFiltersModalOpen(false)}
+          title="Filtros"
+          size="md"
+        >
+          <div className="space-y-4">
+            <div>
+              <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Categoria
+              </label>
+              <StringSingleSelectDropdown
+                value={categoryFilter}
+                onChange={setCategoryFilter}
+                options={categoryOptions}
+                placeholder="Todas"
+                emptyOptionLabel="Todas"
+                allowEmpty
+              />
+            </div>
+            <div className="flex items-center justify-between gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
+              <button
+                type="button"
+                onClick={() => setCategoryFilter('')}
+                className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
+              >
+                Limpar filtros
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsFiltersModalOpen(false)}
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700"
+              >
+                Fechar
+              </button>
+            </div>
+          </div>
+        </Modal>
 
         {openCourseId ? (
           <AppModalOverlay className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center p-4">
