@@ -1,15 +1,22 @@
 import { createError } from '../middleware/errorHandler';
 
 /**
- * Proxy da SINPRES API (https://api.sinpres.com.br) — catálogo SINAPI de insumos e
- * composições extraído das fontes oficiais da Caixa/IBGE.
+ * Proxy do catálogo SINAPI (insumos e composições oficiais Caixa/IBGE).
  *
- * Passamos pelo backend por dois motivos: o rate-limit anônimo é de 100 req/min por IP
- * (compartilhado entre todos os usuários se cada navegador chamasse direto) e o catálogo
- * é praticamente imutável dentro de um mês de referência, então o cache em memória
+ * A SINPRES só publica alguns meses recentes. Para o restante da série
+ * (janeiro/2025 em diante no seletor), consultamos a API pública AutoSINAPI
+ * quando a SINPRES não tem aquela referência.
+ *
+ * Passamos pelo backend por dois motivos: o rate-limit anônimo é compartilhado
+ * entre todos os usuários se cada navegador chamasse direto, e o catálogo é
+ * praticamente imutável dentro de um mês de referência — o cache em memória
  * elimina quase todas as chamadas externas.
  */
 const SINPRES_BASE_URL = process.env.SINPRES_API_URL || 'https://api.sinpres.com.br/api/v1';
+const AUTOSINAPI_BASE_URL =
+  process.env.AUTOSINAPI_API_URL || 'https://autosinapi.mundoaec.com';
+/** Primeiro mês que o seletor da Tabela SINAPI deve oferecer. */
+const SINAPI_HISTORY_START = '2025-01';
 const SECTOR_SLUG = 'civil-construction';
 
 const METADATA_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
@@ -45,6 +52,56 @@ function writeCache(key: string, data: unknown, ttlMs: number): void {
     if (oldestKey) cache.delete(oldestKey);
   }
   cache.set(key, { data, expiresAt: Date.now() + ttlMs });
+}
+
+function currentYearMonth(now = new Date()): string {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Sao_Paulo',
+    year: 'numeric',
+    month: '2-digit'
+  }).formatToParts(now);
+  const year = parts.find((part) => part.type === 'year')?.value;
+  const month = parts.find((part) => part.type === 'month')?.value;
+  if (!year || !month) {
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  }
+  return `${year}-${month}`;
+}
+
+/** Meses AAAA-MM de `start` até `end`, inclusive, em ordem crescente. */
+export function listYearMonths(start: string, end: string): string[] {
+  const match = /^(\d{4})-(\d{2})$/;
+  const startParts = start.match(match);
+  const endParts = end.match(match);
+  if (!startParts || !endParts) return [];
+
+  let year = Number(startParts[1]);
+  let month = Number(startParts[2]);
+  const endYear = Number(endParts[1]);
+  const endMonth = Number(endParts[2]);
+  if (!year || !month || month < 1 || month > 12) return [];
+
+  const months: string[] = [];
+  while (year < endYear || (year === endYear && month <= endMonth)) {
+    months.push(`${year}-${String(month).padStart(2, '0')}`);
+    month += 1;
+    if (month > 12) {
+      month = 1;
+      year += 1;
+    }
+  }
+  return months;
+}
+
+function reaisToCents(value: unknown): number | null {
+  if (value == null || value === '') return null;
+  const parsed = typeof value === 'number' ? value : Number(String(value).replace(',', '.'));
+  if (!Number.isFinite(parsed)) return null;
+  return Math.round(parsed * 100);
+}
+
+function isAppError(error: unknown): error is { statusCode?: number; message: string } {
+  return Boolean(error) && typeof error === 'object' && 'message' in error;
 }
 
 async function fetchSinpres<T>(path: string, ttlMs: number): Promise<T> {
@@ -142,6 +199,203 @@ async function fetchSinpresList<T>(
 
   writeCache(cacheKey, result, ttlMs);
   return result;
+}
+
+type AutoSinapiSearchItem = {
+  codigo?: number;
+  descricao?: string;
+  unidade?: string;
+  tipo?: string;
+  valor?: number | null;
+  custo_total?: number | null;
+  preco_mediano?: number | null;
+  classificacao?: string | null;
+};
+
+type AutoSinapiSearchResponse = {
+  items?: AutoSinapiSearchItem[];
+  total?: number;
+};
+
+function autoSinapiHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { Accept: 'application/json' };
+  const apiKey = process.env.AUTOSINAPI_API_KEY?.trim();
+  if (apiKey) headers['X-API-KEY'] = apiKey;
+  return headers;
+}
+
+function autoSinapiRegime(isDesonerated: boolean): string {
+  return isDesonerated ? 'DESONERADO' : 'NAO_DESONERADO';
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function emptySearchResult(page: number, limit: number): {
+  data: [];
+  meta: SinapiListMeta;
+} {
+  return {
+    data: [],
+    meta: {
+      total: 0,
+      page,
+      limit,
+      totalPages: 0,
+      hasNextPage: false
+    }
+  };
+}
+
+async function fetchAutoSinapi<T>(path: string, ttlMs: number, attempt = 0): Promise<T> {
+  const cacheKey = `autosinapi:${path}`;
+  const cached = readCache(cacheKey);
+  if (cached !== undefined) return cached as T;
+
+  let response: Response;
+  try {
+    response = await fetch(`${AUTOSINAPI_BASE_URL}${path}`, {
+      headers: autoSinapiHeaders()
+    });
+  } catch {
+    throw createError('Não foi possível consultar a base SINAPI no momento', 502);
+  }
+
+  if (response.status === 404) {
+    throw createError('Código não encontrado na base SINAPI', 404);
+  }
+
+  if (response.status === 429 && attempt < 2) {
+    const retryAfter = Number.parseInt(response.headers.get('Retry-After') || '', 10);
+    const waitMs = Number.isFinite(retryAfter) ? Math.min(Math.max(retryAfter, 1), 15) * 1000 : 4000;
+    await sleep(waitMs);
+    return fetchAutoSinapi<T>(path, ttlMs, attempt + 1);
+  }
+
+  if (response.status === 429) {
+    throw createError(
+      'Limite de consultas à base SINAPI atingido. Tente novamente em instantes',
+      429
+    );
+  }
+
+  if (!response.ok) {
+    throw createError('Não foi possível consultar a base SINAPI no momento', 502);
+  }
+
+  const data = (await response.json()) as T;
+  writeCache(cacheKey, data, ttlMs);
+  return data;
+}
+
+async function getSinpresMonths(): Promise<string[]> {
+  try {
+    const months = await fetchSinpres<string[]>('/sinapi/reference-months', METADATA_CACHE_TTL_MS);
+    return Array.isArray(months) ? months : [];
+  } catch {
+    return [];
+  }
+}
+
+async function getAutoSinapiMonths(): Promise<string[]> {
+  try {
+    const filters = await fetchAutoSinapi<{ datas?: string[] }>(
+      '/api/v1/public/filters',
+      METADATA_CACHE_TTL_MS
+    );
+    return Array.isArray(filters?.datas) ? filters.datas : [];
+  } catch {
+    return [];
+  }
+}
+
+function mapAutoSinapiComposition(
+  item: AutoSinapiSearchItem,
+  params: { state: string | null; month: string | null; isDesonerated: boolean }
+): SinapiComposition {
+  const code = Number(item.codigo ?? 0);
+  return {
+    id: code,
+    code,
+    description: String(item.descricao ?? ''),
+    unit: String(item.unidade ?? ''),
+    stateCode: params.state,
+    referenceMonth: params.month,
+    isDesonerated: params.isDesonerated,
+    baseUnitCost: reaisToCents(item.valor ?? item.custo_total)
+  };
+}
+
+function mapAutoSinapiItem(
+  item: AutoSinapiSearchItem,
+  params: { state: string | null; month: string | null; isDesonerated: boolean }
+): SinapiItem {
+  const code = Number(item.codigo ?? 0);
+  return {
+    id: code,
+    code,
+    description: String(item.descricao ?? ''),
+    unit: String(item.unidade ?? ''),
+    stateCode: params.state,
+    referenceMonth: params.month,
+    isDesonerated: params.isDesonerated,
+    unitPrice: reaisToCents(item.valor ?? item.preco_mediano)
+  };
+}
+
+async function searchAutoSinapi(
+  tipo: 'composicao' | 'insumo',
+  params: SinapiSearchParams
+): Promise<{ data: Array<SinapiComposition | SinapiItem>; meta: SinapiListMeta }> {
+  const state = parseState(params.state) || 'SP';
+  const month = parseMonth(params.month) || currentYearMonth();
+  const isDesonerated = parseBoolean(params.isDesonerated);
+  const page = parsePositiveInt(params.page, 1);
+  const limit = parsePositiveInt(params.limit, 50, MAX_LIMIT);
+  const unit = String(params.unit ?? '').trim().toUpperCase();
+  const search = String(params.search ?? '').trim();
+  const queryTerm = search || 'a';
+
+  const query = new URLSearchParams();
+  query.set('q', queryTerm);
+  query.set('uf', state);
+  query.set('data_referencia', month);
+  query.set('regime', autoSinapiRegime(isDesonerated));
+  query.set('tipo', tipo);
+  query.set('sort', search ? 'relevance' : 'name');
+  query.set('skip', String((page - 1) * limit));
+  query.set('limit', String(limit));
+
+  const payload = await fetchAutoSinapi<AutoSinapiSearchResponse>(
+    `/api/v1/public/search?${query.toString()}`,
+    LIST_CACHE_TTL_MS
+  );
+
+  const context = { state, month, isDesonerated };
+  let rows = (payload.items ?? []).map((item) =>
+    tipo === 'composicao'
+      ? mapAutoSinapiComposition(item, context)
+      : mapAutoSinapiItem(item, context)
+  );
+
+  if (unit) {
+    rows = rows.filter((row) => row.unit.toUpperCase() === unit);
+  }
+
+  const total = payload.total ?? rows.length;
+  const totalPages = total > 0 ? Math.ceil(total / limit) : 0;
+
+  return {
+    data: rows,
+    meta: {
+      total,
+      page,
+      limit,
+      totalPages,
+      hasNextPage: page < totalPages
+    }
+  };
 }
 
 export type SinapiSearchParams = {
@@ -277,34 +531,90 @@ export async function getSinapiMetadata(): Promise<{
   states: string[];
   months: string[];
   units: string[];
+  defaultMonth: string | null;
 }> {
-  const [states, months, units] = await Promise.all([
-    fetchSinpres<string[]>('/sinapi/states', METADATA_CACHE_TTL_MS),
-    fetchSinpres<string[]>('/sinapi/reference-months', METADATA_CACHE_TTL_MS),
-    fetchSinpres<string[]>(`/sectors/${SECTOR_SLUG}/units`, METADATA_CACHE_TTL_MS)
+  const [states, sinpresMonths, autoSinapiMonths, units] = await Promise.all([
+    fetchSinpres<string[]>('/sinapi/states', METADATA_CACHE_TTL_MS).catch(() => [] as string[]),
+    getSinpresMonths(),
+    getAutoSinapiMonths(),
+    fetchSinpres<string[]>(`/sectors/${SECTOR_SLUG}/units`, METADATA_CACHE_TTL_MS).catch(
+      () => [] as string[]
+    )
   ]);
 
+  const months = listYearMonths(SINAPI_HISTORY_START, currentYearMonth()).sort((a, b) =>
+    b.localeCompare(a)
+  );
+
+  const availableWithData = [...sinpresMonths, ...autoSinapiMonths]
+    .filter((month) => /^\d{4}-\d{2}$/.test(month))
+    .sort((a, b) => b.localeCompare(a));
+
   return {
-    states: [...states].sort(),
-    months: [...months].sort((a, b) => b.localeCompare(a)),
-    units: [...units].sort()
+    states: (states.length ? states : [
+      'AC', 'AL', 'AM', 'AP', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 'MG', 'MS', 'MT',
+      'PA', 'PB', 'PE', 'PI', 'PR', 'RJ', 'RN', 'RO', 'RR', 'RS', 'SC', 'SE', 'SP', 'TO'
+    ]).sort(),
+    months,
+    units: [...units].sort(),
+    defaultMonth: availableWithData[0] || months[0] || null
   };
 }
 
+async function monthHasSinpresData(month: string | null): Promise<boolean> {
+  if (!month) return true;
+  const months = await getSinpresMonths();
+  return months.includes(month);
+}
+
+async function monthHasAutoSinapiData(month: string | null): Promise<boolean> {
+  if (!month) return false;
+  const months = await getAutoSinapiMonths();
+  return months.includes(month);
+}
+
 export async function searchSinapiCompositions(params: SinapiSearchParams) {
-  const query = buildSearchQuery(params);
-  return fetchSinpresList<SinapiComposition>(
-    `/sectors/${SECTOR_SLUG}/compositions?${query}`,
-    LIST_CACHE_TTL_MS
-  );
+  const month = parseMonth(params.month);
+  if (await monthHasSinpresData(month)) {
+    return fetchSinpresList<SinapiComposition>(
+      `/sectors/${SECTOR_SLUG}/compositions?${buildSearchQuery(params)}`,
+      LIST_CACHE_TTL_MS
+    );
+  }
+
+  if (!(await monthHasAutoSinapiData(month))) {
+    return emptySearchResult(
+      parsePositiveInt(params.page, 1),
+      parsePositiveInt(params.limit, 50, MAX_LIMIT)
+    );
+  }
+
+  return searchAutoSinapi('composicao', params) as Promise<{
+    data: SinapiComposition[];
+    meta: SinapiListMeta;
+  }>;
 }
 
 export async function searchSinapiItems(params: SinapiSearchParams) {
-  const query = buildSearchQuery(params);
-  return fetchSinpresList<SinapiItem>(
-    `/sectors/${SECTOR_SLUG}/items?${query}`,
-    LIST_CACHE_TTL_MS
-  );
+  const month = parseMonth(params.month);
+  if (await monthHasSinpresData(month)) {
+    return fetchSinpresList<SinapiItem>(
+      `/sectors/${SECTOR_SLUG}/items?${buildSearchQuery(params)}`,
+      LIST_CACHE_TTL_MS
+    );
+  }
+
+  if (!(await monthHasAutoSinapiData(month))) {
+    return emptySearchResult(
+      parsePositiveInt(params.page, 1),
+      parsePositiveInt(params.limit, 50, MAX_LIMIT)
+    );
+  }
+
+  return searchAutoSinapi('insumo', params) as Promise<{
+    data: SinapiItem[];
+    meta: SinapiListMeta;
+  }>;
 }
 
 function parseCode(value: unknown): string {
@@ -316,11 +626,33 @@ function parseCode(value: unknown): string {
 /** Composição com o analítico de primeiro nível (insumos e subcomposições com coeficiente). */
 export async function getSinapiComposition(code: unknown, params: SinapiPriceContext) {
   const safeCode = parseCode(code);
+  const month = parseMonth(params.month);
   const query = buildPriceQuery(params);
-  return fetchSinpres<SinapiComposition>(
-    `/sectors/${SECTOR_SLUG}/compositions/${safeCode}?${query}`,
+
+  if (await monthHasSinpresData(month)) {
+    return fetchSinpres<SinapiComposition>(
+      `/sectors/${SECTOR_SLUG}/compositions/${safeCode}?${query}`,
+      DETAIL_CACHE_TTL_MS
+    );
+  }
+
+  if (!(await monthHasAutoSinapiData(month))) {
+    throw createError('Código não encontrado na base SINAPI', 404);
+  }
+
+  const state = parseState(params.state) || 'SP';
+  const isDesonerated = parseBoolean(params.isDesonerated);
+  const detail = await fetchAutoSinapi<{
+    codigo?: number;
+    descricao?: string;
+    unidade?: string;
+    custo_total?: number | null;
+  }>(
+    `/api/v1/public/composicoes/${safeCode}?uf=${encodeURIComponent(state)}&data_referencia=${encodeURIComponent(month || currentYearMonth())}&regime=${autoSinapiRegime(isDesonerated)}`,
     DETAIL_CACHE_TTL_MS
   );
+
+  return mapAutoSinapiComposition(detail, { state, month, isDesonerated });
 }
 
 /** Árvore recursiva da composição (subcomposições abertas até `maxDepth`). */
@@ -332,17 +664,46 @@ export async function getSinapiCompositionTree(
   const query = new URLSearchParams(buildPriceQuery(params));
   query.set('max_depth', String(parsePositiveInt(params.maxDepth, 5, MAX_EXPAND_DEPTH)));
 
-  return fetchSinpres<SinapiExpandedNode>(
-    `/sectors/${SECTOR_SLUG}/compositions/${safeCode}/expanded?${query.toString()}`,
-    DETAIL_CACHE_TTL_MS
-  );
+  try {
+    return await fetchSinpres<SinapiExpandedNode>(
+      `/sectors/${SECTOR_SLUG}/compositions/${safeCode}/expanded?${query.toString()}`,
+      DETAIL_CACHE_TTL_MS
+    );
+  } catch (error) {
+    if (isAppError(error) && error.statusCode === 404) {
+      throw createError('Analítico não disponível para este mês de referência', 404);
+    }
+    throw error;
+  }
 }
 
 export async function getSinapiItem(code: unknown, params: SinapiPriceContext) {
   const safeCode = parseCode(code);
+  const month = parseMonth(params.month);
   const query = buildPriceQuery(params);
-  return fetchSinpres<SinapiItem>(
-    `/sectors/${SECTOR_SLUG}/items/${safeCode}?${query}`,
+
+  if (await monthHasSinpresData(month)) {
+    return fetchSinpres<SinapiItem>(
+      `/sectors/${SECTOR_SLUG}/items/${safeCode}?${query}`,
+      DETAIL_CACHE_TTL_MS
+    );
+  }
+
+  if (!(await monthHasAutoSinapiData(month))) {
+    throw createError('Código não encontrado na base SINAPI', 404);
+  }
+
+  const state = parseState(params.state) || 'SP';
+  const isDesonerated = parseBoolean(params.isDesonerated);
+  const detail = await fetchAutoSinapi<{
+    codigo?: number;
+    descricao?: string;
+    unidade?: string;
+    preco_mediano?: number | null;
+  }>(
+    `/api/v1/public/insumos/${safeCode}?uf=${encodeURIComponent(state)}&data_referencia=${encodeURIComponent(month || currentYearMonth())}&regime=${autoSinapiRegime(isDesonerated)}`,
     DETAIL_CACHE_TTL_MS
   );
+
+  return mapAutoSinapiItem(detail, { state, month, isDesonerated });
 }

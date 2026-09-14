@@ -194,6 +194,7 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
   },
   { key: pathToModuleKey('/ponto/pleitos-gerados'), name: 'Pleitos Gerados', href: '/ponto/pleitos-gerados', category: 'Engenharia' },
   { key: pathToModuleKey('/ponto/aprovacao-fds'), name: 'Fichas de Demanda', href: '/ponto/aprovacao-fds', category: 'Engenharia' },
+  { key: pathToModuleKey('/ponto/caixinha'), name: 'Caixinha', href: '/ponto/caixinha', category: 'Engenharia' },
   {
     key: pathToModuleKey('/ponto/recebimento-entregas'),
     name: 'Recebimento de Entregas',

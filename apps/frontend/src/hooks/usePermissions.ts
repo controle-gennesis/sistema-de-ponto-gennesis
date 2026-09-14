@@ -3,6 +3,7 @@ import { useEffect } from 'react';
 import {
   pathToModuleKey,
   PERMISSION_ACCESS_ACTION,
+  PERMISSION_MODULE_CRUD_ACTIONS,
   PERMISSION_MODULE_KEYS_OPEN_ACCESS,
 } from '@sistema-ponto/permission-modules';
 import api from '@/lib/api';
@@ -445,6 +446,13 @@ export function usePermissions() {
       can(pk('/ponto/contratos')) &&
       allowedContractIds.length > 0);
 
+  /** Métricas → Relatórios de Contrato: só a linha da matriz, sem herdar Contratos. */
+  const relatoriosContratoKey = pk('/ponto/metricas/relatorios-contrato');
+  const canAccessRelatoriosContratoPage =
+    isElevatedUser ||
+    can(relatoriosContratoKey) ||
+    PERMISSION_MODULE_CRUD_ACTIONS.some((action) => canAction(relatoriosContratoKey, action));
+
   const canAccessContractOrdemServicoTab = (contractId: string) => {
     if (isElevatedUser) return true;
     return (
@@ -563,6 +571,7 @@ export function usePermissions() {
     canAccessOrcamentoRoutePage,
     canAccessOsRoutePage,
     canAccessRecebimentoEntregasRoutePage,
+    canAccessRelatoriosContratoPage,
     canAccessContractOrcamentoTab,
     canAccessContractRelatoriosTab,
     canAccessContractReunioesTab,
@@ -616,6 +625,7 @@ export function useRoutePermission(route: string) {
     canAccessOrcamentoRoutePage,
     canAccessOsRoutePage,
     canAccessRecebimentoEntregasRoutePage,
+    canAccessRelatoriosContratoPage,
     fluigApproverNameKeys,
     canAccessFluigApproversRoute,
   } = usePermissions();
@@ -716,15 +726,12 @@ export function useRoutePermission(route: string) {
     '/ponto/contratos/socios': isAdministrator || can(pk('/ponto/contratos/socios')),
     '/ponto/contratos/gastos-operacionais':
       isAdministrator || can(pk('/ponto/contratos/gastos-operacionais')),
-    '/ponto/metricas/relatorios-contrato':
-      isAdministrator ||
-      can(pk('/ponto/metricas/relatorios-contrato')) ||
-      can(pk('/ponto/contratos/controle-geral')) ||
-      can(pk('/ponto/contratos')),
+    '/ponto/metricas/relatorios-contrato': canAccessRelatoriosContratoPage,
     '/ponto/metricas/ocs-boleto-pix':
       isAdministrator || can(pk('/ponto/metricas/ocs-boleto-pix')),
     '/ponto/pleitos-gerados': isAdministrator || can(pk('/ponto/pleitos-gerados')),
     '/ponto/aprovacao-fds': isAdministrator || can(pk('/ponto/aprovacao-fds')),
+    '/ponto/caixinha': isAdministrator || can(pk('/ponto/caixinha')),
     '/ponto/recebimento-entregas': canAccessRecebimentoEntregasRoutePage,
     '/ponto/espelho-nf': isAdministrator || can(pk('/ponto/espelho-nf')),
     '/ponto/prestadores-servico':

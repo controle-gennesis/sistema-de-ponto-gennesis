@@ -2,6 +2,7 @@ import type { PrismaClient } from '@prisma/client';
 import { ensureGestaoOsSchema } from './ensureGestaoOsSchema';
 import { ensureSupportTicketsSchema } from './ensureSupportTicketsSchema';
 import { ensureToolRentalRequestsSchema } from './ensureToolRentalRequestsSchema';
+import { ensureCaixinhaAccountsTable } from './ensureCaixinhaAccounts';
 
 async function columnExists(
   prisma: PrismaClient,
@@ -1782,6 +1783,57 @@ async function ensurePermissionAccessTables(prisma: PrismaClient): Promise<void>
   }
 }
 
+async function ensureCaixinhaPurchasesTable(prisma: PrismaClient): Promise<void> {
+  if (await tableExists(prisma, 'caixinha_purchases')) return;
+
+  console.warn(
+    '[Schema] Tabela caixinha_purchases ausente — criando automaticamente. ' +
+      'Prefira: cd apps/backend && npx prisma migrate deploy.'
+  );
+
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "caixinha_purchases" (
+      "id" TEXT NOT NULL,
+      "filledAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "personName" TEXT NOT NULL,
+      "personUserId" TEXT,
+      "osNumber" TEXT,
+      "contractId" TEXT,
+      "contractName" TEXT,
+      "obraId" TEXT,
+      "obraName" TEXT,
+      "caixinha" TEXT NOT NULL,
+      "purchaseDate" TIMESTAMP(3),
+      "storeName" TEXT,
+      "invoiceNumber" TEXT,
+      "amount" DECIMAL(14, 2) NOT NULL DEFAULT 0,
+      "notes" TEXT,
+      "invoicePdfUrl" TEXT,
+      "invoicePdfName" TEXT,
+      "createdById" TEXT NOT NULL,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "caixinha_purchases_pkey" PRIMARY KEY ("id")
+    );
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "caixinha_purchases_filledAt_idx"
+    ON "caixinha_purchases"("filledAt");
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "caixinha_purchases_caixinha_idx"
+    ON "caixinha_purchases"("caixinha");
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "caixinha_purchases_createdById_idx"
+    ON "caixinha_purchases"("createdById");
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "caixinha_purchases_personName_idx"
+    ON "caixinha_purchases"("personName");
+  `);
+}
+
 export async function ensureProductionSchema(prisma: PrismaClient): Promise<void> {
   try {
     await ensureUnaccentExtension(prisma);
@@ -1827,6 +1879,8 @@ export async function ensureProductionSchema(prisma: PrismaClient): Promise<void
     await ensureJuridicoProcessosTables(prisma);
     await ensureOcsBoletoPixExtrasTable(prisma);
     await ensureObrasTable(prisma);
+    await ensureCaixinhaPurchasesTable(prisma);
+    await ensureCaixinhaAccountsTable(prisma);
     console.log('[Schema] Verificação de tabelas/colunas críticas concluída.');
   } catch (e) {
     console.error('[Schema] Falha ao garantir esquema de produção:', e);

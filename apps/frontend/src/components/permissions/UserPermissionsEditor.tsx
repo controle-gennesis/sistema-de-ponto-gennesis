@@ -459,7 +459,7 @@ function displayModuleName(m: PermissionModuleDef): string {
 function moduleIcon(href: string): LucideIcon {
   if (href.startsWith('/ponto/controle')) return Settings;
   if (href.includes('dashboard')) return LayoutDashboard;
-  if (href.includes('financeiro')) return Wallet;
+  if (href.includes('financeiro') || href.includes('caixinha')) return Wallet;
   if (href.includes('contratos') || href.includes('orcamento') || href.includes('os') || href.includes('pleitos'))
     return HardHat;
   if (

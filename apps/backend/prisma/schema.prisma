@@ -2278,6 +2278,47 @@ model Obra {
   @@map("obras")
 }
 
+/// Compras da Caixinha (Engenharia) — IDs/nomes denormalizados, sem FK para User/Contract/Obra.
+model CaixinhaPurchase {
+  id             String    @id @default(cuid())
+  filledAt       DateTime  @default(now())
+  personName     String
+  personUserId   String?
+  osNumber       String?
+  contractId     String?
+  contractName   String?
+  obraId         String?
+  obraName       String?
+  caixinha       String
+  purchaseDate   DateTime?
+  storeName      String?
+  invoiceNumber  String?
+  amount         Decimal   @default(0) @db.Decimal(14, 2)
+  notes          String?
+  invoicePdfUrl  String?
+  invoicePdfName String?
+  createdById    String
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([filledAt])
+  @@index([caixinha])
+  @@index([createdById])
+  @@index([personName])
+  @@map("caixinha_purchases")
+}
+
+/// Catálogo de nomes da Caixinha (Contas Coringas) — alimenta o select da aba.
+model CaixinhaAccount {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([name])
+  @@map("caixinha_accounts")
+}
+
 // Modelo de Material de Engenharia (SINAPI)
 model EngineeringMaterial {
   id             String   @id @default(cuid())

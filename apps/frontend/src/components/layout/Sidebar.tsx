@@ -275,6 +275,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
     canApproveMaterialRequests,
     canAccessOsRoutePage,
     canAccessRecebimentoEntregasRoutePage,
+    canAccessRelatoriosContratoPage,
     fluigApproverNameKeys,
     fluigApproverFullAccess,
     canAccessFluigApproversRoute,
@@ -1036,11 +1037,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             href: '/ponto/metricas/relatorios-contrato',
             icon: FileText,
             description: 'Reuniões quinzenais por contrato — acompanhamento interno',
-            permission:
-              isAdministrator ||
-              can(pk('/ponto/metricas/relatorios-contrato')) ||
-              can(pk('/ponto/contratos/controle-geral')) ||
-              can(pk('/ponto/contratos'))
+            permission: isAdministrator || canAccessRelatoriosContratoPage
           },
           {
             name: 'OCs Boleto e Pix',
@@ -1118,6 +1115,14 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             icon: ClipboardCheck,
             description: 'Cadastro e gestão das fichas de demanda',
             permission: isAdministrator || can(pk('/ponto/aprovacao-fds')),
+            section: 'Obras'
+          },
+          {
+            name: 'Caixinha',
+            href: '/ponto/caixinha',
+            icon: Wallet,
+            description: 'Lançar compras da caixinha da engenharia',
+            permission: isAdministrator || can(pk('/ponto/caixinha')),
             section: 'Obras'
           },
           {

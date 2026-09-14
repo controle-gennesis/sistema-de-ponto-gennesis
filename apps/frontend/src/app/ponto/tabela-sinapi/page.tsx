@@ -163,13 +163,14 @@ export default function TabelaSinapiPage() {
   }, [tab, search, state, month, unit, regime]);
 
   const { data: metadata, isLoading: loadingMetadata } = useQuery({
-    queryKey: ['sinapi-metadata'],
+    queryKey: ['sinapi-metadata', 'from-2025'],
     queryFn: async () => {
       const res = await api.get('/sinapi/metadata');
-      return (res.data?.data ?? { states: [], months: [], units: [] }) as {
+      return (res.data?.data ?? { states: [], months: [], units: [], defaultMonth: null }) as {
         states: string[];
         months: string[];
         units: string[];
+        defaultMonth: string | null;
       };
     },
     staleTime: 6 * 60 * 60 * 1000,
@@ -178,10 +179,13 @@ export default function TabelaSinapiPage() {
   const availableMonths = metadata?.months ?? [];
 
   useEffect(() => {
-    if (!month && availableMonths.length > 0) {
-      setMonth(availableMonths[0]);
-    }
-  }, [month, availableMonths]);
+    if (availableMonths.length === 0) return;
+    if (month && availableMonths.includes(month)) return;
+    const preferred = metadata?.defaultMonth;
+    setMonth(
+      preferred && availableMonths.includes(preferred) ? preferred : availableMonths[0],
+    );
+  }, [month, availableMonths, metadata?.defaultMonth]);
 
   const filterParams = useMemo(
     () => ({
@@ -447,7 +451,11 @@ export default function TabelaSinapiPage() {
                 title={
                   tab === 'compositions' ? 'Nenhuma composição encontrada' : 'Nenhum insumo encontrado'
                 }
-                hint="Ajuste a busca, a UF ou o mês de referência."
+                hint={
+                  search
+                    ? 'Ajuste a busca, a UF ou o mês de referência.'
+                    : 'Esta referência pode ainda não ter sido publicada. Tente outro mês ou busque por código/descrição.'
+                }
               />
             ) : (
               <>
@@ -534,8 +542,8 @@ export default function TabelaSinapiPage() {
             )}
 
             <p className="mt-4 border-t border-gray-100 pt-3 text-xs text-gray-500 dark:border-gray-700/70 dark:text-gray-400">
-              Dados do SINAPI (Caixa Econômica Federal / IBGE), consultados pela API pública SINPRES.
-              Sem vínculo oficial com a Caixa.
+              Dados do SINAPI (Caixa Econômica Federal / IBGE), de janeiro/2025 até a referência
+              vigente. Sem vínculo oficial com a Caixa.
             </p>
           </CardContent>
         </Card>
