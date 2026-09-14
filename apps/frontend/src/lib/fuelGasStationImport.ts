@@ -1,4 +1,5 @@
 import * as XLSX from 'xlsx';
+import { fuelCityCode, isBrazilStateCode } from '@/lib/brazilStates';
 
 /** Cidades satélites (espelho do backend) — usadas no modelo e na validação do parse. */
 export const FUEL_IMPORT_CITIES = [
@@ -69,8 +70,8 @@ const FUEL_IMPORT_CITY_ALIASES: Array<{
 ];
 
 export const FUEL_STATION_IMPORT_COLUMNS = [
-  { name: 'Estado', required: true, hint: 'DF ou GO' },
-  { name: 'Cidade', required: true, hint: 'Nome da região administrativa (ex.: Taguatinga, Goiânia)' },
+  { name: 'Estado', required: true, hint: 'UF (ex.: DF, GO, SP)' },
+  { name: 'Cidade', required: true, hint: 'Nome do município (no DF: região administrativa, ex.: Taguatinga)' },
   { name: 'Nome', required: true, hint: 'Nome do posto' },
   { name: 'Endereço', required: false },
   { name: 'Ativo', required: false, hint: 'Sim / Não' },
@@ -94,10 +95,9 @@ function normalizeKey(value: string): string {
     .replace(/[\u0300-\u036f]/g, '');
 }
 
-function parseStateCode(raw: string): 'DF' | 'GO' | null {
+function parseStateCode(raw: string) {
   const upper = raw.trim().toUpperCase();
-  if (upper === 'DF' || upper === 'GO') return upper;
-  return null;
+  return isBrazilStateCode(upper) ? upper : null;
 }
 
 /**
@@ -156,7 +156,10 @@ export function resolveFuelCityCode(cityRaw: string, stateRaw?: string): string 
     // Nome ambíguo sem Estado — não resolve
     return null;
   }
-  return candidates[0]?.code ?? null;
+  if (candidates[0]?.code) return candidates[0].code;
+
+  if (state) return fuelCityCode(state, cityTrimmed);
+  return null;
 }
 
 function pickRowValue(row: Record<string, unknown>, ...keys: string[]): string {
@@ -201,8 +204,8 @@ function analyzeImportRow(row: Record<string, unknown>, lineNumber: number): Imp
 
   const skipReasons: string[] = [];
 
-  if (!stateRaw) skipReasons.push('Estado em branco (use DF ou GO)');
-  else if (!parseStateCode(stateRaw)) skipReasons.push(`Estado inválido: "${stateRaw}" (use DF ou GO)`);
+  if (!stateRaw) skipReasons.push('Estado em branco (use a UF, ex.: DF, GO, SP)');
+  else if (!parseStateCode(stateRaw)) skipReasons.push(`Estado inválido: "${stateRaw}" (use a UF, ex.: DF, GO, SP)`);
 
   const cityCode = resolveFuelCityCode(cityRaw, stateRaw);
   if (!cityRaw) skipReasons.push('Cidade em branco');

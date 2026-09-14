@@ -14,7 +14,7 @@ import {
   listActiveFuelGasStationsForRequest,
   listFuelSatelliteCities,
 } from '../lib/fuelAdministrativeRegions';
-import { FUEL_ABASTECIMENTO_STATE_CODES } from '../constants/fuelSatelliteCities';
+import { FUEL_ABASTECIMENTO_STATE_CODES, isBrazilStateCode } from '../constants/fuelSatelliteCities';
 import { getFuelSuppliesSlaHours } from '../lib/fuelSuppliesSla';
 import {
   findEmployeeByCpf,
@@ -208,10 +208,10 @@ export class FuelRefuelRequestController {
     try {
       if (!req.user) throw createError('Usuário não autenticado', 401);
       const stateCode = String(req.query.stateCode ?? '').trim().toUpperCase();
-      if (stateCode && !FUEL_ABASTECIMENTO_STATE_CODES.includes(stateCode as 'DF' | 'GO')) {
-        throw createError('Estado inválido. Use DF ou GO.', 400);
+      if (stateCode && !isBrazilStateCode(stateCode)) {
+        throw createError('Estado inválido.', 400);
       }
-      const rows = listFuelSatelliteCities(stateCode || undefined);
+      const rows = await listFuelSatelliteCities(stateCode || undefined);
       res.json({
         success: true,
         data: {
@@ -450,7 +450,7 @@ export class FuelRefuelRequestController {
       await assertUserHasFuelSuppliesAccess(user.id, user.isAdmin);
 
       const stateCode = String(req.query.stateCode ?? '').trim().toUpperCase();
-      const rows = listFuelSatelliteCities(stateCode || undefined);
+      const rows = await listFuelSatelliteCities(stateCode || undefined);
       res.json({ success: true, data: rows });
     } catch (error) {
       next(error);

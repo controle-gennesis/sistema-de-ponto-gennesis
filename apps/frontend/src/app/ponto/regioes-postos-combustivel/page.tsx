@@ -14,8 +14,8 @@ import { Loading } from '@/components/ui/Loading';
 import { ListPagination } from '@/components/ui/ListPagination';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import { ButtonSeg } from '@/app/ponto/solicitacoes-dp/DpSolicitacaoTypeFields';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { BRAZIL_STATE_SELECT_OPTIONS, type BrazilStateCode } from '@/lib/brazilStates';
 import {
   MultiSelectSearchDropdown,
   type MultiSelectSearchOption,
@@ -43,11 +43,9 @@ import {
   parseFuelStationsFromFile,
 } from '@/lib/fuelGasStationImport';
 
-type FuelStateCode = 'DF' | 'GO';
-
 type SatelliteCity = {
   code: string;
-  stateCode: FuelStateCode;
+  stateCode: BrazilStateCode | string;
   name: string;
 };
 
@@ -93,14 +91,14 @@ export default function RegioesPostosCombustivelPage() {
   const queryClient = useQueryClient();
   const { canCreate, canEdit, canDelete } = useCadastroCrudPermissions('/ponto/regioes-postos-combustivel');
   const showActions = canEdit || canDelete;
-  const [stateFilter, setStateFilter] = useState<FuelStateCode>('DF');
+  const [stateFilter, setStateFilter] = useState<BrazilStateCode>('DF');
   const [cityFilter, setCityFilter] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
   const [showStationForm, setShowStationForm] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
-  const [formStateCode, setFormStateCode] = useState<FuelStateCode>('DF');
+  const [formStateCode, setFormStateCode] = useState<BrazilStateCode>('DF');
   const [editingStation, setEditingStation] = useState<GasStation | null>(null);
   const [detailStation, setDetailStation] = useState<GasStation | null>(null);
   const [deleteStationId, setDeleteStationId] = useState<string | null>(null);
@@ -131,7 +129,7 @@ export default function RegioesPostosCombustivelPage() {
     enabled: !loadingUser,
   });
 
-  const { data: formCities = [] } = useQuery({
+  const { data: formCities = [], isFetching: loadingFormCities } = useQuery({
     queryKey: ['fuel-satellite-cities-form', formStateCode],
     queryFn: async () => {
       const res = await api.get('/fuel-gas-stations/satellite-cities', {
@@ -232,13 +230,8 @@ export default function RegioesPostosCombustivelPage() {
 
   useEffect(() => {
     if (!showStationForm || editingStation) return;
-    if (!formCities.length) {
-      setStationForm((current) => ({ ...current, cityCode: '' }));
-      return;
-    }
-    if (!formCities.some((city) => city.code === stationForm.cityCode)) {
-      setStationForm((current) => ({ ...current, cityCode: formCities[0].code }));
-    }
+    if (formCities.some((city) => city.code === stationForm.cityCode)) return;
+    setStationForm((current) => ({ ...current, cityCode: '' }));
   }, [formStateCode, formCities, showStationForm, editingStation, stationForm.cityCode]);
 
   const {
@@ -706,23 +699,23 @@ export default function RegioesPostosCombustivelPage() {
               <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                 Estado
               </label>
-              <div className="flex gap-2">
-                {(['DF', 'GO'] as FuelStateCode[]).map((state) => (
-                  <ButtonSeg
-                    key={state}
-                    active={stateFilter === state}
-                    onClick={() => {
-                      setStateFilter(state);
-                      setCityFilter('');
-                    }}
-                    label={state}
-                  />
-                ))}
-              </div>
+              <StringSingleSelectDropdown
+                value={stateFilter}
+                onChange={(value) => {
+                  setStateFilter(value as BrazilStateCode);
+                  setCityFilter('');
+                }}
+                options={BRAZIL_STATE_SELECT_OPTIONS}
+                allowEmpty={false}
+                placeholder="Selecionar estado..."
+                searchPlaceholder="Pesquisar estado..."
+                className="w-full"
+                matchTriggerWidth
+              />
             </div>
             <div>
               <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                Cidade satélite
+                Cidade
               </label>
               <StringSingleSelectDropdown
                 value={cityFilter}
@@ -778,23 +771,23 @@ export default function RegioesPostosCombustivelPage() {
             {!editingStation ? (
               <div>
                 <label className="mb-1 block text-sm font-medium text-gray-800 dark:text-gray-200">
-                  Estado
+                  Estado *
                 </label>
-                <div className="flex gap-2">
-                  {(['DF', 'GO'] as FuelStateCode[]).map((state) => (
-                    <ButtonSeg
-                      key={state}
-                      active={formStateCode === state}
-                      onClick={() => setFormStateCode(state)}
-                      label={state}
-                    />
-                  ))}
-                </div>
+                <StringSingleSelectDropdown
+                  value={formStateCode}
+                  onChange={(value) => setFormStateCode(value as BrazilStateCode)}
+                  options={BRAZIL_STATE_SELECT_OPTIONS}
+                  allowEmpty={false}
+                  placeholder="Selecionar estado..."
+                  searchPlaceholder="Pesquisar estado..."
+                  className="w-full"
+                  matchTriggerWidth
+                />
               </div>
             ) : null}
             <div>
               <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                Cidade satélite *
+                Cidade *
               </label>
               {editingStation ? (
                 <p className="text-sm text-gray-900 dark:text-gray-100">
@@ -806,8 +799,12 @@ export default function RegioesPostosCombustivelPage() {
                   onChange={(cityCode) => setStationForm((current) => ({ ...current, cityCode }))}
                   options={formCityOptions}
                   allowEmpty={false}
-                  placeholder="Selecionar cidade..."
+                  disabled={loadingFormCities}
+                  placeholder={loadingFormCities ? 'Carregando cidades...' : 'Selecionar cidade...'}
+                  searchPlaceholder="Pesquisar cidade..."
+                  emptyOptionsMessage="Nenhuma cidade encontrada para este estado."
                   className="w-full"
+                  matchTriggerWidth
                 />
               )}
             </div>
@@ -894,7 +891,7 @@ export default function RegioesPostosCombustivelPage() {
           isOpen={showImportModal}
           onClose={() => setShowImportModal(false)}
           title="Importar postos de combustível"
-          templateHint="Baixe o modelo (abas Postos e Cidades). Preencha Estado (DF/GO), Cidade, Nome do posto… O código do posto é gerado automaticamente."
+          templateHint="Baixe o modelo (abas Postos e Cidades). Preencha a UF, o nome da cidade, o nome do posto… No DF, use a região administrativa. O código do posto é gerado automaticamente."
           columns={FUEL_STATION_IMPORT_COLUMNS}
           bodyKey="stations"
           importPath="/fuel-gas-stations/import"

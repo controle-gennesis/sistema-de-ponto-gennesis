@@ -1,5 +1,6 @@
 import { FuelVehicleType, VehicleUsageType } from '@prisma/client';
 import {
+  assertValidFuelCityCode,
   getFuelSatelliteCityByCode,
   listFuelSatelliteCities,
   type FuelSatelliteCity,
@@ -26,7 +27,7 @@ export type FuelSatelliteCityWithStations = FuelSatelliteCity & {
   stationCount: number;
 };
 
-function cityCodesForLookup(cityCode: string): string[] {
+export function cityCodesForLookup(cityCode: string): string[] {
   const code = cityCode.trim().toUpperCase();
   if (!code) return [];
   const aliases = Object.entries(LEGACY_CITY_CODE_TO_CANONICAL)
@@ -56,12 +57,24 @@ export async function listFuelSatelliteCitiesWithActiveStations(
     countByCanonical.set(canonical, (countByCanonical.get(canonical) ?? 0) + row._count._all);
   }
 
-  return listFuelSatelliteCities(stateCode)
+  const listed = await listFuelSatelliteCities(stateCode);
+  const withCounts = listed
     .map((city) => ({
       ...city,
       stationCount: countByCanonical.get(city.code.toUpperCase()) ?? 0,
     }))
     .filter((city) => city.stationCount > 0);
+
+  const listedCodes = new Set(withCounts.map((city) => city.code.toUpperCase()));
+  for (const [code, count] of countByCanonical) {
+    if (listedCodes.has(code)) continue;
+    const city = getFuelSatelliteCityByCode(code);
+    if (!city) continue;
+    if (stateCode && city.stateCode !== stateCode.trim().toUpperCase()) continue;
+    withCounts.push({ ...city, stationCount: count });
+  }
+
+  return withCounts.sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
 }
 
 const fuelGasStationListSelect = {
@@ -228,8 +241,6 @@ export async function reserveFuelGasStationDisplayNumbers(count: number): Promis
   return numbers;
 }
 
-export function assertValidSatelliteCityCode(cityCode: string) {
-  const city = getFuelSatelliteCityByCode(cityCode);
-  if (!city) throw new Error('Cidade satélite inválida');
-  return city;
+export async function assertValidSatelliteCityCode(cityCode: string) {
+  return assertValidFuelCityCode(cityCode);
 }
