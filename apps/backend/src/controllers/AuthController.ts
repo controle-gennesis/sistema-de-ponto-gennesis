@@ -644,8 +644,8 @@ export class AuthController {
   }
 
   /**
-   * Dispara o e-mail de redefinição. Responde sempre com sucesso para não
-   * revelar quais e-mails/CPFs possuem conta.
+   * Dispara o e-mail de redefinição. Se a conta não existir, responde com
+   * mensagem genérica; se enviar com sucesso, devolve o e-mail de destino.
    */
   async forgotPassword(req: Request, res: Response, next: NextFunction) {
     const genericMessage =
@@ -695,7 +695,11 @@ export class AuthController {
         userId: user.id,
       });
 
-      return res.json({ success: true, message: genericMessage });
+      return res.json({
+        success: true,
+        message: `Enviamos o link de redefinição para ${user.email}.`,
+        email: user.email,
+      });
     } catch (error) {
       return next(error);
     }

@@ -131,9 +131,6 @@ export default function MeusChamadosPageClient() {
   const [origin, setOrigin] = useState<GestaoOsOrigin>('REQUEST');
   const [sacKind, setSacKind] = useState<GestaoOsSacKind>('CHAMADO');
   const [listScope, setListScope] = useState<'mine' | 'unit'>('mine');
-  const [openedAtLabel, setOpenedAtLabel] = useState(() =>
-    formatDateTime(new Date().toISOString())
-  );
 
   const handleLogout = () => {
     localStorage.removeItem('token');
@@ -193,11 +190,6 @@ export default function MeusChamadosPageClient() {
       return res.data?.data ?? [];
     }
   });
-
-  useEffect(() => {
-    if (!createOpen) return;
-    setOpenedAtLabel(formatDateTime(new Date().toISOString()));
-  }, [createOpen]);
 
   const { data: locationTree = [] } = useQuery({
     queryKey: ['gestao-os-locations'],
@@ -746,24 +738,6 @@ export default function MeusChamadosPageClient() {
         >
           <div>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div>
-                <label className={GESTAO_OS_FORM_LABEL_CLS}>Nome do solicitante</label>
-                <input
-                  className={`${FORM_FIELD_INPUT_CLS} cursor-default bg-gray-50 dark:bg-gray-900/60`}
-                  value={user.name || '—'}
-                  readOnly
-                  tabIndex={-1}
-                />
-              </div>
-              <div>
-                <label className={GESTAO_OS_FORM_LABEL_CLS}>Data de abertura</label>
-                <input
-                  className={`${FORM_FIELD_INPUT_CLS} cursor-default bg-gray-50 dark:bg-gray-900/60`}
-                  value={openedAtLabel}
-                  readOnly
-                  tabIndex={-1}
-                />
-              </div>
               <div>
                 <label className={GESTAO_OS_FORM_LABEL_CLS}>
                   Prédio

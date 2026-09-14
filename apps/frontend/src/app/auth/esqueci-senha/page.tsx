@@ -2,23 +2,17 @@
 
 import React, { useState } from 'react';
 import Link from 'next/link';
-import { AlertCircle, CheckCircle2, MessageCircle, UserRound } from 'lucide-react';
+import { AlertCircle, CheckCircle2, UserRound } from 'lucide-react';
 import api from '@/lib/api';
 import { normalizeLoginIdentifierInput } from '@/lib/cpf';
-import { APP_TITLE } from '@/lib/pageTitle';
 import { AUTH_INPUT_CLS, AuthPageShell } from '@/components/auth/AuthPageShell';
-
-const SUPPORT_WHATSAPP_DIGITS = '5561981622021';
 
 export default function EsqueciSenhaPage() {
   const [identifier, setIdentifier] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [sentEmail, setSentEmail] = useState('');
   const [sentMessage, setSentMessage] = useState('');
-
-  const supportWhatsAppUrl = `https://wa.me/${SUPPORT_WHATSAPP_DIGITS}?text=${encodeURIComponent(
-    `Olá! Esqueci minha senha do ${APP_TITLE} e preciso de ajuda para alterar.`
-  )}`;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -29,12 +23,19 @@ export default function EsqueciSenhaPage() {
     setLoading(true);
     setError('');
     try {
-      const res = await api.post<{ success: boolean; message?: string }>('/auth/forgot-password', {
-        identifier: identifier.trim(),
-      });
+      const res = await api.post<{ success: boolean; message?: string; email?: string }>(
+        '/auth/forgot-password',
+        {
+          identifier: identifier.trim(),
+        }
+      );
+      const email = res.data?.email?.trim() || '';
+      setSentEmail(email);
       setSentMessage(
-        res.data?.message ||
-          'Se houver uma conta com esse e-mail, enviaremos as instruções de redefinição em instantes.'
+        email
+          ? `Enviamos o link de redefinição para ${email}.`
+          : res.data?.message ||
+              'Se houver uma conta com esse e-mail, enviaremos as instruções de redefinição em instantes.'
       );
     } catch (err) {
       const message = (err as { response?: { data?: { message?: string } } })?.response?.data
@@ -52,7 +53,18 @@ export default function EsqueciSenhaPage() {
           <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-900/30">
             <CheckCircle2 className="h-7 w-7 text-emerald-600 dark:text-emerald-400" />
           </div>
-          <p className="text-gray-600 dark:text-gray-400">{sentMessage}</p>
+          {sentEmail ? (
+            <>
+              <p className="text-gray-600 dark:text-gray-400">
+                Enviamos o link de redefinição para:
+              </p>
+              <p className="break-all text-base font-semibold text-gray-900 dark:text-gray-100">
+                {sentEmail}
+              </p>
+            </>
+          ) : (
+            <p className="text-gray-600 dark:text-gray-400">{sentMessage}</p>
+          )}
           <p className="text-sm text-gray-500 dark:text-gray-500">
             O link é válido por 1 hora. Não esqueça de conferir a caixa de spam.
           </p>
@@ -66,6 +78,7 @@ export default function EsqueciSenhaPage() {
             type="button"
             onClick={() => {
               setSentMessage('');
+              setSentEmail('');
               setIdentifier('');
             }}
             className="text-sm font-medium text-red-600 transition-colors hover:text-red-700 dark:text-red-400 dark:hover:text-red-500"
@@ -116,21 +129,6 @@ export default function EsqueciSenhaPage() {
         >
           {loading ? 'Enviando...' : 'Enviar link de redefinição'}
         </button>
-
-        <div className="border-t border-gray-200 pt-5 text-center dark:border-gray-700">
-          <p className="mb-3 text-sm text-gray-600 dark:text-gray-400">
-            Não tem acesso ao e-mail cadastrado?
-          </p>
-          <a
-            href={supportWhatsAppUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-green-600 px-4 py-3 text-sm font-medium text-white transition-colors hover:bg-green-700"
-          >
-            <MessageCircle className="h-4 w-4" />
-            Solicitar via WhatsApp
-          </a>
-        </div>
       </form>
     </AuthPageShell>
   );

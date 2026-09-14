@@ -9,6 +9,14 @@ interface EmailOptions {
   text?: string;
 }
 
+/** Remove aspas e espaços extras que o painel do Railway às vezes inclui. */
+function cleanEnv(value: string | undefined): string {
+  return String(value ?? '')
+    .trim()
+    .replace(/^["']|["']$/g, '')
+    .trim();
+}
+
 class EmailService {
   private transporter: nodemailer.Transporter | null = null;
   private resend: Resend | null = null;
@@ -16,8 +24,8 @@ class EmailService {
 
   constructor() {
     // Priorizar Resend se a API key estiver configurada (mais confiável em plataformas como Railway)
-    const resendApiKey = process.env.RESEND_API_KEY;
-    
+    const resendApiKey = cleanEnv(process.env.RESEND_API_KEY);
+
     if (resendApiKey) {
       this.resend = new Resend(resendApiKey);
       this.useResend = true;
@@ -26,15 +34,16 @@ class EmailService {
     }
 
     // Fallback para SMTP se Resend não estiver configurado
-    const smtpHost = process.env.SMTP_HOST;
-    const smtpPort = process.env.SMTP_PORT;
-    const smtpUser = process.env.SMTP_USER;
-    const smtpPass = process.env.SMTP_PASS;
+    const smtpHost = cleanEnv(process.env.SMTP_HOST);
+    const smtpPort = cleanEnv(process.env.SMTP_PORT);
+    const smtpUser = cleanEnv(process.env.SMTP_USER);
+    // Senha de app do Gmail às vezes vem com espaços: "xxxx xxxx xxxx xxxx"
+    const smtpPass = cleanEnv(process.env.SMTP_PASS).replace(/\s+/g, '');
 
     if (smtpHost && smtpPort && smtpUser && smtpPass) {
-      const port = parseInt(smtpPort);
+      const port = parseInt(smtpPort, 10);
       const isSecure = port === 465;
-      
+
       this.transporter = nodemailer.createTransport({
         host: smtpHost,
         port: port,
@@ -50,19 +59,21 @@ class EmailService {
         // Configurações TLS/SSL
         tls: {
           rejectUnauthorized: false,
-          minVersion: 'TLSv1.2'
+          minVersion: 'TLSv1.2',
         },
         // Para portas não-seguras, usar STARTTLS
-        requireTLS: !isSecure && port === 587
+        requireTLS: !isSecure && port === 587,
       } as any);
-      
+
+      console.log(`📧 SMTP configurado: ${smtpHost}:${port} (user=${smtpUser})`);
+
       // Testar conexão ao inicializar (com timeout)
       const verifyPromise = new Promise<void>((resolve, reject) => {
         const timeout = setTimeout(() => {
           reject(new Error('Timeout ao verificar conexão SMTP'));
         }, 15000); // 15 segundos para verificação
-        
-        this.transporter!.verify((error, success) => {
+
+        this.transporter!.verify((error) => {
           clearTimeout(timeout);
           if (error) {
             reject(error);
@@ -71,7 +82,7 @@ class EmailService {
           }
         });
       });
-      
+
       verifyPromise
         .then(() => {
           console.log('✅ Configuração SMTP válida');
@@ -81,9 +92,12 @@ class EmailService {
           if (error.code === 'ETIMEDOUT' || error.message.includes('timeout')) {
             console.error('⏱️ Timeout ao conectar ao servidor SMTP:');
             console.error('   - O Railway pode estar bloqueando conexões SMTP de saída');
-            console.error('   - Tente usar um serviço de email alternativo (SendGrid, Mailgun, etc.)');
+            console.error('   - 💡 Use RESEND_API_KEY em vez de SMTP no Railway');
             console.error('   - Ou verifique se o Gmail está bloqueando conexões do Railway');
-          } else if (error.message.includes('Invalid login') || error.message.includes('BadCredentials')) {
+          } else if (
+            error.message.includes('Invalid login') ||
+            error.message.includes('BadCredentials')
+          ) {
             console.error('📧 Para Gmail, você precisa usar uma SENHA DE APP:');
             console.error('   1. Acesse: https://myaccount.google.com/apppasswords');
             console.error('   2. Gere uma senha de app para "Mail"');
@@ -97,11 +111,11 @@ class EmailService {
       if (!smtpPort) missingVars.push('SMTP_PORT');
       if (!smtpUser) missingVars.push('SMTP_USER');
       if (!smtpPass) missingVars.push('SMTP_PASS');
-      
+
       console.error('⚠️ Configurações de SMTP não encontradas. Emails não serão enviados.');
       console.error(`Variáveis faltando: ${missingVars.join(', ')}`);
       console.error('Configure essas variáveis de ambiente para habilitar o envio de emails.');
-      
+
       if (process.env.NODE_ENV === 'production') {
         console.error('🚨 ATENÇÃO: Você está em PRODUÇÃO e o serviço de email não está configurado!');
         console.error('Isso afetará funcionalidades como recuperação de senha.');
@@ -119,9 +133,12 @@ class EmailService {
     // Usar Resend se estiver configurado
     if (this.useResend && this.resend) {
       try {
-        const fromEmail = process.env.RESEND_FROM_EMAIL || process.env.SMTP_USER || 'noreply@gennesis.com';
-        const fromName = process.env.COMPANY_NAME || 'Gennesis Engenharia';
-        
+        const fromEmail =
+          cleanEnv(process.env.RESEND_FROM_EMAIL) ||
+          cleanEnv(process.env.SMTP_USER) ||
+          'noreply@gennesis.com';
+        const fromName = cleanEnv(process.env.COMPANY_NAME) || 'Gennesis Engenharia';
+
         const { data, error } = await this.resend.emails.send({
           from: `${fromName} <${fromEmail}>`,
           to: options.to,
@@ -153,7 +170,7 @@ class EmailService {
       console.error('💡 Configure uma das opções:');
       console.error('   Opção 1 (RECOMENDADO): RESEND_API_KEY=sua_api_key');
       console.error('   Opção 2: SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS');
-      
+
       // Em desenvolvimento, apenas logar o email que seria enviado
       if (process.env.NODE_ENV === 'development') {
         console.log('📧 Email que seria enviado:');
@@ -161,43 +178,54 @@ class EmailService {
         console.log('Assunto:', options.subject);
         console.log('Conteúdo:', options.text || options.html);
       }
-      
+
       // Lançar erro para que seja capturado e logado no controller
-      throw new Error('Serviço de email não configurado. Configure RESEND_API_KEY ou variáveis SMTP.');
+      throw new Error(
+        'Serviço de email não configurado. Configure RESEND_API_KEY ou variáveis SMTP.'
+      );
     }
 
     try {
       const mailOptions = {
-        from: `"${process.env.COMPANY_NAME || 'Gennesis Engenharia'}" <${process.env.SMTP_USER}>`,
+        from: `"${cleanEnv(process.env.COMPANY_NAME) || 'Gennesis Engenharia'}" <${cleanEnv(process.env.SMTP_USER)}>`,
         to: options.to,
         subject: options.subject,
         html: options.html,
-        text: options.text || options.html.replace(/<[^>]*>/g, ''), // Remover HTML para versão texto
+        text: options.text,
       };
 
       const info = await this.transporter.sendMail(mailOptions);
       console.log('✅ Email enviado com sucesso via SMTP:', info.messageId);
     } catch (error: any) {
       console.error('❌ Erro ao enviar email via SMTP:', error);
-      
+
       // Mensagens de erro mais amigáveis
       if (error.code === 'EAUTH') {
         console.error('🔐 Erro de autenticação SMTP:');
         console.error('   - Verifique se está usando uma SENHA DE APP do Gmail (não a senha normal)');
         console.error('   - Para Gmail: https://myaccount.google.com/apppasswords');
         console.error('   - Certifique-se de que a autenticação de 2 fatores está habilitada');
-      } else if (error.code === 'ECONNECTION' || error.code === 'ETIMEDOUT') {
+      } else if (
+        error.code === 'ECONNECTION' ||
+        error.code === 'ETIMEDOUT' ||
+        error.code === 'ESOCKET'
+      ) {
         console.error('🌐 Erro de conexão/timeout SMTP:');
         console.error('   - O Railway pode estar bloqueando conexões SMTP de saída');
         console.error('   - 💡 RECOMENDAÇÃO: Use Resend (RESEND_API_KEY) em vez de SMTP');
         console.error('   - Resend é gratuito até 3.000 emails/mês: https://resend.com');
       }
-      
+
       throw error;
     }
   }
 
-  async sendPasswordResetEmail(email: string, name: string, resetToken: string, resetUrl: string): Promise<void> {
+  async sendPasswordResetEmail(
+    email: string,
+    name: string,
+    resetToken: string,
+    resetUrl: string
+  ): Promise<void> {
     const subject = `Redefinição de Senha - ${APP_NAME}`;
     const html = `
       <!DOCTYPE html>
@@ -239,4 +267,3 @@ class EmailService {
 }
 
 export const emailService = new EmailService();
-

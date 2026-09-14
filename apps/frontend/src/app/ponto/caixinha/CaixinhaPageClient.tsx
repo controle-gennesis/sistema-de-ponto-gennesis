@@ -289,11 +289,6 @@ export default function CaixinhaPageClient() {
   const { rowActionMenu, rowForActionMenu, toggleRowActionMenu, closeRowActionMenu, isRowMenuOpen } =
     useRowActionMenu(rows);
 
-  const userOptions = useMemo(
-    () => labeledToSelectOptions((options?.users || []).map((u) => ({ value: u.id, label: u.name }))),
-    [options]
-  );
-
   const contractOptions = useMemo(
     () =>
       labeledToSelectOptions(
@@ -404,9 +399,9 @@ export default function CaixinhaPageClient() {
     mutationFn: async () => {
       const person = (options?.users || []).find((u) => u.id === form.personUserId);
       const payload = {
-        filledAt: form.filledAtIso,
-        personUserId: form.personUserId || null,
-        personName: person?.name || form.personName,
+        filledAt: editing ? form.filledAtIso : new Date().toISOString(),
+        personUserId: form.personUserId || user.id || null,
+        personName: person?.name || form.personName || user.name || '',
         osNumber: form.osNumber.trim() || null,
         contractId: form.contractId || null,
         obraId: form.obraId || null,
@@ -651,37 +646,12 @@ export default function CaixinhaPageClient() {
           <div>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
-                <label className={GESTAO_OS_FORM_LABEL_CLS}>Data de preenchimento</label>
-                <input
-                  className={`${FORM_FIELD_INPUT_CLS} cursor-default bg-gray-50 dark:bg-gray-900/60`}
-                  value={formatDateTime(form.filledAtIso)}
-                  readOnly
-                  tabIndex={-1}
-                />
-              </div>
-              <div>
-                <label className={GESTAO_OS_FORM_LABEL_CLS}>
-                  Nome
-                  <GestaoOsRequiredMark />
-                </label>
-                <StringSingleSelectDropdown
-                  value={form.personUserId}
-                  onChange={(v) => {
-                    const found = (options?.users || []).find((u) => u.id === v);
-                    patchForm({ personUserId: v, personName: found?.name || '' });
-                  }}
-                  options={userOptions}
-                  placeholder="Selecione..."
-                  emptyOptionLabel="Selecione..."
-                  allowEmpty
-                />
-              </div>
-              <div>
                 <label className={GESTAO_OS_FORM_LABEL_CLS}>N° OS</label>
                 <input
                   className={FORM_FIELD_INPUT_CLS}
                   value={form.osNumber}
                   onChange={(e) => patchForm({ osNumber: e.target.value })}
+                  placeholder="Ex.: 1234"
                 />
               </div>
               <div>
@@ -788,6 +758,7 @@ export default function CaixinhaPageClient() {
                   className={FORM_FIELD_INPUT_CLS}
                   value={form.invoiceNumber}
                   onChange={(e) => patchForm({ invoiceNumber: e.target.value })}
+                  placeholder="Ex.: 000123"
                 />
               </div>
               <div>
@@ -804,6 +775,7 @@ export default function CaixinhaPageClient() {
                   rows={3}
                   value={form.notes}
                   onChange={(e) => patchForm({ notes: e.target.value })}
+                  placeholder="Ex.: material para manutenção da unidade..."
                 />
               </div>
               <div className="sm:col-span-2">

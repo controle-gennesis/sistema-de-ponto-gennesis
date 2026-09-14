@@ -5,7 +5,7 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Eye, EyeOff, UserRound, Lock, AlertCircle, Moon, Sun, ArrowRight, Mail, MessageCircle, X } from 'lucide-react';
+import { Eye, EyeOff, UserRound, Lock, AlertCircle, Moon, Sun, ArrowRight, Mail, X } from 'lucide-react';
 import { authService } from '@/lib/auth';
 import { normalizeLoginIdentifierInput } from '@/lib/cpf';
 import { toast } from 'react-hot-toast';
@@ -14,7 +14,6 @@ import { useTheme } from '@/context/ThemeContext';
 import { Loading } from '@/components/ui/Loading';
 import { useBrandingLogo } from '@/hooks/useBrandingLogo';
 import { persistUnbBranding } from '@/lib/unbBranding';
-import { APP_TITLE } from '@/lib/pageTitle';
 import { authTransitionCover, authTransitionLoginColdEnter, authTransitionRevealIfNeeded, peekAuthTransition } from '@/lib/authTransition';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
 
@@ -102,11 +101,6 @@ export default function LoginPage() {
       window.clearTimeout(safety);
     };
   }, [checkingSession]);
-
-  const supportWhatsAppDigits = '5561981622021';
-  const supportWhatsAppUrl = `https://wa.me/${supportWhatsAppDigits}?text=${encodeURIComponent(
-    `Olá! Esqueci minha senha do ${APP_TITLE} e preciso de ajuda para alterar.`
-  )}`;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -371,7 +365,7 @@ export default function LoginPage() {
               Enviamos um link de redefinição para o e-mail cadastrado na sua conta.
             </p>
 
-            <div className="mt-5 space-y-3">
+            <div className="mt-5">
               <Link
                 href="/auth/esqueci-senha"
                 className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-red-600 hover:bg-red-700 text-white px-4 py-3 text-sm font-medium transition-colors"
@@ -379,18 +373,6 @@ export default function LoginPage() {
                 <Mail className="w-4 h-4" />
                 Receber link por e-mail
               </Link>
-              <p className="text-center text-xs text-gray-500 dark:text-gray-500">
-                Sem acesso ao e-mail cadastrado?
-              </p>
-              <a
-                href={supportWhatsAppUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-green-600 hover:bg-green-700 text-white px-4 py-3 text-sm font-medium transition-colors"
-              >
-                <MessageCircle className="w-4 h-4" />
-                Solicitar via WhatsApp
-              </a>
             </div>
           </div>
         </AppModalOverlay>
