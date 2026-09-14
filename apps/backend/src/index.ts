@@ -82,6 +82,7 @@ import juridicoProcessosRoutes from './routes/juridicoProcessos';
 import controlePagamentoArtRoutes from './routes/controlePagamentoArt';
 import financeiroReceitasRoutes from './routes/financeiroReceitas';
 import vehicleRoutes from './routes/vehicles';
+import sinapiRoutes from './routes/sinapi';
 import vehicleReservationRoutes from './routes/vehicleReservations';
 import toolRentalRequestRoutes from './routes/toolRentalRequests';
 import paymentConditionRoutes from './routes/paymentConditions';
@@ -401,6 +402,8 @@ app.use('/api/juridico-processos', juridicoProcessosRoutes);
 app.use('/api/controle-pagamentos-art', controlePagamentoArtRoutes);
 app.use('/api/financeiro-receitas', financeiroReceitasRoutes);
 app.use('/api/vehicles', vehicleRoutes);
+/** Catálogo SINAPI (insumos e composições) via proxy da SINPRES API. */
+app.use('/api/sinapi', sinapiRoutes);
 app.use('/api/vehicle-reservations', vehicleReservationRoutes);
 app.use('/api/tool-rental-requests', toolRentalRequestRoutes);
 app.use('/api/payment-conditions', paymentConditionRoutes);
