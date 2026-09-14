@@ -101,7 +101,7 @@ function reaisToCents(value: unknown): number | null {
 }
 
 function isAppError(error: unknown): error is { statusCode?: number; message: string } {
-  return Boolean(error) && typeof error === 'object' && 'message' in error;
+  return error != null && typeof error === 'object' && 'message' in error;
 }
 
 async function fetchSinpres<T>(path: string, ttlMs: number): Promise<T> {
