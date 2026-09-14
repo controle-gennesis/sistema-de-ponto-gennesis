@@ -624,6 +624,7 @@ function ContratoAcompanhamentoPanel({
               </button>
               ) : null}
               {canWrite || currentPeriodEntry ? (
+              <>
               <button
                 type="button"
                 onClick={() => {
@@ -655,6 +656,7 @@ function ContratoAcompanhamentoPanel({
                   {newRecordLabel}
                 </button>
               ) : null}
+              </>
               ) : null}
             </div>
           </div>
