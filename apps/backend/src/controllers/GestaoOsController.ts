@@ -88,6 +88,13 @@ export class GestaoOsController {
       const status = typeof req.query.status === 'string' ? req.query.status : undefined;
       const priority = typeof req.query.priority === 'string' ? req.query.priority : undefined;
       const buildingId = typeof req.query.buildingId === 'string' ? req.query.buildingId : undefined;
+      const teamId = typeof req.query.teamId === 'string' ? req.query.teamId : undefined;
+      const origin = typeof req.query.origin === 'string' ? req.query.origin : undefined;
+      const category = typeof req.query.category === 'string' ? req.query.category : undefined;
+      const assigneeIdFilter =
+        typeof req.query.assigneeId === 'string' ? req.query.assigneeId : undefined;
+      const dateFrom = typeof req.query.dateFrom === 'string' ? req.query.dateFrom : undefined;
+      const dateTo = typeof req.query.dateTo === 'string' ? req.query.dateTo : undefined;
       const mine = req.query.mine === '1' || req.query.mine === 'true';
       const assignedToMe = req.query.assignedToMe === '1' || req.query.assignedToMe === 'true';
       const involved = req.query.involved === '1' || req.query.involved === 'true';
@@ -120,11 +127,17 @@ export class GestaoOsController {
           status,
           priority,
           buildingId,
+          teamId,
+          origin,
+          category,
+          dateFrom,
+          dateTo,
           limit,
           overdue,
           unitPortal,
           requesterId: mine && !involved && !unitPortal ? req.user.id : undefined,
-          assigneeId: assignedToMe && !involved && !unitPortal ? req.user.id : undefined,
+          assigneeId:
+            assignedToMe && !involved && !unitPortal ? req.user.id : assigneeIdFilter,
           involvedUserId: involved && !unitPortal ? req.user.id : undefined
         },
         access
@@ -189,7 +202,8 @@ export class GestaoOsController {
           autoAssign: body.autoAssign === true,
           origin: body.origin,
           sacKind: body.sacKind,
-          teamUserIds: body.teamUserIds
+          teamUserIds: body.teamUserIds,
+          teamId: body.teamId
         },
         access
       );
@@ -230,7 +244,8 @@ export class GestaoOsController {
           startPhotoUrl: body.startPhotoUrl,
           endPhotoUrl: body.endPhotoUrl,
           autoAssign: body.autoAssign === true,
-          teamUserIds: body.teamUserIds
+          teamUserIds: body.teamUserIds,
+          teamId: body.teamId
         },
         access
       );

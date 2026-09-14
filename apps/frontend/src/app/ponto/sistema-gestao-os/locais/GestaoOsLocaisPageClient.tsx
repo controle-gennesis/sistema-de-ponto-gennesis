@@ -39,6 +39,7 @@ import { Modal } from '@/components/ui/Modal';
 import toast from 'react-hot-toast';
 import api from '@/lib/api';
 import { FORM_FIELD_INPUT_CLS } from '@/lib/formFieldUi';
+import { displayPhoneBR, formatPhoneBR } from '@/lib/phone';
 import { DatePickerField } from '@/components/ui/DatePickerField';
 import { useModalCloseConfirm } from '@/hooks/useModalCloseConfirm';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
@@ -64,6 +65,9 @@ type LocationAdminTree = Array<{
   prepostoUserId?: string | null;
   managerUserId?: string | null;
   fiscalUserId?: string | null;
+  responsibleName?: string | null;
+  phone?: string | null;
+  email?: string | null;
   qrToken?: string | null;
   sectors: Array<{
     id: string;
@@ -107,7 +111,10 @@ const EMPTY_BUILDING_FORM = {
   responsibleUserId: '',
   prepostoUserId: '',
   managerUserId: '',
-  fiscalUserId: ''
+  fiscalUserId: '',
+  responsibleName: '',
+  phone: '',
+  email: ''
 };
 
 const EMPTY_ASSET_FORM = {
@@ -131,6 +138,9 @@ type BuildingRow = {
   prepostoUserId?: string | null;
   managerUserId?: string | null;
   fiscalUserId?: string | null;
+  responsibleName?: string | null;
+  phone?: string | null;
+  email?: string | null;
 };
 type SectorRow = {
   id: string;
@@ -180,7 +190,10 @@ function flattenTree(tree: LocationAdminTree) {
       responsibleUserId: b.responsibleUserId ?? null,
       prepostoUserId: b.prepostoUserId ?? null,
       managerUserId: b.managerUserId ?? null,
-      fiscalUserId: b.fiscalUserId ?? null
+      fiscalUserId: b.fiscalUserId ?? null,
+      responsibleName: b.responsibleName ?? null,
+      phone: b.phone ?? null,
+      email: b.email ?? null
     });
     for (const s of b.sectors ?? []) {
       sectors.push({
@@ -233,17 +246,7 @@ export default function GestaoOsLocaisPageClient() {
   const [searchTerm, setSearchTerm] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [buildingForm, setBuildingForm] = useState({
-    name: '',
-    code: '',
-    address: '',
-    latitude: '',
-    longitude: '',
-    responsibleUserId: '',
-    prepostoUserId: '',
-    managerUserId: '',
-    fiscalUserId: ''
-  });
+  const [buildingForm, setBuildingForm] = useState({ ...EMPTY_BUILDING_FORM });
   const [sectorForm, setSectorForm] = useState({ buildingId: '', name: '', code: '' });
   const [placeForm, setPlaceForm] = useState({ sectorId: '', name: '', code: '' });
   const [assetForm, setAssetForm] = useState({
@@ -423,19 +426,24 @@ export default function GestaoOsLocaisPageClient() {
     isRowMenuOpen
   } = useRowActionMenu(menuRows);
 
+  const buildingPayload = () => ({
+    name: buildingForm.name.trim(),
+    code: buildingForm.code.trim() || null,
+    address: buildingForm.address.trim() || null,
+    latitude: buildingForm.latitude ? Number(buildingForm.latitude) : null,
+    longitude: buildingForm.longitude ? Number(buildingForm.longitude) : null,
+    responsibleUserId: buildingForm.responsibleUserId || null,
+    prepostoUserId: buildingForm.prepostoUserId || null,
+    managerUserId: buildingForm.managerUserId || null,
+    fiscalUserId: buildingForm.fiscalUserId || null,
+    responsibleName: buildingForm.responsibleName.trim() || null,
+    phone: buildingForm.phone.trim() || null,
+    email: buildingForm.email.trim() || null
+  });
+
   const createBuilding = useMutation({
     mutationFn: async () => {
-      await api.post('/gestao-os/cadastros/buildings', {
-        name: buildingForm.name.trim(),
-        code: buildingForm.code.trim() || null,
-        address: buildingForm.address.trim() || null,
-        latitude: buildingForm.latitude ? Number(buildingForm.latitude) : null,
-        longitude: buildingForm.longitude ? Number(buildingForm.longitude) : null,
-        responsibleUserId: buildingForm.responsibleUserId || null,
-        prepostoUserId: buildingForm.prepostoUserId || null,
-        managerUserId: buildingForm.managerUserId || null,
-        fiscalUserId: buildingForm.fiscalUserId || null
-      });
+      await api.post('/gestao-os/cadastros/buildings', buildingPayload());
     },
     onSuccess: () => {
       toast.success('Prédio cadastrado.');
@@ -450,17 +458,7 @@ export default function GestaoOsLocaisPageClient() {
 
   const updateBuilding = useMutation({
     mutationFn: async (id: string) => {
-      await api.patch(`/gestao-os/cadastros/buildings/${id}`, {
-        name: buildingForm.name.trim(),
-        code: buildingForm.code.trim() || null,
-        address: buildingForm.address.trim() || null,
-        latitude: buildingForm.latitude ? Number(buildingForm.latitude) : null,
-        longitude: buildingForm.longitude ? Number(buildingForm.longitude) : null,
-        responsibleUserId: buildingForm.responsibleUserId || null,
-        prepostoUserId: buildingForm.prepostoUserId || null,
-        managerUserId: buildingForm.managerUserId || null,
-        fiscalUserId: buildingForm.fiscalUserId || null
-      });
+      await api.patch(`/gestao-os/cadastros/buildings/${id}`, buildingPayload());
     },
     onSuccess: () => {
       toast.success('Prédio atualizado.');
@@ -743,7 +741,10 @@ export default function GestaoOsLocaisPageClient() {
       responsibleUserId: r.responsibleUserId ?? '',
       prepostoUserId: r.prepostoUserId ?? '',
       managerUserId: r.managerUserId ?? '',
-      fiscalUserId: r.fiscalUserId ?? ''
+      fiscalUserId: r.fiscalUserId ?? '',
+      responsibleName: r.responsibleName ?? '',
+      phone: formatPhoneBR(r.phone ?? ''),
+      email: r.email ?? ''
     });
     setShowForm(true);
   };
@@ -1375,6 +1376,50 @@ export default function GestaoOsLocaisPageClient() {
                       </div>
                     </div>
                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <div className="sm:col-span-2">
+                        <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                          Responsável (nome de contato)
+                        </label>
+                        <input
+                          value={buildingForm.responsibleName}
+                          onChange={(e) =>
+                            setBuildingForm((s) => ({ ...s, responsibleName: e.target.value }))
+                          }
+                          placeholder="Nome de quem responde pela localidade"
+                          className={FORM_FIELD_INPUT_CLS}
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                          Telefone
+                        </label>
+                        <input
+                          type="tel"
+                          value={buildingForm.phone}
+                          onChange={(e) =>
+                            setBuildingForm((s) => ({ ...s, phone: formatPhoneBR(e.target.value) }))
+                          }
+                          placeholder="(00) 00000-0000"
+                          maxLength={15}
+                          className={FORM_FIELD_INPUT_CLS}
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                          E-mail
+                        </label>
+                        <input
+                          type="email"
+                          value={buildingForm.email}
+                          onChange={(e) =>
+                            setBuildingForm((s) => ({ ...s, email: e.target.value }))
+                          }
+                          placeholder="contato@localidade.gov.br"
+                          className={FORM_FIELD_INPUT_CLS}
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                       <div>
                         <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                           Preposto da localidade
@@ -1689,6 +1734,32 @@ export default function GestaoOsLocaisPageClient() {
                           ? `${viewing.row.latitude}, ${viewing.row.longitude}`
                           : '—'}
                       </p>
+                    </div>
+                    <div>
+                      <p className="mb-1 text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                        Responsável
+                      </p>
+                      <p className="text-sm text-gray-900 dark:text-gray-100">
+                        {viewing.row.responsibleName || '—'}
+                      </p>
+                    </div>
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                      <div>
+                        <p className="mb-1 text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                          Telefone
+                        </p>
+                        <p className="text-sm text-gray-900 dark:text-gray-100">
+                          {displayPhoneBR(viewing.row.phone) || '—'}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="mb-1 text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                          E-mail
+                        </p>
+                        <p className="break-all text-sm text-gray-900 dark:text-gray-100">
+                          {viewing.row.email || '—'}
+                        </p>
+                      </div>
                     </div>
                   </>
                 ) : null}

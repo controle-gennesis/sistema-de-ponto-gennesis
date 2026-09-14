@@ -37,6 +37,7 @@ import {
 import { ListRowNavigableLabel } from '@/components/ui/listTableUi';
 import { useRowActionMenu } from '@/hooks/useRowActionMenu';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { DatePickerField } from '@/components/ui/DatePickerField';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import { MultiSelectSearchDropdown } from '@/components/ui/MultiSelectSearchDropdown';
 import { SignaturePad } from '@/components/gestao-os/SignaturePad';
@@ -69,12 +70,15 @@ import {
   GestaoOsChecklistResponseItem,
   GestaoOsLocationTree,
   GestaoOsMaintenanceType,
+  GestaoOsOrigin,
   GestaoOsPartLine,
   GestaoOsPriority,
   GestaoOsServiceCategory,
   GestaoOsStatus,
+  GestaoOsTeam,
   GestaoOsWorkOrder,
   MAINTENANCE_TYPE_LABELS,
+  ORIGIN_LABELS,
   PRIORITY_LABELS,
   SERVICE_CATEGORIES,
   STATUS_LABELS,
@@ -197,6 +201,10 @@ export default function SistemaGestaoOsPageClient() {
   const [activePhase, setActivePhase] = useState<GestaoOsStatus>('OPEN');
   const [priorityFilter, setPriorityFilter] = useState<GestaoOsPriority | ''>('');
   const [buildingFilter, setBuildingFilter] = useState('');
+  const [originFilter, setOriginFilter] = useState('');
+  const [teamFilter, setTeamFilter] = useState('');
+  const [dateFromFilter, setDateFromFilter] = useState('');
+  const [dateToFilter, setDateToFilter] = useState('');
   const [overdueOnly, setOverdueOnly] = useState(false);
   const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
@@ -267,7 +275,18 @@ export default function SistemaGestaoOsPageClient() {
     data: rows = [],
     isLoading: loadingRows
   } = useQuery({
-    queryKey: ['gestao-os-list', search, activePhase, priorityFilter, buildingFilter, overdueOnly],
+    queryKey: [
+      'gestao-os-list',
+      search,
+      activePhase,
+      priorityFilter,
+      buildingFilter,
+      originFilter,
+      teamFilter,
+      dateFromFilter,
+      dateToFilter,
+      overdueOnly
+    ],
     enabled: !loadingCompany,
     queryFn: async () => {
       const res = await api.get<{ success: boolean; data: GestaoOsWorkOrder[] }>('/gestao-os', {
@@ -276,7 +295,11 @@ export default function SistemaGestaoOsPageClient() {
           status: overdueOnly ? undefined : activePhase,
           overdue: overdueOnly ? '1' : undefined,
           priority: priorityFilter || undefined,
-          buildingId: buildingFilter || undefined
+          buildingId: buildingFilter || undefined,
+          origin: originFilter || undefined,
+          teamId: teamFilter || undefined,
+          dateFrom: dateFromFilter || undefined,
+          dateTo: dateToFilter || undefined
         }
       });
       return res.data?.data ?? [];
@@ -328,6 +351,17 @@ export default function SistemaGestaoOsPageClient() {
     queryFn: async () => {
       const res = await api.get<{ success: boolean; data: GestaoOsLocationTree }>(
         '/gestao-os/locations'
+      );
+      return res.data?.data ?? [];
+    }
+  });
+
+  const { data: teams = [] } = useQuery({
+    queryKey: ['gestao-os-cadastros', 'teams'],
+    enabled: !loadingCompany,
+    queryFn: async () => {
+      const res = await api.get<{ success: boolean; data: GestaoOsTeam[] }>(
+        '/gestao-os/cadastros/teams'
       );
       return res.data?.data ?? [];
     }
@@ -479,11 +513,23 @@ export default function SistemaGestaoOsPageClient() {
     return places.find((p) => p.id === placeId)?.assets ?? [];
   }, [places, placeId]);
 
-  const hasActiveFilters = Boolean(priorityFilter || buildingFilter || overdueOnly);
+  const hasActiveFilters = Boolean(
+    priorityFilter ||
+      buildingFilter ||
+      originFilter ||
+      teamFilter ||
+      dateFromFilter ||
+      dateToFilter ||
+      overdueOnly
+  );
 
   const clearFilters = () => {
     setPriorityFilter('');
     setBuildingFilter('');
+    setOriginFilter('');
+    setTeamFilter('');
+    setDateFromFilter('');
+    setDateToFilter('');
     setOverdueOnly(false);
   };
 
@@ -511,6 +557,29 @@ export default function SistemaGestaoOsPageClient() {
   );
 
   const buildingFormOptions = buildingFilterOptions;
+
+  const originFilterOptions = useMemo(
+    () =>
+      labeledToSelectOptions(
+        (Object.keys(ORIGIN_LABELS) as GestaoOsOrigin[]).map((key) => ({
+          value: key,
+          label: ORIGIN_LABELS[key]
+        }))
+      ),
+    []
+  );
+
+  const teamFilterOptions = useMemo(
+    () =>
+      labeledToSelectOptions(
+        teams.map((team) => ({
+          value: team.id,
+          label: team.name,
+          searchText: `${team.name} ${team.code ?? ''}`
+        }))
+      ),
+    [teams]
+  );
 
   const sectorFormOptions = useMemo(
     () =>
@@ -1177,6 +1246,56 @@ export default function SistemaGestaoOsPageClient() {
                 emptyOptionLabel="Todos"
                 allowEmpty
               />
+            </div>
+            <div>
+              <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Origem / canal
+              </label>
+              <StringSingleSelectDropdown
+                value={originFilter}
+                onChange={setOriginFilter}
+                options={originFilterOptions}
+                placeholder="Todas"
+                emptyOptionLabel="Todas"
+                allowEmpty
+              />
+            </div>
+            <div>
+              <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Equipe
+              </label>
+              <StringSingleSelectDropdown
+                value={teamFilter}
+                onChange={setTeamFilter}
+                options={teamFilterOptions}
+                placeholder="Todas"
+                emptyOptionLabel="Todas"
+                allowEmpty
+              />
+            </div>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div>
+                <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Abertura de
+                </label>
+                <DatePickerField
+                  value={dateFromFilter}
+                  onChange={setDateFromFilter}
+                  noFocusRing
+                  aria-label="Abertura de"
+                />
+              </div>
+              <div>
+                <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Abertura até
+                </label>
+                <DatePickerField
+                  value={dateToFilter}
+                  onChange={setDateToFilter}
+                  noFocusRing
+                  aria-label="Abertura até"
+                />
+              </div>
             </div>
             <div>
               <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">

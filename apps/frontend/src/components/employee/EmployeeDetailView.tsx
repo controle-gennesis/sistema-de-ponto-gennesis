@@ -32,6 +32,7 @@ import {
 import { usePermissions } from '@/hooks/usePermissions';
 import { pathToModuleKey } from '@sistema-ponto/permission-modules';
 import api from '@/lib/api';
+import { displayPhoneBR } from '@/lib/phone';
 import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
 import {
   SalaryAdjustment, CreateAdjustmentData, UpdateAdjustmentData,
@@ -91,6 +92,7 @@ interface Employee {
     employeeId: string;
     department: string;
     position: string;
+    phone?: string | null;
     hireDate: string;
     birthDate?: string;
     salary: number;
@@ -293,6 +295,7 @@ export function EmployeeDetailView({
     exportData.push(['Nome:', selectedEmployee.name]);
     exportData.push(['Email:', selectedEmployee.email]);
     exportData.push(['CPF:', selectedEmployee.cpf]);
+    exportData.push(['Telefone:', displayPhoneBR(selectedEmployee.employee?.phone) || 'N/A']);
     exportData.push(['Matrícula:', selectedEmployee.employee?.employeeId || 'N/A']);
     exportData.push(['Setor:', selectedEmployee.employee?.department || 'N/A']);
     exportData.push(['Cargo:', selectedEmployee.employee?.position || 'N/A']);
@@ -1384,6 +1387,12 @@ export function EmployeeDetailView({
                               <div className="text-xs text-gray-500 dark:text-gray-400">Email</div>
                               <div className="mt-0.5 break-all text-sm font-medium text-gray-900 dark:text-gray-100">
                                 {selectedEmployee.email}
+                              </div>
+                            </div>
+                            <div>
+                              <div className="text-xs text-gray-500 dark:text-gray-400">Telefone</div>
+                              <div className="mt-0.5 text-sm font-medium text-gray-900 dark:text-gray-100">
+                                {displayPhoneBR(selectedEmployee.employee?.phone) || '—'}
                               </div>
                             </div>
                             <div>

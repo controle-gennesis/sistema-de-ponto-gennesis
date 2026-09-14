@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import crypto from 'crypto';
 import type { SignOptions } from 'jsonwebtoken';
 import jwt from 'jsonwebtoken';
 import { createError } from '../middleware/errorHandler';
@@ -6,6 +7,7 @@ import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { comparePassword, hashPassword } from '../lib/passwordHash';
 import { ChatService } from '../services/ChatService';
+import { emailService } from '../services/EmailService';
 import { findUserByLoginIdentifier, normalizeLoginIdentifier } from '../lib/loginIdentifier';
 import { recordSuccessfulLogin, recordSuccessfulLogout } from './UserActivityController';
 import { recordAuditEvent } from '../lib/auditLog';
@@ -13,6 +15,44 @@ import { getRequestContext } from '../lib/requestContext';
 import { encodeImpersonationSource } from '../lib/impersonationLoginEvents';
 
 const chatUploadService = new ChatService();
+
+const PASSWORD_RESET_TTL_MS = 60 * 60 * 1000;
+
+/** O token só trafega por e-mail; no banco guardamos apenas o hash. */
+function hashResetToken(rawToken: string) {
+  return crypto.createHash('sha256').update(rawToken).digest('hex');
+}
+
+function resolveFrontendBaseUrl() {
+  const configured =
+    process.env.FRONTEND_URL?.trim() ||
+    process.env.NEXT_PUBLIC_APP_URL?.trim() ||
+    'http://localhost:3000';
+  return configured.replace(/\/$/, '');
+}
+
+async function findValidResetToken(rawToken: string) {
+  const token = rawToken.trim();
+  if (!token) return null;
+
+  const record = await prisma.passwordResetToken.findUnique({
+    where: { token: hashResetToken(token) },
+    include: { user: { select: { id: true, name: true, email: true, isActive: true } } },
+  });
+
+  if (!record || record.used || record.expiresAt <= new Date() || !record.user.isActive) {
+    return null;
+  }
+  return record;
+}
+
+function maskEmail(email: string | null) {
+  if (!email) return null;
+  const [local, domain] = email.split('@');
+  if (!domain) return null;
+  const visible = local.slice(0, 2);
+  return `${visible}${'*'.repeat(Math.max(local.length - 2, 1))}@${domain}`;
+}
 
 const userMeSelect = {
   id: true,
@@ -597,6 +637,130 @@ export class AuthController {
       return res.json({
         success: true,
         message: 'Senha alterada com sucesso'
+      });
+    } catch (error) {
+      return next(error);
+    }
+  }
+
+  /**
+   * Dispara o e-mail de redefinição. Responde sempre com sucesso para não
+   * revelar quais e-mails/CPFs possuem conta.
+   */
+  async forgotPassword(req: Request, res: Response, next: NextFunction) {
+    const genericMessage =
+      'Se houver uma conta com esse e-mail, enviaremos as instruções de redefinição em instantes.';
+    try {
+      const identifier = normalizeLoginIdentifier(String(req.body?.identifier ?? ''));
+      if (!identifier) {
+        throw createError('Informe o e-mail ou CPF cadastrado', 400);
+      }
+
+      const user = await findUserByLoginIdentifier(identifier);
+      if (!user || !user.isActive || !user.email) {
+        return res.json({ success: true, message: genericMessage });
+      }
+
+      await prisma.passwordResetToken.updateMany({
+        where: { userId: user.id, used: false, expiresAt: { gt: new Date() } },
+        data: { used: true },
+      });
+
+      const rawToken = crypto.randomBytes(32).toString('hex');
+      await prisma.passwordResetToken.create({
+        data: {
+          userId: user.id,
+          token: hashResetToken(rawToken),
+          expiresAt: new Date(Date.now() + PASSWORD_RESET_TTL_MS),
+        },
+      });
+
+      const resetUrl = `${resolveFrontendBaseUrl()}/auth/redefinir-senha?token=${rawToken}`;
+
+      try {
+        await emailService.sendPasswordResetEmail(user.email, user.name, rawToken, resetUrl);
+      } catch (emailError) {
+        console.error('Falha ao enviar e-mail de redefinicao de senha:', emailError);
+        throw createError(
+          'Não foi possível enviar o e-mail de redefinição. Procure o administrador do sistema.',
+          503
+        );
+      }
+
+      recordAuditEvent({
+        action: 'CREATE',
+        entity: 'PasswordResetToken',
+        entityId: user.id,
+        summary: 'Solicitou redefinição de senha por e-mail',
+        userId: user.id,
+      });
+
+      return res.json({ success: true, message: genericMessage });
+    } catch (error) {
+      return next(error);
+    }
+  }
+
+  /** Checa se o link ainda é válido antes de exibir o formulário. */
+  async validateResetToken(req: Request, res: Response, next: NextFunction) {
+    try {
+      const record = await findValidResetToken(String(req.query?.token ?? ''));
+      return res.json({
+        success: true,
+        data: {
+          valid: !!record,
+          name: record?.user.name ?? null,
+          email: record ? maskEmail(record.user.email) : null,
+        },
+      });
+    } catch (error) {
+      return next(error);
+    }
+  }
+
+  /** Conclui a redefinição consumindo o token enviado por e-mail. */
+  async resetPassword(req: Request, res: Response, next: NextFunction) {
+    try {
+      const token = String(req.body?.token ?? '');
+      const newPassword = String(req.body?.newPassword ?? '');
+
+      if (newPassword.length < 8) {
+        throw createError('A nova senha deve ter ao menos 8 caracteres', 400);
+      }
+
+      const record = await findValidResetToken(token);
+      if (!record) {
+        throw createError('Link de redefinição inválido ou expirado. Solicite um novo.', 400);
+      }
+
+      const hashedPassword = await hashPassword(newPassword);
+
+      await prisma.$transaction([
+        prisma.user.update({
+          where: { id: record.userId },
+          data: { password: hashedPassword, isFirstLogin: false },
+        }),
+        prisma.passwordResetToken.update({
+          where: { id: record.id },
+          data: { used: true },
+        }),
+        prisma.passwordResetToken.updateMany({
+          where: { userId: record.userId, used: false },
+          data: { used: true },
+        }),
+      ]);
+
+      recordAuditEvent({
+        action: 'CREATE',
+        entity: 'PasswordResetToken',
+        entityId: record.id,
+        summary: 'Redefiniu a senha pelo link enviado por e-mail',
+        userId: record.userId,
+      });
+
+      return res.json({
+        success: true,
+        message: 'Senha redefinida com sucesso. Faça login com a nova senha.',
       });
     } catch (error) {
       return next(error);

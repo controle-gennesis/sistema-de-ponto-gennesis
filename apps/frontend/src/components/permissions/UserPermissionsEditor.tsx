@@ -421,6 +421,8 @@ function inferCategoryFromHref(href: string): string {
       '/ponto/sistema-gestao-os/locais',
       '/ponto/sistema-gestao-os/equipamentos',
       '/ponto/sistema-gestao-os/tipos-servico',
+      '/ponto/sistema-gestao-os/equipes',
+      '/ponto/treinamentos/administracao',
     ].some((p) => h === p)
   ) {
     return 'Cadastros';

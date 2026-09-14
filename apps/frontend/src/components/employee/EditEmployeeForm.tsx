@@ -8,6 +8,7 @@ import { TOMADORES_LIST } from '@/constants/tomadores';
 import { CARGOS_AVAILABLE } from '@/constants/cargos';
 import { useCostCenters } from '@/hooks/useCostCenters';
 import { useModalCloseConfirm } from '@/hooks/useModalCloseConfirm';
+import { formatPhoneBR } from '@/lib/phone';
 import api from '@/lib/api';
 import toast from 'react-hot-toast';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
@@ -26,7 +27,8 @@ interface EmployeeFormData {
   email: string;
   cpf: string;
   isActive: boolean;
-  
+  phone: string;
+
   // Dados do funcionário
   employeeId: string;
   sector: string;
@@ -86,6 +88,7 @@ interface Employee {
     employeeId: string;
     department: string;
     position: string;
+    phone?: string | null;
     hireDate: string;
     birthDate?: string;
     salary: number;
@@ -218,6 +221,7 @@ export function EditEmployeeForm({ employee, onClose, visibleSections, onEmploye
     email: employee.email || '',
     cpf: employee.cpf || '',
     isActive: employee.isActive ?? true,
+    phone: formatPhoneBR(employee.employee?.phone || ''),
     employeeId: employee.employee?.employeeId || '',
     sector: employee.employee?.department || '',
     position: employee.employee?.position || '',
@@ -531,6 +535,7 @@ export function EditEmployeeForm({ employee, onClose, visibleSections, onEmploye
         birthDate: data.birthDate || undefined,
         salary: data.salary ? parseCurrencyBRToNumber(data.salary as any) : undefined,
         isRemote: data.isRemote,
+        phone: data.phone.trim() || null,
         workSchedule: {
           startTime: data.workStartTime,
           endTime: data.workEndTime,
@@ -794,8 +799,20 @@ export function EditEmployeeForm({ employee, onClose, visibleSections, onEmploye
                     )}
                   </div>
 
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      Telefone de contato
+                    </label>
+                    <input
+                      type="tel"
+                      value={formData.phone}
+                      onChange={(e) => handleInputChange('phone', formatPhoneBR(e.target.value))}
+                      className="w-full px-3 py-2.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
+                      placeholder="(00) 00000-0000"
+                      maxLength={15}
+                    />
+                  </div>
 
-                  
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                       Data de Nascimento

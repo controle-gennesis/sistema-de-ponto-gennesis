@@ -144,6 +144,10 @@ model User {
   scheduledNewsViews                        ScheduledNewsView[]                  @relation("ScheduledNewsViewer")
   supportTicketsRequested                   SupportTicket[]                      @relation("SupportTicketRequester")
   supportTicketsAssigned                    SupportTicket[]                      @relation("SupportTicketAssignee")
+  gestaoOsTeamsManaged                      GestaoOsTeam[]                       @relation("GestaoOsTeamManager")
+  gestaoOsTeamMemberships                   GestaoOsTeamMember[]                 @relation("GestaoOsTeamMemberUser")
+  trainingCoursesCreated                    TrainingCourse[]                     @relation("TrainingCourseCreator")
+  trainingEnrollments                       TrainingEnrollment[]                 @relation("TrainingEnrollmentUser")
 
   @@map("users")
 }
@@ -155,6 +159,8 @@ model Employee {
   employeeId            String    @unique // MatrÃ­cula
   department            String
   position              String
+  /// Telefone / celular de contato do funcionario
+  phone                 String?
   hireDate              DateTime
   birthDate             DateTime? // Data de nascimento para aniversÃ¡rios
   salary                Decimal   @db.Decimal(10, 2)
@@ -343,6 +349,12 @@ model CompanySettings {
   maxDistanceMeters    Int      @default(1000)
   defaultLatitude      Float    @default(-23.5505)
   defaultLongitude     Float    @default(-46.6333)
+  /// Liga a conferencia de presenca por geolocalizacao no registro de ponto
+  geofenceEnabled         Boolean @default(false)
+  /// true bloqueia a batida fora do raio; false apenas marca o registro como fora da area
+  geofenceBlockOutside    Boolean @default(true)
+  /// Exige que o dispositivo envie coordenadas para registrar o ponto
+  geofenceRequireLocation Boolean @default(true)
   vacationDaysPerYear  Int      @default(30)
   /// Prazo informado ao solicitante de combustÃ­vel (horas Ãºteis atÃ© atendimento do Suprimentos)
   fuelSuppliesSlaHours Int      @default(24)
@@ -4271,6 +4283,7 @@ model GestaoOsCompany {
   plans      GestaoOsMaintenancePlan[]
   checklists GestaoOsChecklistTemplate[]
   documents  GestaoOsDocument[]
+  teams      GestaoOsTeam[]
 
   @@index([name])
   @@index([document])
@@ -4360,6 +4373,71 @@ model GestaoOsMembership {
   @@map("gestao_os_memberships")
 }
 
+/// Equipe de servico que atende uma ou mais localidades.
+model GestaoOsTeam {
+  id            String   @id @default(cuid())
+  companyId     String?
+  name          String
+  code          String?
+  description   String?  @db.Text
+  /// Gestor responsavel pela equipe.
+  managerUserId String?
+  /// Turno / jornada da equipe (texto livre, ex.: "Diurno 07h-15h").
+  shift         String?
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  company    GestaoOsCompany?          @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  manager    User?                     @relation("GestaoOsTeamManager", fields: [managerUserId], references: [id], onDelete: SetNull)
+  members    GestaoOsTeamMember[]
+  buildings  GestaoOsTeamBuilding[]
+  workOrders GestaoOsWorkOrder[]
+  plans      GestaoOsMaintenancePlan[]
+
+  @@index([companyId])
+  @@index([name])
+  @@index([managerUserId])
+  @@index([isActive])
+  @@map("gestao_os_teams")
+}
+
+/// Funcionario que integra uma equipe de servico.
+model GestaoOsTeamMember {
+  id        String   @id @default(cuid())
+  teamId    String
+  userId    String
+  /// LEADER | MEMBER
+  role      String   @default("MEMBER")
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  team GestaoOsTeam @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user User         @relation("GestaoOsTeamMemberUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([teamId, userId])
+  @@index([teamId])
+  @@index([userId])
+  @@map("gestao_os_team_members")
+}
+
+/// Localidade atendida por uma equipe de servico.
+model GestaoOsTeamBuilding {
+  id         String   @id @default(cuid())
+  teamId     String
+  buildingId String
+  createdAt  DateTime @default(now())
+
+  team     GestaoOsTeam     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  building GestaoOsBuilding @relation(fields: [buildingId], references: [id], onDelete: Cascade)
+
+  @@unique([teamId, buildingId])
+  @@index([teamId])
+  @@index([buildingId])
+  @@map("gestao_os_team_buildings")
+}
+
 /// PrÃ©dio / edifÃ­cio da hierarquia de locais.
 model GestaoOsBuilding {
   id                String   @id @default(cuid())
@@ -4374,6 +4452,12 @@ model GestaoOsBuilding {
   prepostoUserId    String?
   managerUserId     String?
   fiscalUserId      String?
+  /// Nome do responsavel pela localidade quando ele nao e usuario do sistema.
+  responsibleName   String?
+  /// Telefone de contato da localidade.
+  phone             String?
+  /// E-mail de contato da localidade.
+  email             String?
   qrToken           String?  @unique
   isActive          Boolean  @default(true)
   createdAt         DateTime @default(now())
@@ -4385,6 +4469,7 @@ model GestaoOsBuilding {
   workOrders GestaoOsWorkOrder[]
   plans      GestaoOsMaintenancePlan[]
   documents  GestaoOsDocument[]
+  teams      GestaoOsTeamBuilding[]
 
   @@index([companyId])
   @@index([branchId])
@@ -4532,6 +4617,8 @@ model GestaoOsWorkOrder {
   placeId    String?
   assetId    String?
   providerId String?
+  /// Equipe de servico responsavel pelo atendimento.
+  teamId     String?
 
   company  GestaoOsCompany?  @relation(fields: [companyId], references: [id], onDelete: SetNull)
   building GestaoOsBuilding? @relation(fields: [buildingId], references: [id], onDelete: SetNull)
@@ -4539,6 +4626,7 @@ model GestaoOsWorkOrder {
   place    GestaoOsPlace?    @relation(fields: [placeId], references: [id], onDelete: SetNull)
   asset    GestaoOsAsset?    @relation(fields: [assetId], references: [id], onDelete: SetNull)
   provider GestaoOsProvider? @relation(fields: [providerId], references: [id], onDelete: SetNull)
+  team     GestaoOsTeam?     @relation(fields: [teamId], references: [id], onDelete: SetNull)
 
   /// Snapshot textual do local (cascata) no momento da abertura.
   locationLabel String?
@@ -4561,7 +4649,7 @@ model GestaoOsWorkOrder {
   ratingComment       String?   @db.Text
   /// REQUEST | SAC | UNPLANNED | PLANTAO
   origin              String    @default("REQUEST")
-  /// CHAMADO | DUVIDA | RECLAMACAO (quando origin = SAC)
+  /// CHAMADO | DUVIDA | INFORMACAO | RECLAMACAO | ELOGIO (quando origin = SAC)
   sacKind             String?
   teamUserIds         Json?
   fiscalRating        Int?
@@ -4624,6 +4712,7 @@ model GestaoOsWorkOrder {
   @@index([dueAt])
   @@index([relatedWorkOrderId])
   @@index([assetId])
+  @@index([teamId])
   @@map("gestao_os_work_orders")
 }
 
@@ -4702,6 +4791,8 @@ model GestaoOsMaintenancePlan {
   nextDueAt         DateTime
   lastGeneratedAt   DateTime?
   assigneeId        String?
+  /// Equipe padrao do agendamento (pode ser trocada na geracao da OS).
+  teamId            String?
   /// HorÃ¡rio previsto da OS (HH:mm).
   scheduledTime     String?
   /// IDs dos tÃ©cnicos na ordem do rodÃ­zio.
@@ -4717,12 +4808,14 @@ model GestaoOsMaintenancePlan {
   asset     GestaoOsAsset?             @relation(fields: [assetId], references: [id], onDelete: SetNull)
   checklist GestaoOsChecklistTemplate? @relation(fields: [checklistId], references: [id], onDelete: SetNull)
   assignee  User?                      @relation("GestaoOsPlanAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  team      GestaoOsTeam?              @relation(fields: [teamId], references: [id], onDelete: SetNull)
   runs      GestaoOsPlanRun[]
 
   @@index([companyId])
   @@index([planType])
   @@index([nextDueAt])
   @@index([isActive])
+  @@index([teamId])
   @@map("gestao_os_maintenance_plans")
 }
 
@@ -4980,4 +5073,164 @@ model OcsBoletoPixExtra {
   @@unique([coligada, idMov])
   @@index([idMov])
   @@map("ocs_boleto_pix_extras")
+}
+
+// ============================================================
+// Central de Treinamentos
+// ============================================================
+
+/// Curso da central de treinamentos.
+model TrainingCourse {
+  id                 String   @id @default(cuid())
+  title              String
+  description        String?  @db.Text
+  /// Categoria livre para agrupar cursos (ex.: "Limpeza", "Seguranca do Trabalho").
+  category           String?
+  coverImageUrl      String?
+  /// Carga horaria declarada, usada no certificado.
+  workloadHours      Float?
+  /// Percentual minimo de acerto para aprovacao na avaliacao.
+  passingScore       Int      @default(70)
+  /// Quando true, gera certificado ao concluir com aproveitamento.
+  certificateEnabled Boolean  @default(true)
+  /// Cursos nao publicados ficam visiveis apenas na administracao.
+  isPublished        Boolean  @default(false)
+  isActive           Boolean  @default(true)
+  createdById        String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  createdBy   User?                @relation("TrainingCourseCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  lessons     TrainingLesson[]
+  questions   TrainingQuestion[]
+  enrollments TrainingEnrollment[]
+
+  @@index([title])
+  @@index([category])
+  @@index([isPublished])
+  @@index([isActive])
+  @@map("training_courses")
+}
+
+/// Aula (videoaula ou material) de um curso.
+model TrainingLesson {
+  id              String   @id @default(cuid())
+  courseId        String
+  title           String
+  description     String?  @db.Text
+  /// URL do video (YouTube, Vimeo ou arquivo hospedado).
+  videoUrl        String?
+  /// YOUTUBE | VIMEO | URL
+  videoProvider   String   @default("YOUTUBE")
+  /// Material de apoio anexado a aula.
+  attachmentUrl   String?
+  attachmentName  String?
+  durationMinutes Int?
+  position        Int      @default(0)
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  course   TrainingCourse           @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  progress TrainingLessonProgress[]
+
+  @@index([courseId, position])
+  @@map("training_lessons")
+}
+
+/// Pergunta do questionario de avaliacao do curso.
+model TrainingQuestion {
+  id        String   @id @default(cuid())
+  courseId  String
+  statement String   @db.Text
+  /// Alternativas: [{ id, label, correct }]
+  options   Json
+  position  Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  course TrainingCourse @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@index([courseId, position])
+  @@map("training_questions")
+}
+
+/// Matricula de um usuario em um curso.
+model TrainingEnrollment {
+  id           String    @id @default(cuid())
+  courseId     String
+  userId       String
+  /// ENROLLED | IN_PROGRESS | COMPLETED | FAILED
+  status       String    @default("ENROLLED")
+  enrolledAt   DateTime  @default(now())
+  startedAt    DateTime?
+  completedAt  DateTime?
+  /// Melhor percentual obtido nas tentativas de avaliacao.
+  bestScore    Int?
+  attemptCount Int       @default(0)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  course         TrainingCourse           @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  user           User                     @relation("TrainingEnrollmentUser", fields: [userId], references: [id], onDelete: Cascade)
+  lessonProgress TrainingLessonProgress[]
+  attempts       TrainingQuizAttempt[]
+  certificate    TrainingCertificate?
+
+  @@unique([courseId, userId])
+  @@index([userId])
+  @@index([courseId])
+  @@index([status])
+  @@map("training_enrollments")
+}
+
+/// Conclusao de uma aula por um aluno matriculado.
+model TrainingLessonProgress {
+  id           String   @id @default(cuid())
+  enrollmentId String
+  lessonId     String
+  completedAt  DateTime @default(now())
+
+  enrollment TrainingEnrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  lesson     TrainingLesson     @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+
+  @@unique([enrollmentId, lessonId])
+  @@index([enrollmentId])
+  @@index([lessonId])
+  @@map("training_lesson_progress")
+}
+
+/// Tentativa de avaliacao (questionario) de um curso.
+model TrainingQuizAttempt {
+  id             String   @id @default(cuid())
+  enrollmentId   String
+  score          Int
+  passed         Boolean  @default(false)
+  correctCount   Int      @default(0)
+  questionCount  Int      @default(0)
+  /// Respostas: [{ questionId, optionId, correct }]
+  answers        Json
+  createdAt      DateTime @default(now())
+
+  enrollment TrainingEnrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+
+  @@index([enrollmentId, createdAt])
+  @@map("training_quiz_attempts")
+}
+
+/// Certificado de conclusao emitido para uma matricula aprovada.
+model TrainingCertificate {
+  id            String   @id @default(cuid())
+  enrollmentId  String   @unique
+  /// Codigo publico de validacao do certificado.
+  code          String   @unique
+  score         Int?
+  workloadHours Float?
+  issuedAt      DateTime @default(now())
+
+  enrollment TrainingEnrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+
+  @@index([code])
+  @@map("training_certificates")
 }

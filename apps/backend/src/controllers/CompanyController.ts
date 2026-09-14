@@ -66,6 +66,9 @@ export class CompanyController {
         maxDistanceMeters,
         defaultLatitude,
         defaultLongitude,
+        geofenceEnabled,
+        geofenceBlockOutside,
+        geofenceRequireLocation,
         vacationDaysPerYear,
         fuelSuppliesSlaHours,
       } = req.body;
@@ -126,9 +129,18 @@ export class CompanyController {
             ...(lunchEndTime && { lunchEndTime }),
             ...(toleranceMinutes !== undefined && { toleranceMinutes }),
             ...(maxOvertimeHours !== undefined && { maxOvertimeHours }),
-            ...(maxDistanceMeters !== undefined && { maxDistanceMeters }),
+            ...(maxDistanceMeters !== undefined && {
+              maxDistanceMeters: Math.max(10, Number(maxDistanceMeters) || 1000),
+            }),
             ...(defaultLatitude !== undefined && { defaultLatitude }),
             ...(defaultLongitude !== undefined && { defaultLongitude }),
+            ...(geofenceEnabled !== undefined && { geofenceEnabled: !!geofenceEnabled }),
+            ...(geofenceBlockOutside !== undefined && {
+              geofenceBlockOutside: !!geofenceBlockOutside,
+            }),
+            ...(geofenceRequireLocation !== undefined && {
+              geofenceRequireLocation: !!geofenceRequireLocation,
+            }),
             ...(vacationDaysPerYear !== undefined && { vacationDaysPerYear }),
             ...(fuelSuppliesSlaHours !== undefined && {
               fuelSuppliesSlaHours: Math.max(1, Number(fuelSuppliesSlaHours) || 24),
@@ -153,11 +165,18 @@ export class CompanyController {
             maxDistanceMeters: maxDistanceMeters || 1000,
             defaultLatitude: defaultLatitude || -23.5505,
             defaultLongitude: defaultLongitude || -46.6333,
+            geofenceEnabled: !!geofenceEnabled,
+            geofenceBlockOutside: geofenceBlockOutside === undefined ? true : !!geofenceBlockOutside,
+            geofenceRequireLocation:
+              geofenceRequireLocation === undefined ? true : !!geofenceRequireLocation,
             vacationDaysPerYear: vacationDaysPerYear || 30,
             fuelSuppliesSlaHours: Math.max(1, Number(fuelSuppliesSlaHours) || 24),
           }
         });
       }
+
+      // Sem isto o cache de 1h devolveria a configuração antiga ao ponto e aos relatórios
+      cache.set('company_settings', settings, 3600);
 
       res.json({
         success: true,

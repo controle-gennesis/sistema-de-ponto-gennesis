@@ -125,6 +125,7 @@ export class UserController {
         employeeId: true,
         department: true,
         position: true,
+        phone: true,
         hireDate: true,
         birthDate: true,
         isRemote: true,
@@ -286,6 +287,7 @@ export class UserController {
                 toleranceMinutes: 10
               },
               isRemote: employeeData.isRemote || false,
+              phone: employeeData.phone || null,
               allowedLocations: employeeData.allowedLocations || [],
               costCenter: employeeData.costCenter || null,
               client: employeeData.client || null,
@@ -441,6 +443,7 @@ export class UserController {
               ...(employeeData.salary && { salary: employeeData.salary }),
               ...(employeeData.workSchedule && { workSchedule: employeeData.workSchedule }),
               ...(employeeData.isRemote !== undefined && { isRemote: employeeData.isRemote }),
+              ...(employeeData.phone !== undefined && { phone: employeeData.phone || null }),
               ...(employeeData.allowedLocations && { allowedLocations: employeeData.allowedLocations }),
               ...(employeeData.costCenter !== undefined && { costCenter: employeeData.costCenter }),
               ...(employeeData.client !== undefined && { client: employeeData.client }),

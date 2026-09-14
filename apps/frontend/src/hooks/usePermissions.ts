@@ -374,7 +374,8 @@ export function usePermissions() {
     !!permissionData?.isAdmin ||
     can(pk('/ponto/sistema-gestao-os/locais')) ||
     can(pk('/ponto/sistema-gestao-os/equipamentos')) ||
-    can(pk('/ponto/sistema-gestao-os/tipos-servico'));
+    can(pk('/ponto/sistema-gestao-os/tipos-servico')) ||
+    can(pk('/ponto/sistema-gestao-os/equipes'));
 
   /** Aprovação de RMs: gestor por contrato ou permissão legada Controle. */
   const canApproveMaterialRequests =
@@ -699,6 +700,14 @@ export function useRoutePermission(route: string) {
     '/ponto/materiais-construcao': isAdministrator || can(pk('/ponto/materiais-construcao')),
     '/ponto/andamento-da-os': canAccessOsRoutePage,
     '/ponto/meus-chamados': isAdministrator || can(pk('/ponto/meus-chamados')),
+    /** Área reservada da localidade — mesmo público de Meus Chamados, escopo vem do backend. */
+    '/ponto/meus-chamados/relatorios':
+      isAdministrator ||
+      can(pk('/ponto/meus-chamados')) ||
+      can(pk('/ponto/sistema-gestao-os')) ||
+      can(pk('/ponto/sistema-gestao-os/relatorios')) ||
+      can(pk('/ponto/sistema-gestao-os/locais')) ||
+      can(pk('/ponto/sistema-gestao-os/equipes')),
     '/ponto/sistema-gestao-os': isAdministrator || can(pk('/ponto/sistema-gestao-os')),
     '/ponto/sistema-gestao-os/planos':
       isAdministrator || can(pk('/ponto/sistema-gestao-os/planos')),
@@ -710,6 +719,14 @@ export function useRoutePermission(route: string) {
       isAdministrator || can(pk('/ponto/sistema-gestao-os/equipamentos')),
     '/ponto/sistema-gestao-os/tipos-servico':
       isAdministrator || can(pk('/ponto/sistema-gestao-os/tipos-servico')),
+    '/ponto/sistema-gestao-os/equipes':
+      isAdministrator || can(pk('/ponto/sistema-gestao-os/equipes')),
+    /** Cursos publicados ficam abertos a todo funcionário autenticado. */
+    '/ponto/treinamentos': true,
+    '/ponto/treinamentos/administracao':
+      isAdministrator || can(pk('/ponto/treinamentos/administracao')),
+    /** Parâmetros globais do ponto (cerca virtual) — apenas administradores. */
+    '/ponto/configuracoes-ponto': isAdministrator,
     '/ponto/permissoes': true,
     '/ponto/conversas-whatsapp': isAdministrator || can(pk('/ponto/conversas-whatsapp')),
     '/ponto/financeiro': isAdministrator || can(pk('/ponto/financeiro')),

@@ -193,6 +193,14 @@ export class GestaoOsPlansService {
         asset: { select: { id: true, name: true, category: true } },
         checklist: { select: { id: true, name: true, items: true } },
         assignee: { select: { id: true, name: true } },
+        team: {
+          select: {
+            id: true,
+            name: true,
+            code: true,
+            members: { select: { userId: true } }
+          }
+        },
         runs: { orderBy: { generatedAt: 'desc' }, take: 5 }
       },
       orderBy: [{ nextDueAt: 'asc' }, { name: 'asc' }]
@@ -243,6 +251,7 @@ export class GestaoOsPlansService {
         category: body.category ? String(body.category).trim() : null,
         buildingId: body.buildingId ? String(body.buildingId) : null,
         assetId: body.assetId ? String(body.assetId) : null,
+        teamId: body.teamId ? String(body.teamId) : null,
         checklistId: checklistId || null,
         intervalDays,
         nextDueAt: dueAt,
@@ -256,6 +265,7 @@ export class GestaoOsPlansService {
       include: {
         building: { select: { id: true, name: true } },
         asset: { select: { id: true, name: true } },
+        team: { select: { id: true, name: true, code: true } },
         checklist: true
       }
     });
@@ -281,6 +291,9 @@ export class GestaoOsPlansService {
     }
     if (body.assetId !== undefined) {
       data.asset = body.assetId ? { connect: { id: String(body.assetId) } } : { disconnect: true };
+    }
+    if (body.teamId !== undefined) {
+      data.team = body.teamId ? { connect: { id: String(body.teamId) } } : { disconnect: true };
     }
     const checklistId = await resolvePlanChecklistId(
       access,
@@ -335,6 +348,7 @@ export class GestaoOsPlansService {
       include: {
         building: { select: { id: true, name: true } },
         asset: { select: { id: true, name: true } },
+        team: { select: { id: true, name: true, code: true } },
         checklist: true
       }
     });
@@ -357,14 +371,31 @@ export class GestaoOsPlansService {
         nextDueAt: { lte: now },
         ...(access?.companyId ? { companyId: access.companyId } : {})
       },
-      include: { checklist: true, asset: true, building: true }
+      include: {
+        checklist: true,
+        asset: true,
+        building: true,
+        team: {
+          select: {
+            id: true,
+            isActive: true,
+            members: {
+              where: { isActive: true },
+              orderBy: [{ role: 'asc' }, { createdAt: 'asc' }],
+              select: { userId: true }
+            }
+          }
+        }
+      }
     });
 
     const created: string[] = [];
     for (const plan of duePlans) {
-      const { assigneeId, nextRotationIndex } = nextAssigneeFromPlan(plan);
-      const systemUserId = assigneeId;
-      let requesterId = systemUserId;
+      const teamMemberIds = (plan.team?.members ?? []).map((m) => m.userId);
+      // Sem técnico no rodízio, o líder da equipe assume a OS gerada.
+      const { assigneeId: rotationAssigneeId, nextRotationIndex } = nextAssigneeFromPlan(plan);
+      const assigneeId: string | null = rotationAssigneeId ?? teamMemberIds[0] ?? null;
+      let requesterId: string | null = assigneeId;
       if (!requesterId) {
         const manager = await prisma.gestaoOsMembership.findFirst({
           where: { companyId: plan.companyId, isActive: true, profile: { in: ['MANAGER', 'ADMIN'] } },
@@ -423,22 +454,33 @@ export class GestaoOsPlansService {
         }
       );
 
+      const teamData = plan.teamId
+        ? {
+            teamId: plan.teamId,
+            ...(teamMemberIds.length
+              ? { teamUserIds: teamMemberIds as Prisma.InputJsonValue }
+              : {})
+          }
+        : {};
+
       if (checklistItems.length) {
         await prisma.gestaoOsWorkOrder.update({
           where: { id: wo.id },
           data: {
             checklistResponses: checklistItems as Prisma.InputJsonValue,
             assigneeId,
+            ...teamData,
             status: GestaoOsStatus.APPROVED,
             approvedAt: now,
             maintenanceType
           }
         });
-      } else if (assigneeId) {
+      } else if (assigneeId || plan.teamId) {
         await prisma.gestaoOsWorkOrder.update({
           where: { id: wo.id },
           data: {
             assigneeId,
+            ...teamData,
             status: GestaoOsStatus.APPROVED,
             approvedAt: now,
             maintenanceType

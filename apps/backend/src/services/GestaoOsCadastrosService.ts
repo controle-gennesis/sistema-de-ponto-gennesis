@@ -315,6 +315,9 @@ export class GestaoOsCadastrosService {
     prepostoUserId?: string | null;
     managerUserId?: string | null;
     fiscalUserId?: string | null;
+    responsibleName?: string | null;
+    phone?: string | null;
+    email?: string | null;
   }) {
     const name = String(input.name ?? '').trim();
     if (!name) throw createError('Informe o nome do prédio', 400);
@@ -334,6 +337,9 @@ export class GestaoOsCadastrosService {
       prepostoUserId: input.prepostoUserId?.trim() || null,
       managerUserId: input.managerUserId?.trim() || null,
       fiscalUserId: input.fiscalUserId?.trim() || null,
+      responsibleName: input.responsibleName?.trim() || null,
+      phone: input.phone?.trim() || null,
+      email: input.email?.trim() || null,
       qrToken: newQrToken()
     });
     return created;
@@ -354,6 +360,9 @@ export class GestaoOsCadastrosService {
       prepostoUserId?: string | null;
       managerUserId?: string | null;
       fiscalUserId?: string | null;
+      responsibleName?: string | null;
+      phone?: string | null;
+      email?: string | null;
       regenerateQr?: boolean;
     }
   ) {
@@ -385,6 +394,11 @@ export class GestaoOsCadastrosService {
       ...(input.fiscalUserId !== undefined
         ? { fiscalUserId: input.fiscalUserId?.trim() || null }
         : {}),
+      ...(input.responsibleName !== undefined
+        ? { responsibleName: input.responsibleName?.trim() || null }
+        : {}),
+      ...(input.phone !== undefined ? { phone: input.phone?.trim() || null } : {}),
+      ...(input.email !== undefined ? { email: input.email?.trim() || null } : {}),
       ...(input.regenerateQr ? { qrToken: newQrToken() } : {})
     });
     return updated;

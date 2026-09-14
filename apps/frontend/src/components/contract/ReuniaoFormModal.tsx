@@ -1179,9 +1179,9 @@ export function ReuniaoFormModal({
           const full = resolveFieldWidth(q as FormQuestion) === 'full';
           return (
             <div key={q.id} className={`min-w-0 ${!compact && full ? 'sm:col-span-2' : ''}`}>
-              <QuestionField
-                question={q}
-                answer={form.answers[q.id]}
+          <QuestionField
+            question={q}
+            answer={form.answers[q.id]}
                 allAnswers={form.answers}
                 profileOptions={profileSelectOptions}
                 formReadOnly={readOnly}
@@ -1206,9 +1206,9 @@ export function ReuniaoFormModal({
 
   const formBody = loading ? (
     <div className={compact ? 'py-10' : 'py-16'}>
-      <Loading message="Carregando formulário…" size="md" />
-    </div>
-  ) : (
+          <Loading message="Carregando formulário…" size="md" />
+        </div>
+      ) : (
     <div className={compact ? 'space-y-6 pb-2' : 'space-y-8 pb-2'}>
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
@@ -1224,9 +1224,9 @@ export function ReuniaoFormModal({
           {formDescription ? (
             <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">{formDescription}</p>
           ) : null}
-        </div>
+                </div>
         <ReuniaoFormCloseButton onClick={compact ? () => setConfirmInlineClose(true) : undefined} />
-      </div>
+                    </div>
 
       <div className={compact ? 'space-y-6' : 'space-y-8'}>
         {multiStep ? (
@@ -1243,8 +1243,8 @@ export function ReuniaoFormModal({
 
         {visibleSections.length > 0 ? (
           visibleSections.map(renderSection)
-        ) : (
-          <p className="py-8 text-center text-sm text-gray-500 dark:text-gray-400">
+              ) : (
+                <p className="py-8 text-center text-sm text-gray-500 dark:text-gray-400">
             Nenhuma pergunta neste formulário.
           </p>
         )}
@@ -1262,22 +1262,22 @@ export function ReuniaoFormModal({
             }
           />
         ) : null}
-      </div>
+                </div>
 
       <div className="flex justify-end gap-2 border-t border-gray-200 pt-6 dark:border-gray-700">
         {readOnly ? (
-          <button
-            type="button"
+            <button
+              type="button"
             onClick={onClose}
             className="inline-flex h-10 items-center rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-800 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
-          >
+            >
             Fechar
-          </button>
+            </button>
         ) : (
           <>
         {multiStep && activeFillStep > 0 ? (
-          <button
-            type="button"
+              <button
+                type="button"
             onClick={() => setActiveFillStep((prev) => Math.max(prev - 1, 0))}
             disabled={saving}
             className="inline-flex h-10 items-center rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-800 transition-colors hover:bg-gray-50 disabled:opacity-60 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
@@ -1293,22 +1293,22 @@ export function ReuniaoFormModal({
             className="inline-flex h-10 items-center rounded-lg bg-red-600 px-5 text-sm font-semibold text-white transition-colors hover:bg-red-700 disabled:opacity-60"
           >
             Próxima etapa
-          </button>
-        ) : (
-          <button
-            type="button"
+              </button>
+            ) : (
+              <button
+                type="button"
             onClick={() => void handleFinish()}
             disabled={saving}
             className="inline-flex h-10 items-center gap-2 rounded-lg bg-red-600 px-5 text-sm font-semibold text-white transition-colors hover:bg-red-700 disabled:opacity-60"
-          >
+              >
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
             Salvar
-          </button>
-        )}
+              </button>
+            )}
           </>
         )}
-      </div>
-    </div>
+          </div>
+        </div>
   );
 
   if (variant === 'inline') {
