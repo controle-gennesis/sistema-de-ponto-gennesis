@@ -71,10 +71,12 @@ import {
   Boxes,
   Workflow,
   ChevronDown,
+  GraduationCap,
   HelpCircle,
   Newspaper,
   Calculator,
   Table2,
+  ShieldCheck,
   type LucideIcon,
 } from 'lucide-react';
 import { pathToModuleKey } from '@sistema-ponto/permission-modules';
@@ -705,6 +707,13 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
   const requiresTimeClock = user?.employee?.requiresTimeClock !== false;
 
   const isEmployee = userRole === 'EMPLOYEE';
+  const canOpenUnitReports =
+    isAdministrator ||
+    can(pk('/ponto/meus-chamados')) ||
+    can(pk('/ponto/sistema-gestao-os')) ||
+    can(pk('/ponto/sistema-gestao-os/relatorios')) ||
+    can(pk('/ponto/sistema-gestao-os/locais')) ||
+    can(pk('/ponto/sistema-gestao-os/equipes'));
 
   // Menu items agrupados por categoria
   const getMenuItems = () => {
@@ -792,11 +801,25 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             permission: isAdministrator || can(pk('/ponto/meus-chamados'))
           },
           {
+            name: 'Relatórios da Localidade',
+            href: '/ponto/meus-chamados/relatorios',
+            icon: BarChart3,
+            description: 'Serviços executados nas suas localidades, com exportação em PDF',
+            permission: canOpenUnitReports
+          },
+          {
             name: 'Entrega da Logística',
             href: '/ponto/entrega-logistica',
             icon: Truck,
             description: 'Finalizar solicitações de entrega logística',
             permission: isAdministrator || can(pk('/ponto/entrega-logistica'))
+          },
+          {
+            name: 'Central de Treinamentos',
+            href: '/ponto/treinamentos',
+            icon: GraduationCap,
+            description: 'Videoaulas, avaliações e certificados',
+            permission: true,
           },
           {
             name: 'Central de Ajuda',
@@ -915,6 +938,13 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             icon: FolderClock,
             description: 'Controle de banco de horas',
             permission: isAdministrator || permissions.canManageBankHours
+          },
+          {
+            name: 'Configurações do Ponto',
+            href: '/ponto/configuracoes-ponto',
+            icon: ShieldCheck,
+            description: 'Confirmação de presença por geolocalização',
+            permission: isAdministrator
           },
           {
             name: 'Alocação',
@@ -1351,6 +1381,26 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             permission:
               isAdministrator ||
               can(pk('/ponto/sistema-gestao-os/tipos-servico')),
+            section: 'Central de Chamados'
+          },
+          {
+            name: 'Equipes de Serviço',
+            href: '/ponto/sistema-gestao-os/equipes',
+            icon: Users,
+            description: 'Equipes, integrantes e localidades atendidas',
+            permission:
+              isAdministrator ||
+              can(pk('/ponto/sistema-gestao-os/equipes')),
+            section: 'Central de Chamados'
+          },
+          {
+            name: 'Treinamentos',
+            href: '/ponto/treinamentos/administracao',
+            icon: GraduationCap,
+            description: 'Cursos, videoaulas e questionários',
+            permission:
+              isAdministrator ||
+              can(pk('/ponto/treinamentos/administracao')),
             section: 'Central de Chamados'
           },
           {

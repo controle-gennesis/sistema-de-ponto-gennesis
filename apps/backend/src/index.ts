@@ -117,6 +117,7 @@ import fuelRefuelRequestRoutes from './routes/fuelRefuelRequests';
 import fuelGasStationRoutes from './routes/fuelGasStations';
 import logisticsDeliveryRequestRoutes from './routes/logisticsDeliveryRequests';
 import gestaoOsRoutes from './routes/gestaoOs';
+import trainingRoutes from './routes/training';
 import approvalsRoutes from './routes/approvals';
 import licitacoesRoutes from './routes/licitacoes';
 import pncpRoutes from './routes/pncp';
@@ -322,9 +323,26 @@ const authLoginLimiter = rateLimit({
     ),
 });
 
+// Evita uso do envio de e-mail de redefinição como vetor de spam/enumeração
+const passwordResetLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: enableRateLimit ? 10 : 10_000,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: skipRateLimit,
+  handler: (req, res) =>
+    rateLimit429Handler(
+      req,
+      res,
+      'Muitas solicitações de redefinição de senha. Aguarde uma hora e tente novamente.',
+    ),
+});
+
 app.use(limiter);
 app.use('/api/auth/me', authMeLimiter);
 app.use('/api/auth/login', authLoginLimiter);
+app.use('/api/auth/forgot-password', passwordResetLimiter);
+app.use('/api/auth/reset-password', passwordResetLimiter);
 
 // Logging
 app.use(morgan('combined'));
@@ -437,6 +455,7 @@ app.use('/api/fuel-refuel-requests', fuelRefuelRequestRoutes);
 app.use('/api/fuel-gas-stations', fuelGasStationRoutes);
 app.use('/api/logistics-delivery-requests', logisticsDeliveryRequestRoutes);
 app.use('/api/gestao-os', gestaoOsRoutes);
+app.use('/api/training', trainingRoutes);
 app.use('/api/approvals', approvalsRoutes);
 // Rotas explícitas de licitações (garantem checklist mesmo se o router interno estiver desatualizado)
 app.get('/api/licitacoes/checklist-template', authenticate, (req, res, next) =>

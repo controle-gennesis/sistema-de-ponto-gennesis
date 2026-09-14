@@ -3,8 +3,9 @@
 // Desabilitar prerendering
 
 import React, { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Eye, EyeOff, UserRound, Lock, AlertCircle, Moon, Sun, ArrowRight, MessageCircle, X } from 'lucide-react';
+import { Eye, EyeOff, UserRound, Lock, AlertCircle, Moon, Sun, ArrowRight, Mail, MessageCircle, X } from 'lucide-react';
 import { authService } from '@/lib/auth';
 import { normalizeLoginIdentifierInput } from '@/lib/cpf';
 import { toast } from 'react-hot-toast';
@@ -367,10 +368,20 @@ export default function LoginPage() {
             </div>
 
             <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
-              A recuperação automática foi desativada. Solicite a alteração de senha pelo WhatsApp:
+              Enviamos um link de redefinição para o e-mail cadastrado na sua conta.
             </p>
 
-            <div className="mt-5">
+            <div className="mt-5 space-y-3">
+              <Link
+                href="/auth/esqueci-senha"
+                className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-red-600 hover:bg-red-700 text-white px-4 py-3 text-sm font-medium transition-colors"
+              >
+                <Mail className="w-4 h-4" />
+                Receber link por e-mail
+              </Link>
+              <p className="text-center text-xs text-gray-500 dark:text-gray-500">
+                Sem acesso ao e-mail cadastrado?
+              </p>
               <a
                 href={supportWhatsAppUrl}
                 target="_blank"

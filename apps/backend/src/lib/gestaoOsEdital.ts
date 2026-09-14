@@ -3,7 +3,13 @@ import { prisma } from './prisma';
 export const GESTAO_OS_ORIGINS = ['REQUEST', 'SAC', 'UNPLANNED', 'PLANTAO'] as const;
 export type GestaoOsOrigin = (typeof GESTAO_OS_ORIGINS)[number];
 
-export const GESTAO_OS_SAC_KINDS = ['CHAMADO', 'DUVIDA', 'RECLAMACAO'] as const;
+export const GESTAO_OS_SAC_KINDS = [
+  'CHAMADO',
+  'DUVIDA',
+  'INFORMACAO',
+  'RECLAMACAO',
+  'ELOGIO'
+] as const;
 export type GestaoOsSacKind = (typeof GESTAO_OS_SAC_KINDS)[number];
 
 export type GestaoOsChecklistEvidenceItem = {
@@ -121,6 +127,9 @@ export async function persistBuildingEdital(
     prepostoUserId?: string | null;
     managerUserId?: string | null;
     fiscalUserId?: string | null;
+    responsibleName?: string | null;
+    phone?: string | null;
+    email?: string | null;
     qrToken?: string | null;
   }
 ) {
@@ -134,6 +143,9 @@ export async function persistBuildingEdital(
   if (input.prepostoUserId !== undefined) sets.push(`"prepostoUserId" = ${sqlText(input.prepostoUserId)}`);
   if (input.managerUserId !== undefined) sets.push(`"managerUserId" = ${sqlText(input.managerUserId)}`);
   if (input.fiscalUserId !== undefined) sets.push(`"fiscalUserId" = ${sqlText(input.fiscalUserId)}`);
+  if (input.responsibleName !== undefined) sets.push(`"responsibleName" = ${sqlText(input.responsibleName)}`);
+  if (input.phone !== undefined) sets.push(`"phone" = ${sqlText(input.phone)}`);
+  if (input.email !== undefined) sets.push(`"email" = ${sqlText(input.email)}`);
   if (input.qrToken !== undefined) sets.push(`"qrToken" = ${sqlText(input.qrToken)}`);
   if (!sets.length) return;
   await prisma.$executeRawUnsafe(
@@ -152,6 +164,9 @@ export async function loadBuildingEditalMap(ids: string[]) {
       prepostoUserId: string | null;
       managerUserId: string | null;
       fiscalUserId: string | null;
+      responsibleName: string | null;
+      phone: string | null;
+      email: string | null;
       qrToken: string | null;
     }
   >();
@@ -166,10 +181,13 @@ export async function loadBuildingEditalMap(ids: string[]) {
       prepostoUserId: string | null;
       managerUserId: string | null;
       fiscalUserId: string | null;
+      responsibleName: string | null;
+      phone: string | null;
+      email: string | null;
       qrToken: string | null;
     }>
   >(
-    `SELECT "id", "address", "latitude", "longitude", "responsibleUserId", "prepostoUserId", "managerUserId", "fiscalUserId", "qrToken"
+    `SELECT "id", "address", "latitude", "longitude", "responsibleUserId", "prepostoUserId", "managerUserId", "fiscalUserId", "responsibleName", "phone", "email", "qrToken"
      FROM "gestao_os_buildings"
      WHERE "id" IN (${ids.map((id) => sqlText(id)).join(',')})`
   );

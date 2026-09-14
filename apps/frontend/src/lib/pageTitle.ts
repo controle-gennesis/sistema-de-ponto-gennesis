@@ -30,6 +30,10 @@ const EXTRA_PAGE_TITLES: Record<string, { title: string; category?: string; href
     title: 'Solicitações - Fluig',
     category: 'Departamento Pessoal',
   },
+  '/ponto/meus-chamados/relatorios': {
+    title: 'Relatórios da Localidade',
+    category: 'Principal',
+  },
   '/auth/login': { title: 'Login' },
 };
 

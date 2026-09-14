@@ -5,6 +5,7 @@ import { createError } from '../middleware/errorHandler';
 import { savePersistentUpload } from '../lib/persistentUpload';
 import { gestaoOsController } from '../controllers/GestaoOsController';
 import { gestaoOsCadastrosController } from '../controllers/GestaoOsCadastrosController';
+import { gestaoOsTeamsController } from '../controllers/GestaoOsTeamsController';
 import { gestaoOsPlansService } from '../services/GestaoOsPlansService';
 import { gestaoOsReportsService } from '../services/GestaoOsReportsService';
 import { gestaoOsDocumentsService } from '../services/GestaoOsDocumentsService';
@@ -60,6 +61,7 @@ function parseReportFilters(req: AuthRequest) {
     origin: typeof req.query.origin === 'string' ? req.query.origin : null,
     assigneeId: typeof req.query.assigneeId === 'string' ? req.query.assigneeId : null,
     teamUserId: typeof req.query.teamUserId === 'string' ? req.query.teamUserId : null,
+    teamId: typeof req.query.teamId === 'string' ? req.query.teamId : null,
     unitPortal: req.query.unitPortal === '1' || req.query.unitPortal === 'true'
   };
 }
@@ -375,6 +377,19 @@ router.patch('/cadastros/branches/:id', (req, res, next) =>
 
 router.get('/cadastros/my-unit-buildings', (req, res, next) =>
   gestaoOsCadastrosController.myUnitBuildings(req, res, next)
+);
+
+/** Equipes de serviço: cadastro, membros e localidades atendidas. */
+router.get('/cadastros/teams', (req, res, next) => gestaoOsTeamsController.list(req, res, next));
+router.get('/cadastros/teams/:id', (req, res, next) =>
+  gestaoOsTeamsController.getById(req, res, next)
+);
+router.post('/cadastros/teams', (req, res, next) => gestaoOsTeamsController.create(req, res, next));
+router.patch('/cadastros/teams/:id', (req, res, next) =>
+  gestaoOsTeamsController.update(req, res, next)
+);
+router.delete('/cadastros/teams/:id', (req, res, next) =>
+  gestaoOsTeamsController.remove(req, res, next)
 );
 router.get('/cadastros/locations', (req, res, next) =>
   gestaoOsCadastrosController.locationTreeAdmin(req, res, next)

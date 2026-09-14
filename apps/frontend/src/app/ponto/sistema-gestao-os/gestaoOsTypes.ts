@@ -24,7 +24,7 @@ export type GestaoOsDocumentKind =
   | 'OTHER';
 
 export type GestaoOsOrigin = 'REQUEST' | 'SAC' | 'UNPLANNED' | 'PLANTAO';
-export type GestaoOsSacKind = 'CHAMADO' | 'DUVIDA' | 'RECLAMACAO';
+export type GestaoOsSacKind = 'CHAMADO' | 'DUVIDA' | 'INFORMACAO' | 'RECLAMACAO' | 'ELOGIO';
 
 export type GestaoOsAttachment = {
   url: string;
@@ -64,6 +64,52 @@ export type GestaoOsPartLine = {
   stockDeductedAt?: string | null;
 };
 
+/** Referência enxuta de equipe, usada em OS, agendamentos e filtros. */
+export type GestaoOsTeamRef = {
+  id: string;
+  name: string;
+  code?: string | null;
+};
+
+export type GestaoOsTeamMemberRole = 'LEADER' | 'MEMBER';
+
+export const TEAM_MEMBER_ROLE_LABELS: Record<GestaoOsTeamMemberRole, string> = {
+  LEADER: 'Líder',
+  MEMBER: 'Integrante'
+};
+
+export type GestaoOsTeam = {
+  id: string;
+  companyId: string | null;
+  name: string;
+  code: string | null;
+  description: string | null;
+  managerUserId: string | null;
+  shift: string | null;
+  isActive: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+  company?: { id: string; name: string } | null;
+  manager?: GestaoOsUserRef | null;
+  members: Array<{
+    id: string;
+    userId: string;
+    role: GestaoOsTeamMemberRole;
+    isActive: boolean;
+    user: GestaoOsUserRef & {
+      employee?: { position?: string | null; department?: string | null; phone?: string | null } | null;
+    };
+  }>;
+  buildings: Array<{
+    id: string;
+    buildingId: string;
+    building: { id: string; name: string; code?: string | null; address?: string | null };
+  }>;
+  /** Contadores agregados de OS em andamento, usados no dashboard de equipes. */
+  openCount?: number;
+  overdueCount?: number;
+};
+
 export type GestaoOsWorkOrder = {
   id: string;
   displayNumber: number;
@@ -85,6 +131,8 @@ export type GestaoOsWorkOrder = {
   assigneeId: string | null;
   assignee: GestaoOsUserRef | null;
   teamUserIds?: string[];
+  teamId?: string | null;
+  team?: GestaoOsTeamRef | null;
   origin?: GestaoOsOrigin | null;
   sacKind?: GestaoOsSacKind | null;
   fiscalRating?: number | null;
@@ -145,6 +193,7 @@ export type GestaoOsMaintenancePlan = {
   category: string | null;
   buildingId: string | null;
   assetId: string | null;
+  teamId?: string | null;
   checklistId: string | null;
   intervalDays: number;
   nextDueAt: string;
@@ -159,6 +208,7 @@ export type GestaoOsMaintenancePlan = {
   asset?: { id: string; name: string; category?: string | null } | null;
   checklist?: { id: string; name: string; items?: unknown } | null;
   assignee?: GestaoOsUserRef | null;
+  team?: (GestaoOsTeamRef & { members?: Array<{ userId: string }> }) | null;
 };
 
 export type GestaoOsDocument = {
@@ -189,6 +239,15 @@ export type GestaoOsReportsSummary = {
   byCategory: Array<{ category: string; count: number }>;
   byBuilding: Array<{ buildingId: string | null; name: string; count: number }>;
   byTechnician: Array<{ assigneeId: string | null; name: string; count: number }>;
+  byTeam?: Array<{
+    teamId: string;
+    name: string;
+    code: string | null;
+    membersCount: number;
+    count: number;
+    open: number;
+    resolved: number;
+  }>;
   monthlyByCategory?: Array<{
     month: string;
     total: number;
@@ -266,7 +325,9 @@ export const ORIGIN_LABELS: Record<GestaoOsOrigin, string> = {
 export const SAC_KIND_LABELS: Record<GestaoOsSacKind, string> = {
   CHAMADO: 'Chamado',
   DUVIDA: 'Dúvida',
-  RECLAMACAO: 'Reclamação'
+  INFORMACAO: 'Pedido de informação',
+  RECLAMACAO: 'Reclamação',
+  ELOGIO: 'Elogio'
 };
 
 export type GestaoOsLocationTree = Array<{

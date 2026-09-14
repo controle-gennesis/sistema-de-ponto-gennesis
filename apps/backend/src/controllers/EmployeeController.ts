@@ -110,6 +110,7 @@ export const createEmployee = async (req: Request, res: Response) => {
       salary,
       isRemote = false,
       role = 'EMPLOYEE',
+      phone,
       // Novos campos
       company,
       bank,
@@ -194,6 +195,7 @@ export const createEmployee = async (req: Request, res: Response) => {
             workDays: [1, 2, 3, 4, 5] // Segunda a sexta
           },
           isRemote,
+          phone: phone || null,
           // Novos campos
           company,
           bank,
@@ -263,6 +265,7 @@ export const updateEmployee = async (req: Request, res: Response) => {
       isRemote,
       role,
       isActive,
+      phone,
       // Novos campos
       company,
       bank,
@@ -342,6 +345,7 @@ export const updateEmployee = async (req: Request, res: Response) => {
           ...(hireDate && { hireDate: hireDate.includes('T') ? new Date(hireDate) : new Date(hireDate + 'T04:00:00') }),
           ...(salary && { salary: parseFloat(salary) }),
           ...(isRemote !== undefined && { isRemote }),
+          ...(phone !== undefined && { phone: phone || null }),
           // Novos campos
           ...(company !== undefined && { company }),
           ...(bank !== undefined && { bank }),

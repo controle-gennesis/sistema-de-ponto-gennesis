@@ -137,6 +137,7 @@ const workOrderInclude = {
   sector: { select: { id: true, name: true } },
   place: { select: { id: true, name: true } },
   asset: { select: { id: true, name: true, category: true, qrToken: true } },
+  team: { select: { id: true, name: true, code: true } },
   events: {
     orderBy: { createdAt: 'asc' as const },
     include: { actor: { select: { id: true, name: true } } }
@@ -573,6 +574,11 @@ export class GestaoOsService {
       assigneeId?: string;
       involvedUserId?: string;
       buildingId?: string;
+      teamId?: string;
+      origin?: string;
+      category?: string;
+      dateFrom?: string;
+      dateTo?: string;
       unitPortal?: boolean;
       overdue?: boolean;
       limit?: number;
@@ -611,6 +617,21 @@ export class GestaoOsService {
       if (params.assigneeId) where.assigneeId = params.assigneeId;
     }
     if (params.buildingId) where.buildingId = params.buildingId;
+    if (params.teamId) where.teamId = params.teamId;
+    if (params.origin) where.origin = parseOrigin(params.origin);
+    if (params.category) where.category = params.category;
+
+    // Intervalo de abertura do chamado: "até" cobre o dia inteiro informado.
+    const openedFrom = params.dateFrom ? new Date(params.dateFrom) : null;
+    const openedTo = params.dateTo ? new Date(params.dateTo) : null;
+    if (openedTo && !Number.isNaN(openedTo.getTime())) openedTo.setHours(23, 59, 59, 999);
+    if (openedFrom && !Number.isNaN(openedFrom.getTime())) {
+      where.openedAt = { ...(where.openedAt as object), gte: openedFrom };
+    }
+    if (openedTo && !Number.isNaN(openedTo.getTime())) {
+      where.openedAt = { ...(where.openedAt as object), lte: openedTo };
+    }
+
     if (params.unitPortal) {
       const unitIds = await loadUnitBuildingIds(access.userId);
       if (!unitIds.length) return [];
@@ -782,6 +803,7 @@ export class GestaoOsService {
       origin?: unknown;
       sacKind?: unknown;
       teamUserIds?: unknown;
+      teamId?: string | null;
     },
     access: GestaoOsAccessContext
   ) {
@@ -870,6 +892,17 @@ export class GestaoOsService {
 
     const sacKind = origin === 'SAC' ? parseSacKind(input.sacKind) : null;
 
+    // Equipe informada na abertura tem prioridade; senão herda a equipe vinculada à localidade.
+    let teamId = input.teamId?.trim() || null;
+    if (!teamId && buildingId) {
+      const defaultTeam = await prisma.gestaoOsTeamBuilding.findFirst({
+        where: { buildingId, team: { isActive: true } },
+        orderBy: { createdAt: 'asc' },
+        select: { teamId: true }
+      });
+      teamId = defaultTeam?.teamId ?? null;
+    }
+
     const created = await prisma.$transaction(async (tx) => {
       const agg = await tx.gestaoOsWorkOrder.aggregate({ _max: { displayNumber: true } });
       const displayNumber = (agg._max.displayNumber ?? 0) + 1;
@@ -887,6 +920,7 @@ export class GestaoOsService {
           sectorId: sectorId || null,
           placeId: placeId || null,
           assetId: input.assetId || null,
+          teamId,
           locationLabel,
           requesterId: input.requesterId,
           assigneeId,
@@ -991,6 +1025,7 @@ export class GestaoOsService {
       endPhotoUrl?: string | null;
       autoAssign?: boolean;
       teamUserIds?: unknown;
+      teamId?: string | null;
     },
     access: GestaoOsAccessContext
   ) {
@@ -1030,6 +1065,9 @@ export class GestaoOsService {
     }
     if (input.providerName !== undefined) {
       data.providerName = input.providerName ? String(input.providerName).trim() : null;
+    }
+    if (input.teamId !== undefined) {
+      data.team = input.teamId ? { connect: { id: String(input.teamId) } } : { disconnect: true };
     }
     if (input.category != null) {
       const category = String(input.category).trim();

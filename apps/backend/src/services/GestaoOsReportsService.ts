@@ -15,6 +15,7 @@ export type GestaoOsReportFilters = {
   origin?: string | null;
   assigneeId?: string | null;
   teamUserId?: string | null;
+  teamId?: string | null;
   unitPortal?: boolean;
 };
 
@@ -31,6 +32,7 @@ function applyReportFilters(
   if (filters.buildingId) where.buildingId = filters.buildingId;
   if (filters.origin) where.origin = filters.origin;
   if (filters.assigneeId) where.assigneeId = filters.assigneeId;
+  if (filters.teamId) where.teamId = filters.teamId;
   if (filters.teamUserId) {
     where.OR = [
       { assigneeId: filters.teamUserId },
@@ -68,50 +70,56 @@ export class GestaoOsReportsService {
       'REWORK'
     ];
 
-    const [byStatus, overdue, completed, byCategory, byBuilding, byAssignee] = await Promise.all([
-      prisma.gestaoOsWorkOrder.groupBy({
-        by: ['status'],
-        where: visibility,
-        _count: { _all: true }
-      }),
-      prisma.gestaoOsWorkOrder.count({
-        where: {
-          ...visibility,
-          dueAt: { lt: new Date() },
-          status: { in: openStatuses }
-        }
-      }),
-      prisma.gestaoOsWorkOrder.findMany({
-        where: {
-          ...visibility,
-          status: { in: ['COMPLETED', 'CLOSED'] },
-          OR: [{ startedAt: { not: null } }, { completedAt: { not: null } }]
-        },
-        select: { id: true, startedAt: true, completedAt: true, status: true },
-        take: 2000
-      }),
-      prisma.gestaoOsWorkOrder.groupBy({
-        by: ['category'],
-        where: visibility,
-        _count: { _all: true },
-        orderBy: { _count: { category: 'desc' } },
-        take: 20
-      }),
-      prisma.gestaoOsWorkOrder.groupBy({
-        by: ['buildingId'],
-        where: { ...visibility, buildingId: { not: null } },
-        _count: { _all: true },
-        orderBy: { _count: { buildingId: 'desc' } },
-        take: 20
-      }),
-      prisma.gestaoOsWorkOrder.groupBy({
-        by: ['assigneeId'],
-        where: { ...visibility, assigneeId: { not: null } },
-        _count: { _all: true },
-        orderBy: { _count: { assigneeId: 'desc' } },
-        take: 20
-      })
-    ]);
+    const [byStatus, overdue, completed, byCategory, byBuilding, byAssignee, byTeam] =
+      await Promise.all([
+        prisma.gestaoOsWorkOrder.groupBy({
+          by: ['status'],
+          where: visibility,
+          _count: { _all: true }
+        }),
+        prisma.gestaoOsWorkOrder.count({
+          where: {
+            ...visibility,
+            dueAt: { lt: new Date() },
+            status: { in: openStatuses }
+          }
+        }),
+        prisma.gestaoOsWorkOrder.findMany({
+          where: {
+            ...visibility,
+            status: { in: ['COMPLETED', 'CLOSED'] },
+            OR: [{ startedAt: { not: null } }, { completedAt: { not: null } }]
+          },
+          select: { id: true, startedAt: true, completedAt: true, status: true },
+          take: 2000
+        }),
+        prisma.gestaoOsWorkOrder.groupBy({
+          by: ['category'],
+          where: visibility,
+          _count: { _all: true },
+          orderBy: { _count: { category: 'desc' } },
+          take: 20
+        }),
+        prisma.gestaoOsWorkOrder.groupBy({
+          by: ['buildingId'],
+          where: { ...visibility, buildingId: { not: null } },
+          _count: { _all: true },
+          orderBy: { _count: { buildingId: 'desc' } },
+          take: 20
+        }),
+        prisma.gestaoOsWorkOrder.groupBy({
+          by: ['assigneeId'],
+          where: { ...visibility, assigneeId: { not: null } },
+          _count: { _all: true },
+          orderBy: { _count: { assigneeId: 'desc' } },
+          take: 20
+        }),
+        prisma.gestaoOsWorkOrder.groupBy({
+          by: ['teamId', 'status'],
+          where: { ...visibility, teamId: { not: null } },
+          _count: { _all: true }
+        })
+      ]);
 
     let mttrHours: number | null = null;
     if (completed.length) {
@@ -136,7 +144,8 @@ export class GestaoOsReportsService {
 
     const buildingIds = byBuilding.map((b) => b.buildingId!).filter(Boolean);
     const assigneeIds = byAssignee.map((a) => a.assigneeId!).filter(Boolean);
-    const [buildings, users] = await Promise.all([
+    const teamIds = [...new Set(byTeam.map((t) => t.teamId!).filter(Boolean))];
+    const [buildings, users, teamRows] = await Promise.all([
       buildingIds.length
         ? prisma.gestaoOsBuilding.findMany({
             where: { id: { in: buildingIds } },
@@ -148,10 +157,29 @@ export class GestaoOsReportsService {
             where: { id: { in: assigneeIds } },
             select: { id: true, name: true }
           })
+        : Promise.resolve([]),
+      teamIds.length
+        ? prisma.gestaoOsTeam.findMany({
+            where: { id: { in: teamIds } },
+            select: { id: true, name: true, code: true, _count: { select: { members: true } } }
+          })
         : Promise.resolve([])
     ]);
     const buildingMap = new Map(buildings.map((b) => [b.id, b.name]));
     const userMap = new Map(users.map((u) => [u.id, u.name]));
+
+    const teamStats = new Map<
+      string,
+      { total: number; open: number; resolved: number }
+    >();
+    for (const row of byTeam) {
+      if (!row.teamId) continue;
+      const bucket = teamStats.get(row.teamId) ?? { total: 0, open: 0, resolved: 0 };
+      bucket.total += row._count._all;
+      if (openStatuses.includes(row.status)) bucket.open += row._count._all;
+      if (row.status === 'COMPLETED' || row.status === 'CLOSED') bucket.resolved += row._count._all;
+      teamStats.set(row.teamId, bucket);
+    }
 
     const backlog = byStatus.reduce((s, g) => s + g._count._all, 0);
     const openLike = byStatus
@@ -179,6 +207,20 @@ export class GestaoOsReportsService {
         name: userMap.get(g.assigneeId!) || '—',
         count: g._count._all
       })),
+      byTeam: teamRows
+        .map((team) => {
+          const stats = teamStats.get(team.id) ?? { total: 0, open: 0, resolved: 0 };
+          return {
+            teamId: team.id,
+            name: team.name,
+            code: team.code,
+            membersCount: team._count.members,
+            count: stats.total,
+            open: stats.open,
+            resolved: stats.resolved
+          };
+        })
+        .sort((a, b) => b.count - a.count),
       monthlyByCategory: await this.monthlyByCategory(visibility),
       materials: await this.materialsSummary(visibility),
       pendencias: await this.pendencias(visibility)
@@ -454,6 +496,9 @@ export class GestaoOsReportsService {
       `resumo,resolvidas,${data.resolved}`,
       `resumo,atrasadas,${data.overdue}`,
       ...data.byCategory.map((r) => `categoria,${csvCell(r.category)},${r.count}`),
+      ...data.byTeam.map(
+        (r) => `equipe,${csvCell(r.name)},${r.count}|${r.open}|${r.resolved}|${r.membersCount}`
+      ),
       ...data.monthlyByCategory.flatMap((m) =>
         m.byCategory.map((r) => `volume-mensal,${m.month} ${csvCell(r.category)},${r.count}`)
       ),

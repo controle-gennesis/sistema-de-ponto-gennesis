@@ -17,6 +17,7 @@ import { TOMADORES_LIST } from '@/constants/tomadores';
 import { CARGOS_AVAILABLE } from '@/constants/cargos';
 import { useCostCenters } from '@/hooks/useCostCenters';
 import { useModalCloseConfirm } from '@/hooks/useModalCloseConfirm';
+import { formatPhoneBR } from '@/lib/phone';
 import api from '@/lib/api';
 import toast from 'react-hot-toast';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
@@ -87,6 +88,7 @@ interface EmployeeFormData {
   email: string;
   cpf: string;
   password: string;
+  phone: string;
 
   // Dados do funcionário
   employeeId: string;
@@ -235,6 +237,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
     email: '',
     cpf: '',
     password: '',
+    phone: '',
     employeeId: generateEmployeeId(),
     sector: '',
     position: '',
@@ -351,6 +354,7 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
         birthDate: birthDateISO || null,
         salary: parseCurrencyBRToNumber(data.salary),
         isRemote: data.isRemote,
+        phone: data.phone.trim() || null,
         workSchedule: {
           startTime: data.workStartTime,
           endTime: data.workEndTime,
@@ -1225,6 +1229,20 @@ export function CreateEmployeeForm({ onClose }: CreateEmployeeFormProps) {
                     {errors.cpf}
                   </p>
                 )}
+              </div>
+
+              <div>
+                <label className={FIELD_LABEL_CLS}>
+                  Telefone de contato
+                </label>
+                <input
+                  type="tel"
+                  value={formData.phone}
+                  onChange={(e) => handleInputChange('phone', formatPhoneBR(e.target.value))}
+                  className={fieldInputCls(false)}
+                  placeholder="(00) 00000-0000"
+                  maxLength={15}
+                />
               </div>
 
               <div>

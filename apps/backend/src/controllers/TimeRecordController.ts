@@ -2,7 +2,7 @@ import { Response, NextFunction } from 'express';
 import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { TimeRecordService } from '../services/TimeRecordService';
-import { LocationService } from '../services/LocationService';
+import { LocationService, parseAllowedLocations } from '../services/LocationService';
 import { PhotoService } from '../services/PhotoService';
 import { HolidayService } from '../services/HolidayService';
 import { uploadPhoto, handleUploadError } from '../middleware/upload';
@@ -82,20 +82,50 @@ export class TimeRecordController {
         throw createError('Tipo de registro inválido', 400);
       }
 
-      // Sempre permitir bater ponto de qualquer lugar, mas salvar a localização
+      // Conferência de presença por geolocalização (configurável em Configurações da Empresa).
+      // Com a cerca desligada, o ponto continua sendo aceito de qualquer lugar.
+      const geofencePolicy = await locationService.getGeofencePolicy();
+      const hasCoordinates =
+        latNum !== null &&
+        lonNum !== null &&
+        !Number.isNaN(latNum) &&
+        !Number.isNaN(lonNum) &&
+        locationService.isValidCoordinates(latNum, lonNum);
+
       let isValidLocation = true;
       let locationReason = '';
 
-      // Se a localização foi fornecida, validar e salvar
-      if (latNum !== null && lonNum !== null && !Number.isNaN(latNum) && !Number.isNaN(lonNum)) {
-        // Verificar se as coordenadas são válidas
-        if (locationService.isValidCoordinates(latNum, lonNum)) {
-          locationReason = `Localização registrada: ${locationService.formatLocation(latNum, lonNum)}`;
-        } else {
-          locationReason = 'Coordenadas inválidas fornecidas';
-        }
+      if (hasCoordinates) {
+        locationReason = `Localização registrada: ${locationService.formatLocation(latNum!, lonNum!)}`;
+      } else if (latNum !== null && lonNum !== null) {
+        locationReason = 'Coordenadas inválidas fornecidas';
       } else {
         locationReason = 'Localização não fornecida';
+      }
+
+      if (geofencePolicy.enabled) {
+        if (!hasCoordinates) {
+          isValidLocation = false;
+          if (geofencePolicy.requireLocation) {
+            throw createError(
+              'Ative a localização do dispositivo para registrar o ponto. A confirmação de presença por geolocalização está ativa.',
+              400
+            );
+          }
+        } else {
+          const validation = await locationService.validateLocation(
+            latNum!,
+            lonNum!,
+            parseAllowedLocations(employee.allowedLocations),
+            geofencePolicy
+          );
+          isValidLocation = validation.isValid;
+          locationReason = validation.reason;
+
+          if (!validation.isValid && geofencePolicy.blockOutside) {
+            throw createError(validation.reason, 400);
+          }
+        }
       }
 
       // Upload da foto se fornecida
@@ -227,7 +257,7 @@ export class TimeRecordController {
           longitude: lonNum !== null && !Number.isNaN(lonNum) ? lonNum : null,
           photoUrl: photoUrl || null,
           photoKey: photoKey || null,
-          isValid: true, // Sempre válido - permitir bater ponto de qualquer lugar
+          isValid: isValidLocation,
           reason: locationReason, // Sempre incluir informações da localização
           observation: observation && observation.trim() ? observation.trim() : null, // Observação do funcionário
           foodVoucherAmount,

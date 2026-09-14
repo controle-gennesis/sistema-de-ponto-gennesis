@@ -3,7 +3,17 @@ import type { GestaoOsReportsSummary } from '@/app/ponto/sistema-gestao-os/gesta
 import { STATUS_LABELS } from '@/app/ponto/sistema-gestao-os/gestaoOsTypes';
 import { loadPdfBrandingLogo } from '@/lib/loadPdfBrandingLogo';
 
-export async function exportGestaoOsReportsPdf(data: GestaoOsReportsSummary) {
+type ExportOptions = {
+  title?: string;
+  /** Linha extra sob o título, ex.: nome da localidade e período do recorte. */
+  subtitle?: string;
+  fileName?: string;
+};
+
+export async function exportGestaoOsReportsPdf(
+  data: GestaoOsReportsSummary,
+  options: ExportOptions = {}
+) {
   const pdf = new jsPDF({ unit: 'mm', format: 'a4' });
   const pageW = pdf.internal.pageSize.getWidth();
   const pageH = pdf.internal.pageSize.getHeight();
@@ -24,10 +34,14 @@ export async function exportGestaoOsReportsPdf(data: GestaoOsReportsSummary) {
 
   pdf.setFont('helvetica', 'bold');
   pdf.setFontSize(14);
-  pdf.text('Relatório gerencial de OS', pageW / 2, y, { align: 'center' });
+  pdf.text(options.title || 'Relatório gerencial de OS', pageW / 2, y, { align: 'center' });
   y += 7;
   pdf.setFont('helvetica', 'normal');
   pdf.setFontSize(9);
+  if (options.subtitle) {
+    pdf.text(options.subtitle, pageW / 2, y, { align: 'center' });
+    y += 5;
+  }
   pdf.text(`Gerado em ${new Date().toLocaleString('pt-BR')}`, pageW / 2, y, { align: 'center' });
   y += 10;
 
@@ -61,6 +75,27 @@ export async function exportGestaoOsReportsPdf(data: GestaoOsReportsSummary) {
     ensure();
     pdf.text(`${STATUS_LABELS[status as keyof typeof STATUS_LABELS] || status}: ${count}`, 14, y);
     y += 5;
+  }
+
+  y += 3;
+  ensure(12);
+  pdf.setFont('helvetica', 'bold');
+  pdf.text('Desempenho por equipe', 14, y);
+  y += 5;
+  pdf.setFont('helvetica', 'normal');
+  if (!data.byTeam?.length) {
+    pdf.text('Nenhuma equipe com chamado no recorte.', 14, y);
+    y += 5;
+  } else {
+    for (const row of data.byTeam.slice(0, 30)) {
+      ensure();
+      pdf.text(
+        `${row.name}: ${row.count} OS · ${row.open} em aberto · ${row.resolved} concluídas · ${row.membersCount} integrante(s)`,
+        14,
+        y
+      );
+      y += 5;
+    }
   }
 
   y += 3;
@@ -121,5 +156,5 @@ export async function exportGestaoOsReportsPdf(data: GestaoOsReportsSummary) {
     }
   }
 
-  pdf.save(`relatorio-os-${new Date().toISOString().slice(0, 10)}.pdf`);
+  pdf.save(options.fileName || `relatorio-os-${new Date().toISOString().slice(0, 10)}.pdf`);
 }

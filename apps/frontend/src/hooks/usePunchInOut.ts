@@ -58,7 +58,8 @@ export const usePunchInOut = () => {
       queryClient.invalidateQueries({ queryKey: ['dashboard'] });
     },
     onError: (error: any) => {
-      const errorMessage = error.response?.data?.error || 'Erro ao registrar ponto';
+      const errorMessage =
+        error.response?.data?.error || error.response?.data?.message || 'Erro ao registrar ponto';
       setError(errorMessage);
       toast.error(errorMessage);
     },

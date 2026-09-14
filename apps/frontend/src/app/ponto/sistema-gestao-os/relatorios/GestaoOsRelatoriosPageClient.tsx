@@ -35,7 +35,8 @@ import {
   STATUS_LABELS,
   type GestaoOsLocationTree,
   type GestaoOsOrigin,
-  type GestaoOsStatus
+  type GestaoOsStatus,
+  type GestaoOsTeam
 } from '../gestaoOsTypes';
 import { useGestaoOsCompany } from '../useGestaoOsCompany';
 import {
@@ -153,6 +154,7 @@ export default function GestaoOsRelatoriosPageClient() {
   const [buildingId, setBuildingId] = useState('');
   const [origin, setOrigin] = useState('');
   const [assigneeId, setAssigneeId] = useState('');
+  const [teamId, setTeamId] = useState('');
   const [mapShowAssets, setMapShowAssets] = useState(true);
   const [mapShowWorkOrders, setMapShowWorkOrders] = useState(true);
   const reportParams = {
@@ -161,7 +163,8 @@ export default function GestaoOsRelatoriosPageClient() {
     buildingId: buildingId || undefined,
     origin: origin || undefined,
     assigneeId: assigneeId || undefined,
-    teamUserId: assigneeId || undefined
+    teamUserId: assigneeId || undefined,
+    teamId: teamId || undefined
   };
 
   const { data: locationTree = [] } = useQuery({
@@ -185,9 +188,32 @@ export default function GestaoOsRelatoriosPageClient() {
     }
   });
 
+  const { data: teams = [] } = useQuery({
+    queryKey: ['gestao-os-cadastros', 'teams'],
+    enabled: !loadingCompany,
+    queryFn: async () => {
+      const res = await api.get<{ success: boolean; data: GestaoOsTeam[] }>(
+        '/gestao-os/cadastros/teams'
+      );
+      return res.data?.data ?? [];
+    }
+  });
+
   const technicianSelectOptions = useMemo(
     () => gestaoOsTechnicianSelectOptions(technicians),
     [technicians]
+  );
+
+  const teamSelectOptions = useMemo(
+    () =>
+      labeledToSelectOptions(
+        teams.map((team) => ({
+          value: team.id,
+          label: team.name,
+          searchText: `${team.name} ${team.code ?? ''}`
+        }))
+      ),
+    [teams]
   );
 
   const { data, isLoading } = useQuery({
@@ -251,7 +277,7 @@ export default function GestaoOsRelatoriosPageClient() {
             </p>
           </div>
 
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-6">
             <div>
               <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
                 De
@@ -299,7 +325,7 @@ export default function GestaoOsRelatoriosPageClient() {
             </div>
             <div>
               <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                Técnico / equipe
+                Técnico
               </label>
               <StringSingleSelectDropdown
                 value={assigneeId}
@@ -307,6 +333,19 @@ export default function GestaoOsRelatoriosPageClient() {
                 options={technicianSelectOptions}
                 placeholder="Todos"
                 emptyOptionLabel="Todos"
+                allowEmpty
+              />
+            </div>
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Equipe
+              </label>
+              <StringSingleSelectDropdown
+                value={teamId}
+                onChange={setTeamId}
+                options={teamSelectOptions}
+                placeholder="Todas"
+                emptyOptionLabel="Todas"
                 allowEmpty
               />
             </div>
@@ -514,6 +553,77 @@ export default function GestaoOsRelatoriosPageClient() {
                       title="Nenhum prédio com coordenadas no recorte"
                       hint="Verifique se o prédio (localidade) possui lat/lng cadastrados."
                     />
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card className={cadastroListClasses.card}>
+                <CardHeader className={cadastroListClasses.cardHeader}>
+                  <div className={cadastroListClasses.cardHeaderIconRow}>
+                    <div className="rounded-lg bg-red-100 p-2 dark:bg-red-900/30 sm:p-3">
+                      <Users className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6" />
+                    </div>
+                    <div className="min-w-0">
+                      <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                        Desempenho por equipe
+                      </h3>
+                      <p className="text-sm text-gray-600 dark:text-gray-400">
+                        Tarefas executadas pelas equipes de serviço no recorte selecionado
+                      </p>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className={cadastroListClasses.cardContent}>
+                  {(data.byTeam ?? []).length === 0 ? (
+                    <CadastroListEmpty
+                      icon={Users}
+                      title="Nenhuma equipe com chamado no recorte"
+                      hint="Vincule equipes às localidades e aos agendamentos para acompanhar aqui."
+                    />
+                  ) : (
+                    <div className={cadastroListClasses.tableScroll}>
+                      <table className={`${cadastroListClasses.table} min-w-[36rem]`}>
+                        <thead className="border-b border-gray-200 dark:border-gray-700">
+                          <tr>
+                            <th className={cadastroListClasses.th}>Equipe</th>
+                            <th className={cadastroListClasses.thCenter}>Integrantes</th>
+                            <th className={cadastroListClasses.thCenter}>Total</th>
+                            <th className={cadastroListClasses.thCenter}>Em aberto</th>
+                            <th className={cadastroListClasses.thCenter}>Concluídas</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
+                          {(data.byTeam ?? []).map((row) => (
+                            <tr key={row.teamId}>
+                              <td className={cadastroListClasses.td}>
+                                <span className="block truncate font-medium">{row.name}</span>
+                                {row.code ? (
+                                  <span className="mt-0.5 block truncate text-xs text-gray-500 dark:text-gray-400">
+                                    {row.code}
+                                  </span>
+                                ) : null}
+                              </td>
+                              <td className={cadastroListClasses.tdCenter}>
+                                <span className="tabular-nums">{row.membersCount}</span>
+                              </td>
+                              <td className={cadastroListClasses.tdCenter}>
+                                <span className="tabular-nums font-semibold">{row.count}</span>
+                              </td>
+                              <td className={cadastroListClasses.tdCenter}>
+                                <span className="tabular-nums font-semibold text-amber-700 dark:text-amber-300">
+                                  {row.open}
+                                </span>
+                              </td>
+                              <td className={cadastroListClasses.tdCenter}>
+                                <span className="tabular-nums font-semibold text-emerald-700 dark:text-emerald-300">
+                                  {row.resolved}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   )}
                 </CardContent>
               </Card>

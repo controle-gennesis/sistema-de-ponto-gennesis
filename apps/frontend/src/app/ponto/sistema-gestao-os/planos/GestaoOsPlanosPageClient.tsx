@@ -39,6 +39,7 @@ import {
   GestaoOsLocationTree,
   GestaoOsMaintenancePlan,
   GestaoOsPlanType,
+  GestaoOsTeam,
   GestaoOsDocument,
   DOCUMENT_KIND_LABELS,
   PLAN_TYPE_LABELS,
@@ -124,6 +125,7 @@ type PlanForm = {
   intervalDays: string;
   nextDueAt: string;
   scheduledTime: string;
+  teamId: string;
   technicianIds: string[];
   rotateTechnicians: boolean;
   checklistText: string;
@@ -144,6 +146,7 @@ function emptyForm(): PlanForm {
     intervalDays: '30',
     nextDueAt: '',
     scheduledTime: '',
+    teamId: '',
     technicianIds: [],
     rotateTechnicians: false,
     checklistText: ''
@@ -280,6 +283,18 @@ export default function GestaoOsPlanosPageClient() {
     }
   });
 
+  const { data: teams = [] } = useQuery({
+    queryKey: ['gestao-os-cadastros', 'teams'],
+    enabled: !loadingCompany,
+    queryFn: async () => {
+      const res = await api.get<{ success: boolean; data: GestaoOsTeam[] }>(
+        '/gestao-os/cadastros/teams',
+        { params: { onlyActive: '1' } }
+      );
+      return res.data?.data ?? [];
+    }
+  });
+
   const { data: ifspDocs = [] } = useQuery({
     queryKey: ['gestao-os-ifsp-docs'],
     enabled: !loadingCompany,
@@ -372,6 +387,21 @@ export default function GestaoOsPlanosPageClient() {
     () => gestaoOsTechnicianSelectOptions(technicians),
     [technicians]
   );
+  /** Equipes da localidade escolhida vêm primeiro; as demais seguem disponíveis para troca. */
+  const teamOptions = useMemo(() => {
+    const servesBuilding = (team: GestaoOsTeam) =>
+      !!form.buildingId && team.buildings.some((b) => b.buildingId === form.buildingId);
+    const sorted = [...teams].sort((a, b) => {
+      const diff = Number(servesBuilding(b)) - Number(servesBuilding(a));
+      return diff !== 0 ? diff : a.name.localeCompare(b.name, 'pt-BR');
+    });
+    return labeledToSelectOptions(
+      sorted.map((team) => ({
+        value: team.id,
+        label: servesBuilding(team) ? `${team.name} (atende o local)` : team.name
+      }))
+    );
+  }, [teams, form.buildingId]);
 
   const q = searchTerm.trim().toLowerCase();
   const rows = useMemo(() => {
@@ -424,6 +454,7 @@ export default function GestaoOsPlanosPageClient() {
       intervalDays: String(plan.intervalDays || 30),
       nextDueAt: isoToYmd(plan.nextDueAt),
       scheduledTime: plan.scheduledTime || '',
+      teamId: plan.teamId || '',
       technicianIds:
         asIdList(plan.technicianIds).length > 0
           ? asIdList(plan.technicianIds)
@@ -450,6 +481,15 @@ export default function GestaoOsPlanosPageClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams, plans, locationTree]);
 
+  // Sugere a equipe da localidade quando nenhuma foi escolhida manualmente.
+  useEffect(() => {
+    if (!showForm || !form.buildingId || form.teamId) return;
+    const suggestion = teams.find((team) =>
+      team.buildings.some((b) => b.buildingId === form.buildingId)
+    );
+    if (suggestion) setForm((s) => (s.teamId ? s : { ...s, teamId: suggestion.id }));
+  }, [showForm, form.buildingId, form.teamId, teams]);
+
   const planPayload = () => ({
     name: form.name.trim(),
     planType: form.planType,
@@ -460,6 +500,7 @@ export default function GestaoOsPlanosPageClient() {
     scheduledTime: form.scheduledTime || null,
     buildingId: form.buildingId || null,
     assetId: form.specifyAsset ? form.assetId || null : null,
+    teamId: form.teamId || null,
     technicianIds: form.technicianIds,
     rotateTechnicians: form.technicianIds.length >= 2 && form.rotateTechnicians,
     checklistItems: form.checklistText,
@@ -1082,6 +1123,23 @@ export default function GestaoOsPlanosPageClient() {
                   </div>
                   <div className="sm:col-span-2">
                     <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Equipe de serviço
+                    </label>
+                    <StringSingleSelectDropdown
+                      value={form.teamId}
+                      onChange={(v) => setForm((s) => ({ ...s, teamId: v }))}
+                      options={teamOptions}
+                      placeholder="Selecione a equipe"
+                      emptyOptionLabel="Sem equipe definida"
+                      allowEmpty
+                    />
+                    <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                      A equipe sugerida é a vinculada à localidade, mas você pode trocá-la neste
+                      agendamento.
+                    </p>
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                       Técnico(s)
                     </label>
                     <MultiSelectSearchDropdown
@@ -1275,6 +1333,16 @@ export default function GestaoOsPlanosPageClient() {
                   <p className="text-sm text-gray-900 dark:text-gray-100">
                     {formatDate(viewing.nextDueAt)}
                     {viewing.scheduledTime ? ` · ${viewing.scheduledTime}` : ''}
+                  </p>
+                </div>
+                <div>
+                  <p className="mb-1 text-xs font-medium uppercase tracking-wide text-gray-500">
+                    Equipe
+                  </p>
+                  <p className="text-sm text-gray-900 dark:text-gray-100">
+                    {viewing.team?.name ||
+                      teams.find((team) => team.id === viewing.teamId)?.name ||
+                      '—'}
                   </p>
                 </div>
                 <div>

@@ -17,6 +17,9 @@ const uploadAvatar = multer({
 
 // Rotas públicas
 router.post('/login', authController.login);
+router.post('/forgot-password', authController.forgotPassword);
+router.get('/reset-password/validate', authController.validateResetToken);
+router.post('/reset-password', authController.resetPassword);
 // Aceita access token válido ou expirado dentro da janela de graça
 router.post('/refresh-token', authenticateForRefresh, authController.publicRefreshToken);
 

@@ -1,3 +1,6 @@
+import { prisma } from '../lib/prisma';
+import { getCompanySettings } from '../lib/cache';
+
 export interface LocationValidation {
   isValid: boolean;
   reason: string;
@@ -10,6 +13,38 @@ export interface Location {
   latitude: number;
   longitude: number;
   radius: number; // em metros
+}
+
+/** Política de cerca virtual configurada em CompanySettings. */
+export interface GeofencePolicy {
+  enabled: boolean;
+  blockOutside: boolean;
+  requireLocation: boolean;
+  maxDistanceMeters: number;
+  defaultLatitude: number;
+  defaultLongitude: number;
+}
+
+/** Converte o Json `Employee.allowedLocations` em locais utilizáveis na validação. */
+export function parseAllowedLocations(raw: unknown): Location[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((item) => {
+    if (!item || typeof item !== 'object') return [];
+    const entry = item as Record<string, unknown>;
+    const latitude = Number(entry.latitude);
+    const longitude = Number(entry.longitude);
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return [];
+    const radius = Number(entry.radius);
+    return [
+      {
+        id: String(entry.id ?? `${latitude},${longitude}`),
+        name: String(entry.name ?? 'Local autorizado'),
+        latitude,
+        longitude,
+        radius: Number.isFinite(radius) && radius > 0 ? radius : 300,
+      },
+    ];
+  });
 }
 
 export class LocationService {
@@ -42,12 +77,37 @@ export class LocationService {
   }
 
   /**
+   * Lê a política de cerca virtual das configurações da empresa, caindo para as
+   * variáveis de ambiente quando ainda não há registro salvo.
+   */
+  async getGeofencePolicy(): Promise<GeofencePolicy> {
+    const settings = await getCompanySettings(prisma);
+    return {
+      enabled: settings?.geofenceEnabled ?? false,
+      blockOutside: settings?.geofenceBlockOutside ?? true,
+      requireLocation: settings?.geofenceRequireLocation ?? true,
+      maxDistanceMeters:
+        Number(settings?.maxDistanceMeters) ||
+        parseInt(process.env.MAX_DISTANCE_METERS || '1000'),
+      defaultLatitude:
+        Number.isFinite(Number(settings?.defaultLatitude))
+          ? Number(settings.defaultLatitude)
+          : parseFloat(process.env.DEFAULT_LATITUDE || '-23.5505'),
+      defaultLongitude:
+        Number.isFinite(Number(settings?.defaultLongitude))
+          ? Number(settings.defaultLongitude)
+          : parseFloat(process.env.DEFAULT_LONGITUDE || '-46.6333'),
+    };
+  }
+
+  /**
    * Valida se a localização está dentro dos locais permitidos
    */
   async validateLocation(
     latitude: number,
     longitude: number,
-    allowedLocations: Location[]
+    allowedLocations: Location[],
+    policy?: GeofencePolicy
   ): Promise<LocationValidation> {
     // Modo desenvolvimento: pular validação
     if ((process.env.SKIP_LOCATION_VALIDATION || '').toLowerCase() === 'true') {
@@ -62,7 +122,7 @@ export class LocationService {
 
     // Se não há locais permitidos, usar localização padrão da empresa
     if (!allowedLocations || allowedLocations.length === 0) {
-      return this.validateWithDefaultLocation(latitude, longitude, expandedRadius);
+      return this.validateWithDefaultLocation(latitude, longitude, expandedRadius, policy);
     }
 
     // Verificar se está dentro de algum local permitido (com possível expansão de raio em dev)
@@ -123,12 +183,13 @@ export class LocationService {
   private async validateWithDefaultLocation(
     latitude: number,
     longitude: number,
-    expandedRadius: number = 0
+    expandedRadius: number = 0,
+    policy?: GeofencePolicy
   ): Promise<LocationValidation> {
-    const defaultLatitude = parseFloat(process.env.DEFAULT_LATITUDE || '-23.5505');
-    const defaultLongitude = parseFloat(process.env.DEFAULT_LONGITUDE || '-46.6333');
-    const maxDistanceBase = parseInt(process.env.MAX_DISTANCE_METERS || '1000');
-    const maxDistance = Math.max(maxDistanceBase, expandedRadius || 0);
+    const effectivePolicy = policy ?? (await this.getGeofencePolicy());
+    const defaultLatitude = effectivePolicy.defaultLatitude;
+    const defaultLongitude = effectivePolicy.defaultLongitude;
+    const maxDistance = Math.max(effectivePolicy.maxDistanceMeters, expandedRadius || 0);
 
     const distance = this.calculateDistance(
       latitude,

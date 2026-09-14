@@ -59,6 +59,7 @@ export const PERMISSION_MODULE_KEYS_OPEN_ACCESS: readonly string[] = [
   pathToModuleKey('/ponto/kanban'),
   pathToModuleKey('/ponto/flow'),
   pathToModuleKey('/ponto/central-de-ajuda'),
+  pathToModuleKey('/ponto/treinamentos'),
 ];
 
 /**
@@ -84,6 +85,13 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
   { key: pathToModuleKey('/ponto/drive'), name: 'Meu Drive', href: '/ponto/drive', category: 'Principal' },
   /** Acesso livre — oculto na matriz «Acesso» (ver PERMISSION_MODULE_KEYS_OPEN_ACCESS). */
   { key: pathToModuleKey('/ponto/kanban'), name: 'Tasks', href: '/ponto/kanban', category: 'Principal' },
+  /** Acesso livre — todo funcionário pode fazer os cursos publicados. */
+  {
+    key: pathToModuleKey('/ponto/treinamentos'),
+    name: 'Central de Treinamentos',
+    href: '/ponto/treinamentos',
+    category: 'Principal',
+  },
   // Departamento Pessoal
   { key: pathToModuleKey('/ponto/funcionarios'), name: 'Funcionários e Externos', href: '/ponto/funcionarios', category: 'Departamento Pessoal' },
   { key: pathToModuleKey('/ponto/folha-pagamento'), name: 'Folha de Pagamento', href: '/ponto/folha-pagamento', category: 'Departamento Pessoal' },
@@ -306,6 +314,18 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
     key: pathToModuleKey('/ponto/sistema-gestao-os/tipos-servico'),
     name: 'Tipos de Serviço',
     href: '/ponto/sistema-gestao-os/tipos-servico',
+    category: 'Cadastros',
+  },
+  {
+    key: pathToModuleKey('/ponto/sistema-gestao-os/equipes'),
+    name: 'Equipes de Serviço',
+    href: '/ponto/sistema-gestao-os/equipes',
+    category: 'Cadastros',
+  },
+  {
+    key: pathToModuleKey('/ponto/treinamentos/administracao'),
+    name: 'Treinamentos',
+    href: '/ponto/treinamentos/administracao',
     category: 'Cadastros',
   },
   // Registros de Ponto

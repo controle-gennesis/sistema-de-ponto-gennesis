@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
+import { useQuery } from '@tanstack/react-query';
 import { MapPin, Clock, AlertCircle, DoorOpen, DoorClosed, Utensils, UtensilsCrossed, Camera, X, RotateCcw, CheckCircle, Download, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Card, CardContent } from '@/components/ui/Card';
@@ -32,6 +33,22 @@ export const PunchCard: React.FC<PunchCardProps> = ({ onSuccess, showCloseButton
   const [punchData, setPunchData] = useState<{ type: TimeRecordType; timestamp: Date } | null>(null);
   
   const { location, error: locationError, loading: locationLoading, refetch: refetchLocation } = useGeolocation();
+
+  const { data: geofence } = useQuery({
+    queryKey: ['company-geofence-settings'],
+    staleTime: 5 * 60 * 1000,
+    queryFn: async () => {
+      const res = await api.get<{
+        success: boolean;
+        data: { geofenceEnabled?: boolean; geofenceRequireLocation?: boolean };
+      }>('/company/settings');
+      return {
+        enabled: !!res.data?.data?.geofenceEnabled,
+        requireLocation: res.data?.data?.geofenceRequireLocation ?? true,
+      };
+    },
+  });
+  const locationRequired = !!geofence?.enabled && geofence.requireLocation;
   const { 
     punchInOut, 
     loading: punchLoading, 
@@ -184,6 +201,13 @@ export const PunchCard: React.FC<PunchCardProps> = ({ onSuccess, showCloseButton
   const handlePunch = async () => {
     if (!capturedPhoto) {
       alert('Por favor, tire uma foto antes de bater o ponto');
+      return;
+    }
+
+    if (locationRequired && !location) {
+      alert(
+        'A confirmação de presença por geolocalização está ativa. Permita o acesso à localização e tente novamente.'
+      );
       return;
     }
 
@@ -380,7 +404,17 @@ export const PunchCard: React.FC<PunchCardProps> = ({ onSuccess, showCloseButton
 
   const getLocationStatus = () => {
     if (locationLoading) return { text: 'Obtendo localização...', variant: 'info' as const };
-    if (locationError) return { text: 'Localização não disponível - ponto será registrado sem localização', variant: 'warning' as const };
+    if (locationError) {
+      return locationRequired
+        ? {
+            text: 'Localização obrigatória - ative o GPS para bater o ponto',
+            variant: 'error' as const,
+          }
+        : {
+            text: 'Localização não disponível - ponto será registrado sem localização',
+            variant: 'warning' as const,
+          };
+    }
     if (location) return { text: 'Localização registrada', variant: 'success' as const };
     return { text: 'Aguardando localização...', variant: 'info' as const };
   };
