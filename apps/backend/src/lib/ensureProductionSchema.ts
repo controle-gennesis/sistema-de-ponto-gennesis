@@ -1310,6 +1310,12 @@ async function ensureUserActivityTracking(prisma: PrismaClient): Promise<void> {
     await prisma.$executeRawUnsafe(
       `ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "lastActivityLabel" TEXT;`
     );
+    await prisma.$executeRawUnsafe(
+      `ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "facePhotoUrl" TEXT;`
+    );
+    await prisma.$executeRawUnsafe(
+      `ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "facePhotoKey" TEXT;`
+    );
   }
 
   if (!(await tableExists(prisma, 'user_login_events'))) {

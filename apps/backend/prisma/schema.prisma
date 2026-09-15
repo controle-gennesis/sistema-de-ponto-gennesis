@@ -24,6 +24,10 @@ model User {
   profilePhotoUrl   String?
   /// Chave no S3 (quando usar armazenamento em nuvem)
   profilePhotoKey   String?
+  /// Foto sÃ©ria usada no confronto facial do ponto (nÃ£o Ã© o avatar)
+  facePhotoUrl      String?
+  /// Chave no S3 da foto de confronto do ponto
+  facePhotoKey      String?
   /// Ãltimo login bem-sucedido
   lastLoginAt       DateTime?
   /// Ãltima atividade observada (page view / heartbeat)
@@ -365,7 +369,7 @@ model CompanySettings {
   /// Exige que o dispositivo envie coordenadas para registrar o ponto
   geofenceRequireLocation Boolean @default(true)
   /// Confronta a foto do ponto com a foto cadastrada no painel
-  requireFaceMatch        Boolean @default(false)
+  requireFaceMatch        Boolean @default(true)
   /// Exige leitura do QR da localidade no registro de ponto
   requirePunchQr          Boolean @default(false)
   vacationDaysPerYear  Int      @default(30)

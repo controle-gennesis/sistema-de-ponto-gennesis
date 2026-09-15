@@ -8,7 +8,7 @@ import {
 } from 'react-native';
 import { MaterialTopTabBarProps } from '@react-navigation/material-top-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { House, Fuel, CarFront, Inbox, Plus, Clock, Wrench, Camera, type LucideIcon } from 'lucide-react-native';
+import { House, Fuel, CarFront, Inbox, Plus, Clock, Wrench, type LucideIcon } from 'lucide-react-native';
 import { useTheme } from '../context/ThemeContext';
 import { emitFabBarLongPress, emitFabBarPress, FabBarTabName } from './fabBarEvents';
 import { useChromeVisibility } from './ChromeVisibilityContext';
@@ -50,7 +50,7 @@ const FAB_ICONS: Record<string, LucideIcon> = {
   DpRequests: Plus,
   Fuel: Plus,
   Vehicle: Plus,
-  GestaoOs: Camera,
+  GestaoOs: Plus,
 };
 
 const FAB_LABELS: Record<string, string> = {
@@ -59,7 +59,7 @@ const FAB_LABELS: Record<string, string> = {
   DpRequests: 'Nova',
   Fuel: 'Nova',
   Vehicle: 'Nova',
-  GestaoOs: 'Escanear QR',
+  GestaoOs: 'Nova',
 };
 
 function TabIconView({

@@ -106,7 +106,12 @@ export class TimeRecordController {
           dailyFoodVoucher: true,
           dailyTransportVoucher: true,
           user: {
-            select: { name: true, email: true, profilePhotoUrl: true, profilePhotoKey: true }
+            select: {
+              name: true,
+              email: true,
+              facePhotoUrl: true,
+              facePhotoKey: true,
+            }
           }
         }
       });
@@ -188,18 +193,18 @@ export class TimeRecordController {
         }
       }
 
-      // Upload da foto se fornecida
-      let photoUrl = '';
-      let photoKey = '';
-
-      if (photo) {
-        const photoResult = await photoService.uploadPhoto(photo, userId);
-        photoUrl = photoResult.url;
-        photoKey = photoResult.key;
+      if (!photo) {
+        throw createError(
+          'Tire uma foto do rosto para registrar o ponto. A selfie é confrontada com a foto de ponto cadastrada no painel.',
+          400
+        );
       }
 
+      const photoResult = await photoService.uploadPhoto(photo, userId);
+      const photoUrl = photoResult.url;
+      const photoKey = photoResult.key;
+
       const punchFlags = await loadPunchFlags();
-      const requireFaceMatch = punchFlags.requireFaceMatch;
       const requirePunchQr = punchFlags.requirePunchQr;
 
       const allowedPunchLocations =
@@ -244,31 +249,27 @@ export class TimeRecordController {
       let faceMatchSimilarity: number | null = null;
       let faceMatchReason = '';
 
-      if (requireFaceMatch || photo) {
-        const face = await faceMatchService.comparePunchToProfile({
-          profilePhotoUrl: employee.user?.profilePhotoUrl,
-          profilePhotoKey: employee.user?.profilePhotoKey,
-          punchPhotoUrl: photoUrl || null,
-          punchPhotoKey: photoKey || null,
-          requireMatch: requireFaceMatch,
-        });
-        faceMatchStatus = face.status;
-        faceMatchSimilarity = face.similarity;
-        faceMatchReason = face.reason;
+      const face = await faceMatchService.comparePunchToProfile({
+        facePhotoUrl: employee.user?.facePhotoUrl,
+        facePhotoKey: employee.user?.facePhotoKey,
+        punchPhotoUrl: photoUrl || null,
+        punchPhotoKey: photoKey || null,
+        requireMatch: true,
+      });
+      faceMatchStatus = face.status;
+      faceMatchSimilarity = face.similarity;
+      faceMatchReason = face.reason;
 
-        if (requireFaceMatch) {
-          if (face.status === 'no_profile_photo' || face.status === 'no_punch_photo') {
-            throw createError(face.reason, 400);
-          }
-          if (face.status === 'mismatch' || face.status === 'unavailable') {
-            throw createError(face.reason, 400);
-          }
-        }
-        if (faceMatchReason) {
-          locationReason = locationReason
-            ? `${locationReason} · ${faceMatchReason}`
-            : faceMatchReason;
-        }
+      if (face.status === 'no_profile_photo' || face.status === 'no_punch_photo') {
+        throw createError(face.reason, 400);
+      }
+      if (face.status === 'mismatch' || face.status === 'unavailable') {
+        throw createError(face.reason, 400);
+      }
+      if (faceMatchReason) {
+        locationReason = locationReason
+          ? `${locationReason} · ${faceMatchReason}`
+          : faceMatchReason;
       }
 
       if (qrLocation) {
@@ -459,6 +460,44 @@ export class TimeRecordController {
     }
   }
 
+  /** Preview ao vivo: compara um frame com a foto de ponto, sem registrar batida. */
+  async faceCheck(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = req.user!.id;
+      const photo = (req as unknown as Express.Request & { file?: Express.Multer.File }).file;
+      if (!photo?.buffer) {
+        throw createError('Envie um frame da câmera para o confronto facial', 400);
+      }
+
+      const employee = await prisma.employee.findUnique({
+        where: { userId },
+        select: {
+          user: { select: { facePhotoUrl: true, facePhotoKey: true } },
+        },
+      });
+      if (!employee) throw createError('Dados de funcionário não encontrados', 404);
+
+      const face = await faceMatchService.comparePunchToProfile({
+        facePhotoUrl: employee.user?.facePhotoUrl,
+        facePhotoKey: employee.user?.facePhotoKey,
+        punchPhotoBytes: photo.buffer,
+        requireMatch: true,
+      });
+
+      res.json({
+        success: true,
+        data: {
+          status: face.status,
+          similarity: face.similarity,
+          reason: face.reason,
+          matched: face.status === 'matched',
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
   async getPunchPolicy(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const userId = req.user!.id;
@@ -470,21 +509,26 @@ export class TimeRecordController {
           select: {
             allowedLocations: true,
             isRemote: true,
-            user: { select: { profilePhotoUrl: true } },
+            user: { select: { facePhotoUrl: true, facePhotoKey: true } },
           },
         }),
       ]);
       const employeeLocations = parseAllowedLocations(employee?.allowedLocations);
       const locations = employeeLocations.length > 0 ? employeeLocations : policy.locations;
+      const hasFacePhoto = Boolean(
+        employee?.user?.facePhotoUrl || employee?.user?.facePhotoKey
+      );
       res.json({
         success: true,
         data: {
           geofenceEnabled: policy.enabled,
           geofenceBlockOutside: policy.blockOutside,
           geofenceRequireLocation: policy.requireLocation,
-          requireFaceMatch: punchFlags.requireFaceMatch,
+          requireFaceMatch: true,
           requirePunchQr: punchFlags.requirePunchQr,
-          hasProfilePhoto: Boolean(employee?.user?.profilePhotoUrl),
+          hasFacePhoto,
+          hasProfilePhoto: hasFacePhoto,
+          facePhotoUrl: employee?.user?.facePhotoUrl || null,
           isRemote: Boolean(employee?.isRemote),
           locations: locations.map((loc) => ({
             id: loc.id,

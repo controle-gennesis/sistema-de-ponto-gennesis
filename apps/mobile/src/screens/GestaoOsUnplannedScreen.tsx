@@ -15,15 +15,15 @@ import { StatusBar } from 'expo-status-bar';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Check, ChevronDown, MapPin } from 'lucide-react-native';
+import { Check, ChevronDown } from 'lucide-react-native';
 import { useTheme } from '../context/ThemeContext';
 import AppHeader from '../components/AppHeader';
 import FormFieldLabel from '../components/FormFieldLabel';
 import {
   createUnplannedWorkOrder,
-  fetchFieldBuildings,
+  fetchFieldPlaces,
   fetchGestaoOsCategories,
-  type GestaoOsFieldBuilding,
+  type GestaoOsFieldPlace,
 } from '../services/gestaoOs';
 import type { RootStackParamList } from '../../App';
 
@@ -33,30 +33,30 @@ export default function GestaoOsUnplannedScreen() {
   const styles = useMemo(() => getStyles(colors, isDark), [colors, isDark]);
   const queryClient = useQueryClient();
 
-  const [building, setBuilding] = useState<GestaoOsFieldBuilding | null>(null);
+  const [place, setPlace] = useState<GestaoOsFieldPlace | null>(null);
   const [category, setCategory] = useState('Outros');
   const [description, setDescription] = useState('');
-  const [picker, setPicker] = useState<'building' | 'category' | null>(null);
+  const [picker, setPicker] = useState<'place' | 'category' | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const buildingsQuery = useQuery({
-    queryKey: ['gestao-os-field-buildings'],
-    queryFn: fetchFieldBuildings,
+  const placesQuery = useQuery({
+    queryKey: ['gestao-os-field-places'],
+    queryFn: fetchFieldPlaces,
   });
   const categoriesQuery = useQuery({
     queryKey: ['gestao-os-categories'],
     queryFn: fetchGestaoOsCategories,
   });
 
-  const buildings = buildingsQuery.data || [];
+  const places = placesQuery.data || [];
   const categories = (categoriesQuery.data || [])
     .map((row) => String((row as { name?: string }).name || '').trim())
     .filter(Boolean);
   const categoryOptions = categories.length ? categories : ['Elétrica', 'Hidráulica', 'Outros'];
 
   const onSubmit = async () => {
-    if (!building) {
-      Alert.alert('Localidade', 'Selecione a localidade atendida.');
+    if (!place) {
+      Alert.alert('Local', 'Selecione o local.');
       return;
     }
     if (!description.trim()) {
@@ -68,9 +68,9 @@ export default function GestaoOsUnplannedScreen() {
       const wo = (await createUnplannedWorkOrder({
         category: category || 'Outros',
         description: description.trim(),
-        buildingId: building.id,
-        sectorId: building.sectorId,
-        placeId: building.placeId,
+        buildingId: place.buildingId,
+        sectorId: place.sectorId,
+        placeId: place.placeId,
       })) as { id?: string; displayNumber?: number };
       void queryClient.invalidateQueries({ queryKey: ['gestao-os-mine'] });
       Alert.alert(
@@ -96,20 +96,22 @@ export default function GestaoOsUnplannedScreen() {
   return (
     <View style={styles.safe}>
       <StatusBar style={isDark ? 'light' : 'dark'} />
-      <AppHeader />
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-        <Text style={styles.title}>Ocorrência não prevista</Text>
+      <AppHeader showBack title="Ocorrência não prevista" onBack={() => navigation.goBack()} />
+      <ScrollView
+        contentContainerStyle={styles.content}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
         <Text style={styles.subtitle}>
           Informe o que aconteceu na localidade mesmo sem o QR do ativo.
         </Text>
 
-        <FormFieldLabel label="Localidade" required style={styles.label} />
-        <TouchableOpacity style={styles.select} onPress={() => setPicker('building')} activeOpacity={0.8}>
-          <MapPin size={16} color={colors.textSecondary} />
-          <Text style={[styles.selectText, !building && styles.placeholder]} numberOfLines={2}>
-            {building
-              ? `${building.name}${building.address ? ` · ${building.address}` : ''}`
-              : 'Selecionar localidade'}
+        <FormFieldLabel label="Local" required style={styles.label} />
+        <TouchableOpacity style={styles.select} onPress={() => setPicker('place')} activeOpacity={0.8}>
+          <Text style={[styles.selectText, !place && styles.placeholder]} numberOfLines={2}>
+            {place
+              ? [place.name, place.buildingName].filter(Boolean).join(' · ')
+              : 'Selecionar local'}
           </Text>
           <ChevronDown size={16} color={colors.textSecondary} />
         </TouchableOpacity>
@@ -132,8 +134,8 @@ export default function GestaoOsUnplannedScreen() {
         />
 
         <TouchableOpacity
-          style={[styles.primary, (loading || !building || !description.trim()) && { opacity: 0.55 }]}
-          disabled={loading || !building || !description.trim()}
+          style={[styles.primary, (loading || !place || !description.trim()) && { opacity: 0.55 }]}
+          disabled={loading || !place || !description.trim()}
           onPress={() => void onSubmit()}
           activeOpacity={0.85}
         >
@@ -145,25 +147,38 @@ export default function GestaoOsUnplannedScreen() {
         <Pressable style={styles.backdrop} onPress={() => setPicker(null)}>
           <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
             <Text style={styles.sheetTitle}>
-              {picker === 'building' ? 'Localidade' : 'Categoria'}
+              {picker === 'place' ? 'Local' : 'Categoria'}
             </Text>
             <ScrollView style={{ maxHeight: 360 }}>
-              {(picker === 'building' ? buildings : categoryOptions.map((name) => ({ id: name, name }))).map(
-                (item) => (
-                  <TouchableOpacity
-                    key={item.id}
-                    style={styles.option}
-                    onPress={() => {
-                      if (picker === 'building') setBuilding(item as GestaoOsFieldBuilding);
-                      else setCategory(item.name);
-                      setPicker(null);
-                    }}
-                  >
-                    <Text style={styles.optionText}>{item.name}</Text>
-                    {(picker === 'building' ? building?.id === item.id : category === item.name) ? (
-                      <Check size={16} color={colors.primary} />
-                    ) : null}
-                  </TouchableOpacity>
+              {picker === 'place' && places.length === 0 ? (
+                <Text style={styles.optionSub}>Nenhum local cadastrado.</Text>
+              ) : (
+                (picker === 'place' ? places : categoryOptions.map((name) => ({ id: name, name }))).map(
+                  (item) => (
+                    <TouchableOpacity
+                      key={item.id}
+                      style={styles.option}
+                      onPress={() => {
+                        if (picker === 'place') setPlace(item as GestaoOsFieldPlace);
+                        else setCategory(item.name);
+                        setPicker(null);
+                      }}
+                    >
+                      <View style={{ flex: 1, paddingRight: 12 }}>
+                        <Text style={styles.optionText}>{item.name}</Text>
+                        {picker === 'place' && 'buildingName' in item && item.buildingName ? (
+                          <Text style={styles.optionSub}>
+                            {[item.buildingName, (item as GestaoOsFieldPlace).sectorName]
+                              .filter(Boolean)
+                              .join(' · ')}
+                          </Text>
+                        ) : null}
+                      </View>
+                      {(picker === 'place' ? place?.id === item.id : category === item.name) ? (
+                        <Check size={16} color={colors.primary} />
+                      ) : null}
+                    </TouchableOpacity>
+                  )
                 )
               )}
             </ScrollView>
@@ -176,10 +191,9 @@ export default function GestaoOsUnplannedScreen() {
 
 const getStyles = (colors: any, isDark: boolean) =>
   StyleSheet.create({
-    safe: { flex: 1, backgroundColor: 'transparent' },
-    content: { padding: 20, paddingBottom: 40 },
-    title: { fontSize: 24, fontWeight: '800', color: colors.text },
-    subtitle: { marginTop: 6, marginBottom: 18, color: colors.textSecondary, lineHeight: 20 },
+    safe: { flex: 1, backgroundColor: colors.screenRoot },
+    content: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 40 },
+    subtitle: { marginBottom: 18, color: colors.textSecondary, lineHeight: 20, fontSize: 14 },
     label: { marginTop: 12, marginBottom: 6 },
     select: {
       flexDirection: 'row',
@@ -232,5 +246,6 @@ const getStyles = (colors: any, isDark: boolean) =>
       borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.08)',
     },
-    optionText: { color: colors.text, fontSize: 15, flex: 1, paddingRight: 12 },
+    optionText: { color: colors.text, fontSize: 15 },
+    optionSub: { color: colors.textSecondary, fontSize: 12, marginTop: 2 },
   });

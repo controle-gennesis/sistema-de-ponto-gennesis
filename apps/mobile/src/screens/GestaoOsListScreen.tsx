@@ -20,7 +20,9 @@ import { useQuery } from '@tanstack/react-query';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import {
+  AlertTriangle,
   MapPin,
+  QrCode,
   Search,
   Wrench,
   X,
@@ -113,6 +115,7 @@ export default function GestaoOsListScreen() {
   const [cardFilter, setCardFilter] = useState<CardFilter>('all');
   const [qrToken, setQrToken] = useState('');
   const [tokenOpen, setTokenOpen] = useState(false);
+  const [actionOpen, setActionOpen] = useState(false);
   const [scannerOpen, setScannerOpen] = useState(false);
   const [followTarget, setFollowTarget] = useState<GestaoOsWorkOrderMobile | null>(null);
   const [permission, requestPermission] = useCameraPermissions();
@@ -138,7 +141,7 @@ export default function GestaoOsListScreen() {
 
   useEffect(() => {
     const sub = onFabBarPress('GestaoOs', () => {
-      void openScanner();
+      setActionOpen(true);
     });
     const longSub = onFabBarLongPress('GestaoOs', () => {
       setTokenOpen(true);
@@ -147,7 +150,7 @@ export default function GestaoOsListScreen() {
       sub.remove();
       longSub.remove();
     };
-  }, [openScanner]);
+  }, []);
 
   const onScanned = (result: BarcodeScanningResult) => {
     if (scanLockRef.current) return;
@@ -250,13 +253,6 @@ export default function GestaoOsListScreen() {
     <View>
       <Text style={styles.pageTitle}>Chamados</Text>
       <Text style={styles.pageSubtitle}>Acompanhe seus chamados e o histórico dos atendimentos</Text>
-      <TouchableOpacity
-        style={styles.unplannedBtn}
-        onPress={() => navigation.navigate('GestaoOsUnplanned')}
-        activeOpacity={0.85}
-      >
-        <Text style={styles.unplannedBtnText}>Reportar ocorrência não prevista</Text>
-      </TouchableOpacity>
 
       {memberships.length > 1 ? (
         <View style={styles.companyRow}>
@@ -533,6 +529,55 @@ export default function GestaoOsListScreen() {
       </Modal>
 
       <Modal
+        visible={actionOpen}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setActionOpen(false)}
+      >
+        <Pressable style={styles.tokenBackdrop} onPress={() => setActionOpen(false)}>
+          <Pressable style={styles.tokenSheet} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.tokenTitle}>O que deseja fazer?</Text>
+            <Text style={styles.actionHint}>Escolha como abrir o chamado</Text>
+            <TouchableOpacity
+              style={styles.actionOption}
+              onPress={() => {
+                setActionOpen(false);
+                void openScanner();
+              }}
+              activeOpacity={0.85}
+            >
+              <View style={styles.actionIconWrap}>
+                <QrCode size={20} color={colors.primary} strokeWidth={2.2} />
+              </View>
+              <View style={styles.actionCopy}>
+                <Text style={styles.actionOptionTitle}>Escanear QR do ativo</Text>
+                <Text style={styles.actionOptionSub}>Ler o código colado no equipamento</Text>
+              </View>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.actionOption}
+              onPress={() => {
+                setActionOpen(false);
+                navigation.navigate('GestaoOsUnplanned');
+              }}
+              activeOpacity={0.85}
+            >
+              <View style={styles.actionIconWrap}>
+                <AlertTriangle size={20} color={colors.primary} strokeWidth={2.2} />
+              </View>
+              <View style={styles.actionCopy}>
+                <Text style={styles.actionOptionTitle}>Ocorrência não prevista</Text>
+                <Text style={styles.actionOptionSub}>Registrar sem o QR do ativo</Text>
+              </View>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.actionCancel} onPress={() => setActionOpen(false)}>
+              <Text style={styles.actionCancelText}>Cancelar</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal
         visible={scannerOpen}
         animationType="slide"
         presentationStyle="fullScreen"
@@ -614,19 +659,6 @@ const getStyles = (colors: any, isDark: boolean) =>
       fontSize: 14,
       fontWeight: '500',
       marginBottom: 12,
-    },
-    unplannedBtn: {
-      alignSelf: 'flex-start',
-      backgroundColor: colors.primary,
-      borderRadius: 12,
-      paddingHorizontal: 14,
-      paddingVertical: 10,
-      marginBottom: 16,
-    },
-    unplannedBtnText: {
-      color: '#fff',
-      fontWeight: '700',
-      fontSize: 13,
     },
     companyRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 14 },
     companyChip: {
@@ -903,4 +935,40 @@ const getStyles = (colors: any, isDark: boolean) =>
     tokenPrimaryText: { color: '#fff', fontWeight: '700', fontSize: 15 },
     tokenCancel: { alignItems: 'center', paddingVertical: 8 },
     tokenCancelText: { color: colors.textSecondary, fontWeight: '600', fontSize: 14 },
+    actionHint: {
+      color: colors.textSecondary,
+      fontSize: 13,
+      fontWeight: '500',
+      marginTop: -4,
+      marginBottom: 4,
+    },
+    actionOption: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      paddingVertical: 12,
+      paddingHorizontal: 12,
+      borderRadius: 14,
+      backgroundColor: isDark ? colors.screenRoot : colors.surface,
+      borderWidth: StyleSheet.hairlineWidth * 1.5,
+      borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15, 23, 42, 0.08)',
+    },
+    actionIconWrap: {
+      width: 42,
+      height: 42,
+      borderRadius: 12,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: isDark ? 'rgba(220, 38, 38, 0.18)' : 'rgba(220, 38, 38, 0.1)',
+    },
+    actionCopy: { flex: 1, minWidth: 0 },
+    actionOptionTitle: { color: colors.text, fontSize: 15, fontWeight: '700' },
+    actionOptionSub: {
+      marginTop: 2,
+      color: colors.textSecondary,
+      fontSize: 12,
+      fontWeight: '500',
+    },
+    actionCancel: { alignItems: 'center', paddingVertical: 10 },
+    actionCancelText: { color: colors.textSecondary, fontWeight: '600', fontSize: 14 },
   });

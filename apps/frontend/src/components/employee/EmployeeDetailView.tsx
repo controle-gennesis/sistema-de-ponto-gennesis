@@ -82,6 +82,8 @@ interface Employee {
   isActive: boolean;
   /** URL da foto de perfil (mesmo campo da tabela `users`) */
   profilePhotoUrl?: string | null;
+  /** Foto séria usada no confronto facial do ponto (não é o avatar) */
+  facePhotoUrl?: string | null;
   createdAt?: string;
   lastLoginAt?: string | null;
   lastSeenAt?: string | null;
@@ -219,6 +221,10 @@ export function EmployeeDetailView({
   const [isParsing, setIsParsing] = useState(false);
   const [headerMoreOpen, setHeaderMoreOpen] = useState(false);
   const headerMoreRef = useRef<HTMLDivElement>(null);
+  const facePhotoInputRef = useRef<HTMLInputElement>(null);
+  const [showFacePhotoModal, setShowFacePhotoModal] = useState(false);
+  const [facePhotoDraftFile, setFacePhotoDraftFile] = useState<File | null>(null);
+  const [facePhotoDraftUrl, setFacePhotoDraftUrl] = useState<string | null>(null);
   const [permissionTab, setPermissionTab] = useState<PermissionEditorTab>('gerais');
   const [showContractsTab, setShowContractsTab] = useState(false);
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
@@ -1156,6 +1162,69 @@ export function EmployeeDetailView({
     [selectedEmployee?.id, selectedEmployee?.profilePhotoUrl]
   );
 
+  const selectedEmployeeFacePhotoHref = useMemo(
+    () =>
+      selectedEmployee ? resolveApiMediaUrl(selectedEmployee.facePhotoUrl ?? null) : null,
+    [selectedEmployee?.id, selectedEmployee?.facePhotoUrl]
+  );
+
+  const canSetFacePhoto = canEditEmployees || canManageEmployees;
+
+  const closeFacePhotoModal = () => {
+    setShowFacePhotoModal(false);
+    setFacePhotoDraftFile(null);
+    setFacePhotoDraftUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
+    if (facePhotoInputRef.current) facePhotoInputRef.current.value = '';
+  };
+
+  const uploadFacePhotoMutation = useMutation({
+    mutationFn: async (file: File) => {
+      const fd = new FormData();
+      fd.append('facePhoto', file);
+      const res = await api.patch(`/users/${selectedEmployee!.id}/face-photo`, fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      return res.data?.data as { facePhotoUrl?: string | null };
+    },
+    onSuccess: (data) => {
+      setSelectedEmployee((prev) =>
+        prev ? { ...prev, facePhotoUrl: data?.facePhotoUrl ?? prev.facePhotoUrl } : prev
+      );
+      queryClient.invalidateQueries({ queryKey: ['employee-detail', userId] });
+      toast.success('Foto do ponto atualizada');
+      closeFacePhotoModal();
+    },
+    onError: (error: any) => {
+      toast.error(
+        error?.response?.data?.message ||
+          error?.response?.data?.error ||
+          'Não foi possível salvar a foto do ponto'
+      );
+    },
+  });
+
+  const removeFacePhotoMutation = useMutation({
+    mutationFn: async () => {
+      await api.delete(`/users/${selectedEmployee!.id}/face-photo`);
+    },
+    onSuccess: () => {
+      setSelectedEmployee((prev) => (prev ? { ...prev, facePhotoUrl: null } : prev));
+      queryClient.invalidateQueries({ queryKey: ['employee-detail', userId] });
+      toast.success('Foto do ponto removida');
+      closeFacePhotoModal();
+    },
+    onError: (error: any) => {
+      toast.error(
+        error?.response?.data?.message ||
+          error?.response?.data?.error ||
+          'Não foi possível remover a foto do ponto'
+      );
+    },
+  });
+
   const handleDelete = (employeeId: string) => {
     deleteEmployeeMutation.mutate(employeeId);
   };
@@ -1264,7 +1333,20 @@ export function EmployeeDetailView({
             <MoreVertical className="h-5 w-5" />
           </button>
           {headerMoreOpen && (
-            <div className="absolute right-0 top-full z-50 mt-1 w-52 overflow-hidden rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-800">
+            <div className="absolute right-0 top-full z-50 mt-1 w-60 overflow-hidden rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-800">
+              {canSetFacePhoto && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setHeaderMoreOpen(false);
+                    setShowFacePhotoModal(true);
+                  }}
+                  className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700"
+                >
+                  <Camera className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
+                  {selectedEmployee.facePhotoUrl ? 'Alterar foto do ponto' : 'Definir foto do ponto'}
+                </button>
+              )}
               {canChangeEmployeePassword && selectedEmployee.isActive && (
                 <button
                   type="button"
@@ -1275,7 +1357,9 @@ export function EmployeeDetailView({
                     setShowConfirmPassword(false);
                     setShowChangePasswordModal(true);
                   }}
-                  className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700"
+                  className={`flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700 ${
+                    canSetFacePhoto ? 'border-t border-gray-100 dark:border-gray-700' : ''
+                  }`}
                 >
                   <KeyRound className="h-4 w-4 shrink-0 text-amber-500" />
                   Alterar senha
@@ -2092,6 +2176,108 @@ export function EmployeeDetailView({
                   </div>
                 )}
       </div>
+
+        {showFacePhotoModal && selectedEmployee && (
+          <AppModalOverlay className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center">
+            <div className="absolute inset-0 bg-black/40" onClick={closeFacePhotoModal} />
+            <div className="relative mx-4 w-full max-w-md rounded-lg bg-white shadow-2xl dark:bg-gray-800">
+              <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4 dark:border-gray-700">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Foto do ponto</h3>
+                <button
+                  type="button"
+                  onClick={closeFacePhotoModal}
+                  className="rounded p-2 text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700"
+                  aria-label="Fechar"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              <div className="space-y-4 p-6">
+                <p className="text-sm text-gray-600 dark:text-gray-400">
+                  Esta foto é usada só no confronto facial da batida. Não substitui a foto de perfil.
+                  Prefira um retrato sério, de frente, com boa iluminação.
+                </p>
+                <div className="flex justify-center">
+                  <div className="flex h-40 w-40 items-center justify-center overflow-hidden rounded-2xl bg-gray-100 dark:bg-gray-700">
+                    {facePhotoDraftUrl || selectedEmployeeFacePhotoHref ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={facePhotoDraftUrl || selectedEmployeeFacePhotoHref || ''}
+                        alt="Foto do ponto"
+                        className="h-full w-full object-cover"
+                        referrerPolicy="no-referrer"
+                      />
+                    ) : (
+                      <Camera className="h-10 w-10 text-gray-400" />
+                    )}
+                  </div>
+                </div>
+                <input
+                  ref={facePhotoInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    setFacePhotoDraftFile(file);
+                    setFacePhotoDraftUrl((prev) => {
+                      if (prev) URL.revokeObjectURL(prev);
+                      return URL.createObjectURL(file);
+                    });
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => facePhotoInputRef.current?.click()}
+                  className="flex w-full items-center justify-center gap-2 rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
+                >
+                  <Upload className="h-4 w-4" />
+                  {facePhotoDraftFile || selectedEmployeeFacePhotoHref ? 'Escolher outra foto' : 'Escolher foto'}
+                </button>
+                <div className="flex gap-3 pt-1">
+                  {selectedEmployeeFacePhotoHref && !facePhotoDraftFile ? (
+                    <button
+                      type="button"
+                      onClick={() => removeFacePhotoMutation.mutate()}
+                      disabled={removeFacePhotoMutation.isPending}
+                      className="flex-1 rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 dark:border-red-900/40 dark:text-red-400 dark:hover:bg-red-950/30"
+                    >
+                      Remover
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={closeFacePhotoModal}
+                      className="flex-1 rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
+                    >
+                      Cancelar
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!facePhotoDraftFile) {
+                        toast.error('Escolha uma foto primeiro');
+                        return;
+                      }
+                      uploadFacePhotoMutation.mutate(facePhotoDraftFile);
+                    }}
+                    disabled={uploadFacePhotoMutation.isPending || !facePhotoDraftFile}
+                    className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {uploadFacePhotoMutation.isPending ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Save className="h-4 w-4" />
+                    )}
+                    Salvar
+                  </button>
+                </div>
+              </div>
+            </div>
+          </AppModalOverlay>
+        )}
 
         {/* Modal de edição de registro */}
         {editingRecord && (

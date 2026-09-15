@@ -7,6 +7,14 @@ import { gennecyBotUserWhereExclude } from '../lib/gennecyBotUser';
 import { releaseUserIdentity, buildReleasedIdentity } from '../lib/userIdentityRelease';
 import { ensureDefaultEmployeeAccessPermissions } from '../lib/permissionRegistrySync';
 import { findUserIdsMatchingSearch } from '../lib/normalizeSearchText';
+import { ChatService } from '../services/ChatService';
+
+const chatUploadService = new ChatService();
+const facePhotoSelect = {
+  id: true,
+  facePhotoUrl: true,
+  facePhotoKey: true,
+} as const;
 
 export class UserController {
   async updateUserPassword(req: AuthRequest, res: Response, next: NextFunction) {
@@ -756,6 +764,71 @@ export class UserController {
         success: true,
         exists: !!existingUser,
         user: existingUser ? { id: existingUser.id, name: existingUser.name } : null
+      });
+    } catch (error) {
+      return next(error);
+    }
+  }
+
+  /** Foto séria usada só no confronto facial do ponto — não altera o avatar. */
+  async uploadFacePhoto(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const { id } = req.params;
+      const file = (req as unknown as Express.Request & { file?: Express.Multer.File }).file;
+      if (!file?.buffer) throw createError('Nenhuma imagem enviada', 400);
+
+      const mime = String(file.mimetype || '').toLowerCase();
+      const name = String(file.originalname || '').toLowerCase();
+      const imageOk =
+        mime.startsWith('image/') ||
+        ['.jpg', '.jpeg', '.png', '.webp'].some((ext) => name.endsWith(ext));
+      if (!imageOk) throw createError('Envie uma imagem (JPG, PNG ou WEBP)', 400);
+
+      const existing = await prisma.user.findUnique({
+        where: { id },
+        select: { id: true },
+      });
+      if (!existing) throw createError('Usuário não encontrado', 404);
+
+      const uploadResult = await chatUploadService.uploadFile(file, id);
+      const updated = await prisma.user.update({
+        where: { id },
+        data: {
+          facePhotoUrl: uploadResult.url,
+          facePhotoKey: uploadResult.key,
+        },
+        select: facePhotoSelect,
+      });
+
+      return res.json({
+        success: true,
+        data: updated,
+        message: 'Foto do ponto atualizada',
+      });
+    } catch (error) {
+      return next(error);
+    }
+  }
+
+  async removeFacePhoto(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const { id } = req.params;
+      const existing = await prisma.user.findUnique({
+        where: { id },
+        select: { id: true },
+      });
+      if (!existing) throw createError('Usuário não encontrado', 404);
+
+      const updated = await prisma.user.update({
+        where: { id },
+        data: { facePhotoUrl: null, facePhotoKey: null },
+        select: facePhotoSelect,
+      });
+
+      return res.json({
+        success: true,
+        data: updated,
+        message: 'Foto do ponto removida',
       });
     } catch (error) {
       return next(error);

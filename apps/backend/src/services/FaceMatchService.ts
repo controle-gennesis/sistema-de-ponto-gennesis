@@ -42,21 +42,25 @@ export class FaceMatchService {
   }
 
   async comparePunchToProfile(params: {
-    profilePhotoUrl?: string | null;
-    profilePhotoKey?: string | null;
+    facePhotoUrl?: string | null;
+    facePhotoKey?: string | null;
     punchPhotoUrl?: string | null;
     punchPhotoKey?: string | null;
+    /** Bytes da selfie (ex.: preview ao vivo) — evita gravar frame no S3 */
+    punchPhotoBytes?: Buffer | null;
     requireMatch: boolean;
   }): Promise<FaceMatchResult> {
-    if (!params.profilePhotoUrl && !params.profilePhotoKey) {
+    const facePhotoUrl = params.facePhotoUrl;
+    const facePhotoKey = params.facePhotoKey;
+    if (!facePhotoUrl && !facePhotoKey) {
       return {
         status: 'no_profile_photo',
         similarity: null,
         reason:
-          'Não há foto cadastrada no painel para confrontar a biometria facial. Atualize a foto do colaborador.',
+          'Não há foto de ponto cadastrada para confrontar o rosto. No painel, abra a ficha do colaborador e use os três pontos → Definir foto do ponto.',
       };
     }
-    if (!params.punchPhotoUrl && !params.punchPhotoKey) {
+    if (!params.punchPhotoBytes && !params.punchPhotoUrl && !params.punchPhotoKey) {
       return {
         status: 'no_punch_photo',
         similarity: null,
@@ -64,16 +68,19 @@ export class FaceMatchService {
       };
     }
 
-    const [source, target] = await Promise.all([
-      this.photoService.getImageBytes(params.profilePhotoUrl, params.profilePhotoKey),
-      this.photoService.getImageBytes(params.punchPhotoUrl, params.punchPhotoKey),
+    const [source, targetFromStore] = await Promise.all([
+      this.photoService.getImageBytes(facePhotoUrl, facePhotoKey),
+      params.punchPhotoBytes
+        ? Promise.resolve(null)
+        : this.photoService.getImageBytes(params.punchPhotoUrl, params.punchPhotoKey),
     ]);
+    const target = params.punchPhotoBytes || targetFromStore;
 
     if (!source || source.length < 100) {
       return {
         status: 'no_profile_photo',
         similarity: null,
-        reason: 'Não foi possível ler a foto cadastrada no painel para o confronto facial.',
+        reason: 'Não foi possível ler a foto de ponto cadastrada para o confronto facial.',
       };
     }
     if (!target || target.length < 100) {
@@ -90,7 +97,7 @@ export class FaceMatchService {
         status: params.requireMatch ? 'pending_review' : 'pending_review',
         similarity: null,
         reason:
-          'Foto do ponto e foto do painel foram registradas. O confronto automático (Rekognition) não está configurado neste ambiente; o registro segue para conferência.',
+          'Foto do ponto e foto da batida foram registradas. O confronto automático (Rekognition) não está configurado neste ambiente; o registro segue para conferência.',
       };
     }
 
@@ -112,7 +119,7 @@ export class FaceMatchService {
         return {
           status: 'matched',
           similarity,
-          reason: `Biometria facial conferida com a foto do painel (${similarity.toFixed(1)}%).`,
+          reason: `Biometria facial conferida com a foto de ponto (${similarity.toFixed(1)}%).`,
         };
       }
 
@@ -121,15 +128,15 @@ export class FaceMatchService {
           status: 'mismatch',
           similarity: match ? similarity : null,
           reason: match
-            ? `A foto do ponto não corresponde à foto cadastrada no painel (${similarity.toFixed(1)}%).`
-            : 'Nenhum rosto correspondente foi encontrado entre a foto do ponto e a foto do painel.',
+            ? `A selfie da batida não corresponde à foto de ponto cadastrada (${similarity.toFixed(1)}%).`
+            : 'Nenhum rosto correspondente foi encontrado entre a selfie da batida e a foto de ponto.',
         };
       }
 
       return {
         status: 'mismatch',
         similarity,
-        reason: 'A foto do ponto não corresponde à foto cadastrada no painel.',
+        reason: 'A selfie da batida não corresponde à foto de ponto cadastrada.',
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Falha no confronto facial';

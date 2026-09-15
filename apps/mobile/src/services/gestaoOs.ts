@@ -462,18 +462,18 @@ export async function createWorkOrderFromQr(input: {
   }
 }
 
-export type GestaoOsFieldBuilding = {
+export type GestaoOsFieldPlace = {
   id: string;
   name: string;
-  code?: string | null;
-  sectorId: string;
   placeId: string;
+  sectorId: string;
+  sectorName: string;
+  buildingId: string;
+  buildingName: string;
   address?: string | null;
-  latitude?: number | null;
-  longitude?: number | null;
 };
 
-export async function fetchFieldBuildings(): Promise<GestaoOsFieldBuilding[]> {
+export async function fetchFieldPlaces(): Promise<GestaoOsFieldPlace[]> {
   const { qs, headers } = await withCompany();
   const res = await api.get(`/api/gestao-os/cadastros/field-buildings${qs}`, { headers });
   const data = await parseJson(res);

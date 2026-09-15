@@ -7,12 +7,17 @@ import { UserActivityController } from '../controllers/UserActivityController';
 import { getBirthdayEmployees } from '../controllers/EmployeeController';
 import { importEmployees, importEmployeesPreview, importEmployeesBulk } from '../controllers/EmployeeImportController';
 import { uploadImport, handleUploadError } from '../middleware/upload';
+import multer from 'multer';
 import { prisma } from '../lib/prisma';
 import { createError } from '../middleware/errorHandler';
 import { Response, NextFunction } from 'express';
 
 const router = express.Router();
 const userController = new UserController();
+const uploadFacePhoto = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+});
 const userActivityController = new UserActivityController();
 const CHANGE_EMPLOYEE_PASSWORD_MODULE_KEY = pathToModuleKey('/ponto/controle/alterar-senha-funcionarios');
 
@@ -85,6 +90,14 @@ router.get(
   userActivityController.getUserActivityInsights.bind(userActivityController)
 );
 router.get('/:id/activity', requireEmployeesModuleAccess, userActivityController.getUserActivity);
+router.patch(
+  '/:id/face-photo',
+  requireEmployeesModuleAccess,
+  uploadFacePhoto.single('facePhoto'),
+  handleUploadError,
+  userController.uploadFacePhoto
+);
+router.delete('/:id/face-photo', requireEmployeesModuleAccess, userController.removeFacePhoto);
 router.get('/:id', requireEmployeesModuleAccess, userController.getUserById);
 router.put('/:id', requireEmployeesModuleAccess, userController.updateUser);
 router.delete('/:id', requireEmployeesModuleAccess, userController.deleteUser);

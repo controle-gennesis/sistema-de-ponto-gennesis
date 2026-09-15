@@ -1231,94 +1231,38 @@ export class GestaoOsCadastrosService {
     }));
   }
 
-  async listFieldBuildings(userId: string) {
-    const teamRows = await prisma.gestaoOsTeamMember.findMany({
-      where: { userId, isActive: true },
-      select: { teamId: true },
-    });
-    const teamIds = teamRows.map((row) => row.teamId);
-    const teamBuildings = teamIds.length
-      ? await prisma.gestaoOsTeamBuilding.findMany({
-          where: { teamId: { in: teamIds } },
-          select: { buildingId: true },
-        })
-      : [];
-    let ids = [...new Set(teamBuildings.map((row) => row.buildingId))];
-    if (!ids.length) {
-      const assigned = await prisma.gestaoOsWorkOrder.findMany({
-        where: {
-          OR: [{ assigneeId: userId }, { requesterId: userId }],
-          buildingId: { not: null },
+  async listFieldBuildings(_userId: string) {
+    const places = await prisma.gestaoOsPlace.findMany({
+      where: {
+        isActive: true,
+        sector: { isActive: true, building: { isActive: true } },
+      },
+      select: {
+        id: true,
+        name: true,
+        sector: {
+          select: {
+            id: true,
+            name: true,
+            building: {
+              select: { id: true, name: true, address: true },
+            },
+          },
         },
-        select: { buildingId: true },
-        take: 200,
-      });
-      ids = [...new Set(assigned.map((row) => row.buildingId).filter(Boolean))] as string[];
-    }
-    if (!ids.length) {
-      const all = await prisma.gestaoOsBuilding.findMany({
-        where: { isActive: true },
-        select: { id: true },
-        orderBy: { name: 'asc' },
-        take: 200,
-      });
-      ids = all.map((row) => row.id);
-    }
-    if (!ids.length) return [];
-
-    const map = await loadBuildingEditalMap(ids);
-    const rows = await prisma.gestaoOsBuilding.findMany({
-      where: { id: { in: ids } },
-      select: { id: true, name: true, code: true, address: true, latitude: true, longitude: true },
-      orderBy: { name: 'asc' },
+      },
+      orderBy: [{ name: 'asc' }],
+      take: 500,
     });
-
-    const result = [];
-    for (const row of rows) {
-      const meta = map.get(row.id) || {};
-      let sector = await prisma.gestaoOsSector.findFirst({
-        where: { buildingId: row.id, isActive: true },
-        orderBy: { name: 'asc' },
-        select: { id: true },
-      });
-      if (!sector) {
-        sector = await prisma.gestaoOsSector.create({
-          data: { buildingId: row.id, name: 'Geral', code: 'GERAL' },
-          select: { id: true },
-        });
-      }
-      let place = await prisma.gestaoOsPlace.findFirst({
-        where: { sectorId: sector.id, isActive: true },
-        orderBy: { name: 'asc' },
-        select: { id: true },
-      });
-      if (!place) {
-        place = await prisma.gestaoOsPlace.create({
-          data: { sectorId: sector.id, name: 'Área comum', code: 'AREA' },
-          select: { id: true },
-        });
-      }
-      result.push({
-        id: row.id,
-        name: row.name,
-        code: row.code,
-        sectorId: sector.id,
-        placeId: place.id,
-        address:
-          row.address ||
-          (meta as { address?: string | null }).address ||
-          null,
-        latitude:
-          row.latitude ??
-          (meta as { latitude?: number | null }).latitude ??
-          null,
-        longitude:
-          row.longitude ??
-          (meta as { longitude?: number | null }).longitude ??
-          null,
-      });
-    }
-    return result;
+    return places.map((place) => ({
+      id: place.id,
+      name: place.name,
+      placeId: place.id,
+      sectorId: place.sector.id,
+      sectorName: place.sector.name,
+      buildingId: place.sector.building.id,
+      buildingName: place.sector.building.name,
+      address: place.sector.building.address ?? null,
+    }));
   }
 }
 
