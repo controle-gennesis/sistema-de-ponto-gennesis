@@ -775,7 +775,8 @@ export class DpRequestController {
         req.user.isAdmin,
         dpRequest.requestType,
         dpRequest.contractId,
-        dpRequest.costCenterId
+        dpRequest.costCenterId,
+        dpRequest.sectorSolicitante
       );
 
       const payload = approveDpRequestSchema.parse(req.body);
@@ -838,7 +839,8 @@ export class DpRequestController {
         req.user.isAdmin,
         dpRequest.requestType,
         dpRequest.contractId,
-        dpRequest.costCenterId
+        dpRequest.costCenterId,
+        dpRequest.sectorSolicitante
       );
 
       const payload = rejectDpRequestSchema.parse(req.body);

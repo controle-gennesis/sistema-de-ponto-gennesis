@@ -1770,6 +1770,17 @@ async function ensurePermissionAccessTables(prisma: PrismaClient): Promise<void>
     secondTable: 'contracts',
   });
 
+  if (await tableExists(prisma, 'user_dp_approval_contracts')) {
+    await prisma.$executeRawUnsafe(
+      `ALTER TABLE "user_dp_approval_contracts" ADD COLUMN IF NOT EXISTS "allowedSectors" JSONB NOT NULL DEFAULT '[]';`
+    );
+  }
+  if (await tableExists(prisma, 'user_restricted_dp_approval_cost_centers')) {
+    await prisma.$executeRawUnsafe(
+      `ALTER TABLE "user_restricted_dp_approval_cost_centers" ADD COLUMN IF NOT EXISTS "allowedSectors" JSONB NOT NULL DEFAULT '[]';`
+    );
+  }
+
   if (await tableExists(prisma, 'position_permission_templates')) {
     await prisma.$executeRawUnsafe(
       `ALTER TABLE "position_permission_templates" ADD COLUMN IF NOT EXISTS "restrictedDpApprovalCostCenterIds" JSONB NOT NULL DEFAULT '[]';`
@@ -1779,6 +1790,12 @@ async function ensurePermissionAccessTables(prisma: PrismaClient): Promise<void>
     );
     await prisma.$executeRawUnsafe(
       `ALTER TABLE "position_permission_templates" ADD COLUMN IF NOT EXISTS "fdApprovalContractIds" JSONB NOT NULL DEFAULT '[]';`
+    );
+    await prisma.$executeRawUnsafe(
+      `ALTER TABLE "position_permission_templates" ADD COLUMN IF NOT EXISTS "dpApprovalContractSectors" JSONB NOT NULL DEFAULT '{}';`
+    );
+    await prisma.$executeRawUnsafe(
+      `ALTER TABLE "position_permission_templates" ADD COLUMN IF NOT EXISTS "restrictedDpApprovalCostCenterSectors" JSONB NOT NULL DEFAULT '{}';`
     );
   }
 }

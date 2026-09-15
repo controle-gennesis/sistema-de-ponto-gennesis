@@ -4,6 +4,11 @@ import { createError } from '../middleware/errorHandler';
 import { getContractAccessForUser } from './contractAccess';
 import { AuthRequest } from '../middleware/auth';
 import { isAdmTstDpRequestType } from './dpRequestAdmTst';
+import {
+  isDfAdmLocalLabel,
+  sanitizeDpApprovalSectors,
+  sectorSolicitanteMatches,
+} from './dpApprovalSectors';
 
 export const DP_APPROVE_MODULE_KEY = pathToModuleKey('/ponto/controle/aprovar-solicitacoes-dp');
 export const DP_RESTRICTED_APPROVE_MODULE_KEY = pathToModuleKey(
@@ -102,6 +107,28 @@ async function resolveDpRequestCostCenterId(
   return contract?.costCenterId ?? null;
 }
 
+type RestrictedDpAssignment = {
+  costCenterId: string;
+  isDfAdmLocal: boolean;
+  allowedSectors: string[];
+};
+
+async function getRestrictedDpAssignments(userId: string): Promise<RestrictedDpAssignment[]> {
+  const rows = await prisma.userRestrictedDpApprovalCostCenter.findMany({
+    where: { userId },
+    select: {
+      costCenterId: true,
+      allowedSectors: true,
+      costCenter: { select: { name: true, code: true } },
+    },
+  });
+  return rows.map((row) => ({
+    costCenterId: row.costCenterId,
+    isDfAdmLocal: isDfAdmLocalLabel(row.costCenter?.name, row.costCenter?.code),
+    allowedSectors: sanitizeDpApprovalSectors(row.allowedSectors),
+  }));
+}
+
 async function userHasRestrictedApproveForCostCenter(
   userId: string,
   costCenterId: string | null | undefined
@@ -116,22 +143,70 @@ async function userHasRestrictedApproveForCostCenter(
   return !!ok;
 }
 
+async function userHasRestrictedApproveForRequest(
+  userId: string,
+  costCenterId: string | null | undefined,
+  sectorSolicitante?: string | null
+): Promise<boolean> {
+  if (!costCenterId) return false;
+  const assignments = await getRestrictedDpAssignments(userId);
+  const match = assignments.find((a) => a.costCenterId === costCenterId);
+  if (!match) return false;
+  if (!match.isDfAdmLocal || match.allowedSectors.length === 0) return true;
+  return sectorSolicitanteMatches(match.allowedSectors, sectorSolicitante);
+}
+
 /** Pedidos dos CCs liberados — com ou sem contrato cadastrado. */
 async function restrictedDpApprovalVisibilityWhere(
-  costCenterIds: string[]
+  assignments: RestrictedDpAssignment[]
 ): Promise<Record<string, unknown>> {
-  if (costCenterIds.length === 0) return { id: { in: [] } };
-  const contracts = await prisma.contract.findMany({
-    where: { costCenterId: { in: costCenterIds } },
-    select: { id: true },
-  });
-  const contractIds = contracts.map((c) => c.id);
-  if (contractIds.length === 0) {
-    return { costCenterId: { in: costCenterIds } };
+  if (assignments.length === 0) return { id: { in: [] } };
+
+  const unrestrictedIds: string[] = [];
+  const orParts: Record<string, unknown>[] = [];
+
+  for (const assignment of assignments) {
+    if (assignment.isDfAdmLocal && assignment.allowedSectors.length > 0) {
+      const contracts = await prisma.contract.findMany({
+        where: { costCenterId: assignment.costCenterId },
+        select: { id: true },
+      });
+      const contractIds = contracts.map((c) => c.id);
+      const ccScope =
+        contractIds.length === 0
+          ? { costCenterId: assignment.costCenterId }
+          : {
+              OR: [
+                { costCenterId: assignment.costCenterId },
+                { contractId: { in: contractIds } },
+              ],
+            };
+      orParts.push({
+        AND: [ccScope, sectorWhere(assignment.allowedSectors)],
+      });
+      continue;
+    }
+    unrestrictedIds.push(assignment.costCenterId);
   }
-  return {
-    OR: [{ costCenterId: { in: costCenterIds } }, { contractId: { in: contractIds } }],
-  };
+
+  if (unrestrictedIds.length > 0) {
+    const contracts = await prisma.contract.findMany({
+      where: { costCenterId: { in: unrestrictedIds } },
+      select: { id: true },
+    });
+    const contractIds = contracts.map((c) => c.id);
+    if (contractIds.length === 0) {
+      orParts.push({ costCenterId: { in: unrestrictedIds } });
+    } else {
+      orParts.push({
+        OR: [{ costCenterId: { in: unrestrictedIds } }, { contractId: { in: contractIds } }],
+      });
+    }
+  }
+
+  if (orParts.length === 0) return { id: { in: [] } };
+  if (orParts.length === 1) return orParts[0];
+  return { OR: orParts };
 }
 
 /** Gestor DP comum ou aprovador de solicitações restritas (para entrar na API de aprovações). */
@@ -199,6 +274,29 @@ export async function userHasSensitiveDpCreateControlePermission(userId: string)
   return !!row;
 }
 
+type DpApprovalAssignment = {
+  contractId: string;
+  costCenterId: string | null;
+  isDfAdmLocal: boolean;
+  allowedSectors: string[];
+};
+
+function sectorWhere(allowedSectors: string[]): Record<string, unknown> {
+  if (allowedSectors.length === 1) {
+    return { sectorSolicitante: { equals: allowedSectors[0], mode: 'insensitive' } };
+  }
+  return {
+    OR: allowedSectors.map((setor) => ({
+      sectorSolicitante: { equals: setor, mode: 'insensitive' },
+    })),
+  };
+}
+
+function contractOrCostCenterWhere(contractId: string, costCenterId: string | null): Record<string, unknown> {
+  if (!costCenterId) return { contractId };
+  return { OR: [{ contractId }, { costCenterId }] };
+}
+
 /**
  * `null` = usuário não é gestor DP (sem permissão ou sem contratos vinculados).
  * `{}` = admin (sem filtro de contrato).
@@ -217,22 +315,110 @@ async function buildManagerDpScopeFromContractIds(contractIds: string[]): Promis
   };
 }
 
+async function getDpApprovalAssignments(userId: string): Promise<DpApprovalAssignment[]> {
+  const rows = await prisma.userDpApprovalContract.findMany({
+    where: { userId },
+    select: {
+      contractId: true,
+      allowedSectors: true,
+      contract: {
+        select: {
+          name: true,
+          costCenterId: true,
+          costCenter: { select: { name: true, code: true } },
+        },
+      },
+    },
+  });
+  return rows.map((row) => ({
+    contractId: row.contractId,
+    costCenterId: row.contract.costCenterId,
+    isDfAdmLocal: isDfAdmLocalLabel(
+      row.contract.name,
+      row.contract.costCenter?.name,
+      row.contract.costCenter?.code
+    ),
+    allowedSectors: sanitizeDpApprovalSectors(row.allowedSectors),
+  }));
+}
+
+async function buildManagerDpScopeFromAssignments(
+  assignments: DpApprovalAssignment[]
+): Promise<Record<string, unknown>> {
+  if (assignments.length === 0) return { contractId: { in: [] } };
+
+  const unrestrictedContractIds: string[] = [];
+  const unrestrictedCostCenterIds: string[] = [];
+  const orParts: Record<string, unknown>[] = [];
+
+  for (const assignment of assignments) {
+    if (assignment.isDfAdmLocal && assignment.allowedSectors.length > 0) {
+      orParts.push({
+        AND: [
+          contractOrCostCenterWhere(assignment.contractId, assignment.costCenterId),
+          sectorWhere(assignment.allowedSectors),
+        ],
+      });
+      continue;
+    }
+    unrestrictedContractIds.push(assignment.contractId);
+    if (assignment.costCenterId) unrestrictedCostCenterIds.push(assignment.costCenterId);
+  }
+
+  if (unrestrictedContractIds.length > 0) {
+    const uniqueCcIds = [...new Set(unrestrictedCostCenterIds)];
+    if (uniqueCcIds.length === 0) {
+      orParts.push({ contractId: { in: unrestrictedContractIds } });
+    } else {
+      orParts.push({
+        OR: [
+          { contractId: { in: unrestrictedContractIds } },
+          { costCenterId: { in: uniqueCcIds } },
+        ],
+      });
+    }
+  }
+
+  if (orParts.length === 0) return { contractId: { in: [] } };
+  if (orParts.length === 1) return orParts[0];
+  return { OR: orParts };
+}
+
+function assignmentCoversSector(
+  assignments: DpApprovalAssignment[],
+  contractId: string | null,
+  costCenterId: string | null,
+  sectorSolicitante: string | null | undefined
+): boolean {
+  const relevant = assignments.filter(
+    (a) =>
+      (contractId && a.contractId === contractId) ||
+      (costCenterId && a.costCenterId === costCenterId)
+  );
+  if (relevant.length === 0) return true;
+  const unrestricted = relevant.filter((a) => !a.isDfAdmLocal || a.allowedSectors.length === 0);
+  if (unrestricted.length > 0) return true;
+  return relevant.some(
+    (a) => a.isDfAdmLocal && sectorSolicitanteMatches(a.allowedSectors, sectorSolicitante)
+  );
+}
+
 export async function getDpManagerApprovalVisibilityWhere(
   userId: string,
   isAdmin: boolean
 ): Promise<Record<string, unknown> | null> {
   if (isAdmin) return {};
   const regularScope = await getManagerDpApprovalContractScope(userId, false);
-  const restrictedCcIds = await getRestrictedDpApprovalCostCenterIds(userId, false);
   const hasRestricted = await userHasRestrictedDpApprovePermission(userId);
+  const restrictedAssignments = hasRestricted ? await getRestrictedDpAssignments(userId) : [];
   const orParts: Record<string, unknown>[] = [];
   if (regularScope) {
     orParts.push({
       AND: [regularScope, { requestType: { notIn: [...SENSITIVE_DP_REQUEST_TYPES] } }],
     });
   }
-  if (hasRestricted && restrictedCcIds && restrictedCcIds.length > 0) {
-    orParts.push(await restrictedDpApprovalVisibilityWhere(restrictedCcIds));
+  if (hasRestricted && restrictedAssignments.length > 0) {
+    orParts.push(await restrictedDpApprovalVisibilityWhere(restrictedAssignments));
   }
   if (orParts.length === 0) return null;
   return { OR: orParts };
@@ -245,12 +431,8 @@ export async function getManagerDpApprovalContractScope(
   if (isAdmin) return {};
   const hasApprove = await userHasDpApprovePermission(userId);
   if (!hasApprove) return null;
-  const ids = await prisma.userDpApprovalContract.findMany({
-    where: { userId },
-    select: { contractId: true },
-  });
-  const list = ids.map((r) => r.contractId);
-  if (list.length > 0) return buildManagerDpScopeFromContractIds(list);
+  const assignments = await getDpApprovalAssignments(userId);
+  if (assignments.length > 0) return buildManagerDpScopeFromAssignments(assignments);
   const legacy = await prisma.userPermission.findFirst({
     where: { userId, module: DP_APPROVE_MODULE_KEY, action: PERMISSION_ACCESS_ACTION, allowed: true },
   });
@@ -312,12 +494,17 @@ export async function assertManagerCanApproveDpRequest(
   isAdmin: boolean,
   requestType: string,
   contractId: string | null,
-  costCenterId?: string | null
+  costCenterId?: string | null,
+  sectorSolicitante?: string | null
 ): Promise<void> {
   if (isAdmin) return;
 
   const resolvedCostCenterId = await resolveDpRequestCostCenterId(contractId, costCenterId);
-  const restrictedOk = await userHasRestrictedApproveForCostCenter(userId, resolvedCostCenterId);
+  const restrictedOk = await userHasRestrictedApproveForRequest(
+    userId,
+    resolvedCostCenterId,
+    sectorSolicitante
+  );
 
   if (isSensitiveDpRequestType(requestType)) {
     if (!restrictedOk) {
@@ -334,6 +521,11 @@ export async function assertManagerCanApproveDpRequest(
   if (restrictedOk) return;
 
   await assertManagerCanActOnDpContract(userId, isAdmin, contractId, resolvedCostCenterId);
+
+  const assignments = await getDpApprovalAssignments(userId);
+  if (!assignmentCoversSector(assignments, contractId, resolvedCostCenterId, sectorSolicitante)) {
+    throw createError('Sem permissão para aprovar solicitações deste setor', 403);
+  }
 }
 
 /** Pode vincular centro de custo ao formulário de solicitação DP. */

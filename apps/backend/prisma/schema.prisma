@@ -2593,6 +2593,8 @@ model UserDpApprovalContract {
   id         String   @id @default(cuid())
   userId     String
   contractId String
+  /// Setores que o gestor pode aprovar. Só vale para DF - ADM LOCAL; vazio = todos os setores.
+  allowedSectors Json @default("[]")
   updatedBy  String?
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
@@ -2612,6 +2614,8 @@ model UserRestrictedDpApprovalCostCenter {
   id           String   @id @default(cuid())
   userId       String
   costCenterId String
+  /// Setores que o aprovador pode atuar. Só vale para DF - ADM LOCAL; vazio = todos os setores.
+  allowedSectors Json @default("[]")
   updatedBy    String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
@@ -2709,7 +2713,11 @@ model PositionPermissionTemplate {
   permissions                       Json
   allowedContractIds                Json     @default("[]")
   dpApprovalContractIds             Json     @default("[]")
+  /// Map contractId -> string[] de setores (DF - ADM LOCAL).
+  dpApprovalContractSectors         Json     @default("{}")
   restrictedDpApprovalCostCenterIds Json     @default("[]")
+  /// Map costCenterId -> string[] de setores (DF - ADM LOCAL nas solicitações restritas).
+  restrictedDpApprovalCostCenterSectors Json @default("{}")
   fdApprovalContractIds             Json     @default("[]")
   fuelApprovalContractIds           Json     @default("[]")
   dpRequestViewCostCenterIds        Json     @default("[]")
