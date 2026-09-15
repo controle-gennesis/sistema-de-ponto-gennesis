@@ -232,8 +232,8 @@ export async function userHasContractsModuleAccess(userId: string, isAdmin: bool
 
 /**
  * Mutação em reunião/relatório.
- * Métricas → Relatórios de Contrato: só quem tem Criar/Editar/Excluir nessa linha.
- * Quem tem o módulo Contratos continua preenchendo pela aba do contrato.
+ * Excluir: só admin ou quem tem Excluir em Métricas → Relatórios de Contrato.
+ * Criar/editar: módulo Contratos (aba do contrato) ou Criar/Editar em Relatórios de Contrato.
  */
 export async function assertRelatoriosContratoMutation(
   req: AuthRequest,
@@ -241,7 +241,6 @@ export async function assertRelatoriosContratoMutation(
 ): Promise<void> {
   if (!req.user) throw createError('Usuário não autenticado', 401);
   if (req.user.isAdmin) return;
-  if (await userHasContractsModuleAccess(req.user.id, false)) return;
 
   const rows = await prisma.userPermission.findMany({
     where: {
@@ -252,12 +251,16 @@ export async function assertRelatoriosContratoMutation(
     select: { action: true },
   });
   const actions = new Set(rows.map((r) => r.action));
+
   if (action === 'excluir') {
     if (!actions.has('excluir')) {
       throw createError('Você não tem permissão para excluir reuniões', 403);
     }
     return;
   }
+
+  if (await userHasContractsModuleAccess(req.user.id, false)) return;
+
   if (!actions.has('editar') && !actions.has('criar')) {
     throw createError('Você só pode visualizar as reuniões quinzenais', 403);
   }

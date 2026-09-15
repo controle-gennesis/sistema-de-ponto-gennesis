@@ -33,8 +33,16 @@ import { ReuniaoFormModal, type ReuniaoListPatch } from '@/components/contract/R
 import { ContratoControleGeralMensalCard } from '@/components/contract/ContratoControleGeralMensalCard';
 import { ContratoReunioesLancamentosBar } from '@/components/contract/ContratoReunioesLancamentosBar';
 import { useCadastroCrudPermissions } from '@/hooks/useCadastroCrudPermissions';
+import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import { entryMonthLabel, formatMonthLabel, getIsoMonthKey } from '@/lib/monthPeriod';
-import { entryWeekLabel, formatWeekLabel, getFortnightKey } from '@/lib/weekPeriod';
+import {
+  entryWeekLabel,
+  formatWeekLabel,
+  fortnightOverlapsCalendarMonth,
+  fortnightOverlapsCalendarYear,
+  getFortnightKey,
+} from '@/lib/weekPeriod';
 import type { AcompanhamentoKind } from '@/lib/acompanhamentoTypes';
 
 export type { AcompanhamentoKind };
@@ -68,6 +76,8 @@ interface Contract {
   id: string;
   name: string;
   number: string;
+  startDate?: string;
+  endDate?: string;
 }
 
 interface ReuniaoActionMenuState {
@@ -109,6 +119,81 @@ export type ContratoAcompanhamentoTabs = {
 };
 
 const REUNIAO_MENU_WIDTH_PX = 224;
+const COMPACT_PANEL_BODY_CLASS = 'min-h-[22rem] flex-1';
+
+const MESES_FILTRO = [
+  { value: 0, label: 'Todos os meses' },
+  { value: 1, label: 'Janeiro' },
+  { value: 2, label: 'Fevereiro' },
+  { value: 3, label: 'Março' },
+  { value: 4, label: 'Abril' },
+  { value: 5, label: 'Maio' },
+  { value: 6, label: 'Junho' },
+  { value: 7, label: 'Julho' },
+  { value: 8, label: 'Agosto' },
+  { value: 9, label: 'Setembro' },
+  { value: 10, label: 'Outubro' },
+  { value: 11, label: 'Novembro' },
+  { value: 12, label: 'Dezembro' },
+];
+
+const MESES_FILTRO_SELECT_OPTIONS = labeledToSelectOptions(
+  MESES_FILTRO.map((m) => ({ value: String(m.value), label: m.label }))
+);
+
+function yearsFromContractRange(startDate?: string, endDate?: string): number[] {
+  const now = new Date().getFullYear();
+  const startY = startDate ? new Date(startDate).getFullYear() : now;
+  const endY = endDate ? new Date(endDate).getFullYear() : now;
+  if (Number.isNaN(startY) || Number.isNaN(endY)) return [now];
+  const from = Math.min(startY, endY, now);
+  const to = Math.max(startY, endY, now);
+  const years: number[] = [];
+  for (let y = from; y <= to; y++) years.push(y);
+  return years;
+}
+
+function parseMonthKeyParts(monthKey?: string): { y: number; m: number } | null {
+  const match = /^(\d{4})-(\d{2})$/.exec(String(monthKey || '').trim());
+  if (!match) return null;
+  const y = Number(match[1]);
+  const m = Number(match[2]);
+  if (!y || m < 1 || m > 12) return null;
+  return { y, m };
+}
+
+function entryMatchesPeriodFilter(
+  kind: AcompanhamentoKind,
+  entry: ReuniaoEntry,
+  filterYear: number,
+  filterMonth: number
+): boolean {
+  if (kind === 'mensal') {
+    const parts = parseMonthKeyParts(entry.monthKey);
+    if (parts) {
+      if (filterYear > 0 && parts.y !== filterYear) return false;
+      if (filterMonth > 0 && parts.m !== filterMonth) return false;
+      return true;
+    }
+    const d = entry.createdAt ? new Date(entry.createdAt) : null;
+    if (!d || Number.isNaN(d.getTime())) return filterYear === 0 && filterMonth === 0;
+    if (filterYear > 0 && d.getFullYear() !== filterYear) return false;
+    if (filterMonth > 0 && d.getMonth() + 1 !== filterMonth) return false;
+    return true;
+  }
+
+  if (entry.weekKey) {
+    if (filterMonth > 0) return fortnightOverlapsCalendarMonth(entry.weekKey, filterYear, filterMonth);
+    if (filterYear > 0) return fortnightOverlapsCalendarYear(entry.weekKey, filterYear);
+    return true;
+  }
+
+  const d = entry.createdAt ? new Date(entry.createdAt) : null;
+  if (!d || Number.isNaN(d.getTime())) return filterYear === 0 && filterMonth === 0;
+  if (filterYear > 0 && d.getFullYear() !== filterYear) return false;
+  if (filterMonth > 0 && d.getMonth() + 1 !== filterMonth) return false;
+  return true;
+}
 
 function formatDateTime(iso: string) {
   if (!iso) return '-';
@@ -176,12 +261,16 @@ function ContratoAcompanhamentoPanel({
   compact,
   formVariant,
   consumeOpenQuery,
+  filterYear,
+  filterMonth,
 }: {
   config: ContratoAcompanhamentoListConfig;
   contractId: string;
   compact: boolean;
   formVariant: 'modal' | 'inline';
   consumeOpenQuery: boolean;
+  filterYear: number;
+  filterMonth: number;
 }) {
   const {
     kind,
@@ -206,7 +295,7 @@ function ContratoAcompanhamentoPanel({
   const relatoriosCrud = useCadastroCrudPermissions('/ponto/metricas/relatorios-contrato');
   const fromMetricasPage = config.protectedRoute === '/ponto/metricas/relatorios-contrato';
   const canWrite = !fromMetricasPage || relatoriosCrud.canEdit || relatoriosCrud.canCreate;
-  const canRemove = !fromMetricasPage || relatoriosCrud.canDelete;
+  const canRemove = relatoriosCrud.canDelete;
 
   const router = useRouter();
   const pathname = usePathname();
@@ -216,7 +305,9 @@ function ContratoAcompanhamentoPanel({
   const [searchTerm, setSearchTerm] = useState('');
   const [reuniaoActionMenu, setReuniaoActionMenu] = useState<ReuniaoActionMenuState | null>(null);
   const [modalReuniaoId, setModalReuniaoId] = useState<string | null>(null);
+  const [formViewOnly, setFormViewOnly] = useState(false);
   const [listOverrides, setListOverrides] = useState<Record<string, ReuniaoListPatch>>({});
+  const [removedIds, setRemovedIds] = useState<Set<string>>(() => new Set());
   const [configModalOpen, setConfigModalOpen] = useState(false);
   const [selectedFormularioId, setSelectedFormularioId] = useState<string>('');
 
@@ -264,13 +355,14 @@ function ContratoAcompanhamentoPanel({
     if (!consumeOpenQuery) return;
     const openId = searchParams?.get('open');
     if (!openId) return;
+    setFormViewOnly(!canWrite);
     setModalReuniaoId(openId);
     const next = new URLSearchParams(searchParams?.toString() ?? '');
     next.delete('open');
     const qs = next.toString();
     const path = pathname || backHref?.(contractId) || `/ponto/contratos/${contractId}/reunioes`;
     router.replace(qs ? `${path}?${qs}` : path, { scroll: false });
-  }, [searchParams, contractId, router, pathname, backHref, consumeOpenQuery]);
+  }, [searchParams, contractId, router, pathname, backHref, consumeOpenQuery, canWrite]);
 
   useEffect(() => {
     if (!configModalOpen) return;
@@ -309,6 +401,7 @@ function ContratoAcompanhamentoPanel({
         return { success: true, data: [entry, ...list.filter((r) => r.id !== entry.id)] };
       });
       queryClient.invalidateQueries({ queryKey: listQueryKey });
+      setFormViewOnly(false);
       setModalReuniaoId(entry.id);
       toast.success(forceNew ? newRecordToast : openSuccessToast);
     },
@@ -327,17 +420,49 @@ function ContratoAcompanhamentoPanel({
 
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => api.delete(`${apiBase}/${id}`),
+    onMutate: async (id) => {
+      await queryClient.cancelQueries({ queryKey: listQueryKey });
+      const previous = queryClient.getQueryData(listQueryKey);
+      queryClient.setQueryData(listQueryKey, (old: { data?: ReuniaoEntry[] } | undefined) => {
+        const list = Array.isArray(old?.data) ? old.data : [];
+        return { success: true, data: list.filter((r) => r.id !== id) };
+      });
+      setRemovedIds((prev) => {
+        const next = new Set(prev);
+        next.add(id);
+        return next;
+      });
+      if (modalReuniaoId === id) {
+        setModalReuniaoId(null);
+        setFormViewOnly(false);
+      }
+      return { previous };
+    },
     onSuccess: (_res, id) => {
-      if (modalReuniaoId === id) setModalReuniaoId(null);
       setListOverrides((prev) => {
         const next = { ...prev };
         delete next[id];
         return next;
       });
+      queryClient.setQueryData(listQueryKey, (old: { data?: ReuniaoEntry[] } | undefined) => {
+        const list = Array.isArray(old?.data) ? old.data : [];
+        return { ...(old ?? { success: true }), data: list.filter((r) => r.id !== id) };
+      });
       queryClient.invalidateQueries({ queryKey: listQueryKey });
       toast.success('Registro excluído.');
     },
-    onError: () => toast.error('Erro ao excluir.'),
+    onError: (err: unknown, id, ctx) => {
+      if (ctx?.previous) queryClient.setQueryData(listQueryKey, ctx.previous);
+      setRemovedIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+      const msg =
+        (err as { response?: { data?: { message?: string } } })?.response?.data?.message ||
+        'Erro ao excluir.';
+      toast.error(msg);
+    },
   });
 
   const handleListPatch = useCallback(
@@ -364,17 +489,25 @@ function ContratoAcompanhamentoPanel({
     [queryClient, listQueryKey]
   );
 
-  const openReuniao = (id: string) => {
+  const closeForm = () => {
+    setModalReuniaoId(null);
+    setFormViewOnly(false);
+  };
+
+  const openReuniao = (id: string, mode: 'view' | 'edit' = 'view') => {
     setReuniaoActionMenu(null);
+    setFormViewOnly(mode === 'view' || !canWrite);
     setModalReuniaoId(id);
   };
 
-  const reunioesRaw: ReuniaoEntry[] = (reunioesData?.data ?? []).map(
-    (r: ReuniaoEntry & { contrato?: string }) => ({
+  const formReadOnly = !canWrite || formViewOnly;
+
+  const reunioesRaw: ReuniaoEntry[] = (reunioesData?.data ?? [])
+    .filter((r: ReuniaoEntry) => !removedIds.has(r.id))
+    .map((r: ReuniaoEntry & { contrato?: string }) => ({
       ...r,
       nome: r.nome || r.contrato || '',
-    })
-  );
+    }));
 
   const reunioes = reunioesRaw
     .map((r) => {
@@ -396,14 +529,16 @@ function ContratoAcompanhamentoPanel({
     [reunioes, kind]
   );
 
-  const reunioesFiltradas = reunioes.filter(
-    (r) =>
-      !searchTerm.trim() ||
+  const reunioesFiltradas = reunioes.filter((r) => {
+    if (!entryMatchesPeriodFilter(kind, r, filterYear, filterMonth)) return false;
+    if (!searchTerm.trim()) return true;
+    return (
       textMatchesSearch(entryPeriodLabel(kind, r), searchTerm) ||
       textMatchesSearch(r.formularioName, searchTerm) ||
       textMatchesSearch(r.formularioDescription, searchTerm) ||
       textMatchesSearch(r.responsavelPreenchimento, searchTerm)
-  );
+    );
+  });
 
   const listMarkup = (
     <>
@@ -428,7 +563,7 @@ function ContratoAcompanhamentoPanel({
       ) : reunioesFiltradas.length === 0 ? (
         <div
           className={`flex flex-col items-center justify-center px-6 text-center ${
-            compact ? 'min-h-[22rem] flex-1 py-10' : 'py-14'
+            compact ? `${COMPACT_PANEL_BODY_CLASS} py-10` : 'py-14'
           }`}
         >
           <div
@@ -440,11 +575,19 @@ function ContratoAcompanhamentoPanel({
             {reunioes.length === 0 ? tone.emptyTitle : 'Nenhum registro encontrado'}
           </p>
           <p className="mt-1.5 max-w-[18rem] text-sm leading-relaxed text-gray-500 dark:text-gray-400">
-            {reunioes.length === 0 ? tone.emptyHint : 'Tente outro termo na busca.'}
+            {reunioes.length === 0
+              ? tone.emptyHint
+              : searchTerm.trim()
+                ? 'Tente outro termo na busca.'
+                : 'Nenhum registro neste mês e ano.'}
           </p>
         </div>
       ) : (
-        <div className="mt-1 overflow-hidden rounded-xl border border-gray-100 dark:border-white/10">
+        <div
+          className={`mt-1 overflow-hidden rounded-xl border border-gray-100 dark:border-white/10 ${
+            compact ? COMPACT_PANEL_BODY_CLASS : ''
+          }`}
+        >
           <div className="table-scroll">
             <table className={`w-full text-sm ${compact ? 'min-w-[520px]' : 'min-w-[720px]'}`}>
               <thead>
@@ -469,7 +612,7 @@ function ContratoAcompanhamentoPanel({
                 {reunioesFiltradas.map((r) => (
                   <tr
                     key={r.id}
-                    onClick={() => openReuniao(r.id)}
+                    onClick={() => openReuniao(r.id, 'view')}
                     className={`border-b border-gray-100 last:border-0 dark:border-white/5 ${getListTableRowClassName(true)} ${
                       modalReuniaoId === r.id ? 'bg-red-50/50 dark:bg-red-950/20' : ''
                     } ${isCurrentPeriod(kind, r) ? 'bg-indigo-50/40 dark:bg-indigo-950/20' : ''}`}
@@ -524,45 +667,6 @@ function ContratoAcompanhamentoPanel({
           </div>
         </div>
       )}
-      {reuniaoActionMenu && (
-        <ActionMenuOverlay
-          open
-          onClose={() => setReuniaoActionMenu(null)}
-          top={reuniaoActionMenu.top}
-          left={reuniaoActionMenu.left}
-        >
-          <button
-            type="button"
-            role="menuitem"
-            onClick={(e) => {
-              e.stopPropagation();
-              openReuniao(reuniaoActionMenu.reuniaoId);
-            }}
-            className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700"
-          >
-            <Eye className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
-            <span>Abrir formulário</span>
-          </button>
-          {canRemove ? (
-          <button
-            type="button"
-            role="menuitem"
-            onClick={(e) => {
-              e.stopPropagation();
-              const { reuniaoId } = reuniaoActionMenu;
-              setReuniaoActionMenu(null);
-              if (confirm('Excluir este registro? Esta ação não pode ser desfeita.')) {
-                deleteMutation.mutate(reuniaoId);
-              }
-            }}
-            className="flex w-full items-center gap-2 border-t border-gray-200 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-700"
-          >
-            <Trash2 className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
-            <span>Excluir</span>
-          </button>
-          ) : null}
-        </ActionMenuOverlay>
-      )}
     </>
   );
 
@@ -570,8 +674,8 @@ function ContratoAcompanhamentoPanel({
     <>
       <Card
         padding={compact ? 'none' : 'md'}
-        className={`relative w-full !overflow-visible !rounded-2xl border-gray-200/80 shadow-[0_18px_40px_-28px_rgba(15,23,42,0.55)] dark:border-white/10 dark:bg-gray-900/70 ${
-          compact ? 'flex min-h-0 flex-1 flex-col' : ''
+        className={`relative w-full !overflow-hidden !rounded-2xl border-gray-200/80 shadow-[0_18px_40px_-28px_rgba(15,23,42,0.55)] dark:border-white/10 dark:bg-gray-900/70 ${
+          compact ? 'flex h-full min-h-[28rem] flex-1 flex-col' : ''
         }`}
       >
         <div className={`absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${tone.bar}`} />
@@ -629,7 +733,7 @@ function ContratoAcompanhamentoPanel({
                 type="button"
                 onClick={() => {
                   if (currentPeriodEntry) {
-                    setModalReuniaoId(currentPeriodEntry.id);
+                    openReuniao(currentPeriodEntry.id, canWrite ? 'edit' : 'view');
                     return;
                   }
                   if (!canWrite) return;
@@ -664,22 +768,24 @@ function ContratoAcompanhamentoPanel({
         <CardContent
           className={
             compact
-              ? 'app-thin-scroll flex min-h-0 flex-1 flex-col overflow-y-auto !px-5 !pb-5 !pt-4 sm:!px-6 sm:!pb-6'
+              ? `app-thin-scroll flex ${COMPACT_PANEL_BODY_CLASS} flex-col overflow-y-auto !px-5 !pb-5 !pt-4 sm:!px-6 sm:!pb-6`
               : undefined
           }
         >
           {showInlineForm ? (
-            <ReuniaoFormModal
-              key={modalReuniaoId}
-              isOpen={formOpen}
-              onClose={() => setModalReuniaoId(null)}
-              contractId={contractId}
-              kind={kind}
-              reuniaoId={modalReuniaoId}
-              onListPatch={handleListPatch}
-              variant="inline"
-              readOnly={!canWrite}
-            />
+            <div className={COMPACT_PANEL_BODY_CLASS}>
+              <ReuniaoFormModal
+                key={modalReuniaoId}
+                isOpen={formOpen}
+                onClose={closeForm}
+                contractId={contractId}
+                kind={kind}
+                reuniaoId={modalReuniaoId}
+                onListPatch={handleListPatch}
+                variant="inline"
+                readOnly={formReadOnly}
+              />
+            </div>
           ) : (
             listMarkup
           )}
@@ -688,6 +794,7 @@ function ContratoAcompanhamentoPanel({
 
       {reuniaoActionMenu ? (
         <ActionMenuOverlay
+          key={reuniaoActionMenu.reuniaoId}
           open
           onClose={() => setReuniaoActionMenu(null)}
           top={reuniaoActionMenu.top}
@@ -700,29 +807,45 @@ function ContratoAcompanhamentoPanel({
             role="menuitem"
             onClick={(e) => {
               e.stopPropagation();
-              openReuniao(reuniaoActionMenu.reuniaoId);
+              openReuniao(reuniaoActionMenu.reuniaoId, 'view');
             }}
             className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700"
           >
             <Eye className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
-            <span>Abrir formulário</span>
+            <span>Visualizar</span>
           </button>
-          <button
-            type="button"
-            role="menuitem"
-            onClick={(e) => {
-              e.stopPropagation();
-              const { reuniaoId } = reuniaoActionMenu;
-              setReuniaoActionMenu(null);
-              if (confirm('Excluir este registro? Esta ação não pode ser desfeita.')) {
-                deleteMutation.mutate(reuniaoId);
-              }
-            }}
-            className="flex w-full items-center gap-2 border-t border-gray-200 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-700"
-          >
-            <Trash2 className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
-            <span>Excluir</span>
-          </button>
+          {canWrite ? (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={(e) => {
+                e.stopPropagation();
+                openReuniao(reuniaoActionMenu.reuniaoId, 'edit');
+              }}
+              className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700"
+            >
+              <PenLine className="h-4 w-4 shrink-0 text-indigo-600 dark:text-indigo-400" />
+              <span>Editar formulário</span>
+            </button>
+          ) : null}
+          {canRemove ? (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={(e) => {
+                e.stopPropagation();
+                const { reuniaoId } = reuniaoActionMenu;
+                setReuniaoActionMenu(null);
+                if (confirm('Excluir este registro? Esta ação não pode ser desfeita.')) {
+                  deleteMutation.mutate(reuniaoId);
+                }
+              }}
+              className="flex w-full items-center gap-2 border-t border-gray-200 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-700"
+            >
+              <Trash2 className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
+              <span>Excluir</span>
+            </button>
+          ) : null}
         </ActionMenuOverlay>
       ) : null}
 
@@ -806,12 +929,12 @@ function ContratoAcompanhamentoPanel({
         <ReuniaoFormModal
           key={modalReuniaoId}
           isOpen={formOpen}
-          onClose={() => setModalReuniaoId(null)}
+          onClose={closeForm}
           contractId={contractId}
           kind={kind}
           reuniaoId={modalReuniaoId}
           onListPatch={handleListPatch}
-          readOnly={!canWrite}
+          readOnly={formReadOnly}
         />
       ) : null}
     </>
@@ -846,6 +969,10 @@ export function ContratoAcompanhamentoListPage({
   const isSplit = !!splitWith;
   const openKind: AcompanhamentoKind =
     searchParams?.get('aba') === 'relatorio-mensal' ? 'mensal' : 'semanal';
+  const currentYear = new Date().getFullYear();
+  const currentMonth = new Date().getMonth() + 1;
+  const [filterYear, setFilterYear] = useState(currentYear);
+  const [filterMonth, setFilterMonth] = useState(currentMonth);
 
   const { data: userData, isLoading: loadingUser } = useQuery({
     queryKey: ['user'],
@@ -866,6 +993,18 @@ export function ContratoAcompanhamentoListPage({
 
   const user = userData?.data || { name: 'Usuário', role: 'EMPLOYEE' };
   const contract = contractData?.data as Contract | undefined;
+  const availableYears = useMemo(
+    () => yearsFromContractRange(contract?.startDate, contract?.endDate),
+    [contract?.startDate, contract?.endDate]
+  );
+  const yearSelectOptions = useMemo(
+    () =>
+      labeledToSelectOptions([
+        { value: '0', label: 'Todos os anos' },
+        ...availableYears.map((year) => ({ value: String(year), label: String(year) })),
+      ]),
+    [availableYears]
+  );
 
   if (!contractId || loadingUser) {
     return <Loading message="Carregando..." fullScreen size="lg" />;
@@ -881,6 +1020,8 @@ export function ContratoAcompanhamentoListPage({
       compact={opts.compact}
       formVariant={opts.formVariant}
       consumeOpenQuery={opts.consumeOpenQuery}
+      filterYear={filterYear}
+      filterMonth={filterMonth}
     />
   );
 
@@ -935,20 +1076,44 @@ export function ContratoAcompanhamentoListPage({
             </div>
           ) : null}
 
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
+            <StringSingleSelectDropdown
+              value={String(filterMonth)}
+              onChange={(v) => setFilterMonth(Number(v))}
+              options={MESES_FILTRO_SELECT_OPTIONS}
+              allowEmpty={false}
+              disableSearch
+              menuAlign="end"
+              matchTriggerWidth
+              className="min-w-[9.5rem] max-w-[10.5rem]"
+            />
+            <StringSingleSelectDropdown
+              value={String(filterYear)}
+              onChange={(v) => setFilterYear(Number(v))}
+              options={yearSelectOptions}
+              allowEmpty={false}
+              disableSearch
+              menuAlign="end"
+              matchTriggerWidth
+              menuMinWidth={152}
+              className="min-w-[5.25rem]"
+            />
+          </div>
+
           {isSplit && splitWith ? (
             <div
-              className={`grid min-h-0 flex-1 grid-cols-1 gap-5 xl:grid-cols-2 ${
-                showMonthlyControleGeral ? 'xl:h-[min(44rem,calc(100dvh-20rem))]' : ''
+              className={`grid min-h-0 flex-1 grid-cols-1 gap-5 xl:grid-cols-2 xl:items-stretch ${
+                showMonthlyControleGeral ? 'xl:min-h-[min(44rem,calc(100dvh-20rem))]' : ''
               }`}
             >
-              <div className="flex h-full min-h-0 min-w-0 flex-col">
+              <div className="flex h-full min-h-[28rem] min-w-0 flex-col">
                 {renderPanel(config, {
                   compact: true,
                   formVariant: 'inline',
                   consumeOpenQuery: openKind === config.kind,
                 })}
               </div>
-              <div className="flex h-full min-h-0 min-w-0 flex-col">
+              <div className="flex h-full min-h-[28rem] min-w-0 flex-col">
                 {renderPanel(splitWith, {
                   compact: true,
                   formVariant: 'inline',

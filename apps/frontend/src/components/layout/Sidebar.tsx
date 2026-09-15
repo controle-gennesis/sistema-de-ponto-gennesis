@@ -1617,6 +1617,11 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
     return href;
   };
 
+  const isCurrentHref = (href: string) => {
+    if (pathname == null) return false;
+    return pathname === resolveNavHref(href);
+  };
+
   const isActive = (href: string) => {
     if (pathname == null) return false;
     if (href === '/ponto/fluig/aprovadores') {
@@ -1710,7 +1715,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
                       prefetch={navLinkPrefetch}
                       onMouseEnter={navDataPrefetchForHref(child.href)}
                       onClick={(event) => {
-                        if (!active) return;
+                        if (!isCurrentHref(child.href)) return;
                         event.preventDefault();
                         bumpNavPop(child.href);
                         dispatchReplayPageEnter();
@@ -1744,7 +1749,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
           prefetch={navLinkPrefetch}
           onMouseEnter={navDataPrefetchForHref(item.href)}
           onClick={(event) => {
-            if (!active) return;
+            if (!isCurrentHref(item.href)) return;
             event.preventDefault();
             bumpNavPop(item.href);
             dispatchReplayPageEnter();
@@ -2194,7 +2199,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
                       href={singleItem.href}
                       prefetch={navLinkPrefetch}
                       onClick={(event) => {
-                        if (!active) return;
+                        if (!isCurrentHref(singleItem.href)) return;
                         event.preventDefault();
                         bumpRailPop(category.id);
                         dispatchReplayPageEnter();

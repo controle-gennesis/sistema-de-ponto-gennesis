@@ -414,8 +414,8 @@ function QuestionField({
   const displayValue = hasFormula ? computedValue : value;
 
   return (
-    <div>
-      <FieldLabel required={normalizedQuestion.required}>{normalizedQuestion.title}</FieldLabel>
+    <div className={locked ? 'pointer-events-none' : undefined}>
+      <FieldLabel required={normalizedQuestion.required && !formReadOnly}>{normalizedQuestion.title}</FieldLabel>
 
       {normalizedQuestion.type === 'sim_nao' && (
         <SimNaoGroup options={options} value={String(value ?? '')} onChange={setValue} />
@@ -1009,7 +1009,7 @@ export function ReuniaoFormModal({
 
   const persist = useCallback(
     async (data: ReuniaoData, opts?: { finalize?: boolean }) => {
-      if (!reuniaoId) return false;
+      if (readOnly || !reuniaoId) return false;
       setSaving(true);
       try {
         const now = new Date().toISOString();
@@ -1034,7 +1034,7 @@ export function ReuniaoFormModal({
         setSaving(false);
       }
     },
-    [apiBase, contractId, kind, onListPatch, queryClient, reuniaoId]
+    [apiBase, contractId, kind, onListPatch, queryClient, readOnly, reuniaoId]
   );
 
   const updateForm = (updater: (prev: ReuniaoData) => ReuniaoData) => {
@@ -1121,7 +1121,7 @@ export function ReuniaoFormModal({
   const handleStepSelect = (targetIndex: number) => {
     if (targetIndex === activeFillStep) return;
 
-    if (targetIndex < activeFillStep) {
+    if (readOnly || targetIndex < activeFillStep) {
       setActiveFillStep(targetIndex);
       return;
     }
@@ -1139,13 +1139,15 @@ export function ReuniaoFormModal({
   };
 
   const handleNextStep = () => {
-    const err = validateSections(
-      (currentStep?.sections as Section[]) ?? [],
-      form.answers
-    );
-    if (err) {
-      toast.error(err);
-      return;
+    if (!readOnly) {
+      const err = validateSections(
+        (currentStep?.sections as Section[]) ?? [],
+        form.answers
+      );
+      if (err) {
+        toast.error(err);
+        return;
+      }
     }
     setActiveFillStep((prev) => Math.min(prev + 1, formSteps.length - 1));
   };
@@ -1224,9 +1226,18 @@ export function ReuniaoFormModal({
           {formDescription ? (
             <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">{formDescription}</p>
           ) : null}
-                </div>
-        <ReuniaoFormCloseButton onClick={compact ? () => setConfirmInlineClose(true) : undefined} />
-                    </div>
+          {readOnly ? (
+            <p className="mt-2 text-xs font-medium uppercase tracking-wide text-sky-700 dark:text-sky-300">
+              Somente visualização
+            </p>
+          ) : null}
+        </div>
+        <ReuniaoFormCloseButton
+          onClick={
+            compact ? (readOnly ? onClose : () => setConfirmInlineClose(true)) : undefined
+          }
+        />
+      </div>
 
       <div className={compact ? 'space-y-6' : 'space-y-8'}>
         {multiStep ? (
@@ -1236,7 +1247,7 @@ export function ReuniaoFormModal({
               label: step.title.trim() || `Etapa ${index + 1}`,
             }))}
             currentIndex={activeFillStep}
-            mode="progress"
+            mode={readOnly ? 'navigation' : 'progress'}
             onSelect={handleStepSelect}
           />
         ) : null}
@@ -1266,13 +1277,34 @@ export function ReuniaoFormModal({
 
       <div className="flex justify-end gap-2 border-t border-gray-200 pt-6 dark:border-gray-700">
         {readOnly ? (
-            <button
-              type="button"
-            onClick={onClose}
-            className="inline-flex h-10 items-center rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-800 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
-            >
-            Fechar
-            </button>
+          <>
+            {multiStep && activeFillStep > 0 ? (
+              <button
+                type="button"
+                onClick={() => setActiveFillStep((prev) => Math.max(prev - 1, 0))}
+                className="inline-flex h-10 items-center rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-800 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
+              >
+                Anterior
+              </button>
+            ) : null}
+            {multiStep && activeFillStep < formSteps.length - 1 ? (
+              <button
+                type="button"
+                onClick={handleNextStep}
+                className="inline-flex h-10 items-center rounded-lg bg-red-600 px-5 text-sm font-semibold text-white transition-colors hover:bg-red-700"
+              >
+                Próxima etapa
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={onClose}
+                className="inline-flex h-10 items-center rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-800 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
+              >
+                Fechar
+              </button>
+            )}
+          </>
         ) : (
           <>
         {multiStep && activeFillStep > 0 ? (
@@ -1336,7 +1368,7 @@ export function ReuniaoFormModal({
       panelClassName="!max-w-[1500px] w-full"
       contentClassName="sm:p-8 lg:p-10"
       contentOverflowVisible
-      confirmBeforeClose
+      confirmBeforeClose={!readOnly}
       showCloseButton={false}
     >
       {formBody}
