@@ -364,7 +364,7 @@ function SelectField({
 export default function FuelRequestsScreen() {
   const navigation = useNavigation();
   const navState = navigation.getState?.();
-  const isTabScreen = navState?.type === 'tab';
+  const isTabScreen = navState?.type === 'tab' || navState?.type === 'material-top-tab';
   const { colors, isDark } = useTheme();
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
@@ -938,11 +938,13 @@ export default function FuelRequestsScreen() {
   return (
     <View style={styles.safeArea}>
       <StatusBar style={isDark ? 'light' : 'dark'} />
-      <AppHeader
-        showBack={!isTabScreen}
-        onBack={() => navigation.goBack()}
-        title={!isTabScreen ? 'Abastecimento' : undefined}
-      />
+      {!isTabScreen ? (
+        <AppHeader
+          showBack
+          onBack={() => navigation.goBack()}
+          title="Abastecimento"
+        />
+      ) : null}
 
       <ScrollView
         style={styles.container}

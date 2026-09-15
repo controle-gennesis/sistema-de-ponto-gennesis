@@ -14,7 +14,7 @@ import { OcAttachmentActions } from '@/components/oc/OcAttachmentActions';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { FilterStatCard } from '@/components/ui/FilterStatCard';
 import { cadastroListClasses } from '@/components/ui/RowActionMenu';
-import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
+import { resolveApiMediaUrl, isOpenableMediaUrl } from '@/lib/resolveMediaUrl';
 import type { DpTimelineStep } from '@/lib/dpRequestTimeline';
 import {
   type GestaoOsAttachment,
@@ -497,7 +497,9 @@ function GestaoOsDocumentItem({
   const [busy, setBusy] = useState<'view' | 'download' | null>(null);
   const trimmedUrl = (url || '').trim();
   const hasGeneratedActions = Boolean(onView || onDownload);
-  const isPending = pending || (!hasGeneratedActions && !trimmedUrl);
+  const canOpenUrl = isOpenableMediaUrl(trimmedUrl);
+  const isPending = pending || (!hasGeneratedActions && !canOpenUrl);
+  const isPlaceholderOnly = Boolean(trimmedUrl) && !canOpenUrl && !hasGeneratedActions;
   const actionBtnCls =
     'inline-flex items-center justify-center rounded-md p-1.5 text-red-600 transition-colors hover:bg-red-50 hover:text-red-700 disabled:opacity-50 dark:text-red-400 dark:hover:bg-red-950/40 dark:hover:text-red-300';
 
@@ -520,10 +522,15 @@ function GestaoOsDocumentItem({
         {subtitle ? (
           <p className="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400">{subtitle}</p>
         ) : null}
+        {isPlaceholderOnly ? (
+          <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+            Confirmado no aplicativo (sem imagem anexada)
+          </p>
+        ) : null}
       </div>
       <div className="flex shrink-0 items-center gap-1.5">
-        {isPending ? (
-          <span className="inline-flex whitespace-nowrap rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 dark:bg-gray-700 dark:text-gray-300">
+        {isPending && !isPlaceholderOnly ? (
+          <span className="rounded-md bg-amber-50 px-2 py-1 text-[11px] font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
             Pendente
           </span>
         ) : hasGeneratedActions ? (
@@ -531,43 +538,43 @@ function GestaoOsDocumentItem({
             {onView ? (
               <button
                 type="button"
-                onClick={() => void runAction('view', onView)}
-                disabled={busy != null}
-                title="Ver"
-                aria-label={`Ver ${fileName || label}`}
                 className={actionBtnCls}
+                disabled={busy !== null}
+                title="Ver"
+                aria-label={`Ver ${label}`}
+                onClick={() => void runAction('view', onView)}
               >
                 {busy === 'view' ? (
-                  <Loader2 className="h-5 w-5 shrink-0 animate-spin" />
+                  <Loader2 className="h-5 w-5 animate-spin" />
                 ) : (
-                  <Eye className="h-5 w-5 shrink-0" />
+                  <Eye className="h-5 w-5" />
                 )}
               </button>
             ) : null}
             {onDownload ? (
               <button
                 type="button"
-                onClick={() => void runAction('download', onDownload)}
-                disabled={busy != null}
-                title="Baixar"
-                aria-label={`Baixar ${fileName || label}`}
                 className={actionBtnCls}
+                disabled={busy !== null}
+                title="Baixar"
+                aria-label={`Baixar ${label}`}
+                onClick={() => void runAction('download', onDownload)}
               >
                 {busy === 'download' ? (
-                  <Loader2 className="h-5 w-5 shrink-0 animate-spin" />
+                  <Loader2 className="h-5 w-5 animate-spin" />
                 ) : (
-                  <Download className="h-5 w-5 shrink-0" />
+                  <Download className="h-5 w-5" />
                 )}
               </button>
             ) : null}
           </>
-        ) : (
+        ) : canOpenUrl ? (
           <OcAttachmentActions
             url={trimmedUrl}
             fileName={fileName || label}
             variant="buttons"
           />
-        )}
+        ) : null}
       </div>
     </div>
   );

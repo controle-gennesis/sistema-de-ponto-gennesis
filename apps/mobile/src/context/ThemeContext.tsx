@@ -42,7 +42,7 @@ interface ThemeContextData {
   isDark: boolean;
 }
 
-const lightColors: ThemeColors = {
+export const lightColors: ThemeColors = {
   appShell: '#f4f6f8',
   screenRoot: 'transparent',
   background: '#f4f6f8',
@@ -62,7 +62,7 @@ const lightColors: ThemeColors = {
   headerText: '#ffffff',
 };
 
-const darkColors: ThemeColors = {
+export const darkColors: ThemeColors = {
   appShell: '#111827',
   screenRoot: 'transparent',
   background: '#111827',

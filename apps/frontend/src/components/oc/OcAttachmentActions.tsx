@@ -30,6 +30,8 @@ export function OcAttachmentActions({
   const [downloading, setDownloading] = useState(false);
   const trimmed = (url || '').trim();
   if (!trimmed) return null;
+  const href = absoluteUploadUrl(trimmed);
+  if (!href) return null;
 
   const handleDownload = async () => {
     setDownloading(true);
@@ -57,7 +59,7 @@ export function OcAttachmentActions({
     return (
       <span className={`inline-flex items-center gap-1.5 shrink-0 ${className ?? ''}`}>
         <a
-          href={absoluteUploadUrl(trimmed)}
+          href={href}
           target="_blank"
           rel="noopener noreferrer"
           title="Ver"
@@ -86,7 +88,7 @@ export function OcAttachmentActions({
 
   return (
     <span className={`inline-flex items-center gap-2 flex-wrap ${className ?? ''}`}>
-      <a href={absoluteUploadUrl(trimmed)} target="_blank" rel="noopener noreferrer" className={linkCls}>
+      <a href={href} target="_blank" rel="noopener noreferrer" className={linkCls}>
         <Icon className="w-3.5 h-3.5 shrink-0" />
         {fileName}
       </a>

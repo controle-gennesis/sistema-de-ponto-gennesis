@@ -13,6 +13,8 @@ export interface Employee {
   client?: string;
   modality?: string;
   isRemote: boolean;
+  /** Se false, não precisa bater ponto (padrão true, como no web). */
+  requiresTimeClock?: boolean;
 }
 
 export interface User {

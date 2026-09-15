@@ -8,16 +8,25 @@ import {
   TextInput,
   Alert,
   ActivityIndicator,
-  Image
+  Image,
+  Modal,
+  Pressable,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
+import { StatusBar } from 'expo-status-bar';
 import * as ImagePicker from 'expo-image-picker';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { Check } from 'lucide-react-native';
 import { useTheme } from '../context/ThemeContext';
+import { useAuth } from '../context/AuthContext';
 import AppHeader from '../components/AppHeader';
+import { resolveMediaUrl } from '../utils/resolveMediaUrl';
 import {
   GESTAO_OS_SAFETY_CHECKLIST_ITEMS,
   fetchWorkOrder,
+  fetchGestaoOsMe,
   transitionWorkOrder,
   patchWorkOrder,
   uploadGestaoOsAttachment,
@@ -26,11 +35,15 @@ import {
   syncGestaoOsOfflineQueue,
   loadGestaoOsLocalDraft,
   saveGestaoOsLocalDraft,
-  clearGestaoOsLocalDraft
+  clearGestaoOsLocalDraft,
 } from '../services/gestaoOs';
 import type { RootStackParamList } from '../../App';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'GestaoOsDetail'>;
+
+function mediaUri(url: string | null | undefined): string | undefined {
+  return resolveMediaUrl(url);
+}
 
 type ChecklistItem = {
   id: string;
@@ -54,26 +67,69 @@ const NEXT: Record<string, string[]> = {
   SAFETY_CHECK: ['IN_PROGRESS'],
   IN_PROGRESS: ['WAITING_PARTS', 'COMPLETED'],
   WAITING_PARTS: ['IN_PROGRESS', 'COMPLETED'],
-  REWORK: ['IN_PROGRESS']
+  REWORK: ['IN_PROGRESS'],
 };
 
-const LABEL: Record<string, string> = {
+const ACTION_LABEL: Record<string, string> = {
   IN_PROGRESS: 'Iniciar / Retomar',
   WAITING_PARTS: 'Aguardando peça',
-  COMPLETED: 'Concluir serviço'
+  COMPLETED: 'Concluir serviço',
 };
+
+const STATUS_LABEL: Record<string, string> = {
+  OPEN: 'Aberta',
+  UNDER_REVIEW: 'Em análise',
+  APPROVED: 'Aprovada',
+  SAFETY_CHECK: 'Segurança',
+  IN_PROGRESS: 'Em execução',
+  WAITING_PARTS: 'Aguardando peça',
+  COMPLETED: 'Concluída',
+  REWORK: 'Ajuste',
+  CLOSED: 'Encerrada',
+  CANCELLED: 'Cancelada',
+};
+
+const PRIORITY_LABEL: Record<string, string> = {
+  LOW: 'Baixa',
+  MEDIUM: 'Média',
+  HIGH: 'Alta',
+  URGENT: 'Urgente',
+};
+
+function statusTone(status: string, primary: string): string {
+  switch (status) {
+    case 'IN_PROGRESS':
+    case 'APPROVED':
+    case 'SAFETY_CHECK':
+      return '#2563eb';
+    case 'WAITING_PARTS':
+    case 'UNDER_REVIEW':
+    case 'REWORK':
+      return '#d97706';
+    case 'COMPLETED':
+    case 'CLOSED':
+      return '#16a34a';
+    case 'CANCELLED':
+      return '#94a3b8';
+    case 'OPEN':
+    default:
+      return primary;
+  }
+}
 
 function mergeSafetyChecklist(items?: SafetyItem[] | null): SafetyItem[] {
   const byId = new Map((items || []).map((item) => [item.id, item]));
   return GESTAO_OS_SAFETY_CHECKLIST_ITEMS.map((item) => ({
     ...item,
-    checked: Boolean(byId.get(item.id)?.checked)
+    checked: Boolean(byId.get(item.id)?.checked),
   }));
 }
 
-export default function GestaoOsDetailScreen({ route }: Props) {
+export default function GestaoOsDetailScreen({ route, navigation }: Props) {
   const { id } = route.params;
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
+  const { user } = useAuth();
+  const styles = useMemo(() => getStyles(colors, isDark), [colors, isDark]);
   const queryClient = useQueryClient();
   const [note, setNote] = useState('');
   const [checklist, setChecklist] = useState<ChecklistItem[]>([]);
@@ -86,6 +142,12 @@ export default function GestaoOsDetailScreen({ route }: Props) {
   const [uploadingEnd, setUploadingEnd] = useState(false);
   const [parts, setParts] = useState<Array<{ id: string; name: string; quantity: number }>>([]);
   const [newPartName, setNewPartName] = useState('');
+  const [partsModalOpen, setPartsModalOpen] = useState(false);
+
+  const meQuery = useQuery({
+    queryKey: ['gestao-os-me-mobile'],
+    queryFn: fetchGestaoOsMe,
+  });
 
   const query = useQuery({
     queryKey: ['gestao-os-detail', id],
@@ -152,7 +214,7 @@ export default function GestaoOsDetailScreen({ route }: Props) {
         endPhotoUrl: endPhotoUrl || undefined,
         closeQrToken,
         parts:
-          status === 'WAITING_PARTS' || parts.length
+          status === 'WAITING_PARTS'
             ? parts.map((p) => ({
                 id: p.id,
                 name: p.name,
@@ -163,14 +225,15 @@ export default function GestaoOsDetailScreen({ route }: Props) {
                 notes: null
               }))
             : undefined,
-        signatureTechnicianUrl: status === 'COMPLETED' ? 'mobile:assinatura-tecnico' : undefined
       });
       if (status === 'COMPLETED') await clearCloseQrToken();
       return result;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['gestao-os-detail', id] });
+      queryClient.invalidateQueries({ queryKey: ['gestao-os-mine'] });
       queryClient.invalidateQueries({ queryKey: ['gestao-os-assigned'] });
+      setPartsModalOpen(false);
       Alert.alert('Status atualizado');
       setNote('');
     },
@@ -238,6 +301,7 @@ export default function GestaoOsDetailScreen({ route }: Props) {
     });
     if (result.canceled || !result.assets[0]?.uri) return;
     const asset = result.assets[0];
+    setSafetyPhotoUrl(asset.uri);
     setUploadingPhoto(true);
     try {
       const uploaded = await uploadGestaoOsAttachment({
@@ -249,6 +313,7 @@ export default function GestaoOsDetailScreen({ route }: Props) {
       setSafetyPhotoUrl(uploaded.url);
       await persistProgress({ safetyPhotoUrl: uploaded.url });
     } catch (err) {
+      setSafetyPhotoUrl(null);
       Alert.alert('Erro', err instanceof Error ? err.message : 'Falha ao enviar a foto');
     } finally {
       setUploadingPhoto(false);
@@ -271,6 +336,7 @@ export default function GestaoOsDetailScreen({ route }: Props) {
     });
     if (result.canceled || !result.assets[0]?.uri) return;
     const asset = result.assets[0];
+    setUrl(asset.uri);
     setBusy(true);
     try {
       const uploaded = await uploadGestaoOsAttachment({
@@ -282,6 +348,7 @@ export default function GestaoOsDetailScreen({ route }: Props) {
       setUrl(uploaded.url);
       await persistProgress({ [field]: uploaded.url });
     } catch (err) {
+      setUrl('');
       Alert.alert('Erro', err instanceof Error ? err.message : 'Falha ao enviar a foto');
     } finally {
       setBusy(false);
@@ -323,13 +390,33 @@ export default function GestaoOsDetailScreen({ route }: Props) {
     if (!name) return;
     setParts((prev) => [
       ...prev,
-      { id: `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, name, quantity: 1 }
+      { id: `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, name, quantity: 1 },
     ]);
     setNewPartName('');
   };
 
+  const confirmWaitingParts = () => {
+    if (parts.length === 0) {
+      Alert.alert('Peças', 'Adicione ao menos uma peça ou material.');
+      return;
+    }
+    mutation.mutate('WAITING_PARTS');
+  };
+
   const wo = query.data;
-  const actions = useMemo(() => (wo ? NEXT[wo.status] || [] : []), [wo]);
+  const userId = user?.id;
+  const canExecuteField = useMemo(() => {
+    if (!wo || !userId) return false;
+    if (meQuery.data?.isAdmin || meQuery.data?.canAnalisar) return true;
+    if (wo.assigneeId === userId) return true;
+    const team = Array.isArray(wo.teamUserIds) ? wo.teamUserIds.map(String) : [];
+    return team.includes(userId);
+  }, [wo, userId, meQuery.data?.isAdmin, meQuery.data?.canAnalisar]);
+
+  const actions = useMemo(
+    () => (wo && canExecuteField ? NEXT[wo.status] || [] : []),
+    [wo, canExecuteField]
+  );
   const safetyReady =
     safetyChecklist.length > 0 &&
     safetyChecklist.every((item) => item.required === false || item.checked) &&
@@ -345,30 +432,62 @@ export default function GestaoOsDetailScreen({ route }: Props) {
         !!item.afterPhotoUrl
     );
 
-  return (
-    <View style={[styles.container, { backgroundColor: colors.screenRoot }]}>
-      <AppHeader title="Detalhe da OS" showBack />
-      {query.isLoading || !wo ? (
-        <ActivityIndicator style={{ marginTop: 40 }} color={colors.primary} />
-      ) : (
-        <ScrollView contentContainerStyle={styles.body}>
-          <Text style={[styles.title, { color: colors.text }]}>
-            {wo.osNumber != null ? `OS #${wo.osNumber}` : `Chamado #${wo.displayNumber}`}
-          </Text>
-          <Text style={{ color: colors.textSecondary, marginTop: 4 }}>
-            {wo.status} · {wo.priority} · {wo.category}
-          </Text>
-          <Text style={[styles.desc, { color: colors.text }]}>{wo.description}</Text>
-          {wo.locationLabel ? (
-            <Text style={{ color: colors.textSecondary, marginTop: 8 }}>{wo.locationLabel}</Text>
-          ) : null}
+  const tone = statusTone(wo?.status || '', colors.primary);
+  const statusLabel = wo ? STATUS_LABEL[wo.status] || wo.status : '';
+  const priorityLabel = wo ? PRIORITY_LABEL[wo.priority] || wo.priority : '';
 
-          {wo.status === 'APPROVED' || wo.status === 'SAFETY_CHECK' ? (
-            <View style={[styles.box, { borderColor: colors.border, backgroundColor: colors.card }]}>
-              <Text style={[styles.boxTitle, { color: colors.text }]}>
-                Segurança do trabalho
-              </Text>
-              <Text style={{ color: colors.textSecondary, marginBottom: 10, fontSize: 13 }}>
+  return (
+    <View style={styles.safeArea}>
+      <StatusBar style={isDark ? 'light' : 'dark'} />
+      <AppHeader
+        title="Detalhes do Chamado"
+        showBack
+        onBack={() => navigation.goBack()}
+      />
+      {query.isLoading || !wo ? (
+        <View style={styles.loadingWrap}>
+          <ActivityIndicator color={colors.primary} size="large" />
+        </View>
+      ) : (
+        <ScrollView
+          style={styles.container}
+          contentContainerStyle={styles.body}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.hero}>
+            <Text style={styles.title}>
+              {wo.osNumber != null ? `OS #${wo.osNumber}` : `Chamado #${wo.displayNumber}`}
+            </Text>
+            <View style={[styles.badge, { backgroundColor: `${tone}18` }]}>
+              <Text style={[styles.badgeText, { color: tone }]}>{statusLabel}</Text>
+            </View>
+
+            <View style={styles.chipsRow}>
+              {priorityLabel ? (
+                <View style={styles.chip}>
+                  <Text style={styles.chipLabel}>Prioridade</Text>
+                  <Text style={styles.chipValue}>{priorityLabel}</Text>
+                </View>
+              ) : null}
+              {wo.category ? (
+                <View style={styles.chip}>
+                  <Text style={styles.chipLabel}>Categoria</Text>
+                  <Text style={styles.chipValue}>{wo.category}</Text>
+                </View>
+              ) : null}
+            </View>
+
+            {wo.description ? <Text style={styles.desc}>{wo.description}</Text> : null}
+
+            {wo.locationLabel ? (
+              <Text style={styles.location}>{wo.locationLabel}</Text>
+            ) : null}
+          </View>
+
+          {canExecuteField && (wo.status === 'APPROVED' || wo.status === 'SAFETY_CHECK') ? (
+            <View style={styles.box}>
+              <Text style={styles.boxTitle}>Segurança do trabalho</Text>
+              <Text style={styles.boxHint}>
                 Marque os EPIs e envie uma foto usando os equipamentos antes de iniciar a execução.
               </Text>
               {safetyChecklist.map((item, idx) => (
@@ -384,43 +503,48 @@ export default function GestaoOsDetailScreen({ route }: Props) {
                       return next;
                     });
                   }}
+                  activeOpacity={0.7}
                 >
                   <View
                     style={[
                       styles.checkbox,
-                      {
-                        borderColor: colors.border,
-                        backgroundColor: item.checked ? colors.primary : 'transparent'
-                      }
+                      item.checked && { backgroundColor: colors.primary, borderColor: colors.primary },
                     ]}
-                  />
-                  <Text style={{ color: colors.text, flex: 1 }}>{item.label}</Text>
+                  >
+                    {item.checked ? <Check size={13} color="#fff" strokeWidth={3} /> : null}
+                  </View>
+                  <Text style={styles.checkLabel}>{item.label}</Text>
                 </TouchableOpacity>
               ))}
-              {safetyPhotoUrl ? (
-                <Image source={{ uri: safetyPhotoUrl }} style={styles.photo} />
+              {safetyPhotoUrl && mediaUri(safetyPhotoUrl) ? (
+                <Image source={{ uri: mediaUri(safetyPhotoUrl) }} style={styles.photo} />
               ) : null}
               <TouchableOpacity
-                style={[styles.btn, { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border }]}
+                style={styles.secondaryBtn}
                 disabled={uploadingPhoto}
                 onPress={() => void takeSafetyPhoto()}
+                activeOpacity={0.85}
               >
-                <Text style={{ color: colors.text, fontWeight: '700' }}>
-                  {uploadingPhoto ? 'Enviando foto...' : safetyPhotoUrl ? 'Tirar outra foto' : 'Tirar foto com EPIs'}
+                <Text style={styles.secondaryBtnText}>
+                  {uploadingPhoto
+                    ? 'Enviando foto...'
+                    : safetyPhotoUrl
+                      ? 'Tirar outra foto'
+                      : 'Tirar foto com EPIs'}
                 </Text>
               </TouchableOpacity>
             </View>
           ) : null}
 
-          {checklist.length > 0 ? (
-            <View style={[styles.box, { borderColor: colors.border, backgroundColor: colors.card }]}>
-              <Text style={[styles.boxTitle, { color: colors.text }]}>Checklist</Text>
-              <Text style={{ color: colors.textSecondary, marginBottom: 10, fontSize: 13 }}>
+          {canExecuteField && checklist.length > 0 ? (
+            <View style={styles.box}>
+              <Text style={styles.boxTitle}>Checklist</Text>
+              <Text style={styles.boxHint}>
                 Marque o item, registre o horário e tire foto de antes e depois. Sem rede, o
                 progresso fica no aparelho e sincroniza depois.
               </Text>
               {checklist.map((item, idx) => (
-                <View key={item.id} style={{ marginBottom: 12 }}>
+                <View key={item.id} style={styles.checklistItem}>
                   <TouchableOpacity
                     style={styles.checkRow}
                     onPress={() => {
@@ -434,47 +558,48 @@ export default function GestaoOsDetailScreen({ route }: Props) {
                             ...row,
                             checked: true,
                             startedAt: row.startedAt || now,
-                            completedAt: now
+                            completedAt: now,
                           };
                         });
                         void persistProgress({ checklist: next });
                         return next;
                       });
                     }}
+                    activeOpacity={0.7}
                   >
                     <View
                       style={[
                         styles.checkbox,
-                        {
-                          borderColor: colors.border,
-                          backgroundColor: item.checked ? colors.primary : 'transparent'
-                        }
+                        item.checked && {
+                          backgroundColor: colors.primary,
+                          borderColor: colors.primary,
+                        },
                       ]}
-                    />
-                    <Text style={{ color: colors.text, flex: 1 }}>{item.label}</Text>
-                  </TouchableOpacity>
-                  {item.beforePhotoUrl ? (
-                    <Image source={{ uri: item.beforePhotoUrl }} style={styles.photo} />
-                  ) : null}
-                  {item.afterPhotoUrl ? (
-                    <Image source={{ uri: item.afterPhotoUrl }} style={styles.photo} />
-                  ) : null}
-                  <View style={{ flexDirection: 'row', gap: 8 }}>
-                    <TouchableOpacity
-                      style={[styles.btn, { flex: 1, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border }]}
-                      onPress={() => void captureChecklistPhoto(idx, 'beforePhotoUrl')}
                     >
-                      <Text style={{ color: colors.text, fontWeight: '700', textAlign: 'center' }}>
-                        Foto antes
-                      </Text>
+                      {item.checked ? <Check size={13} color="#fff" strokeWidth={3} /> : null}
+                    </View>
+                    <Text style={styles.checkLabel}>{item.label}</Text>
+                  </TouchableOpacity>
+                  {item.beforePhotoUrl && mediaUri(item.beforePhotoUrl) ? (
+                    <Image source={{ uri: mediaUri(item.beforePhotoUrl) }} style={styles.photo} />
+                  ) : null}
+                  {item.afterPhotoUrl && mediaUri(item.afterPhotoUrl) ? (
+                    <Image source={{ uri: mediaUri(item.afterPhotoUrl) }} style={styles.photo} />
+                  ) : null}
+                  <View style={styles.photoActions}>
+                    <TouchableOpacity
+                      style={[styles.secondaryBtn, styles.photoActionBtn]}
+                      onPress={() => void captureChecklistPhoto(idx, 'beforePhotoUrl')}
+                      activeOpacity={0.85}
+                    >
+                      <Text style={styles.secondaryBtnText}>Foto antes</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
-                      style={[styles.btn, { flex: 1, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border }]}
+                      style={[styles.secondaryBtn, styles.photoActionBtn]}
                       onPress={() => void captureChecklistPhoto(idx, 'afterPhotoUrl')}
+                      activeOpacity={0.85}
                     >
-                      <Text style={{ color: colors.text, fontWeight: '700', textAlign: 'center' }}>
-                        Foto depois
-                      </Text>
+                      <Text style={styles.secondaryBtnText}>Foto depois</Text>
                     </TouchableOpacity>
                   </View>
                 </View>
@@ -483,170 +608,450 @@ export default function GestaoOsDetailScreen({ route }: Props) {
           ) : null}
 
           {actions.includes('IN_PROGRESS') ? (
-            <View style={[styles.box, { borderColor: colors.border, backgroundColor: colors.card }]}>
-              <Text style={[styles.boxTitle, { color: colors.text }]}>Foto de início</Text>
-              <Text style={{ color: colors.textSecondary, marginBottom: 10, fontSize: 13 }}>
-                Registre uma foto antes de iniciar a execução.
-              </Text>
-              {startPhotoUrl ? <Image source={{ uri: startPhotoUrl }} style={styles.photo} /> : null}
+            <View style={styles.box}>
+              <Text style={styles.boxTitle}>Foto de início</Text>
+              <Text style={styles.boxHint}>Registre uma foto antes de iniciar a execução.</Text>
+              {startPhotoUrl && mediaUri(startPhotoUrl) ? (
+                <Image source={{ uri: mediaUri(startPhotoUrl) }} style={styles.photo} />
+              ) : null}
               <TouchableOpacity
-                style={[styles.btn, { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border }]}
+                style={styles.secondaryBtn}
                 disabled={uploadingStart}
                 onPress={() => void capturePhoto(setStartPhotoUrl, setUploadingStart, 'startPhotoUrl')}
+                activeOpacity={0.85}
               >
-                <Text style={{ color: colors.text, fontWeight: '700' }}>
-                  {uploadingStart ? 'Enviando foto...' : startPhotoUrl ? 'Tirar outra foto' : 'Tirar foto de início'}
+                <Text style={styles.secondaryBtnText}>
+                  {uploadingStart
+                    ? 'Enviando foto...'
+                    : startPhotoUrl
+                      ? 'Tirar outra foto'
+                      : 'Tirar foto de início'}
                 </Text>
               </TouchableOpacity>
             </View>
           ) : null}
 
-          {actions.includes('WAITING_PARTS') ? (
-            <View style={[styles.box, { borderColor: colors.border, backgroundColor: colors.card }]}>
-              <Text style={[styles.boxTitle, { color: colors.text }]}>Peças / materiais</Text>
-              {parts.map((part) => (
-                <View key={part.id} style={styles.partRow}>
-                  <Text style={{ color: colors.text, flex: 1 }}>{part.name}</Text>
+          {actions.includes('COMPLETED') ? (
+            <View style={styles.box}>
+              <Text style={styles.boxTitle}>Foto de conclusão</Text>
+              <Text style={styles.boxHint}>
+                {executionReady
+                  ? 'Registre uma foto antes de concluir o serviço.'
+                  : 'Marque todos os itens do checklist de execução antes de concluir.'}
+              </Text>
+              {endPhotoUrl && mediaUri(endPhotoUrl) ? (
+                <Image source={{ uri: mediaUri(endPhotoUrl) }} style={styles.photo} />
+              ) : null}
+              <TouchableOpacity
+                style={styles.secondaryBtn}
+                disabled={uploadingEnd}
+                onPress={() => void capturePhoto(setEndPhotoUrl, setUploadingEnd, 'endPhotoUrl')}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.secondaryBtnText}>
+                  {uploadingEnd
+                    ? 'Enviando foto...'
+                    : endPhotoUrl
+                      ? 'Tirar outra foto'
+                      : 'Tirar foto de conclusão'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
+
+          {!canExecuteField ? (
+            <Text style={styles.notice}>
+              Você está acompanhando este chamado. Alterar status (aguardar peça, concluir etc.) é
+              exclusivo do técnico responsável ou da equipe atribuída.
+            </Text>
+          ) : null}
+
+          {canExecuteField ? (
+            <>
+              <Text style={styles.fieldLabel}>Observação</Text>
+              <TextInput
+                value={note}
+                onChangeText={setNote}
+                placeholder="Observação / conclusão"
+                placeholderTextColor={colors.textSecondary}
+                multiline
+                style={styles.input}
+              />
+
+              {actions.map((status) => {
+                const blocked =
+                  mutation.isPending ||
+                  uploadingPhoto ||
+                  uploadingStart ||
+                  uploadingEnd ||
+                  (status === 'IN_PROGRESS' &&
+                    (wo.status === 'APPROVED' || wo.status === 'SAFETY_CHECK') &&
+                    !safetyReady) ||
+                  (status === 'IN_PROGRESS' && !startPhotoUrl) ||
+                  (status === 'COMPLETED' && (!endPhotoUrl || !executionReady));
+                return (
                   <TouchableOpacity
-                    onPress={() => setParts((prev) => prev.filter((p) => p.id !== part.id))}
+                    key={status}
+                    style={[styles.primaryBtn, blocked && { opacity: 0.5 }]}
+                    disabled={blocked}
+                    onPress={() => {
+                      if (status === 'WAITING_PARTS') {
+                        setPartsModalOpen(true);
+                        return;
+                      }
+                      mutation.mutate(status);
+                    }}
+                    activeOpacity={0.85}
                   >
-                    <Text style={{ color: '#ef4444', fontWeight: '700' }}>Remover</Text>
+                    <Text style={styles.primaryBtnText}>{ACTION_LABEL[status] || status}</Text>
                   </TouchableOpacity>
-                </View>
-              ))}
+                );
+              })}
+            </>
+          ) : null}
+        </ScrollView>
+      )}
+
+      <Modal
+        visible={partsModalOpen}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setPartsModalOpen(false)}
+      >
+        <Pressable style={styles.modalBackdrop} onPress={() => setPartsModalOpen(false)}>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            style={styles.modalKeyboard}
+          >
+            <Pressable style={styles.modalSheet} onPress={(e) => e.stopPropagation()}>
+              <Text style={styles.modalTitle}>Peças / materiais</Text>
+              <Text style={styles.modalHint}>
+                Informe o que está faltando para marcar o chamado como aguardando peça.
+              </Text>
+
+              {parts.length === 0 ? (
+                <Text style={styles.modalEmpty}>Nenhuma peça adicionada ainda.</Text>
+              ) : (
+                parts.map((part) => (
+                  <View key={part.id} style={styles.partRow}>
+                    <Text style={styles.partName}>{part.name}</Text>
+                    <TouchableOpacity
+                      onPress={() => setParts((prev) => prev.filter((p) => p.id !== part.id))}
+                      hitSlop={8}
+                    >
+                      <Text style={styles.partRemove}>Remover</Text>
+                    </TouchableOpacity>
+                  </View>
+                ))
+              )}
+
               <View style={styles.partAddRow}>
                 <TextInput
                   value={newPartName}
                   onChangeText={setNewPartName}
                   placeholder="Nome da peça"
                   placeholderTextColor={colors.textSecondary}
-                  style={[
-                    styles.partInput,
-                    { color: colors.text, borderColor: colors.border, backgroundColor: colors.background }
-                  ]}
+                  style={styles.partInput}
                   onSubmitEditing={addPart}
+                  autoFocus
                 />
                 <TouchableOpacity
                   style={[styles.partAddBtn, { backgroundColor: colors.primary }]}
                   onPress={addPart}
+                  activeOpacity={0.85}
                 >
-                  <Text style={{ color: '#fff', fontWeight: '700' }}>Adicionar</Text>
+                  <Text style={styles.primaryBtnText}>Adicionar</Text>
                 </TouchableOpacity>
               </View>
-            </View>
-          ) : null}
 
-          {actions.includes('COMPLETED') ? (
-            <>
-              <Text style={{ color: colors.textSecondary, marginBottom: 8, fontSize: 13 }}>
-                Para concluir, leia o QR do responsável da localidade (scanner na lista) e envie
-                foto de antes/depois de cada item.
-              </Text>
-              <View style={[styles.box, { borderColor: colors.border, backgroundColor: colors.card }]}>
-                <Text style={[styles.boxTitle, { color: colors.text }]}>Foto de conclusão</Text>
-                <Text style={{ color: colors.textSecondary, marginBottom: 10, fontSize: 13 }}>
-                  {executionReady
-                    ? 'Registre uma foto antes de concluir o serviço.'
-                    : 'Marque todos os itens do checklist de execução antes de concluir.'}
-                </Text>
-                {endPhotoUrl ? <Image source={{ uri: endPhotoUrl }} style={styles.photo} /> : null}
-                <TouchableOpacity
-                  style={[styles.btn, { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border }]}
-                  disabled={uploadingEnd}
-                  onPress={() => void capturePhoto(setEndPhotoUrl, setUploadingEnd, 'endPhotoUrl')}
-                >
-                  <Text style={{ color: colors.text, fontWeight: '700' }}>
-                    {uploadingEnd ? 'Enviando foto...' : endPhotoUrl ? 'Tirar outra foto' : 'Tirar foto de conclusão'}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            </>
-          ) : null}
-
-          <TextInput
-            value={note}
-            onChangeText={setNote}
-            placeholder="Observação / conclusão"
-            placeholderTextColor={colors.textSecondary}
-            multiline
-            style={[
-              styles.input,
-              { color: colors.text, borderColor: colors.border, backgroundColor: colors.card }
-            ]}
-          />
-
-          {actions.map((status) => {
-            const blocked =
-              mutation.isPending ||
-              uploadingPhoto ||
-              uploadingStart ||
-              uploadingEnd ||
-              (status === 'IN_PROGRESS' &&
-                (wo.status === 'APPROVED' || wo.status === 'SAFETY_CHECK') &&
-                !safetyReady) ||
-              (status === 'IN_PROGRESS' && !startPhotoUrl) ||
-              (status === 'COMPLETED' && (!endPhotoUrl || !executionReady)) ||
-              (status === 'WAITING_PARTS' && parts.length === 0);
-            return (
               <TouchableOpacity
-                key={status}
-                style={[styles.btn, { backgroundColor: colors.primary, opacity: blocked ? 0.5 : 1 }]}
-                disabled={blocked}
-                onPress={() => mutation.mutate(status)}
+                style={[
+                  styles.primaryBtn,
+                  styles.modalConfirmBtn,
+                  (mutation.isPending || parts.length === 0) && { opacity: 0.5 },
+                ]}
+                disabled={mutation.isPending || parts.length === 0}
+                onPress={confirmWaitingParts}
+                activeOpacity={0.85}
               >
-                <Text style={styles.btnText}>{LABEL[status] || status}</Text>
+                {mutation.isPending ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.primaryBtnText}>Confirmar aguardando peça</Text>
+                )}
               </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
-      )}
+
+              <TouchableOpacity
+                style={styles.modalCancel}
+                onPress={() => setPartsModalOpen(false)}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.modalCancelText}>Cancelar</Text>
+              </TouchableOpacity>
+            </Pressable>
+          </KeyboardAvoidingView>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1 },
-  body: { padding: 16, paddingBottom: 40 },
-  title: { fontSize: 20, fontWeight: '700' },
-  desc: { marginTop: 12, fontSize: 15, lineHeight: 22 },
-  box: { borderWidth: 1, borderRadius: 12, padding: 12, marginTop: 16 },
-  boxTitle: { fontWeight: '700', marginBottom: 8 },
-  checkRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 },
-  checkbox: { width: 20, height: 20, borderRadius: 4, borderWidth: 1 },
-  input: {
-    borderWidth: 1,
-    borderRadius: 12,
-    minHeight: 90,
-    padding: 12,
-    marginTop: 16,
-    textAlignVertical: 'top'
-  },
-  btn: {
-    marginTop: 10,
-    borderRadius: 12,
-    paddingVertical: 12,
-    alignItems: 'center'
-  },
-  btnText: { color: '#fff', fontWeight: '700' },
-  photo: { width: '100%', height: 180, borderRadius: 10, marginTop: 8, marginBottom: 4 },
-  partRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    marginBottom: 8
-  },
-  partAddRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 },
-  partInput: {
-    flex: 1,
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10
-  },
-  partAddBtn: {
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    alignItems: 'center'
-  }
-});
+const getStyles = (colors: any, isDark: boolean) =>
+  StyleSheet.create({
+    safeArea: { flex: 1, backgroundColor: colors.screenRoot },
+    container: { flex: 1, backgroundColor: colors.screenRoot },
+    loadingWrap: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    body: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 48 },
+    hero: {
+      marginBottom: 8,
+      alignItems: 'center',
+      paddingHorizontal: 8,
+    },
+    title: {
+      fontSize: 22,
+      fontWeight: '700',
+      letterSpacing: -0.4,
+      color: colors.text,
+      textAlign: 'center',
+    },
+    badge: {
+      marginTop: 10,
+      paddingHorizontal: 12,
+      paddingVertical: 5,
+      borderRadius: 999,
+    },
+    badgeText: {
+      fontSize: 12,
+      fontWeight: '700',
+    },
+    chipsRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      justifyContent: 'center',
+      gap: 8,
+      marginTop: 14,
+    },
+    chip: {
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      borderRadius: 12,
+      backgroundColor: isDark ? colors.card : colors.surface,
+      borderWidth: StyleSheet.hairlineWidth * 1.5,
+      borderColor: isDark ? colors.border : 'rgba(15, 23, 42, 0.08)',
+      alignItems: 'center',
+    },
+    chipLabel: {
+      fontSize: 10,
+      fontWeight: '600',
+      color: colors.textSecondary,
+      textTransform: 'uppercase',
+      letterSpacing: 0.3,
+      marginBottom: 2,
+      textAlign: 'center',
+    },
+    chipValue: {
+      fontSize: 13,
+      fontWeight: '700',
+      color: colors.text,
+      textAlign: 'center',
+    },
+    desc: {
+      marginTop: 14,
+      fontSize: 15,
+      lineHeight: 22,
+      fontWeight: '500',
+      color: colors.text,
+      textAlign: 'center',
+    },
+    location: {
+      color: colors.textSecondary,
+      marginTop: 12,
+      fontSize: 13,
+      fontWeight: '500',
+      lineHeight: 18,
+      textAlign: 'center',
+      paddingHorizontal: 4,
+    },
+    box: {
+      borderWidth: StyleSheet.hairlineWidth * 1.5,
+      borderRadius: 16,
+      padding: 16,
+      marginTop: 16,
+      borderColor: isDark ? colors.border : 'rgba(15, 23, 42, 0.08)',
+      backgroundColor: colors.card,
+    },
+    boxTitle: {
+      fontWeight: '700',
+      marginBottom: 6,
+      fontSize: 16,
+      letterSpacing: -0.2,
+      color: colors.text,
+    },
+    boxHint: {
+      color: colors.textSecondary,
+      marginBottom: 14,
+      fontSize: 13,
+      lineHeight: 18,
+      fontWeight: '500',
+    },
+    notice: {
+      color: colors.textSecondary,
+      marginTop: 16,
+      marginBottom: 4,
+      fontSize: 13,
+      lineHeight: 18,
+      fontWeight: '500',
+    },
+    checklistItem: { marginBottom: 14 },
+    checkRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 8 },
+    checkbox: {
+      width: 22,
+      height: 22,
+      borderRadius: 6,
+      borderWidth: 1.5,
+      borderColor: isDark ? colors.border : 'rgba(15, 23, 42, 0.2)',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    checkLabel: {
+      flex: 1,
+      color: colors.text,
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    fieldLabel: {
+      marginTop: 18,
+      marginBottom: 8,
+      fontSize: 13,
+      fontWeight: '700',
+      color: colors.text,
+    },
+    input: {
+      borderWidth: StyleSheet.hairlineWidth * 1.5,
+      borderRadius: 14,
+      minHeight: 96,
+      padding: 14,
+      textAlignVertical: 'top',
+      color: colors.text,
+      backgroundColor: colors.card,
+      borderColor: isDark ? colors.border : 'rgba(15, 23, 42, 0.08)',
+      fontSize: 15,
+      fontWeight: '500',
+    },
+    primaryBtn: {
+      marginTop: 12,
+      borderRadius: 14,
+      paddingVertical: 15,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.primary,
+      minHeight: 52,
+    },
+    primaryBtnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
+    secondaryBtn: {
+      marginTop: 8,
+      borderRadius: 12,
+      paddingVertical: 12,
+      alignItems: 'center',
+      backgroundColor: isDark ? 'rgba(255,255,255,0.04)' : colors.surface,
+      borderWidth: StyleSheet.hairlineWidth * 1.5,
+      borderColor: isDark ? colors.border : 'rgba(15, 23, 42, 0.08)',
+    },
+    secondaryBtnText: {
+      color: colors.text,
+      fontWeight: '700',
+      fontSize: 13,
+      textAlign: 'center',
+    },
+    photoActions: { flexDirection: 'row', gap: 8 },
+    photoActionBtn: { flex: 1, marginTop: 4 },
+    photo: {
+      width: '100%',
+      height: 180,
+      borderRadius: 12,
+      marginTop: 8,
+      marginBottom: 4,
+      backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.06)',
+      resizeMode: 'cover',
+    },
+    partRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      marginBottom: 10,
+    },
+    partName: { color: colors.text, flex: 1, fontSize: 14, fontWeight: '600' },
+    partRemove: { color: '#ef4444', fontWeight: '700', fontSize: 13 },
+    partAddRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 },
+    partInput: {
+      flex: 1,
+      borderWidth: StyleSheet.hairlineWidth * 1.5,
+      borderRadius: 12,
+      paddingHorizontal: 12,
+      paddingVertical: 11,
+      color: colors.text,
+      backgroundColor: isDark ? 'rgba(255,255,255,0.04)' : colors.surface,
+      borderColor: isDark ? colors.border : 'rgba(15, 23, 42, 0.08)',
+      fontSize: 14,
+      fontWeight: '500',
+    },
+    partAddBtn: {
+      borderRadius: 12,
+      paddingHorizontal: 14,
+      paddingVertical: 11,
+      alignItems: 'center',
+    },
+    modalBackdrop: {
+      flex: 1,
+      backgroundColor: 'rgba(15, 23, 42, 0.45)',
+      justifyContent: 'flex-end',
+    },
+    modalKeyboard: {
+      width: '100%',
+    },
+    modalSheet: {
+      backgroundColor: colors.card,
+      borderTopLeftRadius: 20,
+      borderTopRightRadius: 20,
+      paddingHorizontal: 20,
+      paddingTop: 20,
+      paddingBottom: 28,
+    },
+    modalTitle: {
+      fontSize: 18,
+      fontWeight: '700',
+      letterSpacing: -0.3,
+      color: colors.text,
+      marginBottom: 6,
+    },
+    modalHint: {
+      fontSize: 13,
+      lineHeight: 18,
+      fontWeight: '500',
+      color: colors.textSecondary,
+      marginBottom: 16,
+    },
+    modalEmpty: {
+      fontSize: 13,
+      fontWeight: '500',
+      color: colors.textSecondary,
+      marginBottom: 12,
+    },
+    modalConfirmBtn: {
+      marginTop: 16,
+    },
+    modalCancel: {
+      marginTop: 12,
+      alignItems: 'center',
+      paddingVertical: 10,
+    },
+    modalCancelText: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: colors.textSecondary,
+    },
+  });

@@ -24,6 +24,7 @@ const COMBUSTIVEL_KEY = pathToModuleKey('/ponto/solicitar-combustivel');
 const RESERVAS_KEY = pathToModuleKey('/ponto/reserva-veiculos');
 const SOLICITACOES_DP_KEY = pathToModuleKey('/ponto/solicitacoes-dp');
 const GESTAO_OS_KEY = pathToModuleKey('/ponto/sistema-gestao-os');
+const MEUS_CHAMADOS_KEY = pathToModuleKey('/ponto/meus-chamados');
 
 function moduleReady(isFetched: boolean, isPending: boolean) {
   return isFetched && !isPending;
@@ -84,8 +85,12 @@ export function usePermissions() {
   const canSeeDpRequests =
     isElevated || isDepartmentPessoal || hasModule(SOLICITACOES_DP_KEY);
 
-  /** Central de Chamados — oculta no mobile (só web). */
-  const canSeeGestaoOs = false;
+  /** Meus Chamados ou Central de Chamados (web). */
+  const canSeeGestaoOs =
+    isElevated || hasModule(MEUS_CHAMADOS_KEY) || hasModule(GESTAO_OS_KEY);
+
+  /** Registros de ponto — mesmo critério do web (`requiresTimeClock`). */
+  const canSeePonto = user?.employee?.requiresTimeClock !== false;
 
   return {
     isLoading: isAuthenticated && !!user?.id && !isElevated && (isPending || !isFetched),
@@ -96,5 +101,6 @@ export function usePermissions() {
     canSeePncp,
     canSeeDpRequests,
     canSeeGestaoOs,
+    canSeePonto,
   };
 }

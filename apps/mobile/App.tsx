@@ -19,7 +19,6 @@ import KanbanBoardsScreen from './src/screens/kanban/KanbanBoardsScreen';
 import KanbanBoardScreen from './src/screens/kanban/KanbanBoardScreen';
 import KanbanCardScreen from './src/screens/kanban/KanbanCardScreen';
 import DpRequestsScreen from './src/screens/DpRequestsScreen';
-import GestaoOsListScreen from './src/screens/GestaoOsListScreen';
 import GestaoOsDetailScreen from './src/screens/GestaoOsDetailScreen';
 import GestaoOsQrScreen from './src/screens/GestaoOsQrScreen';
 import AuthBrandSplash, { SPLASH_BG } from './src/components/AuthBrandSplash';
@@ -46,7 +45,6 @@ export type RootStackParamList = {
   KanbanBoard: { departmentKey?: string; title?: string };
   KanbanCard: { cardId: string; departmentKey?: string };
   DpRequests: undefined;
-  GestaoOs: undefined;
   GestaoOsDetail: { id: string };
   GestaoOsQr: { token: string };
 };
@@ -123,17 +121,17 @@ function AppNavigator() {
   const shell = (
     <View style={{ flex: 1, backgroundColor: isAuthenticated ? 'transparent' : SPLASH_BG }}>
       <NavigationContainer>
-        <Stack.Navigator
-          screenOptions={{
-            headerShown: false,
-            contentStyle: {
-              backgroundColor: isAuthenticated ? 'transparent' : SPLASH_BG,
-            },
-            animation: 'slide_from_right',
-          }}
-        >
-          {isAuthenticated ? (
-            <>
+        {isAuthenticated ? (
+          <>
+            <Stack.Navigator
+              screenOptions={{
+                headerShown: false,
+                contentStyle: {
+                  backgroundColor: 'transparent',
+                },
+                animation: 'slide_from_right',
+              }}
+            >
               <Stack.Screen name="Main" component={BottomTabNavigator} />
               <Stack.Screen name="Punch" component={PunchScreen} />
               <Stack.Screen name="TimeRecords" component={TimeRecordsScreen} />
@@ -145,17 +143,26 @@ function AppNavigator() {
               <Stack.Screen name="KanbanBoard" component={KanbanBoardScreen} />
               <Stack.Screen name="KanbanCard" component={KanbanCardScreen} />
               <Stack.Screen name="DpRequests" component={DpRequestsScreen} />
-              <Stack.Screen name="GestaoOs" component={GestaoOsListScreen} />
               <Stack.Screen name="GestaoOsDetail" component={GestaoOsDetailScreen} />
               <Stack.Screen name="GestaoOsQr" component={GestaoOsQrScreen} />
-            </>
-          ) : (
+            </Stack.Navigator>
+            <NotificationsSheet />
+          </>
+        ) : (
+          <Stack.Navigator
+            screenOptions={{
+              headerShown: false,
+              contentStyle: {
+                backgroundColor: SPLASH_BG,
+              },
+              animation: 'slide_from_right',
+            }}
+          >
             <Stack.Screen name="Login">
               {() => <LoginScreen fromBootSplash />}
             </Stack.Screen>
-          )}
-        </Stack.Navigator>
-        {isAuthenticated ? <NotificationsSheet /> : null}
+          </Stack.Navigator>
+        )}
       </NavigationContainer>
     </View>
   );

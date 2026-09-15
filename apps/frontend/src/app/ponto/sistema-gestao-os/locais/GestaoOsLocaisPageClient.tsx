@@ -636,6 +636,7 @@ export default function GestaoOsLocaisPageClient() {
       const count = await downloadGestaoOsAssetQrLabelsPdf(labels, {
         companyName: logoAlt,
         forceUnbBranding: useUnbBranding,
+        logoSrc: printLogoSrc,
         quantities
       });
       toast.success(`${count} etiqueta(s) no PDF.`);
@@ -661,6 +662,7 @@ export default function GestaoOsLocaisPageClient() {
       const count = await downloadGestaoOsAssetQrLabelsPdf([label], {
         companyName: logoAlt,
         forceUnbBranding: useUnbBranding,
+        logoSrc: printLogoSrc,
         quantities: { [label.assetId]: quantity }
       });
       toast.success(`${count} etiqueta(s) no PDF.`);

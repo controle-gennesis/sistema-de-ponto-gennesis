@@ -298,11 +298,11 @@ export function usePermissions() {
     !!permissionData?.isAdmin ||
     can(pk('/ponto/controle/aprovar-solicitacoes-restritas-dp'));
 
-  /** Tela / API de aprovações DP: gestor por contrato, permissão restrita ou permissão legada (Controle). */
+  /** Tela / API de aprovações DP (Solicitações Internas): permissão Controle ou legada.
+   * Ser gestor de contrato libera RM/OC, mas não esta aba. */
   const canAccessDpApproverPages =
     isAdministrator ||
     !!permissionData?.isAdmin ||
-    dpApprovalContractIds.length > 0 ||
     canApproveRestrictedDpRequests ||
     can(pk('/ponto/controle/aprovar-solicitacoes-dp'));
 
@@ -662,15 +662,13 @@ export function useRoutePermission(route: string) {
      */
     '/ponto/aprovacoes':
       isAdministrator ||
-      dpApprovalContractIds.length > 0 ||
       canApproveRestrictedDpRequests ||
       can(pk('/ponto/controle/aprovar-solicitacoes-dp')) ||
       canApproveFd ||
       canApproveEspelhoNf ||
       canApproveFuel ||
-      can(pk('/ponto/controle/aprovar-oc-compras')) ||
-      can(pk('/ponto/controle/aprovar-oc-diretoria')) ||
-      can(pk('/ponto/controle/aprovar-requisicoes-materiais')),
+      canApproveOc ||
+      canApproveMaterialRequests,
     '/ponto/funcionarios': isAdministrator || permissions.canManageEmployees,
     '/ponto/aniversariantes': isAdministrator || can(pk('/ponto/aniversariantes')),
     '/ponto/seguranca-do-trabalho': isAdministrator || can(pk('/ponto/seguranca-do-trabalho')),

@@ -1,6 +1,7 @@
 import api from './api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
+import { uploadMultipartFile } from '../utils/uploadMultipartFile';
 
 const COMPANY_KEY = 'gestao-os-company-id';
 
@@ -56,7 +57,9 @@ export type GestaoOsWorkOrderMobile = {
   description: string;
   locationLabel: string | null;
   dueAt: string | null;
+  requesterId?: string | null;
   assigneeId: string | null;
+  teamUserIds?: string[] | null;
   completionNote: string | null;
   checklistResponses: Array<{
     id: string;
@@ -148,11 +151,15 @@ export async function fetchGestaoOsAgenda(
   }
 }
 
-export async function fetchAssignedWorkOrders() {
-  const { qs, headers } = await withCompany({ assignedToMe: 'true', limit: '100' });
+export async function fetchMyWorkOrders() {
+  // Abertos por mim + atribuídos a mim (acompanhar andamento e executar)
+  const { qs, headers } = await withCompany({ involved: 'true', limit: '100' });
   const res = await api.get(`/api/gestao-os${qs}`, { headers });
   return parseJson(res) as Promise<GestaoOsWorkOrderMobile[]>;
 }
+
+/** @deprecated use fetchMyWorkOrders */
+export const fetchAssignedWorkOrders = fetchMyWorkOrders;
 
 export async function fetchWorkOrder(id: string) {
   const { qs, headers } = await withCompany();
@@ -267,14 +274,12 @@ async function enqueueOffline(job: OfflineJob) {
 }
 
 async function uploadAttachmentOnline(file: { uri: string; name: string; type: string }) {
-  const form = new FormData();
-  form.append('file', {
-    uri: file.uri,
-    name: file.name,
-    type: file.type
-  } as unknown as Blob);
-  const res = await api.post('/api/gestao-os/upload-attachment', form);
-  return parseJson(res) as Promise<{ url: string; name?: string; mimeType?: string }>;
+  return uploadMultipartFile<{ url: string; name?: string; mimeType?: string }>({
+    path: '/api/gestao-os/upload-attachment',
+    fieldName: 'file',
+    method: 'POST',
+    file
+  });
 }
 
 async function hydrateLocalMedia<T>(value: T): Promise<T> {

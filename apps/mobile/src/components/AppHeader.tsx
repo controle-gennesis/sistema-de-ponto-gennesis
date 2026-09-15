@@ -9,6 +9,7 @@ import {
   Animated,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
 import { Menu as MenuIcon, ArrowLeft, Bell } from 'lucide-react-native';
 import { useTheme } from '../context/ThemeContext';
 import { useNotifications } from '../notifications/NotificationsContext';
@@ -71,11 +72,13 @@ export default function AppHeader({
   title,
   rightAction,
 }: AppHeaderProps) {
+  const navigation = useNavigation();
   const { colors, isDark } = useTheme();
   const [showMenu, setShowMenu] = useState(false);
   const chrome = useChromeVisibility();
 
   const iconColor = colors.text;
+  const handleBack = onBack ?? (() => navigation.goBack());
 
   if (showBack) {
     return (
@@ -83,7 +86,7 @@ export default function AppHeader({
         <View style={styles.stackHeader}>
           <View style={styles.side}>
             <TouchableOpacity
-              onPress={onBack}
+              onPress={handleBack}
               hitSlop={8}
               accessibilityLabel="Voltar"
               style={styles.iconBtn}

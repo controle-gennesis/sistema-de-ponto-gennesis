@@ -20,7 +20,7 @@ import { resolveSlaDueAt } from '../lib/gestaoOsSla';
 import { notifyGestaoOsEvent } from '../lib/gestaoOsNotify';
 import { parseParts, parsePartsLoose } from '../lib/gestaoOsParts';
 import { deductGestaoOsPartsFromStock } from '../lib/gestaoOsStockLink';
-import { applyExecutionClock } from '../lib/gestaoOsExecution';
+import { applyExecutionClock, clampExecutionMs } from '../lib/gestaoOsExecution';
 import {
   isChecklistEmpty,
   isExecutionChecklistComplete,
@@ -289,7 +289,7 @@ async function persistWorkOrderExtras(
     );
   }
   if (extras.executionMs !== undefined) {
-    sets.push(`"executionMs" = ${Math.max(0, Math.round(Number(extras.executionMs) || 0))}`);
+    sets.push(`"executionMs" = ${clampExecutionMs(Number(extras.executionMs) || 0)}`);
   }
   if (extras.lastExecutionResumeAt !== undefined) {
     sets.push(
@@ -884,10 +884,15 @@ export class GestaoOsService {
         buildingId,
         category
       });
-      assigneeId = suggested?.id ?? null;
+      // Nunca atribuir o próprio solicitante como executor na abertura
+      assigneeId =
+        suggested?.id && suggested.id !== input.requesterId ? suggested.id : null;
     }
     if (!assigneeId) {
-      assigneeId = buildingMeta?.prepostoUserId || buildingMeta?.managerUserId || null;
+      const candidate =
+        buildingMeta?.prepostoUserId || buildingMeta?.managerUserId || null;
+      // Preposto/gestor da localidade só vira responsável se não for quem abriu o chamado
+      assigneeId = candidate && candidate !== input.requesterId ? candidate : null;
     }
 
     const sacKind = origin === 'SAC' ? parseSacKind(input.sacKind) : null;
@@ -1035,11 +1040,41 @@ export class GestaoOsService {
     }
     if (
       !isGestaoOsManager(access) &&
-      !access.canExecutar &&
       current.assigneeId !== actorId &&
+      !(
+        Array.isArray((current as { teamUserIds?: unknown }).teamUserIds) &&
+        ((current as { teamUserIds?: unknown }).teamUserIds as unknown[]).map(String).includes(actorId)
+      ) &&
       current.requesterId !== actorId
     ) {
       throw createError('Sem permissão para editar esta OS', 403);
+    }
+
+    // Solicitante só pode editar campos leves; progresso de execução é do responsável/equipe/analista
+    const isFieldActor =
+      isGestaoOsManager(access) ||
+      current.assigneeId === actorId ||
+      (Array.isArray((current as { teamUserIds?: unknown }).teamUserIds) &&
+        ((current as { teamUserIds?: unknown }).teamUserIds as unknown[])
+          .map(String)
+          .includes(actorId));
+    if (
+      !isFieldActor &&
+      current.requesterId === actorId &&
+      (input.checklistResponses !== undefined ||
+        input.safetyChecklistResponses !== undefined ||
+        input.safetyPhotoUrl !== undefined ||
+        input.parts !== undefined ||
+        input.startPhotoUrl !== undefined ||
+        input.endPhotoUrl !== undefined ||
+        input.signatureTechnicianUrl !== undefined ||
+        input.assigneeId !== undefined ||
+        input.autoAssign)
+    ) {
+      throw createError(
+        'Somente o técnico responsável (ou a equipe) pode atualizar a execução deste chamado',
+        403
+      );
     }
 
     const data: Prisma.GestaoOsWorkOrderUpdateInput = {};
@@ -1106,9 +1141,11 @@ export class GestaoOsService {
         : null;
     }
     if (input.signatureTechnicianUrl !== undefined) {
-      data.signatureTechnicianUrl = input.signatureTechnicianUrl
+      const raw = input.signatureTechnicianUrl
         ? String(input.signatureTechnicianUrl).trim()
-        : null;
+        : '';
+      data.signatureTechnicianUrl =
+        raw && !/^mobile:/i.test(raw) && !/^app:/i.test(raw) ? raw : null;
     }
 
     await prisma.gestaoOsWorkOrder.update({
@@ -1204,7 +1241,8 @@ export class GestaoOsService {
     assertCanTransition(access, current.status, nextStatus, {
       requesterId: current.requesterId,
       assigneeId: current.assigneeId,
-      companyId: current.companyId
+      companyId: current.companyId,
+      teamUserIds: (current as { teamUserIds?: unknown }).teamUserIds
     });
 
     if (nextStatus === 'CANCELLED') {
@@ -1443,9 +1481,11 @@ export class GestaoOsService {
         : null;
     }
     if (input.signatureTechnicianUrl !== undefined) {
-      data.signatureTechnicianUrl = input.signatureTechnicianUrl
+      const raw = input.signatureTechnicianUrl
         ? String(input.signatureTechnicianUrl).trim()
-        : null;
+        : '';
+      data.signatureTechnicianUrl =
+        raw && !/^mobile:/i.test(raw) && !/^app:/i.test(raw) ? raw : null;
     }
 
     let slaHoursToPersist: number | null | undefined = undefined;

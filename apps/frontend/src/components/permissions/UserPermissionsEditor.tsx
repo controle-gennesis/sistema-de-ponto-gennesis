@@ -2365,7 +2365,7 @@ export function UserPermissionsEditor({
                         <th
                           scope="col"
                           className="px-1 pb-3 text-center text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-400 dark:text-gray-500"
-                          title="Gestor do contrato: aprova solicitações internas, requisições de materiais e OCs na fase gestor deste contrato."
+                          title="Gestor do contrato: aprova requisições de materiais e OCs na fase gestor deste contrato. Solicitações internas usam a permissão Controle «Aprovar Solicitações Restritas»."
                         >
                           Gestor
                         </th>

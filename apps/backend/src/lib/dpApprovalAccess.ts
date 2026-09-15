@@ -30,8 +30,8 @@ export function isSensitiveDpRequestType(requestType: string): boolean {
 }
 
 /**
- * Pode atuar como gestor nas rotas de aprovação DP: vínculo em `user_dp_approval_contracts`
- * ou permissão legada (antes da coluna «Gestor DP» na aba Contratos).
+ * Vínculo de Gestor no contrato ou permissão legada Controle.
+ * Usado para criar tipos sensíveis / anexar CC — não libera sozinho a aba Solicitações Internas.
  */
 export async function userHasDpApprovePermission(userId: string): Promise<boolean> {
   const legacy = await prisma.userPermission.findFirst({
@@ -209,10 +209,14 @@ async function restrictedDpApprovalVisibilityWhere(
   return { OR: orParts };
 }
 
-/** Gestor DP comum ou aprovador de solicitações restritas (para entrar na API de aprovações). */
+/** Pode entrar na fila/API de aprovações de Solicitações Internas (não inclui só ser Gestor de contrato). */
 export async function userHasAnyDpApproverAccess(userId: string): Promise<boolean> {
-  if (await userHasDpApprovePermission(userId)) return true;
-  return userHasRestrictedDpApprovePermission(userId);
+  if (await userHasRestrictedDpApprovePermission(userId)) return true;
+  const legacy = await prisma.userPermission.findFirst({
+    where: { userId, module: DP_APPROVE_MODULE_KEY, action: PERMISSION_ACCESS_ACTION, allowed: true },
+    select: { id: true },
+  });
+  return !!legacy;
 }
 
 export async function userHasDpManagePermission(userId: string): Promise<boolean> {
@@ -274,13 +278,6 @@ export async function userHasSensitiveDpCreateControlePermission(userId: string)
   return !!row;
 }
 
-type DpApprovalAssignment = {
-  contractId: string;
-  costCenterId: string | null;
-  isDfAdmLocal: boolean;
-  allowedSectors: string[];
-};
-
 function sectorWhere(allowedSectors: string[]): Record<string, unknown> {
   if (allowedSectors.length === 1) {
     return { sectorSolicitante: { equals: allowedSectors[0], mode: 'insensitive' } };
@@ -292,15 +289,6 @@ function sectorWhere(allowedSectors: string[]): Record<string, unknown> {
   };
 }
 
-function contractOrCostCenterWhere(contractId: string, costCenterId: string | null): Record<string, unknown> {
-  if (!costCenterId) return { contractId };
-  return { OR: [{ contractId }, { costCenterId }] };
-}
-
-/**
- * `null` = usuário não é gestor DP (sem permissão ou sem contratos vinculados).
- * `{}` = admin (sem filtro de contrato).
- */
 async function buildManagerDpScopeFromContractIds(contractIds: string[]): Promise<Record<string, unknown>> {
   if (contractIds.length === 0) return { contractId: { in: [] } };
   const rows = await prisma.contract.findMany({
@@ -313,94 +301,6 @@ async function buildManagerDpScopeFromContractIds(contractIds: string[]): Promis
   return {
     OR: [{ contractId: { in: contractIds } }, { costCenterId: { in: costCenterIds } }],
   };
-}
-
-async function getDpApprovalAssignments(userId: string): Promise<DpApprovalAssignment[]> {
-  const rows = await prisma.userDpApprovalContract.findMany({
-    where: { userId },
-    select: {
-      contractId: true,
-      allowedSectors: true,
-      contract: {
-        select: {
-          name: true,
-          costCenterId: true,
-          costCenter: { select: { name: true, code: true } },
-        },
-      },
-    },
-  });
-  return rows.map((row) => ({
-    contractId: row.contractId,
-    costCenterId: row.contract.costCenterId,
-    isDfAdmLocal: isDfAdmLocalLabel(
-      row.contract.name,
-      row.contract.costCenter?.name,
-      row.contract.costCenter?.code
-    ),
-    allowedSectors: sanitizeDpApprovalSectors(row.allowedSectors),
-  }));
-}
-
-async function buildManagerDpScopeFromAssignments(
-  assignments: DpApprovalAssignment[]
-): Promise<Record<string, unknown>> {
-  if (assignments.length === 0) return { contractId: { in: [] } };
-
-  const unrestrictedContractIds: string[] = [];
-  const unrestrictedCostCenterIds: string[] = [];
-  const orParts: Record<string, unknown>[] = [];
-
-  for (const assignment of assignments) {
-    if (assignment.isDfAdmLocal && assignment.allowedSectors.length > 0) {
-      orParts.push({
-        AND: [
-          contractOrCostCenterWhere(assignment.contractId, assignment.costCenterId),
-          sectorWhere(assignment.allowedSectors),
-        ],
-      });
-      continue;
-    }
-    unrestrictedContractIds.push(assignment.contractId);
-    if (assignment.costCenterId) unrestrictedCostCenterIds.push(assignment.costCenterId);
-  }
-
-  if (unrestrictedContractIds.length > 0) {
-    const uniqueCcIds = [...new Set(unrestrictedCostCenterIds)];
-    if (uniqueCcIds.length === 0) {
-      orParts.push({ contractId: { in: unrestrictedContractIds } });
-    } else {
-      orParts.push({
-        OR: [
-          { contractId: { in: unrestrictedContractIds } },
-          { costCenterId: { in: uniqueCcIds } },
-        ],
-      });
-    }
-  }
-
-  if (orParts.length === 0) return { contractId: { in: [] } };
-  if (orParts.length === 1) return orParts[0];
-  return { OR: orParts };
-}
-
-function assignmentCoversSector(
-  assignments: DpApprovalAssignment[],
-  contractId: string | null,
-  costCenterId: string | null,
-  sectorSolicitante: string | null | undefined
-): boolean {
-  const relevant = assignments.filter(
-    (a) =>
-      (contractId && a.contractId === contractId) ||
-      (costCenterId && a.costCenterId === costCenterId)
-  );
-  if (relevant.length === 0) return true;
-  const unrestricted = relevant.filter((a) => !a.isDfAdmLocal || a.allowedSectors.length === 0);
-  if (unrestricted.length > 0) return true;
-  return relevant.some(
-    (a) => a.isDfAdmLocal && sectorSolicitanteMatches(a.allowedSectors, sectorSolicitante)
-  );
 }
 
 export async function getDpManagerApprovalVisibilityWhere(
@@ -424,17 +324,19 @@ export async function getDpManagerApprovalVisibilityWhere(
   return { OR: orParts };
 }
 
+/**
+ * Escopo de listagem para quem tem a permissão legada Controle «Aprovar solicitações DP».
+ * A coluna Gestor do contrato não entra mais nesta fila (só RM/OC).
+ * `null` = sem acesso por este caminho. `{}` = admin (sem filtro).
+ */
 export async function getManagerDpApprovalContractScope(
   userId: string,
   isAdmin: boolean
 ): Promise<Record<string, unknown> | null> {
   if (isAdmin) return {};
-  const hasApprove = await userHasDpApprovePermission(userId);
-  if (!hasApprove) return null;
-  const assignments = await getDpApprovalAssignments(userId);
-  if (assignments.length > 0) return buildManagerDpScopeFromAssignments(assignments);
   const legacy = await prisma.userPermission.findFirst({
     where: { userId, module: DP_APPROVE_MODULE_KEY, action: PERMISSION_ACCESS_ACTION, allowed: true },
+    select: { id: true },
   });
   if (!legacy) return null;
   const access = await getContractAccessForUser(userId, false);
@@ -451,24 +353,18 @@ export async function assertManagerCanActOnDpContract(
   costCenterId?: string | null
 ): Promise<void> {
   if (isAdmin) return;
-  const hasApprove = await userHasDpApprovePermission(userId);
-  if (!hasApprove) {
+
+  const legacy = await prisma.userPermission.findFirst({
+    where: { userId, module: DP_APPROVE_MODULE_KEY, action: PERMISSION_ACCESS_ACTION, allowed: true },
+    select: { id: true },
+  });
+  if (!legacy) {
     throw createError('Sem permissão para aprovar solicitações DP', 403);
   }
 
   if (contractId) {
-    const ok = await prisma.userDpApprovalContract.findFirst({
-      where: { userId, contractId },
-      select: { id: true },
-    });
-    if (ok) return;
-    const legacy = await prisma.userPermission.findFirst({
-      where: { userId, module: DP_APPROVE_MODULE_KEY, action: PERMISSION_ACCESS_ACTION, allowed: true },
-    });
-    if (legacy) {
-      const access = await getContractAccessForUser(userId, false);
-      if (access.filter === 'ids' && access.ids.includes(contractId)) return;
-    }
+    const access = await getContractAccessForUser(userId, false);
+    if (access.filter === 'ids' && access.ids.includes(contractId)) return;
   }
 
   if (costCenterId) {
@@ -521,11 +417,6 @@ export async function assertManagerCanApproveDpRequest(
   if (restrictedOk) return;
 
   await assertManagerCanActOnDpContract(userId, isAdmin, contractId, resolvedCostCenterId);
-
-  const assignments = await getDpApprovalAssignments(userId);
-  if (!assignmentCoversSector(assignments, contractId, resolvedCostCenterId, sectorSolicitante)) {
-    throw createError('Sem permissão para aprovar solicitações deste setor', 403);
-  }
 }
 
 /** Pode vincular centro de custo ao formulário de solicitação DP. */

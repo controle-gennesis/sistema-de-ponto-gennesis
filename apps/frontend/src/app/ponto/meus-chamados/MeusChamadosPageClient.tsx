@@ -482,8 +482,7 @@ export default function MeusChamadosPageClient() {
               Meus Chamados
             </h1>
             <p className="mt-2 text-sm text-gray-600 dark:text-gray-400 sm:text-base">
-              Canal eletrônico 24h: abra chamados, reclamações do SAC, plantão e ocorrências não
-              planejadas a qualquer hora.
+              Acompanhe seus chamados
             </p>
           </div>
 
