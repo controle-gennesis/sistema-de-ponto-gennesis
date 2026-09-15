@@ -71,6 +71,35 @@ export function isFortnightAfter(weekKey: string, otherWeekKey: string): boolean
   return monday.getTime() > otherMonday.getTime();
 }
 
+/** A quinzena cruza o mês civil (1–12). `year` 0 = qualquer ano. */
+export function fortnightOverlapsCalendarMonth(
+  weekKey: string,
+  year: number,
+  month: number
+): boolean {
+  if (month < 1 || month > 12) return true;
+  const monday = mondayFromIsoWeekKey(weekKey);
+  const sunday = sundayFromFortnightKey(weekKey);
+  if (!monday || !sunday) return false;
+
+  if (year > 0) {
+    const monthStart = Date.UTC(year, month - 1, 1);
+    const monthEnd = Date.UTC(year, month, 0, 23, 59, 59, 999);
+    return monday.getTime() <= monthEnd && sunday.getTime() >= monthStart;
+  }
+
+  return monday.getUTCMonth() + 1 === month || sunday.getUTCMonth() + 1 === month;
+}
+
+/** A quinzena cruza o ano civil. */
+export function fortnightOverlapsCalendarYear(weekKey: string, year: number): boolean {
+  if (year <= 0) return true;
+  const monday = mondayFromIsoWeekKey(weekKey);
+  const sunday = sundayFromFortnightKey(weekKey);
+  if (!monday || !sunday) return false;
+  return monday.getUTCFullYear() === year || sunday.getUTCFullYear() === year;
+}
+
 /** Rótulo compacto: "24 ago – 06 set". */
 export function formatWeekRangeCompactLabel(weekKey: string): string {
   const monday = mondayFromIsoWeekKey(weekKey);

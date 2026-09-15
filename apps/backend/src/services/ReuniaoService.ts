@@ -641,7 +641,8 @@ export class ReuniaoService {
 
   async getIndex(contractId: string, kind: ReuniaoKind): Promise<ReuniaoIndex> {
     let idx = await this.readJson<ReuniaoIndex>(this.getIndexKey(contractId, kind));
-    if (!idx?.reunioes?.length && kind === 'mensal') {
+    /** Só usa o índice legado se o novo ainda não existir — lista vazia é exclusão válida. */
+    if (idx == null && kind === 'mensal') {
       idx = await this.readJson<ReuniaoIndex>(this.getLegacyIndexKey(contractId));
     }
     if (!idx) return { reunioes: [] };
@@ -912,10 +913,21 @@ export class ReuniaoService {
     if (existing?.video?.key) await this.deleteAnexoFile(existing.video.key).catch(() => {});
 
     await this.deleteKey(this.getReuniaoKey(contractId, kind, reuniaoId));
+    if (kind === 'mensal') {
+      await this.deleteKey(this.getLegacyReuniaoKey(contractId, reuniaoId)).catch(() => {});
+    }
 
     const idx = await this.getIndex(contractId, kind);
     idx.reunioes = idx.reunioes.filter((r) => r.id !== reuniaoId);
     await this.writeJson(this.getIndexKey(contractId, kind), idx);
+
+    if (kind === 'mensal') {
+      const legacy = await this.readJson<ReuniaoIndex>(this.getLegacyIndexKey(contractId));
+      if (legacy?.reunioes?.length) {
+        legacy.reunioes = legacy.reunioes.filter((r) => r.id !== reuniaoId);
+        await this.writeJson(this.getLegacyIndexKey(contractId), legacy);
+      }
+    }
   }
 
   // ---- Anexos ----
