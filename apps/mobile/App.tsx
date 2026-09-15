@@ -33,6 +33,7 @@ import { ThemeProvider, useTheme } from './src/context/ThemeContext';
 import { NotificationsProvider } from './src/notifications/NotificationsContext';
 import { ChromeVisibilityProvider } from './src/navigation/ChromeVisibilityContext';
 import NotificationsSheet from './src/components/NotificationsSheet';
+import { useOfflineSync } from './src/hooks/useOfflineSync';
 
 export type RootStackParamList = {
   Login: undefined;
@@ -180,6 +181,12 @@ function AppNavigator() {
   return shell;
 }
 
+function OfflineSyncHost() {
+  const { isAuthenticated } = useAuth();
+  useOfflineSync(isAuthenticated);
+  return null;
+}
+
 function StatusBarComponent() {
   const { isDark } = useTheme();
   const { isAuthenticated, loading } = useAuth();
@@ -207,6 +214,7 @@ export default function App() {
           <AuthProvider>
             <NotificationsProvider>
               <ChromeVisibilityProvider>
+                <OfflineSyncHost />
                 <AppNavigator />
                 <StatusBarComponent />
                 <AppToastHost />

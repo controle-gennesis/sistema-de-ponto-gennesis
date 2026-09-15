@@ -16,10 +16,11 @@ import {
   Modal,
   Dimensions,
   Easing,
+  Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
-import { Eye, EyeOff, UserRound, Lock, MessageCircle, X, Check } from 'lucide-react-native';
+import { Eye, EyeOff, UserRound, Lock, MessageCircle, X, Check, ScanFace } from 'lucide-react-native';
 import Toast from 'react-native-toast-message';
 import { useAuth } from '../context/AuthContext';
 import { API_CONFIG } from '../config/api';
@@ -52,8 +53,10 @@ export default function LoginScreen({ fromBootSplash = true }: Props) {
   const [error, setError] = useState('');
   const [introDone, setIntroDone] = useState(false);
   const passwordRef = useRef<TextInput>(null);
-  const { login } = useAuth();
+  const { login, loginWithBiometrics, biometric, enableBiometrics } = useAuth();
   const insets = useSafeAreaInsets();
+  const [bioLoading, setBioLoading] = useState(false);
+  const bioPrompted = useRef(false);
 
   const progress = useRef(new Animated.Value(0)).current;
   const titlesAnim = useRef(new Animated.Value(0)).current;
@@ -110,8 +113,54 @@ export default function LoginScreen({ fromBootSplash = true }: Props) {
     outputRange: [10, 0],
   });
 
-  const canSubmit = identifier.trim().length > 0 && password.length > 0 && !loading;
+  const canSubmit = identifier.trim().length > 0 && password.length > 0 && !loading && !bioLoading;
   const styles = useMemo(() => getStyles(insets.bottom), [insets.bottom]);
+  const showBiometric = biometric.enabled && biometric.available;
+
+  const offerBiometrics = (id: string, pass: string) => {
+    if (!biometric.available || biometric.enabled) return;
+    Alert.alert(
+      `Entrar com ${biometric.label}?`,
+      'No próximo acesso você entra com biometria facial ou digital, sem digitar a senha.',
+      [
+        { text: 'Agora não', style: 'cancel' },
+        {
+          text: 'Ativar',
+          onPress: () => {
+            void enableBiometrics(id, pass).catch((err) => {
+              Alert.alert('Biometria', err instanceof Error ? err.message : 'Não foi possível ativar.');
+            });
+          },
+        },
+      ]
+    );
+  };
+
+  const handleBiometricLogin = async () => {
+    setError('');
+    setBioLoading(true);
+    try {
+      await loginWithBiometrics();
+      Toast.show({
+        type: 'success',
+        text1: 'Bem-vindo',
+        text2: 'Login realizado com sucesso.',
+      });
+    } catch (err: any) {
+      setError(err?.message || 'Não foi possível entrar com biometria.');
+    } finally {
+      setBioLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!introDone || !showBiometric || bioPrompted.current) return;
+    bioPrompted.current = true;
+    const t = setTimeout(() => {
+      void handleBiometricLogin();
+    }, 400);
+    return () => clearTimeout(t);
+  }, [introDone, showBiometric]);
 
   const handleLogin = async () => {
     const trimmedIdentifier = identifier.trim();
@@ -129,6 +178,7 @@ export default function LoginScreen({ fromBootSplash = true }: Props) {
         text1: 'Bem-vindo',
         text2: 'Login realizado com sucesso.',
       });
+      offerBiometrics(trimmedIdentifier, password);
     } catch (err: any) {
       const message = String(err?.message || '');
       if (
@@ -315,6 +365,24 @@ export default function LoginScreen({ fromBootSplash = true }: Props) {
                 </Text>
               )}
             </TouchableOpacity>
+
+            {showBiometric ? (
+              <TouchableOpacity
+                style={styles.bioButton}
+                onPress={() => void handleBiometricLogin()}
+                disabled={loading || bioLoading}
+                activeOpacity={0.9}
+              >
+                {bioLoading ? (
+                  <ActivityIndicator color={BRAND} />
+                ) : (
+                  <>
+                    <ScanFace size={18} color={BRAND} strokeWidth={2.2} />
+                    <Text style={styles.bioButtonText}>Entrar com {biometric.label}</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            ) : null}
 
             <Text style={styles.footer}>© {new Date().getFullYear()} Gennesis Conecta</Text>
           </ScrollView>
@@ -530,6 +598,23 @@ const getStyles = (bottomInset: number) =>
     },
     buttonTextOff: {
       color: '#9ca3af',
+    },
+    bioButton: {
+      marginTop: 12,
+      height: 54,
+      borderRadius: 999,
+      borderWidth: 1.5,
+      borderColor: BRAND,
+      backgroundColor: '#fff',
+      alignItems: 'center',
+      justifyContent: 'center',
+      flexDirection: 'row',
+      gap: 8,
+    },
+    bioButtonText: {
+      color: BRAND,
+      fontSize: 15,
+      fontWeight: '700',
     },
     footer: {
       marginTop: 28,

@@ -31,6 +31,7 @@ import {
 } from 'lucide-react-native';
 import * as Location from 'expo-location';
 import { CameraView, useCameraPermissions, type BarcodeScanningResult } from 'expo-camera';
+import NetInfo from '@react-native-community/netinfo';
 import Svg, { Defs, Ellipse, Mask, Rect } from 'react-native-svg';
 import { useTheme } from '../context/ThemeContext';
 import AppHeader from '../components/AppHeader';
@@ -38,6 +39,8 @@ import FormFieldLabel from '../components/FormFieldLabel';
 import api from '../services/api';
 import { uploadMultipartFile } from '../utils/uploadMultipartFile';
 import { resolveMediaUrl } from '../utils/resolveMediaUrl';
+import { isNetworkError } from '../utils/network';
+import { enqueuePendingPunch } from '../services/punchOfflineQueue';
 
 enum TimeRecordType {
   ENTRY = 'ENTRY',
@@ -194,7 +197,7 @@ export default function PunchScreen() {
   const [scannedLocationName, setScannedLocationName] = useState<string | null>(null);
   const [qrScannerOpen, setQrScannerOpen] = useState(false);
   const [faceCameraOpen, setFaceCameraOpen] = useState(false);
-  const [faceCameraMode, setFaceCameraMode] = useState<'check' | 'register'>('check');
+  const [faceCameraMode, setFaceCameraMode] = useState<'check' | 'register' | 'offline'>('check');
   const [faceScanBusy, setFaceScanBusy] = useState(false);
   const [faceRegisterBusy, setFaceRegisterBusy] = useState(false);
   const [faceScanStatus, setFaceScanStatus] = useState('Encaixe o rosto no oval');
@@ -323,12 +326,14 @@ export default function PunchScreen() {
 
   const startFaceCheckCamera = async () => {
     if (!(await ensureCameraPermission())) return;
+    const net = await NetInfo.fetch();
+    const offline = net.isConnected === false;
     faceMatchedRef.current = false;
     faceScanLockRef.current = false;
-    setFaceCameraMode('check');
+    setFaceCameraMode(offline ? 'offline' : 'check');
     setFaceConfirmed(false);
     setPhoto(null);
-    setFaceScanStatus('Encaixe o rosto no oval');
+    setFaceScanStatus(offline ? 'Sem internet — capture a foto para sincronizar' : 'Encaixe o rosto no oval');
     setFaceScanTone('neutral');
     setFaceCameraOpen(true);
   };
@@ -433,6 +438,39 @@ export default function PunchScreen() {
     }
   }, [faceCameraMode, faceRegisterBusy]);
 
+  const captureFaceOfflinePhoto = useCallback(async () => {
+    if (faceRegisterBusy || faceCameraMode !== 'offline') return;
+    setFaceRegisterBusy(true);
+    setFaceScanStatus('Capturando...');
+    setFaceScanTone('checking');
+    try {
+      const shot = await faceCameraRef.current?.takePictureAsync({
+        quality: 0.7,
+        shutterSound: false,
+      });
+      if (!shot?.uri) {
+        setFaceScanStatus('Não foi possível capturar — tente de novo');
+        setFaceScanTone('bad');
+        return;
+      }
+      setPhoto(shot.uri);
+      setFaceConfirmed(true);
+      setFaceScanStatus('Foto salva — será conferida ao sincronizar');
+      setFaceScanTone('ok');
+      setTimeout(() => {
+        setFaceCameraOpen(false);
+        setFaceCameraMode('check');
+        setFaceRegisterBusy(false);
+        setFaceScanStatus('Encaixe o rosto no oval');
+        setFaceScanTone('neutral');
+      }, 700);
+    } catch {
+      setFaceScanStatus('Não foi possível capturar — tente de novo');
+      setFaceScanTone('bad');
+      setFaceRegisterBusy(false);
+    }
+  }, [faceCameraMode, faceRegisterBusy]);
+
   const runFaceScanTick = useCallback(async () => {
     if (
       !faceCameraOpen ||
@@ -498,7 +536,13 @@ export default function PunchScreen() {
 
       setFaceScanStatus('Não reconhecido — mantenha o rosto no oval');
       setFaceScanTone('bad');
-    } catch {
+    } catch (err) {
+      if (isNetworkError(err)) {
+        setFaceCameraMode('offline');
+        setFaceScanStatus('Sem internet — capture a foto para sincronizar');
+        setFaceScanTone('neutral');
+        return;
+      }
       if (!faceMatchedRef.current) {
         setFaceScanStatus('Tentando de novo...');
         setFaceScanTone('neutral');
@@ -542,16 +586,23 @@ export default function PunchScreen() {
     }
 
     setLoading(true);
-    try {
-      const now = new Date();
-      const year = now.getFullYear();
-      const month = String(now.getMonth() + 1).padStart(2, '0');
-      const day = String(now.getDate()).padStart(2, '0');
-      const hours = String(now.getHours()).padStart(2, '0');
-      const minutes = String(now.getMinutes()).padStart(2, '0');
-      const seconds = String(now.getSeconds()).padStart(2, '0');
-      const localTimestamp = `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const hours = String(now.getHours()).padStart(2, '0');
+    const minutes = String(now.getMinutes()).padStart(2, '0');
+    const seconds = String(now.getSeconds()).padStart(2, '0');
+    const localTimestamp = `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
+    const punchTypeLabels: Record<TimeRecordType, string> = {
+      ENTRY: 'Entrada',
+      LUNCH_START: 'Saída para almoço',
+      LUNCH_END: 'Retorno do almoço',
+      EXIT: 'Saída',
+      ABSENCE_JUSTIFIED: 'Ausência justificada',
+    };
 
+    try {
       const data = await uploadMultipartFile<{ punchLocationName?: string | null }>({
         path: '/api/time-records/punch',
         fieldName: 'photo',
@@ -565,14 +616,6 @@ export default function PunchScreen() {
           ...(scannedPunchQr ? { punchQrToken: scannedPunchQr } : {}),
         },
       });
-
-      const punchTypeLabels: Record<TimeRecordType, string> = {
-        ENTRY: 'Entrada',
-        LUNCH_START: 'Saída para almoço',
-        LUNCH_END: 'Retorno do almoço',
-        EXIT: 'Saída',
-        ABSENCE_JUSTIFIED: 'Ausência justificada',
-      };
 
       setSuccessData({
         type: punchTypeLabels[selectedType],
@@ -591,6 +634,40 @@ export default function PunchScreen() {
       setScannedLocationName(data?.punchLocationName || scannedLocationName);
       void fetchTodayRecords();
     } catch (error: unknown) {
+      if (isNetworkError(error) && photo && location) {
+        try {
+          await enqueuePendingPunch({
+            type: selectedType,
+            latitude: location.coords.latitude.toString(),
+            longitude: location.coords.longitude.toString(),
+            observation: observation.trim() || '',
+            clientTimestamp: localTimestamp,
+            punchQrToken: scannedPunchQr || undefined,
+            photoUri: photo,
+          });
+          setSuccessData({
+            type: punchTypeLabels[selectedType],
+            time: `${hours}:${minutes}:${seconds}`,
+            date: now.toLocaleDateString('pt-BR', {
+              day: '2-digit',
+              month: '2-digit',
+              year: 'numeric',
+            }),
+          });
+          setShowSuccessModal(true);
+          setPhoto(null);
+          setFaceConfirmed(false);
+          setObservation('');
+          setScannedPunchQr(null);
+          Alert.alert(
+            'Salvo no aparelho',
+            'Sem internet agora. O ponto será enviado automaticamente quando a conexão voltar.'
+          );
+          return;
+        } catch {
+          /* cai no alerta abaixo */
+        }
+      }
       Alert.alert('Erro ao registrar ponto', error instanceof Error ? error.message : 'Tente novamente.');
     } finally {
       setLoading(false);
@@ -892,10 +969,14 @@ export default function PunchScreen() {
               <ActivityIndicator color="#fff" />
             </View>
           ) : null}
-          {faceCameraMode === 'register' ? (
+          {faceCameraMode === 'register' || faceCameraMode === 'offline' ? (
             <TouchableOpacity
               style={[styles.faceCaptureBtn, { bottom: Math.max(insets.bottom + 88, 108) }]}
-              onPress={() => void captureFaceRegisterPhoto()}
+              onPress={() =>
+                void (faceCameraMode === 'offline'
+                  ? captureFaceOfflinePhoto()
+                  : captureFaceRegisterPhoto())
+              }
               disabled={faceRegisterBusy}
               activeOpacity={0.85}
             >
@@ -904,7 +985,9 @@ export default function PunchScreen() {
               ) : (
                 <>
                   <Camera size={20} color="#fff" strokeWidth={2.2} />
-                  <Text style={styles.faceCaptureBtnText}>Capturar foto do ponto</Text>
+                  <Text style={styles.faceCaptureBtnText}>
+                    {faceCameraMode === 'offline' ? 'Capturar foto (offline)' : 'Capturar foto do ponto'}
+                  </Text>
                 </>
               )}
             </TouchableOpacity>

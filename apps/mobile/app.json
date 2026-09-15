@@ -15,7 +15,8 @@
       "infoPlist": {
         "NSCameraUsageDescription": "Este app precisa acessar a câmera para capturar fotos ao bater o ponto.",
         "NSLocationWhenInUseUsageDescription": "Este app precisa acessar sua localização para validar o ponto.",
-        "NSLocationAlwaysAndWhenInUseUsageDescription": "Este app precisa acessar sua localização para validar o ponto."
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Este app precisa acessar sua localização para validar o ponto.",
+        "NSFaceIDUsageDescription": "Use o Face ID para entrar no aplicativo com segurança após o primeiro acesso."
       }
     },
     "android": {
@@ -34,7 +35,9 @@
         "android.permission.RECORD_AUDIO",
         "android.permission.FOREGROUND_SERVICE",
         "android.permission.POST_NOTIFICATIONS",
-        "android.permission.VIBRATE"
+        "android.permission.VIBRATE",
+        "android.permission.USE_BIOMETRIC",
+        "android.permission.USE_FINGERPRINT"
       ]
     },
     "web": {
@@ -78,6 +81,12 @@
       ],
       "expo-font",
       "expo-secure-store",
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Use o Face ID para entrar no aplicativo com segurança após o primeiro acesso."
+        }
+      ],
       [
         "expo-status-bar",
         {

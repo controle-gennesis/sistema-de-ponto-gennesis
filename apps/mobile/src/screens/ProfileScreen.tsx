@@ -7,6 +7,11 @@ import {
   ScrollView,
   Alert,
   ActivityIndicator,
+  Switch,
+  Modal,
+  Pressable,
+  TextInput,
+  Platform,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -20,6 +25,7 @@ import {
   ArrowLeft,
   Bell,
   Pencil,
+  ScanFace,
 } from 'lucide-react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../context/AuthContext';
@@ -39,10 +45,13 @@ type InfoRow = {
 export default function ProfileScreen() {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
-  const { user, updateUser } = useAuth();
+  const { user, updateUser, biometric, enableBiometrics, disableBiometrics } = useAuth();
   const { colors, isDark } = useTheme();
   const { unreadCount, openSheet } = useNotifications();
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [bioBusy, setBioBusy] = useState(false);
+  const [bioPasswordOpen, setBioPasswordOpen] = useState(false);
+  const [bioPassword, setBioPassword] = useState('');
   const styles = useMemo(() => getStyles(colors, isDark), [colors, isDark]);
 
   const uploadProfilePhoto = useCallback(
@@ -115,6 +124,50 @@ export default function ProfileScreen() {
       { text: 'Câmera', onPress: () => void pickFromCamera() },
       { text: 'Galeria', onPress: () => void pickFromLibrary() },
       { text: 'Cancelar', style: 'cancel' },
+    ]);
+  };
+
+  const confirmEnableBiometrics = async () => {
+    const identifier = String(user?.email || user?.cpf || '').trim();
+    if (!identifier || !bioPassword) {
+      Alert.alert('Senha', 'Informe a senha da conta para ativar a biometria.');
+      return;
+    }
+    setBioBusy(true);
+    try {
+      await enableBiometrics(identifier, bioPassword);
+      setBioPasswordOpen(false);
+      setBioPassword('');
+      Alert.alert('Pronto', `Acesso com ${biometric.label} ativado.`);
+    } catch (err) {
+      Alert.alert('Biometria', err instanceof Error ? err.message : 'Não foi possível ativar.');
+    } finally {
+      setBioBusy(false);
+    }
+  };
+
+  const onToggleBiometrics = (value: boolean) => {
+    if (!biometric.available) {
+      Alert.alert(
+        'Biometria',
+        `Cadastre ${biometric.label} neste aparelho (Ajustes) para ativar o acesso rápido.`
+      );
+      return;
+    }
+    if (value) {
+      setBioPassword('');
+      setBioPasswordOpen(true);
+      return;
+    }
+    Alert.alert('Desativar biometria', 'O próximo acesso vai pedir e-mail/CPF e senha.', [
+      { text: 'Cancelar', style: 'cancel' },
+      {
+        text: 'Desativar',
+        style: 'destructive',
+        onPress: () => {
+          void disableBiometrics();
+        },
+      },
     ]);
   };
 
@@ -266,8 +319,75 @@ export default function ProfileScreen() {
               })
             )}
           </View>
+
+          {Platform.OS !== 'web' ? (
+            <>
+              <Text style={[styles.sectionTitle, { marginTop: 8 }]}>Acesso</Text>
+              <View style={styles.bioRow}>
+                <View style={styles.infoIcon}>
+                  <ScanFace size={18} color={colors.primary} strokeWidth={2} />
+                </View>
+                <View style={styles.infoText}>
+                  <Text style={styles.infoLabel}>Entrar com {biometric.label}</Text>
+                  <Text style={styles.infoValue}>
+                    {biometric.available
+                      ? biometric.enabled
+                        ? 'Ativado neste aparelho'
+                        : 'Após o primeiro acesso, use facial ou digital'
+                      : 'Indisponível neste aparelho'}
+                  </Text>
+                </View>
+                <Switch
+                  value={biometric.enabled}
+                  onValueChange={onToggleBiometrics}
+                  disabled={bioBusy || !biometric.available}
+                  trackColor={{ false: isDark ? '#374151' : '#d1d5db', true: '#fca5a5' }}
+                  thumbColor={biometric.enabled ? colors.primary : '#f4f4f5'}
+                />
+              </View>
+            </>
+          ) : null}
         </View>
       </ScrollView>
+
+      <Modal
+        visible={bioPasswordOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setBioPasswordOpen(false)}
+      >
+        <Pressable style={styles.modalOverlay} onPress={() => setBioPasswordOpen(false)}>
+          <Pressable style={styles.modalCard} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.modalTitle}>Ativar {biometric.label}</Text>
+            <Text style={styles.modalBody}>
+              Confirme a senha da conta para guardar o acesso rápido neste aparelho.
+            </Text>
+            <TextInput
+              value={bioPassword}
+              onChangeText={setBioPassword}
+              placeholder="Senha"
+              placeholderTextColor={colors.textSecondary}
+              secureTextEntry
+              style={styles.modalInput}
+              autoFocus
+            />
+            <TouchableOpacity
+              style={styles.modalPrimary}
+              onPress={() => void confirmEnableBiometrics()}
+              disabled={bioBusy}
+            >
+              {bioBusy ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.modalPrimaryText}>Ativar</Text>
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setBioPasswordOpen(false)}>
+              <Text style={styles.modalCancel}>Cancelar</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -429,5 +549,60 @@ const getStyles = (colors: any, isDark: boolean) =>
       height: StyleSheet.hairlineWidth,
       backgroundColor: isDark ? colors.border : 'rgba(15,23,42,0.08)',
       marginLeft: 48,
+    },
+    bioRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      paddingVertical: 8,
+      marginBottom: 16,
+    },
+    modalOverlay: {
+      flex: 1,
+      backgroundColor: 'rgba(0,0,0,0.45)',
+      justifyContent: 'center',
+      padding: 24,
+    },
+    modalCard: {
+      backgroundColor: colors.card,
+      borderRadius: 18,
+      padding: 20,
+    },
+    modalTitle: {
+      fontSize: 17,
+      fontWeight: '700',
+      color: colors.text,
+      marginBottom: 8,
+    },
+    modalBody: {
+      fontSize: 14,
+      lineHeight: 20,
+      color: colors.textSecondary,
+      marginBottom: 14,
+    },
+    modalInput: {
+      borderWidth: StyleSheet.hairlineWidth * 1.5,
+      borderColor: colors.border,
+      borderRadius: 12,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+      color: colors.text,
+      fontSize: 15,
+      backgroundColor: isDark ? colors.screenRoot : colors.surface,
+      marginBottom: 14,
+    },
+    modalPrimary: {
+      backgroundColor: colors.primary,
+      borderRadius: 12,
+      paddingVertical: 14,
+      alignItems: 'center',
+      marginBottom: 10,
+    },
+    modalPrimaryText: { color: '#fff', fontWeight: '700', fontSize: 15 },
+    modalCancel: {
+      textAlign: 'center',
+      color: colors.textSecondary,
+      fontWeight: '600',
+      paddingVertical: 6,
     },
   });
