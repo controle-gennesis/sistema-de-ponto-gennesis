@@ -30,6 +30,9 @@ export type TimeRecord = {
   timestamp: string;
   isValid: boolean;
   observation?: string;
+  reason?: string;
+  punchLocationName?: string | null;
+  faceMatchStatus?: string | null;
 };
 
 interface GroupedRecords {
@@ -94,7 +97,7 @@ export default function TimeRecordsScreen() {
       const endDate = new Date(selectedYear, selectedMonth + 1, 0);
 
       const res = await api.get(
-        `/api/time-records/my-records?startDate=${startDate.toISOString()}&endDate=${endDate.toISOString()}`,
+        `/api/time-records/my-records?startDate=${startDate.toISOString()}&endDate=${endDate.toISOString()}&limit=200`,
       );
 
       if (!res.ok) {
@@ -250,6 +253,14 @@ export default function TimeRecordsScreen() {
                           <Text style={styles.recordLabel}>
                             {TYPE_LABELS[record.type] || record.type}
                           </Text>
+                          {record.punchLocationName ? (
+                            <Text style={styles.recordMeta}>{record.punchLocationName}</Text>
+                          ) : null}
+                          {record.reason ? (
+                            <Text style={styles.recordMeta} numberOfLines={2}>
+                              {record.reason}
+                            </Text>
+                          ) : null}
                           {!record.isValid ? (
                             <Text style={styles.invalidBadge}>Inválido</Text>
                           ) : null}
@@ -376,6 +387,7 @@ const getStyles = (colors: any, isDark: boolean) =>
     },
     recordTextWrap: { flex: 1, minWidth: 0, gap: 2 },
     recordLabel: { fontSize: 14, fontWeight: '600', color: colors.text },
+    recordMeta: { fontSize: 12, color: colors.textSecondary, marginTop: 2, lineHeight: 16 },
     recordTime: {
       fontSize: 16,
       fontWeight: '700',

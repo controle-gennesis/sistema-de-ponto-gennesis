@@ -378,6 +378,9 @@ router.patch('/cadastros/branches/:id', (req, res, next) =>
 router.get('/cadastros/my-unit-buildings', (req, res, next) =>
   gestaoOsCadastrosController.myUnitBuildings(req, res, next)
 );
+router.get('/cadastros/field-buildings', (req, res, next) =>
+  gestaoOsCadastrosController.fieldBuildings(req, res, next)
+);
 
 /** Equipes de serviço: cadastro, membros e localidades atendidas. */
 router.get('/cadastros/teams', (req, res, next) => gestaoOsTeamsController.list(req, res, next));

@@ -423,8 +423,67 @@ export class PhotoService {
   }
 
   /**
-   * Cria o bucket se não existir
+   * Lê bytes de uma foto (S3, disco local ou URL HTTP) para confronto biométrico.
    */
+  async getImageBytes(url?: string | null, key?: string | null): Promise<Buffer | null> {
+    const resolvedKey = String(key || '').trim();
+    const resolvedUrl = String(url || '').trim();
+
+    const tryLocal = async (relative: string): Promise<Buffer | null> => {
+      const cleaned = relative.replace(/^\/+/, '').split('?')[0];
+      if (!cleaned || cleaned.includes('..')) return null;
+      const candidates = [
+        path.join(process.cwd(), 'apps', 'backend', cleaned),
+        path.join(process.cwd(), cleaned),
+      ];
+      for (const abs of candidates) {
+        try {
+          return await fs.promises.readFile(abs);
+        } catch {
+          /* next */
+        }
+      }
+      return null;
+    };
+
+    if (resolvedKey) {
+      if (this.useLocal || resolvedKey.startsWith('uploads/')) {
+        const local = await tryLocal(resolvedKey);
+        if (local) return local;
+      }
+      if (!this.useLocal && this.s3) {
+        try {
+          const obj = await this.s3
+            .getObject({ Bucket: this.bucketName, Key: resolvedKey })
+            .promise();
+          if (obj.Body) return Buffer.from(obj.Body as Buffer);
+        } catch (error) {
+          console.warn('[PhotoService] getImageBytes S3', error);
+        }
+      }
+    }
+
+    if (resolvedUrl) {
+      const pathMatch = resolvedUrl.match(/(\/uploads\/[^\s?#]+)/);
+      if (pathMatch) {
+        const local = await tryLocal(pathMatch[1].replace(/^\//, ''));
+        if (local) return local;
+      }
+      if (/^https?:\/\//i.test(resolvedUrl)) {
+        try {
+          const res = await fetch(resolvedUrl);
+          if (!res.ok) return null;
+          const arr = await res.arrayBuffer();
+          return Buffer.from(arr);
+        } catch (error) {
+          console.warn('[PhotoService] getImageBytes fetch', error);
+        }
+      }
+    }
+
+    return null;
+  }
+
   async createBucketIfNotExists(): Promise<void> {
     if (this.useLocal) {
       return; // Local storage does not require bucket creation

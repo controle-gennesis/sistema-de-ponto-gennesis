@@ -232,7 +232,7 @@ export default function GestaoOsListScreen() {
       { key: 'all', label: 'Todas', count: countFor('all') },
       { key: 'active', label: 'Em andamento', count: countFor('active') },
       { key: 'waiting', label: 'Aguardando', count: countFor('waiting') },
-      { key: 'done', label: 'Finalizadas', count: countFor('done') },
+      { key: 'done', label: 'Histórico', count: countFor('done') },
     ];
   }, [rows]);
 
@@ -249,7 +249,14 @@ export default function GestaoOsListScreen() {
   const listHeader = (
     <View>
       <Text style={styles.pageTitle}>Chamados</Text>
-      <Text style={styles.pageSubtitle}>Acompanhe seus chamados</Text>
+      <Text style={styles.pageSubtitle}>Acompanhe seus chamados e o histórico dos atendimentos</Text>
+      <TouchableOpacity
+        style={styles.unplannedBtn}
+        onPress={() => navigation.navigate('GestaoOsUnplanned')}
+        activeOpacity={0.85}
+      >
+        <Text style={styles.unplannedBtnText}>Reportar ocorrência não prevista</Text>
+      </TouchableOpacity>
 
       {memberships.length > 1 ? (
         <View style={styles.companyRow}>
@@ -606,7 +613,20 @@ const getStyles = (colors: any, isDark: boolean) =>
       color: colors.textSecondary,
       fontSize: 14,
       fontWeight: '500',
+      marginBottom: 12,
+    },
+    unplannedBtn: {
+      alignSelf: 'flex-start',
+      backgroundColor: colors.primary,
+      borderRadius: 12,
+      paddingHorizontal: 14,
+      paddingVertical: 10,
       marginBottom: 16,
+    },
+    unplannedBtnText: {
+      color: '#fff',
+      fontWeight: '700',
+      fontSize: 13,
     },
     companyRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 14 },
     companyChip: {

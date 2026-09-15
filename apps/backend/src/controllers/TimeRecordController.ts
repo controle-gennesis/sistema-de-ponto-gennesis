@@ -2,8 +2,9 @@ import { Response, NextFunction } from 'express';
 import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { TimeRecordService } from '../services/TimeRecordService';
-import { LocationService, parseAllowedLocations } from '../services/LocationService';
+import { LocationService, parseAllowedLocations, parsePunchQrToken, punchQrPayload } from '../services/LocationService';
 import { PhotoService } from '../services/PhotoService';
+import { faceMatchService } from '../services/FaceMatchService';
 import { HolidayService } from '../services/HolidayService';
 import { uploadPhoto, handleUploadError } from '../middleware/upload';
 import moment from 'moment-timezone';
@@ -14,11 +15,70 @@ const locationService = new LocationService();
 const photoService = new PhotoService();
 const holidayService = new HolidayService();
 
+function sqlText(value: string | null | undefined): string {
+  if (value == null || value === '') return 'NULL';
+  return `'${String(value).replace(/'/g, "''")}'`;
+}
+
+function sqlNum(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return 'NULL';
+  return String(value);
+}
+
+async function persistPunchExtras(
+  id: string,
+  extras: {
+    faceMatchStatus?: string | null;
+    faceMatchSimilarity?: number | null;
+    punchQrToken?: string | null;
+    punchLocationId?: string | null;
+    punchLocationName?: string | null;
+  }
+) {
+  const sets = [
+    extras.faceMatchStatus !== undefined
+      ? `"faceMatchStatus" = ${sqlText(extras.faceMatchStatus)}`
+      : null,
+    extras.faceMatchSimilarity !== undefined
+      ? `"faceMatchSimilarity" = ${sqlNum(extras.faceMatchSimilarity)}`
+      : null,
+    extras.punchQrToken !== undefined ? `"punchQrToken" = ${sqlText(extras.punchQrToken)}` : null,
+    extras.punchLocationId !== undefined
+      ? `"punchLocationId" = ${sqlText(extras.punchLocationId)}`
+      : null,
+    extras.punchLocationName !== undefined
+      ? `"punchLocationName" = ${sqlText(extras.punchLocationName)}`
+      : null,
+  ].filter(Boolean);
+  if (!sets.length) return;
+  try {
+    await prisma.$executeRawUnsafe(
+      `UPDATE "time_records" SET ${sets.join(', ')} WHERE "id" = ${sqlText(id)}`
+    );
+  } catch (error) {
+    console.warn('[TimeRecord] persistPunchExtras', error);
+  }
+}
+
+async function loadPunchFlags(): Promise<{ requireFaceMatch: boolean; requirePunchQr: boolean }> {
+  try {
+    const rows = await prisma.$queryRaw<
+      Array<{ requireFaceMatch?: boolean | null; requirePunchQr?: boolean | null }>
+    >`SELECT "requireFaceMatch", "requirePunchQr" FROM "company_settings" LIMIT 1`;
+    return {
+      requireFaceMatch: Boolean(rows[0]?.requireFaceMatch),
+      requirePunchQr: Boolean(rows[0]?.requirePunchQr),
+    };
+  } catch {
+    return { requireFaceMatch: false, requirePunchQr: false };
+  }
+}
+
 export class TimeRecordController {
   async punchInOut(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const userId = req.user!.id;
-      const { type, latitude, longitude, observation, clientTimestamp } = req.body;
+      const { type, latitude, longitude, observation, clientTimestamp, punchQrToken } = req.body;
       const photo = req.file; // Arquivo enviado via multer
 
 
@@ -46,7 +106,7 @@ export class TimeRecordController {
           dailyFoodVoucher: true,
           dailyTransportVoucher: true,
           user: {
-            select: { name: true, email: true }
+            select: { name: true, email: true, profilePhotoUrl: true, profilePhotoKey: true }
           }
         }
       });
@@ -136,6 +196,85 @@ export class TimeRecordController {
         const photoResult = await photoService.uploadPhoto(photo, userId);
         photoUrl = photoResult.url;
         photoKey = photoResult.key;
+      }
+
+      const punchFlags = await loadPunchFlags();
+      const requireFaceMatch = punchFlags.requireFaceMatch;
+      const requirePunchQr = punchFlags.requirePunchQr;
+
+      const allowedPunchLocations =
+        parseAllowedLocations(employee.allowedLocations).length > 0
+          ? parseAllowedLocations(employee.allowedLocations)
+          : geofencePolicy.locations;
+
+      const scannedPunchQr = parsePunchQrToken(punchQrToken);
+      const qrLocation = scannedPunchQr
+        ? locationService.findLocationByQrToken(allowedPunchLocations, scannedPunchQr) ||
+          locationService.findLocationByQrToken(geofencePolicy.locations, scannedPunchQr)
+        : null;
+
+      if (requirePunchQr && !scannedPunchQr) {
+        throw createError(
+          'Leia o QR Code da localidade para registrar o ponto neste site.',
+          400
+        );
+      }
+      if (scannedPunchQr && !qrLocation) {
+        throw createError(
+          'QR Code de ponto não corresponde a nenhuma localidade autorizada.',
+          400
+        );
+      }
+      if (qrLocation && hasCoordinates) {
+        const distanceToQr = locationService.calculateDistance(
+          latNum!,
+          lonNum!,
+          qrLocation.latitude,
+          qrLocation.longitude
+        );
+        if (distanceToQr > qrLocation.radius && geofencePolicy.blockOutside) {
+          throw createError(
+            `Você está a ${Math.round(distanceToQr)}m de ${qrLocation.name}. Máximo permitido: ${qrLocation.radius}m.`,
+            400
+          );
+        }
+      }
+
+      let faceMatchStatus: string | null = null;
+      let faceMatchSimilarity: number | null = null;
+      let faceMatchReason = '';
+
+      if (requireFaceMatch || photo) {
+        const face = await faceMatchService.comparePunchToProfile({
+          profilePhotoUrl: employee.user?.profilePhotoUrl,
+          profilePhotoKey: employee.user?.profilePhotoKey,
+          punchPhotoUrl: photoUrl || null,
+          punchPhotoKey: photoKey || null,
+          requireMatch: requireFaceMatch,
+        });
+        faceMatchStatus = face.status;
+        faceMatchSimilarity = face.similarity;
+        faceMatchReason = face.reason;
+
+        if (requireFaceMatch) {
+          if (face.status === 'no_profile_photo' || face.status === 'no_punch_photo') {
+            throw createError(face.reason, 400);
+          }
+          if (face.status === 'mismatch' || face.status === 'unavailable') {
+            throw createError(face.reason, 400);
+          }
+        }
+        if (faceMatchReason) {
+          locationReason = locationReason
+            ? `${locationReason} · ${faceMatchReason}`
+            : faceMatchReason;
+        }
+      }
+
+      if (qrLocation) {
+        locationReason = locationReason
+          ? `${locationReason} · Localidade (QR): ${qrLocation.name}`
+          : `Localidade (QR): ${qrLocation.name}`;
       }
 
       // Verificar se já existe registro no mesmo dia para o mesmo tipo
@@ -280,6 +419,14 @@ export class TimeRecordController {
         }
       });
 
+      await persistPunchExtras(timeRecord.id, {
+        faceMatchStatus,
+        faceMatchSimilarity,
+        punchQrToken: scannedPunchQr || null,
+        punchLocationId: qrLocation?.id || null,
+        punchLocationName: qrLocation?.name || null,
+      });
+
       // Calcular horas trabalhadas se for saída
       let workHours = null;
       if (type === 'EXIT') {
@@ -289,14 +436,98 @@ export class TimeRecordController {
       res.status(201).json({
         success: true,
         data: {
-          timeRecord,
+          timeRecord: {
+            ...timeRecord,
+            faceMatchStatus,
+            faceMatchSimilarity,
+            punchQrToken: scannedPunchQr || null,
+            punchLocationId: qrLocation?.id || null,
+            punchLocationName: qrLocation?.name || null,
+          },
           workHours,
-          locationValid: true, // Sempre válido - permitir bater ponto de qualquer lugar
-          locationReason: locationReason
+          locationValid: isValidLocation,
+          locationReason,
+          faceMatchStatus,
+          faceMatchSimilarity,
+          punchLocationName: qrLocation?.name || null,
         },
         message: 'Ponto registrado com sucesso'
       });
       return;
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async getPunchPolicy(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = req.user!.id;
+      const [policy, punchFlags, employee] = await Promise.all([
+        locationService.getGeofencePolicy(),
+        loadPunchFlags(),
+        prisma.employee.findUnique({
+          where: { userId },
+          select: {
+            allowedLocations: true,
+            isRemote: true,
+            user: { select: { profilePhotoUrl: true } },
+          },
+        }),
+      ]);
+      const employeeLocations = parseAllowedLocations(employee?.allowedLocations);
+      const locations = employeeLocations.length > 0 ? employeeLocations : policy.locations;
+      res.json({
+        success: true,
+        data: {
+          geofenceEnabled: policy.enabled,
+          geofenceBlockOutside: policy.blockOutside,
+          geofenceRequireLocation: policy.requireLocation,
+          requireFaceMatch: punchFlags.requireFaceMatch,
+          requirePunchQr: punchFlags.requirePunchQr,
+          hasProfilePhoto: Boolean(employee?.user?.profilePhotoUrl),
+          isRemote: Boolean(employee?.isRemote),
+          locations: locations.map((loc) => ({
+            id: loc.id,
+            name: loc.name,
+            latitude: loc.latitude,
+            longitude: loc.longitude,
+            radius: loc.radius,
+            hasQr: Boolean(loc.qrToken),
+          })),
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async resolvePunchQr(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const token = parsePunchQrToken(req.body?.token ?? req.query?.token);
+      if (!token) throw createError('Informe o QR Code da localidade', 400);
+      const policy = await locationService.getGeofencePolicy();
+      const employee = await prisma.employee.findUnique({
+        where: { userId: req.user!.id },
+        select: { allowedLocations: true },
+      });
+      const employeeLocations = parseAllowedLocations(employee?.allowedLocations);
+      const pool = [...employeeLocations, ...policy.locations];
+      const location = locationService.findLocationByQrToken(pool, token);
+      if (!location) {
+        throw createError('QR Code de ponto não corresponde a nenhuma localidade autorizada', 400);
+      }
+      res.json({
+        success: true,
+        data: {
+          id: location.id,
+          name: location.name,
+          latitude: location.latitude,
+          longitude: location.longitude,
+          radius: location.radius,
+          qrToken: token,
+          payload: punchQrPayload(token),
+        },
+      });
     } catch (error) {
       next(error);
     }

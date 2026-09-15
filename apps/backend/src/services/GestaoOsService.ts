@@ -411,6 +411,31 @@ async function buildLocationLabel(input: {
   return parts.length ? parts.join(' › ') : null;
 }
 
+async function ensureBuildingSectorAndPlace(buildingId: string): Promise<{
+  sectorId: string;
+  placeId: string;
+}> {
+  let sector = await prisma.gestaoOsSector.findFirst({
+    where: { buildingId, isActive: true },
+    orderBy: { name: 'asc' },
+  });
+  if (!sector) {
+    sector = await prisma.gestaoOsSector.create({
+      data: { buildingId, name: 'Geral', code: 'GERAL' },
+    });
+  }
+  let place = await prisma.gestaoOsPlace.findFirst({
+    where: { sectorId: sector.id, isActive: true },
+    orderBy: { name: 'asc' },
+  });
+  if (!place) {
+    place = await prisma.gestaoOsPlace.create({
+      data: { sectorId: sector.id, name: 'Área comum', code: 'AREA' },
+    });
+  }
+  return { sectorId: sector.id, placeId: place.id };
+}
+
 const DEFAULT_TREE = [
   {
     name: 'Sede Administrativa',
@@ -812,6 +837,8 @@ export class GestaoOsService {
     if (!category) throw createError('Informe a categoria/tipo de serviço', 400);
     if (!description) throw createError('Informe a descrição do problema', 400);
 
+    const origin = parseOrigin(input.origin);
+
     let buildingId = input.buildingId || null;
     let sectorId = input.sectorId || null;
     let placeId = input.placeId || null;
@@ -830,6 +857,13 @@ export class GestaoOsService {
         buildingId = buildingId || asset.place.sector.buildingId;
       }
     }
+
+    if (origin === 'UNPLANNED' && buildingId && (!sectorId || !placeId)) {
+      const filled = await ensureBuildingSectorAndPlace(buildingId);
+      sectorId = sectorId || filled.sectorId;
+      placeId = placeId || filled.placeId;
+    }
+
     if (!buildingId) throw createError('Selecione o prédio', 400);
     if (!sectorId) throw createError('Selecione o andar', 400);
     if (!placeId) throw createError('Selecione o local', 400);
@@ -845,7 +879,6 @@ export class GestaoOsService {
     });
 
     const attachments = parseAttachments(input.attachments) ?? [];
-    const origin = parseOrigin(input.origin);
     const sla = await resolveSlaDueAt({
       priority,
       assetId: input.assetId,

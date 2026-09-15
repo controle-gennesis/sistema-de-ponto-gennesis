@@ -25,6 +25,7 @@ type UploadMultipartOptions = {
   fieldName: string;
   file: UploadFileInput;
   method?: 'POST' | 'PUT' | 'PATCH';
+  fields?: Record<string, string>;
 };
 
 /**
@@ -33,10 +34,15 @@ type UploadMultipartOptions = {
 export async function uploadMultipartFile<T = unknown>(
   options: UploadMultipartOptions
 ): Promise<T> {
-  const { path, fieldName, file, method = 'POST' } = options;
+  const { path, fieldName, file, method = 'POST', fields } = options;
 
   if (Platform.OS === 'web') {
     const form = new FormData();
+    if (fields) {
+      for (const [key, value] of Object.entries(fields)) {
+        if (value != null) form.append(key, value);
+      }
+    }
     const blob = await fetch(file.uri).then((r) => r.blob());
     form.append(fieldName, blob, file.name);
     const res =
@@ -59,6 +65,7 @@ export async function uploadMultipartFile<T = unknown>(
     mimeType: file.type || 'image/jpeg',
     httpMethod: method,
     headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    parameters: fields,
   });
 
   let json: { message?: string; error?: string; data?: T } = {};

@@ -21,6 +21,7 @@ type GeofenceLocation = {
   latitude: number;
   longitude: number;
   radius: number;
+  qrToken?: string | null;
 };
 
 type CompanySettings = {
@@ -32,12 +33,16 @@ type CompanySettings = {
   geofenceEnabled: boolean;
   geofenceBlockOutside: boolean;
   geofenceRequireLocation: boolean;
+  requireFaceMatch?: boolean;
+  requirePunchQr?: boolean;
 };
 
 type GeofenceForm = {
   geofenceEnabled: boolean;
   geofenceBlockOutside: boolean;
   geofenceRequireLocation: boolean;
+  requireFaceMatch: boolean;
+  requirePunchQr: boolean;
   locations: GeofenceLocation[];
 };
 
@@ -75,6 +80,7 @@ function seedLocations(settings: CompanySettings): GeofenceLocation[] {
       latitude: Number(loc.latitude),
       longitude: Number(loc.longitude),
       radius: Math.max(10, Number(loc.radius) || settings.maxDistanceMeters || 1000),
+      qrToken: loc.qrToken || null,
     }));
   }
   return [
@@ -161,6 +167,8 @@ export default function ConfiguracoesPontoPage() {
       geofenceEnabled: !!settings.geofenceEnabled,
       geofenceBlockOutside: settings.geofenceBlockOutside ?? true,
       geofenceRequireLocation: settings.geofenceRequireLocation ?? true,
+      requireFaceMatch: !!settings.requireFaceMatch,
+      requirePunchQr: !!settings.requirePunchQr,
       locations: seedLocations(settings),
     });
   }, [settings, form]);
@@ -172,6 +180,8 @@ export default function ConfiguracoesPontoPage() {
         geofenceEnabled: payload.geofenceEnabled,
         geofenceBlockOutside: payload.geofenceBlockOutside,
         geofenceRequireLocation: payload.geofenceRequireLocation,
+        requireFaceMatch: payload.requireFaceMatch,
+        requirePunchQr: payload.requirePunchQr,
         geofenceLocations: payload.locations,
         maxDistanceMeters: first?.radius ?? 1000,
         defaultLatitude: first?.latitude,
@@ -259,6 +269,7 @@ export default function ConfiguracoesPontoPage() {
       latitude,
       longitude,
       radius: Math.round(radius),
+      qrToken: form.locations.find((loc) => loc.id === locationDraft.id)?.qrToken || null,
     };
 
     setForm({
@@ -354,6 +365,20 @@ export default function ConfiguracoesPontoPage() {
                     onChange={(value) => setForm({ ...form, geofenceRequireLocation: value })}
                   />
 
+                  <ToggleRow
+                    title="Confrontar biometria facial"
+                    description="Compara a foto do ponto com a foto cadastrada no painel (Rekognition). Sem a foto do colaborador a batida é recusada."
+                    checked={form.requireFaceMatch}
+                    onChange={(value) => setForm({ ...form, requireFaceMatch: value })}
+                  />
+
+                  <ToggleRow
+                    title="Exigir QR Code da localidade"
+                    description="O colaborador só registra o ponto depois de ler o QR associado ao local de prestação do serviço."
+                    checked={form.requirePunchQr}
+                    onChange={(value) => setForm({ ...form, requirePunchQr: value })}
+                  />
+
                   <div
                     className={`rounded-lg border border-gray-200 p-4 dark:border-gray-700 ${
                       !form.geofenceEnabled ? 'opacity-60' : ''
@@ -401,6 +426,7 @@ export default function ConfiguracoesPontoPage() {
                               <p className="truncate text-xs text-gray-500 dark:text-gray-400">
                                 {loc.latitude.toFixed(6)}, {loc.longitude.toFixed(6)} · raio{' '}
                                 {loc.radius} m
+                                {loc.qrToken ? ` · QR gennesis-punch:${loc.qrToken}` : ''}
                               </p>
                             </button>
                             <button

@@ -13,6 +13,8 @@ export interface Location {
   latitude: number;
   longitude: number;
   radius: number; // em metros
+  /** Token do QR de ponto associado a esta localidade. */
+  qrToken?: string | null;
 }
 
 /** Política de cerca virtual configurada em CompanySettings. */
@@ -37,6 +39,7 @@ export function parseAllowedLocations(raw: unknown): Location[] {
     const longitude = Number(entry.longitude);
     if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return [];
     const radius = Number(entry.radius);
+    const qrTokenRaw = String(entry.qrToken ?? entry.punchQrToken ?? '').trim();
     return [
       {
         id: String(entry.id ?? `${latitude},${longitude}`),
@@ -44,6 +47,7 @@ export function parseAllowedLocations(raw: unknown): Location[] {
         latitude,
         longitude,
         radius: Number.isFinite(radius) && radius > 0 ? radius : 300,
+        qrToken: qrTokenRaw || null,
       },
     ];
   });
@@ -53,11 +57,22 @@ export function normalizeGeofenceLocations(raw: unknown): Location[] {
   return parseAllowedLocations(raw);
 }
 
+export function parsePunchQrToken(raw: unknown): string {
+  return String(raw ?? '')
+    .trim()
+    .replace(/^gennesis-punch:/i, '')
+    .replace(/^punch:/i, '');
+}
+
+export function punchQrPayload(token: string): string {
+  return `gennesis-punch:${token}`;
+}
+
 export class LocationService {
   /**
    * Calcula a distância entre dois pontos usando a fórmula de Haversine
    */
-  private calculateDistance(
+  calculateDistance(
     lat1: number,
     lon1: number,
     lat2: number,
@@ -349,6 +364,38 @@ export class LocationService {
       userAgent: undefined, // Pode ser passado do request
       ipAddress: undefined  // Pode ser passado do request
     };
+  }
+
+  findLocationByQrToken(locations: Location[], rawToken: unknown): Location | null {
+    const token = parsePunchQrToken(rawToken);
+    if (!token) return null;
+    const needle = token.toLowerCase();
+    return (
+      locations.find((loc) => String(loc.qrToken || '').trim().toLowerCase() === needle) || null
+    );
+  }
+
+  nearestLocation(
+    latitude: number,
+    longitude: number,
+    locations: Location[]
+  ): { location: Location; distance: number } | null {
+    if (!locations.length) return null;
+    let best = locations[0];
+    let bestDistance = this.calculateDistance(
+      latitude,
+      longitude,
+      best.latitude,
+      best.longitude
+    );
+    for (const loc of locations.slice(1)) {
+      const distance = this.calculateDistance(latitude, longitude, loc.latitude, loc.longitude);
+      if (distance < bestDistance) {
+        best = loc;
+        bestDistance = distance;
+      }
+    }
+    return { location: best, distance: Math.round(bestDistance) };
   }
 
   /**

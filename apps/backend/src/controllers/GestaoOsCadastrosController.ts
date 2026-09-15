@@ -68,6 +68,16 @@ export class GestaoOsCadastrosController {
     }
   }
 
+  async fieldBuildings(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.user) throw createError('Usuário não autenticado', 401);
+      const data = await gestaoOsCadastrosService.listFieldBuildings(req.user.id);
+      res.json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  }
+
   // Locais / ativos
   async locationTreeAdmin(req: AuthRequest, res: Response, next: NextFunction) {
     try {

@@ -11,7 +11,8 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useQuery } from '@tanstack/react-query';
 import { CalendarClock, ExternalLink } from 'lucide-react-native';
 import { useTheme } from '../context/ThemeContext';
-import { fetchPlannerEvents, type PlannerEvent } from '../services/plannerEvents';
+import { fetchPlannerEvents } from '../services/plannerEvents';
+import { fetchGestaoOsAgenda } from '../services/gestaoOs';
 import type { RootStackParamList } from '../../App';
 
 type TodayItem = {
@@ -23,6 +24,8 @@ type TodayItem = {
   timeRange: string | null;
   accent: string;
   ongoing: boolean;
+  subtitle?: string | null;
+  workOrderId?: string;
 };
 
 const MAX_ITEMS = 5;
@@ -43,7 +46,17 @@ function formatClock(date: Date): string {
   return date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 }
 
-function buildTodayEvents(events: PlannerEvent[], nowMs: number): TodayItem[] {
+type AgendaLike = {
+  id: string;
+  title: string;
+  startAt: string;
+  endAt: string;
+  color?: string | null;
+  description?: string | null;
+  workOrderId?: string;
+};
+
+function buildTodayEvents(events: AgendaLike[], nowMs: number): TodayItem[] {
   const items: TodayItem[] = [];
 
   for (const ev of events) {
@@ -62,6 +75,8 @@ function buildTodayEvents(events: PlannerEvent[], nowMs: number): TodayItem[] {
       timeRange: hasRange ? `${formatClock(start)} – ${formatClock(end)}` : null,
       accent: ev.color || '#3B82F6',
       ongoing: start.getTime() <= nowMs && endMs >= nowMs,
+      subtitle: ev.description || null,
+      workOrderId: ev.workOrderId,
     });
   }
 
@@ -97,8 +112,28 @@ export default function HomeAgendaCard() {
   const { data: todayEvents = [], isLoading } = useQuery({
     queryKey: ['planner-events', 'home-today', todayRange.from.toISOString()],
     queryFn: async () => {
-      const { events } = await fetchPlannerEvents(todayRange.from, todayRange.to);
-      return events;
+      const [{ events }, osItems] = await Promise.all([
+        fetchPlannerEvents(todayRange.from, todayRange.to),
+        fetchGestaoOsAgenda(todayRange.from, todayRange.to),
+      ]);
+      const planner: AgendaLike[] = events.map((ev) => ({
+        id: ev.id,
+        title: ev.title,
+        startAt: ev.startAt,
+        endAt: ev.endAt,
+        color: ev.color,
+        description: ev.description,
+      }));
+      const os: AgendaLike[] = osItems.map((item) => ({
+        id: item.id,
+        title: item.title,
+        startAt: item.startAt,
+        endAt: item.endAt,
+        color: item.color,
+        description: [item.description, item.address].filter(Boolean).join(' · ') || null,
+        workOrderId: item.workOrderId,
+      }));
+      return [...os, ...planner];
     },
     staleTime: 60_000,
   });
@@ -151,7 +186,13 @@ export default function HomeAgendaCard() {
                 styles.eventRow,
                 index === 0 && styles.eventRowFirst,
               ]}
-              onPress={openAgenda}
+              onPress={() => {
+                if (item.workOrderId) {
+                  navigation.navigate('GestaoOsDetail', { id: item.workOrderId });
+                  return;
+                }
+                openAgenda();
+              }}
               activeOpacity={0.7}
             >
               <View style={[styles.accentBar, { backgroundColor: item.accent }]} />
@@ -164,7 +205,9 @@ export default function HomeAgendaCard() {
                   style={[styles.eventMeta, item.ongoing && styles.eventMetaOngoing]}
                   numberOfLines={1}
                 >
-                  {item.ongoing ? 'Em andamento' : item.timeRange || item.timeStart}
+                  {item.ongoing
+                    ? 'Em andamento'
+                    : item.subtitle || item.timeRange || item.timeStart}
                 </Text>
               </View>
             </TouchableOpacity>

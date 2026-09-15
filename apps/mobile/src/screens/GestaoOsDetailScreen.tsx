@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -16,6 +16,7 @@ import {
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import * as ImagePicker from 'expo-image-picker';
+import { CameraView, useCameraPermissions, type BarcodeScanningResult } from 'expo-camera';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Check } from 'lucide-react-native';
@@ -31,6 +32,7 @@ import {
   patchWorkOrder,
   uploadGestaoOsAttachment,
   readCloseQrToken,
+  saveCloseQrToken,
   clearCloseQrToken,
   syncGestaoOsOfflineQueue,
   loadGestaoOsLocalDraft,
@@ -125,6 +127,11 @@ function mergeSafetyChecklist(items?: SafetyItem[] | null): SafetyItem[] {
   }));
 }
 
+function extractCloseQrToken(raw: string): string {
+  const value = (raw || '').trim();
+  return value.replace(/^gennesis-os-close:/i, '');
+}
+
 export default function GestaoOsDetailScreen({ route, navigation }: Props) {
   const { id } = route.params;
   const { colors, isDark } = useTheme();
@@ -143,6 +150,9 @@ export default function GestaoOsDetailScreen({ route, navigation }: Props) {
   const [parts, setParts] = useState<Array<{ id: string; name: string; quantity: number }>>([]);
   const [newPartName, setNewPartName] = useState('');
   const [partsModalOpen, setPartsModalOpen] = useState(false);
+  const [closeScannerOpen, setCloseScannerOpen] = useState(false);
+  const [permission, requestPermission] = useCameraPermissions();
+  const scanLockRef = useRef(false);
 
   const meQuery = useQuery({
     queryKey: ['gestao-os-me-mobile'],
@@ -484,6 +494,29 @@ export default function GestaoOsDetailScreen({ route, navigation }: Props) {
             ) : null}
           </View>
 
+          {Array.isArray(wo.events) && wo.events.length > 0 ? (
+            <View style={styles.box}>
+              <Text style={styles.boxTitle}>Histórico do atendimento</Text>
+              {wo.events.map((event) => (
+                <View key={event.id} style={styles.eventRow}>
+                  <Text style={styles.eventWhen}>
+                    {new Date(event.createdAt).toLocaleString('pt-BR', {
+                      day: '2-digit',
+                      month: '2-digit',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </Text>
+                  <Text style={styles.eventWhat}>
+                    {STATUS_LABEL[event.toStatus || ''] || event.toStatus || 'Atualização'}
+                    {event.actor?.name ? ` · ${event.actor.name}` : ''}
+                  </Text>
+                  {event.note ? <Text style={styles.eventNote}>{event.note}</Text> : null}
+                </View>
+              ))}
+            </View>
+          ) : null}
+
           {canExecuteField && (wo.status === 'APPROVED' || wo.status === 'SAFETY_CHECK') ? (
             <View style={styles.box}>
               <Text style={styles.boxTitle}>Segurança do trabalho</Text>
@@ -635,9 +668,11 @@ export default function GestaoOsDetailScreen({ route, navigation }: Props) {
             <View style={styles.box}>
               <Text style={styles.boxTitle}>Foto de conclusão</Text>
               <Text style={styles.boxHint}>
-                {executionReady
-                  ? 'Registre uma foto antes de concluir o serviço.'
-                  : 'Marque todos os itens do checklist de execução antes de concluir.'}
+                {wo.buildingCloseQrRequired
+                  ? 'Além da foto, leia o QR em posse do responsável pela localidade para concluir.'
+                  : executionReady
+                    ? 'Registre uma foto antes de concluir o serviço.'
+                    : 'Marque todos os itens do checklist de execução antes de concluir.'}
               </Text>
               {endPhotoUrl && mediaUri(endPhotoUrl) ? (
                 <Image source={{ uri: mediaUri(endPhotoUrl) }} style={styles.photo} />
@@ -697,6 +732,28 @@ export default function GestaoOsDetailScreen({ route, navigation }: Props) {
                     onPress={() => {
                       if (status === 'WAITING_PARTS') {
                         setPartsModalOpen(true);
+                        return;
+                      }
+                      if (status === 'COMPLETED' && wo.buildingCloseQrRequired) {
+                        void (async () => {
+                          const existing = await readCloseQrToken();
+                          if (existing) {
+                            mutation.mutate(status);
+                            return;
+                          }
+                          if (!permission?.granted) {
+                            const res = await requestPermission();
+                            if (!res.granted) {
+                              Alert.alert(
+                                'QR da localidade',
+                                'É preciso ler o QR em posse do responsável pela localidade para concluir.'
+                              );
+                              return;
+                            }
+                          }
+                          scanLockRef.current = false;
+                          setCloseScannerOpen(true);
+                        })();
                         return;
                       }
                       mutation.mutate(status);
@@ -791,6 +848,35 @@ export default function GestaoOsDetailScreen({ route, navigation }: Props) {
             </Pressable>
           </KeyboardAvoidingView>
         </Pressable>
+      </Modal>
+
+      <Modal
+        visible={closeScannerOpen}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={() => setCloseScannerOpen(false)}
+      >
+        <View style={styles.scannerContainer}>
+          <CameraView
+            style={StyleSheet.absoluteFill}
+            facing="back"
+            barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+            onBarcodeScanned={(result: BarcodeScanningResult) => {
+              if (scanLockRef.current) return;
+              const token = extractCloseQrToken(result?.data ?? '');
+              if (!token) return;
+              scanLockRef.current = true;
+              setCloseScannerOpen(false);
+              void saveCloseQrToken(token).then(() => mutation.mutate('COMPLETED'));
+            }}
+          />
+          <View style={styles.scannerBar}>
+            <TouchableOpacity onPress={() => setCloseScannerOpen(false)}>
+              <Text style={styles.scannerClose}>Cancelar</Text>
+            </TouchableOpacity>
+            <Text style={styles.scannerHint}>QR do responsável pela localidade</Text>
+          </View>
+        </View>
       </Modal>
     </View>
   );
@@ -906,6 +992,24 @@ const getStyles = (colors: any, isDark: boolean) =>
       lineHeight: 18,
       fontWeight: '500',
     },
+    eventRow: {
+      marginBottom: 12,
+      paddingBottom: 10,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.08)',
+    },
+    eventWhen: { color: colors.textSecondary, fontSize: 12, fontWeight: '600' },
+    eventWhat: { color: colors.text, fontSize: 14, fontWeight: '700', marginTop: 2 },
+    eventNote: { color: colors.textSecondary, fontSize: 13, marginTop: 2, lineHeight: 18 },
+    scannerContainer: { flex: 1, backgroundColor: '#000' },
+    scannerBar: {
+      position: 'absolute',
+      left: 20,
+      right: 20,
+      top: 54,
+    },
+    scannerClose: { color: '#fff', fontWeight: '700', fontSize: 16 },
+    scannerHint: { color: '#fff', marginTop: 10, fontSize: 15, fontWeight: '600' },
     checklistItem: { marginBottom: 14 },
     checkRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 8 },
     checkbox: {

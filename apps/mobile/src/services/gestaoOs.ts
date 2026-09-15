@@ -93,6 +93,13 @@ export type GestaoOsWorkOrderMobile = {
   }> | null;
   slaOverdue?: boolean;
   slaWarning?: boolean;
+  events?: Array<{
+    id: string;
+    toStatus?: string | null;
+    note?: string | null;
+    createdAt: string;
+    actor?: { id?: string; name?: string | null } | null;
+  }> | null;
 };
 
 export const GESTAO_OS_SAFETY_CHECKLIST_ITEMS = [
@@ -453,4 +460,46 @@ export async function createWorkOrderFromQr(input: {
     }
     throw err;
   }
+}
+
+export type GestaoOsFieldBuilding = {
+  id: string;
+  name: string;
+  code?: string | null;
+  sectorId: string;
+  placeId: string;
+  address?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+};
+
+export async function fetchFieldBuildings(): Promise<GestaoOsFieldBuilding[]> {
+  const { qs, headers } = await withCompany();
+  const res = await api.get(`/api/gestao-os/cadastros/field-buildings${qs}`, { headers });
+  const data = await parseJson(res);
+  return Array.isArray(data) ? data : [];
+}
+
+export async function fetchGestaoOsCategories(): Promise<Array<{ name: string }>> {
+  const { qs, headers } = await withCompany();
+  const res = await api.get(`/api/gestao-os/cadastros/categories${qs}`, { headers });
+  const data = await parseJson(res);
+  if (Array.isArray(data)) return data;
+  if (Array.isArray((data as { items?: unknown[] })?.items)) {
+    return (data as { items: Array<{ name: string }> }).items;
+  }
+  return [];
+}
+
+export async function createUnplannedWorkOrder(input: {
+  category: string;
+  description: string;
+  buildingId: string;
+  sectorId?: string;
+  placeId?: string;
+}) {
+  return createWorkOrderFromQr({
+    ...input,
+    origin: 'UNPLANNED',
+  });
 }

@@ -21,6 +21,8 @@ import KanbanCardScreen from './src/screens/kanban/KanbanCardScreen';
 import DpRequestsScreen from './src/screens/DpRequestsScreen';
 import GestaoOsDetailScreen from './src/screens/GestaoOsDetailScreen';
 import GestaoOsQrScreen from './src/screens/GestaoOsQrScreen';
+import GestaoOsUnplannedScreen from './src/screens/GestaoOsUnplannedScreen';
+import FieldAssistantScreen from './src/screens/FieldAssistantScreen';
 import AuthBrandSplash, { SPLASH_BG } from './src/components/AuthBrandSplash';
 import ThemeBackground from './src/components/ThemeBackground';
 
@@ -47,6 +49,8 @@ export type RootStackParamList = {
   DpRequests: undefined;
   GestaoOsDetail: { id: string };
   GestaoOsQr: { token: string };
+  GestaoOsUnplanned: undefined;
+  FieldAssistant: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -145,6 +149,8 @@ function AppNavigator() {
               <Stack.Screen name="DpRequests" component={DpRequestsScreen} />
               <Stack.Screen name="GestaoOsDetail" component={GestaoOsDetailScreen} />
               <Stack.Screen name="GestaoOsQr" component={GestaoOsQrScreen} />
+              <Stack.Screen name="GestaoOsUnplanned" component={GestaoOsUnplannedScreen} />
+              <Stack.Screen name="FieldAssistant" component={FieldAssistantScreen} />
             </Stack.Navigator>
             <NotificationsSheet />
           </>

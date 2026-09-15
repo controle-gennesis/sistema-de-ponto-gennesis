@@ -4,6 +4,11 @@ import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { cache } from '../lib/cache';
 import { normalizeGeofenceLocations } from '../services/LocationService';
+import { randomBytes } from 'crypto';
+
+function newPunchQrToken() {
+  return randomBytes(12).toString('hex');
+}
 
 function sanitizeGeofenceLocationsPayload(raw: unknown) {
   const locations = normalizeGeofenceLocations(raw).map((loc, index) => ({
@@ -12,6 +17,7 @@ function sanitizeGeofenceLocationsPayload(raw: unknown) {
     latitude: loc.latitude,
     longitude: loc.longitude,
     radius: Math.max(10, Math.round(loc.radius) || 1000),
+    qrToken: String(loc.qrToken || '').trim() || newPunchQrToken(),
   }));
 
   for (const loc of locations) {
@@ -94,6 +100,8 @@ export class CompanyController {
         geofenceLocations,
         vacationDaysPerYear,
         fuelSuppliesSlaHours,
+        requireFaceMatch,
+        requirePunchQr,
       } = req.body;
 
       // Validar CNPJ se fornecido
@@ -230,6 +238,25 @@ export class CompanyController {
 
       // Sem isto o cache de 1h devolveria a configuração antiga ao ponto e aos relatórios
       cache.set('company_settings', settings, 3600);
+
+      if (settings?.id && (requireFaceMatch !== undefined || requirePunchQr !== undefined)) {
+        const face =
+          requireFaceMatch !== undefined ? (requireFaceMatch ? 'true' : 'false') : null;
+        const qr = requirePunchQr !== undefined ? (requirePunchQr ? 'true' : 'false') : null;
+        const sets: string[] = [];
+        if (face) sets.push(`"requireFaceMatch" = ${face}`);
+        if (qr) sets.push(`"requirePunchQr" = ${qr}`);
+        if (sets.length) {
+          await prisma.$executeRawUnsafe(
+            `UPDATE "company_settings" SET ${sets.join(', ')} WHERE "id" = '${String(settings.id).replace(/'/g, "''")}'`
+          );
+          settings.requireFaceMatch =
+            requireFaceMatch !== undefined ? !!requireFaceMatch : settings.requireFaceMatch;
+          settings.requirePunchQr =
+            requirePunchQr !== undefined ? !!requirePunchQr : settings.requirePunchQr;
+          cache.set('company_settings', settings, 3600);
+        }
+      }
 
       res.json({
         success: true,

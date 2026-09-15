@@ -15,6 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { ArrowLeft } from 'lucide-react-native';
 import * as Location from 'expo-location';
+import { CameraView, useCameraPermissions, type BarcodeScanningResult } from 'expo-camera';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -22,6 +23,7 @@ import api from '../services/api';
 import Toast from 'react-native-toast-message';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
+import { uploadMultipartFile } from '../utils/uploadMultipartFile';
 
 enum TimeRecordType {
   ENTRY = 'ENTRY',
@@ -37,6 +39,46 @@ const PUNCH_TYPES = [
   { type: TimeRecordType.LUNCH_END, label: 'Retorno', icon: '🔄' },
   { type: TimeRecordType.EXIT, label: 'Saída', icon: '🌆' },
 ];
+
+type PunchPolicyLocation = {
+  id: string;
+  name: string;
+  latitude: number;
+  longitude: number;
+  radius: number;
+  hasQr?: boolean;
+};
+
+type PunchPolicy = {
+  geofenceEnabled: boolean;
+  geofenceBlockOutside: boolean;
+  geofenceRequireLocation: boolean;
+  requireFaceMatch: boolean;
+  requirePunchQr: boolean;
+  hasProfilePhoto: boolean;
+  locations: PunchPolicyLocation[];
+};
+
+function haversineMeters(
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number
+): number {
+  const R = 6371000;
+  const toRad = (n: number) => (n * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function parsePunchQr(raw: string): string {
+  const value = (raw || '').trim();
+  return value.replace(/^gennesis-punch:/i, '').replace(/^punch:/i, '');
+}
 
 export default function PunchScreen() {
   const navigation = useNavigation();
@@ -61,6 +103,12 @@ export default function PunchScreen() {
     time: string;
     date: string;
   } | null>(null);
+  const [punchPolicy, setPunchPolicy] = useState<PunchPolicy | null>(null);
+  const [scannedPunchQr, setScannedPunchQr] = useState<string | null>(null);
+  const [scannedLocationName, setScannedLocationName] = useState<string | null>(null);
+  const [qrScannerOpen, setQrScannerOpen] = useState(false);
+  const [qrPermission, requestQrPermission] = useCameraPermissions();
+  const qrLockRef = useRef(false);
   const { user } = useAuth();
   
   const styles = getStyles(colors);
@@ -68,6 +116,7 @@ export default function PunchScreen() {
   useEffect(() => {
     requestPermissions();
     fetchTodayRecords();
+    void fetchPunchPolicy();
   }, []);
 
   // Atualizar o relógio a cada segundo
@@ -97,8 +146,20 @@ export default function PunchScreen() {
         setTodayRecords(records);
         setAllPointsCompleted(checkAllPointsCompleted(records));
       }
-    } catch (error) {
+      } catch (error) {
       // Erro silencioso
+    }
+  };
+
+  const fetchPunchPolicy = async () => {
+    try {
+      const response = await api.get('/api/time-records/punch-policy');
+      const json = await response.json().catch(() => ({}));
+      if (response.ok) {
+        setPunchPolicy(json.data || json);
+      }
+    } catch {
+      /* ignore */
     }
   };
 
@@ -246,14 +307,21 @@ export default function PunchScreen() {
       return;
     }
 
+    if (punchPolicy?.requirePunchQr && !scannedPunchQr) {
+      Alert.alert('QR da localidade', 'Leia o QR Code do local onde o serviço será prestado para registrar o ponto.');
+      return;
+    }
+
+    if (punchPolicy?.requireFaceMatch && !punchPolicy.hasProfilePhoto) {
+      Alert.alert(
+        'Foto do painel',
+        'Não há foto cadastrada no painel para o confronto facial. Peça ao RH para atualizar sua foto.'
+      );
+      return;
+    }
+
     setLoading(true);
     try {
-      const formData = new FormData();
-      formData.append('type', selectedType);
-      formData.append('latitude', location.coords.latitude.toString());
-      formData.append('longitude', location.coords.longitude.toString());
-      formData.append('observation', observation.trim() || '');
-      // Enviar timestamp como string no formato que o banco vai interpretar como horário de Brasília
       const now = new Date();
       const year = now.getFullYear();
       const month = String(now.getMonth() + 1).padStart(2, '0');
@@ -262,29 +330,29 @@ export default function PunchScreen() {
       const minutes = String(now.getMinutes()).padStart(2, '0');
       const seconds = String(now.getSeconds()).padStart(2, '0');
       const localTimestamp = `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
-      formData.append('clientTimestamp', localTimestamp);
-      formData.append('photo', {
-        uri: photo,
-        type: 'image/jpeg',
-        name: 'punch_photo.jpg',
-      } as any);
 
-      const response = await api.post('/api/time-records/punch', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
+      const data = await uploadMultipartFile<{
+        punchLocationName?: string | null;
+        faceMatchStatus?: string | null;
+      }>({
+        path: '/api/time-records/punch',
+        fieldName: 'photo',
+        file: {
+          uri: photo,
+          name: 'punch_photo.jpg',
+          type: 'image/jpeg',
+        },
+        fields: {
+          type: selectedType,
+          latitude: location.coords.latitude.toString(),
+          longitude: location.coords.longitude.toString(),
+          observation: observation.trim() || '',
+          clientTimestamp: localTimestamp,
+          ...(scannedPunchQr ? { punchQrToken: scannedPunchQr } : {}),
         },
       });
-
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'Erro ao registrar ponto');
-      }
-
-      const data = await response.json();
       
-      if (data.success) {
-        // Preparar dados para o modal de sucesso
-        const punchTypeLabels: Record<TimeRecordType, string> = {
+      const punchTypeLabels: Record<TimeRecordType, string> = {
           ENTRY: 'Entrada',
           LUNCH_START: 'Saída para Almoço',
           LUNCH_END: 'Retorno do Almoço',
@@ -307,7 +375,9 @@ export default function PunchScreen() {
         setShowSuccessModal(true);
         setPhoto(null);
         setObservation('');
-      }
+        setScannedPunchQr(null);
+        setScannedLocationName(data?.punchLocationName || scannedLocationName);
+        void fetchTodayRecords();
     } catch (error: any) {
       Toast.show({
         type: 'error',
@@ -317,6 +387,39 @@ export default function PunchScreen() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const openPunchQrScanner = async () => {
+    if (!qrPermission?.granted) {
+      const res = await requestQrPermission();
+      if (!res.granted) {
+        Alert.alert('Permissão da câmera', 'Precisamos da câmera para ler o QR da localidade.');
+        return;
+      }
+    }
+    qrLockRef.current = false;
+    setQrScannerOpen(true);
+  };
+
+  const onPunchQrScanned = (result: BarcodeScanningResult) => {
+    if (qrLockRef.current) return;
+    const token = parsePunchQr(result?.data ?? '');
+    if (!token) return;
+    qrLockRef.current = true;
+    setQrScannerOpen(false);
+    setScannedPunchQr(token);
+    void (async () => {
+      try {
+        const res = await api.post('/api/time-records/resolve-punch-qr', { token });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(json.message || json.error || 'QR inválido');
+        setScannedLocationName(json.data?.name || 'Localidade autorizada');
+      } catch (err) {
+        setScannedPunchQr(null);
+        setScannedLocationName(null);
+        Alert.alert('QR inválido', err instanceof Error ? err.message : 'Não foi possível validar o QR.');
+      }
+    })();
   };
 
   if (cameraPermission === null || locationPermission === null) {
@@ -344,6 +447,35 @@ export default function PunchScreen() {
       </SafeAreaView>
     );
   }
+
+  let fenceLabel = punchPolicy?.geofenceEnabled
+    ? 'Confirmando se você está na área autorizada…'
+    : 'Cerca virtual desligada — o ponto pode ser registrado de qualquer lugar.';
+  let fenceOk = !punchPolicy?.geofenceEnabled;
+  if (punchPolicy?.geofenceEnabled && location && punchPolicy.locations?.length) {
+    const nearest = punchPolicy.locations
+      .map((loc) => ({
+        loc,
+        distance: haversineMeters(
+          location.coords.latitude,
+          location.coords.longitude,
+          loc.latitude,
+          loc.longitude
+        ),
+      }))
+      .sort((a, b) => a.distance - b.distance)[0];
+    fenceOk = nearest.distance <= nearest.loc.radius;
+    fenceLabel = fenceOk
+      ? `Dentro de ${nearest.loc.name} (${Math.round(nearest.distance)}m)`
+      : `Fora da área — ${Math.round(nearest.distance)}m de ${nearest.loc.name} (máx. ${nearest.loc.radius}m)`;
+  }
+
+  const punchBlocked =
+    loading ||
+    !photo ||
+    !location ||
+    allPointsCompleted ||
+    Boolean(punchPolicy?.requirePunchQr && !scannedPunchQr);
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -461,6 +593,26 @@ export default function PunchScreen() {
               )}
             </View>
           </View>
+          <View style={[styles.fenceCard, fenceOk ? styles.fenceOk : styles.fenceBad]}>
+            <Text style={styles.fenceText}>{fenceLabel}</Text>
+          </View>
+          {punchPolicy?.requireFaceMatch ? (
+            <Text style={styles.policyHint}>
+              {punchPolicy.hasProfilePhoto
+                ? 'A foto deste ponto será confrontada com a foto cadastrada no painel.'
+                : 'Falta a foto cadastrada no painel para o confronto facial.'}
+            </Text>
+          ) : null}
+          <TouchableOpacity style={styles.qrButton} onPress={() => void openPunchQrScanner()} activeOpacity={0.85}>
+            <Ionicons name="qr-code-outline" size={20} color="#fff" />
+            <Text style={styles.qrButtonText}>
+              {scannedLocationName
+                ? `QR lido: ${scannedLocationName}`
+                : punchPolicy?.requirePunchQr
+                  ? 'Ler QR da localidade'
+                  : 'Ler QR da localidade (opcional)'}
+            </Text>
+          </TouchableOpacity>
         </View>
 
         {/* Status */}
@@ -481,10 +633,10 @@ export default function PunchScreen() {
       <TouchableOpacity
           style={[
             styles.confirmButton,
-            (loading || !photo || !location || allPointsCompleted) && styles.confirmButtonDisabled
+            punchBlocked && styles.confirmButtonDisabled
           ]}
           onPress={() => setShowConfirmModal(true)}
-          disabled={loading || !photo || !location || allPointsCompleted}
+          disabled={punchBlocked}
           activeOpacity={0.8}
       >
         {loading ? (
@@ -501,6 +653,28 @@ export default function PunchScreen() {
         )}
       </TouchableOpacity>
     </ScrollView>
+
+    <Modal
+      visible={qrScannerOpen}
+      animationType="slide"
+      presentationStyle="fullScreen"
+      onRequestClose={() => setQrScannerOpen(false)}
+    >
+      <View style={styles.scannerContainer}>
+        <CameraView
+          style={StyleSheet.absoluteFill}
+          facing="back"
+          barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+          onBarcodeScanned={onPunchQrScanned}
+        />
+        <SafeAreaView style={styles.scannerOverlay}>
+          <TouchableOpacity style={styles.scannerClose} onPress={() => setQrScannerOpen(false)}>
+            <Text style={styles.scannerCloseText}>Cancelar</Text>
+          </TouchableOpacity>
+          <Text style={styles.scannerHint}>Aponte para o QR da localidade</Text>
+        </SafeAreaView>
+      </View>
+    </Modal>
 
     {/* Modal de Sucesso */}
     <Modal
@@ -1096,5 +1270,71 @@ const getStyles = (colors: any) => StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
+  },
+  fenceCard: {
+    marginTop: 10,
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  fenceOk: {
+    backgroundColor: 'rgba(16,185,129,0.12)',
+  },
+  fenceBad: {
+    backgroundColor: 'rgba(206,55,54,0.12)',
+  },
+  fenceText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.text,
+  },
+  policyHint: {
+    marginTop: 8,
+    fontSize: 12,
+    color: colors.textSecondary,
+    lineHeight: 18,
+  },
+  qrButton: {
+    marginTop: 12,
+    backgroundColor: '#111827',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  qrButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+    flex: 1,
+  },
+  scannerContainer: {
+    flex: 1,
+    backgroundColor: '#000',
+  },
+  scannerOverlay: {
+    flex: 1,
+    justifyContent: 'space-between',
+    padding: 20,
+  },
+  scannerClose: {
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  scannerCloseText: {
+    color: '#fff',
+    fontWeight: '700',
+  },
+  scannerHint: {
+    color: '#fff',
+    textAlign: 'center',
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 40,
   },
 });

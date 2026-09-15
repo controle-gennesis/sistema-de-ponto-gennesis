@@ -623,6 +623,8 @@ export function useRoutePermission(route: string) {
     canApproveFd,
     canApproveFuel,
     canApproveEspelhoNf,
+    canApproveOc,
+    canApproveMaterialRequests,
     canAccessOrcamentoRoutePage,
     canAccessOsRoutePage,
     canAccessRecebimentoEntregasRoutePage,
