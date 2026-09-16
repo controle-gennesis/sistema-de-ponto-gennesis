@@ -57,6 +57,24 @@ export async function assertCostCenterAllowedForUnbUser(
   }
 }
 
+/**
+ * Combina escopo do gestor com restrição UNB do funcionário.
+ * Se a interseção zera (contrato UNB com CC diferente do cadastro UNB),
+ * usa o catálogo UNB — senão a fila de aprovação some no deploy.
+ */
+export function mergeGestorScopeWithUnbRestriction(
+  gestorOrFullScope: string[] | null,
+  unbScope: string[] | null,
+): string[] | null {
+  if (unbScope === null) return gestorOrFullScope;
+  if (unbScope.length === 0) return gestorOrFullScope;
+  if (gestorOrFullScope === null) return unbScope;
+  const allowed = new Set(unbScope);
+  const intersected = gestorOrFullScope.filter((id) => allowed.has(id));
+  if (intersected.length > 0) return intersected;
+  return [...new Set([...gestorOrFullScope, ...unbScope])];
+}
+
 /** Intersecta filtro pedido com escopo UNB (quando aplicável). */
 export function applyUnbCostCenterScopeToIdFilter(
   scope: string[] | null,

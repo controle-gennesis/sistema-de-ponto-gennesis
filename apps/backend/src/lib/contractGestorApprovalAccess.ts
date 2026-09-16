@@ -1,6 +1,8 @@
 import { PERMISSION_ACCESS_ACTION } from '@sistema-ponto/permission-modules';
 import { prisma } from './prisma';
 import { createError } from '../middleware/errorHandler';
+import { isUnbRelatedLabel } from './unbBranding';
+import { getUnbCostCenterIds, isEmployeeUnbUser, isUnbCostCenterRecord } from './unbCostCenterScope';
 
 async function userHasLegacyModule(userId: string, moduleKey: string): Promise<boolean> {
   const row = await prisma.userPermission.findFirst({
@@ -31,11 +33,33 @@ export async function getContractGestorCostCenterIds(userId: string): Promise<st
 
   const rows = await prisma.contract.findMany({
     where: { id: { in: contractIds } },
-    select: { costCenterId: true },
-    distinct: ['costCenterId'],
+    select: {
+      costCenterId: true,
+      name: true,
+      number: true,
+      costCenter: { select: { name: true, code: true } },
+    },
   });
 
-  return rows.map((row) => row.costCenterId).filter(Boolean);
+  const ids = new Set(rows.map((row) => row.costCenterId).filter(Boolean));
+
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { employee: { select: { costCenter: true } } },
+  });
+
+  const gestorHasUnbContract = rows.some(
+    (row) =>
+      isUnbRelatedLabel(row.name) ||
+      isUnbRelatedLabel(row.number) ||
+      isUnbCostCenterRecord(row.costCenter)
+  );
+
+  if (isEmployeeUnbUser(user?.employee?.costCenter) || gestorHasUnbContract) {
+    for (const id of await getUnbCostCenterIds()) ids.add(id);
+  }
+
+  return Array.from(ids);
 }
 
 /**

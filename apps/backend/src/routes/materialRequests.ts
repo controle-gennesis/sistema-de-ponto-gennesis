@@ -18,6 +18,7 @@ import {
   applyUnbCostCenterScopeToIdFilter,
   assertCostCenterAllowedForUnbUser,
   getUserUnbCostCenterScope,
+  mergeGestorScopeWithUnbRestriction,
 } from '../lib/unbCostCenterScope';
 
 const router = Router();
@@ -164,14 +165,7 @@ router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
     }
     if (req.user?.id) {
       const unbScope = await getUserUnbCostCenterScope(req.user.id, !!req.user.isAdmin);
-      if (unbScope !== null) {
-        if (scopeCostCenterIds === null) {
-          scopeCostCenterIds = unbScope;
-        } else {
-          const allowed = new Set(unbScope);
-          scopeCostCenterIds = scopeCostCenterIds.filter((id) => allowed.has(id));
-        }
-      }
+      scopeCostCenterIds = mergeGestorScopeWithUnbRestriction(scopeCostCenterIds, unbScope);
     }
 
     const listFilters: Parameters<MaterialRequestService['listMaterialRequests']>[0] = {
