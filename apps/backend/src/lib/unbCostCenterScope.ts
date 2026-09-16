@@ -7,23 +7,70 @@ export function isEmployeeUnbUser(employeeCostCenter: string | null | undefined)
   return isUnbRelatedLabel(employeeCostCenter);
 }
 
-/** CostCenter cadastrado (name/code) ligado à UNB — OC pula compras e diretoria. */
+/** CostCenter cadastrado (name/code/empresa/polo) ligado à UNB — OC pula compras e diretoria. */
 export function isUnbCostCenterRecord(
-  costCenter: { name?: string | null; code?: string | null } | null | undefined,
+  costCenter:
+    | { name?: string | null; code?: string | null; company?: string | null; polo?: string | null }
+    | null
+    | undefined,
 ): boolean {
   if (!costCenter) return false;
-  return isUnbRelatedLabel(costCenter.name) || isUnbRelatedLabel(costCenter.code);
+  return (
+    isUnbRelatedLabel(costCenter.name) ||
+    isUnbRelatedLabel(costCenter.code) ||
+    isUnbRelatedLabel(costCenter.company) ||
+    isUnbRelatedLabel(costCenter.polo)
+  );
 }
 
-/** IDs de CostCenter cujo name/code são UNB. */
-export async function getUnbCostCenterIds(): Promise<string[]> {
-  const rows = await prisma.costCenter.findMany({
-    where: { isActive: true },
-    select: { id: true, name: true, code: true },
+/**
+ * Employee.costCenter é texto livre: pode ser "UNB", o código, o nome ou o id do cadastro.
+ * No deploy o id sem a palavra UNB fazia o gestor UNB ser tratado como usuário comum.
+ */
+export async function employeeRecordIsUnb(
+  employeeCostCenter: string | null | undefined,
+): Promise<boolean> {
+  if (isEmployeeUnbUser(employeeCostCenter)) return true;
+  const raw = employeeCostCenter?.trim();
+  if (!raw) return false;
+
+  const cc = await prisma.costCenter.findFirst({
+    where: {
+      OR: [{ id: raw }, { code: raw }, { name: raw }],
+    },
+    select: { name: true, code: true, company: true, polo: true },
   });
-  return rows
-    .filter((r) => isUnbRelatedLabel(r.name) || isUnbRelatedLabel(r.code))
-    .map((r) => r.id);
+  return isUnbCostCenterRecord(cc);
+}
+
+/** IDs de CostCenter cujo name/code/empresa/polo são UNB, inclusive inativos e CCs de contratos UNB. */
+export async function getUnbCostCenterIds(): Promise<string[]> {
+  const [centers, contracts] = await Promise.all([
+    prisma.costCenter.findMany({
+      select: { id: true, name: true, code: true, company: true, polo: true },
+    }),
+    prisma.contract.findMany({
+      select: {
+        costCenterId: true,
+        name: true,
+        number: true,
+        costCenter: { select: { name: true, code: true, company: true, polo: true } },
+      },
+    }),
+  ]);
+
+  const ids = new Set<string>();
+  for (const row of centers) {
+    if (isUnbCostCenterRecord(row)) ids.add(row.id);
+  }
+  for (const row of contracts) {
+    const contractIsUnb =
+      isUnbRelatedLabel(row.name) ||
+      isUnbRelatedLabel(row.number) ||
+      isUnbCostCenterRecord(row.costCenter);
+    if (contractIsUnb && row.costCenterId) ids.add(row.costCenterId);
+  }
+  return Array.from(ids);
 }
 
 /**
@@ -40,7 +87,7 @@ export async function getUserUnbCostCenterScope(
     where: { id: userId },
     select: { employee: { select: { costCenter: true } } },
   });
-  if (!isEmployeeUnbUser(user?.employee?.costCenter)) return null;
+  if (!(await employeeRecordIsUnb(user?.employee?.costCenter))) return null;
 
   return getUnbCostCenterIds();
 }
@@ -59,8 +106,8 @@ export async function assertCostCenterAllowedForUnbUser(
 
 /**
  * Combina escopo do gestor com restrição UNB do funcionário.
- * Se a interseção zera (contrato UNB com CC diferente do cadastro UNB),
- * usa o catálogo UNB — senão a fila de aprovação some no deploy.
+ * União: se o contrato UNB aponta para um CC e a RM/OC usa outro CC UNB,
+ * a interseção esvaziava a fila no deploy.
  */
 export function mergeGestorScopeWithUnbRestriction(
   gestorOrFullScope: string[] | null,
@@ -69,9 +116,6 @@ export function mergeGestorScopeWithUnbRestriction(
   if (unbScope === null) return gestorOrFullScope;
   if (unbScope.length === 0) return gestorOrFullScope;
   if (gestorOrFullScope === null) return unbScope;
-  const allowed = new Set(unbScope);
-  const intersected = gestorOrFullScope.filter((id) => allowed.has(id));
-  if (intersected.length > 0) return intersected;
   return [...new Set([...gestorOrFullScope, ...unbScope])];
 }
 
@@ -92,3 +136,13 @@ export function applyUnbCostCenterScopeToIdFilter(
   }
   return { costCenterIds: scope };
 }
+
+/** Filtro Prisma para CC cujo nome/código/empresa/polo contém UNB. */
+export const unbCostCenterLabelPrismaWhere = {
+  OR: [
+    { name: { contains: 'UNB', mode: 'insensitive' as const } },
+    { code: { contains: 'UNB', mode: 'insensitive' as const } },
+    { company: { contains: 'UNB', mode: 'insensitive' as const } },
+    { polo: { contains: 'UNB', mode: 'insensitive' as const } },
+  ],
+};

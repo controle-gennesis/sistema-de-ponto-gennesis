@@ -2,7 +2,11 @@ import { PERMISSION_ACCESS_ACTION } from '@sistema-ponto/permission-modules';
 import { prisma } from './prisma';
 import { createError } from '../middleware/errorHandler';
 import { isUnbRelatedLabel } from './unbBranding';
-import { getUnbCostCenterIds, isEmployeeUnbUser, isUnbCostCenterRecord } from './unbCostCenterScope';
+import {
+  employeeRecordIsUnb,
+  getUnbCostCenterIds,
+  isUnbCostCenterRecord,
+} from './unbCostCenterScope';
 
 async function userHasLegacyModule(userId: string, moduleKey: string): Promise<boolean> {
   const row = await prisma.userPermission.findFirst({
@@ -37,11 +41,46 @@ export async function getContractGestorCostCenterIds(userId: string): Promise<st
       costCenterId: true,
       name: true,
       number: true,
-      costCenter: { select: { name: true, code: true } },
+      costCenter: { select: { name: true, code: true, company: true, polo: true } },
     },
   });
 
   const ids = new Set(rows.map((row) => row.costCenterId).filter(Boolean));
+
+  if (await userShouldExpandUnbGestorCatalog(userId, rows)) {
+    for (const id of await getUnbCostCenterIds()) ids.add(id);
+  }
+
+  return Array.from(ids);
+}
+
+async function userShouldExpandUnbGestorCatalog(
+  userId: string,
+  contractRows?: Array<{
+    name: string | null;
+    number: string | null;
+    costCenter: { name?: string | null; code?: string | null; company?: string | null; polo?: string | null } | null;
+  }>,
+): Promise<boolean> {
+  const assignedIds = (
+    await prisma.userDpApprovalContract.findMany({
+      where: { userId },
+      select: { contractId: true },
+    })
+  ).map((row) => row.contractId);
+
+  const rows =
+    contractRows ??
+    (assignedIds.length === 0
+      ? []
+      : await prisma.contract.findMany({
+          where: { id: { in: assignedIds } },
+          select: {
+            name: true,
+            number: true,
+            costCenter: { select: { name: true, code: true, company: true, polo: true } },
+          },
+        }));
 
   const user = await prisma.user.findUnique({
     where: { id: userId },
@@ -52,14 +91,27 @@ export async function getContractGestorCostCenterIds(userId: string): Promise<st
     (row) =>
       isUnbRelatedLabel(row.name) ||
       isUnbRelatedLabel(row.number) ||
-      isUnbCostCenterRecord(row.costCenter)
+      isUnbCostCenterRecord(row.costCenter),
   );
 
-  if (isEmployeeUnbUser(user?.employee?.costCenter) || gestorHasUnbContract) {
-    for (const id of await getUnbCostCenterIds()) ids.add(id);
-  }
+  return (await employeeRecordIsUnb(user?.employee?.costCenter)) || gestorHasUnbContract;
+}
 
-  return Array.from(ids);
+/** Gestor UNB pode agir em qualquer CC do catálogo UNB, mesmo com id diferente do contrato. */
+export async function isCostCenterAllowedForContractGestor(
+  userId: string,
+  costCenterId: string | null | undefined,
+): Promise<boolean> {
+  if (!costCenterId) return false;
+  const scopeIds = await getContractGestorCostCenterIds(userId);
+  if (scopeIds.includes(costCenterId)) return true;
+  if (scopeIds.length === 0) return false;
+  if (!(await userShouldExpandUnbGestorCatalog(userId))) return false;
+  const cc = await prisma.costCenter.findUnique({
+    where: { id: costCenterId },
+    select: { name: true, code: true, company: true, polo: true },
+  });
+  return isUnbCostCenterRecord(cc);
 }
 
 /**
@@ -88,7 +140,7 @@ export async function assertUserIsContractGestorForCostCenter(
   const scopeIds = await getContractGestorListScopeCostCenterIds(userId, false, legacyControleModuleKey);
   if (scopeIds === null) return;
 
-  if (!costCenterId || scopeIds.length === 0 || !scopeIds.includes(costCenterId)) {
-    throw createError('Sem permissão para aprovar solicitações deste contrato', 403);
-  }
+  if (await isCostCenterAllowedForContractGestor(userId, costCenterId)) return;
+
+  throw createError('Sem permissão para aprovar solicitações deste contrato', 403);
 }

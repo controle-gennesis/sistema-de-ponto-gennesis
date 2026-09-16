@@ -3,6 +3,7 @@ import { prisma } from './prisma';
 import { createError } from '../middleware/errorHandler';
 import {
   getContractGestorCostCenterIds,
+  isCostCenterAllowedForContractGestor,
   userHasContractGestorAssignment,
 } from './contractGestorApprovalAccess';
 
@@ -132,12 +133,7 @@ export async function assertUserMayActOnOcApprovalPhase(
     if (!(await userHasOcGestorApprovePermission(userId))) {
       throw createError('Sem permissão para aprovar OCs na fase do gestor', 403);
     }
-    const scopeIds = await getContractGestorCostCenterIds(userId);
-    if (
-      !materialRequestCostCenterId ||
-      scopeIds.length === 0 ||
-      !scopeIds.includes(materialRequestCostCenterId)
-    ) {
+    if (!(await isCostCenterAllowedForContractGestor(userId, materialRequestCostCenterId))) {
       throw createError('Sem permissão para aprovar solicitações deste contrato', 403);
     }
     return;

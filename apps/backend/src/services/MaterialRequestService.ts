@@ -1,6 +1,6 @@
 import { prisma } from '../lib/prisma';
 import { type EngineeringMaterial, Prisma, PurchaseOrderStatus } from '@prisma/client';
-import { isUnbCostCenterRecord } from '../lib/unbCostCenterScope';
+import { isUnbCostCenterRecord, unbCostCenterLabelPrismaWhere } from '../lib/unbCostCenterScope';
 import { resolveRmServiceOrderFields } from '../utils/materialRequestServiceOrder';
 import { fixMulterOriginalName } from '../lib/fixUploadFileName';
 import {
@@ -785,6 +785,8 @@ export class MaterialRequestService {
     approvedBy?: string;
     costCenterId?: string;
     costCenterIds?: string[];
+    /** Inclui CCs com rótulo UNB além dos ids do escopo (gestor UNB no deploy). */
+    alsoMatchUnbLabeledCostCenters?: boolean;
     projectId?: string;
     requestedBy?: string;
     priority?: string;
@@ -811,6 +813,13 @@ export class MaterialRequestService {
 
     if (filters.costCenterId) {
       where.costCenterId = filters.costCenterId;
+    } else if (filters.alsoMatchUnbLabeledCostCenters) {
+      const unbMatch = { costCenter: unbCostCenterLabelPrismaWhere };
+      if (filters.costCenterIds?.length) {
+        where.OR = [{ costCenterId: { in: filters.costCenterIds } }, unbMatch];
+      } else {
+        Object.assign(where, unbMatch);
+      }
     } else if (filters.costCenterIds?.length) {
       where.costCenterId = { in: filters.costCenterIds };
     }

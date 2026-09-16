@@ -389,20 +389,27 @@ export function usePermissions() {
    * undefined = sem filtro (admin ou permissão legada Controle).
    * string[] = centros de custo dos contratos em que é gestor.
    */
+  /** Gestor UNB: o backend já restringe a fila. Filtrar de novo por id do contrato escondia RM/OC UNB. */
+  const skipGestorCostCenterClientFilter = isUnbUser || unbCostCenterIds.length > 0;
+
   const rmGestorScopedCostCenterIds: string[] | undefined =
     isAdministrator || !!permissionData?.isAdmin
       ? undefined
       : hasLegacyRmApproveControle
         ? undefined
         : dpApprovalContractIds.length > 0
-          ? gestorCostCenterIds
+          ? skipGestorCostCenterClientFilter
+            ? undefined
+            : gestorCostCenterIds
           : undefined;
 
   const ocGestorScopedCostCenterIds: string[] | undefined =
     isAdministrator || !!permissionData?.isAdmin
       ? undefined
       : dpApprovalContractIds.length > 0
-        ? gestorCostCenterIds
+        ? skipGestorCostCenterClientFilter
+          ? undefined
+          : gestorCostCenterIds
         : undefined;
 
   /** Alias legado — mesmo escopo da RM (aprovação por contrato). */

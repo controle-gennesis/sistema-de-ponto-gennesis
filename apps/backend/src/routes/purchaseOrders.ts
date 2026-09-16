@@ -77,7 +77,7 @@ router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
       scopeCostCenterIds,
       typeof costCenterId === 'string' ? costCenterId : undefined,
     );
-    if (scoped.denyAll) {
+    if (scoped.denyAll && unbScope === null) {
       res.json({
         success: true,
         data: [],
@@ -90,8 +90,9 @@ router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
       status: status as string,
       supplierId: supplierId as string,
       materialRequestId: materialRequestId as string,
-      costCenterId: scoped.costCenterId,
-      costCenterIds: scoped.costCenterIds,
+      costCenterId: scoped.denyAll ? undefined : scoped.costCenterId,
+      costCenterIds: scoped.denyAll ? undefined : scoped.costCenterIds,
+      alsoMatchUnbLabeledCostCenters: unbScope !== null,
       serviceOrderId: typeof serviceOrderId === 'string' ? serviceOrderId : undefined,
       serviceOrderText: typeof serviceOrderText === 'string' ? serviceOrderText : undefined,
       orderDateFrom: typeof orderDateFrom === 'string' ? orderDateFrom : undefined,
@@ -132,6 +133,7 @@ router.get('/export-finalized-csv', async (req: AuthRequest, res: Response, next
       supplierId: typeof supplierId === 'string' ? supplierId : undefined,
       costCenterId: scoped.costCenterId,
       costCenterIds: scoped.costCenterIds,
+      alsoMatchUnbLabeledCostCenters: unbScope !== null,
       orderDateFrom: typeof orderDateFrom === 'string' ? orderDateFrom : undefined,
       orderDateTo: typeof orderDateTo === 'string' ? orderDateTo : undefined,
       q: typeof q === 'string' ? q : undefined

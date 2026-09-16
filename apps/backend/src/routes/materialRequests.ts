@@ -157,6 +157,7 @@ router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
 
     // Escopo do aprovador (quando não filtra "minhas RMs"); escopo UNB sempre.
     let scopeCostCenterIds: string[] | null = null;
+    let unbScope: string[] | null = null;
     if (req.user?.id && !requestedBy) {
       scopeCostCenterIds = await getRmApproverListScopeCostCenterIds(
         req.user.id,
@@ -164,7 +165,7 @@ router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
       );
     }
     if (req.user?.id) {
-      const unbScope = await getUserUnbCostCenterScope(req.user.id, !!req.user.isAdmin);
+      unbScope = await getUserUnbCostCenterScope(req.user.id, !!req.user.isAdmin);
       scopeCostCenterIds = mergeGestorScopeWithUnbRestriction(scopeCostCenterIds, unbScope);
     }
 
@@ -185,7 +186,7 @@ router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
         scopeCostCenterIds,
         typeof costCenterId === 'string' ? costCenterId : undefined,
       );
-      if (scoped.denyAll) {
+      if (scoped.denyAll && unbScope === null) {
         res.json({
           success: true,
           data: [],
@@ -193,12 +194,19 @@ router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
         });
         return;
       }
-      if (scoped.costCenterId) {
-        listFilters.costCenterId = scoped.costCenterId;
-        delete listFilters.costCenterIds;
-      } else if (scoped.costCenterIds?.length) {
-        listFilters.costCenterIds = scoped.costCenterIds;
+      if (scoped.denyAll && unbScope !== null) {
+        listFilters.alsoMatchUnbLabeledCostCenters = true;
         delete listFilters.costCenterId;
+        delete listFilters.costCenterIds;
+      } else {
+        if (scoped.costCenterId) {
+          listFilters.costCenterId = scoped.costCenterId;
+          delete listFilters.costCenterIds;
+        } else if (scoped.costCenterIds?.length) {
+          listFilters.costCenterIds = scoped.costCenterIds;
+          delete listFilters.costCenterId;
+        }
+        listFilters.alsoMatchUnbLabeledCostCenters = unbScope !== null;
       }
     }
 

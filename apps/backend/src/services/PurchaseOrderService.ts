@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
 import { BorderService, BorderData } from './BorderService';
 import { stockShortfallService } from './StockShortfallService';
-import { isUnbCostCenterRecord } from '../lib/unbCostCenterScope';
+import { isUnbCostCenterRecord, unbCostCenterLabelPrismaWhere } from '../lib/unbCostCenterScope';
 import {
   collectInvoicesForOrderFromMovements,
   collectLatestPaymentSlipsPerParcelFromMovements,
@@ -1152,6 +1152,7 @@ export class PurchaseOrderService {
     materialRequestId?: string;
     costCenterId?: string;
     costCenterIds?: string[];
+    alsoMatchUnbLabeledCostCenters?: boolean;
     serviceOrderId?: string;
     serviceOrderText?: string;
     orderDateFrom?: string;
@@ -1166,6 +1167,15 @@ export class PurchaseOrderService {
 
     if (filters.costCenterId) {
       andParts.push({ materialRequest: { costCenterId: filters.costCenterId } });
+    } else if (filters.alsoMatchUnbLabeledCostCenters) {
+      const unbMatch = { materialRequest: { costCenter: unbCostCenterLabelPrismaWhere } };
+      if (filters.costCenterIds?.length) {
+        andParts.push({
+          OR: [{ materialRequest: { costCenterId: { in: filters.costCenterIds } } }, unbMatch],
+        });
+      } else {
+        andParts.push(unbMatch);
+      }
     } else if (filters.costCenterIds?.length) {
       andParts.push({ materialRequest: { costCenterId: { in: filters.costCenterIds } } });
     }
@@ -1242,6 +1252,7 @@ export class PurchaseOrderService {
     materialRequestId?: string;
     costCenterId?: string;
     costCenterIds?: string[];
+    alsoMatchUnbLabeledCostCenters?: boolean;
     serviceOrderId?: string;
     serviceOrderText?: string;
     orderDateFrom?: string;
@@ -1283,6 +1294,7 @@ export class PurchaseOrderService {
     supplierId?: string;
     costCenterId?: string;
     costCenterIds?: string[];
+    alsoMatchUnbLabeledCostCenters?: boolean;
     orderDateFrom?: string;
     orderDateTo?: string;
     q?: string;
@@ -1292,6 +1304,7 @@ export class PurchaseOrderService {
       supplierId: filters.supplierId,
       costCenterId: filters.costCenterId,
       costCenterIds: filters.costCenterIds,
+      alsoMatchUnbLabeledCostCenters: filters.alsoMatchUnbLabeledCostCenters,
       orderDateFrom: filters.orderDateFrom,
       orderDateTo: filters.orderDateTo,
       q: filters.q
