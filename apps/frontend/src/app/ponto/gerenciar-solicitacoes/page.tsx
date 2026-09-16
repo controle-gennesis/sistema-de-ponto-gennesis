@@ -13,15 +13,10 @@ import {
   FileText,
   User,
   MessageSquare,
-  ThumbsUp,
-  ThumbsDown,
   Users,
   Filter,
   Search,
-  ChevronDown,
-  ChevronUp,
   RotateCcw,
-  Building2
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -33,13 +28,14 @@ import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
 import { CadastroListLoading } from '@/components/ui/CadastroListSummary';
 import { AppUnderlineTabButton, AppUnderlineTabList } from '@/components/ui/AppTabButton';
+import { cadastroListClasses } from '@/components/ui/RowActionMenu';
+import { FORM_FIELD_INPUT_CLS, FORM_FIELD_TEXTAREA_CLS } from '@/lib/formFieldUi';
 import api from '@/lib/api';
 import { toast } from 'react-hot-toast';
 import { DEPARTMENTS_LIST, COMPANIES_LIST } from '@/constants/payrollFilters';
 import { CARGOS_LIST } from '@/constants/cargos';
 import { getListTableRowClassName, ListRowNavigableLabel } from '@/components/ui/listTableUi';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
-import { labeledToSelectOptions, filterOptionsWithAll } from '@/lib/selectOptionBuilders';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
 
 interface PointCorrectionRequest {
@@ -131,7 +127,6 @@ export default function GerenciarSolicitacoesPage() {
   const [rejectionReason, setRejectionReason] = useState('');
   const [rejectionComment, setRejectionComment] = useState('');
   const [activeStatusTab, setActiveStatusTab] = useState<'all' | 'PENDING' | 'IN_REVIEW' | 'APPROVED' | 'REJECTED' | 'CANCELLED'>('PENDING');
-  const [isFiltersMinimized, setIsFiltersMinimized] = useState(true);
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [filters, setFilters] = useState({
     search: '',
@@ -380,6 +375,12 @@ export default function GerenciarSolicitacoesPage() {
     role: 'EMPLOYEE'
   };
 
+  const hasAdvancedFilters = !!(
+    filters.department ||
+    filters.position ||
+    filters.company
+  );
+
   if (loadingUser) {
     return (
       <ProtectedRoute route="/ponto/gerenciar-solicitacoes">
@@ -413,8 +414,8 @@ export default function GerenciarSolicitacoesPage() {
           <Card>
             <CardContent className="p-4 sm:p-6">
               <div className="flex items-center gap-3 sm:gap-4">
-                <div className="w-10 h-10 sm:w-12 sm:h-12 bg-blue-100 dark:bg-blue-900/30 rounded-lg flex items-center justify-center">
-                  <Users className="w-5 h-5 sm:w-6 sm:h-6 text-blue-600 dark:text-blue-400" />
+                <div className="flex h-10 w-10 sm:h-12 sm:w-12 items-center justify-center rounded-lg bg-red-100 dark:bg-red-900/30">
+                  <Users className="h-5 w-5 sm:h-6 sm:w-6 text-red-600 dark:text-red-400" />
                 </div>
                 <div>
                   <p className="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400">Total Registros</p>
@@ -467,167 +468,128 @@ export default function GerenciarSolicitacoesPage() {
           </Card>
         </div>
 
-        {/* Filtros */}
-        <Card>
-          <CardHeader className="border-b-0">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-2">
-                <Filter className="w-5 h-5 text-gray-900 dark:text-gray-100" />
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Filtros</h3>
-              </div>
-              <div className="flex items-center space-x-4">
-                {!isFiltersMinimized && (
-                  <>
-                    <button
-                      onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
-                      className="flex items-center justify-center w-8 h-8 text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-                      title={showAdvancedFilters ? 'Ocultar filtros avançados' : 'Mostrar filtros avançados'}
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M13.354 3H3a1 1 0 0 0-.742 1.67l7.225 7.989A2 2 0 0 1 10 14v6a1 1 0 0 0 .553.895l2 1A1 1 0 0 0 14 21v-7a2 2 0 0 1 .517-1.341l1.218-1.348"/><path d="M16 6h6"/><path d="M19 3v6"/></svg>
-                    </button>
-                    <button
-                      onClick={clearFilters}
-                      className="flex items-center justify-center w-8 h-8 text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors"
-                      title="Limpar todos os filtros"
-                    >
-                      <RotateCcw className="w-5 h-5" />
-                    </button>
-                  </>
-                )}
-                <button
-                  onClick={() => setIsFiltersMinimized(!isFiltersMinimized)}
-                  className="flex items-center justify-center w-8 h-8 text-gray-900 dark:text-gray-100 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-                  title={isFiltersMinimized ? 'Expandir filtros' : 'Minimizar filtros'}
-                >
-                  {isFiltersMinimized ? (
-                    <ChevronDown className="w-5 h-5" />
-                  ) : (
-                    <ChevronUp className="w-5 h-5" />
-                  )}
-                </button>
-              </div>
-            </div>
-          </CardHeader>
-          {!isFiltersMinimized && (
-            <CardContent className="p-4 sm:p-6">
-              <div className="space-y-4">
-                {/* Filtro Principal - Busca Geral */}
-                <div className="space-y-2">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Buscar
-                  </label>
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4" />
-                    <input
-                      type="text"
-                      value={filters.search}
-                      onChange={handleSearchChange}
-                      placeholder="Digite nome, título ou justificativa..."
-                      className="w-full pl-10 pr-4 py-3 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
-                    />
-                  </div>
-                </div>
-
-                {/* Filtros Avançados */}
-                {showAdvancedFilters && (
-                  <div className="border-t dark:border-gray-700 pt-4 space-y-4">
-                    <div className="flex items-center justify-between">
-                      <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">Filtros Avançados</h4>
-                    </div>
-                    
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                          Setor
-                        </label>
-                        <div className="relative">
-                          <Building2 className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4" />
-                        <StringSingleSelectDropdown
-                          value={filters.department}
-                          onChange={handleDepartmentChange}
-                          options={DEPARTMENTS_LIST}
-                          emptyOptionLabel="Todos os setores"
-                        />
-                        </div>
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                          Cargo
-                        </label>
-                        <StringSingleSelectDropdown
-                          value={filters.position}
-                          onChange={handlePositionChange}
-                          options={CARGOS_LIST}
-                          emptyOptionLabel="Todos os cargos"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                          Empresa
-                        </label>
-                        <StringSingleSelectDropdown
-                          value={filters.company}
-                          onChange={handleCompanyChange}
-                          options={COMPANIES_LIST}
-                          emptyOptionLabel="Todas as empresas"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                          Mês
-                        </label>
-                        <div className="relative">
-                          <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4" />
-                          <StringSingleSelectDropdown
-                            value={String(filters.month)}
-                            onChange={handleMonthChange}
-                            options={monthFilterSelectOptions}
-                            allowEmpty={false}
-                          />
-                        </div>
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                          Ano
-                        </label>
-                        <div className="relative">
-                          <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4" />
-                          <StringSingleSelectDropdown
-                            value={String(filters.year)}
-                            onChange={handleYearChange}
-                            options={yearFilterSelectOptions}
-                            allowEmpty={false}
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </CardContent>
-          )}
-        </Card>
-
         {/* Lista de Solicitações */}
-        <Card>
-          <CardHeader>
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-              <div className="flex items-center">
-                <div className="p-2 sm:p-3 bg-blue-100 dark:bg-blue-900/30 rounded-lg flex-shrink-0">
-                  <FileText className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+        <Card className={cadastroListClasses.card}>
+          <CardHeader className={cadastroListClasses.cardHeader}>
+            <div className={cadastroListClasses.cardHeaderRow}>
+              <div className={cadastroListClasses.cardHeaderIconRow}>
+                <div className="rounded-lg bg-red-100 p-2 sm:p-3 dark:bg-red-900/30">
+                  <FileText className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6" />
                 </div>
-                <div className="ml-3 sm:ml-4 min-w-0">
+                <div className="min-w-0">
                   <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Solicitações de Correção</h3>
                   <p className="text-sm text-gray-600 dark:text-gray-400">Lista de todas as solicitações registradas</p>
                 </div>
               </div>
+              <div className={cadastroListClasses.cardToolbar}>
+                <div className={cadastroListClasses.searchFilterGroup}>
+                  <div className={cadastroListClasses.searchFieldInGroup}>
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
+                    <input
+                      type="text"
+                      value={filters.search}
+                      onChange={handleSearchChange}
+                      placeholder="Buscar nome, título ou justificativa..."
+                      className={`${FORM_FIELD_INPUT_CLS} h-10 pl-9`}
+                    />
+                  </div>
+                  <div className={cadastroListClasses.filterIconButtonWrap}>
+                    <button
+                      type="button"
+                      onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
+                      className={`${cadastroListClasses.filterIconButton} transition-colors ${
+                        showAdvancedFilters || hasAdvancedFilters
+                          ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40'
+                          : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
+                      }`}
+                      title={showAdvancedFilters ? 'Ocultar filtros avançados' : 'Mostrar filtros avançados'}
+                      aria-label="Filtros avançados"
+                    >
+                      <Filter className="h-4 w-4" />
+                      {hasAdvancedFilters ? (
+                        <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
+                      ) : null}
+                    </button>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={clearFilters}
+                  className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-red-600 transition-colors hover:bg-red-50 dark:border-gray-600 dark:bg-gray-800 dark:text-red-400 dark:hover:bg-red-900/30"
+                  title="Limpar todos os filtros"
+                  aria-label="Limpar filtros"
+                >
+                  <RotateCcw className="h-4 w-4" />
+                </button>
+              </div>
             </div>
+
+            {showAdvancedFilters && (
+              <div className="mt-3 space-y-4 rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-700/30 sm:p-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">Filtros avançados</h4>
+                </div>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Setor
+                    </label>
+                    <StringSingleSelectDropdown
+                      value={filters.department}
+                      onChange={handleDepartmentChange}
+                      options={DEPARTMENTS_LIST}
+                      emptyOptionLabel="Todos os setores"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Cargo
+                    </label>
+                    <StringSingleSelectDropdown
+                      value={filters.position}
+                      onChange={handlePositionChange}
+                      options={CARGOS_LIST}
+                      emptyOptionLabel="Todos os cargos"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Empresa
+                    </label>
+                    <StringSingleSelectDropdown
+                      value={filters.company}
+                      onChange={handleCompanyChange}
+                      options={COMPANIES_LIST}
+                      emptyOptionLabel="Todas as empresas"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Mês
+                    </label>
+                    <StringSingleSelectDropdown
+                      value={String(filters.month)}
+                      onChange={handleMonthChange}
+                      options={monthFilterSelectOptions}
+                      allowEmpty={false}
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Ano
+                    </label>
+                    <StringSingleSelectDropdown
+                      value={String(filters.year)}
+                      onChange={handleYearChange}
+                      options={yearFilterSelectOptions}
+                      allowEmpty={false}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
           </CardHeader>
-          <CardContent>
+          <CardContent className={cadastroListClasses.cardContent}>
             <div className="space-y-4">
               {/* Tabs de Status */}
               <AppUnderlineTabList aria-label="Status das solicitações" centered={false}>
@@ -920,7 +882,7 @@ export default function GerenciarSolicitacoesPage() {
                     value={approvalComment}
                     onChange={(e) => setApprovalComment(e.target.value)}
                     placeholder="Digite um comentário sobre a aprovação..."
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-blue-500 dark:focus:border-blue-400 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
+                    className={FORM_FIELD_TEXTAREA_CLS}
                     rows={3}
                   />
                 </div>
@@ -980,7 +942,7 @@ export default function GerenciarSolicitacoesPage() {
                     value={rejectionComment}
                     onChange={(e) => setRejectionComment(e.target.value)}
                     placeholder="Explique o motivo da rejeição..."
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-blue-500 dark:focus:border-blue-400 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
+                    className={FORM_FIELD_TEXTAREA_CLS}
                     rows={3}
                   />
                 </div>

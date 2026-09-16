@@ -11,6 +11,7 @@ import { PointCorrectionCard } from '@/components/ponto/PointCorrectionCard';
 import { PointCorrectionList } from '@/components/ponto/PointCorrectionList';
 import { Loading } from '@/components/ui/Loading';
 import { AppUnderlineTabButton, AppUnderlineTabList } from '@/components/ui/AppTabButton';
+import { cadastroListClasses } from '@/components/ui/RowActionMenu';
 import api from '@/lib/api';
 
 export default function SolicitacoesPage() {
@@ -87,14 +88,14 @@ export default function SolicitacoesPage() {
           </AppUnderlineTabList>
 
           {/* Conteúdo principal */}
-          <Card>
-            <CardHeader>
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                <div className="flex items-center">
-                  <div className="p-2 sm:p-3 bg-blue-100 dark:bg-blue-900/30 rounded-lg flex-shrink-0">
-                    <FileText className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+          <Card className={cadastroListClasses.card}>
+            <CardHeader className={cadastroListClasses.cardHeader}>
+              <div className={cadastroListClasses.cardHeaderRow}>
+                <div className={cadastroListClasses.cardHeaderIconRow}>
+                  <div className="rounded-lg bg-red-100 p-2 sm:p-3 dark:bg-red-900/30">
+                    <FileText className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6" />
                   </div>
-                  <div className="ml-3 sm:ml-4 min-w-0">
+                  <div className="min-w-0">
                     <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
                       {activeTab === 'list' ? 'Minhas alterações' : 'Nova alteração'}
                     </h3>
@@ -105,7 +106,7 @@ export default function SolicitacoesPage() {
                 </div>
               </div>
             </CardHeader>
-            <CardContent>
+            <CardContent className={cadastroListClasses.cardContent}>
               {activeTab === 'list' ? (
                 <PointCorrectionList />
               ) : (

@@ -14,6 +14,7 @@ import { TimeRecordType } from '@/types';
 import api from '@/lib/api';
 import { APP_TITLE } from '@/lib/pageTitle';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
+import { FORM_FIELD_TEXTAREA_CLS } from '@/lib/formFieldUi';
 
 interface PunchCardProps {
   onSuccess?: () => void;
@@ -466,19 +467,19 @@ export const PunchCard: React.FC<PunchCardProps> = ({ onSuccess, showCloseButton
               if (hasAbsenceJustified) {
                 return (
                   <div className="text-center space-y-4">
-                    <div className="p-6 bg-blue-50 border-2 border-blue-200 rounded-lg">
+                    <div className="p-6 bg-red-50 dark:bg-red-900/20 border-2 border-red-200 dark:border-red-800 rounded-lg">
                       <div className="flex flex-col items-center space-y-3">
-                        <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center">
-                          <Clock className="w-8 h-8 text-blue-600" />
+                        <div className="w-16 h-16 bg-red-100 dark:bg-red-900/40 rounded-full flex items-center justify-center">
+                          <Clock className="w-8 h-8 text-red-600 dark:text-red-400" />
                         </div>
                         <div>
-                          <h3 className="text-lg font-semibold text-blue-800 mb-2">
+                          <h3 className="text-lg font-semibold text-red-800 dark:text-red-300 mb-2">
                             Ausência Justificada
                           </h3>
-                          <p className="text-blue-700 text-sm">
+                          <p className="text-red-700 dark:text-red-400 text-sm">
                             Você possui ausência justificada para hoje. Não é necessário bater ponto.
                           </p>
-                          <p className="text-blue-600 text-sm mt-2 font-medium">
+                          <p className="text-red-600 dark:text-red-400 text-sm mt-2 font-medium">
                             Você poderá bater ponto novamente amanhã.
                           </p>
                         </div>
@@ -508,8 +509,8 @@ export const PunchCard: React.FC<PunchCardProps> = ({ onSuccess, showCloseButton
                       </div>
                     </div>
                     
-                    <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                      <div className="flex items-center justify-center space-x-2 text-blue-700">
+                    <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+                      <div className="flex items-center justify-center space-x-2 text-red-700 dark:text-red-400">
                         <Clock className="w-4 h-4" />
                         <span className="text-sm font-medium">
                           Próximo ponto: Entrada (amanhã)
@@ -701,7 +702,7 @@ export const PunchCard: React.FC<PunchCardProps> = ({ onSuccess, showCloseButton
                 value={observation}
                 onChange={(e) => setObservation(e.target.value)}
                 placeholder="Digite uma observação..."
-                className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-1 focus:ring-blue-500 focus:border-blue-500 resize-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
+                className={`${FORM_FIELD_TEXTAREA_CLS} min-h-0 resize-none`}
                 rows={2}
                 maxLength={500}
               />
@@ -717,7 +718,7 @@ export const PunchCard: React.FC<PunchCardProps> = ({ onSuccess, showCloseButton
               className={`w-full py-3 px-4 rounded-lg font-medium text-sm transition-colors flex items-center justify-center space-x-2 ${
                 punchLoading || !capturedPhoto
                   ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                  : 'bg-blue-600 hover:bg-blue-700 text-white'
+                  : 'bg-red-600 hover:bg-red-700 text-white'
               }`}
             >
               <Clock className="w-4 h-4" />
@@ -778,7 +779,7 @@ export const PunchCard: React.FC<PunchCardProps> = ({ onSuccess, showCloseButton
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-sm font-medium text-gray-600 dark:text-gray-400">Horário:</span>
-                  <span className="text-lg font-bold text-blue-600 dark:text-blue-400">
+                  <span className="text-lg font-bold text-red-600 dark:text-red-400">
                     {punchData.timestamp.toLocaleTimeString('pt-BR', {
                       hour: '2-digit',
                       minute: '2-digit',
@@ -792,7 +793,7 @@ export const PunchCard: React.FC<PunchCardProps> = ({ onSuccess, showCloseButton
               <div className="flex flex-col space-y-2">
                 <button
                   onClick={generateComprovante}
-                  className="w-full py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors flex items-center justify-center space-x-2"
+                  className="w-full py-3 px-4 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg transition-colors flex items-center justify-center space-x-2"
                 >
                   <Download className="w-5 h-5" />
                   <span>Salvar Comprovante</span>

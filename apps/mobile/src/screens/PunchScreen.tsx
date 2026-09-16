@@ -12,6 +12,8 @@ import {
   Modal,
   Pressable,
   useWindowDimensions,
+  Platform,
+  Vibration,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { useNavigation } from '@react-navigation/native';
@@ -19,20 +21,20 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   Camera,
   Check,
-  Image as ImageIcon,
   LogIn,
   LogOut,
   MapPin,
+  PersonStanding,
   QrCode,
   RotateCw,
-  ShieldCheck,
   Utensils,
   X,
 } from 'lucide-react-native';
 import * as Location from 'expo-location';
 import { CameraView, useCameraPermissions, type BarcodeScanningResult } from 'expo-camera';
 import NetInfo from '@react-native-community/netinfo';
-import Svg, { Defs, Ellipse, Mask, Rect } from 'react-native-svg';
+import MapView, { Circle, Marker, type Region } from 'react-native-maps';
+import Svg, { Defs, Ellipse, LinearGradient as SvgGradient, Mask, Path, Rect, Stop } from 'react-native-svg';
 import { useTheme } from '../context/ThemeContext';
 import AppHeader from '../components/AppHeader';
 import FormFieldLabel from '../components/FormFieldLabel';
@@ -160,6 +162,31 @@ function haversineMeters(lat1: number, lon1: number, lat2: number, lon2: number)
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+function metersToLatitudeDelta(meters: number) {
+  return Math.max(meters / 111320, 0.003);
+}
+
+/** Um único leque: forte na bolinha e some no final (sem borda dura). */
+function HeadingVisionCone({ color }: { color: string }) {
+  const gid = color.replace('#', '');
+  return (
+    <Svg width={64} height={56} viewBox="0 0 64 56">
+      <Defs>
+        <SvgGradient id={`vision-${gid}`} x1="32" y1="54" x2="32" y2="0" gradientUnits="userSpaceOnUse">
+          <Stop offset="0%" stopColor={color} stopOpacity="0.58" />
+          <Stop offset="30%" stopColor={color} stopOpacity="0.34" />
+          <Stop offset="55%" stopColor={color} stopOpacity="0.14" />
+          <Stop offset="75%" stopColor={color} stopOpacity="0.04" />
+          <Stop offset="90%" stopColor={color} stopOpacity="0" />
+          <Stop offset="100%" stopColor={color} stopOpacity="0" />
+        </SvgGradient>
+      </Defs>
+      {/* ponta curva + fade a 0 antes da borda — evita “linha” no fim */}
+      <Path d="M32 54 L10 8 Q32 -4 54 8 Z" fill={`url(#vision-${gid})`} />
+    </Svg>
+  );
+}
+
 function parsePunchQr(raw: string): string {
   return (raw || '').trim().replace(/^gennesis-punch:/i, '').replace(/^punch:/i, '');
 }
@@ -174,6 +201,8 @@ export default function PunchScreen() {
   const [photo, setPhoto] = useState<string | null>(null);
   const [showPhoto, setShowPhoto] = useState(false);
   const [location, setLocation] = useState<Location.LocationObject | null>(null);
+  const [heading, setHeading] = useState<number | null>(null);
+  const [arriveFlash, setArriveFlash] = useState(false);
   const [loading, setLoading] = useState(false);
   const [observation, setObservation] = useState('');
   const [todayRecords, setTodayRecords] = useState<Array<{ type: string }>>([]);
@@ -182,7 +211,8 @@ export default function PunchScreen() {
   const [cameraPermission, setCameraPermission] = useState<boolean | null>(null);
   const [locationPermission, setLocationPermission] = useState<boolean | null>(null);
   const [currentTime, setCurrentTime] = useState(new Date());
-  const [address, setAddress] = useState('Obtendo localização...');
+  const [address, setAddress] = useState('Obtendo localização');
+  const [loadingDots, setLoadingDots] = useState(1);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [showWarningModal, setShowWarningModal] = useState(false);
@@ -208,6 +238,11 @@ export default function PunchScreen() {
   const faceCameraRef = useRef<CameraView>(null);
   const faceScanLockRef = useRef(false);
   const faceMatchedRef = useRef(false);
+  const mapRef = useRef<MapView>(null);
+  const mapFittedRef = useRef(false);
+  const wasInsideFenceRef = useRef(false);
+  const addressLookupAtRef = useRef(0);
+  const headingFromCompassRef = useRef(false);
 
   useEffect(() => {
     void requestPermissions();
@@ -219,6 +254,16 @@ export default function PunchScreen() {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
+
+  const isAddressLoading = !location || address.startsWith('Obtendo localização');
+
+  useEffect(() => {
+    if (!isAddressLoading) return;
+    const timer = setInterval(() => {
+      setLoadingDots((prev) => (prev % 3) + 1);
+    }, 450);
+    return () => clearInterval(timer);
+  }, [isAddressLoading]);
 
   useEffect(() => {
     setSelectedType(getNextPunchType());
@@ -272,47 +317,129 @@ export default function PunchScreen() {
     setCameraPermission(Boolean(cam.granted));
     const { status: locationStatus } = await Location.requestForegroundPermissionsAsync();
     setLocationPermission(locationStatus === 'granted');
-    if (locationStatus === 'granted') void getCurrentLocation();
   };
 
-  const getCurrentLocation = async () => {
+  const resolveAddress = useCallback(async (lat: number, lon: number) => {
+    const now = Date.now();
+    if (now - addressLookupAtRef.current < 12000) return;
+    addressLookupAtRef.current = now;
     try {
-      setAddress('Obtendo localização...');
-      const next = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Highest,
-      });
-      setLocation(next);
-      try {
-        const response = await fetch(
-          `https://nominatim.openstreetmap.org/reverse?format=json&lat=${next.coords.latitude}&lon=${next.coords.longitude}&addressdetails=1&zoom=18`,
-          { headers: { 'User-Agent': 'GennesisPontoApp/1.0' } }
-        );
-        if (!response.ok) {
-          setAddress('Não foi possível obter o endereço');
-          return;
-        }
-        const data = await response.json();
-        if (data?.address) {
-          const addr = data.address;
-          const parts = [
-            addr.road || addr.street,
-            addr.house_number,
-            addr.suburb || addr.neighbourhood,
-            addr.city || addr.town,
-            addr.state,
-            addr.postcode,
-          ].filter(Boolean);
-          setAddress(parts.length ? parts.join(', ') : data.display_name || 'Endereço não disponível');
-        } else {
-          setAddress('Endereço não disponível');
-        }
-      } catch {
+      const response = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&addressdetails=1&zoom=18`,
+        { headers: { 'User-Agent': 'GennesisPontoApp/1.0' } }
+      );
+      if (!response.ok) {
         setAddress('Não foi possível obter o endereço');
+        return;
+      }
+      const data = await response.json();
+      if (data?.address) {
+        const addr = data.address;
+        const parts = [
+          addr.road || addr.street,
+          addr.house_number,
+          addr.suburb || addr.neighbourhood,
+          addr.city || addr.town,
+          addr.state,
+          addr.postcode,
+        ].filter(Boolean);
+        setAddress(parts.length ? parts.join(', ') : data.display_name || 'Endereço não disponível');
+      } else {
+        setAddress('Endereço não disponível');
       }
     } catch {
-      setAddress('Erro ao obter localização');
+      setAddress('Não foi possível obter o endereço');
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    if (!locationPermission) return;
+    let cancelled = false;
+    let positionSub: Location.LocationSubscription | null = null;
+
+    const startWatch = async () => {
+      try {
+        const first = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.High,
+        });
+        if (cancelled) return;
+        setLocation(first);
+        if (
+          !headingFromCompassRef.current &&
+          typeof first.coords.heading === 'number' &&
+          first.coords.heading >= 0
+        ) {
+          setHeading(first.coords.heading);
+        }
+        void resolveAddress(first.coords.latitude, first.coords.longitude);
+
+        positionSub = await Location.watchPositionAsync(
+          {
+            accuracy: Location.Accuracy.High,
+            timeInterval: 1200,
+            distanceInterval: 2,
+          },
+          (next) => {
+            setLocation(next);
+            if (
+              !headingFromCompassRef.current &&
+              typeof next.coords.heading === 'number' &&
+              next.coords.heading >= 0
+            ) {
+              setHeading(next.coords.heading);
+            }
+            void resolveAddress(next.coords.latitude, next.coords.longitude);
+          }
+        );
+      } catch {
+        if (!cancelled) setAddress('Erro ao obter localização');
+      }
+    };
+
+    void startWatch();
+    return () => {
+      cancelled = true;
+      positionSub?.remove();
+    };
+  }, [locationPermission, resolveAddress]);
+
+  useEffect(() => {
+    if (!locationPermission) return;
+    let cancelled = false;
+    let headingSub: Location.LocationSubscription | null = null;
+
+    const startHeading = async () => {
+      try {
+        headingSub = await Location.watchHeadingAsync((next) => {
+          if (cancelled) return;
+          const value =
+            typeof next.trueHeading === 'number' && next.trueHeading >= 0
+              ? next.trueHeading
+              : typeof next.magHeading === 'number' && next.magHeading >= 0
+                ? next.magHeading
+                : null;
+          if (value == null) return;
+          headingFromCompassRef.current = true;
+          setHeading((prev) => {
+            if (prev != null) {
+              const diff = Math.abs(prev - value);
+              const shortest = Math.min(diff, 360 - diff);
+              if (shortest < 2) return prev;
+            }
+            return value;
+          });
+        });
+      } catch {
+        /* sem bússola — heading do GPS fica como fallback */
+      }
+    };
+
+    void startHeading();
+    return () => {
+      cancelled = true;
+      headingSub?.remove();
+    };
+  }, [locationPermission]);
 
   const ensureCameraPermission = async () => {
     if (qrPermission?.granted) return true;
@@ -576,6 +703,29 @@ export default function PunchScreen() {
       Alert.alert('Localização', 'Não foi possível obter sua localização.');
       return;
     }
+    if (punchPolicy?.geofenceEnabled && punchPolicy.geofenceBlockOutside && location) {
+      const locs = punchPolicy.locations ?? [];
+      if (locs.length > 0) {
+        const nearest = locs
+          .map((loc) => ({
+            loc,
+            distance: haversineMeters(
+              location.coords.latitude,
+              location.coords.longitude,
+              loc.latitude,
+              loc.longitude
+            ),
+          }))
+          .sort((a, b) => a.distance - b.distance)[0];
+        if (nearest && nearest.distance > nearest.loc.radius) {
+          Alert.alert(
+            'Fora da área',
+            `Você precisa estar dentro do raio de ${nearest.loc.name} para registrar o ponto.`
+          );
+          return;
+        }
+      }
+    }
     if (punchPolicy?.requirePunchQr && !scannedPunchQr) {
       Alert.alert('QR da localidade', 'Leia o QR Code do local onde o serviço será prestado.');
       return;
@@ -723,12 +873,9 @@ export default function PunchScreen() {
     month: 'long',
   });
 
-  let fenceLabel = punchPolicy?.geofenceEnabled
-    ? 'Confirmando se você está na área autorizada…'
-    : 'Cerca virtual desligada — o ponto pode ser registrado de qualquer lugar.';
-  let fenceOk = !punchPolicy?.geofenceEnabled;
-  if (punchPolicy?.geofenceEnabled && location && punchPolicy.locations?.length) {
-    const nearest = punchPolicy.locations
+  const nearestFence = useMemo(() => {
+    if (!location || !punchPolicy?.locations?.length) return null;
+    return punchPolicy.locations
       .map((loc) => ({
         loc,
         distance: haversineMeters(
@@ -739,11 +886,89 @@ export default function PunchScreen() {
         ),
       }))
       .sort((a, b) => a.distance - b.distance)[0];
-    fenceOk = nearest.distance <= nearest.loc.radius;
-    fenceLabel = fenceOk
-      ? `Dentro de ${nearest.loc.name} (${Math.round(nearest.distance)} m)`
-      : `Fora da área — ${Math.round(nearest.distance)} m de ${nearest.loc.name} (máx. ${nearest.loc.radius} m)`;
+  }, [location, punchPolicy?.locations]);
+
+  let fenceOk = !punchPolicy?.geofenceEnabled;
+  if (punchPolicy?.geofenceEnabled && nearestFence) {
+    fenceOk = nearestFence.distance <= nearestFence.loc.radius;
   }
+
+  const mapLocations = punchPolicy?.locations ?? [];
+  const showGeoMap =
+    Platform.OS !== 'web' &&
+    Boolean(punchPolicy?.geofenceEnabled) &&
+    mapLocations.length > 0 &&
+    Boolean(location);
+
+  const mapRegion = useMemo((): Region | null => {
+    if (!location || !mapLocations.length) return null;
+    const points = [
+      { latitude: location.coords.latitude, longitude: location.coords.longitude },
+      ...mapLocations.map((loc) => ({ latitude: loc.latitude, longitude: loc.longitude })),
+    ];
+    const lats = points.map((p) => p.latitude);
+    const lons = points.map((p) => p.longitude);
+    const minLat = Math.min(...lats);
+    const maxLat = Math.max(...lats);
+    const minLon = Math.min(...lons);
+    const maxLon = Math.max(...lons);
+    const maxRadius = Math.max(...mapLocations.map((loc) => loc.radius), 100);
+    const radiusPad = metersToLatitudeDelta(maxRadius * 1.35);
+    const latSpan = Math.max(maxLat - minLat, 0.002) + radiusPad * 2;
+    const lonSpan = Math.max(maxLon - minLon, 0.002) + radiusPad * 2;
+    return {
+      latitude: (minLat + maxLat) / 2,
+      longitude: (minLon + maxLon) / 2,
+      latitudeDelta: Math.max(latSpan * 1.35, 0.006),
+      longitudeDelta: Math.max(lonSpan * 1.35, 0.006),
+    };
+  }, [location, mapLocations]);
+
+  useEffect(() => {
+    if (!punchPolicy?.geofenceEnabled || !nearestFence) return;
+    const inside = nearestFence.distance <= nearestFence.loc.radius;
+    if (inside && !wasInsideFenceRef.current) {
+      wasInsideFenceRef.current = true;
+      setArriveFlash(true);
+      try {
+        Vibration.vibrate([0, 70, 50, 90]);
+      } catch {
+        /* ignore */
+      }
+      const t = setTimeout(() => setArriveFlash(false), 2400);
+      return () => clearTimeout(t);
+    }
+    if (!inside) {
+      wasInsideFenceRef.current = false;
+    }
+  }, [nearestFence, punchPolicy?.geofenceEnabled]);
+
+  useEffect(() => {
+    if (!showGeoMap || !location || !mapLocations.length || mapFittedRef.current) return;
+    const coords = [
+      {
+        latitude: location.coords.latitude,
+        longitude: location.coords.longitude,
+      },
+      ...mapLocations.map((loc) => ({
+        latitude: loc.latitude,
+        longitude: loc.longitude,
+      })),
+    ];
+    const t = setTimeout(() => {
+      mapRef.current?.fitToCoordinates(coords, {
+        edgePadding: { top: 48, right: 48, bottom: 48, left: 48 },
+        animated: true,
+      });
+      mapFittedRef.current = true;
+    }, 450);
+    return () => clearTimeout(t);
+  }, [showGeoMap, location, mapLocations]);
+
+  const outsideBlocked =
+    Boolean(punchPolicy?.geofenceEnabled) &&
+    Boolean(punchPolicy?.geofenceBlockOutside) &&
+    !fenceOk;
 
   const punchBlocked =
     loading ||
@@ -751,6 +976,7 @@ export default function PunchScreen() {
     !faceConfirmed ||
     !location ||
     allPointsCompleted ||
+    outsideBlocked ||
     Boolean(punchPolicy?.requirePunchQr && !scannedPunchQr);
 
   const registeredFacePhotoUri = resolveMediaUrl(punchPolicy?.facePhotoUrl ?? null);
@@ -758,15 +984,17 @@ export default function PunchScreen() {
 
   const readyLabel = allPointsCompleted
     ? 'Todos os pontos de hoje já foram registrados.'
-    : !location && !faceConfirmed
-      ? 'Permita a localização e confirme o rosto para continuar.'
-      : location && !faceConfirmed
-        ? 'Abra a câmera e aguarde a confirmação do rosto.'
-        : !location && faceConfirmed
-          ? 'Obtendo localização...'
-          : punchPolicy?.requirePunchQr && !scannedPunchQr
-            ? 'Leia o QR da localidade para concluir.'
-            : 'Tudo pronto para registrar.';
+    : outsideBlocked
+      ? 'Fora da área autorizada — aproxime-se do local para registrar.'
+      : !location && !faceConfirmed
+        ? 'Permita a localização e confirme o rosto para continuar.'
+        : location && !faceConfirmed
+          ? 'Abra a câmera e aguarde a confirmação do rosto.'
+          : !location && faceConfirmed
+            ? 'Obtendo localização...'
+            : punchPolicy?.requirePunchQr && !scannedPunchQr
+              ? 'Leia o QR da localidade para concluir.'
+              : 'Tudo pronto para registrar.';
 
   if (cameraPermission === null || locationPermission === null) {
     return (
@@ -834,7 +1062,13 @@ export default function PunchScreen() {
               : 'Abra a câmera e aguarde a confirmação automática'}
           </Text>
           {faceConfirmed && confirmedFacePreviewUri ? (
-            <Image source={{ uri: confirmedFacePreviewUri }} style={styles.photo} />
+            <TouchableOpacity
+              onPress={() => setShowPhoto(true)}
+              activeOpacity={0.9}
+              accessibilityLabel="Ver foto"
+            >
+              <Image source={{ uri: confirmedFacePreviewUri }} style={styles.photo} />
+            </TouchableOpacity>
           ) : null}
           <View style={styles.photoActions}>
             <TouchableOpacity style={styles.primaryBtn} onPress={() => void openFaceCamera()} activeOpacity={0.85}>
@@ -845,18 +1079,6 @@ export default function PunchScreen() {
                 </Text>
               </View>
             </TouchableOpacity>
-            {faceConfirmed && confirmedFacePreviewUri ? (
-              <TouchableOpacity
-                style={styles.secondaryBtn}
-                onPress={() => setShowPhoto(true)}
-                activeOpacity={0.85}
-              >
-                <View style={styles.btnRow}>
-                  <ImageIcon size={16} color={colors.text} strokeWidth={2.2} />
-                  <Text style={styles.secondaryBtnText}>Ver foto</Text>
-                </View>
-              </TouchableOpacity>
-            ) : null}
           </View>
         </View>
 
@@ -867,18 +1089,104 @@ export default function PunchScreen() {
               <MapPin size={18} color={colors.primary} strokeWidth={2.2} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.locationText}>{address}</Text>
-              {location ? (
-                <Text style={styles.coords}>
-                  {location.coords.latitude.toFixed(6)}, {location.coords.longitude.toFixed(6)}
-                </Text>
-              ) : null}
+              <Text style={styles.locationText}>
+                {isAddressLoading ? `Obtendo localização${'.'.repeat(loadingDots)}` : address}
+              </Text>
             </View>
           </View>
-          <View style={[styles.fence, fenceOk ? styles.fenceOk : styles.fenceBad]}>
-            <ShieldCheck size={16} color={fenceOk ? '#16a34a' : '#dc2626'} strokeWidth={2.2} />
-            <Text style={[styles.fenceText, { color: fenceOk ? '#15803d' : '#b91c1c' }]}>{fenceLabel}</Text>
-          </View>
+          {showGeoMap && mapRegion && location ? (
+            <View style={[styles.mapWrap, arriveFlash ? styles.mapWrapActive : null]}>
+              <MapView
+                ref={mapRef}
+                style={styles.map}
+                initialRegion={mapRegion}
+                pitchEnabled={false}
+                rotateEnabled={false}
+                showsUserLocation={false}
+                showsMyLocationButton={false}
+                toolbarEnabled={false}
+              >
+                {mapLocations.map((loc) => {
+                  const inside =
+                    haversineMeters(
+                      location.coords.latitude,
+                      location.coords.longitude,
+                      loc.latitude,
+                      loc.longitude
+                    ) <= loc.radius;
+                  return (
+                    <React.Fragment key={loc.id}>
+                      <Circle
+                        center={{ latitude: loc.latitude, longitude: loc.longitude }}
+                        radius={loc.radius}
+                        strokeWidth={2}
+                        strokeColor={inside ? 'rgba(22,163,74,0.9)' : 'rgba(220,38,38,0.85)'}
+                        fillColor={inside ? 'rgba(22,163,74,0.18)' : 'rgba(220,38,38,0.14)'}
+                      />
+                      <Marker
+                        coordinate={{ latitude: loc.latitude, longitude: loc.longitude }}
+                        title={loc.name}
+                        description={`Raio ${loc.radius} m`}
+                        pinColor={inside ? '#16a34a' : '#dc2626'}
+                      />
+                    </React.Fragment>
+                  );
+                })}
+                <Marker
+                  coordinate={{
+                    latitude: location.coords.latitude,
+                    longitude: location.coords.longitude,
+                  }}
+                  title="Você"
+                  description={fenceOk ? 'Área ativada' : 'A caminho'}
+                  anchor={{ x: 0.5, y: 0.85 }}
+                  flat
+                  tracksViewChanges
+                >
+                  <View style={styles.youMarkerWrap}>
+                    <View
+                      style={[
+                        styles.youVisionPivot,
+                        {
+                          transform: [
+                            { rotate: `${typeof heading === 'number' ? heading : 0}deg` },
+                          ],
+                        },
+                      ]}
+                      pointerEvents="none"
+                    >
+                      <HeadingVisionCone color={fenceOk ? '#16a34a' : '#3b82f6'} />
+                    </View>
+                    <View
+                      style={[
+                        styles.youMarker,
+                        {
+                          backgroundColor: fenceOk ? '#16a34a' : '#2563eb',
+                          borderColor: arriveFlash ? '#fbbf24' : '#fff',
+                        },
+                      ]}
+                    >
+                      <PersonStanding size={16} color="#fff" strokeWidth={2.4} />
+                    </View>
+                  </View>
+                </Marker>
+              </MapView>
+              <View style={styles.mapLegend}>
+                <View style={styles.mapLegendItem}>
+                  <View style={[styles.mapDot, { backgroundColor: fenceOk ? '#16a34a' : '#2563eb' }]} />
+                  <Text style={styles.mapLegendText}>Você</Text>
+                </View>
+                <View style={styles.mapLegendItem}>
+                  <View style={[styles.mapDot, { backgroundColor: '#16a34a' }]} />
+                  <Text style={styles.mapLegendText}>Dentro do raio</Text>
+                </View>
+                <View style={styles.mapLegendItem}>
+                  <View style={[styles.mapDot, { backgroundColor: '#dc2626' }]} />
+                  <Text style={styles.mapLegendText}>Fora</Text>
+                </View>
+              </View>
+            </View>
+          ) : null}
         </View>
 
         <View style={styles.box}>
@@ -1227,7 +1535,7 @@ const getStyles = (colors: any, isDark: boolean) =>
       backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.06)',
     },
     photoActions: { gap: 8 },
-    locationRow: { flexDirection: 'row', gap: 12, alignItems: 'flex-start' },
+    locationRow: { flexDirection: 'row', gap: 12, alignItems: 'center' },
     locationIcon: {
       width: 36,
       height: 36,
@@ -1238,18 +1546,66 @@ const getStyles = (colors: any, isDark: boolean) =>
     },
     locationText: { color: colors.text, fontSize: 14, fontWeight: '600', lineHeight: 20 },
     coords: { marginTop: 4, color: colors.textSecondary, fontSize: 12, fontWeight: '500' },
-    fence: {
+    mapWrap: {
       marginTop: 12,
-      borderRadius: 12,
-      paddingVertical: 10,
-      paddingHorizontal: 12,
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
+      borderRadius: 14,
+      overflow: 'hidden',
+      borderWidth: StyleSheet.hairlineWidth * 1.5,
+      borderColor: isDark ? colors.border : 'rgba(15, 23, 42, 0.08)',
+      backgroundColor: isDark ? colors.card : colors.surface,
     },
-    fenceOk: { backgroundColor: isDark ? 'rgba(22,163,74,0.14)' : 'rgba(22,163,74,0.1)' },
-    fenceBad: { backgroundColor: isDark ? 'rgba(220,38,38,0.14)' : 'rgba(220,38,38,0.1)' },
-    fenceText: { flex: 1, fontSize: 13, fontWeight: '600', lineHeight: 18 },
+    mapWrapActive: {
+      borderColor: '#16a34a',
+      borderWidth: 2,
+    },
+    map: {
+      width: '100%',
+      height: 210,
+    },
+    youMarkerWrap: {
+      width: 64,
+      height: 72,
+      alignItems: 'center',
+      justifyContent: 'flex-end',
+      paddingBottom: 2,
+      overflow: 'visible',
+    },
+    youVisionPivot: {
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      top: 0,
+      bottom: 15,
+      alignItems: 'center',
+      justifyContent: 'flex-end',
+      transformOrigin: '32px 57px',
+    },
+    youMarker: {
+      width: 30,
+      height: 30,
+      borderRadius: 15,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 2.5,
+      shadowColor: '#0f172a',
+      shadowOpacity: 0.25,
+      shadowRadius: 4,
+      shadowOffset: { width: 0, height: 2 },
+      elevation: 3,
+      zIndex: 2,
+    },
+    mapLegend: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 14,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: isDark ? colors.border : 'rgba(15, 23, 42, 0.08)',
+    },
+    mapLegendItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+    mapDot: { width: 8, height: 8, borderRadius: 4 },
+    mapLegendText: { color: colors.textSecondary, fontSize: 12, fontWeight: '600' },
     input: {
       minHeight: 88,
       borderWidth: StyleSheet.hairlineWidth * 1.5,

@@ -108,7 +108,7 @@ export const TimeRecordsList: React.FC<TimeRecordsListProps> = ({ records, onVie
           <div className="pt-4 px-6 pb-6">
             <button
               onClick={onViewMore}
-              className="w-full h-12 flex items-center justify-center space-x-2 px-4 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 rounded-lg shadow-sm hover:bg-blue-200 dark:hover:bg-blue-900/50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+              className="w-full h-12 flex items-center justify-center space-x-2 px-4 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded-lg shadow-sm hover:bg-red-200 dark:hover:bg-red-900/50 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-colors"
             >
               <Eye className="w-4 h-4" />
               <span className="text-sm font-medium">Ver mais</span>
@@ -148,7 +148,7 @@ export const TimeRecordsList: React.FC<TimeRecordsListProps> = ({ records, onVie
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             {completeRecordsList.map((record) => (
               <div key={record.type} className="flex flex-col items-center justify-center p-2 sm:p-3 rounded-lg text-center">
-                <div className={`mb-1 sm:mb-2 text-sm sm:text-base ${record.hasRecord ? 'text-blue-600 dark:text-blue-400' : 'text-gray-400 dark:text-gray-500'}`}>
+                <div className={`mb-1 sm:mb-2 text-sm sm:text-base ${record.hasRecord ? 'text-red-600 dark:text-red-400' : 'text-gray-400 dark:text-gray-500'}`}>
                   {record.icon}
                 </div>
                 <div className={`text-sm sm:text-lg font-semibold ${record.hasRecord ? 'text-gray-900 dark:text-gray-100' : 'text-gray-400 dark:text-gray-500'}`}>
@@ -163,7 +163,7 @@ export const TimeRecordsList: React.FC<TimeRecordsListProps> = ({ records, onVie
           <div className="pt-4 px-6 pb-6">
             <button
               onClick={onViewMore}
-              className="w-full h-12 flex items-center justify-center space-x-2 px-4 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 rounded-lg shadow-sm hover:bg-blue-200 dark:hover:bg-blue-900/50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+              className="w-full h-12 flex items-center justify-center space-x-2 px-4 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded-lg shadow-sm hover:bg-red-200 dark:hover:bg-red-900/50 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-colors"
             >
               <Eye className="w-4 h-4" />
               <span className="text-sm font-medium">Ver mais</span>

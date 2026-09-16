@@ -9,6 +9,7 @@ import { Card, CardContent } from '@/components/ui/Card';
 import api from '@/lib/api';
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
 import { toast } from 'react-hot-toast';
+import { FORM_FIELD_TEXTAREA_CLS } from '@/lib/formFieldUi';
 
 interface PointCorrectionCardProps {
   onSuccess?: () => void;
@@ -235,7 +236,7 @@ export const PointCorrectionCard: React.FC<PointCorrectionCardProps> = ({ onSucc
                 value={formData.justification}
                 onChange={(e) => handleInputChange('justification', e.target.value)}
                 placeholder="Descreva o problema e explique detalhadamente por que a correção é necessária..."
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-blue-500 dark:focus:border-blue-400 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
+                className={FORM_FIELD_TEXTAREA_CLS}
                 rows={4}
                 required
               />
@@ -299,31 +300,31 @@ export const PointCorrectionCard: React.FC<PointCorrectionCardProps> = ({ onSucc
                           onClick={() => handleSelectOriginalRecord(record)}
                           className={`relative p-4 rounded-lg border-2 transition-all text-left ${
                             isSelected
-                              ? 'border-blue-500 dark:border-blue-400 bg-blue-50 dark:bg-blue-900/20 shadow-md'
+                              ? 'border-red-500 dark:border-red-400 bg-red-50 dark:bg-red-900/20 shadow-md'
                               : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-gray-300 dark:hover:border-gray-600 hover:shadow-sm'
                           }`}
                         >
                           {isSelected && (
                             <div className="absolute top-2 right-2">
-                              <CheckCircle className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                              <CheckCircle className="w-5 h-5 text-red-600 dark:text-red-400" />
                             </div>
                           )}
                           <div className="flex items-start gap-3">
                             <div className={`p-2 rounded-md ${
                               isSelected 
-                                ? 'bg-blue-100 dark:bg-blue-900/40' 
+                                ? 'bg-red-100 dark:bg-red-900/40' 
                                 : 'bg-gray-100 dark:bg-gray-700'
                             }`}>
                               <Clock className={`w-4 h-4 ${
                                 isSelected 
-                                  ? 'text-blue-600 dark:text-blue-400' 
+                                  ? 'text-red-600 dark:text-red-400' 
                                   : 'text-gray-600 dark:text-gray-400'
                               }`} />
                             </div>
                             <div className="flex-1 min-w-0">
                               <div className={`font-semibold text-sm mb-1 ${
                                 isSelected
-                                  ? 'text-blue-900 dark:text-blue-100'
+                                  ? 'text-red-900 dark:text-red-100'
                                   : 'text-gray-900 dark:text-gray-100'
                               }`}>
                                 {getTypeLabel(record.type)}
@@ -343,10 +344,10 @@ export const PointCorrectionCard: React.FC<PointCorrectionCardProps> = ({ onSucc
 
             {/* Resumo do ponto selecionado */}
             {selectedOriginalRecord && formData.originalDate && (
-              <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+              <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
                 <div className="flex items-center gap-2 mb-4">
-                  <CheckCircle className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-                  <span className="text-sm font-semibold text-blue-900 dark:text-blue-100">
+                  <CheckCircle className="w-5 h-5 text-red-600 dark:text-red-400" />
+                  <span className="text-sm font-semibold text-red-900 dark:text-red-100">
                     Ponto Selecionado
                   </span>
                 </div>
@@ -416,7 +417,6 @@ export const PointCorrectionCard: React.FC<PointCorrectionCardProps> = ({ onSucc
             <Button
               type="submit"
               disabled={isSubmitting}
-              className="bg-blue-600 hover:bg-blue-700"
             >
               {isSubmitting ? 'Enviando...' : 'Enviar Solicitação'}
             </Button>

@@ -362,28 +362,30 @@ export default function ConfiguracoesPontoPage() {
     <ProtectedRoute route="/ponto/configuracoes-ponto">
       <MainLayout userRole={user.role || 'EMPLOYEE'} userName={user.name} onLogout={handleLogout}>
         <div className="space-y-6">
-          <div className="text-center">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-gray-100 sm:text-3xl">
               Configurações do Ponto
             </h1>
-            <p className="mt-2 text-sm text-gray-600 dark:text-gray-400 sm:text-base">
+            <p className="mt-1.5 text-sm text-gray-600 dark:text-gray-400 sm:text-base">
               Defina se a presença das equipes deve ser confirmada por geolocalização.
             </p>
           </div>
 
           <Card className={cadastroListClasses.card}>
             <CardHeader className={cadastroListClasses.cardHeader}>
-              <div className={cadastroListClasses.cardHeaderIconRow}>
-                <div className="rounded-lg bg-red-100 p-2 dark:bg-red-900/30 sm:p-3">
-                  <ShieldCheck className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6" />
-                </div>
-                <div className="min-w-0">
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                    Confirmação de presença por geolocalização
-                  </h3>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">
-                    Compara a posição do celular no momento da batida com os locais autorizados.
-                  </p>
+              <div className={cadastroListClasses.cardHeaderRow}>
+                <div className={cadastroListClasses.cardHeaderIconRow}>
+                  <div className="rounded-lg bg-red-100 p-2 dark:bg-red-900/30 sm:p-3">
+                    <ShieldCheck className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6" />
+                  </div>
+                  <div className="min-w-0">
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                      Confirmação de presença
+                    </h3>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                      Geolocalização, biometria facial e QR da localidade.
+                    </p>
+                  </div>
                 </div>
               </div>
             </CardHeader>
@@ -433,39 +435,40 @@ export default function ConfiguracoesPontoPage() {
                   />
 
                   <div
-                    className={`rounded-lg border border-gray-200 p-4 dark:border-gray-700 ${
+                    className={`rounded-xl border border-gray-200 bg-gray-50/60 p-4 dark:border-gray-700 dark:bg-gray-900/30 ${
                       !form.geofenceEnabled ? 'opacity-60' : ''
                     }`}
                   >
                     <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                      <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-                        Locais autorizados ({form.locations.length})
-                      </h4>
+                      <div className="min-w-0">
+                        <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                          Locais autorizados ({form.locations.length})
+                        </h4>
+                        <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                          A batida é válida dentro do raio de qualquer um deles.
+                        </p>
+                      </div>
                       <button
                         type="button"
                         disabled={!form.geofenceEnabled}
                         onClick={openCreateLocation}
-                        className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-sm font-semibold text-red-700 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300"
+                        className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3 text-sm font-semibold text-red-700 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300"
                       >
                         <Plus className="h-4 w-4" />
                         Adicionar
                       </button>
                     </div>
-                    <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">
-                      Cadastre todos os lugares em que a equipe pode bater ponto. A batida é válida se
-                      estiver dentro do raio de qualquer um deles.
-                    </p>
 
                     {form.locations.length === 0 ? (
-                      <p className="py-6 text-center text-sm text-gray-500 dark:text-gray-400">
+                      <p className="py-8 text-center text-sm text-gray-500 dark:text-gray-400">
                         Nenhum local cadastrado.
                       </p>
                     ) : (
-                      <ul className="divide-y divide-gray-200 rounded-lg border border-gray-200 dark:divide-gray-700 dark:border-gray-700">
+                      <ul className="divide-y divide-gray-200 overflow-hidden rounded-xl border border-gray-200 bg-white dark:divide-gray-700 dark:border-gray-700 dark:bg-gray-800">
                         {form.locations.map((loc) => (
                           <li
                             key={loc.id}
-                            className="flex flex-wrap items-center justify-between gap-3 px-3 py-2.5"
+                            className="flex flex-wrap items-center justify-between gap-3 px-3 py-3 transition-colors hover:bg-gray-50 dark:hover:bg-gray-900/40 sm:px-4"
                           >
                             <button
                               type="button"
@@ -473,10 +476,10 @@ export default function ConfiguracoesPontoPage() {
                               onClick={() => openEditLocation(loc)}
                               className="min-w-0 flex-1 text-left disabled:cursor-not-allowed"
                             >
-                              <p className="truncate text-sm font-medium text-gray-900 dark:text-gray-100">
+                              <p className="truncate text-sm font-semibold text-gray-900 dark:text-gray-100">
                                 {loc.name}
                               </p>
-                              <p className="truncate text-xs text-gray-500 dark:text-gray-400">
+                              <p className="mt-0.5 truncate font-mono text-xs text-gray-500 dark:text-gray-400">
                                 {loc.latitude.toFixed(6)}, {loc.longitude.toFixed(6)} · raio{' '}
                                 {loc.radius} m
                                 {loc.qrToken ? ` · QR gennesis-punch:${loc.qrToken}` : ''}

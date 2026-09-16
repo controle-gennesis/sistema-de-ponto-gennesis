@@ -12,8 +12,9 @@ import {
   FileText,
   User
 } from 'lucide-react';
-import { Card, CardContent, CardHeader } from '@/components/ui/Card';
-import { CadastroListLoading } from '@/components/ui/CadastroListSummary';
+import { Card, CardContent } from '@/components/ui/Card';
+import { CadastroListEmpty, CadastroListLoading } from '@/components/ui/CadastroListSummary';
+import { cadastroListClasses } from '@/components/ui/RowActionMenu';
 import { AppUnderlineTabButton, AppUnderlineTabList } from '@/components/ui/AppTabButton';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -134,15 +135,13 @@ export const PointCorrectionList: React.FC = () => {
 
   if (!allRequests || allRequests.length === 0) {
     return (
-      <Card>
-        <CardContent className="p-6 text-center">
-          <FileText className="w-12 h-12 text-gray-400 dark:text-gray-500 mx-auto mb-4" />
-          <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2">
-            Nenhuma solicitação encontrada
-          </h3>
-          <p className="text-gray-500 dark:text-gray-400">
-            Crie sua primeira solicitação de correção
-          </p>
+      <Card className={cadastroListClasses.card}>
+        <CardContent className={cadastroListClasses.cardContent}>
+          <CadastroListEmpty
+            icon={FileText}
+            title="Nenhuma solicitação encontrada"
+            hint="Crie sua primeira solicitação de correção"
+          />
         </CardContent>
       </Card>
     );
@@ -174,17 +173,17 @@ export const PointCorrectionList: React.FC = () => {
 
       <div className="space-y-3">
         {filteredRequests.length === 0 ? (
-          <Card>
-            <CardContent className="p-6 text-center">
-              <FileText className="w-12 h-12 text-gray-400 dark:text-gray-500 mx-auto mb-4" />
-              <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2">
-                Nenhuma solicitação encontrada
-              </h3>
-              <p className="text-gray-500 dark:text-gray-400">
-                {activeStatusTab !== 'all' 
-                  ? `Não há solicitações ${getStatusInfo(activeStatusTab).label.toLowerCase()} no momento.`
-                  : 'Nenhuma solicitação encontrada.'}
-              </p>
+          <Card className={cadastroListClasses.card}>
+            <CardContent className={cadastroListClasses.cardContent}>
+              <CadastroListEmpty
+                icon={FileText}
+                title="Nenhuma solicitação encontrada"
+                hint={
+                  activeStatusTab !== 'all'
+                    ? `Não há solicitações ${getStatusInfo(activeStatusTab).label.toLowerCase()} no momento.`
+                    : 'Nenhuma solicitação encontrada.'
+                }
+              />
             </CardContent>
           </Card>
         ) : (

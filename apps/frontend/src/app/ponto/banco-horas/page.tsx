@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { Clock, Calendar, Filter, Download, Search, Building2, User, CreditCard, ChevronDown, ChevronUp, ListPlus, RotateCcw } from 'lucide-react';
+import { Clock, Calendar, Filter, Download, Search, RotateCcw } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { MainLayout } from '@/components/layout/MainLayout';
@@ -15,6 +15,8 @@ import { CARGOS_LIST } from '@/constants/cargos';
 import * as XLSX from 'xlsx';
 import api from '@/lib/api';
 import { listTableRowClasses } from '@/components/ui/listTableUi';
+import { cadastroListClasses } from '@/components/ui/RowActionMenu';
+import { FORM_FIELD_INPUT_CLS } from '@/lib/formFieldUi';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 
@@ -86,7 +88,6 @@ function BankHoursPageContent() {
   });
 
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
-  const [isFiltersMinimized, setIsFiltersMinimized] = useState(true); // Minimizados por padrão
 
   const handleLogout = () => {
     localStorage.removeItem('token');
@@ -300,307 +301,263 @@ function BankHoursPageContent() {
   };
 
   const filteredData = bankHoursData?.data || [];
-  
+
   // Log para debug
   console.log('📊 bankHoursData:', bankHoursData);
   console.log('📊 filteredData:', filteredData);
   console.log('📊 filteredData length:', filteredData?.length);
   console.log('❌ Erro banco de horas:', bankHoursError);
 
+  const hasAdvancedFilters = !!(
+    filters.department ||
+    filters.position ||
+    filters.costCenter ||
+    filters.client ||
+    filters.polo ||
+    filters.status
+  );
+
   return (
-    <MainLayout 
-      userRole={user.role} 
-      userName={user.name} 
+    <MainLayout
+      userRole={user.role}
+      userName={user.name}
       onLogout={handleLogout}
     >
       <div className="space-y-6">
-        {/* Header */}
         <div className="text-center">
-          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">Controle de Banco de Horas</h1>
-          <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400">Acompanhamento do banco de horas de todos os funcionários</p>
+          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">
+            Controle de Banco de Horas
+          </h1>
+          <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400">
+            Acompanhamento do banco de horas de todos os funcionários
+          </p>
         </div>
 
-        {/* Filtros */}
-        <Card>
-          <CardHeader className="border-b-0">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-2">
-                <Filter className="w-5 h-5 text-gray-900 dark:text-gray-100" />
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Filtros</h3>
+        <Card className={cadastroListClasses.card}>
+          <CardHeader className={cadastroListClasses.cardHeader}>
+            <div className={cadastroListClasses.cardHeaderRow}>
+              <div className={cadastroListClasses.cardHeaderIconRow}>
+                <div className="rounded-lg bg-red-100 p-2 sm:p-3 dark:bg-red-900/30">
+                  <Clock className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6" />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                    Banco de Horas
+                  </h3>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                    Cálculo do banco de horas de todos os funcionários
+                  </p>
+                </div>
               </div>
-              <div className="flex items-center space-x-4">
-                {!isFiltersMinimized && (
-                  <>
+              <div className={cadastroListClasses.cardToolbar}>
+                <div className={cadastroListClasses.searchFilterGroup}>
+                  <div className={cadastroListClasses.searchFieldInGroup}>
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
+                    <input
+                      type="text"
+                      value={filters.search}
+                      onChange={handleSearchChange}
+                      placeholder="Buscar funcionário..."
+                      className={`${FORM_FIELD_INPUT_CLS} h-10 pl-9`}
+                    />
+                  </div>
+                  <div className={cadastroListClasses.filterIconButtonWrap}>
                     <button
+                      type="button"
                       onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
-                      className="flex items-center justify-center w-8 h-8 text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                      className={`${cadastroListClasses.filterIconButton} transition-colors ${
+                        showAdvancedFilters || hasAdvancedFilters
+                          ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40'
+                          : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
+                      }`}
                       title={showAdvancedFilters ? 'Ocultar filtros avançados' : 'Mostrar filtros avançados'}
+                      aria-label="Filtros avançados"
                     >
-                      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13.354 3H3a1 1 0 0 0-.742 1.67l7.225 7.989A2 2 0 0 1 10 14v6a1 1 0 0 0 .553.895l2 1A1 1 0 0 0 14 21v-7a2 2 0 0 1 .517-1.341l1.218-1.348"/><path d="M16 6h6"/><path d="M19 3v6"/></svg>
+                      <Filter className="h-4 w-4" />
+                      {hasAdvancedFilters ? (
+                        <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
+                      ) : null}
                     </button>
-                    <button
-                      onClick={clearFilters}
-                      className="flex items-center justify-center w-8 h-8 text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors"
-                      title="Limpar todos os filtros"
-                    >
-                      <RotateCcw className="w-5 h-5" />
-                    </button>
-                  </>
-                )}
+                  </div>
+                </div>
+                <div className="relative w-full sm:w-[10.5rem]">
+                  <Calendar className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
+                  <input
+                    type="date"
+                    value={filters.startDate}
+                    onChange={handleStartDateChange}
+                    title="Data inicial"
+                    aria-label="Data inicial"
+                    className={`${FORM_FIELD_INPUT_CLS} h-10 pl-9`}
+                  />
+                </div>
+                <div className="relative w-full sm:w-[10.5rem]">
+                  <Calendar className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
+                  <input
+                    type="date"
+                    value={filters.endDate}
+                    onChange={handleEndDateChange}
+                    title="Data final"
+                    aria-label="Data final"
+                    className={`${FORM_FIELD_INPUT_CLS} h-10 pl-9`}
+                  />
+                </div>
                 <button
-                  onClick={() => setIsFiltersMinimized(!isFiltersMinimized)}
-                  className="flex items-center justify-center w-8 h-8 text-gray-900 dark:text-gray-100 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-                  title={isFiltersMinimized ? 'Expandir filtros' : 'Minimizar filtros'}
+                  type="button"
+                  onClick={clearFilters}
+                  className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-red-600 transition-colors hover:bg-red-50 dark:border-gray-600 dark:bg-gray-800 dark:text-red-400 dark:hover:bg-red-900/30"
+                  title="Limpar todos os filtros"
+                  aria-label="Limpar filtros"
                 >
-                  {isFiltersMinimized ? (
-                    <ChevronDown className="w-5 h-5" />
-                  ) : (
-                    <ChevronUp className="w-5 h-5" />
-                  )}
+                  <RotateCcw className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={exportToExcel}
+                  className="flex h-10 items-center gap-2 rounded-lg bg-green-600 px-3 text-sm font-semibold text-white transition-colors hover:bg-green-700 sm:px-4"
+                >
+                  <Download className="h-4 w-4 shrink-0" />
+                  <span>Exportar</span>
                 </button>
               </div>
             </div>
-          </CardHeader>
-          {!isFiltersMinimized && (
-            <CardContent className="p-4 sm:p-6">
-              <div className="space-y-4">
-              {/* Campo de Busca Principal */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Buscar Funcionário
-                </label>
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4" />
-                  <input
-                    type="text"
-                    value={filters.search}
-                    onChange={handleSearchChange}
-                    placeholder="Digite nome, CPF, matrícula, setor, empresa ou qualquer informação..."
-                    className="w-full pl-10 pr-4 py-3 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
-                  />
-                </div>
-              </div>
 
-              {/* Filtros de Período - Sempre Visíveis */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    Data Inicial
-                  </label>
-                  <div className="relative">
-                    <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4" />
-                    <input
-                      type="date"
-                      value={filters.startDate}
-                      onChange={handleStartDateChange}
-                      className="w-full pl-10 pr-4 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100"
-                    />
-                  </div>
+            {showAdvancedFilters && (
+              <div className="mt-3 space-y-4 rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-700/30 sm:p-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Filtros específicos
+                  </h4>
+                  <button
+                    type="button"
+                    onClick={clearAdvancedFilters}
+                    className="text-xs font-medium text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+                  >
+                    Limpar avançados
+                  </button>
                 </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    Data Final
-                  </label>
-                  <div className="relative">
-                    <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4" />
-                    <input
-                      type="date"
-                      value={filters.endDate}
-                      onChange={handleEndDateChange}
-                      className="w-full pl-10 pr-4 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100"
-                    />
-                  </div>
-                </div>
-              </div>
-
-
-              {/* Filtros Avançados - Condicionais */}
-              {showAdvancedFilters && (
-                <div className="border-t dark:border-gray-700 pt-4 space-y-4">
-                  <div className="flex items-center justify-between">
-                    <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">Filtros Específicos</h4>
-                  </div>
-                  
-                  {/* Grupo 1: Informações Básicas */}
-                  <div className="space-y-3">
-                    <h5 className="text-xs font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wide">Informações Básicas</h5>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                          Setor
-                        </label>
-                        <div className="relative">
-                          <Building2 className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4" />
-                          <StringSingleSelectDropdown
-                            value={filters.department ?? ''}
-                            onChange={handleDepartmentChange}
-                            options={DEPARTMENTS_LIST || []}
-                            emptyOptionLabel="Todos os setores"
-                          />
-                        </div>
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                          Cargo
-                        </label>
-                        <StringSingleSelectDropdown
-                          value={filters.position ?? ''}
-                          onChange={handlePositionChange}
-                          options={CARGOS_LIST || []}
-                          emptyOptionLabel="Todos os cargos"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                          Status do Banco
-                        </label>
-                        <div className="relative">
-                          <Building2 className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4 z-10 pointer-events-none" />
-                          <StringSingleSelectDropdown
-                            value={filters.status ?? ''}
-                            onChange={handleStatusChange}
-                            options={BANK_HOURS_STATUS_OPTIONS}
-                            emptyOptionLabel="Todos os status"
-                            className="[&>button]:pl-10"
-                          />
-                        </div>
-                      </div>
+                <div className="space-y-3">
+                  <h5 className="text-xs font-medium uppercase tracking-wide text-gray-600 dark:text-gray-400">
+                    Informações básicas
+                  </h5>
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                        Setor
+                      </label>
+                      <StringSingleSelectDropdown
+                        value={filters.department ?? ''}
+                        onChange={handleDepartmentChange}
+                        options={DEPARTMENTS_LIST || []}
+                        emptyOptionLabel="Todos os setores"
+                      />
                     </div>
-                  </div>
-
-                  {/* Grupo 2: Informações Financeiras */}
-                  <div className="space-y-3">
-                    <h5 className="text-xs font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wide">Informações Financeiras</h5>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                          Centro de Custo
-                        </label>
-                        <div className="relative">
-                          <Building2 className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4 z-10 pointer-events-none" />
-                          <StringSingleSelectDropdown
-                            value={filters.costCenter ?? ''}
-                            onChange={handleCostCenterChange}
-                            options={costCentersList}
-                            emptyOptionLabel="Todos os centros de custo"
-                            className="[&>button]:pl-10"
-                          />
-                        </div>
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                          Tomador
-                        </label>
-                        <div className="relative">
-                          <Building2 className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4" />
-                          <StringSingleSelectDropdown
-                            value={filters.client ?? ''}
-                            onChange={handleClientChange}
-                            options={CLIENTS_LIST || []}
-                            emptyOptionLabel="Todos os tomadores"
-                          />
-                        </div>
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                          Polo
-                        </label>
-                        <div className="relative">
-                          <Building2 className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 w-4 h-4" />
-                          <StringSingleSelectDropdown
-                            value={filters.polo ?? ''}
-                            onChange={handlePoloChange}
-                            options={POLOS_LIST || []}
-                            emptyOptionLabel="Todos os polos"
-                          />
-                        </div>
-                      </div>
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                        Cargo
+                      </label>
+                      <StringSingleSelectDropdown
+                        value={filters.position ?? ''}
+                        onChange={handlePositionChange}
+                        options={CARGOS_LIST || []}
+                        emptyOptionLabel="Todos os cargos"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                        Status do Banco
+                      </label>
+                      <StringSingleSelectDropdown
+                        value={filters.status ?? ''}
+                        onChange={handleStatusChange}
+                        options={BANK_HOURS_STATUS_OPTIONS}
+                        emptyOptionLabel="Todos os status"
+                      />
                     </div>
                   </div>
                 </div>
-              )}
-              </div>
-            </CardContent>
-          )}
-        </Card>
 
-
-        {/* Tabela de Banco de Horas */}
-        <Card>
-          <CardHeader>
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-              <div className="flex items-center">
-                <div className="p-2 sm:p-3 bg-blue-100 dark:bg-blue-900/30 rounded-lg flex-shrink-0">
-                  <Clock className="w-6 h-6 text-blue-600 dark:text-blue-400" />
-                </div>
-                <div className="ml-3 sm:ml-4 min-w-0">
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Banco de Horas</h3>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">Cálculo do banco de horas de todos os funcionários</p>
+                <div className="space-y-3">
+                  <h5 className="text-xs font-medium uppercase tracking-wide text-gray-600 dark:text-gray-400">
+                    Informações financeiras
+                  </h5>
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                        Centro de Custo
+                      </label>
+                      <StringSingleSelectDropdown
+                        value={filters.costCenter ?? ''}
+                        onChange={handleCostCenterChange}
+                        options={costCentersList}
+                        emptyOptionLabel="Todos os centros de custo"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                        Tomador
+                      </label>
+                      <StringSingleSelectDropdown
+                        value={filters.client ?? ''}
+                        onChange={handleClientChange}
+                        options={CLIENTS_LIST || []}
+                        emptyOptionLabel="Todos os tomadores"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                        Polo
+                      </label>
+                      <StringSingleSelectDropdown
+                        value={filters.polo ?? ''}
+                        onChange={handlePoloChange}
+                        options={POLOS_LIST || []}
+                        emptyOptionLabel="Todos os polos"
+                      />
+                    </div>
+                  </div>
                 </div>
               </div>
-              <button 
-                onClick={exportToExcel}
-                className="flex items-center space-x-2 px-3 sm:px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors text-sm sm:text-base"
-              >
-                <Download className="w-4 h-4" />
-                <span className="hidden sm:inline">Exportar</span>
-                <span className="sm:hidden">Exportar</span>
-              </button>
-            </div>
+            )}
           </CardHeader>
-          <CardContent className="p-0">
-            <div className="table-scroll">
-              <table className="w-full">
+
+          <CardContent className={`${cadastroListClasses.cardContent} p-0 sm:p-0`}>
+            <div className={cadastroListClasses.tableScroll}>
+              <table className={`${cadastroListClasses.table} min-w-[56rem]`}>
                 <thead className="border-b border-gray-200 dark:border-gray-700">
                   <tr>
-                    <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                      Funcionário
-                    </th>
-                    <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider hidden sm:table-cell">
-                      Setor
-                    </th>
-                    <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider hidden md:table-cell">
+                    <th className={cadastroListClasses.th}>Funcionário</th>
+                    <th className={`${cadastroListClasses.thCenter} hidden sm:table-cell`}>Setor</th>
+                    <th className={`${cadastroListClasses.thCenter} hidden md:table-cell`}>
                       Centro de Custo
                     </th>
-                    <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider hidden lg:table-cell">
-                      Tomador
-                    </th>
-                    <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider hidden lg:table-cell">
+                    <th className={`${cadastroListClasses.thCenter} hidden lg:table-cell`}>Tomador</th>
+                    <th className={`${cadastroListClasses.thCenter} hidden lg:table-cell`}>
                       Horas Esperadas
                     </th>
-                    <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider hidden lg:table-cell">
+                    <th className={`${cadastroListClasses.thCenter} hidden lg:table-cell`}>
                       Horas Trabalhadas
                     </th>
-                    <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                      Horas Extras
-                    </th>
-                    <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                      Horas Devidas
-                    </th>
-                    <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                      Saldo Atual
-                    </th>
+                    <th className={cadastroListClasses.thCenter}>Horas Extras</th>
+                    <th className={cadastroListClasses.thCenter}>Horas Devidas</th>
+                    <th className={cadastroListClasses.thCenter}>Saldo Atual</th>
                   </tr>
                 </thead>
-                <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
                   {bankHoursError ? (
                     <tr>
-                      <td colSpan={8} className="px-6 py-8 text-center">
+                      <td colSpan={9} className={`${cadastroListClasses.tdCenter} py-8`}>
                         <div className="text-red-600 dark:text-red-400">
                           <p className="font-semibold">Erro ao carregar dados</p>
-                          <p className="text-sm mt-1">
+                          <p className="mt-1 text-sm">
                             {bankHoursError instanceof Error && bankHoursError.message.includes('CORS')
                               ? 'Erro de CORS: Verifique a configuração do servidor'
                               : bankHoursError instanceof Error
-                              ? bankHoursError.message
-                              : 'Não foi possível conectar ao servidor. Tente novamente mais tarde.'}
+                                ? bankHoursError.message
+                                : 'Não foi possível conectar ao servidor. Tente novamente mais tarde.'}
                           </p>
-                          <p className="text-xs mt-2 text-gray-500 dark:text-gray-400">
+                          <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
                             Verifique o console do navegador para mais detalhes.
                           </p>
                         </div>
@@ -608,36 +565,37 @@ function BankHoursPageContent() {
                     </tr>
                   ) : loadingBankHours ? (
                     <tr>
-                      <td colSpan={8} className="px-6 py-8 text-center">
+                      <td colSpan={9} className={`${cadastroListClasses.tdCenter} py-8`}>
                         <CadastroListLoading message="Carregando banco de horas..." />
                       </td>
                     </tr>
                   ) : !Array.isArray(filteredData) || filteredData.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="px-6 py-8 text-center">
+                      <td colSpan={9} className={`${cadastroListClasses.tdCenter} py-8`}>
                         <div className="text-gray-500 dark:text-gray-400">
                           <p>Nenhum funcionário encontrado.</p>
-                          <p className="text-sm mt-1">Tente ajustar os filtros de busca.</p>
+                          <p className="mt-1 text-sm">Tente ajustar os filtros de busca.</p>
                         </div>
                       </td>
                     </tr>
                   ) : (
                     filteredData.map((employee: BankHoursData) => (
                       <tr key={employee.employeeId} className={listTableRowClasses.tr}>
-                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap">
-                          <div>
-                            <span className="text-sm text-gray-900 dark:text-gray-100 font-medium">
+                        <td className={cadastroListClasses.tdTruncate}>
+                          <div className="min-w-0">
+                            <span className="block truncate text-sm font-medium text-gray-900 dark:text-gray-100">
                               {employee.employeeName}
                             </span>
-                            <div className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">
+                            <div className="text-xs text-gray-500 dark:text-gray-400 sm:text-sm">
                               {employee.employeeCpf}
                             </div>
                             <div className="text-xs text-gray-400 dark:text-gray-500 sm:hidden">
-                              {employee.department && `${employee.department} • ${employee.costCenter || 'N/A'}`}
+                              {employee.department &&
+                                `${employee.department} • ${employee.costCenter || 'N/A'}`}
                             </div>
                           </div>
                         </td>
-                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-center hidden sm:table-cell">
+                        <td className={`${cadastroListClasses.tdCenter} hidden sm:table-cell`}>
                           <div>
                             <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
                               {employee.department || 'N/A'}
@@ -647,38 +605,32 @@ function BankHoursPageContent() {
                             </div>
                           </div>
                         </td>
-                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-center hidden md:table-cell">
-                          <span className="text-sm text-gray-900 dark:text-gray-100">
-                            {employee.costCenter || 'N/A'}
-                          </span>
+                        <td className={`${cadastroListClasses.tdCenter} hidden md:table-cell`}>
+                          {employee.costCenter || 'N/A'}
                         </td>
-                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-center hidden lg:table-cell">
-                          <span className="text-sm text-gray-900 dark:text-gray-100">
-                            {employee.client || 'N/A'}
-                          </span>
+                        <td className={`${cadastroListClasses.tdCenter} hidden lg:table-cell`}>
+                          {employee.client || 'N/A'}
                         </td>
-                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-center hidden lg:table-cell">
-                          <span className="text-sm text-gray-900 dark:text-gray-100">
-                            {formatHoursNoSign(employee.totalExpectedHours)}
-                          </span>
+                        <td className={`${cadastroListClasses.tdCenter} hidden lg:table-cell`}>
+                          {formatHoursNoSign(employee.totalExpectedHours)}
                         </td>
-                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-center hidden lg:table-cell">
-                          <span className="text-sm text-gray-900 dark:text-gray-100">
-                            {formatHoursNoSign(employee.totalWorkedHours)}
-                          </span>
+                        <td className={`${cadastroListClasses.tdCenter} hidden lg:table-cell`}>
+                          {formatHoursNoSign(employee.totalWorkedHours)}
                         </td>
-                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-center">
-                          <span className="text-sm text-gray-900 dark:text-gray-100">
-                            {formatHoursNoSign(employee.overtimeMultipliedHours)}
-                          </span>
+                        <td className={cadastroListClasses.tdCenter}>
+                          {formatHoursNoSign(employee.overtimeMultipliedHours)}
                         </td>
-                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-center">
-                          <span className="text-sm text-gray-900 dark:text-gray-100">
-                            {formatHoursNoSign(employee.pendingHours)}
-                          </span>
+                        <td className={cadastroListClasses.tdCenter}>
+                          {formatHoursNoSign(employee.pendingHours)}
                         </td>
-                        <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-center">
-                          <span className={`text-sm font-bold ${employee.bankHours >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                        <td className={cadastroListClasses.tdCenter}>
+                          <span
+                            className={`text-sm font-bold ${
+                              employee.bankHours >= 0
+                                ? 'text-green-600 dark:text-green-400'
+                                : 'text-red-600 dark:text-red-400'
+                            }`}
+                          >
                             {formatHours(employee.bankHours)}
                           </span>
                         </td>
@@ -689,13 +641,14 @@ function BankHoursPageContent() {
               </table>
             </div>
 
-            {/* Estatísticas */}
             {filteredData.length > 0 && (
-              <div className="px-6 py-4 bg-gray-50 dark:bg-gray-800/50 border-t border-gray-200 dark:border-gray-700 rounded-b-lg">
-                <div className="flex items-center justify-between text-sm text-gray-600 dark:text-gray-400">
-                  <div className="flex items-center space-x-6">
+              <div className="rounded-b-lg border-t border-gray-200 bg-gray-50 px-4 py-4 dark:border-gray-700 dark:bg-gray-800/50 sm:px-6">
+                <div className="flex flex-col gap-2 text-sm text-gray-600 dark:text-gray-400 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-6">
                     <span>
-                      <strong>Período:</strong> {new Date(filters.startDate + 'T00:00:00').toLocaleDateString('pt-BR')} até {new Date(filters.endDate + 'T00:00:00').toLocaleDateString('pt-BR')}
+                      <strong>Período:</strong>{' '}
+                      {new Date(filters.startDate + 'T00:00:00').toLocaleDateString('pt-BR')} até{' '}
+                      {new Date(filters.endDate + 'T00:00:00').toLocaleDateString('pt-BR')}
                     </span>
                     <span>
                       <strong>Total de funcionários:</strong> {filteredData.length}
@@ -712,7 +665,6 @@ function BankHoursPageContent() {
           </CardContent>
         </Card>
       </div>
-
     </MainLayout>
   );
 }
