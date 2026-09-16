@@ -1,19 +1,11 @@
 import { Router } from 'express';
 import { CostCenterController } from '../controllers/CostCenterController';
-import { authenticate, requireAdministrator } from '../middleware/auth';
+import { authenticate } from '../middleware/auth';
 
 const router = Router();
 const costCenterController = new CostCenterController();
 
 router.use(authenticate);
-
-router.get('/admin/migrar-unb-consorcio', requireAdministrator, (req, res, next) =>
-  costCenterController.previewMigrarUnbConsorcio(req, res, next)
-);
-
-router.post('/admin/migrar-unb-consorcio', requireAdministrator, (req, res, next) =>
-  costCenterController.applyMigrarUnbConsorcio(req, res, next)
-);
 
 // Listar todos os centros de custo
 router.get('/', (req, res, next) => 

@@ -42,7 +42,7 @@ export type PdfCompanyHeader = {
 export function resolvePdfCompanyHeader(useUnbBranding: boolean): PdfCompanyHeader {
   if (useUnbBranding) {
     return {
-      name: 'CONSÓRCIO PREDIAL BRASILIA',
+      name: 'UNB - CONSÓRCIO PREDIAL BRASILIA',
       cnpj: '58.344.545/0001-03',
       street: 'Q SOFN QUADRA 4 CONJUNTO G',
       streetNumber: '7',

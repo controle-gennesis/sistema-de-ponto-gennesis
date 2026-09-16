@@ -272,12 +272,22 @@ export function parseReceitasFromWorkbook(
   const sheetName = findSheetName(
     workbook,
     consorcio === 'bsb'
-      ? ['CONSORCIO BSB', 'CONSÓRCIO BSB', 'BSB']
-      : ['CONSORCIO HUB', 'CONSÓRCIO HUB', 'HUB']
+      ? [
+          'UNB - CONSORCIO PREDIAL BRASILIA',
+          'CONSORCIO BSB',
+          'CONSÓRCIO BSB',
+          'BSB',
+        ]
+      : [
+          'HUB - CONSORCIO PREDIAL HUB',
+          'CONSORCIO HUB',
+          'CONSÓRCIO HUB',
+          'HUB',
+        ]
   );
   if (!sheetName) {
     throw new Error(
-      `Aba do ${consorcio === 'bsb' ? 'Consórcio BSB' : 'Consórcio HUB'} não encontrada na planilha.`
+      `Aba do ${consorcio === 'bsb' ? 'UNB - CONSÓRCIO PREDIAL BRASILIA' : 'HUB - CONSÓRCIO PREDIAL HUB'} não encontrada na planilha.`
     );
   }
 

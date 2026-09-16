@@ -46,18 +46,18 @@ export const FINANCIAL_CONTROL_CONSORCIO_OPTIONS: Array<{
   value: FinancialControlConsorcio;
   label: string;
 }> = [
-  { value: 'brasilia', label: 'Consórcio Predial Brasília' },
-  { value: 'hub', label: 'Consórcio Predial HUB' },
+  { value: 'brasilia', label: 'UNB - CONSÓRCIO PREDIAL BRASILIA' },
+  { value: 'hub', label: 'HUB - CONSÓRCIO PREDIAL HUB' },
 ];
 
 export const FINANCIAL_CONTROL_CONSORCIO_LABELS: Record<FinancialControlConsorcio, string> = {
-  brasilia: 'Consórcio Predial Brasília',
-  hub: 'Consórcio Predial HUB',
+  brasilia: 'UNB - CONSÓRCIO PREDIAL BRASILIA',
+  hub: 'HUB - CONSÓRCIO PREDIAL HUB',
 };
 
 /** Consórcio fixo no lançamento rápido a partir da OC (aba Pagamento). */
 export const FINANCIAL_CONTROL_OC_DEFAULT_CONSORCIO: FinancialControlConsorcio = 'brasilia';
-export const FINANCIAL_CONTROL_OC_CONSORCIO_LABEL = 'Consórcio Predial Brasília';
+export const FINANCIAL_CONTROL_OC_CONSORCIO_LABEL = 'UNB - CONSÓRCIO PREDIAL BRASILIA';
 export const FINANCIAL_CONTROL_OC_CONSORCIO_FIELD_LABEL = 'Contrato';
 
 export type FinancialControlAttachment = { url: string; name: string };

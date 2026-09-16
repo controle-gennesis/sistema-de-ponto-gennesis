@@ -102,7 +102,7 @@ export type OcPdfCompanyHeader = {
 export function resolveOcPdfCompanyHeader(useUnbBranding: boolean): OcPdfCompanyHeader {
   if (useUnbBranding) {
     return {
-      name: 'Consórcio Predial',
+      name: 'UNB - CONSÓRCIO PREDIAL BRASILIA',
       subtitle: '',
       address: 'SOFN, QUADRA 4, CONJUNTO G, LOTE 07, SALA 66, ZONA INDUSTRIAL, BRASÍLIA, DF',
       phone: '',

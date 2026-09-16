@@ -5,10 +5,6 @@ import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { getUserUnbCostCenterScope } from '../lib/unbCostCenterScope';
 import { findIdsByUnaccentSearch } from '../lib/normalizeSearchText';
-import {
-  applyMigrarRmUnbParaConsorcio,
-  previewMigrarRmUnbParaConsorcio,
-} from '../lib/migrarRmUnbParaConsorcio';
 
 /**
  * Gera um código automático para o centro de custo no formato CC-YYYY-XXX
@@ -467,31 +463,6 @@ export class CostCenterController {
       });
     } catch (error) {
       next(error);
-    }
-  }
-
-  async previewMigrarUnbConsorcio(req: AuthRequest, res: Response, next: NextFunction) {
-    try {
-      const data = await previewMigrarRmUnbParaConsorcio();
-      res.json({ success: true, data });
-    } catch (error) {
-      next(createError(error instanceof Error ? error.message : 'Não foi possível conferir a migração.', 400));
-    }
-  }
-
-  async applyMigrarUnbConsorcio(req: AuthRequest, res: Response, next: NextFunction) {
-    try {
-      const data = await applyMigrarRmUnbParaConsorcio();
-      res.json({
-        success: true,
-        data,
-        message:
-          data.applied.rms === 0 && data.applied.stock === 0 && data.applied.shortfalls === 0
-            ? 'Nada para migrar.'
-            : `${data.applied.rms} RM(s) passaram para ${data.to.name}. As OCs passam a mostrar esse centro.`,
-      });
-    } catch (error) {
-      next(createError(error instanceof Error ? error.message : 'Não foi possível aplicar a migração.', 400));
     }
   }
 }

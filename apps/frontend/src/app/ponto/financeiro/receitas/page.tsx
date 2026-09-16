@@ -84,8 +84,8 @@ type ResumoMesRow = {
 
 const TOP_TABS: Array<{ key: TopTabKey; label: string }> = [
   { key: 'resumo', label: 'Resumo' },
-  { key: 'bsb', label: 'Consórcio BSB' },
-  { key: 'hub', label: 'Consórcio HUB' },
+  { key: 'bsb', label: 'UNB - CONSÓRCIO PREDIAL BRASILIA' },
+  { key: 'hub', label: 'HUB - CONSÓRCIO PREDIAL HUB' },
 ];
 
 const TIPO_TABS: Array<{ key: TipoKey; label: string }> = [
