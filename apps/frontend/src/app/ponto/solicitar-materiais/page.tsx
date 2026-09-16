@@ -1760,8 +1760,8 @@ function SolicitarMateriaisPage() {
     });
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = (e?: React.FormEvent) => {
+    e?.preventDefault();
     const validationError = validateNewMaterialRequestForm(formData, {
       demandSheetOptional: isNewFormUnbCostCenter
     });
@@ -2601,7 +2601,7 @@ function SolicitarMateriaisPage() {
                 </div>
 
                 <form
-                  onSubmit={handleSubmit}
+                  onSubmit={(e) => e.preventDefault()}
                   className="flex min-h-0 flex-1 flex-col [&_*:focus]:outline-none [&_*:focus]:ring-0 [&_*:focus-visible]:outline-none [&_*:focus-visible]:ring-0"
                 >
                   <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4">
@@ -2912,8 +2912,9 @@ function SolicitarMateriaisPage() {
                       Cancelar
                     </button>
                     <button
-                      type="submit"
+                      type="button"
                       disabled={createMutation.isPending}
+                      onClick={() => handleSubmit()}
                       className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-red-700 disabled:opacity-50 dark:bg-red-700 dark:hover:bg-red-800"
                     >
                       {createMutation.isPending ? 'Criando...' : 'Criar Solicitação'}

@@ -13,11 +13,12 @@ function isExactUnb(name: string, code: string): boolean {
   return normalizeLabel(name) === 'UNB' || normalizeLabel(code) === 'UNB';
 }
 
-function isConsorcioPredial(name: string, code: string): boolean {
+function isUnbConsorcioPredial(name: string, code: string): boolean {
   const n = normalizeLabel(name);
   const c = normalizeLabel(code).replace(/\s/g, '');
   if (c === '009.01' || c === '00901') return true;
-  return n.includes('CONSORCIO PREDIAL');
+  if (n.startsWith('HUB')) return false;
+  return n.startsWith('UNB') && n.includes('CONSORCIO PREDIAL');
 }
 
 export type MigrarUnbConsorcioCenter = {
@@ -49,7 +50,12 @@ async function resolveUnbConsorcioCenters() {
   });
 
   const sources = centers.filter((cc) => isExactUnb(cc.name, cc.code));
-  const targets = centers.filter((cc) => isConsorcioPredial(cc.name, cc.code));
+  const byCode = centers.filter((cc) => {
+    const c = normalizeLabel(cc.code).replace(/\s/g, '');
+    return c === '009.01' || c === '00901';
+  });
+  const byUnbName = centers.filter((cc) => isUnbConsorcioPredial(cc.name, cc.code));
+  const targets = byCode.length === 1 ? byCode : byUnbName;
 
   if (sources.length !== 1) {
     throw new Error(
@@ -59,10 +65,11 @@ async function resolveUnbConsorcioCenters() {
     );
   }
   if (targets.length !== 1) {
+    const found = byUnbName.map((cc) => `${cc.code} — ${cc.name}`).join('; ') || 'nenhum';
     throw new Error(
       targets.length === 0
         ? 'Não achei o centro "UNB - CONSÓRCIO PREDIAL BRASILIA" (código 009.01).'
-        : `Achei ${targets.length} centros Consórcio Predial. Confira o cadastro antes de migrar.`,
+        : `Achei ${targets.length} centros UNB Consórcio Predial (${found}). Confira o cadastro antes de migrar.`,
     );
   }
   if (sources[0].id === targets[0].id) {
