@@ -1826,7 +1826,24 @@ const MODELO_ORCAMENTO_PERFEITO_COLS = [
   'PESO %'
 ] as const;
 
-/** Planilha modelo compatível com `handleImportOrcamentoPerfeito` (cabeçalho na linha 11). */
+const MODELO_ORCAMENTO_COL_WIDTHS = [
+  { wch: 10 },
+  { wch: 14 },
+  { wch: 12 },
+  { wch: 16 },
+  { wch: 52 },
+  { wch: 10 },
+  { wch: 12 },
+  { wch: 14 },
+  { wch: 12 },
+  { wch: 14 },
+  { wch: 16 },
+  { wch: 14 },
+  { wch: 16 },
+  { wch: 10 }
+];
+
+/** Planilha modelo: aba Orçamento já começa no cabeçalho (linha 1). Instruções ficam na 2ª aba. */
 function baixarModeloOrcamentoPerfeitoXlsx() {
   const nCol = MODELO_ORCAMENTO_PERFEITO_COLS.length;
   const pad = (cells: (string | number)[]) => {
@@ -1835,67 +1852,58 @@ function baixarModeloOrcamentoPerfeitoXlsx() {
     return row;
   };
 
-  const linhas: (string | number)[][] = [
-    pad(['MODELO – ORÇAMENTO PERFEITO (mesmas colunas do export “Orçamento detalhado”)']),
-    pad(['']),
-    pad(['Instruções:']),
-    pad([
-      '• Linha 11: cabeçalhos abaixo (não renomeie as colunas usadas pelo sistema: ITEM, CÓDIGO, BANCO, DESCRIÇÃO, MAT + M.O, MÃO DE OBRA, MATERIAL).'
-    ]),
-    pad([
-      '• ITEM: 1 = serviço; 1.1 = subtítulo; 1.1.1 = composição (com CÓDIGO e BANCO). Linhas só com DESCRIÇÃO definem nome do serviço ou subtítulo.'
-    ]),
-    pad([
-      '• CHAVE, UNIDADE, QUANTIDADE, SUB… e PESO % são opcionais na importação (o sistema lê preços unitários em MÃO DE OBRA, MATERIAL e MAT + M.O).'
-    ]),
-    pad(['• Pode apagar estas linhas de texto, mantendo a linha 11 como cabeçalho.']),
-    pad(['']),
-    pad(['']),
+  const dados: (string | number)[][] = [
     pad([...MODELO_ORCAMENTO_PERFEITO_COLS]),
-    pad(['1', '', '', '', 'EXEMPLO — NOME DO SERVIÇO (substitua)', '', '', '', '', '', '', '', '', '']),
-    pad(['1.1', '', '', '', 'EXEMPLO — NOME DO SUBTÍTULO (substitua)', '', '', '', '', '', '', '', '', '']),
-    pad([
-      '1.1.1',
-      '00000',
-      'SINAPI',
-      '',
-      'EXEMPLO — DESCRIÇÃO DA COMPOSIÇÃO (substitua)',
-      'M3',
-      '1',
-      '40,00',
-      '60,00',
-      '100,00',
-      '',
-      '',
-      '',
-      ''
-    ])
+    pad(['1', '', '', '', 'Pintura de paredes', '', '', '', '', '', '', '', '', '']),
+    pad(['1.1', '', '', '', 'Área interna', '', '', '', '', '', '', '', '', '']),
+    pad(['1.1.1', '88495', 'SINAPI', '88495SINAPI', 'Pintura látex PVA duas demãos', 'M2', 10, '8,50', '12,30', '20,80', '', '', '', '']),
+    pad(['1.1.2', '88496', 'SINAPI', '88496SINAPI', 'Massa corrida PVA', 'M2', 10, '6,20', '9,40', '15,60', '', '', '', '']),
+    pad(['2', '', '', '', 'Instalação elétrica', '', '', '', '', '', '', '', '', '']),
+    pad(['2.1', '', '', '', 'Pontos de tomada', '', '', '', '', '', '', '', '', '']),
+    pad(['2.1.1', '91737', 'SINAPI', '91737SINAPI', 'Ponto de tomada 2P+T 10A', 'UN', 4, '22,00', '18,50', '40,50', '', '', '', '']),
   ];
 
-  const ws = XLSX.utils.aoa_to_sheet(linhas);
-  ws['!ref'] = XLSX.utils.encode_range({
+  const wsDados = XLSX.utils.aoa_to_sheet(dados);
+  wsDados['!ref'] = XLSX.utils.encode_range({
     s: { r: 0, c: 0 },
-    e: { r: linhas.length - 1, c: nCol - 1 }
+    e: { r: dados.length - 1, c: nCol - 1 }
   });
-  ws['!cols'] = [
-    { wch: 10 },
-    { wch: 12 },
-    { wch: 10 },
-    { wch: 14 },
-    { wch: 48 },
-    { wch: 10 },
-    { wch: 12 },
-    { wch: 14 },
-    { wch: 12 },
-    { wch: 12 },
-    { wch: 16 },
-    { wch: 14 },
-    { wch: 16 },
-    { wch: 10 }
+  wsDados['!cols'] = MODELO_ORCAMENTO_COL_WIDTHS;
+  wsDados['!autofilter'] = { ref: `A1:${XLSX.utils.encode_col(nCol - 1)}1` };
+  wsDados['!views'] = [{ state: 'frozen', ySplit: 1, topLeft: 'A2' }];
+
+  const instrucoes: (string | number)[][] = [
+    ['Como importar'],
+    [''],
+    ['Use a aba Orçamento. A primeira linha já é o cabeçalho — não renomeie as colunas.'],
+    ['Apague as linhas de exemplo e cole os dados reais a partir da linha 2.'],
+    [''],
+    ['Coluna', 'O que preencher'],
+    ['ITEM', '1 = serviço; 1.1 = subtítulo; 1.1.1 = composição'],
+    ['CÓDIGO', 'Obrigatório só na linha da composição (ex.: 88495)'],
+    ['BANCO', 'Obrigatório na composição (ex.: SINAPI)'],
+    ['CHAVE', 'Opcional (código + banco juntos)'],
+    ['DESCRIÇÃO', 'Nome do serviço, do subtítulo ou da composição'],
+    ['UNIDADE', 'Opcional (M2, UN, M3…)'],
+    ['QUANTIDADE', 'Opcional'],
+    ['MÃO DE OBRA', 'Preço unitário de mão de obra'],
+    ['MATERIAL', 'Preço unitário de material'],
+    ['MAT + M.O', 'Preço unitário total (mão de obra + material)'],
+    ['SUB… e PESO %', 'Opcionais — o sistema calcula se ficar em branco'],
+    [''],
+    ['Não use a coluna ITEM com texto. Serviço/subtítulo: preencha só ITEM + DESCRIÇÃO.'],
   ];
+  const wsHelp = XLSX.utils.aoa_to_sheet(instrucoes);
+  wsHelp['!cols'] = [{ wch: 18 }, { wch: 72 }];
+  if (!wsHelp['!merges']) wsHelp['!merges'] = [];
+  wsHelp['!merges'].push({ s: { r: 0, c: 0 }, e: { r: 0, c: 1 } });
+  wsHelp['!merges'].push({ s: { r: 2, c: 0 }, e: { r: 2, c: 1 } });
+  wsHelp['!merges'].push({ s: { r: 3, c: 0 }, e: { r: 3, c: 1 } });
+
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Orçamento');
-  XLSX.writeFile(wb, `modelo-orcamento-perfeito-${new Date().toISOString().slice(0, 10)}.xlsx`);
+  XLSX.utils.book_append_sheet(wb, wsDados, 'Orçamento');
+  XLSX.utils.book_append_sheet(wb, wsHelp, 'Instruções');
+  XLSX.writeFile(wb, `modelo-orcamento-${new Date().toISOString().slice(0, 10)}.xlsx`);
 }
 
 /** Insumos com descrição de caixinha não entram nos totais do rodapé da ficha. */
@@ -3400,6 +3408,15 @@ export function OrcamentoPageView({
     const name = String(cc.name ?? '').trim();
     return name || null;
   }, [centroCustoId, costCenters]);
+
+  const abrirModalImportarOrcamentoExcel = () => {
+    if (!centroCustoId) {
+      toast.error('Selecione um contrato antes de importar.');
+      return;
+    }
+    setImportOrcamentoModalFile(null);
+    setImportOrcamentoModalOpen(true);
+  };
 
   const [meta, setMeta] = useState<OrcamentoMeta>(sessaoVazia().meta!);
   const [cronograma, setCronograma] = useState<CronogramaPersist>(() => cronogramaVazio());
@@ -8150,6 +8167,36 @@ export function OrcamentoPageView({
                       )}
                       <button
                         type="button"
+                        onClick={abrirModalImportarOrcamentoExcel}
+                        disabled={carregandoListaOrcamentos || !centroCustoId}
+                        className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-800 shadow-sm transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-red-500 disabled:pointer-events-none disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
+                        title="Importar Excel"
+                        aria-label="Importar Excel"
+                      >
+                        {isImportandoOrcamento ? (
+                          <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                        ) : (
+                          <Upload className="h-4 w-4" aria-hidden />
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (listaOrcamentos.length === 0) {
+                            toast.error('Não há orçamento para exportar.');
+                            return;
+                          }
+                          toast.error('Abra o orçamento na lista para exportar a planilha.');
+                        }}
+                        disabled={carregandoListaOrcamentos || listaOrcamentos.length === 0}
+                        className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-800 shadow-sm transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-red-500 disabled:pointer-events-none disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
+                        title="Exportar Excel"
+                        aria-label="Exportar Excel"
+                      >
+                        <Download className="h-4 w-4" aria-hidden />
+                      </button>
+                      <button
+                        type="button"
                         onClick={criarNovoOrcamento}
                         disabled={carregandoListaOrcamentos}
                         className="inline-flex h-10 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-red-600 px-4 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 disabled:pointer-events-none disabled:opacity-50"
@@ -8175,7 +8222,7 @@ export function OrcamentoPageView({
                       <Calculator className="mx-auto mb-4 h-12 w-12 text-gray-400 dark:text-gray-500" aria-hidden />
                       <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">Nenhum orçamento ainda.</p>
                       <p className="mx-auto mt-2 max-w-md text-sm text-gray-600 dark:text-gray-400">
-                        Importe uma planilha para começar com dados prontos ou crie um orçamento em branco para montar do zero.
+                        Importe uma planilha pelo ícone de importar (o modelo Excel fica nessa janela) ou crie um orçamento em branco.
                       </p>
                     </div>
                   ) : (
@@ -11651,7 +11698,7 @@ export function OrcamentoPageView({
               <div className="flex items-center justify-between gap-4 border-b border-gray-200 pb-4 dark:border-gray-700">
                 <div className="min-w-0 flex-1">
                   <p className="text-sm text-gray-600 dark:text-gray-400">
-                    Importação de planilha de orçamento vinculada ao contrato selecionado.
+                    Baixe o modelo, preencha serviço, subtítulo e composições (ITEM, CÓDIGO, BANCO, DESCRIÇÃO e preços) e envie o Excel. Isso cria um orçamento novo neste contrato.
                   </p>
                 </div>
                 <button

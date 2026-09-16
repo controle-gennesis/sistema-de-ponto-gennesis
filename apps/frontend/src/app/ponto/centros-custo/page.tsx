@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { Building2, Plus, Search, X, Check, AlertCircle, Upload, Download, CheckCircle, FileSpreadsheet, Loader2, Filter } from 'lucide-react';
+import { Building2, Plus, Search, X, Check, AlertCircle, Upload, Download, CheckCircle, FileSpreadsheet, Loader2, Filter, ArrowRightLeft } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import {
   CadastroListEmpty,
@@ -15,6 +15,7 @@ import {
 import { RowActionMenuCell, RowActionMenuPortal, cadastroListClasses, listTableRowClasses } from '@/components/ui/RowActionMenu';
 import { useRowActionMenu } from '@/hooks/useRowActionMenu';
 import { useCadastroCrudPermissions } from '@/hooks/useCadastroCrudPermissions';
+import { usePermissions } from '@/hooks/usePermissions';
 import { useModalCloseConfirm } from '@/hooks/useModalCloseConfirm';
 import { Modal } from '@/components/ui/Modal';
 import { MainLayout } from '@/components/layout/MainLayout';
@@ -54,12 +55,26 @@ interface CostCenter {
   updatedAt: string;
 }
 
+type MigrarUnbConsorcioPreview = {
+  from: { id: string; code: string; name: string };
+  to: { id: string; code: string; name: string };
+  rmCount: number;
+  ocCount: number;
+  stockCount: number;
+  shortfallCount: number;
+  contractCount: number;
+  sampleRms: { requestNumber: string; status: string }[];
+  sampleOcs: { orderNumber: string; status: string }[];
+  applied?: { rms: number; stock: number; shortfalls: number };
+};
+
 const ESTADOS_LIST = ['DF', 'GO'];
 
 export default function CentrosCustoPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { canCreate, canEdit, canDelete } = useCadastroCrudPermissions('/ponto/centros-custo');
+  const { isAdministrator } = usePermissions();
   const showActions = canEdit || canDelete;
   const [searchTerm, setSearchTerm] = useState('');
   const [isActiveFilter, setIsActiveFilter] = useState<string>('all'); // 'all', 'true', 'false'
@@ -81,6 +96,7 @@ export default function CentrosCustoPage() {
   const [showDeleteModal, setShowDeleteModal] = useState<string | null>(null);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
+  const [isMigrarUnbOpen, setIsMigrarUnbOpen] = useState(false);
 
   const hasActiveCostCenterFilters =
     isActiveFilter !== 'all' || stateFilter !== 'all';
@@ -166,6 +182,37 @@ export default function CentrosCustoPage() {
       queryClient.invalidateQueries({ queryKey: ['cost-centers'] });
       setShowDeleteModal(null);
     }
+  });
+
+  const { data: migrarUnbPreview, isLoading: loadingMigrarUnb, error: migrarUnbPreviewError, refetch: refetchMigrarUnb } = useQuery({
+    queryKey: ['migrar-unb-consorcio'],
+    queryFn: async () => {
+      const res = await api.get('/cost-centers/admin/migrar-unb-consorcio');
+      return res.data?.data as MigrarUnbConsorcioPreview;
+    },
+    enabled: isMigrarUnbOpen && isAdministrator,
+    retry: false,
+  });
+
+  const migrarUnbMutation = useMutation({
+    mutationFn: async () => {
+      const res = await api.post('/cost-centers/admin/migrar-unb-consorcio');
+      return res.data;
+    },
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ['cost-centers-admin'] });
+      queryClient.invalidateQueries({ queryKey: ['cost-centers'] });
+      queryClient.invalidateQueries({ queryKey: ['migrar-unb-consorcio'] });
+      toast.success(res?.message || 'Migração aplicada.');
+      setIsMigrarUnbOpen(false);
+    },
+    onError: (error: any) => {
+      toast.error(
+        error.response?.data?.error ||
+          error.response?.data?.message ||
+          'Não foi possível migrar UNB para Consórcio.'
+      );
+    },
   });
 
   const resetForm = () => {
@@ -365,6 +412,92 @@ export default function CentrosCustoPage() {
             </div>
           </Modal>
 
+          <Modal
+            isOpen={isMigrarUnbOpen}
+            onClose={() => {
+              setIsMigrarUnbOpen(false);
+              migrarUnbMutation.reset();
+            }}
+            title="Migrar UNB → Consórcio"
+            size="lg"
+          >
+            <div className="space-y-4">
+              <p className="text-sm text-gray-600 dark:text-gray-400">
+                As RMs do centro <strong>UNB</strong> passam para <strong>UNB - CONSÓRCIO PREDIAL BRASILIA</strong>.
+                A coluna CONTRATO das OCs acompanha. UNB - SB e os contratos cadastrados não mudam.
+              </p>
+              {loadingMigrarUnb ? (
+                <div className="flex items-center gap-2 text-sm text-gray-500">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Conferindo o banco…
+                </div>
+              ) : migrarUnbPreviewError ? (
+                <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-800 dark:bg-red-950/30 dark:text-red-200">
+                  {(migrarUnbPreviewError as any)?.response?.data?.error ||
+                    (migrarUnbPreviewError as any)?.response?.data?.message ||
+                    'Não foi possível conferir a migração neste banco.'}
+                  <button
+                    type="button"
+                    onClick={() => refetchMigrarUnb()}
+                    className="ml-2 underline"
+                  >
+                    Tentar de novo
+                  </button>
+                </div>
+              ) : migrarUnbPreview ? (
+                <div className="space-y-3 text-sm">
+                  <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-800/60">
+                    <p><span className="text-gray-500">Origem:</span> {migrarUnbPreview.from.code} — {migrarUnbPreview.from.name}</p>
+                    <p><span className="text-gray-500">Destino:</span> {migrarUnbPreview.to.code} — {migrarUnbPreview.to.name}</p>
+                  </div>
+                  <ul className="grid grid-cols-2 gap-2">
+                    <li className="rounded-lg border border-gray-200 p-3 dark:border-gray-700">RMs: <strong>{migrarUnbPreview.rmCount}</strong></li>
+                    <li className="rounded-lg border border-gray-200 p-3 dark:border-gray-700">OCs ligadas: <strong>{migrarUnbPreview.ocCount}</strong></li>
+                    <li className="rounded-lg border border-gray-200 p-3 dark:border-gray-700">Estoque: <strong>{migrarUnbPreview.stockCount}</strong></li>
+                    <li className="rounded-lg border border-gray-200 p-3 dark:border-gray-700">Furos: <strong>{migrarUnbPreview.shortfallCount}</strong></li>
+                  </ul>
+                  <p className="text-xs text-gray-500">
+                    Contratos no centro UNB (não entram): {migrarUnbPreview.contractCount}
+                  </p>
+                  {migrarUnbPreview.sampleOcs.length > 0 && (
+                    <p className="text-xs text-gray-500">
+                      OCs recentes: {migrarUnbPreview.sampleOcs.map((o) => o.orderNumber).join(', ')}
+                    </p>
+                  )}
+                </div>
+              ) : null}
+              <div className="flex items-center justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsMigrarUnbOpen(false);
+                    migrarUnbMutation.reset();
+                  }}
+                  className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  disabled={
+                    loadingMigrarUnb ||
+                    !!migrarUnbPreviewError ||
+                    !migrarUnbPreview ||
+                    migrarUnbMutation.isPending ||
+                    (migrarUnbPreview.rmCount === 0 &&
+                      migrarUnbPreview.stockCount === 0 &&
+                      migrarUnbPreview.shortfallCount === 0)
+                  }
+                  onClick={() => migrarUnbMutation.mutate()}
+                  className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+                >
+                  {migrarUnbMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                  Aplicar no banco
+                </button>
+              </div>
+            </div>
+          </Modal>
+
           {/* Lista de centros de custo */}
           <Card className={cadastroListClasses.card}>
             <CardHeader className={cadastroListClasses.cardHeader}>
@@ -420,6 +553,16 @@ export default function CentrosCustoPage() {
                       <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
                     ) : null}
                   </button>
+                  {isAdministrator && (
+                  <button
+                    type="button"
+                    onClick={() => setIsMigrarUnbOpen(true)}
+                    className="flex h-10 items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-800 transition-colors hover:bg-amber-100 dark:border-amber-800/60 dark:bg-amber-950/30 dark:text-amber-200 dark:hover:bg-amber-900/40"
+                  >
+                    <ArrowRightLeft className="h-4 w-4 shrink-0" />
+                    <span>Migrar UNB → Consórcio</span>
+                  </button>
+                  )}
                   {canCreate && (
                   <button
                     type="button"
