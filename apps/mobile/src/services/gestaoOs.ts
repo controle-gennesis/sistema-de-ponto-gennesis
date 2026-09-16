@@ -1,6 +1,7 @@
 import api from './api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
+import { uploadMultipartFile } from '../utils/uploadMultipartFile';
 
 const COMPANY_KEY = 'gestao-os-company-id';
 
@@ -56,7 +57,9 @@ export type GestaoOsWorkOrderMobile = {
   description: string;
   locationLabel: string | null;
   dueAt: string | null;
+  requesterId?: string | null;
   assigneeId: string | null;
+  teamUserIds?: string[] | null;
   completionNote: string | null;
   checklistResponses: Array<{
     id: string;
@@ -90,6 +93,13 @@ export type GestaoOsWorkOrderMobile = {
   }> | null;
   slaOverdue?: boolean;
   slaWarning?: boolean;
+  events?: Array<{
+    id: string;
+    toStatus?: string | null;
+    note?: string | null;
+    createdAt: string;
+    actor?: { id?: string; name?: string | null } | null;
+  }> | null;
 };
 
 export const GESTAO_OS_SAFETY_CHECKLIST_ITEMS = [
@@ -148,11 +158,15 @@ export async function fetchGestaoOsAgenda(
   }
 }
 
-export async function fetchAssignedWorkOrders() {
-  const { qs, headers } = await withCompany({ assignedToMe: 'true', limit: '100' });
+export async function fetchMyWorkOrders() {
+  // Abertos por mim + atribuídos a mim (acompanhar andamento e executar)
+  const { qs, headers } = await withCompany({ involved: 'true', limit: '100' });
   const res = await api.get(`/api/gestao-os${qs}`, { headers });
   return parseJson(res) as Promise<GestaoOsWorkOrderMobile[]>;
 }
+
+/** @deprecated use fetchMyWorkOrders */
+export const fetchAssignedWorkOrders = fetchMyWorkOrders;
 
 export async function fetchWorkOrder(id: string) {
   const { qs, headers } = await withCompany();
@@ -267,14 +281,12 @@ async function enqueueOffline(job: OfflineJob) {
 }
 
 async function uploadAttachmentOnline(file: { uri: string; name: string; type: string }) {
-  const form = new FormData();
-  form.append('file', {
-    uri: file.uri,
-    name: file.name,
-    type: file.type
-  } as unknown as Blob);
-  const res = await api.post('/api/gestao-os/upload-attachment', form);
-  return parseJson(res) as Promise<{ url: string; name?: string; mimeType?: string }>;
+  return uploadMultipartFile<{ url: string; name?: string; mimeType?: string }>({
+    path: '/api/gestao-os/upload-attachment',
+    fieldName: 'file',
+    method: 'POST',
+    file
+  });
 }
 
 async function hydrateLocalMedia<T>(value: T): Promise<T> {
@@ -448,4 +460,46 @@ export async function createWorkOrderFromQr(input: {
     }
     throw err;
   }
+}
+
+export type GestaoOsFieldPlace = {
+  id: string;
+  name: string;
+  placeId: string;
+  sectorId: string;
+  sectorName: string;
+  buildingId: string;
+  buildingName: string;
+  address?: string | null;
+};
+
+export async function fetchFieldPlaces(): Promise<GestaoOsFieldPlace[]> {
+  const { qs, headers } = await withCompany();
+  const res = await api.get(`/api/gestao-os/cadastros/field-buildings${qs}`, { headers });
+  const data = await parseJson(res);
+  return Array.isArray(data) ? data : [];
+}
+
+export async function fetchGestaoOsCategories(): Promise<Array<{ name: string }>> {
+  const { qs, headers } = await withCompany();
+  const res = await api.get(`/api/gestao-os/cadastros/categories${qs}`, { headers });
+  const data = await parseJson(res);
+  if (Array.isArray(data)) return data;
+  if (Array.isArray((data as { items?: unknown[] })?.items)) {
+    return (data as { items: Array<{ name: string }> }).items;
+  }
+  return [];
+}
+
+export async function createUnplannedWorkOrder(input: {
+  category: string;
+  description: string;
+  buildingId: string;
+  sectorId?: string;
+  placeId?: string;
+}) {
+  return createWorkOrderFromQr({
+    ...input,
+    origin: 'UNPLANNED',
+  });
 }

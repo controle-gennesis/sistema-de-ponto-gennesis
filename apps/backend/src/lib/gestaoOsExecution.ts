@@ -1,5 +1,13 @@
 import { GestaoOsStatus } from '@prisma/client';
 
+/** PostgreSQL INTEGER / Prisma Int — milissegundos cabem ~24,8 dias. */
+export const GESTAO_OS_EXECUTION_MS_MAX = 2_147_483_647;
+
+export function clampExecutionMs(ms: number): number {
+  if (!Number.isFinite(ms) || ms < 0) return 0;
+  return Math.min(GESTAO_OS_EXECUTION_MS_MAX, Math.round(ms));
+}
+
 export function isExecutionRunningStatus(status: GestaoOsStatus | string): boolean {
   return status === 'IN_PROGRESS';
 }
@@ -17,17 +25,17 @@ export function applyExecutionClock(input: {
   lastExecutionResumeAt: Date | null;
 } {
   const now = input.now;
-  let executionMs = Math.max(0, Math.round(Number(input.executionMs) || 0));
+  let executionMs = clampExecutionMs(Number(input.executionMs) || 0);
   const startedAt = toDate(input.startedAt);
   let lastResume = toDate(input.lastExecutionResumeAt);
   const wasRunning = isExecutionRunningStatus(input.currentStatus);
   const willRun = isExecutionRunningStatus(input.nextStatus);
 
   if (wasRunning && lastResume) {
-    executionMs += Math.max(0, now.getTime() - lastResume.getTime());
+    executionMs = clampExecutionMs(executionMs + Math.max(0, now.getTime() - lastResume.getTime()));
     lastResume = null;
   } else if (wasRunning && !lastResume && startedAt && executionMs === 0) {
-    executionMs += Math.max(0, now.getTime() - startedAt.getTime());
+    executionMs = clampExecutionMs(Math.max(0, now.getTime() - startedAt.getTime()));
   }
 
   if (willRun) {
@@ -49,17 +57,17 @@ export function liveExecutionMs(input: {
   completedAt?: Date | string | null;
   now?: Date;
 }): number {
-  const stored = Math.max(0, Math.round(Number(input.executionMs) || 0));
+  const stored = clampExecutionMs(Number(input.executionMs) || 0);
   const now = input.now ?? new Date();
   if (isExecutionRunningStatus(input.status) && input.lastExecutionResumeAt) {
     const resume = toDate(input.lastExecutionResumeAt);
-    if (resume) return stored + Math.max(0, now.getTime() - resume.getTime());
+    if (resume) return clampExecutionMs(stored + Math.max(0, now.getTime() - resume.getTime()));
   }
   if (stored > 0) return stored;
   const started = toDate(input.startedAt);
   const ended = toDate(input.completedAt);
   if (started && ended && ended.getTime() > started.getTime()) {
-    return ended.getTime() - started.getTime();
+    return clampExecutionMs(ended.getTime() - started.getTime());
   }
   return stored;
 }

@@ -813,4 +813,42 @@ export class AuthController {
       return next(error);
     }
   }
+
+  /** Foto de confronto do ponto — o próprio usuário pode cadastrar (não altera o avatar). */
+  async uploadMyFacePhoto(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = req.user!.id;
+      const file = (req as unknown as Express.Request & { file?: Express.Multer.File }).file;
+      if (!file?.buffer) throw createError('Nenhuma imagem enviada', 400);
+
+      const mime = String(file.mimetype || '').toLowerCase();
+      const name = String(file.originalname || '').toLowerCase();
+      const imageOk =
+        mime.startsWith('image/') ||
+        ['.jpg', '.jpeg', '.png', '.webp'].some((ext) => name.endsWith(ext));
+      if (!imageOk) throw createError('Envie uma imagem (JPG, PNG ou WEBP)', 400);
+
+      const uploadResult = await chatUploadService.uploadFile(file, userId);
+      const updated = await prisma.user.update({
+        where: { id: userId },
+        data: {
+          facePhotoUrl: uploadResult.url,
+          facePhotoKey: uploadResult.key,
+        },
+        select: {
+          id: true,
+          facePhotoUrl: true,
+          facePhotoKey: true,
+        },
+      });
+
+      return res.json({
+        success: true,
+        data: updated,
+        message: 'Foto do ponto atualizada',
+      });
+    } catch (error) {
+      return next(error);
+    }
+  }
 }

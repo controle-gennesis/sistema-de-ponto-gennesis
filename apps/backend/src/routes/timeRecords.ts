@@ -11,6 +11,9 @@ router.use(authenticate);
 
 // Rotas para funcionários
 router.post('/punch', uploadPhoto.single('photo'), handleUploadError, timeRecordController.punchInOut);
+router.post('/face-check', uploadPhoto.single('photo'), handleUploadError, timeRecordController.faceCheck);
+router.get('/punch-policy', timeRecordController.getPunchPolicy);
+router.post('/resolve-punch-qr', timeRecordController.resolvePunchQr);
 router.get('/my-records', timeRecordController.getMyRecords);
 router.get('/my-records/today', timeRecordController.getTodayRecords);
 router.get('/my-records/period', timeRecordController.getRecordsByPeriod);

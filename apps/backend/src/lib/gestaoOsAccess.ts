@@ -186,17 +186,35 @@ export function isGestaoOsManager(ctx: GestaoOsAccessContext): boolean {
   return ctx.isAdmin || ctx.canAnalisar || ctx.canCadastros;
 }
 
+/** Responsável ou membro da equipe do chamado (execução em campo). */
+export function isWorkOrderFieldExecutor(
+  userId: string,
+  workOrder: { assigneeId: string | null; teamUserIds?: unknown }
+): boolean {
+  if (workOrder.assigneeId === userId) return true;
+  const team = Array.isArray(workOrder.teamUserIds)
+    ? workOrder.teamUserIds.map((id) => String(id))
+    : [];
+  return team.includes(userId);
+}
+
 export function assertCanTransition(
   ctx: GestaoOsAccessContext,
   from: GestaoOsStatus,
   to: GestaoOsStatus,
-  _workOrder: { requesterId: string; assigneeId: string | null; companyId: string | null }
+  workOrder: {
+    requesterId: string;
+    assigneeId: string | null;
+    companyId: string | null;
+    teamUserIds?: unknown;
+  }
 ) {
   if (ctx.isAdmin) return;
 
   if (to === 'CANCELLED') {
     if (ctx.canAnalisar) return;
-    if (from === 'OPEN') return; // quem abriu / tem módulo pode cancelar chamado aberto
+    // Solicitante pode cancelar só enquanto o chamado ainda está aberto
+    if (from === 'OPEN' && workOrder.requesterId === ctx.userId) return;
     throw createError('Sem permissão para cancelar. Libere «Analisar OS» em Controle.', 403);
   }
 
@@ -208,6 +226,8 @@ export function assertCanTransition(
     throw createError('Sem permissão para analisar/aprovar. Libere «Analisar OS» em Controle.', 403);
   }
 
+  // Execução em campo: analista (supervisão) ou responsável/equipe do chamado.
+  // Solicitante sozinho — mesmo com «Executar OS» — não muda status de execução.
   if (
     (from === 'APPROVED' && to === 'IN_PROGRESS') ||
     (from === 'SAFETY_CHECK' && to === 'IN_PROGRESS') ||
@@ -215,14 +235,17 @@ export function assertCanTransition(
     (from === 'WAITING_PARTS' && (to === 'IN_PROGRESS' || to === 'COMPLETED')) ||
     (from === 'REWORK' && to === 'IN_PROGRESS')
   ) {
-    if (ctx.canExecutar || ctx.canAnalisar) return;
-    if (_workOrder.assigneeId === ctx.userId) return;
-    throw createError('Sem permissão para executar. Libere «Executar OS» em Controle.', 403);
+    if (ctx.canAnalisar) return;
+    if (isWorkOrderFieldExecutor(ctx.userId, workOrder)) return;
+    throw createError(
+      'Sem permissão para executar este chamado. É preciso ser o técnico responsável (ou da equipe).',
+      403
+    );
   }
 
   if (from === 'COMPLETED' && (to === 'CLOSED' || to === 'REWORK')) {
     if (ctx.canEncerrar || ctx.canAnalisar) return;
-    if (to === 'CLOSED' && _workOrder.requesterId === ctx.userId) return;
+    if (to === 'CLOSED' && workOrder.requesterId === ctx.userId) return;
     throw createError('Sem permissão para encerrar. Libere «Encerrar OS» em Controle.', 403);
   }
 

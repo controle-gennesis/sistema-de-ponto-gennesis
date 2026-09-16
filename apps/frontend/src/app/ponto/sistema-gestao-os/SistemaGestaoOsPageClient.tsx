@@ -102,12 +102,32 @@ function allowedTransitionsByPermission(opts: {
   canAnalisar: boolean;
   canExecutar: boolean;
   canEncerrar: boolean;
+  userId?: string | null;
+  requesterId?: string | null;
+  assigneeId?: string | null;
+  teamUserIds?: unknown;
 }): GestaoOsStatus[] {
-  const { from, next, isAdmin, canAnalisar, canExecutar, canEncerrar } = opts;
+  const {
+    from,
+    next,
+    isAdmin,
+    canAnalisar,
+    canEncerrar,
+    userId,
+    requesterId,
+    assigneeId,
+    teamUserIds
+  } = opts;
   if (isAdmin) return next;
 
+  const team = Array.isArray(teamUserIds) ? teamUserIds.map((id) => String(id)) : [];
+  const isFieldExecutor =
+    Boolean(userId) && (assigneeId === userId || team.includes(String(userId)));
+
   return next.filter((to) => {
-    if (to === 'CANCELLED') return canAnalisar || from === 'OPEN';
+    if (to === 'CANCELLED') {
+      return canAnalisar || (from === 'OPEN' && requesterId === userId);
+    }
     if (from === 'OPEN' && to === 'UNDER_REVIEW') return canAnalisar;
     if (from === 'UNDER_REVIEW' && to === 'APPROVED') return canAnalisar;
     if (
@@ -117,9 +137,11 @@ function allowedTransitionsByPermission(opts: {
       (from === 'WAITING_PARTS' && (to === 'IN_PROGRESS' || to === 'COMPLETED')) ||
       (from === 'REWORK' && to === 'IN_PROGRESS')
     ) {
-      return canExecutar || canAnalisar;
+      return canAnalisar || isFieldExecutor;
     }
-    if (from === 'COMPLETED' && (to === 'CLOSED' || to === 'REWORK')) return canEncerrar || canAnalisar;
+    if (from === 'COMPLETED' && (to === 'CLOSED' || to === 'REWORK')) {
+      return canEncerrar || canAnalisar || (to === 'CLOSED' && requesterId === userId);
+    }
     return canAnalisar;
   });
 }
@@ -886,7 +908,11 @@ export default function SistemaGestaoOsPageClient() {
         isAdmin,
         canAnalisar,
         canExecutar,
-        canEncerrar
+        canEncerrar,
+        userId: user?.id,
+        requesterId: detail.requesterId,
+        assigneeId: detail.assigneeId,
+        teamUserIds: detail.teamUserIds
       })
     : [];
 
@@ -924,14 +950,20 @@ export default function SistemaGestaoOsPageClient() {
   const checklistEditable = Boolean(
     detail &&
       checklistDraft.length > 0 &&
-      (isAdmin || canExecutar) &&
+      (isAdmin ||
+        canAnalisar ||
+        detail.assigneeId === user.id ||
+        (Array.isArray(detail.teamUserIds) && detail.teamUserIds.includes(user.id))) &&
       detail.status !== 'CLOSED' &&
       detail.status !== 'CANCELLED'
   );
 
   const safetyEditable = Boolean(
     detail &&
-      (isAdmin || canExecutar || canAnalisar) &&
+      (isAdmin ||
+        canAnalisar ||
+        detail.assigneeId === user.id ||
+        (Array.isArray(detail.teamUserIds) && detail.teamUserIds.includes(user.id))) &&
       (detail.status === 'APPROVED' || detail.status === 'SAFETY_CHECK')
   );
 
@@ -973,7 +1005,7 @@ export default function SistemaGestaoOsPageClient() {
             </h1>
             <p className="mt-2 text-sm text-gray-600 dark:text-gray-400 sm:text-base">
               Visão geral operacional: acompanhe todos os chamados por fase, filtre e avance o
-              fluxo. Para abrir um chamado, use Meus Chamados.
+              fluxo.
             </p>
           </div>
 

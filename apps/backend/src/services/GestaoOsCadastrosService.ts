@@ -1230,6 +1230,40 @@ export class GestaoOsCadastrosService {
       ...(map.get(row.id) || {})
     }));
   }
+
+  async listFieldBuildings(_userId: string) {
+    const places = await prisma.gestaoOsPlace.findMany({
+      where: {
+        isActive: true,
+        sector: { isActive: true, building: { isActive: true } },
+      },
+      select: {
+        id: true,
+        name: true,
+        sector: {
+          select: {
+            id: true,
+            name: true,
+            building: {
+              select: { id: true, name: true, address: true },
+            },
+          },
+        },
+      },
+      orderBy: [{ name: 'asc' }],
+      take: 500,
+    });
+    return places.map((place) => ({
+      id: place.id,
+      name: place.name,
+      placeId: place.id,
+      sectorId: place.sector.id,
+      sectorName: place.sector.name,
+      buildingId: place.sector.building.id,
+      buildingName: place.sector.building.name,
+      address: place.sector.building.address ?? null,
+    }));
+  }
 }
 
 export const gestaoOsCadastrosService = new GestaoOsCadastrosService();

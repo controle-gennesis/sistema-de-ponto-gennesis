@@ -761,8 +761,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             href: '/ponto/aprovacoes',
             icon: FileCheck,
             description: 'Caixa de entrada de aprovações',
-            // Aparece automaticamente para quem é gestor (decide Solicitações Gerais)
-            // ou tem a permissão «Aprovar Espelho da Nota Fiscal» (Controle).
+            // Aparece para quem aprova algum bloco (SI via Controle, ou RM/OC/FD/etc.).
             permission:
               canAccessDpApproverPages ||
               canApproveFd ||

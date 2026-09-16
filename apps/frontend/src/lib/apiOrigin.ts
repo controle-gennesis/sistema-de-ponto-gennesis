@@ -8,7 +8,9 @@ export function getApiOrigin(): string {
 /** URL absoluta para caminhos retornados pela API (ex.: `/uploads/...`). */
 export function absoluteUploadUrl(relative: string): string {
   if (!relative) return '';
-  if (relative.startsWith('http')) return relative;
+  if (relative.startsWith('http') || relative.startsWith('data:')) return relative;
+  // Placeholders do app mobile (ex.: mobile:assinatura-tecnico) não são arquivos
+  if (/^(mobile|app):/i.test(relative.trim())) return '';
   const origin = getApiOrigin();
   return `${origin}${relative.startsWith('/') ? '' : '/'}${relative}`;
 }

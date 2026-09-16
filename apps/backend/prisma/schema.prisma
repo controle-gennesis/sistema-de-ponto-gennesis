@@ -24,6 +24,10 @@ model User {
   profilePhotoUrl   String?
   /// Chave no S3 (quando usar armazenamento em nuvem)
   profilePhotoKey   String?
+  /// Foto sÃ©ria usada no confronto facial do ponto (nÃ£o Ã© o avatar)
+  facePhotoUrl      String?
+  /// Chave no S3 da foto de confronto do ponto
+  facePhotoKey      String?
   /// Ãltimo login bem-sucedido
   lastLoginAt       DateTime?
   /// Ãltima atividade observada (page view / heartbeat)
@@ -230,6 +234,13 @@ model TimeRecord {
   longitude              Float?
   photoUrl               String?
   photoKey               String? // Chave do S3
+  /// Resultado do confronto facial com a foto do painel
+  faceMatchStatus        String?
+  faceMatchSimilarity    Float?
+  /// QR de ponto associado à localidade
+  punchQrToken           String?
+  punchLocationId        String?
+  punchLocationName      String?
   isValid                Boolean        @default(true)
   reason                 String? // Motivo se invÃ¡lido
   observation            String? // ObservaÃ§Ã£o do funcionÃ¡rio
@@ -357,6 +368,10 @@ model CompanySettings {
   geofenceBlockOutside    Boolean @default(true)
   /// Exige que o dispositivo envie coordenadas para registrar o ponto
   geofenceRequireLocation Boolean @default(true)
+  /// Confronta a foto do ponto com a foto cadastrada no painel
+  requireFaceMatch        Boolean @default(true)
+  /// Exige leitura do QR da localidade no registro de ponto
+  requirePunchQr          Boolean @default(false)
   vacationDaysPerYear  Int      @default(30)
   /// Prazo informado ao solicitante de combustÃ­vel (horas Ãºteis atÃ© atendimento do Suprimentos)
   fuelSuppliesSlaHours Int      @default(24)

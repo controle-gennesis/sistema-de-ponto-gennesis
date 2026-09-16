@@ -1310,6 +1310,12 @@ async function ensureUserActivityTracking(prisma: PrismaClient): Promise<void> {
     await prisma.$executeRawUnsafe(
       `ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "lastActivityLabel" TEXT;`
     );
+    await prisma.$executeRawUnsafe(
+      `ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "facePhotoUrl" TEXT;`
+    );
+    await prisma.$executeRawUnsafe(
+      `ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "facePhotoKey" TEXT;`
+    );
   }
 
   if (!(await tableExists(prisma, 'user_login_events'))) {
@@ -1851,6 +1857,37 @@ async function ensureCaixinhaPurchasesTable(prisma: PrismaClient): Promise<void>
   `);
 }
 
+async function ensurePunchPocColumns(prisma: PrismaClient): Promise<void> {
+  if (await tableExists(prisma, 'company_settings')) {
+    if (!(await columnExists(prisma, 'company_settings', 'requireFaceMatch'))) {
+      await prisma.$executeRawUnsafe(
+        `ALTER TABLE "company_settings" ADD COLUMN IF NOT EXISTS "requireFaceMatch" BOOLEAN NOT NULL DEFAULT false;`
+      );
+    }
+    if (!(await columnExists(prisma, 'company_settings', 'requirePunchQr'))) {
+      await prisma.$executeRawUnsafe(
+        `ALTER TABLE "company_settings" ADD COLUMN IF NOT EXISTS "requirePunchQr" BOOLEAN NOT NULL DEFAULT false;`
+      );
+    }
+  }
+
+  if (!(await tableExists(prisma, 'time_records'))) return;
+  const punchCols: Array<[string, string]> = [
+    ['faceMatchStatus', 'TEXT'],
+    ['faceMatchSimilarity', 'DOUBLE PRECISION'],
+    ['punchQrToken', 'TEXT'],
+    ['punchLocationId', 'TEXT'],
+    ['punchLocationName', 'TEXT'],
+  ];
+  for (const [name, type] of punchCols) {
+    if (!(await columnExists(prisma, 'time_records', name))) {
+      await prisma.$executeRawUnsafe(
+        `ALTER TABLE "time_records" ADD COLUMN IF NOT EXISTS "${name}" ${type};`
+      );
+    }
+  }
+}
+
 export async function ensureProductionSchema(prisma: PrismaClient): Promise<void> {
   try {
     await ensureUnaccentExtension(prisma);
@@ -1892,6 +1929,7 @@ export async function ensureProductionSchema(prisma: PrismaClient): Promise<void
     await ensureQuoteMapUnitPricePrecision(prisma);
     await ensureToolRentalRequestsSchema(prisma);
     await ensureGestaoOsSchema(prisma);
+    await ensurePunchPocColumns(prisma);
     await ensureSupportTicketsSchema(prisma);
     await ensureJuridicoProcessosTables(prisma);
     await ensureOcsBoletoPixExtrasTable(prisma);

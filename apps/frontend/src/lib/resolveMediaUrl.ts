@@ -11,11 +11,32 @@ function isBackendUploadPath(path: string): boolean {
   return path.startsWith('/uploads') || path.startsWith('/api/');
 }
 
+/** Placeholder legado do app (`mobile:assinatura-tecnico`) — não é arquivo real. */
+export function isGestaoOsMediaPlaceholder(url: string | null | undefined): boolean {
+  const u = String(url || '').trim();
+  if (!u) return true;
+  if (/^mobile:/i.test(u)) return true;
+  if (/^app:/i.test(u)) return true;
+  return false;
+}
+
+/** URL que pode ser aberta/baixada (upload, http ou data URL). */
+export function isOpenableMediaUrl(url: string | null | undefined): boolean {
+  const u = String(url || '').trim();
+  if (!u || isGestaoOsMediaPlaceholder(u)) return false;
+  if (/^data:image\//i.test(u)) return true;
+  if (/^https?:\/\//i.test(u)) return true;
+  if (u.startsWith('/uploads') || u.startsWith('/api/')) return true;
+  return false;
+}
+
 /** URLs relativas `/uploads/...` → API; arquivos do /public do Next → frontend. */
 export function resolveApiMediaUrl(url: string | null | undefined): string | undefined {
   if (url == null || String(url).trim() === '') return undefined;
   const u = String(url).trim();
+  if (isGestaoOsMediaPlaceholder(u)) return undefined;
   if (/^https?:\/\//i.test(u)) return u;
+  if (/^data:image\//i.test(u)) return u;
   if (u.startsWith('/')) {
     if (isBackendUploadPath(u)) {
       const apiOrigin = API_BASE_URL.replace(/\/api\/?$/i, '').replace(/\/$/, '');
@@ -27,7 +48,7 @@ export function resolveApiMediaUrl(url: string | null | undefined): string | und
         : FRONTEND_PUBLIC_ORIGIN.replace(/\/$/, '');
     return `${feOrigin}${u}`;
   }
-  return u;
+  return undefined;
 }
 
 export function hasFuelStoredPhoto(

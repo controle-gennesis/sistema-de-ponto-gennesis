@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Crosshair, MapPin, Plus, ShieldCheck, Trash2, X } from 'lucide-react';
+import { Crosshair, MapPin, Plus, Printer, ShieldCheck, Trash2, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
@@ -13,6 +13,12 @@ import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
 import { cadastroListClasses } from '@/components/ui/RowActionMenu';
 import { Loading } from '@/components/ui/Loading';
 import { FORM_FIELD_INPUT_CLS } from '@/lib/formFieldUi';
+import {
+  newPunchQrToken,
+  printPunchLocationQr,
+  punchQrDataUrl,
+  punchQrPayload,
+} from '@/lib/punchLocationQr';
 import api from '@/lib/api';
 
 type GeofenceLocation = {
@@ -21,6 +27,7 @@ type GeofenceLocation = {
   latitude: number;
   longitude: number;
   radius: number;
+  qrToken?: string | null;
 };
 
 type CompanySettings = {
@@ -32,12 +39,16 @@ type CompanySettings = {
   geofenceEnabled: boolean;
   geofenceBlockOutside: boolean;
   geofenceRequireLocation: boolean;
+  requireFaceMatch?: boolean;
+  requirePunchQr?: boolean;
 };
 
 type GeofenceForm = {
   geofenceEnabled: boolean;
   geofenceBlockOutside: boolean;
   geofenceRequireLocation: boolean;
+  requireFaceMatch: boolean;
+  requirePunchQr: boolean;
   locations: GeofenceLocation[];
 };
 
@@ -75,6 +86,7 @@ function seedLocations(settings: CompanySettings): GeofenceLocation[] {
       latitude: Number(loc.latitude),
       longitude: Number(loc.longitude),
       radius: Math.max(10, Number(loc.radius) || settings.maxDistanceMeters || 1000),
+      qrToken: loc.qrToken || null,
     }));
   }
   return [
@@ -131,6 +143,13 @@ export default function ConfiguracoesPontoPage() {
   const [form, setForm] = useState<GeofenceForm | null>(null);
   const [locationModalOpen, setLocationModalOpen] = useState(false);
   const [locationDraft, setLocationDraft] = useState<LocationDraft>(() => emptyLocationDraft());
+  const [punchQrPreview, setPunchQrPreview] = useState<{
+    locationId: string;
+    name: string;
+    payload: string;
+    dataUrl: string;
+  } | null>(null);
+  const [punchQrLoadingId, setPunchQrLoadingId] = useState<string | null>(null);
 
   const handleLogout = () => {
     localStorage.removeItem('token');
@@ -161,6 +180,8 @@ export default function ConfiguracoesPontoPage() {
       geofenceEnabled: !!settings.geofenceEnabled,
       geofenceBlockOutside: settings.geofenceBlockOutside ?? true,
       geofenceRequireLocation: settings.geofenceRequireLocation ?? true,
+      requireFaceMatch: !!settings.requireFaceMatch,
+      requirePunchQr: !!settings.requirePunchQr,
       locations: seedLocations(settings),
     });
   }, [settings, form]);
@@ -172,6 +193,8 @@ export default function ConfiguracoesPontoPage() {
         geofenceEnabled: payload.geofenceEnabled,
         geofenceBlockOutside: payload.geofenceBlockOutside,
         geofenceRequireLocation: payload.geofenceRequireLocation,
+        requireFaceMatch: true,
+        requirePunchQr: payload.requirePunchQr,
         geofenceLocations: payload.locations,
         maxDistanceMeters: first?.radius ?? 1000,
         defaultLatitude: first?.latitude,
@@ -259,6 +282,7 @@ export default function ConfiguracoesPontoPage() {
       latitude,
       longitude,
       radius: Math.round(radius),
+      qrToken: form.locations.find((loc) => loc.id === locationDraft.id)?.qrToken || null,
     };
 
     setForm({
@@ -277,6 +301,45 @@ export default function ConfiguracoesPontoPage() {
       return;
     }
     setForm({ ...form, locations: form.locations.filter((loc) => loc.id !== id) });
+  };
+
+  const openPunchQr = async (loc: GeofenceLocation) => {
+    if (!form) return;
+    setPunchQrLoadingId(loc.id);
+    try {
+      let token = String(loc.qrToken || '').trim();
+      if (!token) {
+        token = newPunchQrToken();
+        setForm({
+          ...form,
+          locations: form.locations.map((item) =>
+            item.id === loc.id ? { ...item, qrToken: token } : item
+          ),
+        });
+        toast('Token gerado — salve as configurações para ativar no app.', { icon: 'ℹ️' });
+      }
+      const payload = punchQrPayload(token);
+      const dataUrl = await punchQrDataUrl(token);
+      setPunchQrPreview({
+        locationId: loc.id,
+        name: loc.name,
+        payload,
+        dataUrl,
+      });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Não foi possível gerar o QR.');
+    } finally {
+      setPunchQrLoadingId(null);
+    }
+  };
+
+  const handlePrintPunchQr = () => {
+    if (!punchQrPreview) return;
+    try {
+      printPunchLocationQr(punchQrPreview);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Não foi possível imprimir.');
+    }
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -354,6 +417,21 @@ export default function ConfiguracoesPontoPage() {
                     onChange={(value) => setForm({ ...form, geofenceRequireLocation: value })}
                   />
 
+                  <ToggleRow
+                    title="Confrontar biometria facial"
+                    description="Obrigatório: toda batida tira uma selfie e compara com a foto de ponto cadastrada na ficha do colaborador (três pontos → Definir foto do ponto). A foto de perfil não entra nesse confronto. Sem a foto de ponto, ou se o rosto não bater, a batida é recusada. O QR da localidade continua disponível abaixo."
+                    checked
+                    disabled
+                    onChange={() => undefined}
+                  />
+
+                  <ToggleRow
+                    title="Exigir QR Code da localidade"
+                    description="O colaborador só registra o ponto depois de ler o QR associado ao local de prestação do serviço."
+                    checked={form.requirePunchQr}
+                    onChange={(value) => setForm({ ...form, requirePunchQr: value })}
+                  />
+
                   <div
                     className={`rounded-lg border border-gray-200 p-4 dark:border-gray-700 ${
                       !form.geofenceEnabled ? 'opacity-60' : ''
@@ -401,17 +479,30 @@ export default function ConfiguracoesPontoPage() {
                               <p className="truncate text-xs text-gray-500 dark:text-gray-400">
                                 {loc.latitude.toFixed(6)}, {loc.longitude.toFixed(6)} · raio{' '}
                                 {loc.radius} m
+                                {loc.qrToken ? ` · QR gennesis-punch:${loc.qrToken}` : ''}
                               </p>
                             </button>
-                            <button
-                              type="button"
-                              disabled={!form.geofenceEnabled}
-                              onClick={() => removeLocation(loc.id)}
-                              className="rounded-lg p-2 text-gray-400 hover:bg-rose-50 hover:text-rose-600 disabled:cursor-not-allowed dark:hover:bg-rose-950/30 dark:hover:text-rose-300"
-                              aria-label={`Remover ${loc.name}`}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
+                            <div className="flex shrink-0 items-center gap-1">
+                              <button
+                                type="button"
+                                disabled={!form.geofenceEnabled || punchQrLoadingId === loc.id}
+                                onClick={() => void openPunchQr(loc)}
+                                className="rounded-lg p-2 text-gray-400 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed dark:hover:bg-red-950/30 dark:hover:text-red-300"
+                                aria-label={`Imprimir QR de ${loc.name}`}
+                                title="Imprimir token QR"
+                              >
+                                <Printer className="h-4 w-4" />
+                              </button>
+                              <button
+                                type="button"
+                                disabled={!form.geofenceEnabled}
+                                onClick={() => removeLocation(loc.id)}
+                                className="rounded-lg p-2 text-gray-400 hover:bg-rose-50 hover:text-rose-600 disabled:cursor-not-allowed dark:hover:bg-rose-950/30 dark:hover:text-rose-300"
+                                aria-label={`Remover ${loc.name}`}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </div>
                           </li>
                         ))}
                       </ul>
@@ -548,6 +639,58 @@ export default function ConfiguracoesPontoPage() {
                 >
                   Cancelar
                 </button>
+              </div>
+            </div>
+          </AppModalOverlay>
+        ) : null}
+
+        {punchQrPreview ? (
+          <AppModalOverlay className="app-modal-overlay fixed inset-0 z-[2100] flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/50" onClick={() => setPunchQrPreview(null)} />
+            <div className="relative w-full max-w-md overflow-hidden rounded-lg bg-white shadow-xl dark:bg-gray-800">
+              <div className="flex items-center justify-between border-b border-gray-200 p-5 dark:border-gray-700">
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                  QR — {punchQrPreview.name}
+                </h2>
+                <button
+                  type="button"
+                  onClick={() => setPunchQrPreview(null)}
+                  className="rounded-lg p-2 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              <div className="space-y-4 p-5 text-center">
+                <p className="text-sm text-gray-600 dark:text-gray-300">
+                  Imprima ou baixe este QR para colar na localidade. O colaborador lê no app ao
+                  registrar o ponto.
+                </p>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={punchQrPreview.dataUrl}
+                  alt={`QR ${punchQrPreview.name}`}
+                  className="mx-auto h-56 w-56 rounded-lg border border-gray-200 bg-white p-2 dark:border-gray-700"
+                />
+                <p className="break-all font-mono text-xs text-gray-500 dark:text-gray-400">
+                  {punchQrPreview.payload}
+                </p>
+                <div className="flex flex-wrap justify-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handlePrintPunchQr}
+                    className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-red-700"
+                  >
+                    <Printer className="h-4 w-4" />
+                    Imprimir
+                  </button>
+                  <a
+                    href={punchQrPreview.dataUrl}
+                    download={`qr-ponto-${punchQrPreview.name.replace(/\s+/g, '-').toLowerCase()}.png`}
+                    className="inline-flex items-center rounded-lg border border-gray-300 px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
+                  >
+                    Baixar PNG
+                  </a>
+                </div>
               </div>
             </div>
           </AppModalOverlay>

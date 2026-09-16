@@ -386,7 +386,7 @@ async function pickAttachment(): Promise<Attachment | null> {
 export default function DpRequestsScreen() {
   const navigation = useNavigation();
   const navState = navigation.getState?.() as { type?: string } | undefined;
-  const isTabScreen = navState?.type === 'tab';
+  const isTabScreen = navState?.type === 'tab' || navState?.type === 'material-top-tab';
   const { colors, isDark } = useTheme();
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -938,18 +938,18 @@ export default function DpRequestsScreen() {
   return (
     <View style={styles.safeArea}>
       <StatusBar style={isDark ? 'light' : 'dark'} />
-      <AppHeader
-        showBack={!isTabScreen}
-        title={!isTabScreen ? 'Solicitações Internas' : undefined}
-        onBack={() => navigation.goBack()}
-        rightAction={
-          !isTabScreen ? (
+      {!isTabScreen ? (
+        <AppHeader
+          showBack
+          title="Solicitações Internas"
+          onBack={() => navigation.goBack()}
+          rightAction={
             <TouchableOpacity onPress={openCreate} hitSlop={8} accessibilityLabel="Nova">
               <Plus size={22} color={colors.text} strokeWidth={2.4} />
             </TouchableOpacity>
-          ) : undefined
-        }
-      />
+          }
+        />
+      ) : null}
 
       <ScrollView
         style={styles.container}

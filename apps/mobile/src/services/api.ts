@@ -199,14 +199,16 @@ export const api = {
   },
 
   patch: async (url: string, data?: any, options?: RequestOptions): Promise<Response> => {
+    const isFormData = data instanceof FormData;
+
     return apiRequest(buildApiUrl(url), {
       ...options,
       method: 'PATCH',
       headers: {
-        'Content-Type': 'application/json',
+        ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
         ...options?.headers,
       },
-      body: data ? JSON.stringify(data) : undefined,
+      body: isFormData ? data : data ? JSON.stringify(data) : undefined,
     });
   },
 

@@ -33,6 +33,7 @@ router.get('/me', authController.getProfile);
 router.put('/profile', authController.updateProfile);
 router.patch('/me/photo', uploadAvatar.single('profileAvatar'), authController.uploadProfilePhoto);
 router.delete('/me/photo', authController.removeProfilePhoto);
+router.patch('/me/face-photo', uploadAvatar.single('facePhoto'), authController.uploadMyFacePhoto);
 router.put('/change-password', authController.changePassword);
 router.post(
   '/impersonate/:userId',

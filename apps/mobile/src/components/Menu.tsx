@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+﻿import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -8,26 +8,19 @@ import {
   ScrollView,
   Animated,
   Easing,
-  Pressable,
   Alert,
   Dimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import {
-  X,
-  Home,
-  Moon,
-  Sun,
-  LogOut,
-  Calendar,
-  LayoutGrid,
-} from 'lucide-react-native';
+import { Home, Moon, Sun, LogOut, X, Clock, Calendar, Sparkles, Wrench } from 'lucide-react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useQueryClient } from '@tanstack/react-query';
 import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../context/AuthContext';
-import { openFavoriteKanbanBoard } from '../lib/openFavoriteKanbanBoard';
+import { usePermissions } from '../hooks/usePermissions';
+import { formatCpfDisplay } from '../lib/cpf';
+import { formatMenuDisplayName } from '../lib/formatDisplayName';
+import UserAvatar from './UserAvatar';
 import type { RootStackParamList } from '../../App';
 
 interface MenuProps {
@@ -35,7 +28,8 @@ interface MenuProps {
   onClose: () => void;
 }
 
-const PANEL_WIDTH = Math.min(320, Dimensions.get('window').width * 0.78);
+const PANEL_WIDTH = Math.min(360, Math.round(Dimensions.get('window').width * 0.88));
+const CORNER = 24;
 
 function MenuItemRow({
   label,
@@ -52,7 +46,6 @@ function MenuItemRow({
   anim: Animated.Value;
   index: number;
 }) {
-  // Cada item entra um pouco depois do anterior.
   const start = Math.min(0.12 * index, 0.55);
   const opacity = anim.interpolate({
     inputRange: [start, Math.min(start + 0.35, 1)],
@@ -78,19 +71,22 @@ function MenuItemRow({
 export default function Menu({ visible, onClose }: MenuProps) {
   const { colors, isDark, toggleTheme } = useTheme();
   const { logout, user } = useAuth();
+  const { canSeePonto, canSeeGestaoOs } = usePermissions();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  const queryClient = useQueryClient();
 
   const slideAnim = useRef(new Animated.Value(-PANEL_WIDTH)).current;
-  const overlayOpacity = useRef(new Animated.Value(0)).current;
   const itemsAnim = useRef(new Animated.Value(0)).current;
   const [isVisible, setIsVisible] = useState(false);
+  const wasOpen = useRef(false);
+
+  const displayName = formatMenuDisplayName(user?.name);
+  const displayCpf = formatCpfDisplay(user?.cpf);
 
   const closeThen = useCallback(
     (action: () => void) => {
       onClose();
-      setTimeout(action, 230);
+      setTimeout(action, 200);
     },
     [onClose],
   );
@@ -127,32 +123,37 @@ export default function Menu({ visible, onClose }: MenuProps) {
   const links = [
     { key: 'home', label: 'Início', icon: Home, onPress: () => go('Home') },
     { key: 'agenda', label: 'Agenda', icon: Calendar, onPress: () => go('Agenda') },
-    {
-      key: 'tasks',
-      label: 'Tasks',
-      icon: LayoutGrid,
-      onPress: () => {
-        closeThen(() => {
-          void openFavoriteKanbanBoard(navigation, user?.id, queryClient);
-        });
-      },
-    },
+    { key: 'assistant', label: 'Assistente de campo', icon: Sparkles, onPress: () => go('FieldAssistant') },
+    ...(canSeeGestaoOs
+      ? [
+          {
+            key: 'unplanned',
+            label: 'Ocorrência não prevista',
+            icon: Wrench,
+            onPress: () => go('GestaoOsUnplanned'),
+          },
+        ]
+      : []),
+    ...(canSeePonto
+      ? [
+          {
+            key: 'time-records',
+            label: 'Registros de ponto',
+            icon: Clock,
+            onPress: () => go('TimeRecords'),
+          },
+        ]
+      : []),
   ];
 
   useEffect(() => {
     if (visible) {
+      wasOpen.current = true;
       setIsVisible(true);
       slideAnim.setValue(-PANEL_WIDTH);
-      overlayOpacity.setValue(0);
       itemsAnim.setValue(0);
 
       Animated.parallel([
-        Animated.timing(overlayOpacity, {
-          toValue: 1,
-          duration: 240,
-          easing: Easing.out(Easing.cubic),
-          useNativeDriver: true,
-        }),
         Animated.spring(slideAnim, {
           toValue: 0,
           damping: 22,
@@ -162,8 +163,8 @@ export default function Menu({ visible, onClose }: MenuProps) {
         }),
         Animated.timing(itemsAnim, {
           toValue: 1,
-          duration: 420,
-          delay: 60,
+          duration: 320,
+          delay: 40,
           easing: Easing.out(Easing.cubic),
           useNativeDriver: true,
         }),
@@ -171,28 +172,27 @@ export default function Menu({ visible, onClose }: MenuProps) {
       return;
     }
 
+    if (!wasOpen.current) return;
+
     Animated.parallel([
-      Animated.timing(overlayOpacity, {
-        toValue: 0,
-        duration: 180,
-        easing: Easing.in(Easing.cubic),
-        useNativeDriver: true,
-      }),
       Animated.timing(slideAnim, {
         toValue: -PANEL_WIDTH,
-        duration: 220,
+        duration: 180,
         easing: Easing.in(Easing.cubic),
         useNativeDriver: true,
       }),
       Animated.timing(itemsAnim, {
         toValue: 0,
-        duration: 140,
+        duration: 120,
         useNativeDriver: true,
       }),
     ]).start(({ finished }) => {
-      if (finished) setIsVisible(false);
+      if (finished) {
+        wasOpen.current = false;
+        setIsVisible(false);
+      }
     });
-  }, [visible, overlayOpacity, slideAnim, itemsAnim]);
+  }, [visible, slideAnim, itemsAnim]);
 
   const handleLogout = () => {
     Alert.alert('Sair', 'Tem certeza que deseja sair?', [
@@ -224,87 +224,139 @@ export default function Menu({ visible, onClose }: MenuProps) {
     <Modal
       visible={isVisible}
       transparent
-      animationType="none"
+      animationType="fade"
       statusBarTranslucent
       navigationBarTranslucent
       onRequestClose={onClose}
     >
+      {/* Fundo escuro sólido — igual notificações (sem opacity animada) */}
       <View style={styles.root}>
-        <Pressable style={StyleSheet.absoluteFill} onPress={onClose}>
-          <Animated.View
-            pointerEvents="none"
-            style={[styles.overlay, { opacity: overlayOpacity }]}
-          />
-        </Pressable>
-
-        <Animated.View
-          style={[
-            styles.panel,
-            {
-              width: PANEL_WIDTH,
-              backgroundColor: colors.background,
-              paddingTop: insets.top,
-              paddingBottom: Math.max(insets.bottom, 16),
-              transform: [{ translateX: slideAnim }],
-            },
-          ]}
-        >
+        <View style={styles.row}>
           <Animated.View
             style={[
-              styles.header,
-              { opacity: headerOpacity, transform: [{ translateX: headerShift }] },
+              styles.panelSlide,
+              { width: PANEL_WIDTH, transform: [{ translateX: slideAnim }] },
             ]}
           >
-            <Text style={[styles.title, { color: colors.text }]}>Menu</Text>
-            <TouchableOpacity onPress={onClose} hitSlop={10} style={styles.closeBtn}>
-              <X size={22} color={colors.text} strokeWidth={2} />
-            </TouchableOpacity>
+            <View
+              collapsable={false}
+              style={[
+                styles.panel,
+                {
+                  backgroundColor: colors.background,
+                  paddingTop: insets.top,
+                  paddingBottom: Math.max(insets.bottom, 16),
+                },
+              ]}
+            >
+              <Animated.View
+                style={[
+                  styles.profileBlock,
+                  {
+                    borderBottomColor: colors.border,
+                    opacity: headerOpacity,
+                    transform: [{ translateX: headerShift }],
+                  },
+                ]}
+              >
+                <TouchableOpacity
+                  style={styles.profileRow}
+                  activeOpacity={0.7}
+                  onPress={() => go('Profile')}
+                  accessibilityLabel="Abrir perfil"
+                >
+                  <UserAvatar
+                    uri={user?.profilePhotoUrl}
+                    size={52}
+                    backgroundColor={colors.primary}
+                    iconColor="#fff"
+                  />
+                  <View style={styles.profileText}>
+                    <Text
+                      style={[styles.profileName, { color: colors.text }]}
+                      numberOfLines={1}
+                      ellipsizeMode="tail"
+                    >
+                      {displayName}
+                    </Text>
+                    {displayCpf ? (
+                      <Text
+                        style={[styles.profileCpf, { color: colors.textSecondary }]}
+                        numberOfLines={1}
+                      >
+                        {displayCpf}
+                      </Text>
+                    ) : null}
+                  </View>
+                </TouchableOpacity>
+              </Animated.View>
+
+              <ScrollView
+                style={styles.content}
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={styles.contentInner}
+              >
+                {links.map((item, index) => (
+                  <MenuItemRow
+                    key={item.key}
+                    label={item.label}
+                    icon={item.icon}
+                    color={colors.text}
+                    onPress={item.onPress}
+                    anim={itemsAnim}
+                    index={index}
+                  />
+                ))}
+              </ScrollView>
+
+              <Animated.View
+                style={[
+                  styles.footer,
+                  {
+                    borderTopColor: colors.border,
+                    opacity: headerOpacity,
+                    transform: [{ translateY: headerShift }],
+                  },
+                ]}
+              >
+                <TouchableOpacity
+                  style={styles.themeRow}
+                  onPress={toggleTheme}
+                  activeOpacity={0.65}
+                >
+                  {isDark ? (
+                    <Sun size={20} color={colors.text} strokeWidth={2} />
+                  ) : (
+                    <Moon size={20} color={colors.text} strokeWidth={2} />
+                  )}
+                  <Text style={[styles.itemLabel, { color: colors.text }]}>
+                    {isDark ? 'Tema claro' : 'Tema escuro'}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.themeRow}
+                  onPress={handleLogout}
+                  activeOpacity={0.65}
+                >
+                  <LogOut size={20} color={colors.primary} strokeWidth={2} />
+                  <Text style={[styles.itemLabel, { color: colors.primary }]}>Sair</Text>
+                </TouchableOpacity>
+              </Animated.View>
+            </View>
           </Animated.View>
 
-          <ScrollView
-            style={styles.content}
-            showsVerticalScrollIndicator={false}
-            contentContainerStyle={styles.contentInner}
+          <TouchableOpacity
+            style={styles.dismissArea}
+            activeOpacity={1}
+            onPress={onClose}
+            accessibilityRole="button"
+            accessibilityLabel="Fechar menu"
           >
-            {links.map((item, index) => (
-              <MenuItemRow
-                key={item.key}
-                label={item.label}
-                icon={item.icon}
-                color={colors.text}
-                onPress={item.onPress}
-                anim={itemsAnim}
-                index={index}
-              />
-            ))}
-          </ScrollView>
-
-          <Animated.View
-            style={[
-              styles.footer,
-              {
-                borderTopColor: colors.border,
-                opacity: headerOpacity,
-                transform: [{ translateY: headerShift }],
-              },
-            ]}
-          >
-            <TouchableOpacity style={styles.themeRow} onPress={toggleTheme} activeOpacity={0.65}>
-              {isDark ? (
-                <Sun size={20} color={colors.text} strokeWidth={2} />
-              ) : (
-                <Moon size={20} color={colors.text} strokeWidth={2} />
-              )}
-              <Text style={[styles.itemLabel, { color: colors.text }]}>
-                {isDark ? 'Tema claro' : 'Tema escuro'}
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.themeRow} onPress={handleLogout} activeOpacity={0.65}>
-              <LogOut size={20} color={colors.primary} strokeWidth={2} />
-              <Text style={[styles.itemLabel, { color: colors.primary }]}>Sair</Text>
-            </TouchableOpacity>
-          </Animated.View>
-        </Animated.View>
+            <View style={styles.dismissClose}>
+              <X size={24} color="#ffffff" strokeWidth={2.2} />
+            </View>
+          </TouchableOpacity>
+        </View>
       </View>
     </Modal>
   );
@@ -313,43 +365,61 @@ export default function Menu({ visible, onClose }: MenuProps) {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-  },
-  overlay: {
-    ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(0,0,0,0.45)',
   },
-  panel: {
-    position: 'absolute',
-    left: 0,
-    top: 0,
-    bottom: 0,
-    height: '100%',
-    maxWidth: 320,
-    paddingHorizontal: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 4, height: 0 },
-    shadowOpacity: 0.18,
-    shadowRadius: 16,
-    elevation: 12,
-  },
-  header: {
+  row: {
+    flex: 1,
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-    paddingHorizontal: 4,
-    height: 44,
   },
-  title: {
-    fontSize: 22,
-    fontWeight: '700',
-    letterSpacing: -0.4,
+  panelSlide: {
+    height: '100%',
+    maxWidth: 360,
   },
-  closeBtn: {
-    width: 40,
-    height: 40,
+  panel: {
+    flex: 1,
+    paddingHorizontal: 20,
+    borderTopRightRadius: CORNER,
+    borderBottomRightRadius: CORNER,
+    overflow: 'hidden',
+  },
+  dismissArea: {
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  dismissClose: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  profileBlock: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingBottom: 16,
+    marginBottom: 8,
+    paddingTop: 8,
+  },
+  profileRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    paddingHorizontal: 4,
+  },
+  profileText: {
+    flex: 1,
+    minWidth: 0,
+    gap: 3,
+  },
+  profileName: {
+    fontSize: 16,
+    fontWeight: '700',
+    letterSpacing: -0.3,
+  },
+  profileCpf: {
+    fontSize: 13,
+    fontWeight: '500',
+    letterSpacing: -0.1,
+    fontVariant: ['tabular-nums'],
   },
   content: { flex: 1 },
   contentInner: { paddingBottom: 16 },

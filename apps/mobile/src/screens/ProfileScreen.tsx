@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -6,25 +6,34 @@ import {
   TouchableOpacity,
   ScrollView,
   Alert,
+  ActivityIndicator,
+  Switch,
+  Modal,
+  Pressable,
+  TextInput,
+  Platform,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as ImagePicker from 'expo-image-picker';
 import {
   User,
   Mail,
   Briefcase,
   Calendar,
-  LogOut,
   MapPin,
-  CreditCard,
   ArrowLeft,
   Bell,
+  Pencil,
+  ScanFace,
 } from 'lucide-react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { useNotifications } from '../notifications/NotificationsContext';
 import UserAvatar from '../components/UserAvatar';
+import { uploadMultipartFile } from '../utils/uploadMultipartFile';
+import type { User as AuthUser } from '../types';
 
 type InfoRow = {
   key: string;
@@ -36,21 +45,133 @@ type InfoRow = {
 export default function ProfileScreen() {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
-  const { user, logout } = useAuth();
+  const { user, updateUser, biometric, enableBiometrics, disableBiometrics } = useAuth();
   const { colors, isDark } = useTheme();
   const { unreadCount, openSheet } = useNotifications();
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [bioBusy, setBioBusy] = useState(false);
+  const [bioPasswordOpen, setBioPasswordOpen] = useState(false);
+  const [bioPassword, setBioPassword] = useState('');
   const styles = useMemo(() => getStyles(colors, isDark), [colors, isDark]);
 
-  const handleLogout = () => {
-    Alert.alert('Sair', 'Tem certeza que deseja sair?', [
+  const uploadProfilePhoto = useCallback(
+    async (asset: ImagePicker.ImagePickerAsset) => {
+      const uri = asset.uri;
+      if (!uri) return;
+
+      const name =
+        asset.fileName ||
+        `profile-${Date.now()}.${(asset.mimeType || 'image/jpeg').split('/')[1] || 'jpg'}`;
+      const type = asset.mimeType || 'image/jpeg';
+
+      setUploadingPhoto(true);
+      try {
+        const next = await uploadMultipartFile<AuthUser>({
+          path: '/api/auth/me/photo',
+          fieldName: 'profileAvatar',
+          method: 'PATCH',
+          file: { uri, name, type },
+        });
+        if (next?.id) {
+          await updateUser(next);
+        }
+      } catch {
+        Alert.alert('Erro', 'Não foi possível atualizar a foto.');
+      } finally {
+        setUploadingPhoto(false);
+      }
+    },
+    [updateUser],
+  );
+
+  const pickFromLibrary = useCallback(async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permissão', 'Precisamos da galeria para alterar a foto.');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.85,
+    });
+    if (!result.canceled && result.assets[0]) {
+      await uploadProfilePhoto(result.assets[0]);
+    }
+  }, [uploadProfilePhoto]);
+
+  const pickFromCamera = useCallback(async () => {
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permissão', 'Precisamos da câmera para alterar a foto.');
+      return;
+    }
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.85,
+    });
+    if (!result.canceled && result.assets[0]) {
+      await uploadProfilePhoto(result.assets[0]);
+    }
+  }, [uploadProfilePhoto]);
+
+  const openPhotoPicker = () => {
+    if (uploadingPhoto) return;
+    Alert.alert('Foto de perfil', 'Como deseja alterar a foto?', [
+      { text: 'Câmera', onPress: () => void pickFromCamera() },
+      { text: 'Galeria', onPress: () => void pickFromLibrary() },
       { text: 'Cancelar', style: 'cancel' },
-      { text: 'Sair', onPress: logout },
+    ]);
+  };
+
+  const confirmEnableBiometrics = async () => {
+    const identifier = String(user?.email || user?.cpf || '').trim();
+    if (!identifier || !bioPassword) {
+      Alert.alert('Senha', 'Informe a senha da conta para ativar a biometria.');
+      return;
+    }
+    setBioBusy(true);
+    try {
+      await enableBiometrics(identifier, bioPassword);
+      setBioPasswordOpen(false);
+      setBioPassword('');
+      Alert.alert('Pronto', `Acesso com ${biometric.label} ativado.`);
+    } catch (err) {
+      Alert.alert('Biometria', err instanceof Error ? err.message : 'Não foi possível ativar.');
+    } finally {
+      setBioBusy(false);
+    }
+  };
+
+  const onToggleBiometrics = (value: boolean) => {
+    if (!biometric.available) {
+      Alert.alert(
+        'Biometria',
+        `Cadastre ${biometric.label} neste aparelho (Ajustes) para ativar o acesso rápido.`
+      );
+      return;
+    }
+    if (value) {
+      setBioPassword('');
+      setBioPasswordOpen(true);
+      return;
+    }
+    Alert.alert('Desativar biometria', 'O próximo acesso vai pedir e-mail/CPF e senha.', [
+      { text: 'Cancelar', style: 'cancel' },
+      {
+        text: 'Desativar',
+        style: 'destructive',
+        onPress: () => {
+          void disableBiometrics();
+        },
+      },
     ]);
   };
 
   const roleLabel = user?.employee?.position || user?.role || 'Colaborador';
-  const metaLeft = user?.employee?.department || null;
-  const metaRight = user?.employee?.polo || user?.employee?.company || null;
 
   const rows: InfoRow[] = [];
   if (user?.email) {
@@ -73,22 +194,6 @@ export default function ProfileScreen() {
       label: 'Setor',
       value: user.employee.department,
       icon: Briefcase,
-    });
-  }
-  if (user?.employee?.employeeId) {
-    rows.push({
-      key: 'matricula',
-      label: 'Matrícula',
-      value: user.employee.employeeId,
-      icon: CreditCard,
-    });
-  }
-  if (user?.employee?.hireDate) {
-    rows.push({
-      key: 'hire',
-      label: 'Data de admissão',
-      value: new Date(user.employee.hireDate).toLocaleDateString('pt-BR'),
-      icon: Calendar,
     });
   }
   if (user?.employee?.company) {
@@ -156,13 +261,30 @@ export default function ProfileScreen() {
           </View>
 
           <View style={styles.heroProfile}>
-            <UserAvatar
-              uri={user?.profilePhotoUrl}
-              size={96}
-              backgroundColor="rgba(255,255,255,0.18)"
-              iconColor="#fff"
-              style={{ marginBottom: 14 }}
-            />
+            <View style={styles.avatarWrap}>
+              <UserAvatar
+                uri={user?.profilePhotoUrl}
+                size={96}
+                backgroundColor="rgba(255,255,255,0.18)"
+                iconColor="#fff"
+              />
+              <TouchableOpacity
+                style={styles.editPhotoBtn}
+                onPress={openPhotoPicker}
+                activeOpacity={0.85}
+                disabled={uploadingPhoto}
+                accessibilityLabel="Alterar foto de perfil"
+                hitSlop={6}
+              >
+                <View style={styles.editPhotoBtnInner}>
+                  {uploadingPhoto ? (
+                    <ActivityIndicator size="small" color="#ce3736" />
+                  ) : (
+                    <Pencil size={14} color="#ce3736" strokeWidth={2.4} />
+                  )}
+                </View>
+              </TouchableOpacity>
+            </View>
             <Text style={styles.name} numberOfLines={2}>
               {user?.name || 'Colaborador'}
             </Text>
@@ -170,31 +292,11 @@ export default function ProfileScreen() {
               {roleLabel}
             </Text>
           </View>
-
-          {(metaLeft || metaRight) && (
-            <View style={styles.statsRow}>
-              <View style={styles.statItem}>
-                <Text style={styles.statValue} numberOfLines={1}>
-                  {metaLeft || '—'}
-                </Text>
-                <Text style={styles.statLabel}>Setor</Text>
-              </View>
-              <View style={styles.statDivider} />
-              <View style={styles.statItem}>
-                <Text style={styles.statValue} numberOfLines={1}>
-                  {metaRight || '—'}
-                </Text>
-                <Text style={styles.statLabel}>
-                  {user?.employee?.polo ? 'Polo' : 'Empresa'}
-                </Text>
-              </View>
-            </View>
-          )}
         </View>
 
         <View style={styles.body}>
           <Text style={styles.sectionTitle}>Informações</Text>
-          <View style={styles.infoCard}>
+          <View style={styles.infoList}>
             {rows.length === 0 ? (
               <Text style={styles.emptyText}>Nenhuma informação disponível.</Text>
             ) : (
@@ -218,16 +320,74 @@ export default function ProfileScreen() {
             )}
           </View>
 
-          <TouchableOpacity
-            style={[styles.logoutButton, { backgroundColor: heroBg }]}
-            onPress={handleLogout}
-            activeOpacity={0.85}
-          >
-            <LogOut size={18} color="#fff" strokeWidth={2.2} />
-            <Text style={styles.logoutText}>Sair da conta</Text>
-          </TouchableOpacity>
+          {Platform.OS !== 'web' ? (
+            <>
+              <Text style={[styles.sectionTitle, { marginTop: 8 }]}>Acesso</Text>
+              <View style={styles.bioRow}>
+                <View style={styles.infoIcon}>
+                  <ScanFace size={18} color={colors.primary} strokeWidth={2} />
+                </View>
+                <View style={styles.infoText}>
+                  <Text style={styles.infoLabel}>Entrar com {biometric.label}</Text>
+                  <Text style={styles.infoValue}>
+                    {biometric.available
+                      ? biometric.enabled
+                        ? 'Ativado neste aparelho'
+                        : 'Após o primeiro acesso, use facial ou digital'
+                      : 'Indisponível neste aparelho'}
+                  </Text>
+                </View>
+                <Switch
+                  value={biometric.enabled}
+                  onValueChange={onToggleBiometrics}
+                  disabled={bioBusy || !biometric.available}
+                  trackColor={{ false: isDark ? '#374151' : '#d1d5db', true: '#fca5a5' }}
+                  thumbColor={biometric.enabled ? colors.primary : '#f4f4f5'}
+                />
+              </View>
+            </>
+          ) : null}
         </View>
       </ScrollView>
+
+      <Modal
+        visible={bioPasswordOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setBioPasswordOpen(false)}
+      >
+        <Pressable style={styles.modalOverlay} onPress={() => setBioPasswordOpen(false)}>
+          <Pressable style={styles.modalCard} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.modalTitle}>Ativar {biometric.label}</Text>
+            <Text style={styles.modalBody}>
+              Confirme a senha da conta para guardar o acesso rápido neste aparelho.
+            </Text>
+            <TextInput
+              value={bioPassword}
+              onChangeText={setBioPassword}
+              placeholder="Senha"
+              placeholderTextColor={colors.textSecondary}
+              secureTextEntry
+              style={styles.modalInput}
+              autoFocus
+            />
+            <TouchableOpacity
+              style={styles.modalPrimary}
+              onPress={() => void confirmEnableBiometrics()}
+              disabled={bioBusy}
+            >
+              {bioBusy ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.modalPrimaryText}>Ativar</Text>
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setBioPasswordOpen(false)}>
+              <Text style={styles.modalCancel}>Cancelar</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -292,7 +452,32 @@ const getStyles = (colors: any, isDark: boolean) =>
     },
     heroProfile: {
       alignItems: 'center',
-      marginBottom: 18,
+      marginBottom: 4,
+    },
+    avatarWrap: {
+      width: 96,
+      height: 96,
+      marginBottom: 14,
+    },
+    editPhotoBtn: {
+      position: 'absolute',
+      top: 0,
+      right: 0,
+      width: 30,
+      height: 30,
+      borderRadius: 15,
+      backgroundColor: '#ce3736',
+      alignItems: 'center',
+      justifyContent: 'center',
+      overflow: 'hidden',
+    },
+    editPhotoBtnInner: {
+      width: 26,
+      height: 26,
+      borderRadius: 13,
+      backgroundColor: '#fff',
+      alignItems: 'center',
+      justifyContent: 'center',
     },
     name: {
       color: '#fff',
@@ -309,36 +494,6 @@ const getStyles = (colors: any, isDark: boolean) =>
       marginTop: 4,
       textAlign: 'center',
     },
-    statsRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      borderTopWidth: StyleSheet.hairlineWidth,
-      borderTopColor: 'rgba(255,255,255,0.28)',
-      paddingTop: 14,
-    },
-    statItem: {
-      flex: 1,
-      alignItems: 'center',
-      paddingHorizontal: 8,
-    },
-    statValue: {
-      color: '#fff',
-      fontSize: 14,
-      fontWeight: '700',
-      marginBottom: 2,
-    },
-    statLabel: {
-      color: 'rgba(255,255,255,0.75)',
-      fontSize: 11,
-      fontWeight: '600',
-      textTransform: 'uppercase',
-      letterSpacing: 0.3,
-    },
-    statDivider: {
-      width: StyleSheet.hairlineWidth,
-      alignSelf: 'stretch',
-      backgroundColor: 'rgba(255,255,255,0.35)',
-    },
     body: {
       paddingHorizontal: 20,
     },
@@ -348,14 +503,9 @@ const getStyles = (colors: any, isDark: boolean) =>
       color: colors.text,
       letterSpacing: -0.3,
       marginBottom: 12,
+      textAlign: 'center',
     },
-    infoCard: {
-      backgroundColor: colors.card,
-      borderRadius: 18,
-      paddingHorizontal: 14,
-      paddingVertical: 6,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: isDark ? colors.border : 'rgba(15,23,42,0.06)',
+    infoList: {
       marginBottom: 16,
     },
     emptyText: {
@@ -400,17 +550,59 @@ const getStyles = (colors: any, isDark: boolean) =>
       backgroundColor: isDark ? colors.border : 'rgba(15,23,42,0.08)',
       marginLeft: 48,
     },
-    logoutButton: {
+    bioRow: {
       flexDirection: 'row',
       alignItems: 'center',
-      justifyContent: 'center',
-      paddingVertical: 14,
-      borderRadius: 14,
-      gap: 8,
+      gap: 12,
+      paddingVertical: 8,
+      marginBottom: 16,
     },
-    logoutText: {
-      color: '#fff',
-      fontSize: 15,
+    modalOverlay: {
+      flex: 1,
+      backgroundColor: 'rgba(0,0,0,0.45)',
+      justifyContent: 'center',
+      padding: 24,
+    },
+    modalCard: {
+      backgroundColor: colors.card,
+      borderRadius: 18,
+      padding: 20,
+    },
+    modalTitle: {
+      fontSize: 17,
       fontWeight: '700',
+      color: colors.text,
+      marginBottom: 8,
+    },
+    modalBody: {
+      fontSize: 14,
+      lineHeight: 20,
+      color: colors.textSecondary,
+      marginBottom: 14,
+    },
+    modalInput: {
+      borderWidth: StyleSheet.hairlineWidth * 1.5,
+      borderColor: colors.border,
+      borderRadius: 12,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+      color: colors.text,
+      fontSize: 15,
+      backgroundColor: isDark ? colors.screenRoot : colors.surface,
+      marginBottom: 14,
+    },
+    modalPrimary: {
+      backgroundColor: colors.primary,
+      borderRadius: 12,
+      paddingVertical: 14,
+      alignItems: 'center',
+      marginBottom: 10,
+    },
+    modalPrimaryText: { color: '#fff', fontWeight: '700', fontSize: 15 },
+    modalCancel: {
+      textAlign: 'center',
+      color: colors.textSecondary,
+      fontWeight: '600',
+      paddingVertical: 6,
     },
   });

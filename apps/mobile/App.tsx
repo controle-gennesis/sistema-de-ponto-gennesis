@@ -19,9 +19,10 @@ import KanbanBoardsScreen from './src/screens/kanban/KanbanBoardsScreen';
 import KanbanBoardScreen from './src/screens/kanban/KanbanBoardScreen';
 import KanbanCardScreen from './src/screens/kanban/KanbanCardScreen';
 import DpRequestsScreen from './src/screens/DpRequestsScreen';
-import GestaoOsListScreen from './src/screens/GestaoOsListScreen';
 import GestaoOsDetailScreen from './src/screens/GestaoOsDetailScreen';
 import GestaoOsQrScreen from './src/screens/GestaoOsQrScreen';
+import GestaoOsUnplannedScreen from './src/screens/GestaoOsUnplannedScreen';
+import FieldAssistantScreen from './src/screens/FieldAssistantScreen';
 import AuthBrandSplash, { SPLASH_BG } from './src/components/AuthBrandSplash';
 import ThemeBackground from './src/components/ThemeBackground';
 
@@ -32,6 +33,7 @@ import { ThemeProvider, useTheme } from './src/context/ThemeContext';
 import { NotificationsProvider } from './src/notifications/NotificationsContext';
 import { ChromeVisibilityProvider } from './src/navigation/ChromeVisibilityContext';
 import NotificationsSheet from './src/components/NotificationsSheet';
+import { useOfflineSync } from './src/hooks/useOfflineSync';
 
 export type RootStackParamList = {
   Login: undefined;
@@ -46,9 +48,10 @@ export type RootStackParamList = {
   KanbanBoard: { departmentKey?: string; title?: string };
   KanbanCard: { cardId: string; departmentKey?: string };
   DpRequests: undefined;
-  GestaoOs: undefined;
   GestaoOsDetail: { id: string };
   GestaoOsQr: { token: string };
+  GestaoOsUnplanned: undefined;
+  FieldAssistant: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -123,17 +126,17 @@ function AppNavigator() {
   const shell = (
     <View style={{ flex: 1, backgroundColor: isAuthenticated ? 'transparent' : SPLASH_BG }}>
       <NavigationContainer>
-        <Stack.Navigator
-          screenOptions={{
-            headerShown: false,
-            contentStyle: {
-              backgroundColor: isAuthenticated ? 'transparent' : SPLASH_BG,
-            },
-            animation: 'slide_from_right',
-          }}
-        >
-          {isAuthenticated ? (
-            <>
+        {isAuthenticated ? (
+          <>
+            <Stack.Navigator
+              screenOptions={{
+                headerShown: false,
+                contentStyle: {
+                  backgroundColor: 'transparent',
+                },
+                animation: 'slide_from_right',
+              }}
+            >
               <Stack.Screen name="Main" component={BottomTabNavigator} />
               <Stack.Screen name="Punch" component={PunchScreen} />
               <Stack.Screen name="TimeRecords" component={TimeRecordsScreen} />
@@ -145,17 +148,28 @@ function AppNavigator() {
               <Stack.Screen name="KanbanBoard" component={KanbanBoardScreen} />
               <Stack.Screen name="KanbanCard" component={KanbanCardScreen} />
               <Stack.Screen name="DpRequests" component={DpRequestsScreen} />
-              <Stack.Screen name="GestaoOs" component={GestaoOsListScreen} />
               <Stack.Screen name="GestaoOsDetail" component={GestaoOsDetailScreen} />
               <Stack.Screen name="GestaoOsQr" component={GestaoOsQrScreen} />
-            </>
-          ) : (
+              <Stack.Screen name="GestaoOsUnplanned" component={GestaoOsUnplannedScreen} />
+              <Stack.Screen name="FieldAssistant" component={FieldAssistantScreen} />
+            </Stack.Navigator>
+            <NotificationsSheet />
+          </>
+        ) : (
+          <Stack.Navigator
+            screenOptions={{
+              headerShown: false,
+              contentStyle: {
+                backgroundColor: SPLASH_BG,
+              },
+              animation: 'slide_from_right',
+            }}
+          >
             <Stack.Screen name="Login">
               {() => <LoginScreen fromBootSplash />}
             </Stack.Screen>
-          )}
-        </Stack.Navigator>
-        {isAuthenticated ? <NotificationsSheet /> : null}
+          </Stack.Navigator>
+        )}
       </NavigationContainer>
     </View>
   );
@@ -165,6 +179,12 @@ function AppNavigator() {
   }
 
   return shell;
+}
+
+function OfflineSyncHost() {
+  const { isAuthenticated } = useAuth();
+  useOfflineSync(isAuthenticated);
+  return null;
 }
 
 function StatusBarComponent() {
@@ -194,6 +214,7 @@ export default function App() {
           <AuthProvider>
             <NotificationsProvider>
               <ChromeVisibilityProvider>
+                <OfflineSyncHost />
                 <AppNavigator />
                 <StatusBarComponent />
                 <AppToastHost />

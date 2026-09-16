@@ -4,13 +4,28 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { User } from '../types';
 import { buildApiUrl } from '../config/api';
 import { serializeLoginIdentifier } from '../lib/cpf';
+import {
+  authenticateWithBiometrics,
+  disableBiometricLogin,
+  enableBiometricLogin,
+  getBiometricCapability,
+  getStoredCredentials,
+  isBiometricEnabled,
+  type BiometricCapability,
+} from '../services/biometricAuth';
 
 interface AuthContextType {
   user: User | null;
   isAuthenticated: boolean;
   login: (identifier: string, password: string) => Promise<void>;
+  loginWithBiometrics: () => Promise<void>;
   logout: () => Promise<void>;
+  updateUser: (user: User) => Promise<void>;
   loading: boolean;
+  biometric: BiometricCapability & { enabled: boolean };
+  refreshBiometric: () => Promise<void>;
+  enableBiometrics: (identifier: string, password: string) => Promise<void>;
+  disableBiometrics: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -19,7 +34,6 @@ interface AuthProviderProps {
   children: ReactNode;
 }
 
-// Storage compatível com Web e Nativo
 const storage = {
   getItem: async (key: string) => {
     if (Platform.OS === 'web') {
@@ -40,36 +54,41 @@ const storage = {
       return Promise.resolve();
     }
     return AsyncStorage.removeItem(key);
-  }
+  },
 };
 
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [biometric, setBiometric] = useState<BiometricCapability & { enabled: boolean }>({
+    available: false,
+    enrolled: false,
+    label: 'biometria',
+    enabled: false,
+  });
+
+  const refreshBiometric = async () => {
+    const cap = await getBiometricCapability();
+    const enabled = await isBiometricEnabled();
+    setBiometric({ ...cap, enabled });
+  };
 
   useEffect(() => {
-    loadStoredAuth();
+    void loadStoredAuth();
   }, []);
 
-  const loadStoredAuth = async () => {
-    try {
-      const token = await storage.getItem('token');
-      const userData = await storage.getItem('user');
+  const hydrateUserFromStorage = async () => {
+    const token = await storage.getItem('token');
+    const userData = await storage.getItem('user');
+    if (!token || !userData) return false;
+    setUser(JSON.parse(userData));
+    return true;
+  };
 
-      if (token && userData) {
-        setUser(JSON.parse(userData));
-      }
-    } catch (error) {
-      console.error('Erro ao carregar dados de autenticação:', error);
-    } finally {
-      setLoading(false);
-    }
-
-    // Atualiza perfil em background (não bloqueia a abertura do app)
+  const refreshProfileInBackground = async () => {
     try {
       const token = await storage.getItem('token');
       if (!token) return;
-
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 8000);
       const res = await fetch(buildApiUrl('/api/auth/me'), {
@@ -77,7 +96,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         signal: controller.signal,
       });
       clearTimeout(timeoutId);
-
       if (res.ok) {
         const json = await res.json();
         const fresh = (json?.data ?? json) as User;
@@ -87,23 +105,45 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         }
       }
     } catch {
-      // mantém usuário do storage
+      /* mantém usuário do storage */
     }
   };
 
-  const login = async (identifier: string, password: string) => {
+  const loadStoredAuth = async () => {
     try {
-      console.log('🔐 Tentando fazer login...');
-      console.log('🌐 URL:', buildApiUrl('/api/auth/login'));
-      
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000);
-      
+      const cap = await getBiometricCapability();
+      const enabled = await isBiometricEnabled();
+      setBiometric({ ...cap, enabled });
+
+      const token = await storage.getItem('token');
+      const userData = await storage.getItem('user');
+      if (token && userData && !enabled) {
+        setUser(JSON.parse(userData));
+      }
+    } catch (error) {
+      console.error('Erro ao carregar dados de autenticação:', error);
+    } finally {
+      setLoading(false);
+    }
+
+    const enabled = await isBiometricEnabled();
+    if (!enabled) void refreshProfileInBackground();
+  };
+
+  const persistSession = async (userData: User, token: string) => {
+    await storage.setItem('token', token);
+    await storage.setItem('user', JSON.stringify(userData));
+    setUser(userData);
+  };
+
+  const login = async (identifier: string, password: string) => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+    try {
       const response = await fetch(buildApiUrl('/api/auth/login'), {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           identifier: serializeLoginIdentifier(identifier),
           password,
@@ -111,32 +151,26 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         }),
         signal: controller.signal,
       });
-      
       clearTimeout(timeoutId);
-      
-      console.log('📡 Response status:', response.status);
-      console.log('📡 Response ok:', response.ok);
 
       if (!response.ok) {
-        const error = await response.json();
-        console.error('❌ Erro na resposta:', error);
+        const error = await response.json().catch(() => ({}));
         throw new Error(error.error || 'Erro ao fazer login');
       }
 
       const data = await response.json();
-      console.log('✅ Dados recebidos:', data);
-      
-      if (data.success) {
-        const { user: userData, token } = data.data;
-        
-        await storage.setItem('token', token);
-        await storage.setItem('user', JSON.stringify(userData));
-        
-        setUser(userData);
-        console.log('🎉 Login realizado com sucesso!');
+      if (!data.success) throw new Error('Erro ao fazer login');
+      const { user: userData, token } = data.data;
+      await persistSession(userData, token);
+
+      if (await isBiometricEnabled()) {
+        try {
+          await enableBiometricLogin(identifier, password);
+        } catch {
+          /* sessão já aberta */
+        }
       }
     } catch (error: any) {
-      console.error('💥 Erro no login:', error);
       if (error.name === 'AbortError') {
         throw new Error('Timeout: Servidor não respondeu em 10 segundos');
       }
@@ -144,16 +178,43 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   };
 
+  const loginWithBiometrics = async () => {
+    const cap = await getBiometricCapability();
+    if (!cap.available) {
+      throw new Error(`Cadastre ${cap.label} neste aparelho para entrar.`);
+    }
+    const ok = await authenticateWithBiometrics(`Entre com ${cap.label}`);
+    if (!ok) throw new Error('Biometria não confirmada.');
+
+    if (await hydrateUserFromStorage()) {
+      void refreshProfileInBackground();
+      return;
+    }
+
+    const creds = await getStoredCredentials();
+    if (!creds) {
+      throw new Error('Entre com e-mail/CPF e senha no primeiro acesso.');
+    }
+    await login(creds.identifier, creds.password);
+  };
+
+  const enableBiometrics = async (identifier: string, password: string) => {
+    await enableBiometricLogin(identifier, password);
+    await refreshBiometric();
+  };
+
+  const disableBiometrics = async () => {
+    await disableBiometricLogin();
+    await refreshBiometric();
+  };
+
   const logout = async () => {
     try {
       const token = await storage.getItem('token');
-      
       if (token) {
         await fetch(buildApiUrl('/api/auth/logout'), {
           method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-          },
+          headers: { Authorization: `Bearer ${token}` },
         });
       }
     } catch (error) {
@@ -165,19 +226,26 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   };
 
+  const updateUser = async (next: User) => {
+    setUser(next);
+    await storage.setItem('user', JSON.stringify(next));
+  };
+
   const value: AuthContextType = {
     user,
     isAuthenticated: !!user,
     login,
+    loginWithBiometrics,
     logout,
+    updateUser,
     loading,
+    biometric,
+    refreshBiometric,
+    enableBiometrics,
+    disableBiometrics,
   };
 
-  return (
-    <AuthContext.Provider value={value}>
-      {children}
-    </AuthContext.Provider>
-  );
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
 
 export const useAuth = (): AuthContextType => {

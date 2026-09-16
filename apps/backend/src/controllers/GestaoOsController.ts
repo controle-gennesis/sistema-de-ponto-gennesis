@@ -217,7 +217,7 @@ export class GestaoOsController {
     try {
       if (!req.user) throw createError('Usuário não autenticado', 401);
       const body = req.body ?? {};
-      const access = await resolveGestaoOsAccess({
+      const access = await resolveGestaoOsAccessAllowPersonal({
         userId: req.user.id,
         isAdmin: !!req.user.isAdmin
       });
@@ -259,7 +259,8 @@ export class GestaoOsController {
     try {
       if (!req.user) throw createError('Usuário não autenticado', 401);
       const body = req.body ?? {};
-      const access = await resolveGestaoOsAccess({
+      // Técnico atribuído pode executar sem módulo completo (acesso pessoal)
+      const access = await resolveGestaoOsAccessAllowPersonal({
         userId: req.user.id,
         isAdmin: !!req.user.isAdmin
       });
