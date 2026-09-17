@@ -1690,7 +1690,6 @@ function normalizarNomeServicoOrcamento(nome: string): string {
 
 /** Marca subtítulo sem composições na seleção do dropdown (valor sintético da chave). */
 const DROPDOWN_BLOCO_SEM_ITENS = '__bloco_sem_itens__';
-const ORCAFASCIO_ORCAMENTO_FIXO_ID = '69f264ca90dfe2e71e80a328';
 
 /** Caixa do ícone em estados vazios e cabeçalhos (fundo vermelho suave + anel leve). */
 const ORCAMENTO_ICON_SOFT_BOX =
@@ -3701,6 +3700,109 @@ function OrcamentoSecaoVazia({
   );
 }
 
+/**
+ * Mantém linhas da lista montadas durante a animação de colapso/expansão.
+ * No leave, colapsa a altura das células (texto é recortado, não some antes).
+ */
+function OrcListaAnimacaoGrupo({
+  aberto,
+  children
+}: {
+  aberto: boolean;
+  children: React.ReactNode;
+}) {
+  const [montado, setMontado] = useState(aberto);
+  const [fase, setFase] = useState<'enter' | 'leave' | 'idle'>('idle');
+  const primeiroRender = useRef(true);
+  const trRefs = useRef<HTMLTableRowElement[]>([]);
+
+  useEffect(() => {
+    if (primeiroRender.current) {
+      primeiroRender.current = false;
+      setMontado(aberto);
+      return;
+    }
+    if (aberto) {
+      setMontado(true);
+      setFase('enter');
+      const t = window.setTimeout(() => setFase('idle'), 220);
+      return () => window.clearTimeout(t);
+    }
+    setFase('leave');
+    const t = window.setTimeout(() => {
+      setMontado(false);
+      setFase('idle');
+      trRefs.current = [];
+    }, 240);
+    return () => window.clearTimeout(t);
+  }, [aberto]);
+
+  useLayoutEffect(() => {
+    if (fase !== 'leave') return;
+    const rows = trRefs.current.filter(Boolean);
+    rows.forEach(tr => {
+      tr.style.pointerEvents = 'none';
+      Array.from(tr.cells).forEach(td => {
+        const cs = window.getComputedStyle(td);
+        const h = td.getBoundingClientRect().height;
+        td.style.boxSizing = 'border-box';
+        td.style.overflow = 'hidden';
+        td.style.verticalAlign = 'top';
+        td.style.height = `${h}px`;
+        td.style.paddingTop = cs.paddingTop;
+        td.style.paddingBottom = cs.paddingBottom;
+        td.style.borderTopWidth = cs.borderTopWidth;
+        td.style.borderBottomWidth = cs.borderBottomWidth;
+        void td.offsetHeight;
+        td.style.transition =
+          'height 0.22s ease-in, padding 0.22s ease-in, border-width 0.22s ease-in';
+        td.style.height = '0px';
+        td.style.paddingTop = '0px';
+        td.style.paddingBottom = '0px';
+        td.style.borderTopWidth = '0px';
+        td.style.borderBottomWidth = '0px';
+      });
+    });
+  }, [fase]);
+
+  if (!montado) return null;
+
+  const animCls = fase === 'enter' ? 'orc-lista-row-enter' : '';
+  const collected: HTMLTableRowElement[] = [];
+
+  const aplicarClasse = (nodes: React.ReactNode): React.ReactNode =>
+    React.Children.map(nodes, child => {
+      if (!React.isValidElement(child)) return child;
+      if (child.type === React.Fragment) {
+        const fragProps = child.props as { children?: React.ReactNode };
+        return (
+          <React.Fragment key={child.key}>
+            {aplicarClasse(fragProps.children)}
+          </React.Fragment>
+        );
+      }
+      if (child.type !== 'tr') return child;
+      const el = child as React.ReactElement<{
+        className?: string;
+        ref?: React.Ref<HTMLTableRowElement>;
+      }>;
+      return React.cloneElement(el, {
+        className: [el.props.className, animCls].filter(Boolean).join(' '),
+        ref: (node: HTMLTableRowElement | null) => {
+          if (node) collected.push(node);
+          trRefs.current = collected;
+          const prev = el.props.ref;
+          if (typeof prev === 'function') prev(node);
+          else if (prev && typeof prev === 'object') {
+            (prev as React.MutableRefObject<HTMLTableRowElement | null>).current = node;
+          }
+        }
+      } as Partial<typeof el.props>);
+    });
+
+  return <>{aplicarClasse(children)}</>;
+}
+
 /** Colunas em R$: símbolo à esquerda e valor numérico à direita na mesma célula. */
 const MoedaCelula = memo(function MoedaCelula({
   valor,
@@ -3893,14 +3995,6 @@ export function OrcamentoPageView({
   const [orcafascioOrcamentoLinhaCatalogoLoading, setOrcafascioOrcamentoLinhaCatalogoLoading] =
     useState(false);
   const [orcafascioOrcamentoLinhaChave, setOrcafascioOrcamentoLinhaChave] = useState<string | null>(null);
-  const [orcafascioAddCompModalOpen, setOrcafascioAddCompModalOpen] = useState(false);
-  const [orcafascioAddCompTargetBlocoKey, setOrcafascioAddCompTargetBlocoKey] = useState<string | null>(null);
-  const [orcafascioAddCompSearch, setOrcafascioAddCompSearch] = useState('');
-  const [orcafascioAddCompLoading, setOrcafascioAddCompLoading] = useState(false);
-  const [orcafascioAddCompComposicoes, setOrcafascioAddCompComposicoes] = useState<Record<string, unknown>[]>([]);
-  const [orcafascioAddCompAnalitico, setOrcafascioAddCompAnalitico] = useState<Record<string, unknown>[]>([]);
-  const [orcafascioAddCompAddingKey, setOrcafascioAddCompAddingKey] = useState<string | null>(null);
-  const [orcafascioAddCompSelecionadas, setOrcafascioAddCompSelecionadas] = useState<Set<string>>(new Set());
   const [novoBlocoModalOpen, setNovoBlocoModalOpen] = useState(false);
   const [novoBlocoModalMode, setNovoBlocoModalMode] = useState<'titulo' | 'subtitulo'>('titulo');
   const [novoBlocoModalServicoId, setNovoBlocoModalServicoId] = useState<string | null>(null);
@@ -4000,6 +4094,16 @@ export function OrcamentoPageView({
     nome: string;
   } | null>(null);
   const [excluindoOrcamento, setExcluindoOrcamento] = useState(false);
+  /** Chaves `t:<servicoId>` / `s:<blocoKey>` das linhas de título/subtítulo recolhidas na montagem. */
+  const [linhasListaRecolhidas, setLinhasListaRecolhidas] = useState<Set<string>>(() => new Set());
+  const alternarRecolherLinhaLista = useCallback((key: string) => {
+    setLinhasListaRecolhidas(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
   const [editarDadosOpen, setEditarDadosOpen] = useState(false);
   const [editarDadosDraft, setEditarDadosDraft] = useState<
     OrcamentoMeta & { nomeOrcamento: string }
@@ -5343,150 +5447,6 @@ export function OrcamentoPageView({
     }
   };
 
-  const carregarComposicoesOrcamentoFixoOrcafascio = useCallback(async () => {
-    setOrcafascioAddCompLoading(true);
-    try {
-      const enc = encodeURIComponent(ORCAFASCIO_ORCAMENTO_FIXO_ID);
-      let listComp: Record<string, unknown>[] = [];
-      try {
-        const sint = await api.get(`/orcafascio/orcamentos/${enc}/sintetico`, { timeout: 120000 });
-        listComp = normalizarListaApiOrcamento(sint.data);
-      } catch {
-        listComp = [];
-      }
-      if (listComp.length === 0) {
-        try {
-          const det = await api.get(`/orcafascio/orcamentos/${enc}`, { timeout: 120000 });
-          listComp = colecionarListasOrcamentoDetalheResposta(det.data);
-        } catch {
-          /* tentativa extra */
-        }
-      }
-      let listAna: Record<string, unknown>[] = [];
-      try {
-        const ana = await api.get(`/orcafascio/orcamentos/${enc}/analitico`, { timeout: 120000 });
-        listAna = normalizarListaApiOrcamento(ana.data);
-      } catch {
-        listAna = [];
-      }
-      setOrcafascioAddCompComposicoes(listComp);
-      setOrcafascioAddCompAnalitico(listAna);
-    } catch (err: any) {
-      const msg = err?.response?.data?.error || err?.response?.data?.message || err?.message || 'Erro ao carregar orçamento fixo do Orçafascio';
-      toast.error(`Orçafascio: ${msg}`);
-      setOrcafascioAddCompComposicoes([]);
-      setOrcafascioAddCompAnalitico([]);
-    } finally {
-      setOrcafascioAddCompLoading(false);
-    }
-  }, []);
-
-  const abrirModalAdicionarComposicaoOrcafascioNoBloco = useCallback((blocoKey: string) => {
-    if (!blocoKey || blocoKey.lastIndexOf('|') <= 0) {
-      toast.error('Não foi possível identificar o subtítulo para adicionar a composição.');
-      return;
-    }
-    setOrcafascioAddCompTargetBlocoKey(blocoKey);
-    setOrcafascioAddCompSearch('');
-    setOrcafascioAddCompSelecionadas(new Set());
-    setOrcafascioAddCompModalOpen(true);
-    void carregarComposicoesOrcamentoFixoOrcafascio();
-  }, [carregarComposicoesOrcamentoFixoOrcafascio]);
-
-  const abrirModalAdicionarComposicaoOrcafascio = useCallback((composicaoKey: string) => {
-    const parsed = parseItemKeyOrcamento(composicaoKey);
-    if (!parsed) {
-      toast.error('Não foi possível identificar o subtítulo para adicionar a composição.');
-      return;
-    }
-    abrirModalAdicionarComposicaoOrcafascioNoBloco(parsed.blocoKey);
-  }, [abrirModalAdicionarComposicaoOrcafascioNoBloco]);
-
-  const chaveLinhaAdicionarComp = useCallback((row: Record<string, unknown>, idx: number): string => {
-    const code = codigoCatalogoLinhaOrcamentoOrcafascio(row) ?? '';
-    const buildItemIdRaw = row.build_item_id != null ? String(row.build_item_id).trim() : '';
-    return `add-fixo-${idx}-${buildItemIdRaw || code || String(row.id ?? '')}`;
-  }, []);
-
-  type AddComposicaoNoBlocoResult =
-    | { ok: true; codigo: string }
-    | { ok: false; codigo: string; reason: 'invalid-target' | 'not-found-analitico' | 'duplicate' };
-
-  async function adicionarComposicaoOrcafascioNoBloco(
-    row: Record<string, unknown>,
-    idx: number,
-    options?: { emLote?: boolean }
-  ): Promise<AddComposicaoNoBlocoResult> {
-    const emLote = options?.emLote ?? false;
-    const blocoKey = orcafascioAddCompTargetBlocoKey;
-    const code = codigoCatalogoLinhaOrcamentoOrcafascio(row) ?? '';
-    if (!blocoKey) return { ok: false, codigo: code, reason: 'invalid-target' };
-    const parsedBloco = parseBlocoKeyOrcamento(blocoKey);
-    if (!parsedBloco) {
-      toast.error('Subtítulo de destino inválido.');
-      return { ok: false, codigo: code, reason: 'invalid-target' };
-    }
-    const { servicoId, subtituloId } = parsedBloco;
-    const rowBase = String(row.base ?? '').trim();
-    const analiticoMatch = encontrarLinhaAnaliticoParaComposicaoOrcamentoFixo(row, orcafascioAddCompAnalitico ?? []);
-    if (!analiticoMatch) {
-      const baseMsg = rowBase ? ` · base ${rowBase}` : '';
-      if (!emLote) {
-        toast.error(
-          `Esta composição não foi encontrada no analítico do orçamento fixo (código ${code || '—'}${baseMsg}).`
-        );
-      }
-      return { ok: false, codigo: code, reason: 'not-found-analitico' };
-    }
-    const detalhe = detalheCatalogoAPartirAnaliticoOrcamento(analiticoMatch as Record<string, unknown>);
-    const novaComp = orcafascioToComposicaoItem(detalhe);
-    const rowKey = chaveLinhaAdicionarComp(row, idx);
-    if (!emLote) setOrcafascioAddCompAddingKey(rowKey);
-    try {
-      let precisaSalvarCatalogo = false;
-      let catalogSnapshot: ComposicaoItem[] = composicoes;
-      setComposicoes((prev) => {
-        precisaSalvarCatalogo = false;
-        const idxExistente = prev.findIndex((c) => c.codigo === novaComp.codigo && c.banco === novaComp.banco);
-        if (idxExistente >= 0) {
-          const atual = prev[idxExistente];
-          const atualTemAnalitico = !!atual?.analiticoLinhas?.length;
-          const novoTemAnalitico = !!novaComp.analiticoLinhas?.length;
-          if (!novoTemAnalitico) {
-            catalogSnapshot = prev;
-            return prev;
-          }
-          const next = [...prev];
-          next[idxExistente] = novaComp;
-          catalogSnapshot = next;
-          precisaSalvarCatalogo =
-            !atualTemAnalitico ||
-            JSON.stringify(atual.analiticoLinhas ?? []) !== JSON.stringify(novaComp.analiticoLinhas ?? []);
-          return next;
-        }
-        precisaSalvarCatalogo = true;
-        catalogSnapshot = [...prev, novaComp];
-        return catalogSnapshot;
-      });
-      if (precisaSalvarCatalogo) {
-        await saveComposicoesGeralToApi(catalogSnapshot);
-      }
-      const addResult = addItemToServico(servicoId, subtituloId, novaComp);
-      if (!addResult.ok) {
-        if (addResult.reason === 'duplicate' && !emLote) {
-          toast.error('Este item já está no subtítulo');
-        }
-        return { ok: false, codigo: code || novaComp.codigo, reason: 'duplicate' };
-      }
-      if (!emLote) {
-        toast.success(`Composição ${novaComp.codigo} adicionada ao orçamento.`);
-      }
-      return { ok: true, codigo: code || novaComp.codigo };
-    } finally {
-      if (!emLote) setOrcafascioAddCompAddingKey(null);
-    }
-  }
-
   const orcafascioImportSelectOptions = useMemo(() => {
     return (orcafascioOrcamentos ?? []).map((o) => {
       const id = idOrcamentoOrcafascioParaApi(o);
@@ -5501,98 +5461,6 @@ export function OrcamentoPageView({
       };
     });
   }, [orcafascioOrcamentos]);
-
-  const orcafascioAddCompFiltradas = useMemo(() => {
-    const somenteComposicoes = orcafascioAddCompComposicoes.filter((row) => {
-      const r = row as Record<string, unknown>;
-      const codeRaw = codigoCatalogoLinhaOrcamentoOrcafascio(r);
-      const code = String(codeRaw ?? '').trim();
-      return !!code && code !== '-' && code !== '—';
-    });
-    const q = orcafascioAddCompSearch.trim().toLowerCase();
-    if (!q) return somenteComposicoes;
-    return somenteComposicoes.filter((row) => {
-      const r = row as Record<string, unknown>;
-      const code = String(codigoCatalogoLinhaOrcamentoOrcafascio(r) ?? '').toLowerCase();
-      const desc = textoDescricaoOrcafascio(r).toLowerCase();
-      return `${code} ${desc}`.includes(q);
-    });
-  }, [orcafascioAddCompComposicoes, orcafascioAddCompSearch]);
-
-  const orcafascioAddCompDestinoLabel = useMemo(() => {
-    const bk = orcafascioAddCompTargetBlocoKey;
-    if (!bk) return 'Subtítulo';
-    const p = parseBlocoKeyOrcamento(bk);
-    if (!p) return bk;
-    const svc = servicos.find((s) => s.id === p.servicoId) ?? servicosParaDropdown.find((s) => s.id === p.servicoId);
-    const sub = svc?.subtitulos.find((sb) => sb.id === p.subtituloId);
-    if (!svc || !sub) return bk;
-    return `${svc.nome} > ${sub.nome}`;
-  }, [orcafascioAddCompTargetBlocoKey, servicos, servicosParaDropdown]);
-
-  const toggleSelecaoAdicionarComp = useCallback((key: string) => {
-    setOrcafascioAddCompSelecionadas((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  }, []);
-
-  async function adicionarComposicoesOrcafascioSelecionadas() {
-    if (orcafascioAddCompSelecionadas.size === 0) {
-      toast('Selecione ao menos uma composição.');
-      return;
-    }
-    const rowsSelecionadas = orcafascioAddCompFiltradas
-      .map((row, idx) => ({ row, idx, key: chaveLinhaAdicionarComp(row, idx) }))
-      .filter((x) => orcafascioAddCompSelecionadas.has(x.key));
-    if (rowsSelecionadas.length === 0) {
-      toast('Nenhuma composição selecionada nesta lista filtrada.');
-      return;
-    }
-    setOrcafascioAddCompAddingKey('batch');
-    let ok = 0;
-    let falhasNaoEncontrado = 0;
-    let falhasDuplicado = 0;
-    let falhasDestino = 0;
-    try {
-      for (const x of rowsSelecionadas) {
-        try {
-          const result = await adicionarComposicaoOrcafascioNoBloco(x.row as Record<string, unknown>, x.idx, {
-            emLote: true,
-          });
-          if (result.ok) {
-            ok += 1;
-          } else if (result.reason === 'not-found-analitico') {
-            falhasNaoEncontrado += 1;
-          } else if (result.reason === 'duplicate') {
-            falhasDuplicado += 1;
-          } else {
-            falhasDestino += 1;
-          }
-        } catch {
-          // Continua lote mesmo se alguma falhar.
-        }
-      }
-      if (ok > 0) {
-        const extras: string[] = [];
-        if (falhasNaoEncontrado > 0) extras.push(`${falhasNaoEncontrado} sem vínculo no analítico`);
-        if (falhasDuplicado > 0) extras.push(`${falhasDuplicado} duplicada(s)`);
-        if (falhasDestino > 0) extras.push(`${falhasDestino} com destino inválido`);
-        toast.success(
-          `${ok} composição(ões) adicionada(s) ao orçamento.${extras.length ? ` (${extras.join(' | ')})` : ''}`
-        );
-      } else {
-        toast.error(
-          `Nenhuma composição foi adicionada.${falhasNaoEncontrado > 0 ? ` ${falhasNaoEncontrado} não foram encontradas no analítico.` : ''}${falhasDuplicado > 0 ? ` ${falhasDuplicado} já estavam no subtítulo.` : ''}`
-        );
-      }
-    } finally {
-      setOrcafascioAddCompAddingKey(null);
-      setOrcafascioAddCompSelecionadas(new Set());
-    }
-  }
 
   const verDetalheComposicaoOrcafascio = async (comp: OrcafascioComposicaoListItem) => {
     setOrcafascioComposicaoDetalheTab('itens');
@@ -11161,6 +11029,11 @@ export function OrcamentoPageView({
                         const checkboxSubtitulo = estadoCheckboxGrupoMontagem(chavesGrupoSubtitulo);
                         const borderTitulo = 'border-l border-red-500/30 dark:border-red-900/40';
                         const borderSub = 'border-l border-gray-200 dark:border-gray-700';
+                        const servicoIdLista = bloco.key.split('|')[0] || bloco.key;
+                        const chaveTituloLista = `t:${servicoIdLista}`;
+                        const chaveSubLista = `s:${bloco.key}`;
+                        const tituloRecolhido = linhasListaRecolhidas.has(chaveTituloLista);
+                        const subRecolhido = linhasListaRecolhidas.has(chaveSubLista);
                         return (
                           <React.Fragment key={bloco.key}>
                             {mostrarTituloServico && (
@@ -11187,9 +11060,27 @@ export function OrcamentoPageView({
                               <td className={`px-3 py-2.5 align-middle text-center ${borderTitulo}`} />
                               <td className={`px-3 py-2.5 align-middle text-center ${borderTitulo}`} />
                               <td className={`min-w-[260px] max-w-[min(520px,55vw)] px-3 py-2.5 align-middle ${borderTitulo}`}>
-                                <span className="block whitespace-normal break-words text-xs font-bold uppercase tracking-wide text-left text-white">
-                                  {bloco.servicoNome}
-                                </span>
+                                <div className="flex items-center gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={e => {
+                                      e.stopPropagation();
+                                      alternarRecolherLinhaLista(chaveTituloLista);
+                                    }}
+                                    className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-white/90 hover:bg-white/15"
+                                    title={tituloRecolhido ? 'Expandir serviço' : 'Minimizar serviço'}
+                                    aria-label={tituloRecolhido ? 'Expandir serviço' : 'Minimizar serviço'}
+                                    aria-expanded={!tituloRecolhido}
+                                  >
+                                    <ChevronDown
+                                      className={`h-4 w-4 transition-transform duration-200 ease-out ${tituloRecolhido ? '-rotate-90' : 'rotate-0'}`}
+                                      aria-hidden
+                                    />
+                                  </button>
+                                  <span className="block min-w-0 flex-1 leading-5 whitespace-normal break-words text-xs font-bold uppercase tracking-wide text-left text-white">
+                                    {bloco.servicoNome}
+                                  </span>
+                                </div>
                               </td>
                               <td className={`px-2 py-2.5 text-center align-middle ${borderTitulo}`} />
                               <td className={`px-2 py-2.5 text-center align-middle ${borderTitulo}`} />
@@ -11213,6 +11104,7 @@ export function OrcamentoPageView({
                               </td>
                             </tr>
                             )}
+                            <OrcListaAnimacaoGrupo aberto={!tituloRecolhido}>
                             <tr
                               className={`border-b border-gray-200/90 bg-slate-200/90 dark:border-gray-800 dark:bg-gray-900 ${gradeTableRowTrCls} ${gradeTituloSubtituloRowTrCls}`}
                               data-orc-ctx-montagem="subtitulo"
@@ -11235,9 +11127,27 @@ export function OrcamentoPageView({
                               <td className={`px-3 py-2.5 align-middle text-center ${borderSub}`} />
                               <td className={`px-3 py-2.5 align-middle text-center ${borderSub}`} />
                               <td className={`min-w-[260px] max-w-[min(520px,55vw)] px-3 py-2.5 align-middle ${borderSub}`}>
-                                <span className="block whitespace-normal break-words text-[11px] font-semibold uppercase tracking-wide text-gray-800 dark:text-gray-200 sm:text-xs">
-                                  {mesmoTituloSubtitulo ? bloco.servicoNome : bloco.subtituloNome}
-                                </span>
+                                <div className="flex items-center gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={e => {
+                                      e.stopPropagation();
+                                      alternarRecolherLinhaLista(chaveSubLista);
+                                    }}
+                                    className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-gray-700 hover:bg-black/5 dark:text-gray-200 dark:hover:bg-white/10"
+                                    title={subRecolhido ? 'Expandir subtítulo' : 'Minimizar subtítulo'}
+                                    aria-label={subRecolhido ? 'Expandir subtítulo' : 'Minimizar subtítulo'}
+                                    aria-expanded={!subRecolhido}
+                                  >
+                                    <ChevronDown
+                                      className={`h-4 w-4 transition-transform duration-200 ease-out ${subRecolhido ? '-rotate-90' : 'rotate-0'}`}
+                                      aria-hidden
+                                    />
+                                  </button>
+                                  <span className="block min-w-0 flex-1 leading-5 whitespace-normal break-words text-[11px] font-semibold uppercase tracking-wide text-gray-800 dark:text-gray-200 sm:text-xs">
+                                    {mesmoTituloSubtitulo ? bloco.servicoNome : bloco.subtituloNome}
+                                  </span>
+                                </div>
                               </td>
                               <td className={`px-2 py-2.5 text-center align-middle ${borderSub}`} />
                               <td className={`px-2 py-2.5 text-center align-middle ${borderSub}`} />
@@ -11260,6 +11170,7 @@ export function OrcamentoPageView({
                                 {resumoSubtitulo.pesoPct.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%
                               </td>
                             </tr>
+                                  <OrcListaAnimacaoGrupo aberto={!tituloRecolhido && !subRecolhido}>
                                   {rowsDoBloco.map((row, itemIdx) => {
                                     const usaDimensoes = !!row.dimensoes?.linhas?.length;
                                     const dim = dimensoesPorItem[row.key] || { tipoUnidade: 'm3' as const, linhas: [] };
@@ -11351,6 +11262,8 @@ export function OrcamentoPageView({
                                     </React.Fragment>
                                     );
                                   })}
+                                  </OrcListaAnimacaoGrupo>
+                            </OrcListaAnimacaoGrupo>
                           </React.Fragment>
                         );
                       });
@@ -11400,27 +11313,6 @@ export function OrcamentoPageView({
                               >
                                 <ListPlus className="h-4 w-4 shrink-0" aria-hidden />
                                 Adicionar subtítulo
-                              </button>
-                            )}
-                            {(menuCtxMontagem.kind === 'subtitulo' || menuCtxMontagem.kind === 'composicao') && (
-                              <button
-                                type="button"
-                                role="menuitem"
-                                className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-violet-700 hover:bg-violet-50 dark:text-violet-300 dark:hover:bg-violet-950/30"
-                                onClick={() => {
-                                  if (menuCtxMontagem.kind === 'subtitulo') {
-                                    const blocoKey = menuCtxMontagem.blocoKey;
-                                    setMenuCtxMontagem(null);
-                                    abrirModalAdicionarComposicaoOrcafascioNoBloco(blocoKey);
-                                    return;
-                                  }
-                                  const key = menuCtxMontagem.composicaoKey;
-                                  setMenuCtxMontagem(null);
-                                  abrirModalAdicionarComposicaoOrcafascio(key);
-                                }}
-                              >
-                                <ListPlus className="h-4 w-4 shrink-0" aria-hidden />
-                                Adicionar composição Orçafascio
                               </button>
                             )}
                             <button
@@ -11508,11 +11400,12 @@ export function OrcamentoPageView({
                 <button
                   type="button"
                   onClick={exportarOrcamentoDetalhado}
-                  className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-red-600 text-white shadow-sm transition-colors hover:bg-red-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-gray-900"
+                  className="inline-flex h-10 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-700 shadow-sm transition-colors hover:bg-gray-50 active:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700 dark:active:bg-gray-600 dark:focus-visible:ring-offset-gray-900"
                   title="Exportar orçamento"
                   aria-label="Exportar orçamento"
                 >
-                  <FileSpreadsheet className="h-5 w-5" aria-hidden />
+                  <Download className="h-4 w-4 shrink-0" aria-hidden />
+                  Exportar
                 </button>
               </div>
             </div>
@@ -12066,139 +11959,6 @@ export function OrcamentoPageView({
           </div>
         </AppModalOverlay>
       )}
-
-      <Modal
-        isOpen={orcafascioAddCompModalOpen}
-        onClose={() => {
-          if (orcafascioAddCompAddingKey) return;
-          setOrcafascioAddCompModalOpen(false);
-          setOrcafascioAddCompSelecionadas(new Set());
-        }}
-        title={`Adicionar composição (${orcafascioAddCompDestinoLabel})`}
-        size="xl"
-        closeOnOverlayClick={!orcafascioAddCompAddingKey}
-      >
-        <div className="space-y-3">
-          <div className="flex items-center gap-2">
-            <div className="flex-1 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2">
-              <input
-                type="text"
-                value={orcafascioAddCompSearch}
-                onChange={(e) => setOrcafascioAddCompSearch(e.target.value)}
-                placeholder="Filtrar por código ou descrição..."
-                className="w-full bg-transparent text-sm outline-none text-gray-900 dark:text-gray-100 placeholder-gray-400"
-              />
-            </div>
-            <button
-              type="button"
-              onClick={() => void carregarComposicoesOrcamentoFixoOrcafascio()}
-              disabled={orcafascioAddCompLoading}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
-            >
-              {orcafascioAddCompLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-              Atualizar
-            </button>
-          </div>
-          <div className="text-xs text-gray-500 dark:text-gray-400">
-            {orcafascioAddCompComposicoes.length.toLocaleString('pt-BR')} composições carregadas ·{' '}
-            {(orcafascioAddCompAnalitico?.length ?? 0).toLocaleString('pt-BR')} analíticos disponíveis ·{' '}
-            {orcafascioAddCompSelecionadas.size.toLocaleString('pt-BR')} selecionada(s)
-          </div>
-          {!orcafascioAddCompLoading && orcafascioAddCompFiltradas.length > 0 && (
-            <div className="flex items-center justify-between gap-2">
-              <button
-                type="button"
-                onClick={() => setOrcafascioAddCompSelecionadas(new Set(orcafascioAddCompFiltradas.map((r, i) => chaveLinhaAdicionarComp(r as Record<string, unknown>, i))))}
-                disabled={!!orcafascioAddCompAddingKey}
-                className="text-xs rounded-md border border-gray-300 dark:border-gray-600 px-2.5 py-1.5 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
-              >
-                Selecionar todos (filtro)
-              </button>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setOrcafascioAddCompSelecionadas(new Set())}
-                  disabled={!!orcafascioAddCompAddingKey}
-                  className="text-xs rounded-md border border-gray-300 dark:border-gray-600 px-2.5 py-1.5 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
-                >
-                  Limpar seleção
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void adicionarComposicoesOrcafascioSelecionadas()}
-                  disabled={!!orcafascioAddCompAddingKey || orcafascioAddCompSelecionadas.size === 0}
-                  className="inline-flex items-center gap-1.5 rounded-md bg-violet-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-violet-700 disabled:opacity-50"
-                >
-                  {orcafascioAddCompAddingKey === 'batch' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ListPlus className="h-3.5 w-3.5" />}
-                  Adicionar selecionadas
-                </button>
-              </div>
-            </div>
-          )}
-          <div className="max-h-[55vh] overflow-auto rounded-lg border border-gray-200 dark:border-gray-700">
-            {orcafascioAddCompLoading ? (
-              <div className="flex items-center justify-center py-10 text-sm text-gray-500 dark:text-gray-400">
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Carregando composições...
-              </div>
-            ) : orcafascioAddCompFiltradas.length === 0 ? (
-              <div className="py-10 text-center text-sm text-gray-500 dark:text-gray-400">
-                Nenhuma composição encontrada para o filtro informado.
-              </div>
-            ) : (
-              <table className="w-full border-collapse text-xs">
-                <thead>
-                  <tr className="sticky top-0 z-10 bg-gray-50 dark:bg-gray-800/80">
-                    <th className="w-10 px-2 py-2 text-center font-semibold text-gray-600 dark:text-gray-300 uppercase">Seleção</th>
-                    <th className="px-3 py-2 text-left font-semibold text-gray-600 dark:text-gray-300 uppercase">Código</th>
-                    <th className="px-3 py-2 text-left font-semibold text-gray-600 dark:text-gray-300 uppercase">Descrição</th>
-                    <th className="px-3 py-2 text-left font-semibold text-gray-600 dark:text-gray-300 uppercase">Base</th>
-                    <th className="px-3 py-2 text-right font-semibold text-gray-600 dark:text-gray-300 uppercase">Ação</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {orcafascioAddCompFiltradas.map((row, idx) => {
-                    const r = row as Record<string, unknown>;
-                    const code = codigoCatalogoLinhaOrcamentoOrcafascio(r) ?? '—';
-                    const desc = textoDescricaoOrcafascio(r) || '—';
-                    const base = String(r.base ?? '—');
-                    const key = chaveLinhaAdicionarComp(r, idx);
-                    const adding = orcafascioAddCompAddingKey === key;
-                    const selected = orcafascioAddCompSelecionadas.has(key);
-                    return (
-                      <tr key={key} className="border-t border-gray-100 dark:border-gray-800">
-                        <td className="px-2 py-2 text-center">
-                          <input
-                            type="checkbox"
-                            checked={selected}
-                            onChange={() => toggleSelecaoAdicionarComp(key)}
-                            disabled={!!orcafascioAddCompAddingKey}
-                            className="h-4 w-4 rounded border-gray-300 text-violet-600 focus:ring-violet-500"
-                          />
-                        </td>
-                        <td className="px-3 py-2 font-mono text-[11px] text-gray-800 dark:text-gray-200">{code}</td>
-                        <td className="px-3 py-2 text-gray-700 dark:text-gray-300">{desc}</td>
-                        <td className="px-3 py-2 text-gray-500 dark:text-gray-400">{base}</td>
-                        <td className="px-3 py-2 text-right">
-                          <button
-                            type="button"
-                            onClick={() => void adicionarComposicaoOrcafascioNoBloco(r, idx)}
-                            disabled={!!orcafascioAddCompAddingKey}
-                            className="inline-flex items-center gap-1.5 rounded-md bg-violet-600 px-3 py-1.5 text-[11px] font-medium text-white hover:bg-violet-700 disabled:opacity-50"
-                          >
-                            {adding ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
-                            Adicionar
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            )}
-          </div>
-        </div>
-      </Modal>
 
       <Modal
         isOpen={novoBlocoModalOpen}

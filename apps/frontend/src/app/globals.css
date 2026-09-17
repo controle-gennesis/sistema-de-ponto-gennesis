@@ -2143,3 +2143,29 @@ html.auth-transition-dimming body {
     animation: none !important;
   }
 }
+
+/* Orçamento montagem: colapso de título/subtítulo */
+@keyframes orc-lista-row-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+tr.orc-lista-row-enter {
+  animation: orc-lista-row-enter 0.2s ease-out both;
+}
+
+tr.orc-lista-row-enter > td {
+  overflow: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  tr.orc-lista-row-enter {
+    animation: none;
+  }
+}
