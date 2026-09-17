@@ -39,6 +39,8 @@ export type SingleSelectSearchDropdownProps = {
   menuAlign?: 'start' | 'end';
   matchTriggerWidth?: boolean;
   menuMinWidth?: number;
+  /** Força o menu flutuante a abrir para baixo. */
+  preferOpenDown?: boolean;
   /** Conteúdo fixo no rodapé do menu (ex.: ação "Criar…"). */
   menuFooter?: React.ReactNode;
 };
@@ -66,6 +68,8 @@ type FloatingPosOptions = {
   optionCount?: number;
   minMenuWidth?: number;
   listMax?: number;
+  /** Força abrir para baixo (mesmo com pouco espaço). */
+  preferOpenDown?: boolean;
 };
 
 const MENU_OPTION_CHROME_PX = 76;
@@ -92,8 +96,10 @@ function computeFloatingPos(trigger: HTMLElement, options?: FloatingPosOptions):
 
   const spaceBelow = window.innerHeight - rect.bottom - gap - margin;
   const spaceAbove = rect.top - gap - margin;
-  // Abre para cima quando não cabe o painel completo abaixo.
-  const openUp = spaceBelow < preferred && spaceAbove > spaceBelow;
+  // Abre para cima quando não cabe o painel completo abaixo — a menos que preferOpenDown.
+  const openUp = options?.preferOpenDown
+    ? false
+    : spaceBelow < preferred && spaceAbove > spaceBelow;
 
   let left = rect.left;
   if (options?.align === 'end') {
@@ -271,6 +277,7 @@ export function SingleSelectSearchDropdown({
   menuAlign = 'start',
   matchTriggerWidth = false,
   menuMinWidth,
+  preferOpenDown = false,
   menuFooter,
 }: SingleSelectSearchDropdownProps) {
   const listCap = listMaxHeightProp ?? LIST_MAX;
@@ -322,6 +329,7 @@ export function SingleSelectSearchDropdown({
         optionCount: options.length + (allowEmpty ? 1 : 0),
         minMenuWidth: minWidth,
         listMax: listCap,
+        preferOpenDown,
       })
     );
   }, [
@@ -333,6 +341,7 @@ export function SingleSelectSearchDropdown({
     emptyOptionLabel,
     menuMinWidth,
     listCap,
+    preferOpenDown,
   ]);
 
   useEffect(() => setMounted(true), []);

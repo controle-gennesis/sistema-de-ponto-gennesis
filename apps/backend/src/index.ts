@@ -94,6 +94,7 @@ import pleitoRoutes from './routes/pleitos';
 import demandSheetApprovalRoutes from './routes/demandSheetApprovals';
 import fluigRoutes from './routes/fluig';
 import { fluigService } from './controllers/FluigController';
+import { orcafascioService } from './controllers/OrcafascioController';
 import whatsappRoutes from './routes/whatsapp';
 import quoteMapRoutes from './routes/quoteMaps';
 import permissionRoutes from './routes/permissions';
@@ -621,6 +622,14 @@ try {
         void fluigService.warmupDatasets(FLUIG_WARM_DATASETS);
         fluigService.startPeriodicRefresh(FLUIG_WARM_DATASETS, 8 * 60 * 1000);
       }, 10_000);
+    }
+
+    // Pré-aquecer lista de orçamentos Orçafascio (mesmo padrão SWR do Fluig)
+    if (process.env.ORCAFASCIO_EMAIL && process.env.ORCAFASCIO_SECRET_TOKEN) {
+      setTimeout(() => {
+        void orcafascioService.warmupBudgetsList();
+        orcafascioService.startPeriodicBudgetsRefresh(5 * 60 * 1000);
+      }, 12_000);
     }
   });
 } catch (error) {

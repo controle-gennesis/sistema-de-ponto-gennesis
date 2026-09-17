@@ -114,6 +114,22 @@ export class OrcafascioService {
   /** Cache curto da lista de segmentos que aceitam GET …/compositions */
   private basesComCatalogoCache: { segments: string[]; expiry: number } | null = null;
 
+  /** Índice code→{id,segment} montado uma vez no fallback de listagem (evita re-paginar por código). */
+  private compositionCodeIndexCache: {
+    expiry: number;
+    byCode: Map<string, { id: string; segment: string }>;
+  } | null = null;
+  private compositionCodeIndexBuilding: Promise<Map<string, { id: string; segment: string }>> | null =
+    null;
+
+  /** Códigos inexistentes — não retenta listagem por um tempo. */
+  private codeNotFoundCache = new Map<string, number>();
+
+  private orcafascioVerbose(): boolean {
+    const v = process.env.ORCAFASCIO_VERBOSE?.trim().toLowerCase();
+    return v === '1' || v === 'true' || v === 'yes';
+  }
+
   constructor() {
     let baseURL = (process.env.ORCAFASCIO_BASE_URL || 'https://api.orcafascio.com/api').trim();
     baseURL = baseURL.replace(/\/+$/, '');
@@ -675,18 +691,25 @@ export class OrcafascioService {
     for (const path of paths) {
       for (const authH of authModes) {
         try {
-          console.log(`[Orçafascio] Tentando GET ${this.client.defaults.baseURL}${path}`);
+          if (this.orcafascioVerbose()) {
+            console.log(`[Orçafascio] Tentando GET ${this.client.defaults.baseURL}${path}`);
+          }
           const res = await this.client.get<T>(path, {
             headers: { Authorization: authH },
             params,
           });
-          console.log(`[Orçafascio] ✅ ${path} → 200`);
+          if (this.orcafascioVerbose()) {
+            console.log(`[Orçafascio] ✅ ${path} → 200`);
+          }
           return res.data;
         } catch (e) {
           lastErr = e;
           const st = axios.isAxiosError(e) ? e.response?.status : undefined;
           const body = axios.isAxiosError(e) ? JSON.stringify(e.response?.data ?? '').slice(0, 150) : '';
-          console.log(`[Orçafascio] ❌ ${path} → HTTP ${st ?? '?'} ${body}`);
+          // 404 em slugs errados é esperado; só loga se verbose ou erro inesperado.
+          if (this.orcafascioVerbose() || (st != null && st !== 404 && st !== 403)) {
+            console.log(`[Orçafascio] ❌ ${path} → HTTP ${st ?? '?'} ${body}`);
+          }
           /* continua tentando próximo path/auth */
         }
       }
@@ -799,55 +822,115 @@ export class OrcafascioService {
   }
 
   /**
+   * Monta (uma vez) índice código→id a partir de GET …/compositions nas bases conhecidas.
+   * Evita que cada find_by_code 404 dispare dezenas/centenas de páginas de listagem.
+   */
+  private async obterIndiceCodigosComposicao(
+    token: string
+  ): Promise<Map<string, { id: string; segment: string }>> {
+    const now = Date.now();
+    if (this.compositionCodeIndexCache && this.compositionCodeIndexCache.expiry > now) {
+      return this.compositionCodeIndexCache.byCode;
+    }
+    if (this.compositionCodeIndexBuilding) {
+      return this.compositionCodeIndexBuilding;
+    }
+
+    this.compositionCodeIndexBuilding = (async () => {
+      const byCode = new Map<string, { id: string; segment: string }>();
+      const segments = this.segmentosComposicaoOrsePrioridade().slice(0, 4);
+      const maxPages = Math.min(
+        40,
+        Math.max(5, parseInt(process.env.ORCAFASCIO_CODE_LOOKUP_MAX_PAGES || '25', 10) || 25)
+      );
+
+      for (const seg of segments) {
+        for (let page = 1; page <= maxPages; page++) {
+          let data: OrcafascioListResponse<OrcafascioComposicaoListItem>;
+          try {
+            data = await this.listarComposicoesParaSegmento(token, seg, page);
+          } catch {
+            break;
+          }
+          for (const r of data.records ?? []) {
+            const id = String(r.id ?? '').trim();
+            const code = String(r.code ?? '').trim();
+            if (!id || !code) continue;
+            if (!byCode.has(code)) byCode.set(code, { id, segment: seg });
+            const digits = code.replace(/[^\d]/g, '');
+            if (digits.length >= 5 && !byCode.has(digits)) {
+              byCode.set(digits, { id, segment: seg });
+            }
+          }
+          const perPage = Math.max(1, data.per_page || 15);
+          const total = data.total ?? 0;
+          if (total > 0 && page * perPage >= total) break;
+          if ((data.records?.length ?? 0) === 0 && page > 1) break;
+        }
+      }
+
+      this.compositionCodeIndexCache = {
+        byCode,
+        expiry: Date.now() + 15 * 60 * 1000,
+      };
+      console.log(`[Orçafascio] Índice de códigos montado (${byCode.size} entradas) para fallback`);
+      return byCode;
+    })();
+
+    try {
+      return await this.compositionCodeIndexBuilding;
+    } finally {
+      this.compositionCodeIndexBuilding = null;
+    }
+  }
+
+  /**
    * Quando `find_by_code` retorna 404 em todos os segmentos (slug «orse» nem sempre existe na API),
-   * localiza o código em GET …/compositions (várias páginas) e abre o detalhe por ID.
+   * localiza o código no índice (listagem cacheada) e abre o detalhe por ID.
    */
   private async buscarComposicaoPorCodigoViaListagem(
     token: string,
     codeNorm: string
   ): Promise<OrcafascioComposicaoDetalhe> {
-    const variantes = this.variantesCodigoBusca(codeNorm);
-    const digitsSet = new Set(
-      variantes
-        .map((v) => v.replace(/[^\d]/g, ''))
-        .filter((v) => v.length >= 5)
-    );
-    const segments = this.segmentosComposicaoOrsePrioridade();
-    const maxPages = Math.min(
-      150,
-      Math.max(15, parseInt(process.env.ORCAFASCIO_CODE_LOOKUP_MAX_PAGES || '90', 10) || 90)
-    );
+    const skipEnv = process.env.ORCAFASCIO_SKIP_LISTAGEM_FALLBACK?.trim().toLowerCase();
+    if (skipEnv === '1' || skipEnv === 'true' || skipEnv === 'yes') {
+      throw new Error(
+        `Orçafascio: composição «${codeNorm}» não encontrada via find_by_code (fallback listagem desligado).`
+      );
+    }
 
-    for (const seg of segments) {
-      for (let page = 1; page <= maxPages; page++) {
-        let data: OrcafascioListResponse<OrcafascioComposicaoListItem>;
-        try {
-          data = await this.listarComposicoesParaSegmento(token, seg, page, codeNorm);
-        } catch {
-          break;
-        }
-        const hit = data.records.find((r) => {
-          const rc = String(r.code ?? '').trim();
-          if (!rc) return false;
-          if (variantes.includes(rc)) return true;
-          const rcDigits = rc.replace(/[^\d]/g, '');
-          return rcDigits.length >= 5 && digitsSet.has(rcDigits);
-        });
-        if (hit) {
-          console.log(
-            `[Orçafascio] Código ${codeNorm} resolvido pela listagem (base=${seg}, página ${page}, hit=${hit.code})`
-          );
-          return this.buscarComposicaoPorId(hit.id, seg);
-        }
-        const perPage = Math.max(1, data.per_page || 15);
-        const total = data.total ?? 0;
-        if (total > 0 && page * perPage >= total) break;
-        if (data.records.length === 0 && page > 2) break;
+    const notFoundUntil = this.codeNotFoundCache.get(codeNorm) ?? 0;
+    if (notFoundUntil > Date.now()) {
+      throw new Error(
+        `Orçafascio: composição com código «${codeNorm}» não encontrada (cache negativo).`
+      );
+    }
+
+    const variantes = this.variantesCodigoBusca(codeNorm);
+    const index = await this.obterIndiceCodigosComposicao(token);
+    let hit: { id: string; segment: string } | undefined;
+    for (const v of variantes) {
+      hit = index.get(v);
+      if (hit) break;
+      const digits = v.replace(/[^\d]/g, '');
+      if (digits.length >= 5) {
+        hit = index.get(digits);
+        if (hit) break;
       }
     }
 
+    if (hit) {
+      if (this.orcafascioVerbose()) {
+        console.log(
+          `[Orçafascio] Código ${codeNorm} resolvido pelo índice (base=${hit.segment}, id=${hit.id})`
+        );
+      }
+      return this.buscarComposicaoPorId(hit.id, hit.segment);
+    }
+
+    this.codeNotFoundCache.set(codeNorm, Date.now() + 30 * 60 * 1000);
     throw new Error(
-      `Orçafascio: composição com código «${codeNorm}» não encontrada após buscar em ${segments.join(', ')}. ` +
+      `Orçafascio: composição com código «${codeNorm}» não encontrada após buscar em ${this.segmentosComposicaoOrsePrioridade().join(', ')}. ` +
         'No site o catálogo ORSE pode estar ligado a outro segmento — defina ORCAFASCIO_ORSE_SEGMENT com o ID da base (DevTools → rede ao filtrar ORSE).'
     );
   }
@@ -1106,6 +1189,16 @@ export class OrcafascioService {
     if (!variantesCodigo.length) {
       throw new Error('Orçafascio: código da composição inválido.');
     }
+
+    const notFoundUntil = this.codeNotFoundCache.get(rawCode) ?? 0;
+    if (notFoundUntil > Date.now()) {
+      const err = new Error(
+        `Orçafascio: composição com código «${rawCode}» não encontrada (cache negativo).`
+      ) as Error & { statusCode?: number };
+      err.statusCode = 404;
+      throw err;
+    }
+
     const { token } = await this.authenticate();
     const ufPreferida = state?.trim() || this.estadoPadraoOrse();
     /** Muitos catálogos «Oficiais» usam SP como UF de referência mesmo para ORSE no front */
@@ -1120,12 +1213,27 @@ export class OrcafascioService {
         for (const st of ufs) {
           for (const authH of authModes) {
             try {
-              console.log(`[Orçafascio] find_by_code base=${segment} state=${st} code=${codeTry}`);
+              if (this.orcafascioVerbose()) {
+                console.log(`[Orçafascio] find_by_code base=${segment} state=${st} code=${codeTry}`);
+              }
               const res = await this.client.get<OrcafascioComposicaoDetalhe>(path, {
                 headers: { Authorization: authH },
                 params: { code: codeTry, state: st },
               });
-              return res.data;
+              const data = res.data;
+              // find_by_code às vezes devolve só o cabeçalho; o detalhe por id traz os insumos.
+              if (
+                data?.id &&
+                (!Array.isArray(data.items) || data.items.length === 0)
+              ) {
+                try {
+                  const full = await this.buscarComposicaoPorId(String(data.id), segment);
+                  if (Array.isArray(full?.items) && full.items.length > 0) return full;
+                } catch {
+                  /* mantém o payload do find_by_code */
+                }
+              }
+              return data;
             } catch (e) {
               lastErr = e;
               const stHttp = axios.isAxiosError(e) ? e.response?.status : undefined;
@@ -1137,15 +1245,31 @@ export class OrcafascioService {
       }
     }
 
-    console.warn('[Orçafascio] find_by_code sem sucesso em todos segmentos/UFs — fallback listagem paginada');
-    try {
-      return await this.buscarComposicaoPorCodigoViaListagem(token, rawCode);
-    } catch (eList) {
-      if (lastErr && axios.isAxiosError(lastErr) && (lastErr.response?.status ?? 0) >= 500) {
-        throw this.wrapAxiosError(lastErr, 'Composição por código');
+    // Fallback de listagem é caro e floodava o terminal — só com opt-in explícito.
+    const allowListagem = (() => {
+      const v = process.env.ORCAFASCIO_LISTAGEM_FALLBACK?.trim().toLowerCase();
+      return v === '1' || v === 'true' || v === 'yes';
+    })();
+    if (allowListagem) {
+      if (this.orcafascioVerbose()) {
+        console.warn('[Orçafascio] find_by_code sem sucesso — fallback listagem (opt-in)');
       }
-      throw eList instanceof Error ? eList : new Error(String(eList));
+      try {
+        return await this.buscarComposicaoPorCodigoViaListagem(token, rawCode);
+      } catch (eList) {
+        if (lastErr && axios.isAxiosError(lastErr) && (lastErr.response?.status ?? 0) >= 500) {
+          throw this.wrapAxiosError(lastErr, 'Composição por código');
+        }
+        throw eList instanceof Error ? eList : new Error(String(eList));
+      }
     }
+
+    this.codeNotFoundCache.set(rawCode, Date.now() + 30 * 60 * 1000);
+    const err = new Error(
+      `Orçafascio: composição com código «${rawCode}» não encontrada.`
+    ) as Error & { statusCode?: number };
+    err.statusCode = 404;
+    throw err;
   }
 
   async buscarComposicaoPorId(composicaoId: string, baseSegment?: string): Promise<OrcafascioComposicaoDetalhe> {
@@ -1164,13 +1288,51 @@ export class OrcafascioService {
 
   // ── Orçamentos ─────────────────────────────────────────────────────────────
 
-  async listarOrcamentos(
+  /** Cache SWR da listagem (padrão Fluig): fresco ~5 min, servível ~20 min. */
+  private static readonly BUDGETS_CACHE_FRESH_MS = 5 * 60 * 1000;
+  private static readonly BUDGETS_CACHE_STALE_MS = 20 * 60 * 1000;
+  private budgetsListCache = new Map<
+    string,
+    {
+      data: {
+        budgets: Record<string, unknown>[];
+        total?: number;
+        current_page?: number;
+        per_page?: number;
+      };
+      fetchedAt: number;
+      refreshing: boolean;
+    }
+  >();
+
+  private budgetsListCacheKey(
+    page: number,
+    orderType?: string,
+    orderName?: string,
+    perPage?: number,
+    search?: string
+  ): string {
+    return JSON.stringify({
+      page,
+      orderType: orderType || '',
+      orderName: orderName || '',
+      perPage: perPage ?? 0,
+      search: (search || '').trim().toLowerCase(),
+    });
+  }
+
+  private async fetchOrcamentosDirect(
     page = 1,
     orderType?: string,
     orderName?: string,
     perPage?: number,
     search?: string
-  ): Promise<{ budgets: Record<string, unknown>[]; total?: number; current_page?: number; per_page?: number }> {
+  ): Promise<{
+    budgets: Record<string, unknown>[];
+    total?: number;
+    current_page?: number;
+    per_page?: number;
+  }> {
     const { token } = await this.authenticate();
     const authModes = OrcafascioService.authorizationVariants(token);
     const params: Record<string, unknown> = { page };
@@ -1208,6 +1370,116 @@ export class OrcafascioService {
     throw lastErr
       ? this.wrapAxiosError(lastErr, 'Listar orçamentos Orçafascio (todas as variantes de auth falharam)')
       : new Error('Orçafascio: falha ao listar orçamentos');
+  }
+
+  async listarOrcamentos(
+    page = 1,
+    orderType?: string,
+    orderName?: string,
+    perPage?: number,
+    search?: string
+  ): Promise<{ budgets: Record<string, unknown>[]; total?: number; current_page?: number; per_page?: number }> {
+    const cacheKey = this.budgetsListCacheKey(page, orderType, orderName, perPage, search);
+    const cached = this.budgetsListCache.get(cacheKey);
+
+    if (cached) {
+      const age = Date.now() - cached.fetchedAt;
+      const emptyCached = !Array.isArray(cached.data.budgets) || cached.data.budgets.length === 0;
+
+      if (emptyCached) {
+        this.budgetsListCache.delete(cacheKey);
+      } else if (age <= OrcafascioService.BUDGETS_CACHE_STALE_MS) {
+        if (age > OrcafascioService.BUDGETS_CACHE_FRESH_MS && !cached.refreshing) {
+          cached.refreshing = true;
+          this.fetchOrcamentosDirect(page, orderType, orderName, perPage, search)
+            .then((data) => {
+              if (!Array.isArray(data.budgets) || data.budgets.length === 0) {
+                cached.refreshing = false;
+                console.warn('⚠️  Orçafascio budgets refresh BG retornou vazio; mantendo cache');
+                return;
+              }
+              this.budgetsListCache.set(cacheKey, {
+                data,
+                fetchedAt: Date.now(),
+                refreshing: false,
+              });
+              console.log(
+                `✅ Orçafascio cache budgets atualizado em BG (${data.budgets.length} itens)`
+              );
+            })
+            .catch((err) => {
+              cached.refreshing = false;
+              console.warn(
+                '⚠️  Orçafascio budgets BG refresh falhou:',
+                (err as Error).message
+              );
+            });
+        }
+        return cached.data;
+      }
+    }
+
+    const data = await this.fetchOrcamentosDirect(page, orderType, orderName, perPage, search);
+    if (Array.isArray(data.budgets) && data.budgets.length > 0) {
+      this.budgetsListCache.set(cacheKey, {
+        data,
+        fetchedAt: Date.now(),
+        refreshing: false,
+      });
+      console.log(`✅ Orçafascio budgets em cache: ${data.budgets.length} item(ns)`);
+    } else {
+      console.warn('⚠️  Orçafascio budgets retornou 0 — não cacheando');
+    }
+    return data;
+  }
+
+  /** Pré-aquece a listagem padrão (página 1, lote grande) usada no modal Importar. */
+  async warmupBudgetsList(): Promise<void> {
+    console.log('🔥 Orçafascio: pré-carregando lista de orçamentos…');
+    try {
+      const data = await this.listarOrcamentos(1, undefined, undefined, 5000);
+      console.log(
+        `✅ Orçafascio cache warm budgets: ${data.budgets?.length ?? 0} item(ns)`
+      );
+    } catch (err) {
+      console.warn(
+        '⚠️  Orçafascio warmup budgets falhou:',
+        (err as Error).message
+      );
+    }
+  }
+
+  /** Refresh periódico para manter o cache quente (como Fluig). */
+  startPeriodicBudgetsRefresh(intervalMs = 5 * 60 * 1000): ReturnType<typeof setInterval> {
+    const warmKey = this.budgetsListCacheKey(1, undefined, undefined, 5000);
+    return setInterval(() => {
+      const entry = this.budgetsListCache.get(warmKey);
+      if (entry?.refreshing) return;
+      if (entry) entry.refreshing = true;
+      this.fetchOrcamentosDirect(1, undefined, undefined, 5000)
+        .then((data) => {
+          if (!Array.isArray(data.budgets) || data.budgets.length === 0) {
+            if (entry) entry.refreshing = false;
+            console.warn('⚠️  Orçafascio refresh periódico budgets vazio; mantendo cache');
+            return;
+          }
+          this.budgetsListCache.set(warmKey, {
+            data,
+            fetchedAt: Date.now(),
+            refreshing: false,
+          });
+          console.log(
+            `✅ Orçafascio refresh periódico budgets: ${data.budgets.length} item(ns)`
+          );
+        })
+        .catch((err) => {
+          if (entry) entry.refreshing = false;
+          console.warn(
+            '⚠️  Orçafascio refresh periódico budgets falhou:',
+            (err as Error).message
+          );
+        });
+    }, intervalMs);
   }
 
 

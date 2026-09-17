@@ -22,10 +22,10 @@ export default function ContractDetailLayout({ children }: { children: React.Rea
 
   const name = (data?.data as { name?: string } | undefined)?.name?.trim() || '';
 
+  // Sempre publica o nome do contrato (inclusive em /orcamento). A página soma Orçamentos / nome.
   useBreadcrumbEntity(
-    name && contractId
-      ? { label: name, href: `/ponto/contratos/${contractId}` }
-      : null,
+    name && contractId ? { label: name, href: `/ponto/contratos/${contractId}` } : null,
+    { priority: 0 },
   );
 
   return children;

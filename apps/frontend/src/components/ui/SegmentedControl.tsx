@@ -15,6 +15,9 @@ type SegmentedControlProps<T extends string> = {
   options: SegmentedOption<T>[];
   className?: string;
   pillClassName?: string;
+  buttonClassName?: string;
+  activeButtonClassName?: string;
+  inactiveButtonClassName?: string;
   'aria-label'?: string;
 };
 
@@ -30,6 +33,10 @@ export function SegmentedControl<T extends string>({
   options,
   className = '',
   pillClassName = 'bg-white shadow-sm dark:bg-gray-600',
+  buttonClassName = '',
+  activeButtonClassName = 'font-medium text-red-600 dark:text-red-400',
+  inactiveButtonClassName =
+    'font-normal text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200',
   'aria-label': ariaLabel,
 }: SegmentedControlProps<T>) {
   const rootRef = useRef<HTMLDivElement>(null);
@@ -49,7 +56,7 @@ export function SegmentedControl<T extends string>({
     const btnRect = btn.getBoundingClientRect();
     // Inteiros evitam jitter de subpixel reentrando no ResizeObserver.
     const next: PillState = {
-      left: Math.round(btnRect.left - rootRect.left),
+      left: Math.round(btnRect.left - rootRect.left + root.scrollLeft),
       width: Math.round(btnRect.width),
       ready: true,
     };
@@ -67,9 +74,11 @@ export function SegmentedControl<T extends string>({
     ro.observe(root);
     btnRefs.current.forEach((b) => b && ro.observe(b));
     window.addEventListener('resize', measure);
+    root.addEventListener('scroll', measure, { passive: true });
     return () => {
       ro.disconnect();
       window.removeEventListener('resize', measure);
+      root.removeEventListener('scroll', measure);
     };
   }, [measure, options.length]);
 
@@ -104,10 +113,8 @@ export function SegmentedControl<T extends string>({
             aria-label={opt.ariaLabel}
             aria-pressed={active}
             onClick={() => onChange(opt.value)}
-            className={`relative z-10 inline-flex h-full items-center justify-center gap-1.5 rounded-md px-2.5 text-sm transition-colors duration-200 sm:px-3 ${
-              active
-                ? 'font-medium text-red-600 dark:text-red-400'
-                : 'font-normal text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+            className={`relative z-10 inline-flex h-full shrink-0 items-center justify-center gap-1.5 rounded-md px-2.5 text-sm transition-colors duration-200 sm:px-3 outline-none ring-0 focus:outline-none focus-visible:outline-none ${buttonClassName} ${
+              active ? activeButtonClassName : inactiveButtonClassName
             }`}
           >
             {opt.label}

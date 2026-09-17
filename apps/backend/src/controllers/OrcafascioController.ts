@@ -2,13 +2,14 @@ import { Request, Response, NextFunction } from 'express';
 import axios from 'axios';
 import { OrcafascioService } from '../services/OrcafascioService';
 
-const service = new OrcafascioService();
+/** Instância compartilhada (warmup no boot + rotas HTTP). */
+export const orcafascioService = new OrcafascioService();
 
 export class OrcafascioController {
   // GET /api/orcafascio/bases — segmentos em que há catálogo de composições
   async listarBases(req: Request, res: Response, next: NextFunction) {
     try {
-      const segments = await service.obterBasesComCatalogo();
+      const segments = await orcafascioService.obterBasesComCatalogo();
       res.json({ bases: segments.map(segment => ({ segment })) });
     } catch (err) {
       next(err);
@@ -21,7 +22,7 @@ export class OrcafascioController {
       const page = Math.max(1, parseInt((req.query.page as string) || '1', 10));
       const search = (req.query.search as string) || undefined;
       const base = (req.query.base as string) || undefined;
-      const data = await service.listarComposicoes(page, search, base);
+      const data = await orcafascioService.listarComposicoes(page, search, base);
       res.json(data);
     } catch (err) {
       next(err);
@@ -35,9 +36,19 @@ export class OrcafascioController {
       if (!code) {
         return res.status(400).json({ error: 'Parâmetro "code" é obrigatório' });
       }
-      const data = await service.buscarComposicaoPorCodigo(code, state?.trim() || undefined);
+      const data = await orcafascioService.buscarComposicaoPorCodigo(code, state?.trim() || undefined);
       return res.json(data);
     } catch (err: any) {
+      const msg = String(err?.message ?? '');
+      const statusCode = Number(err?.statusCode) || (axios.isAxiosError(err) ? err.response?.status : 0);
+      if (
+        statusCode === 404 ||
+        /não encontrada/i.test(msg) ||
+        /nao encontrada/i.test(msg) ||
+        /cache negativo/i.test(msg)
+      ) {
+        return res.status(404).json({ error: msg || 'Composição não encontrada' });
+      }
       if (err?.response?.status === 404) {
         return res.status(404).json({ error: 'Composição não encontrada' });
       }
@@ -50,7 +61,7 @@ export class OrcafascioController {
     try {
       const { id } = req.params;
       const base = (req.query.base as string) || undefined;
-      const data = await service.buscarComposicaoPorId(id, base);
+      const data = await orcafascioService.buscarComposicaoPorId(id, base);
       return res.json(data);
     } catch (err: any) {
       if (err?.response?.status === 404) {
@@ -65,7 +76,7 @@ export class OrcafascioController {
     try {
       const { id } = req.params;
       if (!id) return res.status(400).json({ error: 'Parâmetro "id" é obrigatório' });
-      const data = await service.buscarAnaliticoOrcamento(id);
+      const data = await orcafascioService.buscarAnaliticoOrcamento(id);
       return res.json(data);
     } catch (err: any) {
       if (axios.isAxiosError(err) && err.response?.status === 404) {
@@ -80,7 +91,7 @@ export class OrcafascioController {
     try {
       const { id } = req.params;
       if (!id) return res.status(400).json({ error: 'Parâmetro "id" é obrigatório' });
-      const data = await service.buscarSinteticoOrcamento(id);
+      const data = await orcafascioService.buscarSinteticoOrcamento(id);
       return res.json(data);
     } catch (err: any) {
       if (axios.isAxiosError(err) && err.response?.status === 404) {
@@ -95,7 +106,7 @@ export class OrcafascioController {
     try {
       const { id } = req.params;
       if (!id) return res.status(400).json({ error: 'Parâmetro "id" é obrigatório' });
-      const data = await service.buscarDetalheOrcamento(id);
+      const data = await orcafascioService.buscarDetalheOrcamento(id);
       return res.json(data);
     } catch (err: any) {
       if (axios.isAxiosError(err) && err.response?.status === 404) {
@@ -116,7 +127,7 @@ export class OrcafascioController {
       const search = (req.query.search as string) || undefined;
       const orderType = (req.query.order_type as string) || undefined;
       const orderName = (req.query.order_name as string) || undefined;
-      const data = await service.listarOrcamentos(page, orderType, orderName, perPage, search);
+      const data = await orcafascioService.listarOrcamentos(page, orderType, orderName, perPage, search);
       res.json(data);
     } catch (err) {
       next(err);
@@ -127,7 +138,7 @@ export class OrcafascioController {
   async listarInsumos(req: Request, res: Response, next: NextFunction) {
     try {
       const page = Math.max(1, parseInt((req.query.page as string) || '1', 10));
-      const data = await service.listarInsumos(page);
+      const data = await orcafascioService.listarInsumos(page);
       res.json(data);
     } catch (err) {
       next(err);
@@ -137,7 +148,7 @@ export class OrcafascioController {
   // GET /api/orcafascio/diagnostico
   async diagnosticar(req: Request, res: Response, next: NextFunction) {
     try {
-      const data = await service.diagnosticar();
+      const data = await orcafascioService.diagnosticar();
       res.json(data);
     } catch (err) {
       next(err);
