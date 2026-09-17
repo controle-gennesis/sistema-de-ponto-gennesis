@@ -800,6 +800,7 @@ export function useRoutePermission(route: string) {
     '/ponto/solicitar-combustivel': isAdministrator || can(pk('/ponto/solicitar-combustivel')),
     '/ponto/condicoes-pagamento': isAdministrator || can(pk('/ponto/condicoes-pagamento')),
     '/ponto/obras': isAdministrator || can(pk('/ponto/obras')),
+    '/ponto/empreiteiros': isAdministrator || can(pk('/ponto/empreiteiros')),
     '/ponto/natureza-orcamentaria': isAdministrator || can(pk('/ponto/natureza-orcamentaria')),
     '/ponto/formularios': isAdministrator || can(pk('/ponto/formularios')),
     '/ponto/noticias': isAdministrator || can(pk('/ponto/noticias')),

@@ -401,6 +401,7 @@ function inferCategoryFromHref(href: string): string {
     [
       '/ponto/orcamento',
       '/ponto/contratos',
+      '/ponto/empreiteiros',
       '/ponto/contratos/relatorios',
       '/ponto/andamento-da-os',
       '/ponto/sistema-gestao-os',

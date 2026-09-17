@@ -78,6 +78,7 @@ import {
   Calculator,
   Table2,
   ShieldCheck,
+  HardHat,
   type LucideIcon,
 } from 'lucide-react';
 import { pathToModuleKey } from '@sistema-ponto/permission-modules';
@@ -1119,6 +1120,14 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             icon: FileText,
             description: 'Cadastro de contratos da engenharia',
             permission: isAdministrator || can(pk('/ponto/contratos')),
+            section: 'Obras'
+          },
+          {
+            name: 'Empreiteiros',
+            href: '/ponto/empreiteiros',
+            icon: HardHat,
+            description: 'Cadastro de empreiteiros da obra',
+            permission: isAdministrator || can(pk('/ponto/empreiteiros')),
             section: 'Obras'
           },
           {

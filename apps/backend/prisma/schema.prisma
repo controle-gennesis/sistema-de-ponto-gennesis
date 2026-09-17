@@ -1398,6 +1398,7 @@ model Contract {
   logisticsDeliveryRequests LogisticsDeliveryRequest[]
   fuelGasStations           FuelGasStationContract[]
   obras                     Obra[]
+  empreiteiros              Empreiteiro[]
 
   @@index([costCenterId])
   @@index([number])
@@ -2307,6 +2308,65 @@ model Obra {
   @@index([isActive])
   @@index([contratoId])
   @@map("obras")
+}
+
+/// Cadastro de empreiteiros da Engenharia (mão de obra da obra).
+model Empreiteiro {
+  id           String    @id @default(cuid())
+  name         String
+  tradeName    String?
+  documentKind String
+  document     String
+  phone        String
+  specialty    String
+  contractId   String
+  isActive     Boolean   @default(true)
+  contactName  String?
+  email        String?
+  city         String?
+  state        String?
+  pixKey       String?
+  bank         String?
+  agency       String?
+  account      String?
+  startDate    DateTime?
+  endDate      DateTime?
+  photoUrl     String?
+  photoKey     String?
+  files        Json     @default("[]")
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  contract Contract @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  teamMembers EmpreiteiroTeamMember[]
+
+  @@unique([document])
+  @@index([name])
+  @@index([isActive])
+  @@index([contractId])
+  @@index([specialty])
+  @@map("empreiteiros")
+}
+
+/// Pessoa da equipe de um empreiteiro (herda o contrato do cadastro).
+model EmpreiteiroTeamMember {
+  id            String   @id @default(cuid())
+  empreiteiroId String
+  name          String
+  role          String
+  phone         String?
+  document      String?
+  sortOrder     Int      @default(0)
+  photoUrl      String?
+  photoKey      String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  empreiteiro Empreiteiro @relation(fields: [empreiteiroId], references: [id], onDelete: Cascade)
+
+  @@index([empreiteiroId])
+  @@index([name])
+  @@map("empreiteiro_team_members")
 }
 
 /// Compras da Caixinha (Engenharia) — IDs/nomes denormalizados, sem FK para User/Contract/Obra.

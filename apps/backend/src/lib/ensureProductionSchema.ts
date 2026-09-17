@@ -1710,6 +1710,169 @@ async function ensureObrasTable(prisma: PrismaClient): Promise<void> {
   `);
 }
 
+async function ensureEmpreiteirosTable(prisma: PrismaClient): Promise<void> {
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "empreiteiros" (
+      "id" TEXT NOT NULL,
+      "name" TEXT NOT NULL,
+      "tradeName" TEXT,
+      "documentKind" TEXT NOT NULL,
+      "document" TEXT NOT NULL,
+      "phone" TEXT NOT NULL,
+      "specialty" TEXT NOT NULL,
+      "contractId" TEXT NOT NULL,
+      "isActive" BOOLEAN NOT NULL DEFAULT true,
+      "contactName" TEXT,
+      "email" TEXT,
+      "city" TEXT,
+      "state" TEXT,
+      "pixKey" TEXT,
+      "bank" TEXT,
+      "agency" TEXT,
+      "account" TEXT,
+      "startDate" TIMESTAMP(3),
+      "endDate" TIMESTAMP(3),
+      "photoUrl" TEXT,
+      "photoKey" TEXT,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "empreiteiros_pkey" PRIMARY KEY ("id")
+    );
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    CREATE UNIQUE INDEX IF NOT EXISTS "empreiteiros_document_key" ON "empreiteiros"("document");
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "empreiteiros_name_idx" ON "empreiteiros"("name");
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "empreiteiros_isActive_idx" ON "empreiteiros"("isActive");
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "empreiteiros_contractId_idx" ON "empreiteiros"("contractId");
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "empreiteiros_specialty_idx" ON "empreiteiros"("specialty");
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "empreiteiros" ADD COLUMN IF NOT EXISTS "bank" TEXT;
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "empreiteiros" ADD COLUMN IF NOT EXISTS "agency" TEXT;
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "empreiteiros" ADD COLUMN IF NOT EXISTS "account" TEXT;
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "empreiteiros" DROP COLUMN IF EXISTS "bankDetails";
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "empreiteiros" ADD COLUMN IF NOT EXISTS "photoUrl" TEXT;
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "empreiteiros" ADD COLUMN IF NOT EXISTS "photoKey" TEXT;
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "empreiteiros" DROP COLUMN IF EXISTS "notes";
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "empreiteiros" ADD COLUMN IF NOT EXISTS "files" JSONB NOT NULL DEFAULT '[]';
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "empreiteiros" ADD COLUMN IF NOT EXISTS "endDate" TIMESTAMP(3);
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'empreiteiros_contractId_fkey'
+      ) THEN
+        ALTER TABLE "empreiteiros"
+          ADD CONSTRAINT "empreiteiros_contractId_fkey"
+          FOREIGN KEY ("contractId") REFERENCES "contracts"("id")
+          ON DELETE RESTRICT ON UPDATE CASCADE;
+      END IF;
+    EXCEPTION WHEN others THEN
+      NULL;
+    END $$;
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "empreiteiro_team_members" (
+      "id" TEXT NOT NULL,
+      "empreiteiroId" TEXT NOT NULL,
+      "name" TEXT NOT NULL,
+      "role" TEXT NOT NULL,
+      "phone" TEXT,
+      "document" TEXT,
+      "sortOrder" INTEGER NOT NULL DEFAULT 0,
+      "photoUrl" TEXT,
+      "photoKey" TEXT,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "empreiteiro_team_members_pkey" PRIMARY KEY ("id")
+    );
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "empreiteiro_team_members_empreiteiroId_idx"
+      ON "empreiteiro_team_members"("empreiteiroId");
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "empreiteiro_team_members_name_idx"
+      ON "empreiteiro_team_members"("name");
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "empreiteiro_team_members" ADD COLUMN IF NOT EXISTS "photoUrl" TEXT;
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "empreiteiro_team_members" ADD COLUMN IF NOT EXISTS "photoKey" TEXT;
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "empreiteiro_team_members" ADD COLUMN IF NOT EXISTS "files" JSONB NOT NULL DEFAULT '[]';
+  `);
+  try {
+    await prisma.$executeRawUnsafe(`
+      UPDATE "empreiteiros" e
+      SET "files" = COALESCE((
+        SELECT jsonb_agg(f)
+        FROM "empreiteiro_team_members" m,
+             jsonb_array_elements(COALESCE(m."files", '[]'::jsonb)) AS f
+        WHERE m."empreiteiroId" = e.id
+          AND jsonb_typeof(COALESCE(m."files", '[]'::jsonb)) = 'array'
+          AND jsonb_array_length(COALESCE(m."files", '[]'::jsonb)) > 0
+      ), e."files")
+      WHERE (e."files" IS NULL OR e."files" = '[]'::jsonb)
+        AND EXISTS (
+          SELECT 1
+          FROM "empreiteiro_team_members" m
+          WHERE m."empreiteiroId" = e.id
+            AND jsonb_typeof(COALESCE(m."files", '[]'::jsonb)) = 'array'
+            AND jsonb_array_length(COALESCE(m."files", '[]'::jsonb)) > 0
+        );
+    `);
+  } catch {
+    // Coluna/tabela antiga pode não existir ainda; o cadastro segue vazio.
+  }
+  await prisma.$executeRawUnsafe(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'empreiteiro_team_members_empreiteiroId_fkey'
+      ) THEN
+        ALTER TABLE "empreiteiro_team_members"
+          ADD CONSTRAINT "empreiteiro_team_members_empreiteiroId_fkey"
+          FOREIGN KEY ("empreiteiroId") REFERENCES "empreiteiros"("id")
+          ON DELETE CASCADE ON UPDATE CASCADE;
+      END IF;
+    EXCEPTION WHEN others THEN
+      NULL;
+    END $$;
+  `);
+}
+
 async function ensureUserContractReunioesColumn(prisma: PrismaClient): Promise<void> {
   if (!(await tableExists(prisma, 'user_contract_permissions'))) return;
   await prisma.$executeRawUnsafe(
@@ -1964,6 +2127,7 @@ export async function ensureProductionSchema(prisma: PrismaClient): Promise<void
     await ensureJuridicoProcessosTables(prisma);
     await ensureOcsBoletoPixExtrasTable(prisma);
     await ensureObrasTable(prisma);
+    await ensureEmpreiteirosTable(prisma);
     await ensureCaixinhaPurchasesTable(prisma);
     await ensureCaixinhaAccountsTable(prisma);
     console.log('[Schema] Verificação de tabelas/colunas críticas concluída.');
