@@ -521,6 +521,29 @@ export class FuelRefuelRequestService {
     return updated;
   }
 
+  async updateReceiptPhoto(input: {
+    requestId: string;
+    receiptPhotoUrl: string;
+    receiptPhotoKey: string | null;
+    receiptPhotoName: string | null;
+  }) {
+    const row = await this.getById(input.requestId);
+    if (row.status !== FuelRefuelRequestStatus.COMPLETED) {
+      throw createError('Só é possível alterar o cupom de uma solicitação concluída', 400);
+    }
+
+    const updated = await prisma.fuelRefuelRequest.update({
+      where: { id: input.requestId },
+      data: {
+        receiptPhotoUrl: input.receiptPhotoUrl.trim() || null,
+        receiptPhotoKey: input.receiptPhotoKey,
+        receiptPhotoName: input.receiptPhotoName,
+      },
+      include: fuelRefuelInclude,
+    });
+    return updated;
+  }
+
   async listForManagerApprovals(params: {
     phase: 'PENDING' | 'APPROVED' | 'REJECTED' | 'ALL';
     contractScope: Prisma.FuelRefuelRequestWhereInput;

@@ -464,6 +464,8 @@ export default function SolicitacoesCombustivelPage() {
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [reportTarget, setReportTarget] = useState<FuelRefuelRequest | null>(null);
   const [reportForm, setReportForm] = useState<ReportFormState>(EMPTY_REPORT_FORM);
+  const [isReplacingReceipt, setIsReplacingReceipt] = useState(false);
+  const [receiptReplacePhoto, setReceiptReplacePhoto] = useState('');
   const [actionMenu, setActionMenu] = useState<{
     requestId: string;
     top: number;
@@ -641,6 +643,36 @@ export default function SolicitacoesCombustivelPage() {
     },
   });
 
+  const receiptPhotoMutation = useMutation({
+    mutationFn: async ({
+      id,
+      receiptPhotoBase64,
+    }: {
+      id: string;
+      receiptPhotoBase64: string;
+    }) => {
+      const res = await api.put(`/fuel-refuel-requests/${id}/receipt-photo`, {
+        receiptPhotoBase64,
+      });
+      return res.data?.data as FuelRefuelRequest;
+    },
+    onSuccess: (updated) => {
+      toast.success('Foto do cupom fiscal atualizada');
+      setSelected(updated);
+      setIsReplacingReceipt(false);
+      setReceiptReplacePhoto('');
+      void queryClient.invalidateQueries({ queryKey: ['fuel-refuel-requests'] });
+      void queryClient.invalidateQueries({ queryKey: ['fuel-refuel-requests-supplies'] });
+    },
+    onError: (err: { response?: { data?: { error?: string; message?: string } } }) => {
+      toast.error(
+        err.response?.data?.message ||
+          err.response?.data?.error ||
+          'Erro ao atualizar a foto do cupom',
+      );
+    },
+  });
+
   const contractId = selected?.contract?.id;
   const costCenterLabel = selected?.costCenter || selected?.contract?.name || '';
 
@@ -741,7 +773,10 @@ export default function SolicitacoesCombustivelPage() {
     return records.find((r) => r.id === actionMenu.requestId) ?? null;
   }, [actionMenu, records]);
 
-  const openRequestDetail = (row: FuelRefuelRequest, opts?: { reject?: boolean; cancel?: boolean }) => {
+  const openRequestDetail = (
+    row: FuelRefuelRequest,
+    opts?: { reject?: boolean; cancel?: boolean; replaceReceipt?: boolean },
+  ) => {
     setActionMenu(null);
     setSelected(row);
     setShowRejectForm(!!opts?.reject);
@@ -749,6 +784,8 @@ export default function SolicitacoesCombustivelPage() {
     if (!opts?.reject) setRejectReason('');
     setAdminEditing(false);
     setEditContractId(row.contract?.id || '');
+    setIsReplacingReceipt(!!opts?.replaceReceipt);
+    setReceiptReplacePhoto('');
   };
 
   const openReportForm = (row: FuelRefuelRequest) => {
@@ -1117,6 +1154,17 @@ export default function SolicitacoesCombustivelPage() {
                   </button>
                 </>
               ) : null}
+              {requestForMenu.status === 'COMPLETED' ? (
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => openRequestDetail(requestForMenu, { replaceReceipt: true })}
+                  className={MENU_ITEM_BORDER_CLASS}
+                >
+                  <Pencil className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                  <span>Alterar foto do cupom</span>
+                </button>
+              ) : null}
               {requestForMenu.status === 'AWAITING_REFUEL' ? (
                 <>
                   <button
@@ -1154,6 +1202,8 @@ export default function SolicitacoesCombustivelPage() {
             setShowCancelConfirm(false);
             setAdminEditing(false);
             setEditContractId('');
+            setIsReplacingReceipt(false);
+            setReceiptReplacePhoto('');
           }}
           title={`Solicitação ${selected?.displayNumber ?? ''}`}
           size="lg"
@@ -1470,22 +1520,93 @@ export default function SolicitacoesCombustivelPage() {
                   {selected.refuelReportObservations ? (
                     <p className="mt-2 text-sm">{selected.refuelReportObservations}</p>
                   ) : null}
-                  {hasFuelStoredPhoto(selected.receiptPhotoUrl, selected.receiptPhotoKey) ? (() => {
-                    const receiptPhotoUrl = resolveFuelPhotoSrc(
-                      selected.receiptPhotoViewUrl,
-                      selected.receiptPhotoUrl,
-                    );
-                    if (!receiptPhotoUrl) return null;
-                    return (
-                      <FuelRequestPhoto
-                        src={receiptPhotoUrl}
-                        alt={selected.receiptPhotoName || 'Cupom fiscal'}
-                        label="Cupom fiscal"
-                        fileName={selected.receiptPhotoName}
-                        compact
+                  {isReplacingReceipt ? (
+                    <div className="mt-3 space-y-3">
+                      <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                        Nova foto do cupom fiscal
+                      </p>
+                      <VehicleReturnPhotoField
+                        value={receiptReplacePhoto}
+                        onChange={setReceiptReplacePhoto}
+                        emptyLabel="Clique para enviar o novo cupom fiscal"
+                        photoAlt="Novo cupom fiscal"
+                        disabled={receiptPhotoMutation.isPending}
                       />
-                    );
-                  })() : null}
+                      <div className="flex flex-wrap justify-end gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={receiptPhotoMutation.isPending}
+                          onClick={() => {
+                            setIsReplacingReceipt(false);
+                            setReceiptReplacePhoto('');
+                          }}
+                        >
+                          Cancelar
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          loading={receiptPhotoMutation.isPending}
+                          disabled={receiptPhotoMutation.isPending}
+                          onClick={() => {
+                            if (isBlankVehiclePhoto(receiptReplacePhoto)) {
+                              toast.error('Envie a nova foto do cupom fiscal');
+                              return;
+                            }
+                            receiptPhotoMutation.mutate({
+                              id: selected.id,
+                              receiptPhotoBase64: receiptReplacePhoto,
+                            });
+                          }}
+                        >
+                          Salvar foto
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      {hasFuelStoredPhoto(selected.receiptPhotoUrl, selected.receiptPhotoKey)
+                        ? (() => {
+                            const receiptPhotoUrl = resolveFuelPhotoSrc(
+                              selected.receiptPhotoViewUrl,
+                              selected.receiptPhotoUrl,
+                            );
+                            if (!receiptPhotoUrl) return null;
+                            return (
+                              <FuelRequestPhoto
+                                src={receiptPhotoUrl}
+                                alt={selected.receiptPhotoName || 'Cupom fiscal'}
+                                label="Cupom fiscal"
+                                fileName={selected.receiptPhotoName}
+                                compact
+                              />
+                            );
+                          })()
+                        : (
+                          <p className="mt-3 text-sm text-gray-600 dark:text-gray-400">
+                            Nenhuma foto de cupom cadastrada.
+                          </p>
+                        )}
+                      <div className="mt-3">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          icon={<Pencil className="h-3.5 w-3.5" />}
+                          onClick={() => {
+                            setReceiptReplacePhoto('');
+                            setIsReplacingReceipt(true);
+                          }}
+                        >
+                          {hasFuelStoredPhoto(selected.receiptPhotoUrl, selected.receiptPhotoKey)
+                            ? 'Alterar foto'
+                            : 'Adicionar foto'}
+                        </Button>
+                      </div>
+                    </>
+                  )}
                 </div>
               ) : null}
 

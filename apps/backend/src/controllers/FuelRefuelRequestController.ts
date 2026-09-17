@@ -94,6 +94,10 @@ const createSchema = z.object({
   driverUserId: z.string().optional(),
 });
 
+const receiptPhotoSchema = z.object({
+  receiptPhotoBase64: z.string().min(1, 'Envie a foto do cupom fiscal'),
+});
+
 const reportSchema = z.object({
   odometerKm: z.coerce.number().int().positive('Informe o hodômetro em km'),
   tankLevelAfter: z.enum(['RESERVE', 'QUARTER', 'HALF', 'THREE_QUARTERS', 'FULL'], {
@@ -659,6 +663,36 @@ export class FuelRefuelRequestController {
         data: presented,
         message: 'Abastecimento informado com sucesso',
       });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async updateReceiptPhoto(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const user = req.user;
+      if (!user?.id) throw createError('Usuário não autenticado', 401);
+      await assertUserHasFuelSuppliesAccess(user.id, user.isAdmin);
+
+      const body = receiptPhotoSchema.parse(req.body);
+      if (!body.receiptPhotoBase64.includes('base64,')) {
+        throw createError('Foto do cupom fiscal inválida', 400);
+      }
+
+      const upload = await photoService.uploadPhotoFromBase64(
+        body.receiptPhotoBase64,
+        user.id,
+        parseImageContentType(body.receiptPhotoBase64),
+      );
+
+      const row = await fuelRefuelRequestService.updateReceiptPhoto({
+        requestId: req.params.id,
+        receiptPhotoUrl: upload.url,
+        receiptPhotoKey: upload.key,
+        receiptPhotoName: 'cupom-fiscal.jpg',
+      });
+      const presented = await fuelRefuelRequestService.getByIdForApi(row.id);
+      res.json({ success: true, data: presented, message: 'Foto do cupom fiscal atualizada' });
     } catch (error) {
       next(error);
     }
