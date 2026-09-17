@@ -1,5 +1,26 @@
+import { Prisma } from '@prisma/client';
 import { prisma } from './prisma';
 import { isExactUnbCostCenterLabel, isUnbConsorcioPredialLabel } from './unbBranding';
+
+type UserLinkRow = { id: string; userId: string };
+
+type CostCenterLinkDelegate = {
+  findMany: (args: { where: { costCenterId: string } }) => Promise<UserLinkRow[]>;
+  findFirst: (args: {
+    where: { userId: string; costCenterId: string };
+  }) => Promise<UserLinkRow | null>;
+  delete: (args: { where: { id: string } }) => Promise<unknown>;
+  update: (args: { where: { id: string }; data: { costCenterId: string } }) => Promise<unknown>;
+};
+
+type ContractLinkDelegate = {
+  findMany: (args: { where: { contractId: string } }) => Promise<UserLinkRow[]>;
+  findFirst: (args: {
+    where: { userId: string; contractId: string };
+  }) => Promise<UserLinkRow | null>;
+  delete: (args: { where: { id: string } }) => Promise<unknown>;
+  update: (args: { where: { id: string }; data: { contractId: string } }) => Promise<unknown>;
+};
 
 function isExactUnb(name: string, code: string): boolean {
   return isExactUnbCostCenterLabel(name) || isExactUnbCostCenterLabel(code);
@@ -86,61 +107,80 @@ function employeeCostCenterIsExactUnb(
   return raw === from.id || raw === from.code || raw === from.name;
 }
 
-async function moveUserCostCenterRows(
-  tx: typeof prisma,
+async function moveCostCenterLinkRows(
+  model: CostCenterLinkDelegate,
   fromId: string,
   toId: string,
 ): Promise<number> {
-  let moved = 0;
-  for (const model of ['userDpRequestViewCostCenter', 'userRestrictedDpApprovalCostCenter'] as const) {
-    const rows = await tx[model].findMany({ where: { costCenterId: fromId } });
-    for (const row of rows) {
-      const already = await tx[model].findFirst({
-        where: { userId: row.userId, costCenterId: toId },
-      });
-      if (already) {
-        await tx[model].delete({ where: { id: row.id } });
-      } else {
-        await tx[model].update({ where: { id: row.id }, data: { costCenterId: toId } });
-      }
-      moved += 1;
+  const rows = await model.findMany({ where: { costCenterId: fromId } });
+  for (const row of rows) {
+    const already = await model.findFirst({
+      where: { userId: row.userId, costCenterId: toId },
+    });
+    if (already) {
+      await model.delete({ where: { id: row.id } });
+    } else {
+      await model.update({ where: { id: row.id }, data: { costCenterId: toId } });
     }
   }
-  return moved;
+  return rows.length;
+}
+
+async function moveContractLinkRows(
+  model: ContractLinkDelegate,
+  fromContractId: string,
+  toContractId: string,
+): Promise<number> {
+  const rows = await model.findMany({ where: { contractId: fromContractId } });
+  for (const row of rows) {
+    const already = await model.findFirst({
+      where: { userId: row.userId, contractId: toContractId },
+    });
+    if (already) {
+      await model.delete({ where: { id: row.id } });
+    } else {
+      await model.update({ where: { id: row.id }, data: { contractId: toContractId } });
+    }
+  }
+  return rows.length;
+}
+
+async function moveUserCostCenterRows(
+  tx: Prisma.TransactionClient,
+  fromId: string,
+  toId: string,
+): Promise<number> {
+  const a = await moveCostCenterLinkRows(
+    tx.userDpRequestViewCostCenter as unknown as CostCenterLinkDelegate,
+    fromId,
+    toId,
+  );
+  const b = await moveCostCenterLinkRows(
+    tx.userRestrictedDpApprovalCostCenter as unknown as CostCenterLinkDelegate,
+    fromId,
+    toId,
+  );
+  return a + b;
 }
 
 async function moveUserContractRows(
-  tx: typeof prisma,
+  tx: Prisma.TransactionClient,
   fromContractIds: string[],
   toContractId: string,
 ): Promise<number> {
   if (fromContractIds.length === 0 || !toContractId) return 0;
   let moved = 0;
-  const models = [
-    'userContractPermission',
-    'userDpApprovalContract',
-    'userFdApprovalContract',
-    'userFuelApprovalContract',
-  ] as const;
+  const models: ContractLinkDelegate[] = [
+    tx.userContractPermission as unknown as ContractLinkDelegate,
+    tx.userDpApprovalContract as unknown as ContractLinkDelegate,
+    tx.userFdApprovalContract as unknown as ContractLinkDelegate,
+    tx.userFuelApprovalContract as unknown as ContractLinkDelegate,
+  ];
 
   for (const fromContractId of fromContractIds) {
     if (fromContractId === toContractId) continue;
     for (const model of models) {
-      const rows = await tx[model].findMany({ where: { contractId: fromContractId } });
-      for (const row of rows) {
-        const already = await tx[model].findFirst({
-          where: { userId: row.userId, contractId: toContractId },
-        });
-        if (already) {
-          await tx[model].delete({ where: { id: row.id } });
-        } else {
-          await tx[model].update({
-            where: { id: row.id },
-            data: { contractId: toContractId },
-          });
-        }
-        moved += 1;
-      }
+      moved += await moveContractLinkRows(model, fromContractId, toContractId);
     }
   }
   return moved;
