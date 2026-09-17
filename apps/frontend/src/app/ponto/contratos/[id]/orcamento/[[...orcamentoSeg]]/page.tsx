@@ -15,6 +15,7 @@ import { OrcamentoPageView } from '@/app/ponto/orcamento/OrcamentoPageView';
 interface Contract {
   id: string;
   costCenterId: string;
+  name?: string;
 }
 
 /** Redireciona `?orcamento=uuid` (formato antigo) para `/orcamento/uuid`. */
@@ -146,6 +147,7 @@ export default function ContratoOrcamentoPage() {
       <OrcamentoPageView
         lockedCostCenterId={contract.costCenterId}
         embeddedContractId={contractId}
+        embeddedContractName={typeof contract.name === 'string' ? contract.name.trim() : ''}
         embeddedOrcamentoIdFromRoute={embeddedOrcamentoIdFromRoute}
       />
     </Suspense>

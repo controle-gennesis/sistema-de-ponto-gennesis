@@ -8,8 +8,14 @@ export function useDocumentTitle(title: string | null | undefined) {
   const { setOverride } = usePageTitleOverride();
 
   useEffect(() => {
-    if (!title?.trim()) return;
+    if (!title?.trim()) {
+      setOverride(null);
+      return;
+    }
     setOverride(title.trim());
-    return () => setOverride(null);
   }, [title, setOverride]);
+
+  useEffect(() => {
+    return () => setOverride(null);
+  }, [setOverride]);
 }

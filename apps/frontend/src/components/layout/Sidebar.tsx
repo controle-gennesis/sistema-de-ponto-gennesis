@@ -14,6 +14,7 @@ import {
   GASTOS_OPERACIONAIS_TOTVS_STALE_TIME,
 } from '@/app/ponto/contratos/controle-geral/fetchGastosOperacionaisTotvs';
 import { readGastosOperacionaisTotvsPersisted } from '@/app/ponto/contratos/controle-geral/gastosOperacionaisTotvsPersist';
+import { prefetchOrcafascioOrcamentosList } from '@/lib/orcafascioOrcamentosCache';
 import {
   Home,
   Users,
@@ -377,6 +378,12 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
         return () => prefetchFluigProcessDatasets(FLUIG_DP_DATASET_IDS, FLUIG_DP_HREF);
       }
       if (href === GASTOS_OPERACIONAIS_HREF) return prefetchGastosOperacionais;
+      if (
+        href === '/ponto/orcamento' ||
+        (href.startsWith('/ponto/contratos/') && href.includes('/orcamento'))
+      ) {
+        return () => prefetchOrcafascioOrcamentosList('');
+      }
       return undefined;
     },
     [prefetchFluigDatasets, prefetchFluigProcessDatasets, prefetchGastosOperacionais]

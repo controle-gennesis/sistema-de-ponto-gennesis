@@ -49,6 +49,7 @@ const SUB_PATH_TITLES: Record<string, string> = {
   relatorios: 'Relatórios Fotográficos',
   'acompanhamento-mensal': 'Relatório Mensal',
   reunioes: 'Reuniões de Contrato',
+  orcamento: 'Orçamentos',
 };
 
 const MODULES_BY_HREF_LENGTH = [...PERMISSION_MODULES].sort(
@@ -143,7 +144,6 @@ export function resolveBreadcrumbs(pathname: string): BreadcrumbItem[] {
     if (path.startsWith(`${module.href}/`)) {
       const suffix = path.slice(module.href.length + 1);
       const segments = suffix.split('/').filter(Boolean);
-      const lastSegment = decodePathSegment(segments[segments.length - 1] ?? '');
 
       const crumbs: BreadcrumbItem[] = [];
       if (module.category && module.category !== moduleLabel) {
@@ -151,9 +151,14 @@ export function resolveBreadcrumbs(pathname: string): BreadcrumbItem[] {
       }
       crumbs.push({ label: moduleLabel, href: module.href });
 
-      if (lastSegment && !looksLikeOpaqueId(lastSegment)) {
-        const subTitle = SUB_PATH_TITLES[lastSegment] ?? humanizeSegment(lastSegment);
-        crumbs.push({ label: subTitle, href: path });
+      // Percorre segmentos conhecidos (pula ids opacos) — ex.: .../orcamento/:id → Orçamentos.
+      let built = module.href;
+      for (const raw of segments) {
+        const segment = decodePathSegment(raw);
+        built += `/${raw}`;
+        if (looksLikeOpaqueId(segment)) continue;
+        const subTitle = SUB_PATH_TITLES[segment] ?? humanizeSegment(segment);
+        crumbs.push({ label: subTitle, href: built });
       }
 
       return crumbs;
@@ -196,7 +201,8 @@ export function buildDocumentTitle(pageTitle: string | null | undefined): string
 
 /**
  * Insere entidade(s) dinâmica(s) após o crumb do módulo (ex.: após Contratos / Meu Drive).
- * Ex.: Principal > Meu Drive + CONFEA → Principal > Meu Drive > CONFEA
+ * - 1 item: encaixa entre o módulo e o restante da rota (Contratos > Nome > Andamento).
+ * - 2+ itens: a página dona a trilha após o módulo (Contratos > Contrato > Orçamentos > Nome).
  */
 export function appendBreadcrumbEntity(
   crumbs: BreadcrumbItem[],
@@ -211,16 +217,21 @@ export function appendBreadcrumbEntity(
 
   if (entities.length === 0 || crumbs.length === 0) return crumbs;
 
-  const existing = new Set(crumbs.map((c) => c.label));
-  const toInsert = entities.filter((e) => !existing.has(e.label));
+  const moduleIdx = crumbs.findIndex((c) => Boolean(c.href));
+  const base =
+    moduleIdx >= 0 ? crumbs.slice(0, moduleIdx + 1) : crumbs.slice(0, 1);
+  const baseLabels = new Set(base.map((c) => c.label));
+  const toInsert = entities.filter((e) => !baseLabels.has(e.label));
   if (toInsert.length === 0) return crumbs;
 
-  const moduleIdx = crumbs.findIndex((c) => Boolean(c.href));
-  if (moduleIdx < 0) {
-    return [...crumbs, ...toInsert];
+  // Trilha completa controlada pela página (orçamento, etc.).
+  if (toInsert.length > 1 || entities.length > 1) {
+    return [...base, ...toInsert];
   }
 
-  const next = [...crumbs];
-  next.splice(moduleIdx + 1, 0, ...toInsert);
-  return next;
+  // Um único crumb (ex.: nome do contrato): preserva sufixos da rota.
+  const pathRest = moduleIdx >= 0 ? crumbs.slice(moduleIdx + 1) : crumbs.slice(1);
+  const insertLabels = new Set(toInsert.map((e) => e.label));
+  const rest = pathRest.filter((c) => !insertLabels.has(c.label));
+  return [...base, ...toInsert, ...rest];
 }

@@ -44,6 +44,21 @@ export class OrcamentoService {
   private useLocal: boolean;
   private localBasePath: string;
 
+  /** Migração legado já feita neste processo (evita N× getObject por request). */
+  private migratedCentros = new Set<string>();
+
+  /** Cache SWR do detalhe (padrão Fluig): fresco ~5 min, servível ~20 min. */
+  private static readonly DETAIL_FRESH_MS = 5 * 60 * 1000;
+  private static readonly DETAIL_STALE_MS = 20 * 60 * 1000;
+  private orcamentoDetailCache = new Map<
+    string,
+    { data: OrcamentoData; fetchedAt: number; refreshing: boolean }
+  >();
+  private padraoCache = new Map<
+    string,
+    { data: ServicosPadraoData; fetchedAt: number; refreshing: boolean }
+  >();
+
   constructor() {
     this.useLocal =
       (process.env.STORAGE_PROVIDER || '').toLowerCase() === 'local' ||
@@ -112,16 +127,23 @@ export class OrcamentoService {
   }
 
   async migrateLegacyIfNeeded(centroCustoId: string): Promise<void> {
+    if (this.migratedCentros.has(centroCustoId)) return;
     const indexPath = this.localIndexPath(centroCustoId);
     const legacyPath = this.localLegacyPath(centroCustoId);
 
     if (this.useLocal || !this.s3) {
-      if (!fs.existsSync(legacyPath)) return;
+      if (!fs.existsSync(legacyPath)) {
+        this.migratedCentros.add(centroCustoId);
+        return;
+      }
       if (fs.existsSync(indexPath)) {
         try {
           const raw = fs.readFileSync(indexPath, 'utf-8');
           const idx = JSON.parse(raw) as OrcamentoIndex;
-          if (idx?.orcamentos?.length) return;
+          if (idx?.orcamentos?.length) {
+            this.migratedCentros.add(centroCustoId);
+            return;
+          }
         } catch {
           /* continua migração */
         }
@@ -130,12 +152,14 @@ export class OrcamentoService {
       try {
         rawLegacy = fs.readFileSync(legacyPath, 'utf-8');
       } catch {
+        this.migratedCentros.add(centroCustoId);
         return;
       }
       let legacy: OrcamentoData;
       try {
         legacy = JSON.parse(rawLegacy) as OrcamentoData;
       } catch {
+        this.migratedCentros.add(centroCustoId);
         return;
       }
       const id = randomUUID();
@@ -162,6 +186,7 @@ export class OrcamentoService {
       } catch {
         /* ok */
       }
+      this.migratedCentros.add(centroCustoId);
       return;
     }
 
@@ -175,7 +200,10 @@ export class OrcamentoService {
         : '';
       if (rawIdx) {
         const idx = JSON.parse(rawIdx) as OrcamentoIndex;
-        if (idx?.orcamentos?.length) return;
+        if (idx?.orcamentos?.length) {
+          this.migratedCentros.add(centroCustoId);
+          return;
+        }
       }
     } catch (err: unknown) {
       const e = err as { code?: string };
@@ -188,14 +216,21 @@ export class OrcamentoService {
       legacyBody = r.Body ? (typeof r.Body === 'string' ? r.Body : r.Body.toString('utf-8')) : undefined;
     } catch (err: unknown) {
       const e = err as { code?: string };
-      if (e?.code === 'NoSuchKey') return;
+      if (e?.code === 'NoSuchKey') {
+        this.migratedCentros.add(centroCustoId);
+        return;
+      }
       throw err;
     }
-    if (!legacyBody) return;
+    if (!legacyBody) {
+      this.migratedCentros.add(centroCustoId);
+      return;
+    }
     let legacy: OrcamentoData;
     try {
       legacy = JSON.parse(legacyBody) as OrcamentoData;
     } catch {
+      this.migratedCentros.add(centroCustoId);
       return;
     }
     const id = randomUUID();
@@ -221,14 +256,14 @@ export class OrcamentoService {
       Body: JSON.stringify(index),
       ContentType: 'application/json'
     }).promise();
+    this.migratedCentros.add(centroCustoId);
   }
 
-  async getIndex(centroCustoId: string): Promise<OrcamentoIndex> {
-    await this.migrateLegacyIfNeeded(centroCustoId);
+  private async readIndexRaw(centroCustoId: string): Promise<OrcamentoIndex | null> {
     try {
       if (this.useLocal || !this.s3) {
         const p = this.localIndexPath(centroCustoId);
-        if (!fs.existsSync(p)) return { orcamentos: [] };
+        if (!fs.existsSync(p)) return null;
         const raw = fs.readFileSync(p, 'utf-8');
         const idx = JSON.parse(raw) as OrcamentoIndex;
         return {
@@ -240,7 +275,7 @@ export class OrcamentoService {
         Bucket: this.bucketName,
         Key: this.getIndexKey(centroCustoId)
       }).promise();
-      if (!result.Body) return { orcamentos: [] };
+      if (!result.Body) return null;
       const body = typeof result.Body === 'string' ? result.Body : result.Body.toString('utf-8');
       const idx = JSON.parse(body) as OrcamentoIndex;
       return {
@@ -249,10 +284,20 @@ export class OrcamentoService {
       };
     } catch (err: unknown) {
       const e = err as { code?: string };
-      if (e?.code === 'NoSuchKey') return { orcamentos: [] };
-      if (this.useLocal) return { orcamentos: [] };
+      if (e?.code === 'NoSuchKey') return null;
+      if (this.useLocal) return null;
       throw err;
     }
+  }
+
+  async getIndex(centroCustoId: string): Promise<OrcamentoIndex> {
+    // 1 leitura: se já tem índice, não chama migrate (antes eram 2× getObject no S3).
+    const existing = await this.readIndexRaw(centroCustoId);
+    if (existing && existing.orcamentos.length > 0) return existing;
+
+    await this.migrateLegacyIfNeeded(centroCustoId);
+    const after = await this.readIndexRaw(centroCustoId);
+    return after ?? { orcamentos: [] };
   }
 
   private async writeIndex(centroCustoId: string, index: OrcamentoIndex): Promise<void> {
@@ -353,12 +398,14 @@ export class OrcamentoService {
       if (this.useLocal || !this.s3) {
         const p = this.localServicosPadraoPath(centroCustoId);
         if (fs.existsSync(p)) fs.unlinkSync(p);
-        return;
+      } else {
+        await this.s3!.deleteObject({
+          Bucket: this.bucketName,
+          Key: this.getServicosPadraoKey(centroCustoId)
+        }).promise();
       }
-      await this.s3!.deleteObject({
-        Bucket: this.bucketName,
-        Key: this.getServicosPadraoKey(centroCustoId)
-      }).promise();
+      this.invalidatePadraoCache(centroCustoId);
+      this.invalidateOrcamentoCache(centroCustoId);
       return;
     }
 
@@ -370,35 +417,41 @@ export class OrcamentoService {
       const dir = this.localDir(centroCustoId);
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(this.localServicosPadraoPath(centroCustoId), body, 'utf-8');
+    } else {
+      await this.s3!.putObject({
+        Bucket: this.bucketName,
+        Key: this.getServicosPadraoKey(centroCustoId),
+        Body: body,
+        ContentType: 'application/json'
+      }).promise();
+    }
+    this.invalidatePadraoCache(centroCustoId);
+    this.invalidateOrcamentoCache(centroCustoId);
+  }
+
+  private detailCacheKey(centroCustoId: string, orcamentoId: string): string {
+    return `${centroCustoId}::${orcamentoId}`;
+  }
+
+  private invalidatePadraoCache(centroCustoId: string): void {
+    this.padraoCache.delete(centroCustoId);
+  }
+
+  private invalidateOrcamentoCache(centroCustoId: string, orcamentoId?: string): void {
+    if (orcamentoId) {
+      this.orcamentoDetailCache.delete(this.detailCacheKey(centroCustoId, orcamentoId));
       return;
     }
-    await this.s3!.putObject({
-      Bucket: this.bucketName,
-      Key: this.getServicosPadraoKey(centroCustoId),
-      Body: body,
-      ContentType: 'application/json'
-    }).promise();
+    const prefix = `${centroCustoId}::`;
+    for (const key of this.orcamentoDetailCache.keys()) {
+      if (key.startsWith(prefix)) this.orcamentoDetailCache.delete(key);
+    }
   }
 
-  /** Serviços padrão do contrato (compartilhado entre todos os orçamentos). */
-  async getServicosPadrao(centroCustoId: string): Promise<ServicosPadraoData> {
-    await this.migrateLegacyIfNeeded(centroCustoId);
-    await this.migrateServicosPadraoFromOrcamentosIfNeeded(centroCustoId);
-    const f = await this.readServicosPadraoFile(centroCustoId);
-    const servicos = f?.servicos;
-    const imports = f?.imports;
-    return {
-      servicos: Array.isArray(servicos) ? servicos : [],
-      imports: Array.isArray(imports) ? imports : []
-    };
-  }
-
-  /**
-   * Resposta da API: serviços/imports do contrato + sessão só deste orçamento.
-   * Árvore `servicos` editada na montagem fica no arquivo do orçamento; `servicos-padrao` é só o catálogo (import).
-   */
-  async getOrcamento(centroCustoId: string, orcamentoId: string): Promise<OrcamentoData | null> {
-    if (!isUuid(orcamentoId)) return null;
+  private async fetchOrcamentoDirect(
+    centroCustoId: string,
+    orcamentoId: string
+  ): Promise<OrcamentoData | null> {
     await this.migrateLegacyIfNeeded(centroCustoId);
     const raw = await this.readOrcamentoFile(centroCustoId, orcamentoId);
     if (!raw) return null;
@@ -412,6 +465,94 @@ export class OrcamentoService {
       composicoes: [],
       sessaoOrcamento: raw.sessaoOrcamento
     };
+  }
+
+  private async fetchServicosPadraoDirect(centroCustoId: string): Promise<ServicosPadraoData> {
+    await this.migrateLegacyIfNeeded(centroCustoId);
+    await this.migrateServicosPadraoFromOrcamentosIfNeeded(centroCustoId);
+    const f = await this.readServicosPadraoFile(centroCustoId);
+    return {
+      servicos: Array.isArray(f?.servicos) ? f!.servicos : [],
+      imports: Array.isArray(f?.imports) ? f!.imports : []
+    };
+  }
+
+  /** Serviços padrão do contrato (compartilhado entre todos os orçamentos). */
+  async getServicosPadrao(centroCustoId: string): Promise<ServicosPadraoData> {
+    const cached = this.padraoCache.get(centroCustoId);
+    if (cached) {
+      const age = Date.now() - cached.fetchedAt;
+      if (age <= OrcamentoService.DETAIL_STALE_MS) {
+        if (age > OrcamentoService.DETAIL_FRESH_MS && !cached.refreshing) {
+          cached.refreshing = true;
+          this.fetchServicosPadraoDirect(centroCustoId)
+            .then((data) => {
+              this.padraoCache.set(centroCustoId, {
+                data,
+                fetchedAt: Date.now(),
+                refreshing: false
+              });
+            })
+            .catch(() => {
+              cached.refreshing = false;
+            });
+        }
+        return cached.data;
+      }
+    }
+
+    const data = await this.fetchServicosPadraoDirect(centroCustoId);
+    this.padraoCache.set(centroCustoId, {
+      data,
+      fetchedAt: Date.now(),
+      refreshing: false
+    });
+    return data;
+  }
+
+  /**
+   * Resposta da API: serviços/imports do contrato + sessão só deste orçamento.
+   * Árvore `servicos` editada na montagem fica no arquivo do orçamento; `servicos-padrao` é só o catálogo (import).
+   */
+  async getOrcamento(centroCustoId: string, orcamentoId: string): Promise<OrcamentoData | null> {
+    if (!isUuid(orcamentoId)) return null;
+    const cacheKey = this.detailCacheKey(centroCustoId, orcamentoId);
+    const cached = this.orcamentoDetailCache.get(cacheKey);
+
+    if (cached) {
+      const age = Date.now() - cached.fetchedAt;
+      if (age <= OrcamentoService.DETAIL_STALE_MS) {
+        if (age > OrcamentoService.DETAIL_FRESH_MS && !cached.refreshing) {
+          cached.refreshing = true;
+          this.fetchOrcamentoDirect(centroCustoId, orcamentoId)
+            .then((data) => {
+              if (!data) {
+                cached.refreshing = false;
+                return;
+              }
+              this.orcamentoDetailCache.set(cacheKey, {
+                data,
+                fetchedAt: Date.now(),
+                refreshing: false
+              });
+            })
+            .catch(() => {
+              cached.refreshing = false;
+            });
+        }
+        return cached.data;
+      }
+    }
+
+    const data = await this.fetchOrcamentoDirect(centroCustoId, orcamentoId);
+    if (data) {
+      this.orcamentoDetailCache.set(cacheKey, {
+        data,
+        fetchedAt: Date.now(),
+        refreshing: false
+      });
+    }
+    return data;
   }
 
   /**
@@ -458,6 +599,7 @@ export class OrcamentoService {
       )
     };
     await this.writeIndex(centroCustoId, next);
+    this.invalidateOrcamentoCache(centroCustoId, orcamentoId);
   }
 
   async saveOrcamentoSessao(centroCustoId: string, orcamentoId: string, sessaoOrcamento: unknown): Promise<void> {
@@ -553,6 +695,7 @@ export class OrcamentoService {
       ultimoOrcamentoId: ultimo,
       orcamentos: filtered
     });
+    this.invalidateOrcamentoCache(centroCustoId, orcamentoId);
   }
 
   /** Compat: salva no primeiro orçamento ou cria um se não houver índice (legado). */
