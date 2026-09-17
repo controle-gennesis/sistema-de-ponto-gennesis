@@ -59,7 +59,7 @@ import {
   type RowDraft
 } from '@/components/oc/boletoParcelasUtils';
 import { maskCurrencyInputBrOrEmpty } from '@/lib/maskCurrencyBr';
-import { resolveLockedUnbCostCenterId } from '@/lib/unbBranding';
+import { ocMatchesLockedUnbConsorcioCostCenter, resolveLockedUnbCostCenterId } from '@/lib/unbBranding';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useModalCloseConfirm } from '@/hooks/useModalCloseConfirm';
 import toast from 'react-hot-toast';
@@ -1669,17 +1669,34 @@ export default function EstoquePage() {
     return [
       {
         value: lockedUnbCostCenterId,
-        label: fromCatalog?.name || fromCatalog?.code || 'UNB',
+        label: fromCatalog?.name || fromCatalog?.code || 'UNB - CONSÓRCIO PREDIAL BRASILIA',
       },
     ];
   }, [availableOcOptions, costCenters, lockedUnbCostCenterId]);
 
+  const lockedUnbCostCenter = useMemo(
+    () => costCenters.find((item) => item.id === lockedUnbCostCenterId) ?? null,
+    [costCenters, lockedUnbCostCenterId]
+  );
+
+  const ocMatchesSelectedContract = (order: PurchaseOrderOption, costCenterId: string) => {
+    if (!costCenterId) return false;
+    if (lockedUnbCostCenterId && costCenterId === lockedUnbCostCenterId) {
+      return ocMatchesLockedUnbConsorcioCostCenter(
+        order.materialRequest?.costCenter,
+        lockedUnbCostCenterId,
+        lockedUnbCostCenter
+      );
+    }
+    return order.materialRequest?.costCenter?.id === costCenterId;
+  };
+
   const ocOptionsForSelectedContract = useMemo(() => {
     if (!formData.costCenterId) return [];
-    return availableOcOptions.filter(
-      (order) => order.materialRequest?.costCenter?.id === formData.costCenterId
+    return availableOcOptions.filter((order) =>
+      ocMatchesSelectedContract(order, formData.costCenterId)
     );
-  }, [availableOcOptions, formData.costCenterId]);
+  }, [availableOcOptions, formData.costCenterId, lockedUnbCostCenter, lockedUnbCostCenterId]);
 
   const ocDropdownOptions = useMemo(
     () =>
@@ -1729,8 +1746,7 @@ export default function EstoquePage() {
     setFormData((prev) => {
       const ocStillValid = availableOcOptions.some(
         (order) =>
-          order.orderNumber === prev.ocNumber &&
-          order.materialRequest?.costCenter?.id === costCenterId
+          order.orderNumber === prev.ocNumber && ocMatchesSelectedContract(order, costCenterId)
       );
       return {
         ...prev,
@@ -1742,8 +1758,7 @@ export default function EstoquePage() {
       formData.ocNumber &&
       !availableOcOptions.some(
         (order) =>
-          order.orderNumber === formData.ocNumber &&
-          order.materialRequest?.costCenter?.id === costCenterId
+          order.orderNumber === formData.ocNumber && ocMatchesSelectedContract(order, costCenterId)
       )
     ) {
       setOcMovementItems([]);

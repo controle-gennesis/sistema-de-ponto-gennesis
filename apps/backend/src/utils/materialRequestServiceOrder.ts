@@ -1,4 +1,5 @@
 import { prisma } from '../lib/prisma';
+import { isExactUnbCostCenterLabel, isUnbConsorcioPredialLabel } from '../lib/unbBranding';
 import { buildServiceOrderDisplayLabel } from './serviceOrderLabel';
 
 export type ResolvedRmServiceOrder = {
@@ -30,7 +31,22 @@ export async function resolveRmServiceOrderFields(input: {
       throw new Error('Ordem de serviço não encontrada');
     }
     if (so.costCenterId !== input.costCenterId) {
-      throw new Error('A ordem de serviço não pertence ao centro de custo informado');
+      const [soCc, rmCc] = await Promise.all([
+        prisma.costCenter.findUnique({
+          where: { id: so.costCenterId },
+          select: { name: true, code: true },
+        }),
+        prisma.costCenter.findUnique({
+          where: { id: input.costCenterId },
+          select: { name: true, code: true },
+        }),
+      ]);
+      const osOnExactUnb =
+        isExactUnbCostCenterLabel(soCc?.name) || isExactUnbCostCenterLabel(soCc?.code);
+      const rmOnConsorcio = isUnbConsorcioPredialLabel(rmCc?.name, rmCc?.code);
+      if (!(osOnExactUnb && rmOnConsorcio)) {
+        throw new Error('A ordem de serviço não pertence ao centro de custo informado');
+      }
     }
     const label = buildServiceOrderDisplayLabel(so.numero, so.ano, so.pleitos);
     return { serviceOrderId: so.id, serviceOrder: label };

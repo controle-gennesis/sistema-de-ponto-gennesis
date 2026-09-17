@@ -60,7 +60,12 @@ import {
   parseCurrencyInputBr,
 } from '@/lib/maskCurrencyBr';
 import { FORM_FIELD_INPUT_CLS, FORM_FIELD_TEXTAREA_CLS } from '@/lib/formFieldUi';
-import { isExactUnbCostCenterLabel, isUnbRelatedLabel, resolveLockedUnbCostCenterId } from '@/lib/unbBranding';
+import {
+  isExactUnbCostCenterLabel,
+  isUnbConsorcioPredialLabel,
+  isUnbRelatedLabel,
+  resolveLockedUnbCostCenterId,
+} from '@/lib/unbBranding';
 import {
   purchaseOrderPhaseLabel,
   OC_STATUS_LABELS_PT,
@@ -563,6 +568,23 @@ function resolveLockedUnbContractId(
 ): string | null {
   if (!contracts.length) return null;
 
+  const unbRelated = contracts.filter(
+    (contract) =>
+      isUnbCostCenterOption(contract.costCenter) ||
+      isUnbRelatedLabel(contract.name) ||
+      isUnbRelatedLabel(contract.number)
+  );
+
+  const consorcio = unbRelated.find(
+    (contract) =>
+      isUnbConsorcioPredialLabel(contract.name, contract.number) ||
+      isUnbConsorcioPredialLabel(contract.costCenter?.name, contract.costCenter?.code) ||
+      (lockedCostCenterId != null &&
+        (contract.costCenterId === lockedCostCenterId || contract.costCenter?.id === lockedCostCenterId) &&
+        isUnbConsorcioPredialLabel(contract.costCenter?.name, contract.costCenter?.code))
+  );
+  if (consorcio) return consorcio.id;
+
   const matchesCostCenter = lockedCostCenterId
     ? contracts.filter(
         (contract) =>
@@ -570,13 +592,6 @@ function resolveLockedUnbContractId(
           contract.costCenter?.id === lockedCostCenterId
       )
     : [];
-
-  const unbRelated = contracts.filter(
-    (contract) =>
-      isUnbCostCenterOption(contract.costCenter) ||
-      isUnbRelatedLabel(contract.name) ||
-      isUnbRelatedLabel(contract.number)
-  );
 
   const pool = matchesCostCenter.length > 0 ? matchesCostCenter : unbRelated;
   if (pool.length === 0) return null;

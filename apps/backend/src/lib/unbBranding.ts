@@ -1,14 +1,37 @@
 import fs from 'fs';
 import path from 'path';
 
-/** Contrato, centro de custo, polo ou qualquer rótulo ligado à UNB. */
-export function isUnbRelatedLabel(label: string | null | undefined): boolean {
-  if (!label?.trim()) return false;
-  const normalized = label
+function normalizeUnbLabel(label: string): string {
+  return label
     .trim()
     .toUpperCase()
     .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '');
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ');
+}
+
+/** Rótulo exatamente "UNB" (não "UNB - CAR" nem Consórcio). */
+export function isExactUnbCostCenterLabel(label: string | null | undefined): boolean {
+  if (!label?.trim()) return false;
+  return normalizeUnbLabel(label) === 'UNB';
+}
+
+/** Centro/contrato UNB Consórcio Predial Brasília — não o HUB. */
+export function isUnbConsorcioPredialLabel(
+  name?: string | null,
+  code?: string | null,
+): boolean {
+  const n = name?.trim() ? normalizeUnbLabel(name) : '';
+  const c = code?.trim() ? normalizeUnbLabel(code).replace(/\s/g, '') : '';
+  if (c === '009.01' || c === '00901') return true;
+  if (n.startsWith('HUB')) return false;
+  return n.startsWith('UNB') && n.includes('CONSORCIO PREDIAL');
+}
+
+/** Contrato, centro de custo, polo ou qualquer rótulo ligado à UNB. */
+export function isUnbRelatedLabel(label: string | null | undefined): boolean {
+  if (!label?.trim()) return false;
+  const normalized = normalizeUnbLabel(label);
 
   if (normalized === 'UNB') return true;
   // "UNB - DF", "UNB/Predial", "UNB Engenharia"

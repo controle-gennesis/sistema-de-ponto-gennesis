@@ -19,6 +19,18 @@ export function isExactUnbCostCenterLabel(label: string | null | undefined): boo
   return normalizeUnbLabel(label) === 'UNB';
 }
 
+/** Centro/contrato UNB Consórcio Predial Brasília — não o HUB. */
+export function isUnbConsorcioPredialLabel(
+  name?: string | null,
+  code?: string | null
+): boolean {
+  const n = name?.trim() ? normalizeUnbLabel(name) : '';
+  const c = code?.trim() ? normalizeUnbLabel(code).replace(/\s/g, '') : '';
+  if (c === '009.01' || c === '00901') return true;
+  if (n.startsWith('HUB')) return false;
+  return n.startsWith('UNB') && n.includes('CONSORCIO PREDIAL');
+}
+
 /** Contrato, centro de custo, polo ou qualquer rótulo ligado à UNB. */
 export function isUnbRelatedLabel(label: string | null | undefined): boolean {
   if (!label?.trim()) return false;
@@ -32,8 +44,8 @@ export function isUnbRelatedLabel(label: string | null | undefined): boolean {
 }
 
 /**
- * ID do centro de custo "UNB" para travar filtros/formulários de usuário UNB.
- * Prefere o CC com nome/código exatamente "UNB".
+ * ID do centro de custo UNB para travar filtros/formulários de usuário UNB.
+ * Prefere o Consórcio Predial Brasília; o cadastro exatamente "UNB" fica em segundo.
  */
 export function resolveLockedUnbCostCenterId(
   costCenters: Array<{ id: string; name?: string | null; code?: string | null }>,
@@ -47,6 +59,9 @@ export function resolveLockedUnbCostCenterId(
     : costCenters;
   const searchPool = pool.length > 0 ? pool : costCenters;
 
+  const consorcio = searchPool.find((cc) => isUnbConsorcioPredialLabel(cc.name, cc.code));
+  if (consorcio) return consorcio.id;
+
   const exact = searchPool.find(
     (cc) => isExactUnbCostCenterLabel(cc.name) || isExactUnbCostCenterLabel(cc.code)
   );
@@ -58,6 +73,27 @@ export function resolveLockedUnbCostCenterId(
     (cc) => isUnbRelatedLabel(cc.name) || isUnbRelatedLabel(cc.code)
   );
   return related?.id ?? null;
+}
+
+/**
+ * OC/RM do Consórcio UNB ou do cadastro exatamente "UNB" (legado),
+ * quando o formulário está travado no Consórcio.
+ */
+export function ocMatchesLockedUnbConsorcioCostCenter(
+  orderCostCenter:
+    | { id?: string | null; name?: string | null; code?: string | null }
+    | null
+    | undefined,
+  lockedCostCenterId: string | null | undefined,
+  lockedCostCenter?: { name?: string | null; code?: string | null } | null
+): boolean {
+  if (!orderCostCenter?.id || !lockedCostCenterId) return false;
+  if (orderCostCenter.id === lockedCostCenterId) return true;
+  if (!isUnbConsorcioPredialLabel(lockedCostCenter?.name, lockedCostCenter?.code)) return false;
+  return (
+    isExactUnbCostCenterLabel(orderCostCenter.name) ||
+    isExactUnbCostCenterLabel(orderCostCenter.code)
+  );
 }
 
 /** Usuário UNB (localStorage) ou contexto do documento (contrato/CC/OS). */

@@ -550,6 +550,27 @@ try {
     void (async () => {
       try {
         await ensureProductionSchema(prisma);
+        try {
+          const { applyMigrarRmUnbParaConsorcio } = await import('./lib/migrarRmUnbParaConsorcio');
+          const moved = await applyMigrarRmUnbParaConsorcio();
+          if (
+            moved.applied.rms > 0 ||
+            moved.applied.stock > 0 ||
+            moved.applied.shortfalls > 0 ||
+            moved.applied.employees > 0 ||
+            moved.applied.contractPermissions > 0 ||
+            moved.applied.costCenterPermissions > 0
+          ) {
+            console.log(
+              `[UNB] ${moved.from.name} → ${moved.to.name}: ${moved.applied.rms} RM(s), ${moved.applied.employees} funcionário(s), ${moved.applied.contractPermissions} permissão(ões) de contrato.`
+            );
+          }
+        } catch (e) {
+          console.warn(
+            '[UNB] Não foi possível realocar RMs UNB → Consórcio:',
+            e instanceof Error ? e.message : e
+          );
+        }
         const { removed } = await removeOrphanUserPermissions();
         if (removed > 0) {
           console.log(`🧹 Permissões de módulos removidos do registro: ${removed} registro(s) limpo(s).`);

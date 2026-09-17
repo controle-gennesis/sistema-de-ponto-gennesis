@@ -45,6 +45,7 @@ import {
 import { cadastroListClasses } from '@/components/ui/RowActionMenu';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
+import { DatePickerField } from '@/components/ui/DatePickerField';
 import type { MultiSelectSearchOption } from '@/components/ui/MultiSelectSearchDropdown';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import { usePermissions } from '@/hooks/usePermissions';
@@ -219,6 +220,29 @@ function matchesDetailStatusFilter(status: FuelRefuelStatus, filter: DetailStatu
   if (filter === 'ALL') return true;
   if (filter === 'SUPPLIES_QUEUE') return isFuelSuppliesQueueStatus(status);
   return status === filter;
+}
+
+function fuelAbastecimentoDateKey(row: { refuelDate?: string | null; requestedAt?: string | null }): string {
+  const raw = row.refuelDate || row.requestedAt;
+  if (!raw) return '';
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return '';
+  return format(d, 'yyyy-MM-dd');
+}
+
+function matchesRefuelDateFilter(
+  row: { refuelDate?: string | null; requestedAt?: string | null },
+  dateFrom: string,
+  dateTo: string
+): boolean {
+  if (!dateFrom && !dateTo) return true;
+  const key = fuelAbastecimentoDateKey(row);
+  if (!key) return false;
+  const start = dateFrom && dateTo && dateFrom > dateTo ? dateTo : dateFrom;
+  const end = dateFrom && dateTo && dateFrom > dateTo ? dateFrom : dateTo;
+  if (start && key < start) return false;
+  if (end && key > end) return false;
+  return true;
 }
 
 type FuelRefuelDeadlineUnit = 'HOURS' | 'DAYS';
@@ -424,6 +448,8 @@ export default function SolicitacoesCombustivelPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [cardFilter, setCardFilter] = useState<SuppliesCardFilter>(DEFAULT_CARD_FILTER);
   const [detailStatusFilter, setDetailStatusFilter] = useState<DetailStatusFilter>('ALL');
+  const [refuelDateFrom, setRefuelDateFrom] = useState('');
+  const [refuelDateTo, setRefuelDateTo] = useState('');
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [selected, setSelected] = useState<FuelRefuelRequest | null>(null);
@@ -674,8 +700,12 @@ export default function SolicitacoesCombustivelPage() {
 
   const records = useMemo(
     () =>
-      (listData || []).filter((row) => matchesDetailStatusFilter(row.status, detailStatusFilter)),
-    [listData, detailStatusFilter],
+      (listData || []).filter(
+        (row) =>
+          matchesDetailStatusFilter(row.status, detailStatusFilter) &&
+          matchesRefuelDateFilter(row, refuelDateFrom, refuelDateTo)
+      ),
+    [listData, detailStatusFilter, refuelDateFrom, refuelDateTo],
   );
 
   const suppliesStats = useMemo(() => {
@@ -703,7 +733,8 @@ export default function SolicitacoesCombustivelPage() {
   const startItem = totalFiltered === 0 ? 0 : startIndex + 1;
   const endItem = Math.min(startIndex + ITEMS_PER_PAGE, totalFiltered);
   const isListEmpty = !loadingList && !listError && totalFiltered === 0;
-  const hasActiveFilter = detailStatusFilter !== 'ALL';
+  const hasActiveFilter =
+    detailStatusFilter !== 'ALL' || Boolean(refuelDateFrom) || Boolean(refuelDateTo);
 
   const requestForMenu = useMemo(() => {
     if (!actionMenu) return null;
@@ -769,7 +800,7 @@ export default function SolicitacoesCombustivelPage() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, cardFilter, detailStatusFilter]);
+  }, [searchTerm, cardFilter, detailStatusFilter, refuelDateFrom, refuelDateTo]);
 
   useEffect(() => {
     if (currentPage > totalPages) setCurrentPage(totalPages);
@@ -875,7 +906,7 @@ export default function SolicitacoesCombustivelPage() {
                         : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
                     }`}
                     aria-label="Abrir filtro"
-                    title={hasActiveFilter ? 'Filtro (status ativo)' : 'Filtro'}
+                    title={hasActiveFilter ? 'Filtro ativo' : 'Filtro'}
                   >
                     <Filter className="h-4 w-4" />
                     {hasActiveFilter ? (
@@ -1845,7 +1876,50 @@ export default function SolicitacoesCombustivelPage() {
               />
             </div>
 
+            <div>
+              <p className="mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">
+                Data de abastecimento
+              </p>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="mb-2 block text-xs font-medium text-gray-500 dark:text-gray-400">
+                    De
+                  </label>
+                  <DatePickerField
+                    value={refuelDateFrom}
+                    onChange={setRefuelDateFrom}
+                    noFocusRing
+                    aria-label="Data de abastecimento de"
+                  />
+                </div>
+                <div>
+                  <label className="mb-2 block text-xs font-medium text-gray-500 dark:text-gray-400">
+                    Até
+                  </label>
+                  <DatePickerField
+                    value={refuelDateTo}
+                    onChange={setRefuelDateTo}
+                    noFocusRing
+                    aria-label="Data de abastecimento até"
+                  />
+                </div>
+              </div>
+            </div>
+
             <div className="flex items-center justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
+              {hasActiveFilter ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setDetailStatusFilter('ALL');
+                    setRefuelDateFrom('');
+                    setRefuelDateTo('');
+                  }}
+                >
+                  Limpar
+                </Button>
+              ) : null}
               <Button type="button" variant="outline" onClick={() => setIsFiltersOpen(false)}>
                 Fechar
               </Button>

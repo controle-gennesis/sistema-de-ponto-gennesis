@@ -1,5 +1,6 @@
 import { prisma } from '../lib/prisma';
 import { type EngineeringMaterial, Prisma, PurchaseOrderStatus } from '@prisma/client';
+import { remapExactUnbCostCenterIdToConsorcio } from '../lib/migrarRmUnbParaConsorcio';
 import { isUnbCostCenterRecord, unbCostCenterLabelPrismaWhere } from '../lib/unbCostCenterScope';
 import { resolveRmServiceOrderFields } from '../utils/materialRequestServiceOrder';
 import { fixMulterOriginalName } from '../lib/fixUploadFileName';
@@ -615,6 +616,8 @@ export class MaterialRequestService {
    * Cria uma nova requisição de material
    */
   async createMaterialRequest(data: CreateMaterialRequestData) {
+    data.costCenterId = await remapExactUnbCostCenterIdToConsorcio(data.costCenterId);
+
     // Validar centro de custo
     const costCenter = await prisma.costCenter.findUnique({
       where: { id: data.costCenterId }
@@ -1258,6 +1261,8 @@ export class MaterialRequestService {
     if (existing.status !== 'IN_REVIEW') {
       throw new Error('Só é possível editar requisições em Correção RM');
     }
+
+    data.costCenterId = await remapExactUnbCostCenterIdToConsorcio(data.costCenterId);
 
     const costCenter = await prisma.costCenter.findUnique({
       where: { id: data.costCenterId }
