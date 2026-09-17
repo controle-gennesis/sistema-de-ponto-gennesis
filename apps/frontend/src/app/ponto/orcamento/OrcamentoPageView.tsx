@@ -75,13 +75,17 @@ import { OrcamentoMedicaoPainel } from './OrcamentoMedicaoPainel';
 import { OrcamentoCronogramaPainel } from './OrcamentoCronogramaPainel';
 import {
   calcularDataFimOrcamento,
+  calcularStatusCronograma,
+  CRONOGRAMA_STATUS_LABEL,
   cronogramaVazio,
+  diasEntre,
   formatDataBr,
   normalizarCronograma,
   type CronogramaLinhaServico,
   type CronogramaLinhaSubtitulo,
   type CronogramaPersist
 } from './orcamentoCronogramaTypes';
+import { montarLinhasTimeline } from './orcamentoCronogramaCalc';
 import {
   gradeTableCls,
   gradeTituloSubtituloRowTrCls,
@@ -6813,10 +6817,7 @@ export function OrcamentoPageView({
         };
 
     const out: Linha[] = [];
-    // Só monta a árvore pesada nas abas que exibem/exportam analítico/ficha/memorial.
-    if (!abaOrcamentoPesada || !deferredAbaOrcamentoPesada) {
-      return out;
-    }
+    // Sempre monta a árvore (também fora das abas pesadas) para exportar Orçamento completo.
     if (subtitulosAdicionados.length === 0) return out;
     const insumosOcultosSet = new Set(insumosAnaliticoOcultos);
 
@@ -6930,8 +6931,6 @@ export function OrcamentoPageView({
     }
     return out;
   }, [
-    abaOrcamentoPesada,
-    deferredAbaOrcamentoPesada,
     subtitulosAdicionados,
     itensCalculados,
     mapaComposicoes,
@@ -8254,10 +8253,9 @@ export function OrcamentoPageView({
     toast.success('Memória de cálculo exportada com sucesso.');
   };
 
-  const exportarOrcamentoDetalhado = () => {
+  const montarSheetOrcamentoDetalhado = (): XLSX.WorkSheet | null => {
     if (itensCalculados.length === 0) {
-      toast.error('Não há itens no orçamento para exportar.');
-      return;
+      return null;
     }
 
     const nomeContrato =
@@ -8397,6 +8395,16 @@ export function OrcamentoPageView({
       { wch: 16 },
       { wch: 12 }
     ];
+    return ws;
+  };
+
+  const exportarOrcamentoDetalhado = () => {
+    const ws = montarSheetOrcamentoDetalhado();
+    if (!ws) {
+      toast.error('Não há itens no orçamento para exportar.');
+      return;
+    }
+    const nomeContrato = nomeContratoExport();
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Orçamento Detalhado');
     const nomeArquivo = `Orcamento_Detalhado_${nomeContrato.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().slice(0, 10)}.xlsx`;
@@ -8541,10 +8549,9 @@ export function OrcamentoPageView({
     'Contrato';
 
   /** Exporta a grade da aba Orçamento analítico (mesmas colunas da tela). */
-  const exportarOrcamentoAnaliticoTabela = () => {
+  const montarSheetOrcamentoAnalitico = (): XLSX.WorkSheet | null => {
     if (linhasAnaliticoOrcamento.length === 0) {
-      toast.error('Não há dados para exportar.');
-      return;
+      return null;
     }
     const nomeContrato = nomeContratoExport();
     const dataEmissao = new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
@@ -8612,6 +8619,16 @@ export function OrcamentoPageView({
       { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 48 },
       { wch: 8 }, { wch: 14 }, { wch: 16 }, { wch: 16 }, { wch: 14 }, { wch: 14 }
     ];
+    return ws;
+  };
+
+  const exportarOrcamentoAnaliticoTabela = () => {
+    const ws = montarSheetOrcamentoAnalitico();
+    if (!ws) {
+      toast.error('Não há dados para exportar.');
+      return;
+    }
+    const nomeContrato = nomeContratoExport();
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Analítico');
     const nomeArquivo = `Orcamento_Analitico_${nomeContrato.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().slice(0, 10)}.xlsx`;
@@ -8620,10 +8637,9 @@ export function OrcamentoPageView({
   };
 
   /** Planilha analítica (compras e custos) — alinhado à grade da aba. */
-  const exportarPlanilhaAnalitica = () => {
+  const montarSheetFichaDemanda = (): XLSX.WorkSheet | null => {
     if (linhasAnaliticoOrcamento.length === 0) {
-      toast.error('Não há dados para exportar.');
-      return;
+      return null;
     }
     const nomeContrato = nomeContratoExport();
     const dataEmissao = new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
@@ -8770,11 +8786,106 @@ export function OrcamentoPageView({
       { wch: 12 }, { wch: 16 }, { wch: 16 }, { wch: 14 }, { wch: 16 }, { wch: 16 }, { wch: 18 }, { wch: 16 },
       { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 14 }, { wch: 28 }
     ];
+    return ws;
+  };
+
+  const exportarPlanilhaAnalitica = () => {
+    const ws = montarSheetFichaDemanda();
+    if (!ws) {
+      toast.error('Não há dados para exportar.');
+      return;
+    }
+    const nomeContrato = nomeContratoExport();
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Planilha analítica');
     const nomeArquivo = `Planilha_Analitica_${nomeContrato.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().slice(0, 10)}.xlsx`;
     XLSX.writeFile(wb, nomeArquivo);
     toast.success('Planilha analítica exportada com sucesso.');
+  };
+
+  /** Pacote: Orçamento + Analítico + Ficha de demanda no mesmo .xlsx. */
+  const exportarOrcamentoCompleto = () => {
+    const wsOrc = montarSheetOrcamentoDetalhado();
+    const wsAna = montarSheetOrcamentoAnalitico();
+    const wsFicha = montarSheetFichaDemanda();
+    if (!wsOrc && !wsAna && !wsFicha) {
+      toast.error('Não há dados para exportar.');
+      return;
+    }
+    const nomeContrato = nomeContratoExport();
+    const wb = XLSX.utils.book_new();
+    if (wsOrc) XLSX.utils.book_append_sheet(wb, wsOrc, 'Orçamento');
+    if (wsAna) XLSX.utils.book_append_sheet(wb, wsAna, 'Analítico');
+    if (wsFicha) XLSX.utils.book_append_sheet(wb, wsFicha, 'Ficha de demanda');
+    const nomeArquivo = `Orcamento_${nomeContrato.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    XLSX.writeFile(wb, nomeArquivo);
+    toast.success('Orçamento exportado (Orçamento, Analítico e Ficha de demanda).');
+  };
+
+  const exportarCronogramaExcel = () => {
+    if (linhasCronograma.length === 0) {
+      toast.error('Não há serviços no cronograma para exportar.');
+      return;
+    }
+    const nomeContrato = nomeContratoExport();
+    const dataEmissao = new Date().toLocaleDateString('pt-BR', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric'
+    });
+    const linhasTl = montarLinhasTimeline(linhasCronograma, cronograma);
+    const rows: (string | number)[][] = [
+      ['GENNESIS ENGENHARIA E CONSULTORIA'],
+      ['CRONOGRAMA DA OBRA'],
+      ['CONTRATO', nomeContrato],
+      ['DATA', dataEmissao],
+      [''],
+      [
+        'Serviço',
+        'Início Plan.',
+        'Fim Plan.',
+        'Início Real',
+        'Fim Real',
+        'Dias',
+        '% Exec.',
+        'Status'
+      ]
+    ];
+    for (const row of linhasTl) {
+      const indent = '  '.repeat(row.indentLevel ?? (row.isSub ? 1 : 0));
+      const status = calcularStatusCronograma(row.dados);
+      const dias = diasEntre(row.dados.dataInicio, row.dados.dataFim);
+      const pct =
+        row.dados.percentualExecutado != null && Number.isFinite(row.dados.percentualExecutado)
+          ? `${Math.round(row.dados.percentualExecutado)}%`
+          : '0%';
+      rows.push([
+        `${indent}${row.label}`,
+        formatDataBr(row.dados.dataInicio),
+        formatDataBr(row.dados.dataFim),
+        formatDataBr(row.dados.dataInicioReal),
+        formatDataBr(row.dados.dataFimReal),
+        dias ?? '—',
+        pct,
+        CRONOGRAMA_STATUS_LABEL[status]
+      ]);
+    }
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    ws['!cols'] = [
+      { wch: 48 },
+      { wch: 14 },
+      { wch: 14 },
+      { wch: 14 },
+      { wch: 14 },
+      { wch: 8 },
+      { wch: 10 },
+      { wch: 14 }
+    ];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Cronograma');
+    const nomeArquivo = `Cronograma_${nomeContrato.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    XLSX.writeFile(wb, nomeArquivo);
+    toast.success('Cronograma exportado com sucesso.');
   };
 
   const exportarFichaDemandaPdf = () => {
@@ -11397,16 +11508,28 @@ export function OrcamentoPageView({
                     </p>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={exportarOrcamentoDetalhado}
-                  className="inline-flex h-10 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-700 shadow-sm transition-colors hover:bg-gray-50 active:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700 dark:active:bg-gray-600 dark:focus-visible:ring-offset-gray-900"
-                  title="Exportar orçamento"
-                  aria-label="Exportar orçamento"
-                >
-                  <Download className="h-4 w-4 shrink-0" aria-hidden />
-                  Exportar
-                </button>
+                <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={exportarOrcamentoCompleto}
+                    className="inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-gray-300 bg-white px-3 text-sm font-semibold text-gray-700 shadow-sm transition-colors hover:bg-gray-50 active:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700 dark:active:bg-gray-600 dark:focus-visible:ring-offset-gray-900 sm:px-4"
+                    title="Exporta Orçamento, Analítico e Ficha de demanda no mesmo Excel"
+                    aria-label="Exportar orçamento"
+                  >
+                    <Download className="h-4 w-4 shrink-0" aria-hidden />
+                    Exportar Orçamento
+                  </button>
+                  <button
+                    type="button"
+                    onClick={exportarCronogramaExcel}
+                    className="inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-gray-300 bg-white px-3 text-sm font-semibold text-gray-700 shadow-sm transition-colors hover:bg-gray-50 active:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700 dark:active:bg-gray-600 dark:focus-visible:ring-offset-gray-900 sm:px-4"
+                    title="Exporta o cronograma da obra em Excel"
+                    aria-label="Exportar cronograma"
+                  >
+                    <Calendar className="h-4 w-4 shrink-0" aria-hidden />
+                    Exportar Cronograma
+                  </button>
+                </div>
               </div>
             </div>
           </>
