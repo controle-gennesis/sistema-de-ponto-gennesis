@@ -1374,6 +1374,8 @@ model Contract {
   endDate          DateTime // Fim da vigÃªncia
   costCenterId     String // Centro de custo associado
   valuePlusAddenda Decimal  @db.Decimal(15, 2) // Valor mais aditivos
+  /// Quando true, a seção Faturamento pode importar planilha só com NF, emissão e valores (sem OS/pleito).
+  allowBillingImportWithoutOsPleito Boolean @default(false)
   /// ID legado (AppSheet / importações)
   externalId       String?  @unique
   createdAt        DateTime @default(now())

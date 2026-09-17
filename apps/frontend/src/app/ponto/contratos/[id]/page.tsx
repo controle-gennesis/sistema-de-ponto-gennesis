@@ -57,6 +57,7 @@ import { ContractHistoricoPleitosPanel } from '@/components/contract/ContractHis
 import { ContractOsDetailModal } from '@/components/contract/ContractOsDetailModal';
 import { ContractOsPleitoListPanel } from '@/components/contract/ContractOsPleitoListPanel';
 import { OsPleitoBillingImportModal } from '@/components/contract/OsPleitoBillingImportModal';
+import { BillingOnlyImportModal } from '@/components/contract/BillingOnlyImportModal';
 import { RowActionMenuCell, RowActionMenuPortal, cadastroListClasses, rowActionMenuButtonClass } from '@/components/ui/RowActionMenu';
 import { listTableRowClasses } from '@/components/ui/listTableUi';
 import { CadastroListSummary, getCadastroListRange } from '@/components/ui/CadastroListSummary';
@@ -175,6 +176,7 @@ interface Contract {
   costCenterId: string;
   costCenter?: { id: string; code: string; name: string };
   valuePlusAddenda: number;
+  allowBillingImportWithoutOsPleito?: boolean;
 }
 
 interface ContractAnnualValueRow {
@@ -1031,6 +1033,7 @@ export default function ContractDetailPage() {
   const [showPleitosFilterModal, setShowPleitosFilterModal] = useState(false);
   const [showOsExportModal, setShowOsExportModal] = useState(false);
   const [showOsImportModal, setShowOsImportModal] = useState(false);
+  const [showBillingOnlyImportModal, setShowBillingOnlyImportModal] = useState(false);
   const [exportingOsPdf, setExportingOsPdf] = useState(false);
   const [searchTermProduction, setSearchTermProduction] = useState('');
   const [showProductionFilterModal, setShowProductionFilterModal] = useState(false);
@@ -5275,6 +5278,19 @@ export default function ContractDetailPage() {
                       <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-green-500 ring-2 ring-white dark:ring-gray-900" />
                     ) : null}
                   </button>
+                  {contract?.allowBillingImportWithoutOsPleito ? (
+                    <button
+                      type="button"
+                      onClick={() => setShowBillingOnlyImportModal(true)}
+                      disabled={!canCreateContrato}
+                      className={OS_TOOLBAR_BTN}
+                      title="Importar planilha"
+                      aria-label="Importar faturamento"
+                    >
+                      <Upload className="h-4 w-4 shrink-0" />
+                      Importar
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     onClick={handleExportFaturamentoExcel}
@@ -5331,13 +5347,24 @@ export default function ContractDetailPage() {
                         ? 'Nenhum faturamento encontrado com os filtros atuais.'
                         : `Nenhum faturamento no período selecionado (${selectedMonth > 0 ? MESES_FILTRO.find((m) => m.value === selectedMonth)?.label + ' ' : ''}${isAllYears ? 'todos os anos' : selectedYear}).`}
                   </p>
-                  <button
-                    onClick={() => setShowBillingModal(true)}
-                    disabled={!canCreateContrato}
-                    className="mt-3 text-green-600 dark:text-green-400 hover:underline disabled:opacity-50 disabled:no-underline text-sm font-medium"
-                  >
-                    Cadastrar primeiro faturamento
-                  </button>
+                  {billings.length > 0 &&
+                  !(searchTermBillings.trim() || hasActiveBillingFilter) ? (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedMonth(0)}
+                      className="mt-3 text-green-600 dark:text-green-400 hover:underline text-sm font-medium"
+                    >
+                      Ver {billings.length} faturamento{billings.length === 1 ? '' : 's'} em todos os meses
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => setShowBillingModal(true)}
+                      disabled={!canCreateContrato}
+                      className="mt-3 text-green-600 dark:text-green-400 hover:underline disabled:opacity-50 disabled:no-underline text-sm font-medium"
+                    >
+                      Cadastrar primeiro faturamento
+                    </button>
+                  )}
                 </div>
               ) : (
                 <>
@@ -5784,6 +5811,15 @@ export default function ContractDetailPage() {
               void queryClient.invalidateQueries({ queryKey: ['contract-pleitos', contractId] });
               void queryClient.invalidateQueries({ queryKey: ['contract-billings', contractId] });
               void queryClient.invalidateQueries({ queryKey: ['pleitos-divse-list'] });
+            }}
+          />
+
+          <BillingOnlyImportModal
+            isOpen={showBillingOnlyImportModal}
+            onClose={() => setShowBillingOnlyImportModal(false)}
+            contractId={contractId}
+            onImported={() => {
+              void queryClient.invalidateQueries({ queryKey: ['contract-billings', contractId] });
             }}
           />
 

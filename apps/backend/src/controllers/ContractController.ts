@@ -218,7 +218,16 @@ export class ContractController {
       if (!req.user) throw createError('Usuário não autenticado', 401);
       await assertUserCanCreateContract(req.user.id, req.user.isAdmin);
 
-      const { name, number, startDate, endDate, validityCycle, costCenterId, valuePlusAddenda } = req.body;
+      const {
+        name,
+        number,
+        startDate,
+        endDate,
+        validityCycle,
+        costCenterId,
+        valuePlusAddenda,
+        allowBillingImportWithoutOsPleito,
+      } = req.body;
 
       if (!name?.trim()) {
         throw createError('Nome do contrato é obrigatório', 400);
@@ -272,7 +281,8 @@ export class ContractController {
             startDate: start,
             endDate: end,
             costCenterId,
-            valuePlusAddenda: value
+            valuePlusAddenda: value,
+            allowBillingImportWithoutOsPleito: Boolean(allowBillingImportWithoutOsPleito),
           },
           include: {
             costCenter: {
@@ -325,7 +335,15 @@ export class ContractController {
       await assertUserCanEditContract(req.user.id, !!req.user.isAdmin);
       await assertContractAccess(req, id);
 
-      const { name, number, startDate, endDate, costCenterId, valuePlusAddenda } = req.body;
+      const {
+        name,
+        number,
+        startDate,
+        endDate,
+        costCenterId,
+        valuePlusAddenda,
+        allowBillingImportWithoutOsPleito,
+      } = req.body;
 
       const existing = await prisma.contract.findUnique({
         where: { id }
@@ -360,6 +378,9 @@ export class ContractController {
       if (endDate !== undefined) updateData.endDate = parseDateInput(endDate);
       if (costCenterId !== undefined) updateData.costCenterId = costCenterId;
       if (valuePlusAddenda !== undefined) updateData.valuePlusAddenda = Number(valuePlusAddenda) || 0;
+      if (allowBillingImportWithoutOsPleito !== undefined) {
+        updateData.allowBillingImportWithoutOsPleito = Boolean(allowBillingImportWithoutOsPleito);
+      }
 
       if (updateData.endDate && updateData.startDate && updateData.endDate < updateData.startDate) {
         throw createError('Data de fim da vigência deve ser posterior à data de início', 400);

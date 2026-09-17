@@ -62,6 +62,7 @@ interface Contract {
   costCenterId: string;
   costCenter?: { id: string; code: string; name: string };
   valuePlusAddenda: number;
+  allowBillingImportWithoutOsPleito?: boolean;
 }
 
 type ContractPermissionUser = {
@@ -245,7 +246,8 @@ export default function ContratosPage() {
     startDate: '',
     endDate: '',
     costCenterId: '',
-    valuePlusAddenda: ''
+    valuePlusAddenda: '',
+    allowBillingImportWithoutOsPleito: false,
   });
   const [showDeleteModal, setShowDeleteModal] = useState<string | null>(null);
   const [permissionsContract, setPermissionsContract] = useState<Contract | null>(null);
@@ -424,7 +426,8 @@ export default function ContratosPage() {
       startDate: '',
       endDate: '',
       costCenterId: '',
-      valuePlusAddenda: ''
+      valuePlusAddenda: '',
+      allowBillingImportWithoutOsPleito: false,
     });
     setEditingContract(null);
   };
@@ -441,7 +444,8 @@ export default function ContratosPage() {
       startDate: contract.startDate ? contract.startDate.split('T')[0] : '',
       endDate: contract.endDate ? contract.endDate.split('T')[0] : '',
       costCenterId: contract.costCenterId,
-      valuePlusAddenda: contract.valuePlusAddenda ? formatCurrencyInput(contract.valuePlusAddenda) : ''
+      valuePlusAddenda: contract.valuePlusAddenda ? formatCurrencyInput(contract.valuePlusAddenda) : '',
+      allowBillingImportWithoutOsPleito: Boolean(contract.allowBillingImportWithoutOsPleito),
     });
     setShowForm(true);
   };
@@ -488,7 +492,8 @@ export default function ContratosPage() {
       startDate: formData.startDate,
       endDate: formData.endDate,
       costCenterId: formData.costCenterId,
-      valuePlusAddenda: parsedValue
+      valuePlusAddenda: parsedValue,
+      allowBillingImportWithoutOsPleito: Boolean(formData.allowBillingImportWithoutOsPleito),
     };
 
     if (editingContract) {
@@ -1320,6 +1325,29 @@ function ContractFormModal({
                 })()}
               </div>
             </div>
+
+            <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-3 dark:border-gray-600 dark:bg-gray-700/40">
+              <input
+                type="checkbox"
+                className="mt-0.5 h-4 w-4 shrink-0 rounded border-gray-300 text-red-600 focus:ring-red-500 dark:border-gray-500 dark:bg-gray-800"
+                checked={Boolean(formData.allowBillingImportWithoutOsPleito)}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    allowBillingImportWithoutOsPleito: e.target.checked,
+                  })
+                }
+              />
+              <span>
+                <span className="block text-sm font-medium text-gray-900 dark:text-gray-100">
+                  Permitir importar faturamento sem OS e pleito
+                </span>
+                <span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">
+                  Na seção Faturamento deste contrato, o botão Importar aceita planilha só com nota,
+                  emissão e valores.
+                </span>
+              </span>
+            </label>
 
             {(createMutation.isError || updateMutation.isError) && (
               <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">

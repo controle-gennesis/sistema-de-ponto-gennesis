@@ -28,6 +28,34 @@ async function tableExists(prisma: PrismaClient, tableName: string): Promise<boo
   return (rows[0]?.c ?? BigInt(0)) > BigInt(0);
 }
 
+async function ensureEmployeePhoneColumn(prisma: PrismaClient): Promise<void> {
+  if (await columnExists(prisma, 'employees', 'phone')) return;
+  console.warn('[Schema] Coluna employees.phone ausente — adicionando.');
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "employees" ADD COLUMN IF NOT EXISTS "phone" TEXT;
+  `);
+}
+
+async function ensureContractBillingImportWithoutOsPleito(prisma: PrismaClient): Promise<void> {
+  if (await columnExists(prisma, 'contracts', 'allowBillingImportWithoutOsPleito')) return;
+
+  console.warn('[Schema] Coluna contracts.allowBillingImportWithoutOsPleito ausente — adicionando.');
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "contracts" ADD COLUMN IF NOT EXISTS "allowBillingImportWithoutOsPleito" BOOLEAN NOT NULL DEFAULT false;
+  `);
+  await prisma.$executeRawUnsafe(`
+    UPDATE "contracts"
+    SET "allowBillingImportWithoutOsPleito" = true
+    WHERE
+      upper("name") LIKE '%CONFEA%508%'
+      OR upper("name") LIKE '%CONFEA%516%'
+      OR upper("name") LIKE '%CONIFA%508%'
+      OR upper("name") LIKE '%CONIFA%516%'
+      OR upper(coalesce("number", '')) LIKE '%CONFEA%508%'
+      OR upper(coalesce("number", '')) LIKE '%CONFEA%516%';
+  `);
+}
+
 async function ensureContractAddendaTable(prisma: PrismaClient): Promise<void> {
   if (await tableExists(prisma, 'contract_addenda')) return;
 
@@ -1891,7 +1919,9 @@ async function ensurePunchPocColumns(prisma: PrismaClient): Promise<void> {
 export async function ensureProductionSchema(prisma: PrismaClient): Promise<void> {
   try {
     await ensureUnaccentExtension(prisma);
+    await ensureEmployeePhoneColumn(prisma);
     await ensureContractAddendaTable(prisma);
+    await ensureContractBillingImportWithoutOsPleito(prisma);
     await ensureMaterialRequestColumns(prisma);
     await ensureMaterialRequestItemColumns(prisma);
     await ensureMaterialRequestCommentsTable(prisma);
