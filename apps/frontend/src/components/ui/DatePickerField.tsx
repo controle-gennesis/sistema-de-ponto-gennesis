@@ -33,6 +33,10 @@ export type DatePickerFieldProps = {
   size?: 'form' | 'table';
   /** `field` = caixa com borda; `inline` = só texto + ícone (tabela) */
   appearance?: 'field' | 'inline';
+  /** Esconde o ícone de calendário (o clique no texto ainda abre o seletor). */
+  hideIcon?: boolean;
+  /** Alinhamento do texto no trigger. */
+  textAlign?: 'left' | 'center';
   className?: string;
   noFocusRing?: boolean;
   'aria-label'?: string;
@@ -68,6 +72,8 @@ export function DatePickerField({
   disabled = false,
   size = 'form',
   appearance = 'field',
+  hideIcon = false,
+  textAlign = 'left',
   className,
   noFocusRing = false,
   'aria-label': ariaLabel
@@ -367,7 +373,16 @@ export function DatePickerField({
         aria-expanded={open}
         aria-haspopup="dialog"
         aria-controls={open ? listboxId : undefined}
-        className={datePickerTriggerCls(open, triggerAppearance, noFocusRing, className)}
+        className={datePickerTriggerCls(
+          open,
+          triggerAppearance,
+          noFocusRing,
+          clsx(
+            textAlign === 'center' && 'justify-center text-center',
+            hideIcon && 'gap-0',
+            className
+          )
+        )}
         data-form-field-trigger="true"
         onClick={() => {
           if (disabled) return;
@@ -375,10 +390,18 @@ export function DatePickerField({
           setOpen((v) => !v);
         }}
       >
-        <span className={clsx('min-w-0 truncate tabular-nums', datePickerTriggerTextCls(Boolean(value)))}>
+        <span
+          className={clsx(
+            'min-w-0 truncate tabular-nums',
+            textAlign === 'center' && 'text-center',
+            datePickerTriggerTextCls(Boolean(value))
+          )}
+        >
           {value ? formatDisplayBr(value) : placeholder}
         </span>
-        <Calendar className={datePickerCalendarIconCls(triggerAppearance)} aria-hidden />
+        {!hideIcon ? (
+          <Calendar className={datePickerCalendarIconCls(triggerAppearance)} aria-hidden />
+        ) : null}
       </button>
       {typeof document !== 'undefined' && popover ? createPortal(popover, document.body) : null}
     </>

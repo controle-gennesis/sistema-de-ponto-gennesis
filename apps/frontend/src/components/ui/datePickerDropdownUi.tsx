@@ -76,7 +76,7 @@ export const DATE_PICKER_TRIGGER_FIELD_CLS = `group flex h-10 w-full min-w-0 ite
 export const DATE_PICKER_TRIGGER_TABLE_CLS = `group flex h-9 w-full min-w-0 items-center justify-between gap-2 rounded-md border border-gray-300 bg-white px-2.5 text-left text-xs outline-none transition-[border-color,box-shadow,background-color] disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 sm:text-sm ${FORM_FIELD_NO_FOCUS_CLS}`;
 
 export const DATE_PICKER_TRIGGER_INLINE_CLS =
-  'group flex h-auto w-full min-w-0 cursor-pointer items-center justify-between gap-2 border-0 bg-transparent px-1 py-1 text-left text-xs shadow-none sm:text-sm';
+  'group flex h-auto w-full min-w-0 cursor-pointer items-center justify-center gap-2 border-0 bg-transparent px-1 py-1 text-center text-xs shadow-none sm:text-sm disabled:cursor-default disabled:opacity-100';
 
 export function datePickerTriggerBorderCls(open: boolean, noFocusRing = false) {
   return singleSelectTriggerBorderClass(open, noFocusRing);

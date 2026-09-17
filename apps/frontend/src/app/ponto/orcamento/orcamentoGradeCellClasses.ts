@@ -57,4 +57,4 @@ export const inputGradeMoedaCls =
 
 /** Célula da grade com seletor de data (cronograma). */
 export const tdGradeDateCls =
-  'p-1.5 align-middle border-l border-gray-200 dark:border-gray-600 min-w-[9rem]';
+  'p-1.5 align-middle border-l border-gray-200 dark:border-gray-600 w-[9rem]';

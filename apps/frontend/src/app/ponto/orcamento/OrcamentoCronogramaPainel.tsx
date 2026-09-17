@@ -88,11 +88,14 @@ const thCls =
 const tdCls =
   'px-3 py-2.5 text-sm text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-600 align-middle';
 const tdServicoColCls =
-  'min-w-[9rem] w-max px-3 py-0 text-sm border-l-0 align-middle whitespace-nowrap';
+  'min-w-0 px-3 py-0 text-sm border-l-0 align-middle overflow-hidden';
 const thServicoColCls =
-  'min-w-[9rem] w-max px-3 py-2.5 text-left text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l-0 whitespace-nowrap';
-const tdPctColCls = `${tdCls} text-center min-w-[4.75rem] w-[4.75rem] px-1 whitespace-nowrap`;
-const thPctColCls = `${thCls} min-w-[4.75rem] w-[4.75rem] px-1 whitespace-nowrap`;
+  'min-w-0 px-3 py-2.5 text-left text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l-0';
+const thDateColCls = `${thCls} w-[9rem]`;
+const thDiasColCls = `${thCls} w-[4rem]`;
+const thStatusColCls = `${thCls} w-[7rem]`;
+const tdPctColCls = `${tdCls} text-center w-[4.75rem] px-1 whitespace-nowrap`;
+const thPctColCls = `${thCls} w-[4.75rem] px-1 whitespace-nowrap`;
 const inputPctCls =
   'w-full rounded-md border border-gray-300 bg-white px-1 py-1 text-center text-xs tabular-nums text-gray-900 focus:outline-none dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [-moz-appearance:textfield]';
 const statusBarCls = (status: keyof typeof CRONOGRAMA_STATUS_CLASS) =>
@@ -175,14 +178,15 @@ function SubServicoNomeCell({
               setEditando(false);
             }
           }}
-          className="min-w-0 flex-1 rounded-md border border-gray-300 bg-white px-2 py-1.5 text-xs text-gray-900 focus:outline-none dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 min-w-[12rem]"
+          className="min-w-0 flex-1 rounded-md border border-gray-300 bg-white px-2 py-1.5 text-xs text-gray-900 focus:outline-none dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
           aria-label={`Editar subserviço — ${sub.nome}`}
         />
       ) : (
         <button
           type="button"
           onClick={() => setEditando(true)}
-          className="flex-1 py-1.5 pl-1 pr-0.5 text-left text-xs font-normal text-gray-800 dark:text-gray-200 cursor-pointer whitespace-nowrap"
+          className="min-w-0 flex-1 truncate py-1.5 pl-1 pr-0.5 text-left text-xs font-normal text-gray-800 dark:text-gray-200 cursor-pointer"
+          title={sub.nome}
         >
           {sub.nome}
         </button>
@@ -203,12 +207,24 @@ function ComposicaoResumoNomeCell({ nome }: { nome: string }) {
   return (
     <div className="flex min-h-[2.75rem] items-center gap-2 min-w-0">
       <span
-        className="flex-1 py-1.5 pl-1 pr-0.5 text-left text-xs font-normal text-gray-800 dark:text-gray-200 whitespace-nowrap"
+        className="min-w-0 flex-1 truncate py-1.5 pl-1 pr-0.5 text-left text-xs font-normal text-gray-800 dark:text-gray-200"
         title={nome}
       >
         {nome}
       </span>
     </div>
+  );
+}
+
+function DataCronogramaSomenteLeitura({ value }: { value: string | undefined }) {
+  const texto = formatDataBr(value);
+  return (
+    <span
+      className="flex w-full min-h-[1.75rem] items-center justify-center px-1 py-1 text-center text-xs sm:text-sm tabular-nums font-normal text-gray-500 dark:text-gray-400"
+      title={texto !== '—' ? texto : undefined}
+    >
+      {texto}
+    </span>
   );
 }
 
@@ -227,53 +243,44 @@ function CelulasEtapaCronograma({
 }) {
   const observacao = resolvido.observacao?.trim() || '';
 
+  const celulaData = (
+    value: string | undefined,
+    onChange: (v: string) => void,
+    ariaLabel: string
+  ) => (
+    <td className={`${tdGradeDateCls} text-center`}>
+      {readOnly ? (
+        <DataCronogramaSomenteLeitura value={value} />
+      ) : (
+        <DatePickerField
+          size="table"
+          appearance="inline"
+          hideIcon
+          textAlign="center"
+          value={value ?? ''}
+          onChange={onChange}
+          placeholder="dd/mm/aaaa"
+          aria-label={ariaLabel}
+        />
+      )}
+    </td>
+  );
+
   return (
     <>
-      <td className={tdGradeDateCls}>
-        <DatePickerField
-          size="table"
-          appearance="inline"
-          value={resolvido.dataInicio ?? ''}
-          onChange={(v) => onPatch({ dataInicio: v })}
-          placeholder="dd/mm/aaaa"
-          aria-label={`Início plan. — ${ariaPrefix}`}
-          disabled={readOnly}
-        />
-      </td>
-      <td className={tdGradeDateCls}>
-        <DatePickerField
-          size="table"
-          appearance="inline"
-          value={resolvido.dataFim ?? ''}
-          onChange={(v) => onPatch({ dataFim: v })}
-          placeholder="dd/mm/aaaa"
-          aria-label={`Fim plan. — ${ariaPrefix}`}
-          disabled={readOnly}
-        />
-      </td>
-      <td className={tdGradeDateCls}>
-        <DatePickerField
-          size="table"
-          appearance="inline"
-          value={resolvido.dataInicioReal ?? ''}
-          onChange={(v) => onPatch({ dataInicioReal: v })}
-          placeholder="dd/mm/aaaa"
-          aria-label={`Início real — ${ariaPrefix}`}
-          disabled={readOnly}
-        />
-      </td>
-      <td className={tdGradeDateCls}>
-        <DatePickerField
-          size="table"
-          appearance="inline"
-          value={resolvido.dataFimReal ?? ''}
-          onChange={(v) => onPatch({ dataFimReal: v })}
-          placeholder="dd/mm/aaaa"
-          aria-label={`Fim real — ${ariaPrefix}`}
-          disabled={readOnly}
-        />
-      </td>
-      <td className={`${tdCls} text-center tabular-nums text-xs`}>
+      {celulaData(resolvido.dataInicio, (v) => onPatch({ dataInicio: v }), `Início plan. — ${ariaPrefix}`)}
+      {celulaData(resolvido.dataFim, (v) => onPatch({ dataFim: v }), `Fim plan. — ${ariaPrefix}`)}
+      {celulaData(
+        resolvido.dataInicioReal,
+        (v) => onPatch({ dataInicioReal: v }),
+        `Início real — ${ariaPrefix}`
+      )}
+      {celulaData(resolvido.dataFimReal, (v) => onPatch({ dataFimReal: v }), `Fim real — ${ariaPrefix}`)}
+      <td
+        className={`${tdCls} w-[4rem] text-center tabular-nums text-xs ${
+          readOnly ? 'text-gray-500 dark:text-gray-400' : ''
+        }`}
+      >
         {diasEntre(resolvido.dataInicio, resolvido.dataFim) ?? '—'}
       </td>
       <td className={tdPctColCls}>
@@ -288,9 +295,11 @@ function CelulasEtapaCronograma({
           ariaLabel={`% executado — ${ariaPrefix}`}
         />
       </td>
-      <td className={`${tdCls} text-center`}>
+      <td className={`${tdCls} w-[7rem] text-center`}>
         <span
-          className={`${statusSpanCls(status)}${observacao ? ' cursor-help' : ''}`}
+          className={`${statusSpanCls(status)}${observacao ? ' cursor-help' : ''}${
+            readOnly ? ' !font-medium text-gray-500 dark:text-gray-400' : ''
+          }`}
           title={observacao || undefined}
         >
           {CRONOGRAMA_STATUS_LABEL[status]}
@@ -345,7 +354,7 @@ function PercentualExecCell({
   if (readOnly) {
     return (
       <span
-        className="block w-full py-1 text-center text-xs tabular-nums text-gray-800 dark:text-gray-200"
+        className="block w-full py-1 text-center text-xs tabular-nums text-gray-500 dark:text-gray-400"
         aria-label={ariaLabel}
         title="Calculado automaticamente a partir das etapas"
       >
@@ -1195,17 +1204,17 @@ export function OrcamentoCronogramaPainel({
 
         {viewMode === 'tabela' && (
           <div className="table-scroll">
-            <table className={`w-max min-w-full border-collapse table-auto ${gradeTableCls}`}>
+            <table className={`min-w-[72rem] w-full border-collapse table-fixed ${gradeTableCls}`}>
               <thead className="sticky top-0 z-10 border-t-[0.5px] border-b border-gray-200/80 bg-gray-50 dark:border-gray-700/80 dark:bg-gray-800">
                 <tr className={gradeTableRowTrCls}>
                   <th className={thServicoColCls}>Serviço</th>
-                  <th className={`${thCls} min-w-[9rem]`}>Início Plan.</th>
-                  <th className={`${thCls} min-w-[9rem]`}>Fim Plan.</th>
-                  <th className={`${thCls} min-w-[9rem]`}>Início Real</th>
-                  <th className={`${thCls} min-w-[9rem]`}>Fim Real</th>
-                  <th className={`${thCls} min-w-[4rem]`}>Dias</th>
+                  <th className={thDateColCls}>Início Plan.</th>
+                  <th className={thDateColCls}>Fim Plan.</th>
+                  <th className={thDateColCls}>Início Real</th>
+                  <th className={thDateColCls}>Fim Real</th>
+                  <th className={thDiasColCls}>Dias</th>
                   <th className={thPctColCls}>% Exec.</th>
-                  <th className={`${thCls} min-w-[7rem]`}>Status</th>
+                  <th className={thStatusColCls}>Status</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200/80 dark:divide-gray-700">
@@ -1228,9 +1237,12 @@ export function OrcamentoCronogramaPainel({
                       className={`bg-white dark:bg-gray-900/80 border-b border-gray-200/80 dark:border-gray-700 ${gradeTableRowTrCls}`}
                     >
                       <td className={`${tdServicoColCls} text-left pl-4`}>
-                        <div className="flex min-h-[2.75rem] items-center gap-1">
-                          <div className="flex-1">
-                            <span className="text-sm font-semibold text-gray-900 dark:text-gray-100 block leading-normal whitespace-nowrap">
+                        <div className="flex min-h-[2.75rem] min-w-0 items-center gap-1">
+                          <div className="min-w-0 flex-1 overflow-hidden">
+                            <span
+                              className="block min-w-0 truncate text-sm font-semibold leading-normal text-gray-900 dark:text-gray-100"
+                              title={linha.servicoNome}
+                            >
                               {linha.servicoNome}
                             </span>
                             {gerando ? (
@@ -1357,8 +1369,11 @@ export function OrcamentoCronogramaPainel({
                         className="border-b border-gray-200/90 bg-slate-200/90 dark:border-gray-800 dark:bg-gray-900"
                       >
                         <td className={`${tdServicoColCls} text-left pl-6`}>
-                          <div className="flex min-h-[2rem] items-center gap-1">
-                            <span className="flex-1 text-xs font-semibold uppercase tracking-wide text-gray-800 dark:text-gray-200 whitespace-nowrap">
+                          <div className="flex min-h-[2rem] min-w-0 items-center gap-1">
+                            <span
+                              className="min-w-0 flex-1 truncate text-xs font-semibold uppercase tracking-wide text-gray-800 dark:text-gray-200"
+                              title={st.subtituloNome}
+                            >
                               {st.subtituloNome}
                             </span>
                             {gerandoBlocoKey === st.blocoKey ? (
