@@ -111,7 +111,7 @@ export interface FichaDemandaApprovalFormState {
 export const FD_STATUS_LABELS: Record<DemandSheetApprovalStatus, string> = {
   WAITING_MANAGER: 'Pendente de aprovação',
   APPROVED: 'Aprovada',
-  REJECTED: 'Reprovada',
+  REJECTED: 'Em correção',
   CANCELLED: 'Cancelada',
 };
 

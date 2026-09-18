@@ -863,7 +863,7 @@ function AprovacoesPage() {
     if (canApproveFuel) {
       tabs.push({
         id: 'fuel',
-        label: 'Combustível',
+        label: 'Abastecimento',
         count: approvalCounts.fuel,
       });
     }

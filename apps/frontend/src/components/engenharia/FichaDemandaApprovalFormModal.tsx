@@ -127,16 +127,21 @@ export type FichaDemandaApprovalFormModalProps = {
   isOpen: boolean;
   onClose: () => void;
   editingRecord?: FichaDemandaApprovalRecord | null;
+  /** Prefill ao criar (ex.: envio a partir do orçamento). Ignorado se `editingRecord` estiver setado. */
+  initialForm?: Partial<FichaDemandaApprovalFormState> | null;
   onSave: (form: FichaDemandaApprovalFormState) => void;
   isSaving?: boolean;
+  title?: string;
 };
 
 export function FichaDemandaApprovalFormModal({
   isOpen,
   onClose,
   editingRecord = null,
+  initialForm = null,
   onSave,
   isSaving = false,
+  title,
 }: FichaDemandaApprovalFormModalProps) {
   const queryClient = useQueryClient();
   const [form, setForm] = useState<FichaDemandaApprovalFormState>(() => emptyFichaDemandaForm());
@@ -173,12 +178,18 @@ export function FichaDemandaApprovalFormModal({
     if (!isOpen) return;
     if (editingRecord) {
       setForm(recordToForm(editingRecord));
+    } else if (initialForm) {
+      setForm({
+        ...emptyFichaDemandaForm(),
+        ...initialForm,
+        anexos: initialForm.anexos ? [...initialForm.anexos] : [],
+      });
     } else {
       setForm(emptyFichaDemandaForm());
     }
     setShowCreateObra(false);
     setNovaObraNome('');
-  }, [isOpen, editingRecord]);
+  }, [isOpen, editingRecord, initialForm]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -329,7 +340,8 @@ export function FichaDemandaApprovalFormModal({
       <div className="relative z-[1101] flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-lg bg-white shadow-xl dark:bg-gray-800">
         <div className="sticky top-0 z-10 flex shrink-0 items-center justify-between border-b border-gray-200 bg-white px-6 py-4 dark:border-gray-700 dark:bg-gray-800">
           <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-            {editingRecord ? 'Editar Ficha de Demanda' : 'Nova Ficha de Demanda'}
+            {title ||
+              (editingRecord ? 'Editar Ficha de Demanda' : 'Nova Ficha de Demanda')}
           </h3>
           <button
             type="button"

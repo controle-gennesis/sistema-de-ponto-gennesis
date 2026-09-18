@@ -145,16 +145,12 @@ async function cancelSession(chatId: string, userId: string) {
 }
 
 function vehicleTypeLabel(type?: FuelVehicleType): string {
-  if (type === FuelVehicleType.PRIVATE) return 'Particular (passa pelo gestor)';
-  if (type === FuelVehicleType.COMPANY) return 'Frota / empresa (direto ao Suprimentos)';
+  if (type === FuelVehicleType.PRIVATE) return 'Particular';
+  if (type === FuelVehicleType.COMPANY) return 'Frota / empresa';
   return '—';
 }
 
 function buildSummary(payload: FuelFlowPayload): string {
-  const routing =
-    payload.vehicleType === FuelVehicleType.PRIVATE
-      ? 'Após confirmar, seguirá para aprovação do gestor e depois Suprimentos.'
-      : 'Após confirmar, seguirá direto para a fila do Suprimentos.';
   const vehicleDescription = payload.vehicleDescription?.trim();
 
   return [
@@ -169,7 +165,7 @@ function buildSummary(payload: FuelFlowPayload): string {
     `• Foto do painel: ${hasStoredPhoto(payload.dashboardPhotoUrl, payload.dashboardPhotoKey) ? '✅ enviada' : '—'}`,
     `• Observações: ${payload.observations?.trim() || '—'}`,
     '',
-    routing,
+    'Após confirmar, seguirá para aprovação do gestor e depois Suprimentos.',
     '',
     'Confirma o envio? (sim / não)',
   ].join('\n');
@@ -456,7 +452,7 @@ export class GennecyFuelFlowService {
         return {
           handled: true,
           reply:
-            'É veículo particular (carro próprio do colaborador)?\nDigite «sim» ou «não».\n\n• Sim → a solicitação passa pelo gestor antes do Suprimentos.\n• Não → vai direto para o Suprimentos.',
+            'É veículo particular (carro próprio do colaborador)?\nDigite «sim» ou «não».\n\n• Sim → particular\n• Não → frota/empresa\n\nEm ambos os casos a solicitação passa pelo gestor e depois pelo Suprimentos.',
         };
       }
 

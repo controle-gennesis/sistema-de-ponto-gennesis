@@ -20,9 +20,56 @@ import {
 } from '../services/demandSheetImport';
 import { savePersistentUpload } from '../lib/persistentUpload';
 import { fixMulterOriginalName } from '../lib/fixUploadFileName';
+import { OrcamentoService } from '../services/OrcamentoService';
 
 const fdModuleKey = pathToModuleKey('/ponto/aprovacao-fds');
 const fdsAprovadasModuleKey = pathToModuleKey('/ponto/fds-aprovadas');
+const orcamentoService = new OrcamentoService();
+
+const ORCAMENTO_REF_KIND = 'orcamento-ref';
+const ORCAMENTO_REF_NAME = '__orcamento_ref__';
+
+function isOrcamentoRefAnexo(a: unknown): boolean {
+  if (!a || typeof a !== 'object') return false;
+  const row = a as { kind?: unknown; name?: unknown };
+  return row.kind === ORCAMENTO_REF_KIND || row.name === ORCAMENTO_REF_NAME;
+}
+
+function extractOrcamentoRefFromAnexos(
+  anexos: unknown
+): { centroCustoId: string; orcamentoId: string } | null {
+  if (!Array.isArray(anexos)) return null;
+  for (const a of anexos) {
+    if (!isOrcamentoRefAnexo(a)) continue;
+    const row = a as { centroCustoId?: unknown; orcamentoId?: unknown };
+    const centroCustoId = String(row.centroCustoId || '').trim();
+    const orcamentoId = String(row.orcamentoId || '').trim();
+    if (centroCustoId && orcamentoId) return { centroCustoId, orcamentoId };
+  }
+  return null;
+}
+
+function publicAnexos(anexos: unknown): unknown[] {
+  if (!Array.isArray(anexos)) return [];
+  return anexos.filter((a) => !isOrcamentoRefAnexo(a));
+}
+
+async function syncOrcamentoStatusFromFd(
+  anexos: unknown,
+  statusAprovacao: 'aprovado' | 'em_correcao'
+): Promise<void> {
+  const ref = extractOrcamentoRefFromAnexos(anexos);
+  if (!ref) return;
+  try {
+    await orcamentoService.updateStatusAprovacao(
+      ref.centroCustoId,
+      ref.orcamentoId,
+      statusAprovacao
+    );
+  } catch (err) {
+    console.warn('[DemandSheetApproval] Falha ao sincronizar status do orçamento:', err);
+  }
+}
 
 const PURCHASE_STATUS_VALUES = [
   'WAREHOUSE_DF',
@@ -38,6 +85,9 @@ const anexoSchema = z.object({
   id: z.string().optional(),
   name: z.string().min(1),
   url: z.string().optional(),
+  kind: z.string().optional(),
+  centroCustoId: z.string().optional(),
+  orcamentoId: z.string().optional(),
 });
 
 const formSchema = z.object({
@@ -54,6 +104,8 @@ const formSchema = z.object({
   dataHora: z.string().min(1),
   polo: z.enum(['DF', 'GO']),
   anexos: z.array(anexoSchema).optional().default([]),
+  orcamentoCentroCustoId: z.string().optional(),
+  orcamentoId: z.string().optional(),
 });
 
 const managerDecisionSchema = z.object({
@@ -142,7 +194,7 @@ function serializeRow(row: {
     purchaseStatusUpdatedAt: row.purchaseStatusUpdatedAt
       ? row.purchaseStatusUpdatedAt.toLocaleString('pt-BR')
       : null,
-    anexos: Array.isArray(row.anexos) ? row.anexos : [],
+    anexos: publicAnexos(row.anexos),
   };
 }
 
@@ -253,6 +305,21 @@ export class DemandSheetApprovalController {
 
       const body = formSchema.parse(req.body);
 
+      const anexos: Array<Record<string, unknown>> = Array.isArray(body.anexos)
+        ? body.anexos.map((a) => ({ ...a }))
+        : [];
+      const centroRef = String(body.orcamentoCentroCustoId || '').trim();
+      const orcRef = String(body.orcamentoId || '').trim();
+      if (centroRef && orcRef && !extractOrcamentoRefFromAnexos(anexos)) {
+        anexos.push({
+          id: ORCAMENTO_REF_KIND,
+          name: ORCAMENTO_REF_NAME,
+          kind: ORCAMENTO_REF_KIND,
+          centroCustoId: centroRef,
+          orcamentoId: orcRef,
+        });
+      }
+
       const row = await prisma.demandSheetApproval.create({
         data: {
           numMovRm: body.numMovRm.trim(),
@@ -267,7 +334,7 @@ export class DemandSheetApprovalController {
           observacao: body.observacao.trim(),
           dataHora: parseDataHora(body.dataHora),
           polo: body.polo,
-          anexos: body.anexos,
+          anexos: anexos as unknown as Prisma.InputJsonValue,
           status: 'WAITING_MANAGER',
           createdBy: req.user.id,
         },
@@ -427,6 +494,8 @@ export class DemandSheetApprovalController {
         include: includeDefault,
       });
 
+      await syncOrcamentoStatusFromFd(updated.anexos, 'aprovado');
+
       return res.json({ success: true, data: serializeRow(updated) });
     } catch (e: unknown) {
       const err = e as { statusCode?: number; message?: string };
@@ -466,6 +535,8 @@ export class DemandSheetApprovalController {
         },
         include: includeDefault,
       });
+
+      await syncOrcamentoStatusFromFd(updated.anexos, 'em_correcao');
 
       return res.json({ success: true, data: serializeRow(updated) });
     } catch (e: unknown) {

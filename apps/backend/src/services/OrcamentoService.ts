@@ -15,11 +15,29 @@ export interface OrcamentoIndexEntry {
   id: string;
   nome: string;
   updatedAt: string;
+  /** Espelha sessao.meta.statusAprovacao para a lista sem abrir o detalhe. */
+  statusAprovacao?: string;
+  /** Progresso da ficha de demanda (0–100), espelhado da meta. */
+  fichaDemandaPct?: number;
+  /** BDI em pontos percentuais (ex.: 28.35), espelhado da meta. */
+  bdiPercentual?: number;
+  /** Total com BDI (R$), espelhado da meta. */
+  totalComBdi?: number;
+  /** Progresso físico do cronograma (%), espelhado de meta.cronogramaResumo. */
+  cronogramaProgressoFisico?: number;
+  /** Etapas concluídas no cronograma. */
+  cronogramaConcluido?: number;
+  /** Total de etapas no cronograma. */
+  cronogramaTotalEtapas?: number;
+  /** Etapas atrasadas no cronograma. */
+  cronogramaAtrasado?: number;
 }
 
 export interface OrcamentoIndex {
   ultimoOrcamentoId?: string;
   orcamentos: OrcamentoIndexEntry[];
+  /** 2+ = total da lista não usa mais totaisOrcafascio (só rodapé). */
+  listaFinVersion?: number;
 }
 
 /** Serviços padrão + histórico de importações — compartilhado por todos os orçamentos do contrato. */
@@ -36,6 +54,57 @@ const EMPTY_DATA: OrcamentoData = {
 
 function isUuid(id: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
+}
+
+/** Converte "28,35" / "28.35" / 28.35 → pontos percentuais. */
+function parseBdiPercentualPoints(raw: unknown): number | undefined {
+  if (typeof raw === 'number' && Number.isFinite(raw)) return raw;
+  if (typeof raw !== 'string') return undefined;
+  const limpo = raw.replace('%', '').trim();
+  if (!limpo) return undefined;
+  const n = limpo.includes(',')
+    ? Number(limpo.replace(/\./g, '').replace(',', '.'))
+    : Number(limpo);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+function extractListaFinanceiroFromMeta(meta: Record<string, unknown> | undefined): {
+  bdiPercentual?: number;
+  totalComBdi?: number;
+} {
+  if (!meta) return {};
+  const bdiPercentual = parseBdiPercentualPoints(meta.bdiPercentual);
+  // Só meta.totalComBdi (espelho do rodapé). Não usa totaisOrcafascio — divergem da montagem.
+  const totalDirect = Number(meta.totalComBdi);
+  if (Number.isFinite(totalDirect) && totalDirect > 0) {
+    return { ...(bdiPercentual !== undefined ? { bdiPercentual } : {}), totalComBdi: totalDirect };
+  }
+  return bdiPercentual !== undefined ? { bdiPercentual } : {};
+}
+
+function extractCronogramaResumoFromMeta(meta: Record<string, unknown> | undefined): {
+  cronogramaProgressoFisico?: number;
+  cronogramaConcluido?: number;
+  cronogramaTotalEtapas?: number;
+  cronogramaAtrasado?: number;
+} {
+  if (!meta) return {};
+  const raw = meta.cronogramaResumo;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const o = raw as Record<string, unknown>;
+  const progressoFisico = Number(o.progressoFisico);
+  const concluido = Number(o.concluido);
+  const totalEtapas = Number(o.totalEtapas);
+  const atrasado = Number(o.atrasado);
+  if (![progressoFisico, concluido, totalEtapas, atrasado].every(n => Number.isFinite(n))) {
+    return {};
+  }
+  return {
+    cronogramaProgressoFisico: Math.max(0, Math.min(100, progressoFisico)),
+    cronogramaConcluido: Math.max(0, Math.round(concluido)),
+    cronogramaTotalEtapas: Math.max(0, Math.round(totalEtapas)),
+    cronogramaAtrasado: Math.max(0, Math.round(atrasado))
+  };
 }
 
 export class OrcamentoService {
@@ -268,7 +337,8 @@ export class OrcamentoService {
         const idx = JSON.parse(raw) as OrcamentoIndex;
         return {
           ultimoOrcamentoId: idx.ultimoOrcamentoId,
-          orcamentos: Array.isArray(idx.orcamentos) ? idx.orcamentos : []
+          orcamentos: Array.isArray(idx.orcamentos) ? idx.orcamentos : [],
+          ...(typeof idx.listaFinVersion === 'number' ? { listaFinVersion: idx.listaFinVersion } : {})
         };
       }
       const result = await this.s3!.getObject({
@@ -280,7 +350,8 @@ export class OrcamentoService {
       const idx = JSON.parse(body) as OrcamentoIndex;
       return {
         ultimoOrcamentoId: idx.ultimoOrcamentoId,
-        orcamentos: Array.isArray(idx.orcamentos) ? idx.orcamentos : []
+        orcamentos: Array.isArray(idx.orcamentos) ? idx.orcamentos : [],
+        ...(typeof idx.listaFinVersion === 'number' ? { listaFinVersion: idx.listaFinVersion } : {})
       };
     } catch (err: unknown) {
       const e = err as { code?: string };
@@ -293,11 +364,89 @@ export class OrcamentoService {
   async getIndex(centroCustoId: string): Promise<OrcamentoIndex> {
     // 1 leitura: se já tem índice, não chama migrate (antes eram 2× getObject no S3).
     const existing = await this.readIndexRaw(centroCustoId);
-    if (existing && existing.orcamentos.length > 0) return existing;
+    if (existing && existing.orcamentos.length > 0) {
+      return this.enrichIndexListaFinanceiro(centroCustoId, existing);
+    }
 
     await this.migrateLegacyIfNeeded(centroCustoId);
     const after = await this.readIndexRaw(centroCustoId);
-    return after ?? { orcamentos: [] };
+    const base = after ?? { orcamentos: [] };
+    if (base.orcamentos.length === 0) return base;
+    return this.enrichIndexListaFinanceiro(centroCustoId, base);
+  }
+
+  /** Preenche BDI % no índice; remove Total semeado do Orçafascio (vira 0 até o rodapé sincronizar). */
+  private async enrichIndexListaFinanceiro(
+    centroCustoId: string,
+    index: OrcamentoIndex
+  ): Promise<OrcamentoIndex> {
+    const LISTA_FIN_VERSION = 2;
+    const needsBdiFill = index.orcamentos.some(o => o.bdiPercentual == null);
+    const needsOrcafascioScrub = (index.listaFinVersion ?? 0) < LISTA_FIN_VERSION;
+    if (!needsBdiFill && !needsOrcafascioScrub) return index;
+
+    let changed = needsOrcafascioScrub;
+    const orcamentos: OrcamentoIndexEntry[] = [];
+
+    for (const o of index.orcamentos) {
+      if (o.bdiPercentual != null && !needsOrcafascioScrub) {
+        orcamentos.push(o);
+        continue;
+      }
+
+      try {
+        const file = await this.readOrcamentoFile(centroCustoId, o.id);
+        const metaRaw = (file?.sessaoOrcamento as { meta?: Record<string, unknown> } | undefined)?.meta;
+        const fin = extractListaFinanceiroFromMeta(metaRaw);
+        const orcaComBdi = Number(
+          metaRaw?.totaisOrcafascio && typeof metaRaw.totaisOrcafascio === 'object'
+            ? (metaRaw.totaisOrcafascio as { comBdi?: unknown }).comBdi
+            : undefined
+        );
+        const totalEhOrcafascio =
+          needsOrcafascioScrub &&
+          o.totalComBdi != null &&
+          Number.isFinite(orcaComBdi) &&
+          Math.abs((o.totalComBdi ?? 0) - orcaComBdi) < 0.02;
+
+        const next: OrcamentoIndexEntry = {
+          ...o,
+          bdiPercentual:
+            o.bdiPercentual != null && o.bdiPercentual > 0
+              ? o.bdiPercentual
+              : fin.bdiPercentual ?? o.bdiPercentual ?? 0,
+          totalComBdi: totalEhOrcafascio
+            ? 0
+            : o.totalComBdi != null && o.totalComBdi > 0
+              ? o.totalComBdi
+              : fin.totalComBdi ?? o.totalComBdi ?? 0
+        };
+        if (next.bdiPercentual !== o.bdiPercentual || next.totalComBdi !== o.totalComBdi) {
+          changed = true;
+        }
+        orcamentos.push(next);
+      } catch {
+        orcamentos.push({
+          ...o,
+          bdiPercentual: o.bdiPercentual ?? 0,
+          totalComBdi: o.totalComBdi ?? 0
+        });
+        if (o.bdiPercentual == null) changed = true;
+      }
+    }
+
+    if (!changed && (index.listaFinVersion ?? 0) >= LISTA_FIN_VERSION) return index;
+    const nextIndex: OrcamentoIndex = {
+      ...index,
+      orcamentos,
+      listaFinVersion: LISTA_FIN_VERSION
+    };
+    try {
+      await this.writeIndex(centroCustoId, nextIndex);
+    } catch {
+      /* leitura ok mesmo se persistir falhar */
+    }
+    return nextIndex;
   }
 
   private async writeIndex(centroCustoId: string, index: OrcamentoIndex): Promise<void> {
@@ -592,10 +741,47 @@ export class OrcamentoService {
       }).promise();
     }
     const updatedAt = new Date().toISOString();
+    const meta = (nextSessao as { meta?: Record<string, unknown> } | undefined)?.meta;
+    const statusFromMeta = (() => {
+      const s = meta?.statusAprovacao;
+      return typeof s === 'string' && s.trim() ? s.trim() : undefined;
+    })();
+    const fdPctFromMeta = (() => {
+      const n = Number(meta?.fichaDemandaPct);
+      return Number.isFinite(n) ? Math.max(0, Math.min(100, Math.round(n))) : undefined;
+    })();
+    const finFromMeta = extractListaFinanceiroFromMeta(
+      meta && typeof meta === 'object' ? (meta as Record<string, unknown>) : undefined
+    );
+    const cronoFromMeta = extractCronogramaResumoFromMeta(
+      meta && typeof meta === 'object' ? (meta as Record<string, unknown>) : undefined
+    );
     const next: OrcamentoIndex = {
       ultimoOrcamentoId: orcamentoId,
+      ...(typeof index.listaFinVersion === 'number'
+        ? { listaFinVersion: index.listaFinVersion }
+        : {}),
       orcamentos: index.orcamentos.map(o =>
-        o.id === orcamentoId ? { ...o, updatedAt } : o
+        o.id === orcamentoId
+          ? {
+              ...o,
+              updatedAt,
+              ...(statusFromMeta !== undefined ? { statusAprovacao: statusFromMeta } : {}),
+              ...(fdPctFromMeta !== undefined ? { fichaDemandaPct: fdPctFromMeta } : {}),
+              ...(finFromMeta.bdiPercentual !== undefined
+                ? { bdiPercentual: finFromMeta.bdiPercentual }
+                : {}),
+              ...(finFromMeta.totalComBdi !== undefined ? { totalComBdi: finFromMeta.totalComBdi } : {}),
+              ...(cronoFromMeta.cronogramaProgressoFisico !== undefined
+                ? {
+                    cronogramaProgressoFisico: cronoFromMeta.cronogramaProgressoFisico,
+                    cronogramaConcluido: cronoFromMeta.cronogramaConcluido,
+                    cronogramaTotalEtapas: cronoFromMeta.cronogramaTotalEtapas,
+                    cronogramaAtrasado: cronoFromMeta.cronogramaAtrasado
+                  }
+                : {})
+            }
+          : o
       )
     };
     await this.writeIndex(centroCustoId, next);
@@ -604,6 +790,34 @@ export class OrcamentoService {
 
   async saveOrcamentoSessao(centroCustoId: string, orcamentoId: string, sessaoOrcamento: unknown): Promise<void> {
     await this.mergeOrcamentoArquivo(centroCustoId, orcamentoId, { sessaoOrcamento });
+  }
+
+  /** Atualiza só o status de aprovação na meta da sessão (ex.: retorno de FD). */
+  async updateStatusAprovacao(
+    centroCustoId: string,
+    orcamentoId: string,
+    statusAprovacao: string
+  ): Promise<void> {
+    if (!isUuid(orcamentoId)) throw new Error('ID de orçamento inválido');
+    const existing: Partial<OrcamentoData> =
+      (await this.readOrcamentoFile(centroCustoId, orcamentoId)) ?? {};
+    const sessaoRaw =
+      existing.sessaoOrcamento && typeof existing.sessaoOrcamento === 'object'
+        ? (existing.sessaoOrcamento as Record<string, unknown>)
+        : {};
+    const metaRaw =
+      sessaoRaw.meta && typeof sessaoRaw.meta === 'object' && !Array.isArray(sessaoRaw.meta)
+        ? (sessaoRaw.meta as Record<string, unknown>)
+        : {};
+    await this.mergeOrcamentoArquivo(centroCustoId, orcamentoId, {
+      sessaoOrcamento: {
+        ...sessaoRaw,
+        meta: {
+          ...metaRaw,
+          statusAprovacao,
+        },
+      },
+    });
   }
 
   /** Grava serviços do contrato + sessão do orçamento (compat com clientes que enviam o payload completo). */
