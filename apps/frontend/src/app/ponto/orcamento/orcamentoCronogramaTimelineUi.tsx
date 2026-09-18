@@ -224,14 +224,14 @@ export function TimelineZoomControls({
   onPanChange: (delta: number) => void;
 }) {
   const btnCls = (active: boolean) =>
-    `px-2 py-1 rounded-md text-[10px] font-semibold transition-colors ${
+    `px-3 py-1.5 rounded-md text-sm font-semibold transition-colors ${
       active
         ? 'bg-red-600 text-white'
-        : 'text-gray-600 hover:bg-white dark:text-gray-300 dark:hover:bg-gray-700'
+        : 'text-gray-700 hover:bg-white dark:text-gray-300 dark:hover:bg-gray-700'
     }`;
 
   return (
-    <div className="inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-gray-100/80 p-0.5 dark:border-gray-600 dark:bg-gray-800/70">
+    <div className="inline-flex h-10 items-center gap-1 rounded-lg border border-gray-200 bg-gray-100/80 p-1 dark:border-gray-600 dark:bg-gray-800/70">
       <button type="button" className={btnCls(zoom === 'semana')} onClick={() => onZoomChange('semana')}>
         Semana
       </button>
@@ -243,11 +243,11 @@ export function TimelineZoomControls({
       </button>
       {zoom !== 'obra' ? (
         <>
-          <span className="mx-0.5 h-4 w-px bg-gray-300 dark:bg-gray-600" aria-hidden />
+          <span className="mx-0.5 h-5 w-px bg-gray-300 dark:bg-gray-600" aria-hidden />
           <button
             type="button"
             onClick={() => onPanChange(-1)}
-            className="rounded-md px-1.5 py-1 text-[10px] font-semibold text-gray-600 hover:bg-white dark:text-gray-300 dark:hover:bg-gray-700"
+            className="rounded-md px-2.5 py-1.5 text-sm font-semibold text-gray-700 hover:bg-white dark:text-gray-300 dark:hover:bg-gray-700"
             title={zoom === 'semana' ? 'Semana anterior' : 'Mês anterior'}
           >
             ←
@@ -255,7 +255,7 @@ export function TimelineZoomControls({
           <button
             type="button"
             onClick={() => onPanChange(1)}
-            className="rounded-md px-1.5 py-1 text-[10px] font-semibold text-gray-600 hover:bg-white dark:text-gray-300 dark:hover:bg-gray-700"
+            className="rounded-md px-2.5 py-1.5 text-sm font-semibold text-gray-700 hover:bg-white dark:text-gray-300 dark:hover:bg-gray-700"
             title={zoom === 'semana' ? 'Próxima semana' : 'Próximo mês'}
           >
             →
@@ -264,7 +264,7 @@ export function TimelineZoomControls({
             <button
               type="button"
               onClick={() => onPanChange(-panOffset)}
-              className="rounded-md px-1.5 py-1 text-[10px] text-gray-500 hover:bg-white dark:text-gray-400 dark:hover:bg-gray-700"
+              className="rounded-md px-2.5 py-1.5 text-sm font-semibold text-gray-600 hover:bg-white dark:text-gray-400 dark:hover:bg-gray-700"
               title="Voltar ao período atual"
             >
               Hoje

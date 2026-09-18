@@ -25,8 +25,16 @@ export function approvalStatusBadgeClass(kind: ApprovalStatusKind): string {
   return `inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold whitespace-nowrap ${BADGE_CLASS[kind]}`;
 }
 
-export function ApprovalStatusBadge({ kind }: { kind: ApprovalStatusKind }) {
-  return <span className={approvalStatusBadgeClass(kind)}>{LABELS[kind]}</span>;
+export function ApprovalStatusBadge({
+  kind,
+  label,
+}: {
+  kind: ApprovalStatusKind;
+  label?: string;
+}) {
+  return (
+    <span className={approvalStatusBadgeClass(kind)}>{label ?? LABELS[kind]}</span>
+  );
 }
 
 /** DP / Solicitações */

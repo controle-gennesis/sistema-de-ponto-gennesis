@@ -13,6 +13,7 @@ import {
   Check,
   X,
   AlertCircle,
+  AlertTriangle,
   Loader2,
   ChevronDown,
   ChevronUp,
@@ -20,6 +21,7 @@ import {
   FileDown,
   Download,
   CheckCircle,
+  CheckCircle2,
   FileText,
   Table2,
   ClipboardList,
@@ -30,9 +32,13 @@ import {
   ChevronLeft,
   ChevronRight,
   DownloadCloud,
-  Calendar
+  Calendar,
+  CalendarCheck,
+  ArrowRight,
+  TrendingUp
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
+import { FilterStatCard } from '@/components/ui/FilterStatCard';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import toast from 'react-hot-toast';
@@ -43,6 +49,13 @@ import { useBreadcrumbEntity } from '@/hooks/useBreadcrumbEntity';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import api from '@/lib/api';
+import { FichaDemandaApprovalFormModal } from '@/components/engenharia/FichaDemandaApprovalFormModal';
+import {
+  formatCurrencyInput,
+  formToApiPayload,
+  type FichaDemandaApprovalFormState,
+  type PoloFd,
+} from '@/lib/fichaDemandaApproval';
 import {
   loadOrcafascioOrcamentosList,
   peekOrcafascioOrcamentosCache,
@@ -85,7 +98,7 @@ import {
   type CronogramaLinhaSubtitulo,
   type CronogramaPersist
 } from './orcamentoCronogramaTypes';
-import { montarLinhasTimeline } from './orcamentoCronogramaCalc';
+import { calcularResumoCronograma, montarLinhasTimeline } from './orcamentoCronogramaCalc';
 import {
   gradeTableCls,
   gradeTituloSubtituloRowTrCls,
@@ -111,6 +124,8 @@ export type OrcamentoPageProps = {
   embeddedContractName?: string | null;
   /** Id do orçamento na URL (`/contratos/:id/orcamento/:orcamentoId`); lista quando omitido. */
   embeddedOrcamentoIdFromRoute?: string | null;
+  /** Só a aba Cronograma (página dedicada `/ponto/cronogramas/...`). */
+  cronogramaOnly?: boolean;
 };
 
 // Tipos
@@ -1641,6 +1656,78 @@ export interface ImportRecord {
   itensCount?: number;
 }
 
+type OrcamentoStatusAprovacao =
+  | 'rascunho'
+  | 'pronta'
+  | 'aguardando_aprovacao'
+  | 'aprovado'
+  | 'em_correcao'
+  | 'reprovado';
+
+type OrcamentoListaEntry = {
+  id: string;
+  nome: string;
+  updatedAt: string;
+  statusAprovacao?: OrcamentoStatusAprovacao | string;
+  fichaDemandaPct?: number;
+  /** BDI em pontos percentuais (ex.: 28.35). */
+  bdiPercentual?: number;
+  totalComBdi?: number;
+};
+
+const ORCAMENTO_STATUS_LABELS: Record<OrcamentoStatusAprovacao, string> = {
+  rascunho: 'Rascunho',
+  pronta: 'FD pronta',
+  aguardando_aprovacao: 'Aguardando aprovação',
+  aprovado: 'Aprovado',
+  em_correcao: 'Em correção',
+  reprovado: 'Reprovado',
+};
+
+function normalizarStatusAprovacaoOrcamento(
+  raw: unknown
+): OrcamentoStatusAprovacao {
+  const s = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+  if (
+    s === 'pronta' ||
+    s === 'aguardando_aprovacao' ||
+    s === 'aprovado' ||
+    s === 'em_correcao' ||
+    s === 'reprovado' ||
+    s === 'rascunho'
+  ) {
+    return s;
+  }
+  return 'rascunho';
+}
+
+function orcamentoStatusBadgeClass(status: OrcamentoStatusAprovacao): string {
+  const base =
+    'inline-flex items-center justify-center rounded-full px-2.5 py-1 text-xs font-medium whitespace-nowrap';
+  switch (status) {
+    case 'pronta':
+      return `${base} bg-sky-100 text-sky-900 dark:bg-sky-900/30 dark:text-sky-200`;
+    case 'aguardando_aprovacao':
+      return `${base} bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200`;
+    case 'aprovado':
+      return `${base} bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-200`;
+    case 'em_correcao':
+      return `${base} bg-orange-100 text-orange-900 dark:bg-orange-900/40 dark:text-orange-200`;
+    case 'reprovado':
+      return `${base} bg-red-200 text-red-900 dark:bg-red-900/40 dark:text-red-200`;
+    default:
+      // Mesmo padrão do badge "Lançado" no Controle Financeiro
+      return `${base} bg-slate-100 text-slate-800 dark:bg-slate-800/60 dark:text-slate-200`;
+  }
+}
+
+function inferirPoloFdDeTexto(texto: string): PoloFd | '' {
+  const t = texto.toUpperCase();
+  if (/\bDF\b/.test(t) || t.includes('- DF') || t.endsWith(' DF')) return 'DF';
+  if (/\bGO\b/.test(t) || t.includes('- GO') || t.endsWith(' GO')) return 'GO';
+  return '';
+}
+
 type OrcamentoMeta = {
   osNumeroPasta: string;
   dataAbertura: string; // yyyy-mm-dd — data de início
@@ -1661,6 +1748,21 @@ type OrcamentoMeta = {
     bdi: number;
     comBdi: number;
   };
+  /** Status do ciclo de aprovação da ficha de demanda vinculada ao orçamento. */
+  statusAprovacao?: OrcamentoStatusAprovacao;
+  /** Progresso da ficha de demanda (0–100), espelhado na lista. */
+  fichaDemandaPct?: number;
+  /** Total com BDI (R$), espelhado na lista. */
+  totalComBdi?: number;
+  /** Resumo do cronograma, espelhado na lista de cronogramas. */
+  cronogramaResumo?: {
+    progressoFisico: number;
+    concluido: number;
+    totalEtapas: number;
+    atrasado: number;
+  };
+  /** Id da ficha de demanda enviada para aprovação (quando houver). */
+  fichaDemandaApprovalId?: string;
 };
 
 const ORCAMENTO_REAJUSTES_PADRAO: Array<{ nome: string; percentual: string }> = [
@@ -1668,6 +1770,24 @@ const ORCAMENTO_REAJUSTES_PADRAO: Array<{ nome: string; percentual: string }> = 
   { nome: '2º reajuste IPCA', percentual: '3,92595' },
   { nome: '3º reajuste IPCA', percentual: '5,31964' }
 ];
+
+function normalizarCronogramaResumoMeta(raw: unknown): OrcamentoMeta['cronogramaResumo'] | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const o = raw as Record<string, unknown>;
+  const progressoFisico = Number(o.progressoFisico);
+  const concluido = Number(o.concluido);
+  const totalEtapas = Number(o.totalEtapas);
+  const atrasado = Number(o.atrasado);
+  if (![progressoFisico, concluido, totalEtapas, atrasado].every((n) => Number.isFinite(n))) {
+    return undefined;
+  }
+  return {
+    progressoFisico: Math.max(0, Math.min(100, progressoFisico)),
+    concluido: Math.max(0, Math.round(concluido)),
+    totalEtapas: Math.max(0, Math.round(totalEtapas)),
+    atrasado: Math.max(0, Math.round(atrasado)),
+  };
+}
 
 function metaNovoOrcamentoPadrao(): OrcamentoMeta {
   return {
@@ -1996,7 +2116,8 @@ function sessaoVazia(): SessaoOrcamentoPersist {
       descontoPercentual: '25,01',
       bdiPercentual: '28,35',
       reajustes: ORCAMENTO_REAJUSTES_PADRAO.map((r) => ({ ...r })),
-      revisaoCount: 0
+      revisaoCount: 0,
+      statusAprovacao: 'rascunho'
     }
   };
 }
@@ -2033,6 +2154,28 @@ function loadSessaoOrcamento(centroCustoId: string | null, orcamentoId: string |
           revisaoCount:
             typeof metaRaw.revisaoCount === 'number' && isFinite(metaRaw.revisaoCount) ? metaRaw.revisaoCount : 0,
           importadoPlanilha: metaRaw.importadoPlanilha === true,
+          statusAprovacao: normalizarStatusAprovacaoOrcamento(metaRaw.statusAprovacao),
+          fichaDemandaPct: (() => {
+            const n = Number(metaRaw.fichaDemandaPct);
+            return Number.isFinite(n) ? Math.max(0, Math.min(100, Math.round(n))) : undefined;
+          })(),
+          totalComBdi: (() => {
+            const n = Number(metaRaw.totalComBdi);
+            if (!Number.isFinite(n) || n <= 0) return undefined;
+            // Total semeado do sintético Orçafascio costuma divergir da montagem — ignora.
+            const orca = Number(
+              metaRaw.totaisOrcafascio && typeof metaRaw.totaisOrcafascio === 'object'
+                ? (metaRaw.totaisOrcafascio as { comBdi?: unknown }).comBdi
+                : undefined
+            );
+            if (Number.isFinite(orca) && Math.abs(n - orca) < 0.02) return undefined;
+            return n;
+          })(),
+          cronogramaResumo: normalizarCronogramaResumoMeta(metaRaw.cronogramaResumo),
+          fichaDemandaApprovalId:
+            typeof metaRaw.fichaDemandaApprovalId === 'string' && metaRaw.fichaDemandaApprovalId.trim()
+              ? metaRaw.fichaDemandaApprovalId.trim()
+              : undefined,
         totaisOrcafascio: (() => {
           const t = metaRaw.totaisOrcafascio;
           if (!t || typeof t !== 'object') return undefined;
@@ -2244,7 +2387,7 @@ function addImport(centroCustoId: string, record: Omit<ImportRecord, 'id'>) {
 }
 
 async function fetchOrcamentosLista(centroCustoId: string): Promise<{
-  orcamentos: { id: string; nome: string; updatedAt: string }[];
+  orcamentos: OrcamentoListaEntry[];
   ultimoOrcamentoId: string | null;
 }> {
   const res = await api.get(`/orcamento/${centroCustoId}`, { timeout: 60000 });
@@ -2348,6 +2491,27 @@ function parseOrcamentoDetailRaw(d: {
         revisaoCount:
           typeof metaRaw.revisaoCount === 'number' && isFinite(metaRaw.revisaoCount) ? metaRaw.revisaoCount : 0,
         importadoPlanilha: metaRaw.importadoPlanilha === true,
+        statusAprovacao: normalizarStatusAprovacaoOrcamento(metaRaw.statusAprovacao),
+        fichaDemandaPct: (() => {
+          const n = Number(metaRaw.fichaDemandaPct);
+          return Number.isFinite(n) ? Math.max(0, Math.min(100, Math.round(n))) : undefined;
+        })(),
+        totalComBdi: (() => {
+          const n = Number(metaRaw.totalComBdi);
+          if (!Number.isFinite(n) || n <= 0) return undefined;
+          const orca = Number(
+            metaRaw.totaisOrcafascio && typeof metaRaw.totaisOrcafascio === 'object'
+              ? (metaRaw.totaisOrcafascio as { comBdi?: unknown }).comBdi
+              : undefined
+          );
+          if (Number.isFinite(orca) && Math.abs(n - orca) < 0.02) return undefined;
+          return n;
+        })(),
+        cronogramaResumo: normalizarCronogramaResumoMeta(metaRaw.cronogramaResumo),
+        fichaDemandaApprovalId:
+          typeof metaRaw.fichaDemandaApprovalId === 'string' && metaRaw.fichaDemandaApprovalId.trim()
+            ? metaRaw.fichaDemandaApprovalId.trim()
+            : undefined,
         totaisOrcafascio: (() => {
           const t = metaRaw.totaisOrcafascio;
           if (!t || typeof t !== 'object') return undefined;
@@ -3835,6 +3999,54 @@ const MoedaCelula = memo(function MoedaCelula({
   );
 });
 
+/**
+ * Input da Ficha de Demanda: estado local enquanto digita.
+ * Só notifica o pai no blur — evita re-render da grade inteira a cada tecla.
+ */
+const FdCampoLocal = memo(function FdCampoLocal({
+  committedValue,
+  onCommit,
+  className,
+  placeholder,
+  title,
+  inputMode,
+}: {
+  committedValue: string;
+  onCommit: (raw: string) => void;
+  className?: string;
+  placeholder?: string;
+  title?: string;
+  inputMode?: React.HTMLAttributes<HTMLInputElement>['inputMode'];
+}) {
+  const [local, setLocal] = useState(committedValue);
+  const focusedRef = useRef(false);
+
+  useEffect(() => {
+    if (!focusedRef.current) setLocal(committedValue);
+  }, [committedValue]);
+
+  return (
+    <input
+      type="text"
+      inputMode={inputMode}
+      placeholder={placeholder}
+      title={title}
+      className={className}
+      value={local}
+      onFocus={() => {
+        focusedRef.current = true;
+      }}
+      onChange={(e) => setLocal(e.target.value)}
+      onBlur={(e) => {
+        focusedRef.current = false;
+        const raw = e.target.value;
+        setLocal(raw);
+        onCommit(raw);
+      }}
+    />
+  );
+});
+
 /** Realce de células relacionadas ao passar o mouse (sem popup de tooltip). */
 function CalcHoverBridge({
   children,
@@ -3942,7 +4154,8 @@ export function OrcamentoPageView({
   lockedCostCenterId = null,
   embeddedContractId = null,
   embeddedContractName = null,
-  embeddedOrcamentoIdFromRoute = null
+  embeddedOrcamentoIdFromRoute = null,
+  cronogramaOnly = false,
 }: OrcamentoPageProps = {}) {
   const router = useRouter();
   const { costCenters, isLoading: loadingCentros } = useCostCenters();
@@ -3965,8 +4178,10 @@ export function OrcamentoPageView({
   const [planilhaQuantidadeCompra, setPlanilhaQuantidadeCompra] = useState<Record<string, number>>({});
   const [planilhaValorUnitCompraReal, setPlanilhaValorUnitCompraReal] = useState<Record<string, number>>({});
   const [planilhaTipoInsumo, setPlanilhaTipoInsumo] = useState<Record<string, 'MO' | 'MA' | 'LO'>>({});
-  const [planilhaCompraDraft, setPlanilhaCompraDraft] = useState<Record<string, string>>({});
   const [fichaDemandaObservacoes, setFichaDemandaObservacoes] = useState<Record<string, string>>({});
+  /** Atrasa recálculos pesados da FD após commit — a digitação não espera a grade. */
+  const planilhaQtdDeferred = useDeferredValue(planilhaQuantidadeCompra);
+  const planilhaVlDeferred = useDeferredValue(planilhaValorUnitCompraReal);
   const [novoServicoNome, setNovoServicoNome] = useState('');
   const [showAddServico, setShowAddServico] = useState(false);
   const [isImportandoOrcamento, setIsImportandoOrcamento] = useState(false);
@@ -4046,7 +4261,11 @@ export function OrcamentoPageView({
   // Analítico (detalhamento) da composição para visualização/exportação.
   const [orcamentoViewTab, setOrcamentoViewTab] = useState<
     'dados' | 'montagem' | 'analitico' | 'memorial' | 'planilhaAnalitica' | 'cronograma'
-  >('montagem');
+  >(cronogramaOnly ? 'cronograma' : 'montagem');
+
+  useEffect(() => {
+    if (cronogramaOnly) setOrcamentoViewTab('cronograma');
+  }, [cronogramaOnly]);
   /** Aba “atrasada”: pill/UI muda na hora; grades pesadas montam depois (evita travar a animação). */
   const deferredOrcamentoViewTab = useDeferredValue(orcamentoViewTab);
   const abaOrcamentoPesada =
@@ -4081,7 +4300,7 @@ export function OrcamentoPageView({
   const [orcamentoAtivoId, setOrcamentoAtivoId] = useState<string | null>(() =>
     embeddedContractId ? embeddedOrcamentoIdFromRoute ?? null : null
   );
-  const [listaOrcamentos, setListaOrcamentos] = useState<{ id: string; nome: string; updatedAt: string }[]>([]);
+  const [listaOrcamentos, setListaOrcamentos] = useState<OrcamentoListaEntry[]>([]);
   /** Com contrato fixo na rota, começa em “carregando” para não restaurar URL com lista ainda vazia no 1º efeito. */
   const [carregandoListaOrcamentos, setCarregandoListaOrcamentos] = useState(() => Boolean(lockedCostCenterId));
   const [nomeOrcamentoRascunho, setNomeOrcamentoRascunho] = useState('');
@@ -4135,7 +4354,13 @@ export function OrcamentoPageView({
     (orcamentoId: string | null) => {
       if (!embeddedOrcamentoBasePath) return;
       const target = orcamentoId ? `${embeddedOrcamentoBasePath}/${orcamentoId}` : embeddedOrcamentoBasePath;
-      router.replace(target, { scroll: false });
+      // Abrir: push para a seta do navegador voltar à lista de orçamentos.
+      // Fechar/excluir: replace para não deixar o detalhe excluído no histórico.
+      if (orcamentoId) {
+        router.push(target, { scroll: false });
+      } else {
+        router.replace(target, { scroll: false });
+      }
     },
     [embeddedOrcamentoBasePath, router]
   );
@@ -4225,6 +4450,11 @@ export function OrcamentoPageView({
   const [employeeOptions, setEmployeeOptions] = useState<EmployeeOption[]>([]);
   const [loadingEmployeeOptions, setLoadingEmployeeOptions] = useState(false);
   const [currentUserName, setCurrentUserName] = useState('');
+  const [fdAprovacaoModalOpen, setFdAprovacaoModalOpen] = useState(false);
+  const [fdAprovacaoInitialForm, setFdAprovacaoInitialForm] =
+    useState<Partial<FichaDemandaApprovalFormState> | null>(null);
+  const [fdAprovacaoPreparando, setFdAprovacaoPreparando] = useState(false);
+  const [fdAprovacaoEnviando, setFdAprovacaoEnviando] = useState(false);
 
   /**
    * Estrutura mesclada (catálogo + grupos só do documento) para resolver nomes de blocos,
@@ -4453,7 +4683,7 @@ export function OrcamentoPageView({
       setPlanilhaQuantidadeCompra({});
       setPlanilhaValorUnitCompraReal({});
       setPlanilhaTipoInsumo({});
-      setPlanilhaCompraDraft({});
+      setFichaDemandaObservacoes({});
       setCronograma(cronogramaVazio());
       setServicosPadraoContrato([]);
       setInsumosAnaliticoManuais({});
@@ -4476,7 +4706,6 @@ export function OrcamentoPageView({
       setPlanilhaQuantidadeCompra(s.planilhaQuantidadeCompra ?? {});
       setPlanilhaValorUnitCompraReal(s.planilhaValorUnitCompraReal ?? {});
       setPlanilhaTipoInsumo(normalizarPlanilhaTipoInsumo(s.planilhaTipoInsumo as Record<string, unknown>));
-      setPlanilhaCompraDraft({});
       setCronograma(normalizarCronograma(s.cronograma));
       setMeta(s.meta ? s.meta : sessaoVazia().meta!);
     };
@@ -4663,16 +4892,24 @@ export function OrcamentoPageView({
       cronograma
     };
     servicosImportsRef.current = { servicos, imports };
-    if (centroCustoId && orcamentoAtivoId) {
+    if (!centroCustoId || !orcamentoAtivoId) return;
+    // localStorage de sessão grande trava a UI se rodar a cada tecla/commit da FD.
+    const delayMs = orcamentoViewTab === 'planilhaAnalitica' ? 2500 : 600;
+    const t = window.setTimeout(() => {
       try {
-        localStorage.setItem(storageKey(centroCustoId, 'sessao', orcamentoAtivoId), JSON.stringify(sessaoRef.current));
+        localStorage.setItem(
+          storageKey(centroCustoId, 'sessao', orcamentoAtivoId),
+          JSON.stringify(sessaoRef.current)
+        );
       } catch {
         /* quota */
       }
-    }
+    }, delayMs);
+    return () => window.clearTimeout(t);
   }, [
     centroCustoId,
     orcamentoAtivoId,
+    orcamentoViewTab,
     subtitulosNoOrcamento,
     quantidadesPorItem,
     dimensoesPorItem,
@@ -4687,7 +4924,7 @@ export function OrcamentoPageView({
     imports
   ]);
   useEffect(() => {
-    const ORCAMENTO_AUTOSAVE_MS = 900;
+    const ORCAMENTO_AUTOSAVE_MS = orcamentoViewTab === 'planilhaAnalitica' ? 2800 : 900;
     if (!centroCustoId || !orcamentoAtivoId || loadingFromApi) return;
 
     if (orcamentoAutosaveTimerRef.current) clearTimeout(orcamentoAutosaveTimerRef.current);
@@ -4758,7 +4995,8 @@ export function OrcamentoPageView({
     itensOcultosNoOrcamento,
     cronograma,
     servicos,
-    imports
+    imports,
+    orcamentoViewTab,
   ]);
 
   useEffect(() => {
@@ -5017,11 +5255,16 @@ export function OrcamentoPageView({
       if (nome !== nomeOrcamentoRascunho.trim()) {
         await renomearOrcamentoApi(centroCustoId, orcamentoAtivoId, nome);
         setNomeOrcamentoRascunho(nome);
-        setListaOrcamentos(prev =>
-          prev.map(o => (o.id === orcamentoAtivoId ? { ...o, nome } : o))
-        );
       }
 
+      const bdiPtsEdit = Math.round(parsePercentualMeta(nextMeta.bdiPercentual) * 10000) / 100;
+      setListaOrcamentos(prev =>
+        prev.map(o =>
+          o.id === orcamentoAtivoId
+            ? { ...o, nome, bdiPercentual: bdiPtsEdit }
+            : o
+        )
+      );
       setMeta(nextMeta);
       const nextSessao: SessaoOrcamentoPersist = {
         ...sessaoRef.current,
@@ -5983,6 +6226,8 @@ export function OrcamentoPageView({
         bdiPercentual: finApi.bdiPercentual,
         reajustes: [],
         importadoPlanilha: true,
+        // Não grava totalComBdi do sintético Orçafascio aqui — esse total pode
+        // divergir da montagem. O Total da lista vem do rodapé (totalComDescontoEBdi).
         ...(finApi.totalComBdi > 0
           ? {
               totaisOrcafascio: {
@@ -6026,7 +6271,12 @@ export function OrcamentoPageView({
       });
 
       await renomearOrcamentoApi(centroCustoId, entry.id, nomeLista);
-      const entryAtualizado = { ...entry, nome: nomeLista };
+      const bdiPtsImport = parsePercentualMeta(finApi.bdiPercentual) * 100;
+      const entryAtualizado: OrcamentoListaEntry = {
+        ...entry,
+        nome: nomeLista,
+        bdiPercentual: Math.round(bdiPtsImport * 100) / 100,
+      };
       setListaOrcamentos((prev) => [entryAtualizado, ...prev.filter((o) => o.id !== entry.id)]);
       setNomeOrcamentoRascunho(nomeLista);
       setOrcamentoAtivoId(entry.id);
@@ -7021,6 +7271,42 @@ export function OrcamentoPageView({
     }));
   }, [itensCalculados]);
 
+  const resumoCronograma = useMemo(
+    () => calcularResumoCronograma(linhasCronograma, cronograma),
+    [linhasCronograma, cronograma]
+  );
+
+  // Espelha resumo do cronograma na meta (autosave → índice da lista).
+  useEffect(() => {
+    if (!orcamentoAtivoId) return;
+    const nextResumo = {
+      progressoFisico: Math.round(resumoCronograma.progressoFisico * 10) / 10,
+      concluido: resumoCronograma.porStatus.concluido,
+      totalEtapas: resumoCronograma.totalEtapas,
+      atrasado: resumoCronograma.porStatus.atrasado,
+    };
+    const prev = meta.cronogramaResumo;
+    if (
+      prev &&
+      prev.progressoFisico === nextResumo.progressoFisico &&
+      prev.concluido === nextResumo.concluido &&
+      prev.totalEtapas === nextResumo.totalEtapas &&
+      prev.atrasado === nextResumo.atrasado
+    ) {
+      return;
+    }
+    startTransition(() => {
+      setMeta((m) => ({ ...m, cronogramaResumo: nextResumo }));
+    });
+  }, [
+    orcamentoAtivoId,
+    resumoCronograma.progressoFisico,
+    resumoCronograma.porStatus.concluido,
+    resumoCronograma.porStatus.atrasado,
+    resumoCronograma.totalEtapas,
+    meta.cronogramaResumo,
+  ]);
+
   const nomeOrcamentoAtivo = useMemo(
     () => listaOrcamentos.find((o) => o.id === orcamentoAtivoId)?.nome ?? '',
     [listaOrcamentos, orcamentoAtivoId]
@@ -7045,18 +7331,44 @@ export function OrcamentoPageView({
   }, [meta.osNumeroPasta, nomeOrcamentoAtivo, nomeOrcamentoRascunho]);
 
   const tituloPaginaOrcamento = useMemo(() => {
+    if (cronogramaOnly && orcamentoAtivoId) {
+      return nomeOrcamentoSemCodigo || 'Orçamento';
+    }
     if (orcamentoAtivoId) {
       return nomeOrcamentoSemCodigo || 'Orçamento';
     }
     return nomeContratoBreadcrumb || 'Orçamento';
-  }, [orcamentoAtivoId, nomeOrcamentoSemCodigo, nomeContratoBreadcrumb]);
+  }, [cronogramaOnly, orcamentoAtivoId, nomeOrcamentoSemCodigo, nomeContratoBreadcrumb]);
 
   const subtituloPaginaOrcamento = useMemo(() => {
+    if (cronogramaOnly && orcamentoAtivoId) {
+      return codigoOrcamentoAtivo || 'Prazos e andamento da obra';
+    }
     if (orcamentoAtivoId) {
       return codigoOrcamentoAtivo || 'Orçamento';
     }
-    return 'Orçamentos';
-  }, [orcamentoAtivoId, codigoOrcamentoAtivo]);
+    return 'Gerencie os orçamentos do contrato';
+  }, [cronogramaOnly, orcamentoAtivoId, codigoOrcamentoAtivo]);
+
+  const statusAprovacaoAtivo = useMemo(
+    () => normalizarStatusAprovacaoOrcamento(meta.statusAprovacao),
+    [meta.statusAprovacao]
+  );
+
+  // Espelha o status do detalhe na lista (útil ao voltar sem refetch).
+  useEffect(() => {
+    if (!orcamentoAtivoId) return;
+    setListaOrcamentos((prev) => {
+      let changed = false;
+      const next = prev.map((o) => {
+        if (o.id !== orcamentoAtivoId) return o;
+        if (o.statusAprovacao === statusAprovacaoAtivo) return o;
+        changed = true;
+        return { ...o, statusAprovacao: statusAprovacaoAtivo };
+      });
+      return changed ? next : prev;
+    });
+  }, [orcamentoAtivoId, statusAprovacaoAtivo]);
 
   // Fonte da verdade = URL (evita breadcrumb “fantasma” do orçamento ao voltar pela lista).
   const orcamentoIdNaRota = embeddedContractId
@@ -7065,9 +7377,19 @@ export function OrcamentoPageView({
 
   const breadcrumbOrcamentoTrail = useMemo(() => {
     if (!embeddedContractId) return null;
-    const listHref = `/ponto/contratos/${embeddedContractId}/orcamento`;
+    const listHref = cronogramaOnly
+      ? '/ponto/cronogramas'
+      : `/ponto/contratos/${embeddedContractId}/orcamento`;
     const contractHref = `/ponto/contratos/${embeddedContractId}`;
     const crumbs: { label: string; href?: string }[] = [];
+
+    if (cronogramaOnly) {
+      // Não usar fallback «Cronograma» — colide com o crumb da rota e some do breadcrumb.
+      if (orcamentoIdNaRota && nomeOrcamentoSemCodigo) {
+        crumbs.push({ label: nomeOrcamentoSemCodigo });
+      }
+      return crumbs;
+    }
 
     // Só inclui o contrato quando o nome real já existe (evita crumb genérico «Contrato»).
     // O layout também publica o nome (priority 0); labels iguais são mesclados.
@@ -7075,7 +7397,6 @@ export function OrcamentoPageView({
       crumbs.push({ label: nomeContratoBreadcrumb, href: contractHref });
     }
     crumbs.push({ label: 'Orçamentos', href: listHref });
-
     if (orcamentoIdNaRota) {
       crumbs.push({ label: nomeOrcamentoSemCodigo || 'Orçamento' });
     }
@@ -7086,6 +7407,7 @@ export function OrcamentoPageView({
     orcamentoIdNaRota,
     nomeContratoBreadcrumb,
     nomeOrcamentoSemCodigo,
+    cronogramaOnly,
   ]);
 
   useBreadcrumbEntity(breadcrumbOrcamentoTrail, { priority: 1 });
@@ -7216,7 +7538,7 @@ export function OrcamentoPageView({
       let sum = 0;
       let temAlgum = false;
       for (const ins of filhos) {
-        const qC = planilhaQuantidadeCompra[ins.key];
+        const qC = planilhaQtdDeferred[ins.key];
         if (qC !== undefined && Number.isFinite(qC)) {
           temAlgum = true;
           sum += qC * ins.valorUnit;
@@ -7231,8 +7553,8 @@ export function OrcamentoPageView({
       let sumCustoReal = 0;
       let sumQtdCompraComVlReal = 0;
       for (const ins of filhos) {
-        const qC = planilhaQuantidadeCompra[ins.key];
-        const vReal = planilhaValorUnitCompraReal[ins.key];
+        const qC = planilhaQtdDeferred[ins.key];
+        const vReal = planilhaVlDeferred[ins.key];
         if (qC !== undefined && Number.isFinite(qC) && vReal !== undefined && Number.isFinite(vReal)) {
           sumCustoReal += qC * vReal;
           sumQtdCompraComVlReal += qC;
@@ -7251,7 +7573,7 @@ export function OrcamentoPageView({
         const qO = ins.quantOrc;
         if (!Number.isFinite(qO)) continue;
         sumQO += qO;
-        const qC = planilhaQuantidadeCompra[ins.key];
+        const qC = planilhaQtdDeferred[ins.key];
         if (qC !== undefined && Number.isFinite(qC)) {
           sumQC += qC;
           if (qC > 0) temQtdCompraInformadaMaiorZero = true;
@@ -7267,8 +7589,8 @@ export function OrcamentoPageView({
       let sumQcvR = 0;
       let sumQcvO = 0;
       for (const ins of filhos) {
-        const qC = planilhaQuantidadeCompra[ins.key];
-        const vR = planilhaValorUnitCompraReal[ins.key];
+        const qC = planilhaQtdDeferred[ins.key];
+        const vR = planilhaVlDeferred[ins.key];
         if (
           qC !== undefined &&
           Number.isFinite(qC) &&
@@ -7319,9 +7641,9 @@ export function OrcamentoPageView({
     }[] = [];
     for (const l of linhasAnaliticoFicha) {
       if (l.kind !== 'composicao' && l.kind !== 'insumo') continue;
-      const qCompra = planilhaQuantidadeCompra[l.key];
+      const qCompra = planilhaQtdDeferred[l.key];
       const vReal =
-        l.kind === 'insumo' ? planilhaValorUnitCompraReal[l.key] : undefined;
+        l.kind === 'insumo' ? planilhaVlDeferred[l.key] : undefined;
       const custoCompraReal =
         l.kind === 'composicao'
           ? undefined
@@ -7423,8 +7745,8 @@ export function OrcamentoPageView({
     analiticoComposicaoPorKey,
     analiticoInsumosCountPorParent,
     insumosAnaliticoManuais,
-    planilhaQuantidadeCompra,
-    planilhaValorUnitCompraReal,
+    planilhaQtdDeferred,
+    planilhaVlDeferred,
     planilhaTipoInsumo,
   ]);
 
@@ -7605,8 +7927,8 @@ export function OrcamentoPageView({
       const custoEst = custoOrc * PLANILHA_FATOR_CUSTO_ESTIMADO;
       const qtdOrc = Number(row.quantidadeReal) || 0;
       const valorUnitOrc = Number(row.valorUnit) || 0;
-      const qC = planilhaQuantidadeCompra[row.key];
-      const vReal = planilhaValorUnitCompraReal[row.key];
+      const qC = planilhaQtdDeferred[row.key];
+      const vReal = planilhaVlDeferred[row.key];
       const qtdCompraNum =
         qC !== undefined && Number.isFinite(qC) ? qC : undefined;
       const valorUnitRealNum =
@@ -7686,7 +8008,7 @@ export function OrcamentoPageView({
       aggPorTituloParaTooltip,
       aggPorSubtituloParaTooltip
     };
-  }, [orcamentoViewTab, deferredOrcamentoViewTab, linhasAnaliticoComManuais, planilhaQuantidadeCompra, planilhaValorUnitCompraReal]);
+  }, [orcamentoViewTab, deferredOrcamentoViewTab, linhasAnaliticoComManuais, planilhaQtdDeferred, planilhaVlDeferred]);
 
   /** Indicadores % iguais à Ficha de demanda (levantamento, preço unit. rel., faturamento) por chave de linha. */
   const pctFichaDemandaPorKey = useMemo(() => {
@@ -7809,8 +8131,8 @@ export function OrcamentoPageView({
     for (const l of linhasAnaliticoOrcamento) {
       if (l.kind !== 'insumo') continue;
       if (insumoExcluirCaixinhaRodape(l.descricao)) continue;
-      const qC = planilhaQuantidadeCompra[l.key];
-      const vReal = planilhaValorUnitCompraReal[l.key];
+      const qC = planilhaQtdDeferred[l.key];
+      const vReal = planilhaVlDeferred[l.key];
       if (qC === undefined || !Number.isFinite(qC) || vReal === undefined || !Number.isFinite(vReal)) continue;
       const val = qC * vReal;
       const g = grupoPrecoCompraInsumoPlanilha(l.key, l.categoria || '', l.descricao || '', planilhaTipoInsumo);
@@ -7863,11 +8185,112 @@ export function OrcamentoPageView({
     };
   }, [
     linhasAnaliticoOrcamento,
-    planilhaQuantidadeCompra,
-    planilhaValorUnitCompraReal,
+    planilhaQtdDeferred,
+    planilhaVlDeferred,
     planilhaTipoInsumo,
     linhasFichaDemanda,
     resumoFinanceiro.valorFinal
+  ]);
+
+  /** Progresso da ficha de demanda: cada insumo precisa de qtd. compra + valor unit. compra real. */
+  const fichaDemandaProgresso = useMemo(() => {
+    const insumos = linhasAnaliticoOrcamento.filter((l) => l.kind === 'insumo');
+    const total = insumos.length;
+    if (total === 0) {
+      return { total: 0, filled: 0, pct: 0, completa: false };
+    }
+    let filled = 0;
+    for (const l of insumos) {
+      const q = planilhaQtdDeferred[l.key];
+      const v = planilhaVlDeferred[l.key];
+      if (
+        q !== undefined &&
+        Number.isFinite(q) &&
+        v !== undefined &&
+        Number.isFinite(v)
+      ) {
+        filled += 1;
+      }
+    }
+    const pct = Math.round((filled / total) * 100);
+    return {
+      total,
+      filled,
+      pct,
+      completa: filled === total,
+    };
+  }, [linhasAnaliticoOrcamento, planilhaQtdDeferred, planilhaVlDeferred]);
+
+  const podeEnviarFdAprovacao =
+    fichaDemandaProgresso.completa &&
+    (statusAprovacaoAtivo === 'rascunho' ||
+      statusAprovacaoAtivo === 'pronta' ||
+      statusAprovacaoAtivo === 'em_correcao');
+
+  // Espelha FD %, BDI % e Total do rodapé na meta/lista (autosave persiste — sem POST a cada tecla).
+  useEffect(() => {
+    if (!orcamentoAtivoId) return;
+    const pct = fichaDemandaProgresso.pct;
+    const bdiPercentual =
+      Math.round(resumoFinanceiro.bdiPct * 10000) / 100; // pontos % com 2 casas
+    const totalComBdi = truncarMoeda2(resumoFinanceiro.totalComDescontoEBdi);
+    const metaAtual = sessaoRef.current.meta;
+    const metaMudou =
+      metaAtual?.fichaDemandaPct !== pct || metaAtual?.totalComBdi !== totalComBdi;
+
+    if (metaMudou) {
+      startTransition(() => {
+        setMeta((prev) => ({ ...prev, fichaDemandaPct: pct, totalComBdi }));
+      });
+    }
+
+    startTransition(() => {
+      setListaOrcamentos((prev) => {
+        let changed = false;
+        const next = prev.map((o) => {
+          if (o.id !== orcamentoAtivoId) return o;
+          if (
+            o.fichaDemandaPct === pct &&
+            o.bdiPercentual === bdiPercentual &&
+            o.totalComBdi === totalComBdi
+          ) {
+            return o;
+          }
+          changed = true;
+          return { ...o, fichaDemandaPct: pct, bdiPercentual, totalComBdi };
+        });
+        if (changed && centroCustoId) {
+          const cached = orcamentosListaCache.get(centroCustoId);
+          if (cached) {
+            orcamentosListaCache.set(centroCustoId, {
+              ...cached,
+              data: {
+                ...cached.data,
+                orcamentos: next as typeof cached.data.orcamentos,
+              },
+            });
+          }
+        }
+        return changed ? next : prev;
+      });
+    });
+
+    if (metaMudou) {
+      sessaoRef.current = {
+        ...sessaoRef.current,
+        meta: {
+          ...(sessaoRef.current.meta ?? metaNovoOrcamentoPadrao()),
+          fichaDemandaPct: pct,
+          totalComBdi,
+        },
+      };
+    }
+  }, [
+    orcamentoAtivoId,
+    centroCustoId,
+    fichaDemandaProgresso.pct,
+    resumoFinanceiro.bdiPct,
+    resumoFinanceiro.totalComDescontoEBdi,
   ]);
 
   const setQuantidadeItem = (itemKey: string, valor: number) => {
@@ -7984,45 +8407,38 @@ export function OrcamentoPageView({
     if (n !== null) onCommit(n);
   };
 
-  const commitPlanilhaQtdCompra = (lineKey: string, raw: string) => {
+  const commitPlanilhaQtdCompra = useCallback((lineKey: string, raw: string) => {
     const n = parsePlanilhaCalcOrPtBr(raw);
-    setPlanilhaQuantidadeCompra(prev => {
-      const next = { ...prev };
-      if (n === null) delete next[lineKey];
-      else next[lineKey] = Math.max(0, n);
-      return next;
+    startTransition(() => {
+      setPlanilhaQuantidadeCompra((prev) => {
+        const next = { ...prev };
+        if (n === null) delete next[lineKey];
+        else next[lineKey] = Math.max(0, n);
+        return next;
+      });
     });
-    setPlanilhaCompraDraft(p => {
-      const x = { ...p };
-      delete x[`q|${lineKey}`];
-      return x;
-    });
-  };
+  }, []);
 
-  const commitPlanilhaVlCompraReal = (lineKey: string, raw: string) => {
+  const commitPlanilhaVlCompraReal = useCallback((lineKey: string, raw: string) => {
     const n = parsePlanilhaCalcOrPtBr(raw);
-    setPlanilhaValorUnitCompraReal(prev => {
-      const next = { ...prev };
-      if (n === null) delete next[lineKey];
-      else next[lineKey] = Math.max(0, n);
-      return next;
+    startTransition(() => {
+      setPlanilhaValorUnitCompraReal((prev) => {
+        const next = { ...prev };
+        if (n === null) delete next[lineKey];
+        else next[lineKey] = Math.max(0, n);
+        return next;
+      });
     });
-    setPlanilhaCompraDraft(p => {
-      const x = { ...p };
-      delete x[`v|${lineKey}`];
-      return x;
+  }, []);
+
+  const commitFichaDemandaObservacao = useCallback((lineKey: string, raw: string) => {
+    startTransition(() => {
+      setFichaDemandaObservacoes((prev) => {
+        if ((prev[lineKey] ?? '') === raw) return prev;
+        return { ...prev, [lineKey]: raw };
+      });
     });
-  };
-
-  const handlePlanilhaQtdCompraChange = (lineKey: string, raw: string) => {
-    // Só draft enquanto digita — gravar planilhaQuantidadeCompra no blur evita
-    // recalcular a ficha inteira a cada tecla (travava a aba).
-    setPlanilhaCompraDraft((p) => ({ ...p, [`q|${lineKey}`]: raw }));
-  };
-
-  const handlePlanilhaVlCompraRealChange = (lineKey: string, raw: string) => {
-    setPlanilhaCompraDraft((p) => ({ ...p, [`v|${lineKey}`]: raw }));
-  };
+  }, []);
 
   const novoInsumoManualAnaliticoVazio = (parentKey: string): InsumoAnaliticoManual => ({
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -8888,6 +9304,141 @@ export function OrcamentoPageView({
     toast.success('Cronograma exportado com sucesso.');
   };
 
+  const abrirEnvioFichaDemandaAprovacao = async () => {
+    if (!orcamentoAtivoId) return;
+    if (!fichaDemandaProgresso.completa) {
+      toast.error(
+        `Preencha a ficha de demanda por completo antes de enviar (${fichaDemandaProgresso.pct}% — faltam ${fichaDemandaProgresso.total - fichaDemandaProgresso.filled} de ${fichaDemandaProgresso.total} insumos).`
+      );
+      return;
+    }
+    if (
+      statusAprovacaoAtivo !== 'rascunho' &&
+      statusAprovacaoAtivo !== 'pronta' &&
+      statusAprovacaoAtivo !== 'em_correcao'
+    ) {
+      toast.error('Este orçamento já foi enviado ou aprovado.');
+      return;
+    }
+    if (!embeddedContractId && !centroCustoId) {
+      toast.error('Contrato não identificado para a ficha de demanda.');
+      return;
+    }
+
+    setFdAprovacaoPreparando(true);
+    try {
+      const wsFicha = montarSheetFichaDemanda();
+      const anexos: FichaDemandaApprovalFormState['anexos'] = [];
+      if (wsFicha) {
+        const wbFd = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wbFd, wsFicha, 'Ficha de demanda');
+        const out = XLSX.write(wbFd, { bookType: 'xlsx', type: 'array' });
+        const nomeContratoSafe = (embeddedContractName || nomeContratoBreadcrumb || 'Contrato')
+          .replace(/[^a-zA-Z0-9]/g, '_')
+          .slice(0, 40);
+        const fileName = `Ficha_Demanda_${nomeContratoSafe}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+        const file = new File([new Uint8Array(out as ArrayLike<number>)], fileName, {
+          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        });
+        const formData = new FormData();
+        formData.append('file', file);
+        const uploadRes = await api.post('/demand-sheet-approvals/upload-attachment', formData, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
+        const uploaded = uploadRes.data?.data as { url?: string; originalName?: string } | undefined;
+        const url = String(uploaded?.url || '').trim();
+        if (url) {
+          anexos.push({
+            id: crypto.randomUUID(),
+            name: uploaded?.originalName || fileName,
+            url,
+          });
+        }
+      }
+
+      const codigoFdBase = (codigoOrcamentoAtivo || orcamentoAtivoId.slice(0, 8)).replace(/\s+/g, '');
+      const poloInferido = inferirPoloFdDeTexto(
+        `${embeddedContractName || ''} ${nomeContratoBreadcrumb || ''} ${nomeOrcamentoSemCodigo || ''}`
+      );
+      const custo = resumoFinanceiro.totalComDesconto;
+      const fat = resumoFinanceiro.totalComDescontoEBdi;
+
+      setFdAprovacaoInitialForm({
+        contratoId: embeddedContractId || '',
+        obra: nomeOrcamentoSemCodigo || nomeOrcamentoRascunho || '',
+        codigoPedido: meta.osNumeroPasta.trim() || codigoFdBase,
+        codFichaDemanda: `FD-${codigoFdBase}`,
+        faturamentoEstimado: formatCurrencyInput(fat),
+        custoEstimado: formatCurrencyInput(custo),
+        observacao:
+          meta.descricao.trim() ||
+          `Ficha de demanda gerada a partir do orçamento ${nomeOrcamentoSemCodigo || nomeOrcamentoRascunho || codigoFdBase}.`,
+        polo: poloInferido,
+        anexos,
+      });
+      setFdAprovacaoModalOpen(true);
+    } catch (err: unknown) {
+      const msg =
+        err && typeof err === 'object' && 'response' in err
+          ? (err as { response?: { data?: { error?: string; message?: string } } }).response?.data
+              ?.error ||
+            (err as { response?: { data?: { message?: string } } }).response?.data?.message
+          : undefined;
+      toast.error(msg || 'Não foi possível preparar o envio da ficha de demanda.');
+    } finally {
+      setFdAprovacaoPreparando(false);
+    }
+  };
+
+  const confirmarEnvioFichaDemandaAprovacao = async (form: FichaDemandaApprovalFormState) => {
+    if (!centroCustoId || !orcamentoAtivoId) return;
+    if (!fichaDemandaProgresso.completa) {
+      toast.error('Preencha a ficha de demanda por completo antes de enviar para aprovação.');
+      return;
+    }
+    setFdAprovacaoEnviando(true);
+    try {
+      const res = await api.post('/demand-sheet-approvals', {
+        ...formToApiPayload(form),
+        orcamentoCentroCustoId: centroCustoId,
+        orcamentoId: orcamentoAtivoId,
+      });
+      const createdId = String(res.data?.data?.id || '').trim() || undefined;
+      const nextMeta: OrcamentoMeta = {
+        ...meta,
+        statusAprovacao: 'aguardando_aprovacao',
+        ...(createdId ? { fichaDemandaApprovalId: createdId } : {}),
+      };
+      setMeta(nextMeta);
+      const nextSessao: SessaoOrcamentoPersist = {
+        ...sessaoRef.current,
+        meta: nextMeta,
+      };
+      sessaoRef.current = nextSessao;
+      persistToApi(servicos, imports, nextSessao);
+      setListaOrcamentos((prev) =>
+        prev.map((o) =>
+          o.id === orcamentoAtivoId
+            ? { ...o, statusAprovacao: 'aguardando_aprovacao', updatedAt: new Date().toISOString() }
+            : o
+        )
+      );
+      setFdAprovacaoModalOpen(false);
+      setFdAprovacaoInitialForm(null);
+      toast.success('Ficha de demanda enviada para aprovação.');
+    } catch (err: unknown) {
+      const msg =
+        err && typeof err === 'object' && 'response' in err
+          ? (err as { response?: { data?: { error?: string; message?: string } } }).response?.data
+              ?.error ||
+            (err as { response?: { data?: { message?: string } } }).response?.data?.message
+          : undefined;
+      toast.error(msg || 'Não foi possível enviar a ficha de demanda.');
+    } finally {
+      setFdAprovacaoEnviando(false);
+    }
+  };
+
   const exportarFichaDemandaPdf = () => {
     if (linhasFichaDemanda.length === 0) {
       toast.error('Não há dados para exportar.');
@@ -9083,10 +9634,77 @@ export function OrcamentoPageView({
             <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl break-words">
               {tituloPaginaOrcamento}
             </h1>
-            <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400">
+            <p
+              className={
+                orcamentoAtivoId
+                  ? 'mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400'
+                  : 'mt-2 text-base sm:text-lg text-gray-600 dark:text-gray-400'
+              }
+            >
               {subtituloPaginaOrcamento}
             </p>
           </div>
+
+          {orcamentoAtivoId &&
+            orcamentoViewTab === 'cronograma' &&
+            !loadingFromApi &&
+            linhasCronograma.length > 0 && (
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 sm:gap-6">
+                <FilterStatCard
+                  label="Progresso físico"
+                  count={`${resumoCronograma.progressoFisico.toFixed(1).replace('.', ',')}%`}
+                  icon={TrendingUp}
+                  iconBg="bg-red-100 dark:bg-red-900/30"
+                  iconColor="text-red-600 dark:text-red-400"
+                  subtitle={`${resumoCronograma.valorExecutado.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} de ${resumoCronograma.valorTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`}
+                />
+                <FilterStatCard
+                  label="Concluídos"
+                  count={`${resumoCronograma.porStatus.concluido}/${resumoCronograma.totalEtapas}`}
+                  icon={CheckCircle2}
+                  iconBg="bg-green-100 dark:bg-green-900/30"
+                  iconColor="text-green-600 dark:text-green-400"
+                  subtitle={`${
+                    resumoCronograma.totalEtapas > 0
+                      ? (
+                          (resumoCronograma.porStatus.concluido / resumoCronograma.totalEtapas) *
+                          100
+                        )
+                          .toFixed(1)
+                          .replace('.', ',')
+                      : '0,0'
+                  }% das etapas`}
+                />
+                <FilterStatCard
+                  label="Atrasados"
+                  count={resumoCronograma.porStatus.atrasado}
+                  icon={AlertTriangle}
+                  iconBg={
+                    resumoCronograma.porStatus.atrasado > 0
+                      ? 'bg-red-100 dark:bg-red-900/30'
+                      : 'bg-amber-100 dark:bg-amber-900/30'
+                  }
+                  iconColor={
+                    resumoCronograma.porStatus.atrasado > 0
+                      ? 'text-red-600 dark:text-red-400'
+                      : 'text-amber-600 dark:text-amber-400'
+                  }
+                  subtitle={`de ${resumoCronograma.totalEtapas} etapas`}
+                />
+                <FilterStatCard
+                  label="Com prazo"
+                  count={resumoCronograma.servicosComDatas}
+                  icon={CalendarCheck}
+                  iconBg="bg-sky-100 dark:bg-sky-900/30"
+                  iconColor="text-sky-600 dark:text-sky-400"
+                  subtitle={
+                    resumoCronograma.etapasSemDatasReais > 0
+                      ? `${resumoCronograma.etapasSemDatasReais} sem datas reais`
+                      : `de ${resumoCronograma.totalEtapas} etapas`
+                  }
+                />
+              </div>
+            )}
 
           {/* Seletor de Contrato (Centro de Custo) — oculto quando o orçamento está dentro do contrato */}
           {!lockedCostCenterId && (
@@ -9204,8 +9822,8 @@ export function OrcamentoPageView({
                       </div>
                       <div className="min-w-0">
                         <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Orçamentos</h3>
-                        <p className="text-sm text-gray-600 dark:text-gray-400">
-                          Gestão de orçamentos do contrato.
+                        <p className="text-sm sm:text-base text-gray-600 dark:text-gray-400">
+                          Crie, importe e acompanhe os orçamentos deste contrato.
                         </p>
                       </div>
                     </div>
@@ -9297,13 +9915,25 @@ export function OrcamentoPageView({
                         <table className="w-full table-fixed text-sm">
                           <thead className="border-b border-gray-200 dark:border-gray-700">
                             <tr>
-                              <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[14%] min-w-[5.5rem]">
+                              <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[12%] min-w-[5.5rem]">
                                 Código
                               </th>
                               <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                                Orçamento
+                                Descrição
                               </th>
-                              <th className="px-3 sm:px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[22%]">
+                              <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[12%]">
+                                Status
+                              </th>
+                              <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[7%]">
+                                FD
+                              </th>
+                              <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[12%]">
+                                BDI
+                              </th>
+                              <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[14%]">
+                                Total
+                              </th>
+                              <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[14%]">
                                 Atualizado
                               </th>
                               <th className={listTableRowClasses.actionTh}>Ação</th>
@@ -9312,7 +9942,7 @@ export function OrcamentoPageView({
                           <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
                             {filteredListaOrcamentos.length === 0 ? (
                               <tr>
-                                <td colSpan={4} className="px-6 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
+                                <td colSpan={8} className="px-6 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
                                   Nenhum orçamento encontrado para essa busca.
                                 </td>
                               </tr>
@@ -9320,6 +9950,19 @@ export function OrcamentoPageView({
                               filteredListaOrcamentos.map((o) => {
                                 const codigoLista = codigoFromNomeOrcamento(o.nome);
                                 const nomeLista = nomeOrcamentoSemCodigoSufixo(o.nome) || o.nome;
+                                const statusLista = normalizarStatusAprovacaoOrcamento(o.statusAprovacao);
+                                const fdPctLista =
+                                  typeof o.fichaDemandaPct === 'number' && Number.isFinite(o.fichaDemandaPct)
+                                    ? Math.max(0, Math.min(100, Math.round(o.fichaDemandaPct)))
+                                    : 0;
+                                const bdiPctLista =
+                                  typeof o.bdiPercentual === 'number' && Number.isFinite(o.bdiPercentual)
+                                    ? o.bdiPercentual
+                                    : 0;
+                                const totalComBdiLista =
+                                  typeof o.totalComBdi === 'number' && Number.isFinite(o.totalComBdi)
+                                    ? o.totalComBdi
+                                    : 0;
                                 return (
                                 <tr
                                   key={o.id}
@@ -9341,7 +9984,31 @@ export function OrcamentoPageView({
                                       {nomeLista}
                                     </ListRowNavigableLabel>
                                   </td>
-                                  <td className="whitespace-nowrap px-3 py-3 text-left text-sm text-gray-700 dark:text-gray-300 tabular-nums sm:px-6">
+                                  <td className="whitespace-nowrap px-3 py-3 text-center sm:px-6">
+                                    <span className={orcamentoStatusBadgeClass(statusLista)}>
+                                      {ORCAMENTO_STATUS_LABELS[statusLista]}
+                                    </span>
+                                  </td>
+                                  <td
+                                    className={`whitespace-nowrap px-3 py-3 text-center text-sm font-semibold tabular-nums sm:px-6 ${
+                                      fdPctLista === 100
+                                        ? 'text-green-700 dark:text-green-300'
+                                        : 'text-gray-700 dark:text-gray-300'
+                                    }`}
+                                  >
+                                    {fdPctLista}%
+                                  </td>
+                                  <td className="whitespace-nowrap px-3 py-3 text-center text-sm text-gray-700 dark:text-gray-300 tabular-nums sm:px-6">
+                                    {bdiPctLista.toLocaleString('pt-BR', {
+                                      minimumFractionDigits: 0,
+                                      maximumFractionDigits: 2,
+                                    })}
+                                    %
+                                  </td>
+                                  <td className="whitespace-nowrap px-3 py-3 text-center text-sm font-semibold text-gray-900 dark:text-gray-100 tabular-nums sm:px-6">
+                                    {formatarBRLExport(totalComBdiLista)}
+                                  </td>
+                                  <td className="whitespace-nowrap px-3 py-3 text-center text-sm text-gray-700 dark:text-gray-300 tabular-nums sm:px-6">
                                     {o.updatedAt ? new Date(o.updatedAt).toLocaleString('pt-BR') : '—'}
                                   </td>
                                   <td
@@ -9401,6 +10068,24 @@ export function OrcamentoPageView({
                             <Eye className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
                             <span>Ver detalhes</span>
                           </button>
+                          {embeddedContractId && (
+                            <button
+                              type="button"
+                              role="menuitem"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const id = orcamentoListaActionMenu.orcamentoId;
+                                setOrcamentoListaActionMenu(null);
+                                router.push(
+                                  `/ponto/cronogramas/${embeddedContractId}/${id}`
+                                );
+                              }}
+                              className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700"
+                            >
+                              <Calendar className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                              <span>Cronograma</span>
+                            </button>
+                          )}
                           <button
                             type="button"
                             role="menuitem"
@@ -9423,6 +10108,7 @@ export function OrcamentoPageView({
               </Card>
             ) : (
             <Card className="shadow-none">
+              {!cronogramaOnly && (
               <CardHeader className="!border-b-0">
                 <div className="flex justify-center">
                   <SegmentedControl
@@ -9443,11 +10129,11 @@ export function OrcamentoPageView({
                       { value: 'memorial', label: 'Memória de cálculo' },
                       { value: 'analitico', label: 'Analítico' },
                       { value: 'planilhaAnalitica', label: 'Ficha de demanda' },
-                      { value: 'cronograma', label: 'Cronograma' },
                     ]}
                   />
                 </div>
               </CardHeader>
+              )}
               <CardContent className="space-y-4">
                 {loadingFromApi && (
                   <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 px-4 py-8 sm:py-10">
@@ -9496,11 +10182,18 @@ export function OrcamentoPageView({
                         <div className="space-y-2">
                           {[
                             ['OS/Nº da pasta', meta.osNumeroPasta || '—'],
-                            ['Prazo de execução (dias)', meta.prazoExecucaoDias || '—']
+                            ['Prazo de execução (dias)', meta.prazoExecucaoDias || '—'],
+                            ['Status', ORCAMENTO_STATUS_LABELS[statusAprovacaoAtivo]]
                           ].map(([label, value]) => (
                             <div key={label} className="grid grid-cols-[10.5rem_1fr] gap-3">
                               <span className="text-xs text-gray-500 dark:text-gray-400">{label}</span>
-                              <span className="text-sm font-medium text-gray-900 dark:text-gray-100 break-words">{value}</span>
+                              {label === 'Status' ? (
+                                <span className={orcamentoStatusBadgeClass(statusAprovacaoAtivo)}>
+                                  {value}
+                                </span>
+                              ) : (
+                                <span className="text-sm font-medium text-gray-900 dark:text-gray-100 break-words">{value}</span>
+                              )}
                             </div>
                           ))}
                         </div>
@@ -10618,20 +11311,20 @@ export function OrcamentoPageView({
                                           : ''
                                       }`}
                                     >
-                                      <input
-                                        type="text"
-                                        inputMode="decimal"
+                                      <FdCampoLocal
+                                        committedValue={
+                                          qC !== undefined
+                                            ? qC.toLocaleString('pt-BR', {
+                                                minimumFractionDigits: 2,
+                                                maximumFractionDigits: 4,
+                                              })
+                                            : ''
+                                        }
+                                        onCommit={(raw) => commitPlanilhaQtdCompra(l.key, raw)}
                                         placeholder="0"
                                         title={PLANILHA_ANALITICA_TOOLTIP.qtdCompraInsumo}
+                                        inputMode="decimal"
                                         className={`${inputGradeCls} text-center tabular-nums`}
-                                        value={
-                                          planilhaCompraDraft[`q|${l.key}`] ??
-                                          (qC !== undefined
-                                            ? qC.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })
-                                            : '')
-                                        }
-                                        onChange={(e) => handlePlanilhaQtdCompraChange(l.key, e.target.value)}
-                                        onBlur={(e) => commitPlanilhaQtdCompra(l.key, e.target.value)}
                                       />
                                     </td>
                                     <td
@@ -10663,20 +11356,20 @@ export function OrcamentoPageView({
                                         <span className="shrink-0 text-xs tabular-nums text-gray-500 dark:text-gray-400">
                                           R$
                                         </span>
-                                        <input
-                                          type="text"
-                                          inputMode="decimal"
+                                        <FdCampoLocal
+                                          committedValue={
+                                            vReal !== undefined
+                                              ? vReal.toLocaleString('pt-BR', {
+                                                  minimumFractionDigits: 2,
+                                                  maximumFractionDigits: 2,
+                                                })
+                                              : ''
+                                          }
+                                          onCommit={(raw) => commitPlanilhaVlCompraReal(l.key, raw)}
                                           placeholder="0,00"
                                           title={PLANILHA_ANALITICA_TOOLTIP.vlCompraRealInsumo}
+                                          inputMode="decimal"
                                           className={`${inputGradeMoedaCls} text-right`}
-                                          value={
-                                            planilhaCompraDraft[`v|${l.key}`] ??
-                                            (vReal !== undefined
-                                              ? vReal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-                                              : '')
-                                          }
-                                          onChange={(e) => handlePlanilhaVlCompraRealChange(l.key, e.target.value)}
-                                          onBlur={(e) => commitPlanilhaVlCompraReal(l.key, e.target.value)}
                                         />
                                       </div>
                                     </td>
@@ -10744,15 +11437,9 @@ export function OrcamentoPageView({
                                       )}
                                     </td>
                                     <td className="border-l border-gray-200 dark:border-gray-700 p-0">
-                                      <input
-                                        type="text"
-                                        value={fichaDemandaObservacoes[l.key] ?? ''}
-                                        onChange={(e) =>
-                                          setFichaDemandaObservacoes((prev) => ({
-                                            ...prev,
-                                            [l.key]: e.target.value
-                                          }))
-                                        }
+                                      <FdCampoLocal
+                                        committedValue={fichaDemandaObservacoes[l.key] ?? ''}
+                                        onCommit={(raw) => commitFichaDemandaObservacao(l.key, raw)}
                                         placeholder="Adicionar observação..."
                                         className={`${inputGradeCls} text-left`}
                                       />
@@ -10913,7 +11600,15 @@ export function OrcamentoPageView({
                       titulo="Cronograma vazio"
                       texto="Adicione serviços na aba Orçamento para planejar prazos e acompanhar o andamento da obra."
                       Icon={Calendar}
-                      onIrOrcamento={() => setOrcamentoViewTab('montagem')}
+                      onIrOrcamento={() => {
+                        if (cronogramaOnly && embeddedContractId && orcamentoAtivoId) {
+                          router.push(
+                            `/ponto/contratos/${embeddedContractId}/orcamento/${orcamentoAtivoId}`
+                          );
+                          return;
+                        }
+                        setOrcamentoViewTab('montagem');
+                      }}
                     />
                   ) : (
                     <OrcamentoCronogramaPainel
@@ -10924,6 +11619,10 @@ export function OrcamentoPageView({
                       orcamentoId={orcamentoAtivoId}
                       dataInicioObra={meta.dataAbertura}
                       dataFimObra={dataFimOrcamento}
+                      onDataFimObraChange={(dataEnvio) =>
+                        setMeta((m) => ({ ...m, dataEnvio }))
+                      }
+                      onExport={exportarCronogramaExcel}
                     />
                   )
                 )}
@@ -11465,7 +12164,7 @@ export function OrcamentoPageView({
 
         </div>
 
-        {orcamentoAtivoId && subtitulosAdicionados.length > 0 && (
+        {orcamentoAtivoId && !cronogramaOnly && subtitulosAdicionados.length > 0 && (
           <>
             <div className="h-16 shrink-0" aria-hidden />
             <div
@@ -11507,27 +12206,79 @@ export function OrcamentoPageView({
                       {formatarBRLExport(resumoFinanceiro.totalComDescontoEBdi)}
                     </p>
                   </div>
+                  <div
+                    className="hidden h-8 w-px shrink-0 self-center bg-gray-200 dark:bg-gray-600 sm:block"
+                    aria-hidden
+                  />
+                  <div
+                    className="min-w-0"
+                    title={
+                      fichaDemandaProgresso.total === 0
+                        ? 'Sem insumos na ficha de demanda'
+                        : `Ficha de demanda: ${fichaDemandaProgresso.filled} de ${fichaDemandaProgresso.total} insumos preenchidos (qtd. compra + valor unit. real)`
+                    }
+                  >
+                    <p
+                      className={`text-[10px] font-semibold uppercase tracking-wide ${
+                        fichaDemandaProgresso.completa
+                          ? 'text-green-600 dark:text-green-400'
+                          : 'text-gray-500 dark:text-gray-400'
+                      }`}
+                    >
+                      FD
+                    </p>
+                    <p
+                      className={`mt-0.5 text-sm font-bold tabular-nums tracking-tight sm:text-base whitespace-nowrap ${
+                        fichaDemandaProgresso.completa
+                          ? 'text-green-700 dark:text-green-300'
+                          : 'text-gray-900 dark:text-gray-100'
+                      }`}
+                    >
+                      {fichaDemandaProgresso.pct}%
+                    </p>
+                  </div>
                 </div>
                 <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
                   <button
                     type="button"
                     onClick={exportarOrcamentoCompleto}
-                    className="inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-gray-300 bg-white px-3 text-sm font-semibold text-gray-700 shadow-sm transition-colors hover:bg-gray-50 active:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700 dark:active:bg-gray-600 dark:focus-visible:ring-offset-gray-900 sm:px-4"
-                    title="Exporta Orçamento, Analítico e Ficha de demanda no mesmo Excel"
-                    aria-label="Exportar orçamento"
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 shadow-sm transition-colors hover:bg-gray-50 active:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700 dark:active:bg-gray-600 dark:focus-visible:ring-offset-gray-900"
+                    title="Exportar Orçamento"
+                    aria-label="Exportar Orçamento"
                   >
                     <Download className="h-4 w-4 shrink-0" aria-hidden />
-                    Exportar Orçamento
                   </button>
                   <button
                     type="button"
                     onClick={exportarCronogramaExcel}
-                    className="inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-gray-300 bg-white px-3 text-sm font-semibold text-gray-700 shadow-sm transition-colors hover:bg-gray-50 active:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700 dark:active:bg-gray-600 dark:focus-visible:ring-offset-gray-900 sm:px-4"
-                    title="Exporta o cronograma da obra em Excel"
-                    aria-label="Exportar cronograma"
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 shadow-sm transition-colors hover:bg-gray-50 active:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700 dark:active:bg-gray-600 dark:focus-visible:ring-offset-gray-900"
+                    title="Exportar Cronograma"
+                    aria-label="Exportar Cronograma"
                   >
                     <Calendar className="h-4 w-4 shrink-0" aria-hidden />
-                    Exportar Cronograma
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void abrirEnvioFichaDemandaAprovacao()}
+                    disabled={
+                      fdAprovacaoPreparando || fdAprovacaoEnviando || !podeEnviarFdAprovacao
+                    }
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-red-600 bg-red-600 text-white shadow-sm transition-colors hover:bg-red-700 hover:border-red-700 active:bg-red-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 dark:border-red-500 dark:bg-red-600 dark:text-white dark:hover:bg-red-500 dark:hover:border-red-500 dark:active:bg-red-700 dark:focus-visible:ring-offset-gray-900"
+                    title={
+                      !fichaDemandaProgresso.completa
+                        ? `Preencha a ficha de demanda (${fichaDemandaProgresso.pct}%)`
+                        : statusAprovacaoAtivo === 'aguardando_aprovacao' ||
+                            statusAprovacaoAtivo === 'aprovado'
+                          ? 'Orçamento já enviado ou aprovado'
+                          : 'Enviar para aprovação'
+                    }
+                    aria-label="Enviar para aprovação"
+                  >
+                    {fdAprovacaoPreparando ? (
+                      <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
+                    ) : (
+                      <ArrowRight className="h-4 w-4 shrink-0" aria-hidden />
+                    )}
                   </button>
                 </div>
               </div>
@@ -11535,6 +12286,21 @@ export function OrcamentoPageView({
           </>
         )}
       </MainLayout>
+
+      <FichaDemandaApprovalFormModal
+        isOpen={fdAprovacaoModalOpen}
+        onClose={() => {
+          if (fdAprovacaoEnviando) return;
+          setFdAprovacaoModalOpen(false);
+          setFdAprovacaoInitialForm(null);
+        }}
+        initialForm={fdAprovacaoInitialForm}
+        onSave={(form) => {
+          void confirmarEnvioFichaDemandaAprovacao(form);
+        }}
+        isSaving={fdAprovacaoEnviando}
+        title="Enviar ficha de demanda para aprovação"
+      />
 
       {orcamentoExcluirConfirm && (
         <AppModalOverlay className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center">

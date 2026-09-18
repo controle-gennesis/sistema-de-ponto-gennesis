@@ -365,10 +365,13 @@ const ITEMS_PER_PAGE = 20;
 function extractContractDisplayName(label: string): string {
   const trimmed = label.trim();
   if (!trimmed) return '';
-  const parts = trimmed.split(/\s*[—–-]\s*/).map((p) => p.trim()).filter(Boolean);
-  if (parts.length <= 1) return trimmed;
-  if (/^\d+\/\d+/.test(parts[0])) return parts.slice(1).join(' — ');
-  return parts[parts.length - 1];
+  // Remove só prefixo de número/código (ex.: "01/2024 — …" ou "12345 - …"),
+  // sem cortar o nome quando ele próprio tem hífen (ex.: "SENAC - DF").
+  const numberPrefix = trimmed.match(/^(\d+\/\d+)\s*[—–-]\s*(.+)$/s);
+  if (numberPrefix?.[2]) return numberPrefix[2].trim();
+  const codePrefix = trimmed.match(/^([\d.]+)\s*[—–-]\s*(.+)$/s);
+  if (codePrefix?.[2]) return codePrefix[2].trim();
+  return trimmed;
 }
 
 function fuelContractLabel(row: {
@@ -1291,11 +1294,7 @@ export default function SolicitacoesCombustivelPage() {
                   <span className="font-medium text-gray-500 dark:text-gray-400">
                     Aprovação do gestor
                   </span>
-                  {selected.vehicleType === 'COMPANY' ? (
-                    <p className="text-gray-900 dark:text-gray-100">
-                      Não se aplica (frota — vai direto ao Suprimentos)
-                    </p>
-                  ) : selected.status === 'PENDING_MANAGER' ? (
+                  {selected.status === 'PENDING_MANAGER' ? (
                     <p className="text-gray-900 dark:text-gray-100">Aguardando aprovação</p>
                   ) : selected.managerApprover ? (
                     <p className="text-gray-900 dark:text-gray-100">

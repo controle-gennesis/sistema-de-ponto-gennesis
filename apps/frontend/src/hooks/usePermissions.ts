@@ -775,7 +775,6 @@ export function useRoutePermission(route: string) {
     '/ponto/solicitar-materiais': isAdministrator || can(pk('/ponto/solicitar-materiais')),
     '/ponto/solicitar-ferramentas':
       isAdministrator || can(pk('/ponto/solicitar-ferramentas')),
-    '/ponto/tabela-sinapi': isAdministrator || can(pk('/ponto/tabela-sinapi')),
     '/ponto/gerenciar-materiais': isAdministrator || can(pk('/ponto/gerenciar-materiais')),
     '/ponto/mapa-cotacao': isAdministrator || can(pk('/ponto/mapa-cotacao')),
     '/ponto/ordem-de-compra': isAdministrator || can(pk('/ponto/ordem-de-compra')),

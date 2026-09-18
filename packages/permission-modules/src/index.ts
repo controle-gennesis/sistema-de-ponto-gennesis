@@ -221,12 +221,6 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
     href: '/ponto/solicitar-ferramentas',
     category: 'Engenharia',
   },
-  {
-    key: pathToModuleKey('/ponto/tabela-sinapi'),
-    name: 'Tabela SINAPI',
-    href: '/ponto/tabela-sinapi',
-    category: 'Engenharia',
-  },
   // Jurídico
   { key: pathToModuleKey('/ponto/juridico/processos-ativos'), name: 'Processos Ativos', href: '/ponto/juridico/processos-ativos', category: 'Jurídico' },
   { key: pathToModuleKey('/ponto/juridico/processos-ativos/dashboard'), name: 'Dashboards dos Processos', href: '/ponto/juridico/processos-ativos/dashboard', category: 'Jurídico' },

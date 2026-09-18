@@ -49,7 +49,7 @@ const FUEL_PHASE_SUBTITLE: Record<FuelPhaseFilter, string> = {
   PENDING: 'Aguardando aprovação do gestor',
   APPROVED: 'Já aprovadas e encaminhadas',
   REJECTED: 'Canceladas pelo gestor',
-  ALL: 'Todas as solicitações particulares',
+  ALL: 'Todas as solicitações de abastecimento',
 };
 
 const FUEL_ACTION_MENU_WIDTH_PX = 224;

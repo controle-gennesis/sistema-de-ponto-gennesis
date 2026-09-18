@@ -3,13 +3,19 @@
 import React, { useEffect, useRef, useMemo, useState } from 'react';
 import {
   Calendar,
+  CalendarRange,
   Copy,
+  Download,
   Eye,
   EyeOff,
+  GanttChart,
+  LineChart,
   Loader2,
   Plus,
   RefreshCw,
-  Trash2
+  Table2,
+  Trash2,
+  X
 } from 'lucide-react';
 import { estimarPrazosCronograma, gerarSubServicosCronograma } from './orcamentoCronogramaApi';
 import toast from 'react-hot-toast';
@@ -67,6 +73,8 @@ import {
 } from './orcamentoCronogramaTypes';
 import { gradeTableCls, gradeTableRowTrCls, tdGradeDateCls } from './orcamentoGradeCellClasses';
 import { DatePickerField } from '@/components/ui/DatePickerField';
+import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
+import { Modal } from '@/components/ui/Modal';
 
 type Props = {
   linhas: CronogramaLinhaServico[];
@@ -77,12 +85,11 @@ type Props = {
   /** Datas do orçamento (meta.dataAbertura / dataEnvio). */
   dataInicioObra?: string;
   dataFimObra?: string;
+  /** Persiste a data de fim da obra (meta.dataEnvio) quando informada na modal. */
+  onDataFimObraChange?: (dataFimIso: string) => void;
+  onExport?: () => void;
 };
 
-const sectionShellCls =
-  'rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 overflow-hidden';
-const sectionHeaderCls =
-  'px-4 sm:px-5 py-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50/70 dark:bg-gray-800/40';
 const thCls =
   'px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600 first:border-l-0';
 const tdCls =
@@ -111,6 +118,10 @@ const statusSpanCls = (status: keyof typeof CRONOGRAMA_STATUS_CLASS) =>
 const timelineLabelColCls =
   'shrink-0 pr-4 py-2 text-xs text-gray-800 dark:text-gray-200 whitespace-nowrap';
 const TIMELINE_LABEL_MIN_W_PX = 360;
+const actionBtnCls =
+  'inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 disabled:pointer-events-none disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700';
+const iconBtnCls =
+  'inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 shadow-sm transition-colors hover:bg-gray-50 active:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700 dark:active:bg-gray-600 dark:focus-visible:ring-offset-gray-900';
 
 function calcularLarguraColunaServicoTimeline(
   linhas: { label: string; indentLevel?: 0 | 1 | 2 }[]
@@ -125,10 +136,6 @@ function paddingServicoColCls(indentLevel: 0 | 1 | 2 = 0): string {
   if (indentLevel >= 2) return 'pl-9';
   if (indentLevel === 1) return 'pl-6';
   return 'pl-4';
-}
-
-function formatPct(v: number) {
-  return `${v.toFixed(1).replace('.', ',')}%`;
 }
 
 function SubServicoNomeCell({
@@ -409,7 +416,9 @@ export function OrcamentoCronogramaPainel({
   centroCustoId,
   orcamentoId,
   dataInicioObra = '',
-  dataFimObra = ''
+  dataFimObra = '',
+  onDataFimObraChange,
+  onExport
 }: Props) {
   const [viewMode, setViewMode] = useState<'tabela' | 'timeline'>('tabela');
   const [mostrarPlanejamentoTimeline, setMostrarPlanejamentoTimeline] = useState(true);
@@ -419,6 +428,9 @@ export function OrcamentoCronogramaPainel({
   const [gerandoServicoKey, setGerandoServicoKey] = useState<string | null>(null);
   const [gerandoBlocoKey, setGerandoBlocoKey] = useState<string | null>(null);
   const [distribuindoPrazo, setDistribuindoPrazo] = useState(false);
+  const [showCurvaSModal, setShowCurvaSModal] = useState(false);
+  const [showDataFimModal, setShowDataFimModal] = useState(false);
+  const [draftDataFim, setDraftDataFim] = useState('');
   const cronogramaRef = useRef(cronograma);
   const autoGeradoRef = useRef<Set<string>>(new Set());
   cronogramaRef.current = cronograma;
@@ -546,8 +558,9 @@ export function OrcamentoCronogramaPainel({
     setSubServicos(servicoKey, lista);
   };
 
-  const distribuirPrazoGeral = async () => {
-    if (!dataInicioObra || !dataFimObra || distribuindoPrazo) return;
+  const distribuirPrazoGeral = async (dataFimOverride?: string) => {
+    const fim = (dataFimOverride || dataFimObra || '').trim();
+    if (!dataInicioObra || !fim || distribuindoPrazo) return;
     setDistribuindoPrazo(true);
     try {
       let pesosPorEtapa: Record<string, number> | undefined;
@@ -558,7 +571,7 @@ export function OrcamentoCronogramaPainel({
         if (etapas.length > 0) {
           const result = await estimarPrazosCronograma(centroCustoId, orcamentoId, {
             dataInicioObra,
-            dataFimObra,
+            dataFimObra: fim,
             etapas
           });
           pesosPorEtapa = {};
@@ -575,7 +588,7 @@ export function OrcamentoCronogramaPainel({
         linhas,
         cronograma,
         dataInicioObra,
-        dataFimObra,
+        fim,
         pesosPorEtapa
       );
       if (!next) return;
@@ -586,7 +599,7 @@ export function OrcamentoCronogramaPainel({
         toast.success('Prazos distribuídos com estimativa por quantidade e tipo de serviço.');
       }
     } catch (err) {
-      const next = distribuirPrazoGeralCronograma(linhas, cronograma, dataInicioObra, dataFimObra);
+      const next = distribuirPrazoGeralCronograma(linhas, cronograma, dataInicioObra, fim);
       if (!next) return;
       onChange(next);
       if (isAxiosError(err) && err.code === 'ECONNABORTED') {
@@ -599,6 +612,35 @@ export function OrcamentoCronogramaPainel({
     } finally {
       setDistribuindoPrazo(false);
     }
+  };
+
+  const abrirDistribuirPrazo = () => {
+    if (distribuindoPrazo) return;
+    if (!dataInicioObra) {
+      toast.error('Defina a data de início da obra nos Dados do orçamento.');
+      return;
+    }
+    if (!dataFimObra) {
+      setDraftDataFim('');
+      setShowDataFimModal(true);
+      return;
+    }
+    void distribuirPrazoGeral();
+  };
+
+  const confirmarDataFimEDistribuir = () => {
+    const fim = draftDataFim.trim();
+    if (!fim) {
+      toast.error('Informe a data de fim da obra.');
+      return;
+    }
+    if (dataInicioObra && fim < dataInicioObra) {
+      toast.error('A data de fim deve ser posterior à data de início.');
+      return;
+    }
+    onDataFimObraChange?.(fim);
+    setShowDataFimModal(false);
+    void distribuirPrazoGeral(fim);
   };
 
   const copiarPlanParaReal = () => {
@@ -739,170 +781,143 @@ export function OrcamentoCronogramaPainel({
   }
 
   return (
-    <div>
-      <section className={sectionShellCls}>
-        <div className={`${sectionHeaderCls} space-y-3`}>
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Serviços do cronograma</h3>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="inline-flex items-center gap-1 p-1 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-100/80 dark:bg-gray-800/70">
-                <button
-                  type="button"
-                  onClick={() => setViewMode('tabela')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all outline-none ${
-                    viewMode === 'tabela'
-                      ? 'bg-red-600 text-white shadow-sm'
-                      : 'text-gray-700 dark:text-gray-300 hover:bg-white dark:hover:bg-gray-700'
-                  }`}
-                >
-                  Planilha
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setViewMode('timeline')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all outline-none ${
-                    viewMode === 'timeline'
-                      ? 'bg-red-600 text-white shadow-sm'
-                      : 'text-gray-700 dark:text-gray-300 hover:bg-white dark:hover:bg-gray-700'
-                  }`}
-                >
-                  Linha do tempo
-                </button>
-              </div>
-            </div>
+    <>
+    <div className="space-y-4">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 items-center space-x-3">
+          <div className="rounded-lg bg-red-100 p-2 dark:bg-red-900/30 sm:p-3">
+            <CalendarRange className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6" />
           </div>
-
-          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-t border-gray-200/80 pt-3 text-xs text-gray-600 dark:border-gray-700/80 dark:text-gray-400">
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-              <span
-                className="tabular-nums"
-                title={`${resumo.valorExecutado.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} de ${resumo.valorTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`}
-              >
-                <strong className="font-semibold text-gray-900 dark:text-gray-100">
-                  {formatPct(resumo.progressoFisico)}
-                </strong>{' '}
-                físico
-              </span>
-              <span className="text-gray-300 dark:text-gray-600" aria-hidden>
-                ·
-              </span>
-              <span className="tabular-nums">
-                <strong className="font-semibold text-gray-900 dark:text-gray-100">
-                  {resumo.porStatus.concluido}/{resumo.totalEtapas}
-                </strong>{' '}
-                concluídos
-              </span>
-              <span className="text-gray-300 dark:text-gray-600" aria-hidden>
-                ·
-              </span>
-              <span className="tabular-nums">
-                <strong
-                  className={`font-semibold ${resumo.porStatus.atrasado > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-gray-100'}`}
-                >
-                  {resumo.porStatus.atrasado}
-                </strong>{' '}
-                atrasados
-              </span>
-              <span className="text-gray-300 dark:text-gray-600" aria-hidden>
-                ·
-              </span>
-              <span className="tabular-nums">
-                <strong className="font-semibold text-gray-900 dark:text-gray-100">{resumo.servicosComDatas}</strong>{' '}
-                c/ prazo
-              </span>
-            </div>
-
-            {dataInicioObra || dataFimObra ? (
-              <span className="shrink-0 tabular-nums text-gray-700 dark:text-gray-300">
-                {formatDataBr(dataInicioObra) || '—'}
-                <span className="mx-1.5 text-gray-400 dark:text-gray-500" aria-hidden>
-                  →
-                </span>
-                {formatDataBr(dataFimObra) || '—'}
-              </span>
-            ) : null}
-          </div>
-
-          <div className="flex flex-col gap-2 border-t-[0.5px] border-gray-200/80 pt-3 dark:border-gray-700/80 sm:flex-row sm:items-center sm:justify-between">
-            {resumo.etapasSemDatasReais > 0 ? (
-              <p className="text-xs leading-relaxed text-amber-700 dark:text-amber-300/90">
-                {resumo.etapasSemDatasReais} etapa(s) sem datas reais — preencha na planilha ou use{' '}
-                <strong className="font-semibold">Copiar plan → real</strong> para ver a execução na linha do tempo.
-              </p>
-            ) : (
-              <p className="text-xs text-gray-500 dark:text-gray-400">
-                Resumo considera {resumo.totalEtapas} etapa(s) (subserviços quando existirem).
-              </p>
-            )}
-            <div className="flex shrink-0 flex-wrap gap-2 sm:justify-end">
-              <button
-                type="button"
-                onClick={distribuirPrazoGeral}
-                disabled={!dataInicioObra || !dataFimObra || distribuindoPrazo}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
-                title="Estima a duração de cada etapa (IA quando disponível) e distribui o prazo da obra em sequência"
-              >
-                {distribuindoPrazo ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-                ) : (
-                  <Calendar className="h-3.5 w-3.5" aria-hidden />
-                )}
-                {distribuindoPrazo ? 'Estimando prazos…' : 'Distribuir prazo geral'}
-              </button>
-              <button
-                type="button"
-                onClick={copiarPlanParaReal}
-                disabled={resumo.servicosComDatas === 0}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
-                title="Copia início/fim plan. para início/fim real de cada etapa"
-              >
-                <Copy className="h-3.5 w-3.5" aria-hidden />
-                Copiar plan → real
-              </button>
-            </div>
+          <div className="min-w-0">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Cronograma</h3>
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              Prazos e andamento da obra
+            </p>
           </div>
         </div>
+        <div className="flex flex-shrink-0 flex-wrap items-center gap-2 sm:justify-end">
+          <button
+            type="button"
+            onClick={abrirDistribuirPrazo}
+            disabled={distribuindoPrazo}
+            className={iconBtnCls}
+            title="Estima a duração de cada etapa (IA quando disponível) e distribui o prazo da obra em sequência"
+            aria-label={distribuindoPrazo ? 'Estimando prazos…' : 'Distribuir prazo'}
+          >
+            {distribuindoPrazo ? (
+              <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
+            ) : (
+              <Calendar className="h-4 w-4 shrink-0" aria-hidden />
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={copiarPlanParaReal}
+            disabled={resumo.servicosComDatas === 0}
+            className={iconBtnCls}
+            title="Copia início/fim plan. para início/fim real de cada etapa"
+            aria-label="Copiar plan → real"
+          >
+            <Copy className="h-4 w-4 shrink-0" aria-hidden />
+          </button>
+          {onExport ? (
+            <button
+              type="button"
+              onClick={onExport}
+              className={iconBtnCls}
+              title="Exportar cronograma (.xlsx)"
+              aria-label="Exportar cronograma"
+            >
+              <Download className="h-4 w-4 shrink-0" aria-hidden />
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => setShowCurvaSModal(true)}
+            className={iconBtnCls}
+            title="Abrir Curva S"
+            aria-label="Abrir Curva S"
+          >
+            <LineChart className="h-4 w-4 shrink-0" aria-hidden />
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode((m) => (m === 'tabela' ? 'timeline' : 'tabela'))}
+            className={iconBtnCls}
+            title={
+              viewMode === 'tabela'
+                ? 'Alternar para linha do tempo'
+                : 'Alternar para planilha'
+            }
+            aria-label={
+              viewMode === 'tabela'
+                ? 'Alternar para linha do tempo'
+                : 'Alternar para planilha'
+            }
+          >
+            {viewMode === 'tabela' ? (
+              <GanttChart className="h-4 w-4 shrink-0" aria-hidden />
+            ) : (
+              <Table2 className="h-4 w-4 shrink-0" aria-hidden />
+            )}
+          </button>
+        </div>
+      </div>
 
-        <CronogramaCurvaSPanel
-          linhas={linhas}
-          cronograma={cronograma}
-          dataInicioObra={dataInicioObra}
-          dataFimObra={dataFimObra}
-          hoje={agora}
-        />
+      <div className="rounded-lg border border-gray-200 bg-gray-50/60 px-3 py-3 dark:border-gray-700 dark:bg-gray-800/40 sm:px-4">
+        <div className="min-w-0 space-y-1">
+          {dataInicioObra || dataFimObra ? (
+            <p className="text-sm tabular-nums text-gray-700 dark:text-gray-300">
+              {formatDataBr(dataInicioObra) || '—'}
+              <span className="mx-1.5 text-gray-400 dark:text-gray-500" aria-hidden>
+                →
+              </span>
+              {formatDataBr(dataFimObra) || '—'}
+            </p>
+          ) : null}
+          {resumo.etapasSemDatasReais > 0 ? (
+            <p className="text-xs leading-relaxed text-amber-700 dark:text-amber-300/90">
+              {resumo.etapasSemDatasReais} etapa(s) sem datas reais — preencha na planilha ou use{' '}
+              <strong className="font-semibold">Copiar plan → real</strong> para ver a execução na linha do tempo.
+            </p>
+          ) : (
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              Resumo considera {resumo.totalEtapas} etapa(s) (subserviços quando existirem).
+            </p>
+          )}
+        </div>
+      </div>
 
         {viewMode === 'timeline' && timelineRange && timelineGridCols && (
-          <div className="w-full">
-            <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-gray-200 bg-gray-50/50 px-4 py-2 text-[10px] text-gray-500 dark:border-gray-700 dark:bg-gray-800/30 dark:text-gray-400">
-                <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-                  <span className="inline-flex items-center gap-1">
-                    <span className="h-2 w-3 rounded-sm bg-gray-400" /> Pendente
+          <div className="w-full overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700">
+                <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-gray-200 bg-gray-50/50 px-4 py-2.5 text-xs text-gray-600 dark:border-gray-700 dark:bg-gray-800/30 dark:text-gray-300">
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="h-2.5 w-3.5 rounded-sm bg-gray-400" /> Pendente
                   </span>
-                  <span className="inline-flex items-center gap-1">
-                    <span className="h-2 w-3 rounded-sm bg-sky-500" /> Em andamento
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="h-2.5 w-3.5 rounded-sm bg-sky-500" /> Em andamento
                   </span>
-                  <span className="inline-flex items-center gap-1">
-                    <span className="h-2 w-3 rounded-sm bg-green-500" /> Concluído
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="h-2.5 w-3.5 rounded-sm bg-green-500" /> Concluído
                   </span>
-                  <span className="inline-flex items-center gap-1">
-                    <span className="h-2 w-3 rounded-sm bg-red-500" /> Atrasado
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="h-2.5 w-3.5 rounded-sm bg-red-500" /> Atrasado
                   </span>
                   {mostrarPlanejamentoTimeline ? (
-                    <span className="inline-flex items-center gap-1">
-                      <span className="h-2 w-3 rounded-sm border border-dashed border-gray-400 bg-transparent dark:border-gray-500" />{' '}
+                    <span className="inline-flex items-center gap-1.5">
+                      <span className="h-2.5 w-3.5 rounded-sm border border-dashed border-gray-400 bg-transparent dark:border-gray-500" />{' '}
                       Planejamento
                     </span>
                   ) : null}
-                  <span className="inline-flex items-center gap-1">
-                    <span className="h-2 w-3 rounded-sm bg-sky-500/80" /> Execução (real)
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="h-2.5 w-3.5 rounded-sm bg-sky-500/80" /> Execução (real)
                   </span>
-                  <span className="inline-flex items-center gap-1">
-                    <span className="h-0.5 w-3 rounded-sm bg-red-500/70" aria-hidden /> Desvio (atraso)
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="h-0.5 w-3.5 rounded-sm bg-red-500/70" aria-hidden /> Desvio (atraso)
                   </span>
-                  <span className="inline-flex items-center gap-1">
-                    <span className="h-0.5 w-3 rounded-sm bg-green-500/70" aria-hidden /> Desvio (adiant.)
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="h-0.5 w-3.5 rounded-sm bg-green-500/70" aria-hidden /> Desvio (adiant.)
                   </span>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
@@ -918,15 +933,24 @@ export function OrcamentoCronogramaPainel({
                   <button
                     type="button"
                     onClick={() => setMostrarPlanejamentoTimeline((v) => !v)}
-                    className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 py-1 text-[10px] font-semibold text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                    className={iconBtnCls}
                     aria-pressed={mostrarPlanejamentoTimeline}
+                    title={
+                      mostrarPlanejamentoTimeline
+                        ? 'Ocultar planejamento'
+                        : 'Mostrar planejamento'
+                    }
+                    aria-label={
+                      mostrarPlanejamentoTimeline
+                        ? 'Ocultar planejamento'
+                        : 'Mostrar planejamento'
+                    }
                   >
                     {mostrarPlanejamentoTimeline ? (
-                      <EyeOff className="h-3 w-3" aria-hidden />
+                      <EyeOff className="h-4 w-4 shrink-0" aria-hidden />
                     ) : (
-                      <Eye className="h-3 w-3" aria-hidden />
+                      <Eye className="h-4 w-4 shrink-0" aria-hidden />
                     )}
-                    {mostrarPlanejamentoTimeline ? 'Ocultar planejamento' : 'Mostrar planejamento'}
                   </button>
                 </div>
               </div>
@@ -1203,9 +1227,10 @@ export function OrcamentoCronogramaPainel({
         )}
 
         {viewMode === 'tabela' && (
+          <div className="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700">
           <div className="table-scroll">
             <table className={`min-w-[72rem] w-full border-collapse table-fixed ${gradeTableCls}`}>
-              <thead className="sticky top-0 z-10 border-t-[0.5px] border-b border-gray-200/80 bg-gray-50 dark:border-gray-700/80 dark:bg-gray-800">
+              <thead className="sticky top-0 z-10 border-b border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-800">
                 <tr className={gradeTableRowTrCls}>
                   <th className={thServicoColCls}>Serviço</th>
                   <th className={thDateColCls}>Início Plan.</th>
@@ -1425,8 +1450,89 @@ export function OrcamentoCronogramaPainel({
               </tbody>
             </table>
           </div>
+          </div>
         )}
-      </section>
     </div>
+
+      {showCurvaSModal ? (
+        <AppModalOverlay className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setShowCurvaSModal(false)} />
+          <div className="relative mx-4 w-full max-w-3xl rounded-lg bg-white p-5 shadow-xl dark:bg-gray-800 sm:p-6">
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Curva S</h3>
+                <p className="text-sm text-gray-600 dark:text-gray-400">
+                  Avanço físico planejado vs real
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowCurvaSModal(false)}
+                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+                aria-label="Fechar"
+              >
+                <X className="h-4 w-4" aria-hidden />
+              </button>
+            </div>
+            <CronogramaCurvaSPanel
+              linhas={linhas}
+              cronograma={cronograma}
+              dataInicioObra={dataInicioObra}
+              dataFimObra={dataFimObra}
+              hoje={agora}
+              inModal
+            />
+          </div>
+        </AppModalOverlay>
+      ) : null}
+
+      <Modal
+        isOpen={showDataFimModal}
+        onClose={() => setShowDataFimModal(false)}
+        title="Data de fim da obra"
+        size="sm"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            Informe a data de fim para distribuir o prazo das etapas
+            {dataInicioObra ? (
+              <>
+                {' '}
+                (início em <strong className="font-semibold text-gray-900 dark:text-gray-100">{formatDataBr(dataInicioObra)}</strong>)
+              </>
+            ) : null}
+            .
+          </p>
+          <div>
+            <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+              Data de fim
+            </label>
+            <DatePickerField
+              value={draftDataFim}
+              onChange={setDraftDataFim}
+              placeholder="dd/mm/aaaa"
+              aria-label="Data de fim da obra"
+            />
+          </div>
+          <div className="flex items-center justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
+            <button
+              type="button"
+              onClick={() => setShowDataFimModal(false)}
+              className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={confirmarDataFimEDistribuir}
+              disabled={!draftDataFim.trim() || distribuindoPrazo}
+              className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 disabled:pointer-events-none disabled:opacity-50 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+            >
+              Distribuir prazo
+            </button>
+          </div>
+        </div>
+      </Modal>
+    </>
   );
 }

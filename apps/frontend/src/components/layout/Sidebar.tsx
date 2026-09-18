@@ -76,7 +76,6 @@ import {
   HelpCircle,
   Newspaper,
   Calculator,
-  Table2,
   ShieldCheck,
   type LucideIcon,
 } from 'lucide-react';
@@ -1154,6 +1153,14 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             section: 'Obras'
           },
           {
+            name: 'Cronogramas',
+            href: '/ponto/cronogramas',
+            icon: CalendarRange,
+            description: 'Cronogramas de obra por orçamento',
+            permission: isAdministrator || can(pk('/ponto/contratos')),
+            section: 'Obras'
+          },
+          {
             name: 'Caixinha',
             href: '/ponto/caixinha',
             icon: Wallet,
@@ -1175,14 +1182,6 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             icon: Wrench,
             description: 'Solicitar locação, renovação, devolução ou compra de equipamentos',
             permission: isAdministrator || can(pk('/ponto/solicitar-ferramentas')),
-            section: 'Obras'
-          },
-          {
-            name: 'Tabela SINAPI',
-            href: '/ponto/tabela-sinapi',
-            icon: Table2,
-            description: 'Consultar composições, insumos e analítico do SINAPI',
-            permission: isAdministrator || can(pk('/ponto/tabela-sinapi')),
             section: 'Obras'
           }
         ]

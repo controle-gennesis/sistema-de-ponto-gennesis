@@ -80,10 +80,9 @@ export type SubmitFuelRefuelReportInput = {
   observations?: string | null;
 };
 
-function initialStatusForVehicleType(vehicleType: FuelVehicleType): FuelRefuelRequestStatus {
-  return vehicleType === FuelVehicleType.PRIVATE
-    ? FuelRefuelRequestStatus.PENDING_MANAGER
-    : FuelRefuelRequestStatus.PENDING_SUPPLIES;
+function initialStatusForVehicleType(_vehicleType: FuelVehicleType): FuelRefuelRequestStatus {
+  // Particular e frota: ambos passam pelo gestor antes do Suprimentos.
+  return FuelRefuelRequestStatus.PENDING_MANAGER;
 }
 
 type FuelPhotoFields = {
@@ -281,9 +280,6 @@ export class FuelRefuelRequestService {
     if (row.status !== FuelRefuelRequestStatus.PENDING_MANAGER) {
       throw createError('Esta solicitação não está aguardando aprovação', 400);
     }
-    if (row.vehicleType !== FuelVehicleType.PRIVATE) {
-      throw createError('Apenas solicitações de veículo particular passam pelo gestor', 400);
-    }
 
     const updated = await prisma.fuelRefuelRequest.update({
       where: { id },
@@ -350,7 +346,6 @@ export class FuelRefuelRequestService {
     return prisma.fuelRefuelRequest.count({
       where: {
         status: FuelRefuelRequestStatus.PENDING_MANAGER,
-        vehicleType: FuelVehicleType.PRIVATE,
         ...contractScope,
       },
     });
@@ -529,12 +524,10 @@ export class FuelRefuelRequestService {
       params.phase === 'PENDING'
         ? {
             status: FuelRefuelRequestStatus.PENDING_MANAGER,
-            vehicleType: FuelVehicleType.PRIVATE,
           }
         : params.phase === 'APPROVED'
           ? {
               managerApprovedAt: { not: null },
-              vehicleType: FuelVehicleType.PRIVATE,
               status: {
                 notIn: [
                   FuelRefuelRequestStatus.REJECTED,
@@ -545,14 +538,12 @@ export class FuelRefuelRequestService {
             }
           : params.phase === 'REJECTED'
             ? {
-                vehicleType: FuelVehicleType.PRIVATE,
                 OR: [
                   { status: FuelRefuelRequestStatus.REJECTED },
                   { status: FuelRefuelRequestStatus.CANCELLED },
                 ],
               }
             : {
-                vehicleType: FuelVehicleType.PRIVATE,
                 OR: [
                   { status: FuelRefuelRequestStatus.PENDING_MANAGER },
                   {
