@@ -266,9 +266,10 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
   const {
     permissions,
     isLoading,
-    userPosition,
     user,
+    isAdministrator,
     can,
+    canAccessLicitacoesPage,
     canAccessDpApproverPages,
     canApproveFd,
     canApproveEspelhoNf,
@@ -391,11 +392,11 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
       nameKeys: fluigApproverNameKeys,
     });
     const canPrefetchGastos =
-      userPosition === 'Administrador' || can(GASTOS_OPERACIONAIS_MODULE_KEY);
+      isAdministrator || can(GASTOS_OPERACIONAIS_MODULE_KEY);
     const canPrefetchProcessos =
-      userPosition === 'Administrador' || can(FLUIG_PROCESSOS_MODULE_KEY);
+      isAdministrator || can(FLUIG_PROCESSOS_MODULE_KEY);
     const canPrefetchDp =
-      userPosition === 'Administrador' || can(FLUIG_DP_MODULE_KEY);
+      isAdministrator || can(FLUIG_DP_MODULE_KEY);
 
     const timer = setTimeout(() => {
       router.prefetch('/ponto/fluig/aprovacoes-workflow');
@@ -440,14 +441,12 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
     fluigApproverFullAccess,
     fluigApproverNameKeys,
     canAccessFluigApproversRoute,
-    userPosition,
+    isAdministrator,
     can,
     prefetchGastosOperacionais,
     prefetchFluigProcessDatasets,
   ]);
 
-  // Verificar se é administrador
-  const isAdministrator = userPosition === 'Administrador';
   const canSeeFuroEstoque =
     isAdministrator || can(pk('/ponto/furo-estoque'));
   const canSeeFuelSupplies =
@@ -1197,14 +1196,14 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             href: '/ponto/licitacoes',
             icon: ClipboardList,
             description: 'Acompanhar processos de licitação',
-            permission: isAdministrator || can(pk('/ponto/licitacoes'))
+            permission: canAccessLicitacoesPage,
           },
           {
             name: 'PNCP',
             href: '/ponto/licitacoes-pncp',
             icon: Search,
             description: 'Consultar publicações no Portal Nacional de Contratações',
-            permission: isAdministrator || can(pk('/ponto/licitacoes-pncp')),
+            permission: canAccessLicitacoesPage,
           },
           {
             name: 'Responsáveis Técnicos',

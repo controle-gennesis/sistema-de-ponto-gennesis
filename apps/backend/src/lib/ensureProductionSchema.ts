@@ -948,6 +948,14 @@ async function ensureLicitacaoColumns(prisma: PrismaClient): Promise<void> {
       AND "arquivadaMotivo" = 'encerrada'
       AND COALESCE("analiseJson"->>'arquivadaMotivo', '') = '';
   `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "licitacoes"
+    ADD COLUMN IF NOT EXISTS "analiseEtapa" TEXT NOT NULL DEFAULT 'em_analise';
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "licitacoes_analise_etapa_idx"
+    ON "licitacoes"("analiseEtapa");
+  `);
 }
 
 async function ensureLicitacaoConfigTable(prisma: PrismaClient): Promise<void> {

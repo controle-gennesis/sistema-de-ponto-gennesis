@@ -1,17 +1,27 @@
 import { v4 as uuidv4 } from 'uuid';
 import { getPrisma } from '../lib/prisma';
-import {
-  computeLicitacaoOrcamentoResult,
-  normalizeLicitacaoOrcamentoInputs,
-  type LicitacaoOrcamentoInputs,
-  type LicitacaoOrcamentoResult,
-} from '../lib/licitacaoOrcamentoCalc';
+
+export type LicitacaoOrcamentoAnexo = {
+  id: string;
+  name: string;
+  url: string;
+  mimeType: string;
+  size: number;
+  uploadedAt: string;
+};
+
+export type LicitacaoOrcamentoRegistro = {
+  mode: 'externo';
+  valor: number | null;
+  dataOrcamento: string;
+  observacao: string;
+  anexos: LicitacaoOrcamentoAnexo[];
+};
 
 export type LicitacaoOrcamentoRecord = {
   id: string;
   licitacaoId: string;
-  inputs: LicitacaoOrcamentoInputs;
-  result: LicitacaoOrcamentoResult;
+  registro: LicitacaoOrcamentoRegistro;
   createdBy: string | null;
   updatedBy: string | null;
   createdAt: string;
@@ -29,15 +39,76 @@ type DbRow = {
   updatedAt: Date;
 };
 
-function mapRow(row: DbRow): LicitacaoOrcamentoRecord {
-  const inputs = normalizeLicitacaoOrcamentoInputs(row.inputsJson);
-  const computed = computeLicitacaoOrcamentoResult(inputs);
+export function emptyOrcamentoRegistro(): LicitacaoOrcamentoRegistro {
+  return {
+    mode: 'externo',
+    valor: null,
+    dataOrcamento: '',
+    observacao: '',
+    anexos: [],
+  };
+}
 
+function asFiniteNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value.replace(/\./g, '').replace(',', '.'));
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+}
+
+function parseAnexos(raw: unknown): LicitacaoOrcamentoAnexo[] {
+  if (!Array.isArray(raw)) return [];
+  const anexos: LicitacaoOrcamentoAnexo[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const row = item as Record<string, unknown>;
+    const id = typeof row.id === 'string' ? row.id.trim() : '';
+    const name = typeof row.name === 'string' ? row.name.trim() : '';
+    const url = typeof row.url === 'string' ? row.url.trim() : '';
+    if (!id || !name || !url) continue;
+    anexos.push({
+      id,
+      name,
+      url,
+      mimeType: typeof row.mimeType === 'string' ? row.mimeType : 'application/octet-stream',
+      size: typeof row.size === 'number' && Number.isFinite(row.size) ? row.size : 0,
+      uploadedAt:
+        typeof row.uploadedAt === 'string' && row.uploadedAt.trim()
+          ? row.uploadedAt
+          : new Date().toISOString(),
+    });
+  }
+  return anexos;
+}
+
+export function normalizeOrcamentoRegistro(raw: unknown): LicitacaoOrcamentoRegistro {
+  const base = emptyOrcamentoRegistro();
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return base;
+  const row = raw as Record<string, unknown>;
+  const isExterno =
+    row.mode === 'externo' ||
+    Array.isArray(row.anexos) ||
+    typeof row.dataOrcamento === 'string' ||
+    typeof row.observacao === 'string';
+  if (!isExterno) return base;
+
+  const valor = asFiniteNumber(row.valor);
+  return {
+    mode: 'externo',
+    valor: valor != null && valor >= 0 ? valor : null,
+    dataOrcamento: typeof row.dataOrcamento === 'string' ? row.dataOrcamento.trim() : '',
+    observacao: typeof row.observacao === 'string' ? row.observacao : '',
+    anexos: parseAnexos(row.anexos),
+  };
+}
+
+function mapRow(row: DbRow): LicitacaoOrcamentoRecord {
   return {
     id: row.id,
     licitacaoId: row.licitacaoId,
-    inputs,
-    result: computed,
+    registro: normalizeOrcamentoRegistro(row.inputsJson),
     createdBy: row.createdBy,
     updatedBy: row.updatedBy,
     createdAt: row.createdAt.toISOString(),
@@ -69,15 +140,14 @@ export async function getLicitacaoOrcamentoByLicitacaoId(
 
 export async function upsertLicitacaoOrcamento(params: {
   licitacaoId: string;
-  inputs: unknown;
+  registro: LicitacaoOrcamentoRegistro;
   userId: string;
 }): Promise<LicitacaoOrcamentoRecord> {
   const prisma = getPrisma();
-  const inputs = normalizeLicitacaoOrcamentoInputs(params.inputs);
-  const result = computeLicitacaoOrcamentoResult(inputs);
+  const registro = normalizeOrcamentoRegistro(params.registro);
   const now = new Date();
-  const inputsJson = JSON.stringify(inputs);
-  const resultJson = JSON.stringify(result);
+  const inputsJson = JSON.stringify(registro);
+  const resultJson = JSON.stringify({ valor: registro.valor });
   const existing = await getLicitacaoOrcamentoByLicitacaoId(params.licitacaoId);
 
   if (existing) {

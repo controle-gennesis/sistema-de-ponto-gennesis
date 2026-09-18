@@ -378,6 +378,8 @@ type FormMultiFileFieldProps = {
   onChange: (value: string) => void;
   mode: 'attachment' | 'image';
   disabled?: boolean;
+  /** Só visualizar/baixar — sem enviar, adicionar ou remover. */
+  readOnly?: boolean;
   placeholder?: string;
 };
 
@@ -386,6 +388,7 @@ export function FormMultiFileField({
   onChange,
   mode,
   disabled = false,
+  readOnly = false,
   placeholder,
 }: FormMultiFileFieldProps) {
   const [dragOver, setDragOver] = useState(false);
@@ -400,7 +403,7 @@ export function FormMultiFileField({
   };
 
   const addFiles = async (list: FileList | File[] | null) => {
-    if (disabled || busy || !list?.length) return;
+    if (disabled || readOnly || busy || !list?.length) return;
     const incoming = Array.from(list).filter((file) =>
       isImage ? isImageMime(file.type, file.name) : true
     );
@@ -450,28 +453,32 @@ export function FormMultiFileField({
     (isImage ? 'Clique ou arraste imagens' : 'Clique ou arraste arquivos');
   const hint = isImage ? 'PNG, JPG, WEBP…' : 'PDF, DOC, planilhas, imagens…';
   const accept = isImage ? 'image/*' : undefined;
-  const blocked = disabled || busy;
+  const mutateBlocked = disabled || readOnly || busy;
+  const viewBlocked = disabled || busy;
 
   return (
     <div className="space-y-2">
       {files.length === 0 ? (
+        readOnly ? (
+          <p className="text-sm text-gray-500 dark:text-gray-400">Nenhum arquivo anexado.</p>
+        ) : (
         <label
           onDragOver={(e) => {
             e.preventDefault();
-            if (!blocked) setDragOver(true);
+            if (!mutateBlocked) setDragOver(true);
           }}
           onDragLeave={() => setDragOver(false)}
           onDrop={(e) => {
             e.preventDefault();
             setDragOver(false);
-            if (blocked) return;
+            if (mutateBlocked) return;
             void addFiles(e.dataTransfer.files);
           }}
           className={`flex cursor-pointer flex-col items-center justify-center gap-1.5 rounded-lg border-2 border-dashed px-4 py-5 text-center transition-colors ${
             dragOver
               ? 'border-red-500 bg-red-50 dark:bg-red-950/40'
               : 'border-gray-300 bg-white hover:border-gray-400 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:hover:border-gray-500 dark:hover:bg-gray-700/80'
-          } ${blocked ? 'pointer-events-none opacity-60' : ''}`}
+          } ${mutateBlocked ? 'pointer-events-none opacity-60' : ''}`}
         >
           {busy ? (
             <Loader2 className="h-7 w-7 animate-spin text-red-600 dark:text-red-400" />
@@ -489,13 +496,14 @@ export function FormMultiFileField({
             multiple
             accept={accept}
             className="hidden"
-            disabled={blocked}
+            disabled={mutateBlocked}
             onChange={(e) => {
               void addFiles(e.target.files);
               e.currentTarget.value = '';
             }}
           />
         </label>
+        )
       ) : (
         <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3">
           {files.map((file) => (
@@ -512,11 +520,15 @@ export function FormMultiFileField({
               >
                 {file.name}
               </p>
-              <div className="absolute right-1.5 top-1.5 flex items-center gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
+              <div
+                className={`absolute right-1.5 top-1.5 flex items-center gap-1 transition-opacity ${
+                  readOnly ? 'opacity-100' : 'opacity-100 sm:opacity-0 sm:group-hover:opacity-100'
+                }`}
+              >
                 <button
                   type="button"
                   onClick={() => openFileInNewTab(file)}
-                  disabled={blocked}
+                  disabled={viewBlocked}
                   title="Ver"
                   aria-label={`Ver ${file.name}`}
                   className={cardActionBtnCls}
@@ -526,31 +538,33 @@ export function FormMultiFileField({
                 <button
                   type="button"
                   onClick={() => downloadFormFile(file)}
-                  disabled={blocked}
+                  disabled={viewBlocked}
                   title="Baixar"
                   aria-label={`Baixar ${file.name}`}
                   className={cardActionBtnCls}
                 >
                   <Download className="h-3.5 w-3.5" />
                 </button>
+                {!readOnly ? (
                 <button
                   type="button"
                   onClick={() => removeAt(file.id)}
-                  disabled={blocked}
+                  disabled={mutateBlocked}
                   title="Remover"
                   aria-label={`Remover ${file.name}`}
                   className={`${cardActionBtnCls} hover:bg-red-600`}
                 >
                   <X className="h-3.5 w-3.5" />
                 </button>
+                ) : null}
               </div>
             </li>
           ))}
-          {!disabled ? (
+          {!disabled && !readOnly ? (
             <li>
               <label
                 className={`flex h-full min-h-[7.5rem] cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-gray-300 bg-gray-50 text-gray-500 transition-colors hover:border-gray-400 hover:bg-gray-100 dark:border-gray-600 dark:bg-gray-900/40 dark:hover:bg-gray-800 ${
-                  blocked ? 'pointer-events-none opacity-60' : ''
+                  mutateBlocked ? 'pointer-events-none opacity-60' : ''
                 }`}
               >
                 {busy ? (
@@ -564,7 +578,7 @@ export function FormMultiFileField({
                   multiple
                   accept={accept}
                   className="hidden"
-                  disabled={blocked}
+                  disabled={mutateBlocked}
                   onChange={(e) => {
                     void addFiles(e.target.files);
                     e.currentTarget.value = '';

@@ -11,6 +11,7 @@ import {
   FileText,
   Video,
   ExternalLink,
+  Download,
 } from 'lucide-react';
 import { Modal, useModalRequestClose } from '@/components/ui/Modal';
 import { ModalCloseConfirm } from '@/components/ui/ModalCloseConfirm';
@@ -27,6 +28,7 @@ import {
   FormMultiFileField,
   isBlankFormFileValue,
 } from '@/components/forms/FormMultiFileField';
+import { downloadUploadFile } from '@/lib/downloadUploadFile';
 import { FormStepsStepper } from '@/components/forms/FormStepsStepper';
 import { FORM_FIELD_INPUT_CLS, FORM_FIELD_TEXTAREA_CLS } from '@/lib/formFieldUi';
 import {
@@ -412,9 +414,10 @@ function QuestionField({
   const sliderFill = `calc((100% - ${thumbPx}px) * ${sliderPct / 100} + ${thumbPx / 2}px)`;
   const locked = isQuestionReadOnly(normalizedQuestion) || formReadOnly;
   const displayValue = hasFormula ? computedValue : value;
+  const isFileField = question.type === 'attachment' || question.type === 'image';
 
   return (
-    <div className={locked ? 'pointer-events-none' : undefined}>
+    <div className={locked && !isFileField ? 'pointer-events-none' : undefined}>
       <FieldLabel required={normalizedQuestion.required && !formReadOnly}>{normalizedQuestion.title}</FieldLabel>
 
       {normalizedQuestion.type === 'sim_nao' && (
@@ -613,6 +616,7 @@ function QuestionField({
           value={typeof value === 'string' ? value : ''}
           onChange={(v) => setValue(v)}
           placeholder={question.placeholder}
+          readOnly={locked}
         />
       )}
       {question.type === 'table' && (
@@ -728,6 +732,7 @@ function ReuniaoAnexosSection({
   readOnly?: boolean;
 }) {
   const [uploading, setUploading] = useState<'ata' | 'video' | null>(null);
+  const [downloading, setDownloading] = useState<'ata' | 'video' | null>(null);
   const ataInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
   const apiBase = `/reunioes/${contractId}/${kind}/${reuniaoId}`;
@@ -751,6 +756,29 @@ function ReuniaoAnexosSection({
       setUploading(null);
       if (tipo === 'ata' && ataInputRef.current) ataInputRef.current.value = '';
       if (tipo === 'video' && videoInputRef.current) videoInputRef.current.value = '';
+    }
+  };
+
+  const handleDownload = async (tipo: 'ata' | 'video', info: ReuniaoAnexoInfo) => {
+    if (!info.url) return;
+    setDownloading(tipo);
+    try {
+      await downloadUploadFile(info.url, info.originalName || (tipo === 'ata' ? 'ata' : 'video'));
+    } catch {
+      try {
+        const a = document.createElement('a');
+        a.href = info.url;
+        a.download = info.originalName || (tipo === 'ata' ? 'ata' : 'video');
+        a.rel = 'noopener';
+        a.target = '_blank';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      } catch {
+        toast.error('Não foi possível baixar o arquivo.');
+      }
+    } finally {
+      setDownloading(null);
     }
   };
 
@@ -789,6 +817,19 @@ function ReuniaoAnexosSection({
             <ExternalLink className="h-4 w-4" />
             {info.originalName || (tipo === 'ata' ? 'Ata' : 'Vídeo')}
           </a>
+          <button
+            type="button"
+            onClick={() => void handleDownload(tipo, info)}
+            disabled={downloading === tipo}
+            className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60 dark:text-gray-200 dark:hover:bg-gray-800"
+          >
+            {downloading === tipo ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Download className="h-4 w-4" />
+            )}
+            Baixar
+          </button>
           {!readOnly ? (
                 <button
                   type="button"

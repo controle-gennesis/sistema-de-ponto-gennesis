@@ -9,11 +9,20 @@ export type BancoCatsPdfServico = {
   fonte?: string;
 };
 
+export type BancoCatsPdfStatus =
+  | 'habilita'
+  | 'nao-habilita'
+  | 'compativel'
+  | 'conferencia-detalhada'
+  | 'sem-correspondencia';
+
 export type BancoCatsPdfQuadrante = {
   index: number;
   query: string;
   somaQuant: number;
   somaQuantFormatada: string;
+  status: BancoCatsPdfStatus;
+  statusLabel: string;
   servicos: BancoCatsPdfServico[];
 };
 
@@ -30,6 +39,16 @@ const BORDER: [number, number, number] = [209, 213, 219];
 const TEXT_BLACK: [number, number, number] = [17, 24, 39];
 const TEXT_MUTED: [number, number, number] = [75, 85, 99];
 const TEXT_GREEN: [number, number, number] = [22, 101, 52];
+const TEXT_AMBER: [number, number, number] = [180, 83, 9];
+const TEXT_BLUE: [number, number, number] = [29, 78, 216];
+
+function statusColor(status: BancoCatsPdfStatus): [number, number, number] {
+  if (status === 'habilita') return TEXT_GREEN;
+  if (status === 'conferencia-detalhada') return TEXT_AMBER;
+  if (status === 'nao-habilita') return BRAND_RED;
+  if (status === 'compativel') return TEXT_BLUE;
+  return TEXT_MUTED;
+}
 
 const COMPANY = 'Gennesis Engenharia e Consultoria LTDA';
 const FOOTER_RESERVE = 14;
@@ -124,11 +143,6 @@ export async function exportBancoCatsSelecaoPdf(
   let y = drawHeader(doc, logo, generatedAt);
 
   const totalItens = quadrantes.reduce((sum, q) => sum + q.servicos.length, 0);
-  const somaGeral = quadrantes.reduce((sum, q) => sum + q.somaQuant, 0);
-  const somaGeralFmt = somaGeral.toLocaleString('pt-BR', {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 4,
-  });
 
   y = ensureSpace(doc, y, 14);
   doc.setFillColor(236, 253, 245);
@@ -138,7 +152,7 @@ export async function exportBancoCatsSelecaoPdf(
   doc.setFontSize(9);
   doc.setTextColor(...TEXT_GREEN);
   doc.text(
-    `${quadrantes.length} quadrante(s) · ${totalItens} serviço(s) marcado(s) · Soma geral QUANT.: ${somaGeralFmt}`,
+    `${quadrantes.length} quadrante(s) · ${totalItens} serviço(s) marcado(s)`,
     MARGIN + 4,
     y + 7.5
   );
@@ -152,7 +166,7 @@ export async function exportBancoCatsSelecaoPdf(
   for (const quadrante of quadrantes) {
     const queryLines = doc.splitTextToSize(
       quadrante.query.trim() || '—',
-      contentW - 8
+      contentW - 62
     ) as string[];
     const queryBlockH = Math.min(queryLines.length, 4) * 4 + 4;
     const headerBlockH = 10 + queryBlockH + 8;
@@ -170,11 +184,16 @@ export async function exportBancoCatsSelecaoPdf(
 
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(9);
+    doc.setTextColor(...statusColor(quadrante.status));
+    doc.text(quadrante.statusLabel, pageWidth - MARGIN - 4, y + 6, { align: 'right' });
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
     doc.setTextColor(...TEXT_GREEN);
     doc.text(
       `Soma QUANT.: ${quadrante.somaQuantFormatada} (${quadrante.servicos.length})`,
       pageWidth - MARGIN - 4,
-      y + 6,
+      y + 11,
       { align: 'right' }
     );
 

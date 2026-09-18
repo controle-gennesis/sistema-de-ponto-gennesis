@@ -484,11 +484,33 @@ app.patch('/api/licitacoes/:id/arquivar', authenticate, (req, res, next) =>
 app.patch('/api/licitacoes/:id/desarquivar', authenticate, (req, res, next) =>
   licitacaoExtraCtrl.desarquivarAnalise(req as AuthRequest, res, next)
 );
+app.patch('/api/licitacoes/:id/enviar-arquivo', authenticate, (req, res, next) =>
+  licitacaoExtraCtrl.enviarParaArquivo(req as AuthRequest, res, next)
+);
+app.patch('/api/licitacoes/:id/status-selecionado', authenticate, (req, res, next) =>
+  licitacaoExtraCtrl.setStatusSelecionado(req as AuthRequest, res, next)
+);
+app.patch('/api/licitacoes/:id/analise-etapa', authenticate, (req, res, next) =>
+  licitacaoExtraCtrl.setAnaliseEtapa(req as AuthRequest, res, next)
+);
 app.get('/api/licitacoes/:id/orcamento', authenticate, (req, res, next) =>
   licitacaoExtraCtrl.getOrcamento(req as AuthRequest, res, next)
 );
 app.put('/api/licitacoes/:id/orcamento', authenticate, (req, res, next) =>
   licitacaoExtraCtrl.saveOrcamento(req as AuthRequest, res, next)
+);
+app.post('/api/licitacoes/:id/orcamento/anexo', authenticate, (req, res, next) => {
+  licitacaoExtraCtrl.uploadMiddleware(req, res, (err: unknown) => {
+    if (err) {
+      const msg = err instanceof Error ? err.message : 'Erro no upload';
+      res.status(400).json({ success: false, message: msg });
+      return;
+    }
+    void licitacaoExtraCtrl.uploadOrcamentoAnexo(req as AuthRequest, res, next);
+  });
+});
+app.delete('/api/licitacoes/:id/orcamento/anexo/:anexoId', authenticate, (req, res, next) =>
+  licitacaoExtraCtrl.removeOrcamentoAnexo(req as AuthRequest, res, next)
 );
 app.get('/api/licitacoes/planilha-regioes', authenticate, (req, res, next) =>
   licitacaoExtraCtrl.listRegiaoTabs(req as AuthRequest, res, next)

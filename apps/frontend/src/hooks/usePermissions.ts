@@ -33,6 +33,19 @@ function resolveEmployeeDepartment(user: { employee?: { department?: string | nu
   return undefined;
 }
 
+function normalizeDepartmentLabel(value?: string | null): string {
+  return (value || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
+
+/** Mesma regra do backend (`position` case-insensitive). */
+function isAdministratorPosition(position?: string | null): boolean {
+  return normalizeDepartmentLabel(position) === 'administrador';
+}
+
 export function usePermissions() {
   const queryClient = useQueryClient();
 
@@ -102,7 +115,7 @@ export function usePermissions() {
   const user = userData?.data;
   const userPosition = user?.employee?.position;
   const userDepartment = resolveEmployeeDepartment(user);
-  const isAdministrator = userPosition === 'Administrador';
+  const isAdministrator = isAdministratorPosition(userPosition);
 
   const { data: permissionData, isPending: permissionsPending } = useQuery({
     // Isola cache por usuário — evita flash de permissões do login anterior
@@ -194,6 +207,10 @@ export function usePermissions() {
     if (isAdministrator || permissionData?.isAdmin) return true;
     return allowedActionSet.has(`${moduleKey}:${action}`);
   };
+  /** Acesso ao módulo: `acesso` (coluna Ver) ou qualquer ação granular gravada. */
+  const canAccessModule = (moduleKey: string) =>
+    can(moduleKey) ||
+    PERMISSION_MODULE_CRUD_ACTIONS.some((action) => canAction(moduleKey, action));
 
   /** Acesso a um contrato específico (requer módulo Contratos + autorização explícita). */
   const canAccessContract = (contractId: string) => {
@@ -216,6 +233,11 @@ export function usePermissions() {
   const isDepartmentJuridico =
     userDepartment?.toLowerCase().includes('jurídico') ||
     userDepartment?.toLowerCase().includes('juridico');
+
+  const contratosLicitacoesDept = normalizeDepartmentLabel(userDepartment);
+  const isDepartmentContratosLicitacoes =
+    contratosLicitacoesDept.includes('contratos e licitacoes') ||
+    contratosLicitacoesDept.includes('licitacao');
 
   const isDepartmentSocios = isSociosDepartment(userDepartment);
   /**
@@ -454,6 +476,18 @@ export function usePermissions() {
     can(relatoriosContratoKey) ||
     PERMISSION_MODULE_CRUD_ACTIONS.some((action) => canAction(relatoriosContratoKey, action));
 
+  const licitacoesKey = pk('/ponto/licitacoes');
+  const licitacoesPncpKey = pk('/ponto/licitacoes-pncp');
+  /**
+   * Licitações / Banco CATs: matriz Acesso, coluna Ver, ou setor «Contratos e Licitações».
+   * PNCP entra na mesma família (consulta pública do mesmo time).
+   */
+  const canAccessLicitacoesPage =
+    isElevatedUser ||
+    isDepartmentContratosLicitacoes ||
+    canAccessModule(licitacoesKey) ||
+    canAccessModule(licitacoesPncpKey);
+
   const canAccessContractOrdemServicoTab = (contractId: string) => {
     if (isElevatedUser) return true;
     return (
@@ -526,6 +560,7 @@ export function usePermissions() {
     isDepartmentContabil,
     isDepartmentCompras,
     isDepartmentJuridico,
+    isDepartmentContratosLicitacoes,
     isDepartmentSocios,
     canAccessCollaborationTools,
     permissions: finalPermissions,
@@ -573,6 +608,7 @@ export function usePermissions() {
     canAccessOsRoutePage,
     canAccessRecebimentoEntregasRoutePage,
     canAccessRelatoriosContratoPage,
+    canAccessLicitacoesPage,
     canAccessContractOrcamentoTab,
     canAccessContractRelatoriosTab,
     canAccessContractReunioesTab,
@@ -623,10 +659,13 @@ export function useRoutePermission(route: string) {
     canApproveFd,
     canApproveFuel,
     canApproveEspelhoNf,
+    canApproveOc,
+    canApproveMaterialRequests,
     canAccessOrcamentoRoutePage,
     canAccessOsRoutePage,
     canAccessRecebimentoEntregasRoutePage,
     canAccessRelatoriosContratoPage,
+    canAccessLicitacoesPage,
     fluigApproverNameKeys,
     canAccessFluigApproversRoute,
   } = usePermissions();
@@ -757,8 +796,8 @@ export function useRoutePermission(route: string) {
       isAdministrator || can(pk('/ponto/espelho-nf/contas-bancarias')),
     '/ponto/codigos-tributarios':
       isAdministrator || can(pk('/ponto/espelho-nf/codigos-tributarios')),
-    '/ponto/licitacoes': isAdministrator || can(pk('/ponto/licitacoes')),
-    '/ponto/licitacoes-pncp': isAdministrator || can(pk('/ponto/licitacoes-pncp')),
+    '/ponto/licitacoes': canAccessLicitacoesPage,
+    '/ponto/licitacoes-pncp': canAccessLicitacoesPage,
     '/ponto/responsaveis-tecnicos': isAdministrator || can(pk('/ponto/responsaveis-tecnicos')),
     '/ponto/controle-anuidade': isAdministrator || can(pk('/ponto/controle-anuidade')),
     '/ponto/controle-pagamentos-art': isAdministrator || can(pk('/ponto/controle-pagamentos-art')),

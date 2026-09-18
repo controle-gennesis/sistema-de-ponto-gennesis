@@ -1,56 +1,36 @@
-import {
-  applyCategoryTotalsFromLines,
-  buildCustoDiretoFormula,
-  computeLicitacaoOrcamentoResult,
-  emptyLicitacaoOrcamentoInputs,
-  normalizeLicitacaoOrcamentoInputs,
-  templateToLines,
-} from '../lib/licitacaoOrcamentoCalc';
+import { v4 as uuidv4 } from 'uuid';
 import { licitacaoService } from './LicitacaoService';
+import { savePersistentUpload, deletePersistentUpload } from '../lib/persistentUpload';
 import {
-  getLicitacaoOrcamentoLineTemplate,
-  saveLicitacaoOrcamentoLineTemplate,
-} from './licitacaoOrcamentoLineTemplateService';
-import {
+  emptyOrcamentoRegistro,
   getLicitacaoOrcamentoByLicitacaoId,
+  normalizeOrcamentoRegistro,
   upsertLicitacaoOrcamento,
+  type LicitacaoOrcamentoAnexo,
   type LicitacaoOrcamentoRecord,
+  type LicitacaoOrcamentoRegistro,
 } from './licitacaoOrcamentoStore';
+
+const UPLOAD_FOLDER = 'licitacao-orcamentos';
+const MAX_FILE_SIZE = 15 * 1024 * 1024;
 
 function assertLicitacaoLiberadaParaOrcamento(licitacao: {
   arquivada?: boolean | null;
   arquivadaMotivo?: string | null;
 }) {
   if (licitacao.arquivada !== true || licitacao.arquivadaMotivo !== 'orcamento') {
-    throw new Error(
-      'Orçamento liberado apenas para licitações com status Orçamento.'
-    );
+    throw new Error('Orçamento liberado apenas para licitações com status Orçamento.');
   }
 }
 
-function migrateLegacyTotalsToLines(
-  inputs: ReturnType<typeof emptyLicitacaoOrcamentoInputs>
-): ReturnType<typeof emptyLicitacaoOrcamentoInputs> {
-  if (inputs.lines.length > 0) return inputs;
-
-  const legacy: Array<{ category: typeof inputs.lines[number]['category']; amount: number; label: string }> = [
-    { category: 'pessoal', amount: inputs.gastoPessoal, label: 'Pessoal' },
-    { category: 'material', amount: inputs.gastoMaterial, label: 'Material' },
-    { category: 'sistemas', amount: inputs.gastoSistemas, label: 'Sistemas' },
-    { category: 'administrativo', amount: inputs.gastoAdministrativo, label: 'Administrativo' },
-    { category: 'outros', amount: inputs.gastoOutros, label: 'Outros' },
-  ];
-
-  const lines = legacy
-    .filter((item) => item.amount !== 0)
-    .map((item, index) => ({
-      id: `legacy-${item.category}-${index + 1}`,
-      category: item.category,
-      description: item.label,
-      amount: item.amount,
-    }));
-
-  return { ...inputs, lines };
+function registroFromBody(raw: unknown, current: LicitacaoOrcamentoRegistro): LicitacaoOrcamentoRegistro {
+  const parsed = normalizeOrcamentoRegistro(
+    raw && typeof raw === 'object' ? { ...current, ...(raw as object), mode: 'externo' } : current
+  );
+  return {
+    ...parsed,
+    anexos: current.anexos,
+  };
 }
 
 export async function getOrCreateLicitacaoOrcamentoView(
@@ -62,43 +42,13 @@ export async function getOrCreateLicitacaoOrcamentoView(
 
   const existing = await getLicitacaoOrcamentoByLicitacaoId(licitacaoId);
   if (existing) {
-    const inputs = applyCategoryTotalsFromLines(migrateLegacyTotalsToLines(existing.inputs));
-    const result = computeLicitacaoOrcamentoResult(inputs);
-    return { ...existing, inputs, result, draft: false };
+    return { ...existing, draft: false };
   }
 
-  const inputs = emptyLicitacaoOrcamentoInputs();
-  const template = await getLicitacaoOrcamentoLineTemplate();
-  if (template.expenseTypes.length > 0) {
-    inputs.expenseTypes = template.expenseTypes;
-    inputs.formulas = {
-      ...inputs.formulas,
-      custo_direto_total: buildCustoDiretoFormula(template.expenseTypes),
-    };
-  }
-  if (template.lines.length > 0) {
-    inputs.lines = templateToLines(template.lines);
-  }
-
-  if (licitacao.valorEstimado) {
-    const parsed = Number(
-      String(licitacao.valorEstimado)
-        .replace(/[R$\s]/g, '')
-        .replace(/\./g, '')
-        .replace(',', '.')
-    );
-    if (Number.isFinite(parsed) && parsed > 0) {
-      inputs.precoReferenciaEdital = parsed;
-    }
-  }
-
-  const withTotals = applyCategoryTotalsFromLines(inputs);
-  const result = computeLicitacaoOrcamentoResult(withTotals);
   return {
     id: '',
     licitacaoId,
-    inputs: withTotals,
-    result,
+    registro: emptyOrcamentoRegistro(),
     createdBy: null,
     updatedBy: null,
     createdAt: new Date().toISOString(),
@@ -109,79 +59,99 @@ export async function getOrCreateLicitacaoOrcamentoView(
 
 export async function saveLicitacaoOrcamentoForLicitacao(params: {
   licitacaoId: string;
-  inputs: unknown;
+  registro: unknown;
   userId: string;
 }): Promise<LicitacaoOrcamentoRecord & { draft: boolean }> {
   const licitacao = await licitacaoService.getById(params.licitacaoId);
   if (!licitacao) throw new Error('Licitação não encontrada');
   assertLicitacaoLiberadaParaOrcamento(licitacao);
 
-  const normalized = applyCategoryTotalsFromLines(
-    normalizeLicitacaoOrcamentoInputs(params.inputs)
-  );
-
-  // Estrutura de linhas e tipos de gasto vira padrão para orçamentos futuros.
-  await saveLicitacaoOrcamentoLineTemplate({
-    expenseTypes: normalized.expenseTypes,
-    lines: normalized.lines,
-  });
+  const existing = await getLicitacaoOrcamentoByLicitacaoId(params.licitacaoId);
+  const current = existing?.registro ?? emptyOrcamentoRegistro();
+  const registro = registroFromBody(params.registro, current);
 
   const saved = await upsertLicitacaoOrcamento({
     licitacaoId: params.licitacaoId,
-    inputs: normalized,
+    registro,
     userId: params.userId,
   });
 
   return { ...saved, draft: false };
 }
 
-export async function getOrcamentoLineTemplate() {
-  return getLicitacaoOrcamentoLineTemplate();
+export async function addLicitacaoOrcamentoAnexo(params: {
+  licitacaoId: string;
+  userId: string;
+  file: { buffer: Buffer; originalname: string; mimetype: string; size: number };
+}): Promise<LicitacaoOrcamentoRecord & { draft: boolean }> {
+  const licitacao = await licitacaoService.getById(params.licitacaoId);
+  if (!licitacao) throw new Error('Licitação não encontrada');
+  assertLicitacaoLiberadaParaOrcamento(licitacao);
+
+  if (!params.file.buffer?.length) throw new Error('Selecione um arquivo');
+  if (params.file.size > MAX_FILE_SIZE) throw new Error('Arquivo muito grande. Máximo: 15 MB');
+
+  const savedFile = await savePersistentUpload({
+    folder: UPLOAD_FOLDER,
+    buffer: params.file.buffer,
+    originalName: params.file.originalname,
+    mimeType: params.file.mimetype,
+    includeSafeOriginalName: true,
+  });
+
+  const anexo: LicitacaoOrcamentoAnexo = {
+    id: uuidv4(),
+    name: params.file.originalname || savedFile.fileName,
+    url: savedFile.url,
+    mimeType: params.file.mimetype || 'application/octet-stream',
+    size: params.file.size,
+    uploadedAt: new Date().toISOString(),
+  };
+
+  const existing = await getLicitacaoOrcamentoByLicitacaoId(params.licitacaoId);
+  const registro = existing?.registro ?? emptyOrcamentoRegistro();
+  const saved = await upsertLicitacaoOrcamento({
+    licitacaoId: params.licitacaoId,
+    registro: { ...registro, anexos: [...registro.anexos, anexo] },
+    userId: params.userId,
+  });
+
+  return { ...saved, draft: false };
 }
 
-export async function putOrcamentoLineTemplate(raw: unknown) {
-  const payload =
-    raw && typeof raw === 'object' && !Array.isArray(raw)
-      ? (raw as Record<string, unknown>)
-      : { lines: raw, expenseTypes: [] };
+export async function removeLicitacaoOrcamentoAnexo(params: {
+  licitacaoId: string;
+  anexoId: string;
+  userId: string;
+}): Promise<LicitacaoOrcamentoRecord & { draft: boolean }> {
+  const licitacao = await licitacaoService.getById(params.licitacaoId);
+  if (!licitacao) throw new Error('Licitação não encontrada');
+  assertLicitacaoLiberadaParaOrcamento(licitacao);
 
-  const expenseTypesRaw = Array.isArray(payload.expenseTypes) ? payload.expenseTypes : [];
-  const linesRaw = Array.isArray(payload.lines)
-    ? payload.lines
-    : Array.isArray(raw)
-      ? raw
-      : [];
+  const existing = await getLicitacaoOrcamentoByLicitacaoId(params.licitacaoId);
+  if (!existing) throw new Error('Orçamento não encontrado');
 
-  return saveLicitacaoOrcamentoLineTemplate({
-    expenseTypes: expenseTypesRaw.map((item, index) => {
-      const row = (item ?? {}) as Record<string, unknown>;
-      const id =
-        typeof row.id === 'string' && row.id.trim()
-          ? row.id.trim().toLowerCase().replace(/[^a-z0-9_]/g, '_')
-          : `gasto_${index + 1}`;
-      return {
-        id,
-        label:
-          typeof row.label === 'string' && row.label.trim()
-            ? row.label.trim()
-            : id,
-        builtin: row.builtin === true,
-      };
-    }),
-    lines: linesRaw.map((item, index) => {
-      const row = (item ?? {}) as Record<string, unknown>;
-      return {
-        id:
-          typeof row.id === 'string' && row.id.trim()
-            ? row.id.trim()
-            : `line-${index + 1}`,
-        category:
-          typeof row.category === 'string' && row.category.trim()
-            ? row.category.trim().toLowerCase().replace(/[^a-z0-9_]/g, '_')
-            : 'outros',
-        description: typeof row.description === 'string' ? row.description : '',
-        amount: 0,
-      };
-    }),
+  const anexo = existing.registro.anexos.find((item) => item.id === params.anexoId);
+  if (!anexo) throw new Error('Anexo não encontrado');
+
+  const saved = await upsertLicitacaoOrcamento({
+    licitacaoId: params.licitacaoId,
+    registro: {
+      ...existing.registro,
+      anexos: existing.registro.anexos.filter((item) => item.id !== params.anexoId),
+    },
+    userId: params.userId,
   });
+
+  await deletePersistentUpload(anexo.url);
+
+  return { ...saved, draft: false };
+}
+
+export async function getOrcamentoLineTemplate() {
+  return { expenseTypes: [], lines: [] };
+}
+
+export async function putOrcamentoLineTemplate(_raw: unknown) {
+  return { expenseTypes: [], lines: [] };
 }

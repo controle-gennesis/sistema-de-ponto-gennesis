@@ -1,17 +1,20 @@
 'use client';
 
-import React, { useDeferredValue, useEffect, useMemo, useState } from 'react';
+import React, { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
+  CheckCircle2,
   ChevronDown,
   ChevronUp,
+  Ban,
   Database,
   Download,
   ExternalLink,
   FileSearch,
+  FileSpreadsheet,
   Filter,
   Loader2,
   Plus,
@@ -19,7 +22,9 @@ import {
   RotateCcw,
   Search,
   Trash2,
+  Upload,
   X,
+  XCircle,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
@@ -43,8 +48,23 @@ import {
   extractKeywords,
   matchByKeywords,
   normalizeMatchText,
-  splitHabilitacaoServicos,
 } from './bancoCatsMatch';
+import {
+  consultaHasKeywords,
+  downloadEditalItensTemplate,
+  editalItemKeywords,
+  evaluateEditalHabilitacao,
+  formatEditalItemLine,
+  formatQuantidadeBr,
+  habilitacaoStatusLabel,
+  isAutoSomaMatch,
+  normalizeUnd,
+  parseEditalItensFromFile,
+  parseEditalText,
+  parseQuantidadeBr,
+  type EditalItem,
+  type HabilitacaoItemStatus,
+} from './bancoCatsEditalImport';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
 
 const SPREADSHEET_URL =
@@ -163,6 +183,39 @@ function isHiddenCatalogHeader(header: string): boolean {
   return key === 'ind fonte' || key === 'indice';
 }
 
+function habilitacaoBadgeClass(status: HabilitacaoItemStatus): string {
+  if (status === 'habilita') {
+    return 'bg-emerald-50 text-emerald-800 ring-1 ring-emerald-200/80 dark:bg-emerald-950/40 dark:text-emerald-200 dark:ring-emerald-800/60';
+  }
+  if (status === 'nao-habilita') {
+    return 'bg-red-50 text-red-800 ring-1 ring-red-200/80 dark:bg-red-950/40 dark:text-red-200 dark:ring-red-800/60';
+  }
+  if (status === 'compativel') {
+    return 'bg-sky-50 text-sky-800 ring-1 ring-sky-200/80 dark:bg-sky-950/40 dark:text-sky-200 dark:ring-sky-800/60';
+  }
+  if (status === 'conferencia-detalhada') {
+    return 'bg-amber-50 text-amber-900 ring-1 ring-amber-200/80 dark:bg-amber-950/40 dark:text-amber-200 dark:ring-amber-800/60';
+  }
+  return 'bg-gray-100 text-gray-600 ring-1 ring-gray-200/80 dark:bg-gray-800 dark:text-gray-300 dark:ring-gray-700';
+}
+
+function habilitacaoBadgeCasingClass(status: HabilitacaoItemStatus): string {
+  if (status === 'conferencia-detalhada') return 'normal-case tracking-normal';
+  return 'uppercase tracking-wide';
+}
+
+function alertUnidadesDiferentes(units: string[], toastId: string) {
+  const unique = Array.from(
+    new Set(units.map(normalizeUnd).filter(Boolean))
+  );
+  if (unique.length <= 1) return;
+
+  toast.error(
+    `Atenção: unidades diferentes selecionadas (${unique.join(', ')}). A soma de QUANT. pode não fazer sentido.`,
+    { id: toastId, duration: 5500 }
+  );
+}
+
 function emptyFormFields(headers: string[]): Record<string, string> {
   const fields: Record<string, string> = {};
   for (const header of headers) {
@@ -188,56 +241,6 @@ function apiErrorMessage(error: unknown, fallback: string): string {
   }
   if (error instanceof Error && error.message) return error.message;
   return fallback;
-}
-
-/** Converte quantidade no formato BR (1.064,50 / 1064,50) para número. */
-function parseQuantidadeBr(value: string): number {
-  const text = value.trim();
-  if (!text || text === '-' || text === '—' || text === '–') return 0;
-
-  let normalized = text.replace(/[^\d.,-]/g, '');
-  if (!normalized) return 0;
-
-  if (normalized.includes(',') && normalized.includes('.')) {
-    normalized = normalized.replace(/\./g, '').replace(',', '.');
-  } else if (normalized.includes(',')) {
-    normalized = normalized.replace(',', '.');
-  }
-
-  const parsed = Number(normalized);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function formatQuantidadeBr(value: number): string {
-  return value.toLocaleString('pt-BR', {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 4,
-  });
-}
-
-/** Normaliza unidade para comparação (M, M., m² → M / M2). */
-function normalizeUnd(value: string): string {
-  return value
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .trim()
-    .toUpperCase()
-    .replace(/²/g, '2')
-    .replace(/³/g, '3')
-    .replace(/\.+$/g, '')
-    .replace(/\s+/g, '');
-}
-
-function alertUnidadesDiferentes(units: string[], toastId: string) {
-  const unique = Array.from(
-    new Set(units.map(normalizeUnd).filter(Boolean))
-  );
-  if (unique.length <= 1) return;
-
-  toast.error(
-    `Atenção: unidades diferentes selecionadas (${unique.join(', ')}). A soma de QUANT. pode não fazer sentido.`,
-    { id: toastId, duration: 5500 }
-  );
 }
 
 function CreateServicoModal({
@@ -390,15 +393,21 @@ function CreateServicoModal({
   );
 }
 
-export function BancoCatsPanel() {
+export function BancoCatsPanel({ instanceId = 'banco-cats' }: { instanceId?: string }) {
   const queryClient = useQueryClient();
+  const sheetQueryKey = ['licitacoes-banco-cats', instanceId] as const;
   const [searchInput, setSearchInput] = useState('');
   const deferredSearch = useDeferredValue(searchInput);
   const [empresa, setEmpresa] = useState('');
   const [unidade, setUnidade] = useState('');
   const [fonte, setFonte] = useState('');
   const [habilitacaoDraft, setHabilitacaoDraft] = useState('');
-  const [habilitacaoConsulta, setHabilitacaoConsulta] = useState('');
+  const [consultaItens, setConsultaItens] = useState<EditalItem[]>([]);
+  const [consultaFromExcel, setConsultaFromExcel] = useState(false);
+  const editalFileRef = useRef<HTMLInputElement>(null);
+  const [importingEdital, setImportingEdital] = useState(false);
+  const allowExcelImport = instanceId === 'consulta-rapida-cats';
+  const seededConsultaItensRef = useRef<EditalItem[] | null>(null);
   const [page, setPage] = useState(1);
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
@@ -423,7 +432,7 @@ export function BancoCatsPanel() {
     error,
     refetch,
   } = useQuery({
-    queryKey: ['licitacoes-banco-cats'],
+    queryKey: sheetQueryKey,
     queryFn: async () => {
       const res = await api.get('/licitacoes/banco-cats', {
         params: { refresh: 1 },
@@ -478,35 +487,61 @@ export function BancoCatsPanel() {
     [indexedRows]
   );
 
-  const servicoConsultas = useMemo(
-    () => splitHabilitacaoServicos(habilitacaoConsulta),
-    [habilitacaoConsulta]
-  );
-
   const servicoQuadrantes = useMemo(() => {
-    if (!habilitacaoConsulta.trim()) return [];
+    if (consultaItens.length === 0) return [];
 
-    return servicoConsultas.map((query, index) => {
-      const keywords = extractKeywords(query);
+    return consultaItens.map((item, index) => {
+      const keywords =
+        allowExcelImport || consultaFromExcel
+          ? editalItemKeywords(item)
+          : extractKeywords(item.descricao);
       const matches = keywords.length
         ? matchByKeywords(indexedRows, keywords, {
-            // 1 = conta/exibe todos os que batem em ao menos uma chave;
-            // o ranking (nº de chaves + score) já coloca os melhores no topo.
             minScore: 1,
             limit: null,
-            queryText: query,
+            queryText: item.descricao,
           })
         : [];
 
       return {
         id: `servico-${index + 1}`,
         index: index + 1,
-        query,
+        query: item.descricao,
+        item,
         keywords,
         matches,
       };
     });
-  }, [habilitacaoConsulta, servicoConsultas, indexedRows]);
+  }, [allowExcelImport, consultaFromExcel, consultaItens, indexedRows]);
+
+  const servicoQuadrantesAvaliados = useMemo(() => {
+    return servicoQuadrantes.map((quadrante) => {
+      let somaSelecionada = 0;
+      let countSelecionado = 0;
+      const unidadesSelecionadas: string[] = [];
+      for (const match of quadrante.matches) {
+        if (!selectedMatchKeys.has(`${quadrante.id}::${match.item.rowKey}`)) continue;
+        countSelecionado += 1;
+        somaSelecionada += parseQuantidadeBr(match.item.quant);
+        const und = match.item.und.trim();
+        if (und) unidadesSelecionadas.push(und);
+      }
+
+      return {
+        ...quadrante,
+        avaliacao: evaluateEditalHabilitacao({
+          quantidadeExigida: quadrante.item.quantidade,
+          unidadeExigida: quadrante.item.unidade,
+          keywords: quadrante.keywords,
+          matches: quadrante.matches,
+          somaSelecionada,
+          countSelecionado,
+          unidadesSelecionadas,
+          autoSomaTodasChaves: allowExcelImport,
+        }),
+      };
+    });
+  }, [allowExcelImport, servicoQuadrantes, selectedMatchKeys]);
 
   const visibleRows = useMemo(() => {
     const term = deferredSearch.trim();
@@ -535,16 +570,47 @@ export function BancoCatsPanel() {
 
   useEffect(() => {
     setPage(1);
-  }, [deferredSearch, empresa, unidade, fonte, habilitacaoConsulta]);
+  }, [deferredSearch, empresa, unidade, fonte, consultaItens]);
 
   useEffect(() => {
-    setSelectedMatchKeys(new Set());
     setExpandedQuadrantes(new Set());
     setActiveServicoTabId('');
     setMatchUnidade('');
     setMatchKeywordsInput('');
     setQuantSortDir('none');
-  }, [habilitacaoConsulta]);
+    if (!allowExcelImport) {
+      setSelectedMatchKeys(new Set());
+      seededConsultaItensRef.current = consultaItens;
+    }
+  }, [allowExcelImport, consultaItens]);
+
+  useEffect(() => {
+    if (!allowExcelImport) return;
+    if (consultaItens.length === 0) {
+      setSelectedMatchKeys(new Set());
+      seededConsultaItensRef.current = consultaItens;
+      return;
+    }
+    if (servicoQuadrantes.length === 0) return;
+    if (seededConsultaItensRef.current === consultaItens) return;
+    const next = new Set<string>();
+    for (const quadrante of servicoQuadrantes) {
+      for (const match of quadrante.matches) {
+        if (
+          isAutoSomaMatch(
+            match.matchedKeywords,
+            quadrante.keywords,
+            match.item.und,
+            quadrante.item.unidade
+          )
+        ) {
+          next.add(`${quadrante.id}::${match.item.rowKey}`);
+        }
+      }
+    }
+    setSelectedMatchKeys(next);
+    seededConsultaItensRef.current = consultaItens;
+  }, [allowExcelImport, consultaItens, servicoQuadrantes]);
 
   useEffect(() => {
     if (servicoQuadrantes.length === 0) {
@@ -558,8 +624,10 @@ export function BancoCatsPanel() {
 
   const activeServicoQuadrante = useMemo(
     () =>
-      servicoQuadrantes.find((q) => q.id === activeServicoTabId) ?? servicoQuadrantes[0] ?? null,
-    [servicoQuadrantes, activeServicoTabId]
+      servicoQuadrantesAvaliados.find((q) => q.id === activeServicoTabId) ??
+      servicoQuadrantesAvaliados[0] ??
+      null,
+    [servicoQuadrantesAvaliados, activeServicoTabId]
   );
 
   const matchUnidadeOptions = useMemo(() => {
@@ -611,6 +679,13 @@ export function BancoCatsPanel() {
         const qb = parseQuantidadeBr(b.item.quant);
         return quantSortDir === 'asc' ? qa - qb : qb - qa;
       });
+    } else {
+      rows = [...rows].sort((a, b) => {
+        const keyDiff = b.matchedKeywords.length - a.matchedKeywords.length;
+        if (keyDiff !== 0) return keyDiff;
+        if (b.score !== a.score) return b.score - a.score;
+        return 0;
+      });
     }
 
     return rows;
@@ -658,14 +733,25 @@ export function BancoCatsPanel() {
         for (const key of rowKeys) next.delete(key);
         return next;
       });
-      await queryClient.invalidateQueries({ queryKey: ['licitacoes-banco-cats'] });
+      await queryClient.invalidateQueries({ queryKey: sheetQueryKey });
     },
     onError: (err) => {
       toast.error(apiErrorMessage(err, 'Não foi possível excluir o serviço.'));
     },
   });
 
-  const matchingActive = Boolean(habilitacaoConsulta.trim());
+  const matchingActive = consultaItens.length > 0;
+  const habilitacaoResumo = useMemo(() => {
+    const counts = { habilita: 0, nao: 0, compativel: 0, conferencia: 0, sem: 0 };
+    for (const quadrante of servicoQuadrantesAvaliados) {
+      if (quadrante.avaliacao.status === 'habilita') counts.habilita += 1;
+      else if (quadrante.avaliacao.status === 'nao-habilita') counts.nao += 1;
+      else if (quadrante.avaliacao.status === 'compativel') counts.compativel += 1;
+      else if (quadrante.avaliacao.status === 'conferencia-detalhada') counts.conferencia += 1;
+      else counts.sem += 1;
+    }
+    return counts;
+  }, [servicoQuadrantesAvaliados]);
   const hasActiveFilters = Boolean(empresa || unidade || fonte);
   const errorMessage =
     error instanceof Error
@@ -681,13 +767,71 @@ export function BancoCatsPanel() {
 
   const clearHabilitacaoConsulta = () => {
     setHabilitacaoDraft('');
-    setHabilitacaoConsulta('');
+    setConsultaItens([]);
+    setConsultaFromExcel(false);
     setSelectedMatchKeys(new Set());
     setExpandedQuadrantes(new Set());
     setActiveServicoTabId('');
     setMatchUnidade('');
     setMatchKeywordsInput('');
     setQuantSortDir('none');
+    if (editalFileRef.current) editalFileRef.current.value = '';
+  };
+
+  const applyConsultaItens = (itens: EditalItem[], origem: 'texto' | 'excel' = 'texto') => {
+    if (!consultaHasKeywords(itens)) {
+      toast.error(
+        'Não foi possível extrair palavras-chave suficientes. Inclua a descrição técnica de cada serviço.'
+      );
+      return false;
+    }
+    setConsultaFromExcel(origem === 'excel');
+    setConsultaItens(itens);
+    setHabilitacaoDraft(itens.map(formatEditalItemLine).join('\n'));
+    setSelectedMatchKeys(new Set());
+    setExpandedQuadrantes(new Set());
+    setMatchUnidade('');
+    setMatchKeywordsInput('');
+    setQuantSortDir('none');
+    setPage(1);
+    return true;
+  };
+
+  const runHabilitacaoMatch = () => {
+    const itens = parseEditalText(habilitacaoDraft);
+    if (itens.length === 0) {
+      toast.error(
+        allowExcelImport
+          ? 'Cole, digite ou envie a lista de serviços e quantidades da licitação.'
+          : 'Cole ou digite a lista de serviços e quantidades da licitação.'
+      );
+      return;
+    }
+    applyConsultaItens(itens, 'texto');
+  };
+
+  const handleEditalFile = async (file: File | undefined) => {
+    if (!file) return;
+    setImportingEdital(true);
+    try {
+      const itens = await parseEditalItensFromFile(file);
+      if (itens.length === 0) {
+        toast.error('Nenhum serviço encontrado na planilha. Use as colunas Serviço, Quantidade e Unidade.');
+        return;
+      }
+      if (applyConsultaItens(itens, 'excel')) {
+        toast.success(
+          itens.length === 1
+            ? '1 item da licitação carregado.'
+            : `${itens.length} itens da licitação carregados.`
+        );
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Não foi possível ler a planilha.');
+    } finally {
+      setImportingEdital(false);
+      if (editalFileRef.current) editalFileRef.current.value = '';
+    }
   };
 
   const toggleQuadranteExpanded = (quadranteId: string) => {
@@ -697,29 +841,6 @@ export function BancoCatsPanel() {
       else next.add(quadranteId);
       return next;
     });
-  };
-
-  const runHabilitacaoMatch = () => {
-    const text = habilitacaoDraft.trim();
-    if (!text) {
-      toast.error('Cole ou digite as habilitações técnicas necessárias.');
-      return;
-    }
-    const servicos = splitHabilitacaoServicos(text);
-    const hasKeywords = servicos.some((servico) => extractKeywords(servico).length > 0);
-    if (!hasKeywords) {
-      toast.error(
-        'Não foi possível extrair palavras-chave suficientes. Inclua termos técnicos do edital.'
-      );
-      return;
-    }
-    setHabilitacaoConsulta(text);
-    setSelectedMatchKeys(new Set());
-    setExpandedQuadrantes(new Set());
-    setMatchUnidade('');
-    setMatchKeywordsInput('');
-    setQuantSortDir('none');
-    setPage(1);
   };
 
   const somaPorQuadrante = useMemo(() => {
@@ -776,7 +897,7 @@ export function BancoCatsPanel() {
       if (existingUnits.length > 0) {
         alertUnidadesDiferentes(
           [...existingUnits, newUnd],
-          `banco-cats-mixed-und-${quadranteId}`
+          `${instanceId}-mixed-und-${quadranteId}`
         );
       }
     }
@@ -798,7 +919,7 @@ export function BancoCatsPanel() {
 
     setExportingPdf(true);
     try {
-      const quadrantes = servicoQuadrantes
+      const quadrantes = servicoQuadrantesAvaliados
         .map((quadrante) => {
           const selecao = somaPorQuadrante.get(quadrante.id) ?? { count: 0, soma: 0 };
           const servicos = quadrante.matches
@@ -818,6 +939,8 @@ export function BancoCatsPanel() {
             query: quadrante.query,
             somaQuant: selecao.soma,
             somaQuantFormatada: formatQuantidadeBr(selecao.soma),
+            status: quadrante.avaliacao.status,
+            statusLabel: habilitacaoStatusLabel(quadrante.avaliacao.status),
             servicos,
           };
         })
@@ -891,7 +1014,7 @@ export function BancoCatsPanel() {
       if (existingUnits.length > 0) {
         alertUnidadesDiferentes(
           [...existingUnits, newUnd],
-          'banco-cats-mixed-und-catalog'
+          `${instanceId}-mixed-und-catalog`
         );
       }
     }
@@ -924,7 +1047,7 @@ export function BancoCatsPanel() {
       const und = normalizeUnd(row.und);
       if (und) unitsAfter.push(und);
     }
-    alertUnidadesDiferentes(unitsAfter, 'banco-cats-mixed-und-catalog');
+    alertUnidadesDiferentes(unitsAfter, `${instanceId}-mixed-und-catalog`);
 
     setSelectedCatalogKeys((prev) => {
       const next = new Set(prev);
@@ -952,7 +1075,9 @@ export function BancoCatsPanel() {
                   Consulta de Habilitação Técnica
                 </h3>
                 <p className="text-sm text-gray-600 dark:text-gray-400">
-                  Busque serviços compatíveis com as exigências do edital.
+                  {allowExcelImport
+                    ? 'Envie a lista de serviços e quantidades da licitação. O sistema indica se a empresa se habilita em cada item com base nas CATs.'
+                    : 'Cole ou digite os serviços e quantidades da licitação. O sistema indica se a empresa se habilita em cada item com base nas CATs.'}
                 </p>
               </div>
             </div>
@@ -985,10 +1110,40 @@ export function BancoCatsPanel() {
                   </span>
                 </button>
               ) : null}
+              {allowExcelImport ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => downloadEditalItensTemplate()}
+                    className="inline-flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                  >
+                    <FileSpreadsheet className="h-4 w-4 shrink-0" aria-hidden />
+                    <span>Modelo</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => editalFileRef.current?.click()}
+                    disabled={isLoading || importingEdital}
+                    className="inline-flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                  >
+                    {importingEdital ? (
+                      <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                    ) : (
+                      <Upload className="h-4 w-4 shrink-0" aria-hidden />
+                    )}
+                    <span>{importingEdital ? 'Lendo…' : 'Enviar lista'}</span>
+                  </button>
+                </>
+              ) : null}
               <button
                 type="button"
                 onClick={runHabilitacaoMatch}
-                disabled={isLoading || !habilitacaoDraft.trim()}
+                disabled={isLoading || consultaFromExcel || !habilitacaoDraft.trim()}
+                title={
+                  consultaFromExcel
+                    ? 'Lista enviada via Excel. Limpe a consulta para buscar por texto.'
+                    : undefined
+                }
                 className="flex h-10 items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
               >
                 <FileSearch className="h-4 w-4 shrink-0" aria-hidden />
@@ -998,13 +1153,124 @@ export function BancoCatsPanel() {
           </div>
         </CardHeader>
         <CardContent className={`${cadastroListClasses.cardContent} space-y-4`}>
+          {allowExcelImport ? (
+            <input
+              ref={editalFileRef}
+              type="file"
+              accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                void handleEditalFile(file);
+              }}
+            />
+          ) : null}
           <textarea
             value={habilitacaoDraft}
             onChange={(e) => setHabilitacaoDraft(e.target.value)}
             rows={3}
-            placeholder="Um serviço por linha…"
+            placeholder={
+              allowExcelImport
+                ? 'Um serviço por linha, ou envie a planilha com Serviço, Quantidade e Unidade…'
+                : 'Um serviço por linha. Quantidade exigida após hífen, ex.: serviço - 200 UND'
+            }
             className="min-h-[4.75rem] w-full resize-none rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm leading-normal text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
           />
+          {matchingActive ? (
+            <div className="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-700">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-200 bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-900/60">
+                <p className="text-sm font-semibold text-gray-800 dark:text-gray-100">
+                  Resultado por item da licitação
+                </p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  {habilitacaoResumo.habilita > 0
+                    ? `${habilitacaoResumo.habilita} habilita`
+                    : null}
+                  {habilitacaoResumo.nao > 0
+                    ? `${habilitacaoResumo.habilita > 0 ? ' · ' : ''}${habilitacaoResumo.nao} não se habilita`
+                    : null}
+                  {habilitacaoResumo.compativel > 0
+                    ? `${habilitacaoResumo.habilita + habilitacaoResumo.nao > 0 ? ' · ' : ''}${habilitacaoResumo.compativel} compatível`
+                    : null}
+                  {habilitacaoResumo.conferencia > 0
+                    ? `${habilitacaoResumo.habilita + habilitacaoResumo.nao + habilitacaoResumo.compativel > 0 ? ' · ' : ''}${habilitacaoResumo.conferencia} fazer conferência detalhada`
+                    : null}
+                  {habilitacaoResumo.sem > 0
+                    ? `${habilitacaoResumo.habilita + habilitacaoResumo.nao + habilitacaoResumo.compativel + habilitacaoResumo.conferencia > 0 ? ' · ' : ''}${habilitacaoResumo.sem} sem correspondência`
+                    : null}
+                </p>
+              </div>
+              <div className="table-scroll">
+                <table className="w-full min-w-[640px] text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-100 bg-white dark:border-white/10 dark:bg-gray-950/40">
+                      <th className={`${cadastroListClasses.th} w-10`}>#</th>
+                      <th className={cadastroListClasses.th}>Serviço exigido</th>
+                      <th className={`${cadastroListClasses.thCenter} w-24`}>Chaves</th>
+                      <th className={`${cadastroListClasses.thCenter} w-28`}>Qtd. exigida</th>
+                      <th className={`${cadastroListClasses.thCenter} w-20`}>UND</th>
+                      <th className={`${cadastroListClasses.thCenter} w-56`}>Resultado</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {servicoQuadrantesAvaliados.map((tab) => {
+                      const active = tab.id === activeServicoQuadrante?.id;
+                      const exigida =
+                        tab.item.quantidade != null && tab.item.quantidade > 0
+                          ? formatQuantidadeBr(tab.item.quantidade)
+                          : tab.item.quantidadeLabel || '—';
+                      return (
+                        <tr
+                          key={tab.id}
+                          onClick={() => setActiveServicoTabId(tab.id)}
+                          className={`cursor-pointer border-b border-gray-100 last:border-0 dark:border-white/5 ${
+                            active
+                              ? 'bg-red-50/70 dark:bg-red-950/20'
+                              : 'hover:bg-gray-50 dark:hover:bg-gray-900/40'
+                          }`}
+                        >
+                          <td className={`${cadastroListClasses.tdCenter} tabular-nums text-gray-500`}>
+                            {tab.index}
+                          </td>
+                          <td className={`${cadastroListClasses.td} max-w-xl whitespace-normal`}>
+                            {tab.query}
+                          </td>
+                          <td
+                            className={`${cadastroListClasses.tdCenter} tabular-nums`}
+                            title={tab.keywords.join(' · ') || undefined}
+                          >
+                            {tab.keywords.length}
+                          </td>
+                          <td className={`${cadastroListClasses.tdCenter} tabular-nums`}>
+                            {exigida}
+                          </td>
+                          <td className={cadastroListClasses.tdCenter}>
+                            {tab.item.unidade || tab.avaliacao.undLabel || '—'}
+                          </td>
+                          <td className={cadastroListClasses.tdCenter}>
+                            <span
+                              className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ${habilitacaoBadgeCasingClass(tab.avaliacao.status)} ${habilitacaoBadgeClass(tab.avaliacao.status)}`}
+                            >
+                              {tab.avaliacao.status === 'habilita' ? (
+                                <CheckCircle2 className="h-3.5 w-3.5" aria-hidden />
+                              ) : tab.avaliacao.status === 'nao-habilita' ? (
+                                <XCircle className="h-3.5 w-3.5" aria-hidden />
+                              ) : tab.avaliacao.status === 'conferencia-detalhada' ? (
+                                <FileSearch className="h-3.5 w-3.5" aria-hidden />
+                              ) : (
+                                <Ban className="h-3.5 w-3.5" aria-hidden />
+                              )}
+                              {habilitacaoStatusLabel(tab.avaliacao.status)}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : null}
           {matchingActive && activeServicoQuadrante ? (
             <div className="space-y-4">
               <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
@@ -1013,7 +1279,7 @@ export function BancoCatsPanel() {
                   centered={false}
                   className="min-w-0 flex-1"
                 >
-                  {servicoQuadrantes.map((tab) => {
+                  {servicoQuadrantesAvaliados.map((tab) => {
                     const active = tab.id === activeServicoQuadrante.id;
                     return (
                       <AppUnderlineTabButton
@@ -1027,13 +1293,18 @@ export function BancoCatsPanel() {
                           {tab.query.trim() || `Serviço ${tab.index}`}
                         </span>
                         <span
-                          className={`shrink-0 tabular-nums ${
-                            active
-                              ? 'text-red-500/80 dark:text-red-400/80'
-                              : 'text-gray-400 dark:text-gray-500'
-                          }`}
+                          className={`inline-flex shrink-0 items-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${habilitacaoBadgeCasingClass(tab.avaliacao.status)} ${habilitacaoBadgeClass(tab.avaliacao.status)}`}
+                          title={habilitacaoStatusLabel(tab.avaliacao.status)}
                         >
-                          ({tab.matches.length})
+                          {tab.avaliacao.status === 'habilita'
+                            ? 'Habilita'
+                            : tab.avaliacao.status === 'nao-habilita'
+                              ? 'Não'
+                              : tab.avaliacao.status === 'compativel'
+                                ? 'OK'
+                                : tab.avaliacao.status === 'conferencia-detalhada'
+                                  ? 'Conferir'
+                                  : '—'}
                         </span>
                       </AppUnderlineTabButton>
                     );
@@ -1108,7 +1379,7 @@ export function BancoCatsPanel() {
                       if (und) unitsAfter.push(und);
                       next.add(`${quadrante.id}::${match.item.rowKey}`);
                     }
-                    alertUnidadesDiferentes(unitsAfter, `banco-cats-mixed-und-${quadrante.id}`);
+                    alertUnidadesDiferentes(unitsAfter, `${instanceId}-mixed-und-${quadrante.id}`);
                     return next;
                   });
                 };
@@ -1122,6 +1393,44 @@ export function BancoCatsPanel() {
 
                 return (
                   <div key={quadrante.id} className="space-y-3">
+                    <div
+                      className={`flex flex-wrap items-center justify-between gap-2 rounded-lg px-3 py-2 text-sm ${
+                        quadrante.avaliacao.status === 'habilita'
+                          ? 'bg-emerald-50 text-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-100'
+                          : quadrante.avaliacao.status === 'nao-habilita'
+                            ? 'bg-red-50 text-red-900 dark:bg-red-950/40 dark:text-red-100'
+                            : quadrante.avaliacao.status === 'compativel'
+                              ? 'bg-sky-50 text-sky-900 dark:bg-sky-950/40 dark:text-sky-100'
+                              : quadrante.avaliacao.status === 'conferencia-detalhada'
+                                ? 'bg-amber-50 text-amber-950 dark:bg-amber-950/40 dark:text-amber-100'
+                                : 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-200'
+                      }`}
+                    >
+                      <span className="font-semibold">
+                        {habilitacaoStatusLabel(quadrante.avaliacao.status)}
+                      </span>
+                      <span className="tabular-nums">
+                        {quadrante.keywords.length}{' '}
+                        {quadrante.keywords.length === 1 ? 'chave' : 'chaves'}
+                        {quadrante.keywords.length > 0 ? ` (${quadrante.keywords.join(', ')})` : ''}
+                        {' · '}
+                        Exigido:{' '}
+                        {quadrante.item.quantidade != null && quadrante.item.quantidade > 0
+                          ? `${formatQuantidadeBr(quadrante.item.quantidade)}${
+                              quadrante.item.unidade ? ` ${quadrante.item.unidade}` : ''
+                            }`
+                          : 'sem quantidade'}
+                        {' · '}
+                        Nas CATs:{' '}
+                        {quadrante.avaliacao.usedCount > 0
+                          ? `${formatQuantidadeBr(quadrante.avaliacao.somaCats)}${
+                              quadrante.avaliacao.undLabel
+                                ? ` ${quadrante.avaliacao.undLabel}`
+                                : ''
+                            } (${quadrante.avaliacao.usedCount})`
+                          : 'nenhuma correspondência'}
+                      </span>
+                    </div>
                     <div className="flex flex-col gap-3 rounded-lg border border-gray-200 bg-gray-50/80 p-3 dark:border-gray-700 dark:bg-gray-900/40 sm:flex-row sm:flex-wrap sm:items-end">
                       <label className="block min-w-[10rem] flex-1 sm:max-w-[14rem]">
                         <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
@@ -1712,7 +2021,7 @@ export function BancoCatsPanel() {
         headers={formHeaders}
         onClose={() => setCreateModalOpen(false)}
         onCreated={() => {
-          void queryClient.invalidateQueries({ queryKey: ['licitacoes-banco-cats'] });
+          void queryClient.invalidateQueries({ queryKey: sheetQueryKey });
         }}
       />
     </div>
