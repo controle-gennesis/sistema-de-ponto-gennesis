@@ -372,8 +372,8 @@ async function pickAttachment(): Promise<Attachment | null> {
   if (result.canceled || !result.assets[0]?.base64) return null;
   const asset = result.assets[0];
   const dataBase64 = asset.base64!;
-  if (dataBase64.length > 2_800_000) {
-    showAppToast({ type: 'error', text1: 'Arquivo muito grande (máx. ~2 MB)' });
+  if (dataBase64.length > 22_000_000) {
+    showAppToast({ type: 'error', text1: 'Arquivo muito grande (máx. 15 MB)' });
     return null;
   }
   return {

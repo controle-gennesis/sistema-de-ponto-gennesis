@@ -280,8 +280,8 @@ const DESTINATION_STAT_CARDS: {
 ];
 
 async function fileToDpAttachment(file: File) {
-  const max = 2 * 1024 * 1024;
-  if (file.size > max) throw new Error('Arquivo deve ter no máximo 2 MB');
+  const max = 15 * 1024 * 1024;
+  if (file.size > max) throw new Error('Arquivo deve ter no máximo 15 MB');
   const dataBase64 = await new Promise<string>((resolve, reject) => {
     const fr = new FileReader();
     fr.onload = () => {

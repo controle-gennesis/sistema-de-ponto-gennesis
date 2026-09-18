@@ -1,10 +1,10 @@
 import { z } from 'zod';
 
-/** Anexo enviado em Base64 (evita multipart no MVP). Limite ~2,5 MB decodificados. */
+/** Anexo enviado em Base64 (evita multipart no MVP). Limite ~15 MB decodificados. */
 export const dpAttachmentSchema = z.object({
   fileName: z.string().min(1),
   mimeType: z.string().min(1),
-  dataBase64: z.string().min(1).max(3_500_000),
+  dataBase64: z.string().min(1).max(22_000_000),
 });
 
 const str = z.string().min(1);
