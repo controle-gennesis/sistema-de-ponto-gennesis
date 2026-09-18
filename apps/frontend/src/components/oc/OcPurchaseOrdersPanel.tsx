@@ -2529,6 +2529,8 @@ export function OcPurchaseOrdersPanel({
     item: NonNullable<PurchaseOrder['items']>[number];
   } | null>(null);
   const [returnItemReason, setReturnItemReason] = useState('');
+  const [returnOrderToMapTarget, setReturnOrderToMapTarget] = useState<PurchaseOrder | null>(null);
+  const [returnOrderToMapReason, setReturnOrderToMapReason] = useState('');
   const [pdfExportingId, setPdfExportingId] = useState<string | null>(null);
   const [showEditOcModal, setShowEditOcModal] = useState(false);
 
@@ -3007,6 +3009,33 @@ export function OcPurchaseOrdersPanel({
     },
     onError: (error: { response?: { data?: { message?: string } } }) => {
       toast.error(error.response?.data?.message || 'Erro ao devolver item à RM');
+    },
+  });
+
+  const returnOrderToQuoteMapMutation = useMutation({
+    mutationFn: async ({ orderId, reason }: { orderId: string; reason: string }) => {
+      const res = await api.post(`/purchase-orders/${orderId}/return-to-quote-map`, { reason });
+      return res.data;
+    },
+    onSuccess: (data) => {
+      const updated = data?.data as PurchaseOrder | undefined;
+      setReturnOrderToMapTarget(null);
+      setReturnOrderToMapReason('');
+      setSelectedOrder(null);
+      setOcActionMenu(null);
+      toast.success(
+        data?.message ||
+          'Só esta OC foi cancelada. Os itens voltaram ao mapa de cotação; as outras OCs da RM não mudaram.'
+      );
+      if (updated?.id) {
+        queryClient.setQueryData(['purchase-order-detail', updated.id], updated);
+      }
+      invalidateOcAndLinkedRmQueries(queryClient);
+      queryClient.invalidateQueries({ queryKey: ['material-requests-approved-map'] });
+      queryClient.invalidateQueries({ queryKey: ['material-request-detail'] });
+    },
+    onError: (error: { response?: { data?: { message?: string } } }) => {
+      toast.error(error.response?.data?.message || 'Erro ao devolver a OC ao mapa de cotação');
     },
   });
 
@@ -3909,6 +3938,8 @@ export function OcPurchaseOrdersPanel({
   const canEditOcInReview =
     canActOcCorrection ||
     (!!selectedOrder?.creator?.id && selectedOrder.creator.id === currentUserId);
+  const canReturnOcToQuoteMap =
+    canEditOcInReview || canReturnOcItemToRmPermission;
 
   const canEditBoletoParcels =
     !!selectedOrder &&
@@ -5138,6 +5169,66 @@ export function OcPurchaseOrdersPanel({
                 className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-700 disabled:opacity-50"
               >
                 {returnItemToRmMutation.isPending ? 'Devolvendo…' : 'Devolver à RM'}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {returnOrderToMapTarget && (
+        <Modal
+          isOpen={!!returnOrderToMapTarget}
+          onClose={() => {
+            if (returnOrderToQuoteMapMutation.isPending) return;
+            setReturnOrderToMapTarget(null);
+            setReturnOrderToMapReason('');
+          }}
+          title="Devolver OC ao mapa de cotação"
+          size="md"
+          confirmBeforeClose={false}
+          elevated
+        >
+          <div className="space-y-4">
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              Só esta OC ({returnOrderToMapTarget.orderNumber}) será cancelada. Os itens dela voltam
+              para a mesma RM no mapa de cotação. Outras OCs da RM (pagamento, etc.) não mudam.
+            </p>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Motivo *
+              </label>
+              <textarea
+                value={returnOrderToMapReason}
+                onChange={(e) => setReturnOrderToMapReason(e.target.value)}
+                rows={3}
+                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                placeholder="Ex.: gestor pediu outro orçamento da mangueira"
+              />
+            </div>
+            <div className="flex justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
+              <button
+                type="button"
+                onClick={() => {
+                  setReturnOrderToMapTarget(null);
+                  setReturnOrderToMapReason('');
+                }}
+                disabled={returnOrderToQuoteMapMutation.isPending}
+                className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={!returnOrderToMapReason.trim() || returnOrderToQuoteMapMutation.isPending}
+                onClick={() => {
+                  returnOrderToQuoteMapMutation.mutate({
+                    orderId: returnOrderToMapTarget.id,
+                    reason: returnOrderToMapReason.trim(),
+                  });
+                }}
+                className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-amber-700 disabled:opacity-50"
+              >
+                {returnOrderToQuoteMapMutation.isPending ? 'Devolvendo…' : 'Devolver só esta OC'}
               </button>
             </div>
           </div>
@@ -6486,7 +6577,8 @@ export function OcPurchaseOrdersPanel({
             )}
             </div>
             {(showListApprovalActions(selectedOrder.status) ||
-              (selectedOrder.status === 'IN_REVIEW' && canEditOcInReview)) && (
+              (selectedOrder.status === 'IN_REVIEW' &&
+                (canEditOcInReview || canReturnOcToQuoteMap))) && (
             <div className="shrink-0 border-t border-gray-200 dark:border-gray-700 px-5 py-3 rounded-b-xl">
             <div className="flex flex-wrap gap-2">
               {showListApprovalActions(selectedOrder.status) && (
@@ -6545,6 +6637,20 @@ export function OcPurchaseOrdersPanel({
                     {resubmitOcMutation.isPending ? 'Enviando…' : 'Enviar para Aprovação'}
                   </button>
                 </>
+              )}
+              {selectedOrder.status === 'IN_REVIEW' && canReturnOcToQuoteMap && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setReturnOrderToMapReason('');
+                    setReturnOrderToMapTarget(selectedOrder);
+                  }}
+                  disabled={returnOrderToQuoteMapMutation.isPending}
+                  className="flex-1 min-w-[180px] px-3 py-2 text-sm bg-amber-600 text-white rounded-lg hover:bg-amber-700 disabled:opacity-50 inline-flex items-center justify-center gap-1.5"
+                >
+                  <Undo2 className="w-4 h-4 shrink-0" />
+                  Devolver ao mapa de cotação
+                </button>
               )}
             </div>
             </div>
@@ -7145,9 +7251,14 @@ export function OcPurchaseOrdersPanel({
               )}
               {orderForActionMenu.status === 'IN_REVIEW' &&
                 (canActOcCorrection ||
+                  canReturnOcItemToRmPermission ||
                   (!!orderForActionMenu.creator?.id &&
                     currentUserId === orderForActionMenu.creator.id)) && (
                   <>
+                    {(canActOcCorrection ||
+                      (!!orderForActionMenu.creator?.id &&
+                        currentUserId === orderForActionMenu.creator.id)) && (
+                      <>
                     <button
                       type="button"
                       role="menuitem"
@@ -7183,6 +7294,22 @@ export function OcPurchaseOrdersPanel({
                         <Send className="h-4 w-4 shrink-0 text-indigo-600 dark:text-indigo-400" />
                       )}
                       <span>Enviar para Aprovação</span>
+                    </button>
+                      </>
+                    )}
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setOcActionMenu(null);
+                        setReturnOrderToMapReason('');
+                        setReturnOrderToMapTarget(orderForActionMenu);
+                      }}
+                      className={`${OC_MENU_ITEM_CLASS} border-t border-gray-200 dark:border-gray-700`}
+                    >
+                      <Undo2 className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                      <span>Devolver ao mapa de cotação</span>
                     </button>
                   </>
                 )}

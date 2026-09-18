@@ -15,7 +15,10 @@ import {
   isOcStatusAllowingReturnItemToRm,
   OC_STATUSES_COVERING_RM_ITEMS,
 } from '../lib/rmProcurementCoverage';
-import { assertUserCanReturnOcItemToRm } from '../lib/ocApprovalAccess';
+import {
+  assertUserCanReturnOcItemToRm,
+  assertUserCanReturnOrderToQuoteMap,
+} from '../lib/ocApprovalAccess';
 
 /** Lock distinto do requestNumber de RM (91827365) — serializa só a sequência de OC. */
 const PURCHASE_ORDER_NUMBER_ADVISORY_LOCK = 91827366;
@@ -3799,6 +3802,121 @@ export class PurchaseOrderService {
 
     const fresh = await this.getById(purchaseOrderId);
     if (!fresh) throw new Error('Ordem de compra não encontrada após a retirada');
+    return fresh;
+  }
+
+  /**
+   * Cancela só esta OC e devolve os itens dela à RM (mapa de cotação).
+   * Outras OCs da mesma RM não são alteradas.
+   */
+  async returnOrderToQuoteMap(purchaseOrderId: string, userId: string, isAdmin: boolean, reason: string) {
+    const reasonText = reason.trim();
+    if (!reasonText) throw new Error('Informe o motivo da devolução ao mapa de cotação');
+    if (reasonText.length > 2000) throw new Error('Motivo muito longo (máx. 2000 caracteres)');
+    if (!userId) throw new Error('Usuário não autenticado');
+
+    const order = await prisma.purchaseOrder.findUnique({
+      where: { id: purchaseOrderId },
+      include: {
+        items: {
+          select: { materialRequestItemId: true },
+        },
+        materialRequest: {
+          select: { id: true, status: true },
+        },
+      },
+    });
+    if (!order) throw new Error('Ordem de compra não encontrada');
+    if (order.status === 'CANCELLED' || order.status === 'REJECTED') {
+      throw new Error('Esta OC já está cancelada');
+    }
+    if (!isOcStatusAllowingReturnItemToRm(order.status)) {
+      throw new Error(
+        'Só é possível devolver a OC ao mapa antes da validação de comprovante / conclusão do fluxo'
+      );
+    }
+
+    if (order.status === 'APPROVED') {
+      const launchCount = await prisma.financialControlEntry.count({
+        where: { ocNumber: { equals: order.orderNumber, mode: 'insensitive' } },
+      });
+      if (launchCount > 0) {
+        throw new Error('Não é possível devolver esta OC após o lançamento financeiro');
+      }
+    }
+
+    await assertUserCanReturnOrderToQuoteMap(userId, isAdmin, {
+      status: order.status,
+      createdBy: order.createdBy,
+    });
+
+    const actorName = await resolveUserDisplayName(userId);
+    const at = new Date().toLocaleString('pt-BR');
+    const rmItemIds = [
+      ...new Set(
+        order.items
+          .map((i) => i.materialRequestItemId)
+          .filter((id): id is string => typeof id === 'string' && id.length > 0)
+      ),
+    ];
+    const noteHeader = actorName
+      ? `[OC devolvida ao mapa de cotação — ${at} — ${actorName}]`
+      : `[OC devolvida ao mapa de cotação — ${at}]`;
+    const noteBody = `Motivo: ${reasonText}`;
+    const note = `${noteHeader}\n${noteBody}`;
+    const nextNotes = order.notes?.trim() ? `${order.notes.trim()}\n\n${note}` : note;
+
+    await prisma.$transaction(async (tx) => {
+      if (rmItemIds.length > 0) {
+        await tx.materialRequestItem.updateMany({
+          where: { id: { in: rmItemIds } },
+          data: { status: 'APPROVED', fulfilledQuantity: null, updatedAt: new Date() },
+        });
+        await tx.quoteMapWinnerItem.deleteMany({ where: { materialRequestItemId: { in: rmItemIds } } });
+        await tx.quoteMapSupplierItem.deleteMany({ where: { materialRequestItemId: { in: rmItemIds } } });
+      }
+
+      await tx.purchaseOrder.update({
+        where: { id: purchaseOrderId },
+        data: {
+          status: 'CANCELLED',
+          notes: nextNotes,
+          updatedAt: new Date(),
+        },
+      });
+
+      if (
+        order.materialRequestId &&
+        (order.materialRequest?.status === 'FULFILLED' ||
+          order.materialRequest?.status === 'PARTIALLY_FULFILLED')
+      ) {
+        await tx.materialRequest.update({
+          where: { id: order.materialRequestId },
+          data: { status: 'APPROVED', completedAt: null },
+        });
+      }
+
+      if (order.materialRequestId) {
+        await tx.materialRequestComment.create({
+          data: {
+            materialRequestId: order.materialRequestId,
+            userId,
+            content: `OC ${order.orderNumber} devolvida ao mapa de cotação (OC cancelada; demais OCs da RM inalteradas). ${noteBody}`,
+          },
+        });
+      }
+
+      await tx.purchaseOrderComment.create({
+        data: {
+          purchaseOrderId,
+          userId,
+          content: `OC devolvida ao mapa de cotação (cancelada). ${noteBody}`,
+        },
+      });
+    });
+
+    const fresh = await this.getById(purchaseOrderId);
+    if (!fresh) throw new Error('Ordem de compra não encontrada após a devolução');
     return fresh;
   }
 

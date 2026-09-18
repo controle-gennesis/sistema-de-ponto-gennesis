@@ -102,6 +102,27 @@ export async function assertUserCanReturnOcItemToRm(
   );
 }
 
+export async function userHasOcCorrectionPermission(userId: string): Promise<boolean> {
+  return userHasModule(userId, OC_TAB_CORRECTION_KEY);
+}
+
+/** Devolver a OC inteira ao mapa: admin, permissão de devolver item, ou correção (criador / módulo). */
+export async function assertUserCanReturnOrderToQuoteMap(
+  userId: string,
+  isAdmin: boolean,
+  order: { status: string; createdBy: string | null },
+): Promise<void> {
+  if (isAdmin) return;
+  if (await userHasOcReturnItemToRmPermission(userId)) return;
+  if (
+    order.status === 'IN_REVIEW' &&
+    (order.createdBy === userId || (await userHasOcCorrectionPermission(userId)))
+  ) {
+    return;
+  }
+  throw createError('Sem permissão para devolver esta OC ao mapa de cotação', 403);
+}
+
 export async function assertUserHasOcModule(
   userId: string,
   isAdmin: boolean,
