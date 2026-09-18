@@ -734,9 +734,7 @@ export default function EmpreiteirosPage() {
                       <thead className="border-b border-gray-200 dark:border-gray-700">
                         <tr>
                           <th className={cadastroListClasses.th}>ID</th>
-                          <th className={cadastroListClasses.th}>Foto</th>
                           <th className={cadastroListClasses.th}>Nome</th>
-                          <th className={cadastroListClasses.th}>Documento</th>
                           <th className={cadastroListClasses.th}>Telefone</th>
                           <th className={cadastroListClasses.th}>Especialidade</th>
                           <th className={cadastroListClasses.th}>Contrato</th>
@@ -765,34 +763,32 @@ export default function EmpreiteirosPage() {
                             <td className={cadastroListClasses.tdMono}>
                               {formatCadastroListId(undefined, index + 1)}
                             </td>
-                            <td className="px-3 py-4 sm:px-6">
-                              {resolveApiMediaUrl(it.photoUrl) ? (
-                                // eslint-disable-next-line @next/next/no-img-element
-                                <img
-                                  src={resolveApiMediaUrl(it.photoUrl)}
-                                  alt={it.name}
-                                  className="h-10 w-10 rounded-full object-cover"
-                                />
-                              ) : (
-                                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gray-100 text-gray-400 dark:bg-gray-700 dark:text-gray-500">
-                                  <HardHat className="h-5 w-5" />
+                            <td className="px-3 py-3 sm:px-6 align-middle text-left">
+                              <div className="flex items-center gap-3">
+                                {resolveApiMediaUrl(it.photoUrl) ? (
+                                  <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700">
+                                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                                    <img
+                                      src={resolveApiMediaUrl(it.photoUrl)}
+                                      alt=""
+                                      className="h-full w-full object-cover"
+                                      referrerPolicy="no-referrer"
+                                    />
+                                  </div>
+                                ) : (
+                                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gray-100 text-gray-400 dark:bg-gray-700 dark:text-gray-500">
+                                    <HardHat className="h-5 w-5" />
+                                  </div>
+                                )}
+                                <div className="min-w-0 text-left">
+                                  <ListRowNavigableLabel className="truncate font-semibold">
+                                    {it.name}
+                                  </ListRowNavigableLabel>
+                                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                                    {formatDocumentDisplay(it.documentKind, it.document)}
+                                  </p>
                                 </div>
-                              )}
-                            </td>
-                            <td className="px-3 py-4 sm:px-6">
-                              <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                                <ListRowNavigableLabel>{it.name}</ListRowNavigableLabel>
                               </div>
-                              {it.tradeName ? (
-                                <div className="text-xs text-gray-500 dark:text-gray-400">
-                                  {it.tradeName}
-                                </div>
-                              ) : null}
-                            </td>
-                            <td className="px-3 py-4 sm:px-6">
-                              <span className="text-sm text-gray-900 dark:text-gray-100">
-                                {formatDocumentDisplay(it.documentKind, it.document)}
-                              </span>
                             </td>
                             <td className="px-3 py-4 sm:px-6">
                               <span className="text-sm text-gray-900 dark:text-gray-100">
