@@ -7,8 +7,9 @@ import {
   StyleSheet,
   Platform,
   Animated,
+  StatusBar,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { Menu as MenuIcon, ArrowLeft, Bell } from 'lucide-react-native';
 import { useTheme } from '../context/ThemeContext';
@@ -16,6 +17,10 @@ import { useNotifications } from '../notifications/NotificationsContext';
 import { useChromeVisibility } from '../navigation/ChromeVisibilityContext';
 import { ThemePatternFill } from './ThemeBackground';
 import Menu from './Menu';
+
+/** Folga abaixo da status bar — no Android evitar padding duplo (insets + StatusBar). */
+const HEADER_TOP_GAP = Platform.OS === 'ios' ? 6 : 2;
+const HEADER_BOTTOM_PAD = Platform.OS === 'ios' ? 12 : 8;
 
 type AppHeaderProps = {
   showBack?: boolean;
@@ -74,6 +79,7 @@ export default function AppHeader({
 }: AppHeaderProps) {
   const navigation = useNavigation();
   const { colors, isDark } = useTheme();
+  const insets = useSafeAreaInsets();
   const chrome = useChromeVisibility();
   const [localMenu, setLocalMenu] = useState(false);
   const showMenu = chrome?.menuOpen ?? localMenu;
@@ -82,10 +88,17 @@ export default function AppHeader({
 
   const iconColor = colors.text;
   const handleBack = onBack ?? (() => navigation.goBack());
+  // Android edge-to-edge: insets.top já inclui a status bar. Só usa StatusBar se insets vier 0.
+  const topPad =
+    (Platform.OS === 'android'
+      ? insets.top > 0
+        ? insets.top
+        : StatusBar.currentHeight ?? 24
+      : insets.top) + HEADER_TOP_GAP;
 
   if (showBack) {
     return (
-      <SafeAreaView edges={['top']} style={styles.topSafe}>
+      <View style={[styles.topSafe, { paddingTop: topPad }]}>
         <View style={styles.stackHeader}>
           <View style={styles.side}>
             <TouchableOpacity
@@ -114,14 +127,13 @@ export default function AppHeader({
             {rightAction ?? <NotificationBell iconColor={iconColor} />}
           </View>
         </View>
-      </SafeAreaView>
+      </View>
     );
   }
 
   const headerInner = (
-    <SafeAreaView
-      edges={['top']}
-      style={styles.topSafe}
+    <View
+      style={[styles.topSafe, { paddingTop: topPad }]}
       onLayout={(e) => chrome?.setHeaderHeight(e.nativeEvent.layout.height)}
     >
       <View style={styles.header}>
@@ -150,7 +162,7 @@ export default function AppHeader({
           <NotificationBell iconColor={iconColor} />
         </View>
       </View>
-    </SafeAreaView>
+    </View>
   );
 
   if (!chrome) {
@@ -165,7 +177,8 @@ export default function AppHeader({
   return (
     <>
       <Animated.View
-        pointerEvents={chrome.visible ? 'auto' : 'none'}
+        // box-none: não engole swipe das abas se o overlay crescer demais
+        pointerEvents={chrome.visible ? 'box-none' : 'none'}
         style={[
           styles.overlay,
           {
@@ -181,8 +194,10 @@ export default function AppHeader({
           },
         ]}
       >
-        <ThemePatternFill />
-        {headerInner}
+        <View pointerEvents="box-none" style={styles.headerShell}>
+          <ThemePatternFill />
+          {headerInner}
+        </View>
       </Animated.View>
 
       <Menu visible={showMenu} onClose={closeMenu} />
@@ -198,6 +213,10 @@ const styles = StyleSheet.create({
     right: 0,
     zIndex: 20,
   },
+  headerShell: {
+    position: 'relative',
+    overflow: 'hidden',
+  },
   topSafe: {
     backgroundColor: 'transparent',
   },
@@ -206,18 +225,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 14,
-    paddingTop: 6,
-    paddingBottom: 10,
-    minHeight: 56,
+    paddingTop: 4,
+    paddingBottom: HEADER_BOTTOM_PAD,
+    minHeight: 52,
     backgroundColor: 'transparent',
   },
   stackHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 8,
-    paddingTop: 4,
-    paddingBottom: 8,
-    minHeight: 52,
+    paddingTop: 2,
+    paddingBottom: HEADER_BOTTOM_PAD,
+    minHeight: 48,
   },
   iconBtn: {
     width: 44,

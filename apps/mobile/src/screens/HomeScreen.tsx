@@ -41,13 +41,17 @@ export default function HomeScreen() {
   const edgePan = useMemo(
     () =>
       PanResponder.create({
+        // Só compete com o pager quando o gesto é claramente abrir o menu (→).
         onMoveShouldSetPanResponder: (_, g) =>
-          g.dx > 14 && Math.abs(g.dx) > Math.abs(g.dy) * 1.15,
+          g.dx > 16 && Math.abs(g.dx) > Math.abs(g.dy) * 1.25,
+        onMoveShouldSetPanResponderCapture: (_, g) =>
+          g.dx > 20 && Math.abs(g.dx) > Math.abs(g.dy) * 1.35,
+        onPanResponderTerminationRequest: () => false,
         onPanResponderRelease: (_, g) => {
-          if (g.dx > 52 || g.vx > 0.35) openMenu?.();
+          if (g.dx > 48 || g.vx > 0.3) openMenu?.();
         },
         onPanResponderTerminate: (_, g) => {
-          if (g.dx > 52 || g.vx > 0.35) openMenu?.();
+          if (g.dx > 48 || g.vx > 0.3) openMenu?.();
         },
       }),
     [openMenu],
@@ -75,7 +79,7 @@ export default function HomeScreen() {
     <View style={styles.safeArea}>
       <ScrollView
         style={styles.container}
-        contentContainerStyle={[styles.scrollContent, { paddingTop: headerOffset + 12 }]}
+        contentContainerStyle={[styles.scrollContent, { paddingTop: headerOffset + 16 }]}
         showsVerticalScrollIndicator={false}
         {...chromeScroll}
         refreshControl={
@@ -114,12 +118,8 @@ export default function HomeScreen() {
 
         <HomeTarefasCard />
       </ScrollView>
-      <View
-        pointerEvents="box-none"
-        style={styles.edgeLayer}
-      >
-        <View style={styles.edgeHit} {...edgePan.panHandlers} />
-      </View>
+      {/* Só a faixa da esquerda — View full-screen (mesmo box-none) atrapalha o swipe do pager */}
+      <View style={styles.edgeHit} {...edgePan.panHandlers} />
     </View>
   );
 }
@@ -131,7 +131,7 @@ const getStyles = (colors: any, isDark: boolean) =>
     scrollContent: {
       paddingHorizontal: 20,
       paddingTop: 8,
-      paddingBottom: 120,
+      paddingBottom: 28,
     },
     greetingRow: {
       flexDirection: 'row',
@@ -153,15 +153,12 @@ const getStyles = (colors: any, isDark: boolean) =>
       letterSpacing: -0.5,
       color: colors.text,
     },
-    edgeLayer: {
-      ...StyleSheet.absoluteFillObject,
-      zIndex: 12,
-    },
     edgeHit: {
       position: 'absolute',
       left: 0,
       top: 0,
       bottom: 0,
-      width: 28,
+      width: 32,
+      zIndex: 12,
     },
   });

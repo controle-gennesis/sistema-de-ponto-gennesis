@@ -954,7 +954,7 @@ export default function FuelRequestsScreen() {
         contentContainerStyle={[
           styles.scrollContent,
           { paddingTop: isTabScreen ? headerOffset + 8 : 8 },
-          isTabScreen && { paddingBottom: 110 },
+          isTabScreen && { paddingBottom: 28 },
         ]}
         {...chromeScroll}
         refreshControl={

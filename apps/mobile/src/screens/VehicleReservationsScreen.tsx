@@ -924,7 +924,7 @@ export default function VehicleReservationsScreen() {
         contentContainerStyle={[
           styles.scrollContent,
           { paddingTop: headerOffset + 8 },
-          isTabScreen && { paddingBottom: 110 },
+          isTabScreen && { paddingBottom: 28 },
         ]}
         {...chromeScroll}
         refreshControl={

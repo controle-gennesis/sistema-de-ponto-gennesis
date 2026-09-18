@@ -12,6 +12,7 @@ import { useNavigation } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Clock as PunchClockIcon } from 'lucide-react-native';
 import { useTheme } from '../context/ThemeContext';
+import { getTabBarHeight } from '../navigation/tabBarLayout';
 
 const SIZE = 58;
 const MARGIN = 12;
@@ -29,7 +30,9 @@ export default function DraggablePunchFab() {
   const minX = MARGIN;
   const maxX = winW - SIZE - MARGIN;
   const minY = insets.top + MARGIN + 56;
-  const maxY = winH - SIZE - Math.max(insets.bottom, 16) - 88;
+  const tabBarH = getTabBarHeight(insets.bottom);
+  const createFabStack = SIZE + MARGIN; // FAB de criar + mesma folga
+  const maxY = winH - SIZE - tabBarH - MARGIN - createFabStack;
 
   const clamp = useCallback(
     (x: number, y: number) => ({
@@ -40,8 +43,8 @@ export default function DraggablePunchFab() {
   );
 
   const defaultPos = useMemo(
-    () => clamp(winW - SIZE - MARGIN - 4, winH - SIZE - Math.max(insets.bottom, 16) - 120),
-    [clamp, insets.bottom, winH, winW],
+    () => clamp(winW - SIZE - MARGIN - 4, winH - SIZE - tabBarH - MARGIN - createFabStack - 4),
+    [clamp, createFabStack, tabBarH, winH, winW],
   );
 
   const pos = useRef(new Animated.ValueXY(defaultPos)).current;
@@ -177,8 +180,8 @@ const styles = StyleSheet.create({
     width: SIZE,
     height: SIZE,
     borderRadius: 20,
-    zIndex: 40,
-    elevation: 14,
+    zIndex: 100,
+    elevation: 28,
     ...Platform.select({
       ios: {
         shadowColor: '#000',

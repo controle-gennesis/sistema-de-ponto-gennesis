@@ -956,7 +956,7 @@ export default function DpRequestsScreen() {
         contentContainerStyle={[
           styles.scrollContent,
           { paddingTop: isTabScreen ? headerOffset + 8 : 8 },
-          isTabScreen && { paddingBottom: 110 },
+          isTabScreen && { paddingBottom: 28 },
         ]}
         {...chromeScroll}
         refreshControl={

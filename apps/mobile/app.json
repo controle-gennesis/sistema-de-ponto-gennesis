@@ -26,6 +26,7 @@
         "backgroundColor": "#111827"
       },
       "package": "com.engenharia.sistemaponto",
+      "softwareKeyboardLayoutMode": "pan",
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.ACCESS_FINE_LOCATION",
@@ -42,6 +43,11 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "androidStatusBar": {
+      "backgroundColor": "#00000000",
+      "barStyle": "dark-content",
+      "translucent": true
     },
     "plugins": [
       [

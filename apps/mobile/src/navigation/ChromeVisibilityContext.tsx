@@ -13,6 +13,7 @@ import {
   Easing,
   NativeScrollEvent,
   NativeSyntheticEvent,
+  Platform,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 
@@ -45,7 +46,7 @@ const SHOW_DY = 8;
 const TOP_REVEAL = 18;
 const BOTTOM_LOCK = 28;
 const STOP_REVEAL_MS = 240;
-export const CHROME_HEADER_FALLBACK = 88;
+export const CHROME_HEADER_FALLBACK = Platform.OS === 'android' ? 96 : 110;
 
 export function ChromeVisibilityProvider({ children }: { children: ReactNode }) {
   const progress = useRef(new Animated.Value(1)).current;

@@ -1,16 +1,24 @@
-import React from 'react';
-import { View, StyleSheet } from 'react-native';
-import { createMaterialTopTabNavigator } from '@react-navigation/material-top-tabs';
-import FloatingTabBar from './FloatingTabBar';
+import React, { useState } from 'react';
+import { View, StyleSheet, Platform, Pressable, Text } from 'react-native';
+import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { createNativeBottomTabNavigator } from '@react-navigation/bottom-tabs/unstable';
+import { House, Fuel, CarFront, Inbox, Wrench, type LucideIcon } from 'lucide-react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AppHeader from '../components/AppHeader';
+import CreateActionFab from '../components/CreateActionFab';
+import DraggablePunchFab from '../components/DraggablePunchFab';
 
 import HomeScreen from '../screens/HomeScreen';
 import FuelRequestsScreen from '../screens/FuelRequestsScreen';
 import VehicleReservationsScreen from '../screens/VehicleReservationsScreen';
 import DpRequestsScreen from '../screens/DpRequestsScreen';
 import GestaoOsListScreen from '../screens/GestaoOsListScreen';
-import DraggablePunchFab from '../components/DraggablePunchFab';
 import { usePermissions } from '../hooks/usePermissions';
+import { useTheme } from '../context/ThemeContext';
+import { emitFabBarPress, type FabBarTabName } from './fabBarEvents';
+import { useChromeVisibility } from './ChromeVisibilityContext';
+import { getAndroidTabBarBottomPad, getAndroidTabBarHeight, getAndroidTabBarTopPad, isSamsungDevice } from './tabBarLayout';
+import SamsungTabBar from './SamsungTabBar';
 
 export type BottomTabParamList = {
   Home: undefined;
@@ -20,64 +28,252 @@ export type BottomTabParamList = {
   GestaoOs: undefined;
 };
 
-const Tab = createMaterialTopTabNavigator<BottomTabParamList>();
+const NativeTab = createNativeBottomTabNavigator<BottomTabParamList>();
+const AndroidTab = createBottomTabNavigator<BottomTabParamList>();
+
+const FAB_TABS = new Set<string>(['Combustivel', 'Reservas', 'DpRequests', 'GestaoOs']);
+
+const LUCIDE_ICONS: Record<string, LucideIcon> = {
+  Home: House,
+  Combustivel: Fuel,
+  Reservas: CarFront,
+  DpRequests: Inbox,
+  GestaoOs: Wrench,
+};
+
+function sfIcon(name: string) {
+  return { type: 'sfSymbol' as const, name: name as any };
+}
+
+function useFabListeners(onTabChange?: (name: string) => void) {
+  const chrome = useChromeVisibility();
+  return ({ route, navigation }: any) => ({
+    tabPress: () => {
+      chrome?.reveal();
+      const state = navigation.getState();
+      const focused = state.routes[state.index]?.name === route.name;
+      if (focused && FAB_TABS.has(route.name)) {
+        emitFabBarPress(route.name as FabBarTabName);
+      }
+    },
+    focus: () => {
+      chrome?.reveal();
+      onTabChange?.(route.name);
+    },
+  });
+}
+
+/** iPhone: UITabBar nativo + SF Symbols */
+function IosNativeTabs({ onTabChange }: { onTabChange: (name: string) => void }) {
+  const { canSeeCombustivel, canSeeReservas, canSeeDpRequests, canSeeGestaoOs } = usePermissions();
+  const { colors, isDark } = useTheme();
+  const listeners = useFabListeners(onTabChange);
+
+  return (
+    <NativeTab.Navigator
+      initialRouteName="Home"
+      screenOptions={{
+        headerShown: false,
+        tabBarActiveTintColor: colors.primary,
+        tabBarInactiveTintColor: isDark ? '#9ca3af' : '#6b7280',
+        overrideScrollViewContentInsetAdjustmentBehavior: false,
+        tabBarMinimizeBehavior: 'never',
+        tabBarBlurEffect: isDark ? 'systemMaterialDark' : 'systemMaterial',
+      }}
+      screenListeners={listeners}
+    >
+      <NativeTab.Screen
+        name="Home"
+        component={HomeScreen}
+        options={{
+          title: 'Início',
+          tabBarLabel: 'Início',
+          tabBarIcon: sfIcon('house.fill'),
+        }}
+      />
+      {canSeeCombustivel ? (
+        <NativeTab.Screen
+          name="Combustivel"
+          component={FuelRequestsScreen}
+          options={{
+            title: 'Abastecimento',
+            tabBarLabel: 'Abastecimento',
+            tabBarIcon: sfIcon('fuelpump.fill'),
+          }}
+        />
+      ) : null}
+      {canSeeReservas ? (
+        <NativeTab.Screen
+          name="Reservas"
+          component={VehicleReservationsScreen}
+          options={{
+            title: 'Frota',
+            tabBarLabel: 'Frota',
+            tabBarIcon: sfIcon('car.fill'),
+          }}
+        />
+      ) : null}
+      {canSeeDpRequests ? (
+        <NativeTab.Screen
+          name="DpRequests"
+          component={DpRequestsScreen}
+          options={{
+            title: 'Solicitações',
+            tabBarLabel: 'Solicitações',
+            tabBarIcon: sfIcon('tray.full.fill'),
+          }}
+        />
+      ) : null}
+      {canSeeGestaoOs ? (
+        <NativeTab.Screen
+          name="GestaoOs"
+          component={GestaoOsListScreen}
+          options={{
+            title: 'Chamados',
+            tabBarLabel: 'Chamados',
+            tabBarIcon: sfIcon('wrench.and.screwdriver.fill'),
+          }}
+        />
+      ) : null}
+    </NativeTab.Navigator>
+  );
+}
+
+/** Android: Lucide, sem pill, sem ripple. Samsung: tab bar custom. */
+function AndroidLucideTabs({ onTabChange }: { onTabChange: (name: string) => void }) {
+  const { canSeeCombustivel, canSeeReservas, canSeeDpRequests, canSeeGestaoOs } = usePermissions();
+  const { colors, isDark } = useTheme();
+  const insets = useSafeAreaInsets();
+  const listeners = useFabListeners(onTabChange);
+  const samsung = isSamsungDevice();
+  const androidTopPad = getAndroidTabBarTopPad();
+  const androidBottomPad = getAndroidTabBarBottomPad(insets.bottom);
+  const androidTabBarH = getAndroidTabBarHeight(insets.bottom);
+
+  return (
+    <AndroidTab.Navigator
+      initialRouteName="Home"
+      safeAreaInsets={{ top: 0, right: 0, left: 0, bottom: 0 }}
+      tabBar={samsung ? (props) => <SamsungTabBar {...props} /> : undefined}
+      screenOptions={({ route }) => ({
+        headerShown: false,
+        animation: 'none',
+        tabBarActiveTintColor: colors.primary,
+        tabBarInactiveTintColor: isDark ? '#9ca3af' : '#6b7280',
+        tabBarActiveBackgroundColor: 'transparent',
+        tabBarShowLabel: true,
+        tabBarLabelStyle: {
+          fontSize: 10,
+          fontWeight: '600',
+          marginTop: 2,
+          marginBottom: 0,
+        },
+        tabBarItemStyle: {
+          paddingTop: 4,
+          paddingHorizontal: 0,
+        },
+        tabBarAllowFontScaling: true,
+        tabBarStyle: samsung
+          ? {
+              // Altura/layout vêm do SamsungTabBar; evita estilo da barra padrão
+              backgroundColor: 'transparent',
+              borderTopWidth: 0,
+              elevation: 0,
+              shadowOpacity: 0,
+            }
+          : {
+              backgroundColor: isDark ? '#111827' : '#ffffff',
+              borderTopColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.08)',
+              borderTopWidth: StyleSheet.hairlineWidth,
+              height: androidTabBarH,
+              paddingTop: androidTopPad,
+              paddingBottom: androidBottomPad,
+              elevation: 0,
+              shadowOpacity: 0,
+            },
+        tabBarButton: ({ href: _href, ...rest }) => (
+          <Pressable {...rest} android_ripple={null} />
+        ),
+        tabBarIcon: ({ color }) => {
+          const Icon = LUCIDE_ICONS[route.name] ?? House;
+          return <Icon size={22} color={color} strokeWidth={1.85} />;
+        },
+      })}
+      screenListeners={listeners}
+    >
+      <AndroidTab.Screen name="Home" component={HomeScreen} options={{ title: 'Início', tabBarLabel: 'Início' }} />
+      {canSeeCombustivel ? (
+        <AndroidTab.Screen
+          name="Combustivel"
+          component={FuelRequestsScreen}
+          options={{
+            title: 'Abastecimento',
+            tabBarLabel: ({ color }) => (
+              <Text
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.72}
+                style={{
+                  color,
+                  fontSize: 10,
+                  fontWeight: '600',
+                  marginTop: 2,
+                  marginBottom: 0,
+                  textAlign: 'center',
+                  width: '100%',
+                  paddingHorizontal: 1,
+                }}
+              >
+                Abastecimento
+              </Text>
+            ),
+          }}
+        />
+      ) : null}
+      {canSeeReservas ? (
+        <AndroidTab.Screen
+          name="Reservas"
+          component={VehicleReservationsScreen}
+          options={{ title: 'Frota', tabBarLabel: 'Frota' }}
+        />
+      ) : null}
+      {canSeeDpRequests ? (
+        <AndroidTab.Screen
+          name="DpRequests"
+          component={DpRequestsScreen}
+          options={{ title: 'Solicitações', tabBarLabel: 'Solicitações' }}
+        />
+      ) : null}
+      {canSeeGestaoOs ? (
+        <AndroidTab.Screen
+          name="GestaoOs"
+          component={GestaoOsListScreen}
+          options={{ title: 'Chamados', tabBarLabel: 'Chamados' }}
+        />
+      ) : null}
+    </AndroidTab.Navigator>
+  );
+}
 
 export default function BottomTabNavigator() {
-  const { canSeeCombustivel, canSeeReservas, canSeeDpRequests, canSeePonto, canSeeGestaoOs } =
-    usePermissions();
+  const { canSeePonto } = usePermissions();
+  const [activeTab, setActiveTab] = useState('Home');
+  const showCreateFab = FAB_TABS.has(activeTab);
 
   return (
     <View style={styles.root}>
-      {/* Header fixo fora do pager — não some ao arrastar entre abas */}
       <AppHeader />
-      <Tab.Navigator
-        initialRouteName="Home"
-        tabBarPosition="bottom"
-        tabBar={(props) => <FloatingTabBar {...props} />}
-        sceneContainerStyle={{
-          backgroundColor: 'transparent',
-        }}
-        screenOptions={{
-          swipeEnabled: true,
-          lazy: true,
-          animationEnabled: true,
-        }}
-      >
-        <Tab.Screen name="Home" component={HomeScreen} options={{ title: 'Início' }} />
-        {canSeeCombustivel ? (
-          <Tab.Screen
-            name="Combustivel"
-            component={FuelRequestsScreen}
-            options={{ title: 'Abastecimento' }}
-          />
-        ) : null}
-        {canSeeReservas ? (
-          <Tab.Screen
-            name="Reservas"
-            component={VehicleReservationsScreen}
-            options={{ title: 'Frota' }}
-          />
-        ) : null}
-        {canSeeDpRequests ? (
-          <Tab.Screen
-            name="DpRequests"
-            component={DpRequestsScreen}
-            options={{ title: 'Solicitações' }}
-          />
-        ) : null}
-        {canSeeGestaoOs ? (
-          <Tab.Screen
-            name="GestaoOs"
-            component={GestaoOsListScreen}
-            options={{ title: 'Chamados' }}
-          />
-        ) : null}
-      </Tab.Navigator>
+      {Platform.OS === 'ios' ? (
+        <IosNativeTabs onTabChange={setActiveTab} />
+      ) : (
+        <AndroidLucideTabs onTabChange={setActiveTab} />
+      )}
+      {showCreateFab ? <CreateActionFab tab={activeTab as FabBarTabName} /> : null}
       {canSeePonto ? <DraggablePunchFab /> : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1 },
+  root: { flex: 1, backgroundColor: 'transparent' },
 });

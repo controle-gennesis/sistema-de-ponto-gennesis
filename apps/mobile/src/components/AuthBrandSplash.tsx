@@ -44,7 +44,7 @@ export default function AuthBrandSplash({
 
   return (
     <View style={styles.root}>
-      <StatusBar style="light" />
+      <StatusBar style="light" translucent backgroundColor="transparent" />
       <Animated.View style={{ opacity: fade, transform: [{ scale: pulse }] }}>
         <Image
           source={require('../../assets/logobranca.png')}

@@ -10,6 +10,8 @@ import {
   Easing,
   Alert,
   Dimensions,
+  Platform,
+  StatusBar,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Home, Moon, Sun, LogOut, X, Clock, Calendar } from 'lucide-react-native';
@@ -28,8 +30,11 @@ interface MenuProps {
   onClose: () => void;
 }
 
-const PANEL_WIDTH = Math.min(360, Math.round(Dimensions.get('window').width * 0.88));
-const CORNER = 24;
+const PANEL_WIDTH = Math.min(
+  Platform.OS === 'android' ? 340 : 360,
+  Math.round(Dimensions.get('window').width * (Platform.OS === 'android' ? 0.88 : 0.88)),
+);
+const CORNER = Platform.OS === 'android' ? 20 : 24;
 
 function MenuItemRow({
   label,
@@ -232,8 +237,13 @@ export default function Menu({ visible, onClose }: MenuProps) {
               style={[
                 styles.panel,
                 {
-                  backgroundColor: colors.background,
-                  paddingTop: insets.top,
+                  backgroundColor: colors.surface ?? colors.background,
+                  paddingTop:
+                    (Platform.OS === 'android'
+                      ? insets.top > 0
+                        ? insets.top
+                        : StatusBar.currentHeight ?? 24
+                      : insets.top) + 12,
                   paddingBottom: Math.max(insets.bottom, 16),
                 },
               ]}
@@ -256,7 +266,7 @@ export default function Menu({ visible, onClose }: MenuProps) {
                 >
                   <UserAvatar
                     uri={user?.profilePhotoUrl}
-                    size={52}
+                    size={Platform.OS === 'android' ? 48 : 52}
                     backgroundColor={colors.primary}
                     iconColor="#fff"
                   />
@@ -363,6 +373,12 @@ const styles = StyleSheet.create({
   panelSlide: {
     height: '100%',
     maxWidth: 360,
+    ...Platform.select({
+      android: {
+        elevation: 16,
+      },
+      default: {},
+    }),
   },
   panel: {
     flex: 1,
@@ -384,34 +400,44 @@ const styles = StyleSheet.create({
   },
   profileBlock: {
     borderBottomWidth: StyleSheet.hairlineWidth,
-    paddingBottom: 16,
-    marginBottom: 8,
-    paddingTop: 8,
+    paddingBottom: 18,
+    marginBottom: 10,
+    paddingTop: Platform.OS === 'android' ? 4 : 8,
   },
   profileRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 14,
-    paddingHorizontal: 4,
+    gap: 12,
+    paddingHorizontal: 2,
+    minHeight: 52,
   },
   profileText: {
     flex: 1,
     minWidth: 0,
-    gap: 3,
+    justifyContent: 'center',
+    gap: 4,
   },
   profileName: {
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: '700',
     letterSpacing: -0.3,
+    lineHeight: 22,
   },
   profileCpf: {
     fontSize: 13,
     fontWeight: '500',
     letterSpacing: -0.1,
+    lineHeight: 18,
     fontVariant: ['tabular-nums'],
   },
-  content: { flex: 1 },
-  contentInner: { paddingBottom: 16 },
+  content: {
+    flexGrow: 1,
+    flexShrink: 1,
+  },
+  contentInner: {
+    paddingBottom: 16,
+    flexGrow: 1,
+  },
   item: {
     flexDirection: 'row',
     alignItems: 'center',

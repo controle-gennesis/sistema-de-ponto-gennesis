@@ -234,7 +234,7 @@ export default function ProfileScreen() {
 
   return (
     <View style={styles.safeArea}>
-      <StatusBar style="light" />
+      <StatusBar style="light" translucent backgroundColor="transparent" />
       <ScrollView
         style={styles.container}
         contentContainerStyle={styles.scrollContent}
