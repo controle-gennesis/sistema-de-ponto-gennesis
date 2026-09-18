@@ -53,10 +53,22 @@ export default function LoginScreen({ fromBootSplash = true }: Props) {
   const [error, setError] = useState('');
   const [introDone, setIntroDone] = useState(false);
   const passwordRef = useRef<TextInput>(null);
-  const { login, loginWithBiometrics, biometric, enableBiometrics } = useAuth();
+  const {
+    login,
+    loginWithBiometrics,
+    biometric,
+    enableBiometrics,
+    refreshBiometric,
+    isAuthenticated,
+  } = useAuth();
   const insets = useSafeAreaInsets();
   const [bioLoading, setBioLoading] = useState(false);
   const bioPrompted = useRef(false);
+  const bioInFlight = useRef(false);
+
+  useEffect(() => {
+    void refreshBiometric();
+  }, [refreshBiometric]);
 
   const progress = useRef(new Animated.Value(0)).current;
   const titlesAnim = useRef(new Animated.Value(0)).current;
@@ -137,6 +149,9 @@ export default function LoginScreen({ fromBootSplash = true }: Props) {
   };
 
   const handleBiometricLogin = async () => {
+    if (bioInFlight.current || isAuthenticated) return;
+    bioInFlight.current = true;
+    bioPrompted.current = true;
     setError('');
     setBioLoading(true);
     try {
@@ -150,17 +165,18 @@ export default function LoginScreen({ fromBootSplash = true }: Props) {
       setError(err?.message || 'Não foi possível entrar com biometria.');
     } finally {
       setBioLoading(false);
+      bioInFlight.current = false;
     }
   };
 
   useEffect(() => {
-    if (!introDone || !showBiometric || bioPrompted.current) return;
-    bioPrompted.current = true;
+    if (isAuthenticated || !introDone || !showBiometric || bioPrompted.current) return;
     const t = setTimeout(() => {
+      if (isAuthenticated || bioPrompted.current || bioInFlight.current) return;
       void handleBiometricLogin();
-    }, 400);
+    }, 700);
     return () => clearTimeout(t);
-  }, [introDone, showBiometric]);
+  }, [introDone, showBiometric, isAuthenticated]);
 
   const handleLogin = async () => {
     const trimmedIdentifier = identifier.trim();

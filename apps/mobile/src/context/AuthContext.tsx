@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { User } from '../types';
@@ -11,6 +11,7 @@ import {
   getBiometricCapability,
   getStoredCredentials,
   isBiometricEnabled,
+  saveBiometricCredentials,
   type BiometricCapability,
 } from '../services/biometricAuth';
 
@@ -67,11 +68,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     enabled: false,
   });
 
-  const refreshBiometric = async () => {
+  const refreshBiometric = useCallback(async () => {
     const cap = await getBiometricCapability();
     const enabled = await isBiometricEnabled();
     setBiometric({ ...cap, enabled });
-  };
+  }, []);
 
   useEffect(() => {
     void loadStoredAuth();
@@ -163,9 +164,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       const { user: userData, token } = data.data;
       await persistSession(userData, token);
 
+      // Só atualiza as credenciais guardadas — não pede Face ID de novo.
       if (await isBiometricEnabled()) {
         try {
-          await enableBiometricLogin(identifier, password);
+          await saveBiometricCredentials(identifier, password);
         } catch {
           /* sessão já aberta */
         }
@@ -183,8 +185,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     if (!cap.available) {
       throw new Error(`Cadastre ${cap.label} neste aparelho para entrar.`);
     }
-    const ok = await authenticateWithBiometrics(`Entre com ${cap.label}`);
-    if (!ok) throw new Error('Biometria não confirmada.');
+    await authenticateWithBiometrics(`Entre com ${cap.label}`);
 
     if (await hydrateUserFromStorage()) {
       void refreshProfileInBackground();
