@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import {
+  BarChart3,
   Check,
   CheckCircle,
   Clock,
@@ -953,6 +954,16 @@ export default function SolicitacoesCombustivelPage() {
                       <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
                     ) : null}
                   </button>
+                  <Button
+                    type="button"
+                    variant="primary"
+                    size="sm"
+                    className="h-10 shrink-0 gap-0 px-3 sm:px-4"
+                    icon={<BarChart3 className="h-4 w-4" />}
+                    onClick={() => router.push('/ponto/solicitacoes-combustivel/analises')}
+                  >
+                    <span className="hidden sm:inline">Análises</span>
+                  </Button>
                 </div>
               </div>
             </CardHeader>

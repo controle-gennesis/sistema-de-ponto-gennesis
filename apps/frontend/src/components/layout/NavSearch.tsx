@@ -296,7 +296,7 @@ export function NavSearch({ inputRef }: NavSearchProps) {
             onBlur={() => setFocused(false)}
             onKeyDown={onSearchKeyDown}
             placeholder="Buscar..."
-            className="h-10 w-full rounded-full border border-gray-200 bg-gray-100 py-2 pl-10 pr-11 text-sm font-medium text-gray-900 outline-none transition-colors placeholder:text-gray-400 hover:bg-gray-50 focus:border-gray-300 focus:bg-white focus:ring-2 focus:ring-gray-200/80 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:placeholder:text-gray-500 dark:hover:bg-gray-800/80 dark:focus:border-gray-600 dark:focus:bg-gray-800 dark:focus:ring-gray-700/60"
+            className="h-10 w-full rounded-full border border-gray-200 bg-gray-100 py-2 pl-10 pr-11 text-sm font-medium text-gray-900 outline-none transition-colors placeholder:text-gray-400 focus:border-gray-300 focus:bg-gray-100 focus:ring-2 focus:ring-gray-200/80 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:placeholder:text-gray-500 dark:focus:border-gray-600 dark:focus:bg-gray-800 dark:focus:ring-gray-700/60"
             autoComplete="off"
           />
           {hasTerm ? (
@@ -343,7 +343,7 @@ export function NavSearch({ inputRef }: NavSearchProps) {
                   }}
                   onKeyDown={onSearchKeyDown}
                   placeholder="Buscar páginas..."
-                  className="h-11 w-full rounded-xl border border-gray-200 bg-gray-50 py-2 pl-10 pr-3 text-sm text-gray-900 outline-none ring-0 focus:border-red-300 focus:bg-white dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:focus:border-red-700"
+                  className="h-11 w-full rounded-xl border border-gray-200 bg-gray-50 py-2 pl-10 pr-3 text-sm text-gray-900 outline-none ring-0 focus:border-gray-300 focus:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:focus:border-gray-600 dark:focus:bg-gray-800"
                   autoComplete="off"
                 />
               </div>
