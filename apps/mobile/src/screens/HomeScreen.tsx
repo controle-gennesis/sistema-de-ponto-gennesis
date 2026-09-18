@@ -6,13 +6,14 @@ import {
   ScrollView,
   TouchableOpacity,
   RefreshControl,
+  PanResponder,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
-import { useChromeScroll } from '../navigation/ChromeVisibilityContext';
+import { useChromeScroll, useChromeVisibility } from '../navigation/ChromeVisibilityContext';
 import UserAvatar from '../components/UserAvatar';
 import HomeAgendaCard from '../components/HomeAgendaCard';
 import HomeTarefasCard from '../components/HomeTarefasCard';
@@ -34,6 +35,23 @@ export default function HomeScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const styles = useMemo(() => getStyles(colors, isDark), [colors, isDark]);
   const { scrollProps: chromeScroll, headerOffset } = useChromeScroll();
+  const chrome = useChromeVisibility();
+  const openMenu = chrome?.openMenu;
+
+  const edgePan = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_, g) =>
+          g.dx > 14 && Math.abs(g.dx) > Math.abs(g.dy) * 1.15,
+        onPanResponderRelease: (_, g) => {
+          if (g.dx > 52 || g.vx > 0.35) openMenu?.();
+        },
+        onPanResponderTerminate: (_, g) => {
+          if (g.dx > 52 || g.vx > 0.35) openMenu?.();
+        },
+      }),
+    [openMenu],
+  );
 
   const displayName = formatMenuDisplayName(user?.name);
 
@@ -96,6 +114,12 @@ export default function HomeScreen() {
 
         <HomeTarefasCard />
       </ScrollView>
+      <View
+        pointerEvents="box-none"
+        style={styles.edgeLayer}
+      >
+        <View style={styles.edgeHit} {...edgePan.panHandlers} />
+      </View>
     </View>
   );
 }
@@ -128,5 +152,16 @@ const getStyles = (colors: any, isDark: boolean) =>
       fontWeight: '700',
       letterSpacing: -0.5,
       color: colors.text,
+    },
+    edgeLayer: {
+      ...StyleSheet.absoluteFillObject,
+      zIndex: 12,
+    },
+    edgeHit: {
+      position: 'absolute',
+      left: 0,
+      top: 0,
+      bottom: 0,
+      width: 28,
     },
   });

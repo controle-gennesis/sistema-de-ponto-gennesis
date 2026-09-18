@@ -74,8 +74,11 @@ export default function AppHeader({
 }: AppHeaderProps) {
   const navigation = useNavigation();
   const { colors, isDark } = useTheme();
-  const [showMenu, setShowMenu] = useState(false);
   const chrome = useChromeVisibility();
+  const [localMenu, setLocalMenu] = useState(false);
+  const showMenu = chrome?.menuOpen ?? localMenu;
+  const openMenu = chrome?.openMenu ?? (() => setLocalMenu(true));
+  const closeMenu = chrome?.closeMenu ?? (() => setLocalMenu(false));
 
   const iconColor = colors.text;
   const handleBack = onBack ?? (() => navigation.goBack());
@@ -124,7 +127,7 @@ export default function AppHeader({
       <View style={styles.header}>
         <View style={styles.side}>
           <HeaderIconButton
-            onPress={() => setShowMenu(true)}
+            onPress={openMenu}
             accessibilityLabel="Menu"
           >
             <MenuIcon size={22} color={iconColor} strokeWidth={2.2} />
@@ -154,7 +157,7 @@ export default function AppHeader({
     return (
       <>
         {headerInner}
-        <Menu visible={showMenu} onClose={() => setShowMenu(false)} />
+        <Menu visible={showMenu} onClose={closeMenu} />
       </>
     );
   }
@@ -182,7 +185,7 @@ export default function AppHeader({
         {headerInner}
       </Animated.View>
 
-      <Menu visible={showMenu} onClose={() => setShowMenu(false)} />
+      <Menu visible={showMenu} onClose={closeMenu} />
     </>
   );
 }

@@ -32,6 +32,9 @@ type ChromeVisibilityContextValue = {
   setHeaderHeight: (height: number) => void;
   reveal: () => void;
   conceal: () => void;
+  menuOpen: boolean;
+  openMenu: () => void;
+  closeMenu: () => void;
   scrollHandlers: ScrollHandlers;
 };
 
@@ -53,6 +56,10 @@ export function ChromeVisibilityProvider({ children }: { children: ReactNode }) 
   const animRef = useRef<Animated.CompositeAnimation | null>(null);
   const [visible, setVisible] = useState(true);
   const [headerHeight, setHeaderHeightState] = useState(CHROME_HEADER_FALLBACK);
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  const openMenu = useCallback(() => setMenuOpen(true), []);
+  const closeMenu = useCallback(() => setMenuOpen(false), []);
 
   const setHeaderHeight = useCallback((height: number) => {
     if (height <= 0) return;
@@ -194,9 +201,12 @@ export function ChromeVisibilityProvider({ children }: { children: ReactNode }) 
       setHeaderHeight,
       reveal,
       conceal,
+      menuOpen,
+      openMenu,
+      closeMenu,
       scrollHandlers,
     }),
-    [progress, visible, headerHeight, setHeaderHeight, reveal, conceal, scrollHandlers],
+    [progress, visible, headerHeight, setHeaderHeight, reveal, conceal, menuOpen, openMenu, closeMenu, scrollHandlers],
   );
 
   return (
