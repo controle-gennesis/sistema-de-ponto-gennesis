@@ -21,7 +21,8 @@ import {
   MoreVertical,
   Search,
   X,
-  Printer
+  Printer,
+  Trash2
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Modal } from '@/components/ui/Modal';
@@ -782,7 +783,7 @@ function MovementSegButton({
 export default function EstoquePage() {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const { isUnbUser, unbCostCenterIds } = usePermissions();
+  const { isUnbUser, unbCostCenterIds, isAdministrator } = usePermissions();
   const [activeTab, setActiveTab] = useState<'balance' | 'movements'>('balance');
   const [isMovementModalOpen, setIsMovementModalOpen] = useState(false);
   const [filtersCostCenterId, setFiltersCostCenterId] = useState('');
@@ -797,6 +798,11 @@ export default function EstoquePage() {
   const [historyCurrentPage, setHistoryCurrentPage] = useState(1);
   const [historyDetail, setHistoryDetail] = useState<StockMovement | null>(null);
   const [historyDetailTab, setHistoryDetailTab] = useState<HistoryDetailTab>('resumo');
+  const [pendingDeleteMovements, setPendingDeleteMovements] = useState<{
+    ids: string[];
+    title: string;
+    description: string;
+  } | null>(null);
   const [balanceView, setBalanceView] = useState<'material' | 'contract'>('contract');
   const [selectedContractKey, setSelectedContractKey] = useState<string | null>(null);
   const [selectedMaterialId, setSelectedMaterialId] = useState<string | null>(null);
@@ -1023,6 +1029,30 @@ export default function EstoquePage() {
     onError: (error: any) => {
       const msg = error?.response?.data?.message || error?.message || 'Erro ao registrar movimentação';
       toast.error(msg);
+    }
+  });
+
+  const deleteMovementsMutation = useMutation({
+    mutationFn: async (ids: string[]) => {
+      await Promise.all(ids.map((id) => api.delete(`/stock/movements/${id}`)));
+    },
+    onSuccess: (_data, ids) => {
+      queryClient.invalidateQueries({ queryKey: ['stock-balance'] });
+      queryClient.invalidateQueries({ queryKey: ['stock-movements'] });
+      queryClient.invalidateQueries({ queryKey: ['stock-movements-oc-options'] });
+      queryClient.invalidateQueries({ queryKey: ['stock-movements-oc-tags'] });
+      queryClient.invalidateQueries({ queryKey: ['stock-shortfalls-pending-count'] });
+      queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
+      setHistoryDetail(null);
+      setPendingDeleteMovements(null);
+      toast.success(
+        ids.length > 1
+          ? 'Entrada desfeita. A OC voltou a ficar pendente.'
+          : 'Movimentação excluída.'
+      );
+    },
+    onError: (error: any) => {
+      toast.error(error?.response?.data?.message || 'Não foi possível excluir a movimentação');
     }
   });
 
@@ -1418,6 +1448,43 @@ export default function EstoquePage() {
     );
   }, [balances]);
   const movements: StockMovement[] = movementsData?.data ?? EMPTY_STOCK_MOVEMENTS;
+
+  const requestDeleteHistoryMovement = (movement: StockMovement) => {
+    if (!isAdministrator) {
+      toast.error('Apenas o administrador pode desfazer movimentação.');
+      return;
+    }
+    const ocRaw = extractOcNumberFromNotes(movement.notes).trim();
+    const ocKey = ocRaw.toLowerCase();
+    if (movement.type === 'IN' && ocKey) {
+      const sameOc = movements.filter(
+        (mov) => extractOcNumberFromNotes(mov.notes).trim().toLowerCase() === ocKey
+      );
+      if (sameOc.some((mov) => mov.type === 'OUT')) {
+        toast.error(
+          'Esta OC já tem saída. Não dá para desfazer a entrada sem antes excluir as saídas.'
+        );
+        return;
+      }
+      const inbound = sameOc.filter((mov) => mov.type === 'IN');
+      const ocLabel = formatOcShortNumber(ocRaw) || ocRaw;
+      setPendingDeleteMovements({
+        ids: inbound.map((mov) => mov.id),
+        title:
+          inbound.length > 1 ? `Desfazer entrada da ${ocLabel}?` : 'Excluir esta entrada?',
+        description:
+          inbound.length > 1
+            ? `Isso apaga ${inbound.length} lançamentos de entrada. A OC volta a ficar como se a entrada não tivesse sido dada.`
+            : 'A OC volta a ficar com a entrada pendente.'
+      });
+      return;
+    }
+    setPendingDeleteMovements({
+      ids: [movement.id],
+      title: 'Excluir esta movimentação?',
+      description: 'Esta ação não pode ser desfeita.'
+    });
+  };
 
   const clearBalanceFilters = () => {
     setFiltersCostCenterId(lockedUnbCostCenterId || '');
@@ -2829,14 +2896,26 @@ export default function EstoquePage() {
                                   {mov.user.name}
                                 </td>
                                 <td className="px-3 sm:px-6 py-3 text-right" onClick={(e) => e.stopPropagation()}>
-                                  <button
-                                    type="button"
-                                    onClick={() => setHistoryDetail(mov)}
-                                    className={rowActionMenuButtonClass(false)}
-                                    aria-label="Ver detalhes"
-                                  >
-                                    <MoreVertical className="w-4 h-4" />
-                                  </button>
+                                  <div className="flex items-center justify-end gap-2">
+                                    {isAdministrator && mov.type === 'IN' ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => requestDeleteHistoryMovement(mov)}
+                                        className="inline-flex h-8 items-center gap-1 rounded-lg border border-red-200 bg-red-50 px-2.5 text-xs font-semibold text-red-700 hover:bg-red-100 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-900/50"
+                                      >
+                                        <Trash2 className="h-3.5 w-3.5" />
+                                        Desfazer entrada
+                                      </button>
+                                    ) : null}
+                                    <button
+                                      type="button"
+                                      onClick={() => setHistoryDetail(mov)}
+                                      className={rowActionMenuButtonClass(false)}
+                                      aria-label="Ver detalhes"
+                                    >
+                                      <MoreVertical className="w-4 h-4" />
+                                    </button>
+                                  </div>
                                 </td>
                               </tr>
                             );
@@ -3033,14 +3112,37 @@ export default function EstoquePage() {
                             {historyDetail.material.name}
                           </p>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => setHistoryDetail(null)}
-                          className="shrink-0 rounded-lg p-2 text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700"
-                          aria-label="Fechar"
-                        >
-                          <X className="h-5 w-5" />
-                        </button>
+                        <div className="flex shrink-0 items-center gap-2">
+                          {isAdministrator ? (
+                            isEntry ? (
+                              <button
+                                type="button"
+                                onClick={() => requestDeleteHistoryMovement(historyDetail)}
+                                className="inline-flex items-center gap-1.5 rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                                Desfazer entrada
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => requestDeleteHistoryMovement(historyDetail)}
+                                className="inline-flex items-center gap-1.5 rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                                Excluir
+                              </button>
+                            )
+                          ) : null}
+                          <button
+                            type="button"
+                            onClick={() => setHistoryDetail(null)}
+                            className="shrink-0 rounded-lg p-2 text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700"
+                            aria-label="Fechar"
+                          >
+                            <X className="h-5 w-5" />
+                          </button>
+                        </div>
                       </div>
 
                       <div
@@ -3160,9 +3262,64 @@ export default function EstoquePage() {
                           ) : null}
                         </div>
                       </div>
+                      <div className="flex shrink-0 justify-end gap-3 border-t border-gray-200 px-5 py-4 dark:border-gray-700">
+                        <button
+                          type="button"
+                          onClick={() => setHistoryDetail(null)}
+                          className="rounded-lg bg-gray-100 px-4 py-2 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
+                        >
+                          Fechar
+                        </button>
+                        {isAdministrator ? (
+                          <button
+                            type="button"
+                            onClick={() => requestDeleteHistoryMovement(historyDetail)}
+                            className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-white hover:bg-red-700"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                            {historyDetail.type === 'IN' ? 'Desfazer entrada' : 'Excluir'}
+                          </button>
+                        ) : null}
+                      </div>
                     </>
                   );
                 })()}
+              </div>
+            </AppModalOverlay>
+          ) : null}
+
+          {pendingDeleteMovements ? (
+            <AppModalOverlay className="app-modal-overlay fixed inset-0 z-[2100] flex items-center justify-center p-4">
+              <div
+                className="absolute inset-0 bg-black/50"
+                onClick={() => setPendingDeleteMovements(null)}
+              />
+              <div className="relative mx-4 w-full max-w-md rounded-lg bg-white p-6 shadow-xl dark:bg-gray-800">
+                <h3 className="mb-2 text-lg font-semibold text-gray-900 dark:text-gray-100">
+                  {pendingDeleteMovements.title}
+                </h3>
+                <p className="mb-4 text-sm text-gray-600 dark:text-gray-400">
+                  {pendingDeleteMovements.description}
+                </p>
+                <div className="flex justify-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setPendingDeleteMovements(null)}
+                    className="rounded-lg bg-gray-100 px-4 py-2 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    disabled={deleteMovementsMutation.isPending}
+                    onClick={() =>
+                      deleteMovementsMutation.mutate(pendingDeleteMovements.ids)
+                    }
+                    className="rounded-lg bg-red-600 px-4 py-2 text-white hover:bg-red-700 disabled:opacity-50"
+                  >
+                    {deleteMovementsMutation.isPending ? 'Excluindo...' : 'Confirmar'}
+                  </button>
+                </div>
               </div>
             </AppModalOverlay>
           ) : null}

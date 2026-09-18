@@ -452,6 +452,10 @@ export class StockController {
    */
   async deleteMovement(req: AuthRequest, res: Response, next: NextFunction) {
     try {
+      if (!req.user?.id) throw createError('Usuário não autenticado', 401);
+      if (!req.user.isAdmin) {
+        throw createError('Apenas o administrador pode desfazer movimentação de estoque', 403);
+      }
       const { id } = req.params;
 
       const movement = await prisma.stockMovement.findUnique({
