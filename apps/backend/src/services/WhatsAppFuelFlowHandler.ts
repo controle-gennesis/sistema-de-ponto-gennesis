@@ -56,6 +56,7 @@ const SKIP_WORDS = /^(n[aã]o|nao|nenhuma|nenhum|-|pular|skip)$/i;
 /** WhatsApp lista no máx. 10 linhas; 1 reservada para “Mais contratos”. */
 const CONTRACT_LIST_PAGE_SIZE = 9;
 const CONTRACT_OTHERS_ID = 'fuel_contract_others';
+const FUEL_DATE_TODAY_ID = 'fuel_date_today';
 
 function waButtons(body: string, extra?: Array<{ id: string; title: string }>): SendAction {
   return {
@@ -66,6 +67,19 @@ function waButtons(body: string, extra?: Array<{ id: string; title: string }>): 
       { id: 'END', title: 'Encerrar' },
     ],
   };
+}
+
+function askRefuelDateAction(body: string): SendAction {
+  return waButtons(body, [
+    { id: FUEL_DATE_TODAY_ID, title: 'Hoje' },
+    { id: 'MENU', title: 'Menu' },
+    { id: 'END', title: 'Encerrar' },
+  ]);
+}
+
+function isFuelDateTodaySelection(content: string, textRaw: string): boolean {
+  if (content === FUEL_DATE_TODAY_ID || content === 'hoje') return true;
+  return /^hoje$/i.test(textRaw.trim());
 }
 
 function waList(
@@ -103,7 +117,12 @@ function formatBrDate(iso: string): string {
 }
 
 function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Sao_Paulo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
 }
 
 function vehicleTypeLabel(type?: FuelVehicleType): string {
@@ -265,7 +284,7 @@ function buildContractListAction(
   }
   const intro =
     page === 0
-      ? [`Identifiquei ${driverName}.`, 'Selecione o contrato (mais usados primeiro):']
+      ? [`Identifiquei ${driverName}.`, 'Selecione o contrato desta solicitação:']
       : ['Mais contratos — selecione:'];
   return waList(intro.join('\n'), rows, 'Ver contratos');
 }
@@ -448,10 +467,10 @@ export async function processWhatsAppFuelFlow(params: {
 
   if (startingFromMenu) {
     return {
-      sendAction: waButtons(
+      sendAction: askRefuelDateAction(
         buildFuelFlowStartMessage(
-          `Qual a data para abastecer? (DD/MM/AAAA)\nEx.: ${formatBrDate(todayIso())}`
-        )
+          `Qual a data para abastecer?\nEx.: ${formatBrDate(todayIso())}`,
+        ),
       ),
       newStatus: 'FUEL_ASK_REFUEL_DATE',
       newPayload,
@@ -460,10 +479,14 @@ export async function processWhatsAppFuelFlow(params: {
 
   switch (newStatus) {
     case 'FUEL_ASK_REFUEL_DATE': {
-      const iso = brDateToIso(textRaw);
+      const iso = isFuelDateTodaySelection(content, textRaw)
+        ? todayIso()
+        : brDateToIso(textRaw);
       if (!iso) {
         return {
-          sendAction: waButtons('Data inválida. Informe no formato DD/MM/AAAA (ex.: 08/06/2026).'),
+          sendAction: askRefuelDateAction(
+            'Data inválida. Informe no formato DD/MM/AAAA (ex.: 08/06/2026) ou toque em «Hoje».',
+          ),
           newStatus,
           newPayload,
         };
@@ -486,9 +509,7 @@ export async function processWhatsAppFuelFlow(params: {
       }
       newPayload.route = textRaw.trim();
       return {
-        sendAction: waButtons(
-          'Qual o CPF do condutor? (somente números — precisa estar cadastrado no sistema)',
-        ),
+        sendAction: waButtons('Qual o CPF do condutor?'),
         newStatus: 'FUEL_ASK_DRIVER_CPF',
         newPayload,
       };
@@ -498,7 +519,9 @@ export async function processWhatsAppFuelFlow(params: {
       const cpfDigits = onlyDigits(textRaw);
       if (!cpfDigits || !isValidCpf(cpfDigits)) {
         return {
-          sendAction: waButtons('CPF inválido. Envie os 11 dígitos do CPF do condutor.'),
+          sendAction: waButtons(
+            'CPF inválido. Envie o CPF do condutor (com ou sem pontuação).',
+          ),
           newStatus,
           newPayload,
         };
@@ -850,9 +873,9 @@ export async function processWhatsAppFuelFlow(params: {
     case 'FUEL_COMPLETE': {
       if (isWhatsAppFuelMenuSelection(content)) {
         return {
-          sendAction: waButtons(
+          sendAction: askRefuelDateAction(
             buildFuelFlowStartMessage(
-              `Qual a data para abastecer? (DD/MM/AAAA)\nEx.: ${formatBrDate(todayIso())}`,
+              `Qual a data para abastecer?\nEx.: ${formatBrDate(todayIso())}`,
             ),
           ),
           newStatus: 'FUEL_ASK_REFUEL_DATE',
