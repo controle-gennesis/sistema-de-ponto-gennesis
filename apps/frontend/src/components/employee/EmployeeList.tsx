@@ -45,7 +45,7 @@ const pk = pathToModuleKey;
 
 function isEmpreiteiroRow(emp: {
   empreiteiro?: { id?: string } | null;
-  employee?: { id?: string } | null;
+  employee?: unknown;
 }): boolean {
   return Boolean(emp.empreiteiro?.id) || !emp.employee;
 }

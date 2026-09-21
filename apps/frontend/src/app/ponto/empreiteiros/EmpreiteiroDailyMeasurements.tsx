@@ -77,32 +77,33 @@ const emptyForm = (): FormState => ({
 
 function asGeoPhotos(raw: PaymentFile[] | TeamGeoPhoto[] | undefined): TeamGeoPhoto[] {
   if (!Array.isArray(raw)) return [];
-  return raw
-    .map((item) => {
-      const latitude = Number((item as TeamGeoPhoto).latitude);
-      const longitude = Number((item as TeamGeoPhoto).longitude);
-      const capturedAt = String((item as TeamGeoPhoto).capturedAt || '');
-      if (
-        !item?.url ||
-        !Number.isFinite(latitude) ||
-        !Number.isFinite(longitude) ||
-        !capturedAt ||
-        Number.isNaN(new Date(capturedAt).getTime())
-      ) {
-        return null;
-      }
-      return {
-        url: item.url,
-        name: item.name || 'foto-servico.jpg',
-        key: item.key,
-        latitude,
-        longitude,
-        accuracy: (item as TeamGeoPhoto).accuracy ?? null,
-        capturedAt: new Date(capturedAt).toISOString(),
-        address: (item as TeamGeoPhoto).address ?? null,
-      } satisfies TeamGeoPhoto;
-    })
-    .filter((item): item is TeamGeoPhoto => item != null);
+  const out: TeamGeoPhoto[] = [];
+  for (const item of raw) {
+    const latitude = Number(item.latitude);
+    const longitude = Number(item.longitude);
+    const capturedAt = String(item.capturedAt || '');
+    if (
+      !item?.url ||
+      !Number.isFinite(latitude) ||
+      !Number.isFinite(longitude) ||
+      !capturedAt ||
+      Number.isNaN(new Date(capturedAt).getTime())
+    ) {
+      continue;
+    }
+    const photo: TeamGeoPhoto = {
+      url: item.url,
+      name: item.name || 'foto-servico.jpg',
+      latitude,
+      longitude,
+      accuracy: item.accuracy ?? null,
+      capturedAt: new Date(capturedAt).toISOString(),
+      address: item.address ?? null,
+    };
+    if (item.key) photo.key = item.key;
+    out.push(photo);
+  }
+  return out;
 }
 
 export function EmpreiteiroDailyMeasurements({
