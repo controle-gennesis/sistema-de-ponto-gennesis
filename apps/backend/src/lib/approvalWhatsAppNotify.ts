@@ -1,4 +1,4 @@
-import { PERMISSION_ACCESS_ACTION } from '@sistema-ponto/permission-modules';
+import { PERMISSION_ACCESS_ACTION, pathToModuleKey } from '@sistema-ponto/permission-modules';
 import { prisma } from './prisma';
 import { metaWhatsApp } from '../services/MetaWhatsAppService';
 import { DP_APPROVE_MODULE_KEY } from './dpApprovalAccess';
@@ -6,6 +6,9 @@ import { isDfAdmLocalLabel, sanitizeDpApprovalSectors, sectorSolicitanteMatches 
 import { OC_APPROVE_COMPRAS_MODULE_KEY, OC_APPROVE_DIRETORIA_MODULE_KEY } from './ocApprovalAccess';
 import { RM_APPROVE_MODULE_KEY } from './rmApprovalAccess';
 import { CONTRACTS_MODULE_KEY } from './contractAccess';
+
+/** Igual ao gate de acesso da página Fila de Abastecimento (usePermissions.ts). */
+const FUEL_SUPPLIES_QUEUE_MODULE_KEY = pathToModuleKey('/ponto/solicitacoes-combustivel');
 
 /** Envia sem lançar — falha de WhatsApp nunca deve derrubar a criação da solicitação. */
 async function sendApprovalWhatsApp(phone: string, text: string): Promise<void> {
@@ -179,4 +182,16 @@ export async function getFuelApprovalNotifyUserIds(contractId: string): Promise<
     select: { userId: true },
   });
   return [...new Set(rows.map((r) => r.userId))];
+}
+
+/** Todo mundo com acesso à página Fila de Abastecimento (mesmo gate de usePermissions.ts). */
+export async function getFuelSuppliesQueueAccessUserIds(): Promise<string[]> {
+  const [permitted, admins] = await Promise.all([
+    userIdsWithModule(FUEL_SUPPLIES_QUEUE_MODULE_KEY),
+    prisma.employee.findMany({
+      where: { position: { equals: 'administrador', mode: 'insensitive' } },
+      select: { userId: true },
+    }),
+  ]);
+  return [...new Set([...permitted, ...admins.map((a) => a.userId)])];
 }

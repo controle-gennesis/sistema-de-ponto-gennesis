@@ -25,6 +25,7 @@ import {
 import {
   buildApprovedByLine,
   getFuelApprovalNotifyUserIds,
+  getFuelSuppliesQueueAccessUserIds,
   notifyApproversWhatsApp,
 } from '../lib/approvalWhatsAppNotify';
 
@@ -434,6 +435,18 @@ export class FuelRefuelRequestService {
       },
       updated.sourceWhatsAppPhone,
     );
+
+    const queueUserIds = await getFuelSuppliesQueueAccessUserIds();
+    void notifyApproversWhatsApp(
+      queueUserIds,
+      [
+        '✅ Solicitação de abastecimento aprovada',
+        `Solicitação #${updated.displayNumber} · ${updated.driverName}`,
+        `Posto: ${gasStation.name}`,
+        'Liberada para abastecer.',
+      ].join('\n')
+    );
+
     return updated;
   }
 

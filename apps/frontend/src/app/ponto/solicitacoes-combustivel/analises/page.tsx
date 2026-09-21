@@ -1,12 +1,13 @@
 'use client';
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { format, parseISO, startOfMonth } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import {
   Car,
   Droplets,
+  Filter,
   Fuel,
   Gauge,
   Loader2,
@@ -15,6 +16,8 @@ import {
   Wallet,
   type LucideIcon,
 } from 'lucide-react';
+import { DatePickerField } from '@/components/ui/DatePickerField';
+import { Modal } from '@/components/ui/Modal';
 import {
   Area,
   AreaChart,
@@ -124,6 +127,26 @@ function formatPrice(value: number) {
     minimumFractionDigits: 3,
     maximumFractionDigits: 3,
   }).format(value);
+}
+
+function resolveRowDate(row: FuelRefuelRequest): Date | null {
+  const dateRaw = row.refuelReportedAt || row.refuelDate || row.requestedAt;
+  if (!dateRaw) return null;
+  try {
+    const dte = typeof dateRaw === 'string' ? parseISO(dateRaw) : new Date(dateRaw);
+    return Number.isNaN(dte.getTime()) ? null : dte;
+  } catch {
+    return null;
+  }
+}
+
+function resolveRowYmd(row: FuelRefuelRequest): string | null {
+  const dte = resolveRowDate(row);
+  if (!dte) return null;
+  const y = dte.getFullYear();
+  const m = String(dte.getMonth() + 1).padStart(2, '0');
+  const d = String(dte.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
 }
 
 function shortContractName(row: FuelRefuelRequest): string {
@@ -384,6 +407,9 @@ function buildInsights(rows: FuelRefuelRequest[]) {
 
 function AnalisesCombustivelContent() {
   const theme = useChartTheme();
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
 
   const { data: rows = [], isLoading, isError, refetch } = useQuery({
     queryKey: ['fuel-refuel-requests-analytics'],
@@ -394,7 +420,19 @@ function AnalisesCombustivelContent() {
     staleTime: 30_000,
   });
 
-  const insights = useMemo(() => buildInsights(rows), [rows]);
+  const filteredRows = useMemo(() => {
+    if (!dateFrom && !dateTo) return rows;
+    return rows.filter((row) => {
+      const ymd = resolveRowYmd(row);
+      if (!ymd) return false;
+      if (dateFrom && ymd < dateFrom) return false;
+      if (dateTo && ymd > dateTo) return false;
+      return true;
+    });
+  }, [rows, dateFrom, dateTo]);
+
+  const insights = useMemo(() => buildInsights(filteredRows), [filteredRows]);
+  const hasPeriodFilter = Boolean(dateFrom || dateTo);
 
   if (isLoading) {
     return (
@@ -404,33 +442,129 @@ function AnalisesCombustivelContent() {
     );
   }
 
-  if (isError) {
-    return (
-      <div className="py-16 text-center">
-        <p className="text-gray-600 dark:text-gray-400">Não foi possível carregar os dados.</p>
+  const periodFilterBar = (
+    <div className="flex justify-center">
+      <div className={cadastroListClasses.filterIconButtonWrap}>
         <button
           type="button"
-          onClick={() => void refetch()}
-          className="mt-3 rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700"
+          onClick={() => setIsFiltersModalOpen(true)}
+          className={`${cadastroListClasses.filterIconButton} transition-colors ${
+            hasPeriodFilter
+              ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40'
+              : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
+          }`}
+          aria-label="Abrir filtros"
+          title={hasPeriodFilter ? 'Filtros ativos' : 'Filtros'}
         >
-          Tentar novamente
+          <Filter className="h-4 w-4" />
+          {hasPeriodFilter ? (
+            <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
+          ) : null}
         </button>
+      </div>
+    </div>
+  );
+
+  const filtersModal = (
+    <Modal
+      isOpen={isFiltersModalOpen}
+      onClose={() => setIsFiltersModalOpen(false)}
+      title="Filtros"
+      size="md"
+    >
+      <div className="space-y-4">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="min-w-0">
+            <span className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
+              De
+            </span>
+            <DatePickerField
+              value={dateFrom}
+              onChange={setDateFrom}
+              placeholder="dd/mm/aaaa"
+              noFocusRing
+              className="w-full"
+              aria-label="Período inicial"
+            />
+          </div>
+          <div className="min-w-0">
+            <span className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
+              Até
+            </span>
+            <DatePickerField
+              value={dateTo}
+              onChange={setDateTo}
+              placeholder="dd/mm/aaaa"
+              noFocusRing
+              className="w-full"
+              aria-label="Período final"
+            />
+          </div>
+        </div>
+        <div className="flex justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
+          <button
+            type="button"
+            onClick={() => {
+              setDateFrom('');
+              setDateTo('');
+            }}
+            className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
+          >
+            Limpar
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsFiltersModalOpen(false)}
+            className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700"
+          >
+            Aplicar
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+
+  if (isError) {
+    return (
+      <div className="space-y-6">
+        {periodFilterBar}
+        {filtersModal}
+        <div className="py-16 text-center">
+          <p className="text-gray-600 dark:text-gray-400">Não foi possível carregar os dados.</p>
+          <button
+            type="button"
+            onClick={() => void refetch()}
+            className="mt-3 rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700"
+          >
+            Tentar novamente
+          </button>
+        </div>
       </div>
     );
   }
 
   if (insights.reportedCount === 0) {
     return (
-      <CadastroListEmpty
-        icon={Fuel}
-        title="Ainda sem abastecimentos concluídos"
-        hint="Quando houver relatórios com litros e preço por litro, os gráficos aparecem aqui."
-      />
+      <div className="space-y-6">
+        {periodFilterBar}
+        {filtersModal}
+        <CadastroListEmpty
+          icon={Fuel}
+          title={hasPeriodFilter ? 'Sem abastecimentos neste período' : 'Ainda sem abastecimentos concluídos'}
+          hint={
+            hasPeriodFilter
+              ? 'Tente ajustar o período selecionado.'
+              : 'Quando houver relatórios com litros e preço por litro, os gráficos aparecem aqui.'
+          }
+        />
+      </div>
     );
   }
 
   return (
     <div className="space-y-6">
+      {periodFilterBar}
+      {filtersModal}
       <div className="grid w-full grid-cols-1 gap-6 sm:grid-cols-2 xl:grid-cols-4">
         <FilterStatCard
           icon={Wallet}
