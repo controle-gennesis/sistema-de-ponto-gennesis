@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   CheckCircle,
   ClipboardList,
@@ -41,7 +41,14 @@ import { getMaterialRequestDisplayStatus, isMaterialRequestEffectivelyCancelled 
 import { formatRmListDisplayId } from '../_lib/rmListDisplay';
 import {
   materialRequestOcListRows,
+  sortMaterialRequestPurchaseOrders,
 } from '@/components/oc/materialRequestOcListRows';
+import {
+  buildLatestOcMovementByOrderNumber,
+  normalizeOcNumberKey,
+  OcListDeliveryStatusCellContent,
+  type StockMovementForOcTag,
+} from '@/components/oc/ocDeliveryStatus';
 import { getRmItemCoverageCounts } from '@/lib/rmProcurementCoverage';
 import { formatRmItemProductKinds } from '@/lib/rmItemProductKinds';
 import {
@@ -160,6 +167,21 @@ export function MaterialRequestsRmList({
   const meta = RM_CARD_LIST_CONFIG[cardFilter];
   const ListHeaderIcon = meta.Icon;
   const showStatusColumn = cardFilter === 'all';
+
+  const { data: stockMovementsData } = useQuery({
+    queryKey: ['stock-movements-oc-tags'],
+    queryFn: async () => {
+      const res = await api.get('/stock/movements', { params: { limit: 1000 } });
+      return res.data;
+    },
+    staleTime: 60_000,
+    refetchOnWindowFocus: false
+  });
+
+  const latestOcMovementByOrderNumber = useMemo(() => {
+    const movements: StockMovementForOcTag[] = stockMovementsData?.data || [];
+    return buildLatestOcMovementByOrderNumber(movements);
+  }, [stockMovementsData]);
 
   const listTotal = filteredRequests.length;
   const listTotalPages = Math.max(1, Math.ceil(listTotal / LIST_ITEMS_PER_PAGE));
@@ -394,6 +416,7 @@ export function MaterialRequestsRmList({
                   <col className={tipoColCls} />
                   <col className={ocColCls} />
                   <col className={showStatusColumn ? 'w-[11%]' : 'w-[13%]'} />
+                  <col className={showStatusColumn ? 'w-[11%]' : 'w-[13%]'} />
                   <col className="w-[4%]" />
                 </colgroup>
                 <thead className="border-b border-gray-200 dark:border-gray-700">
@@ -410,6 +433,7 @@ export function MaterialRequestsRmList({
                     <th className={tipoThCls}>Tipo</th>
                     <th className={ocThCls}>OC</th>
                     <th className={thCenterCls}>Status OC</th>
+                    <th className={`${thCenterCls} whitespace-nowrap`}>Status de entrega</th>
                     <th
                       scope="col"
                       className={actionThCls}
@@ -423,6 +447,7 @@ export function MaterialRequestsRmList({
                     const priorityInfo = getPriorityInfo(request.priority);
                     const ocs = ordersByMaterialRequestId.get(request.id) ?? [];
                     const ocRows = materialRequestOcListRows(request, ocs);
+                    const sortedOcs = sortMaterialRequestPurchaseOrders(ocs);
                     const displayStatus = getMaterialRequestDisplayStatus(request, ocs);
                     const statusInfo = getStatusInfo(displayStatus);
                     const { total: itemTotal, pending: itemPending, cancelled: itemCancelled } = getRmItemCoverageCounts(
@@ -544,6 +569,27 @@ export function MaterialRequestsRmList({
                                 >
                                   {row.status}
                                 </span>
+                              ))}
+                            </div>
+                          )}
+                        </td>
+                        <td className={`${tdCenterCls} align-middle`}>
+                          {sortedOcs.length === 0 ? (
+                            <span className="text-xs sm:text-sm text-gray-400 dark:text-gray-500">—</span>
+                          ) : (
+                            <div className="flex flex-col items-center justify-center gap-1">
+                              {sortedOcs.map((po) => (
+                                <OcListDeliveryStatusCellContent
+                                  key={po.id}
+                                  movement={
+                                    po.orderNumber
+                                      ? latestOcMovementByOrderNumber.get(
+                                          normalizeOcNumberKey(po.orderNumber)
+                                        )
+                                      : undefined
+                                  }
+                                  orderStatus={po.status}
+                                />
                               ))}
                             </div>
                           )}
