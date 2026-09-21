@@ -223,7 +223,6 @@ export default function Menu({ visible, onClose }: MenuProps) {
       navigationBarTranslucent
       onRequestClose={onClose}
     >
-      {/* Fundo escuro sólido — igual notificações (sem opacity animada) */}
       <View style={styles.root}>
         <View style={styles.row}>
           <Animated.View

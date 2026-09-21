@@ -254,8 +254,8 @@ export default function GestaoOsListScreen() {
       <Text style={styles.pageTitle}>Chamados</Text>
       <Text style={styles.pageSubtitle}>Acompanhe seus chamados e o histórico dos atendimentos</Text>
 
-      {memberships.length > 1 ? (
-        <View style={styles.companyRow}>
+        {memberships.length > 1 ? (
+          <View style={styles.companyRow}>
           {memberships.map((m: { companyId: string; company: { name: string } }) => {
             const active = meQuery.data?.activeCompanyId === m.companyId;
             return (
@@ -275,8 +275,8 @@ export default function GestaoOsListScreen() {
               </TouchableOpacity>
             );
           })}
-        </View>
-      ) : null}
+          </View>
+        ) : null}
 
       <ScrollView
         horizontal
@@ -286,7 +286,7 @@ export default function GestaoOsListScreen() {
         {chips.map((chip) => {
           const active = cardFilter === chip.key;
           return (
-            <TouchableOpacity
+          <TouchableOpacity
               key={chip.key}
               onPress={() => setCardFilter(chip.key)}
               style={[styles.chip, active && styles.chipActive]}
@@ -294,7 +294,7 @@ export default function GestaoOsListScreen() {
             >
               <Text style={[styles.chipText, active && styles.chipTextActive]}>{chip.label}</Text>
               <Text style={[styles.chipCount, active && styles.chipCountActive]}>{chip.count}</Text>
-            </TouchableOpacity>
+          </TouchableOpacity>
           );
         })}
       </ScrollView>
@@ -462,8 +462,8 @@ export default function GestaoOsListScreen() {
                 accessibilityLabel="Fechar"
               >
                 <X size={18} color={colors.text} strokeWidth={2.2} />
-              </TouchableOpacity>
-            </View>
+          </TouchableOpacity>
+        </View>
 
             {followTarget ? (
               <ScrollView
@@ -584,13 +584,13 @@ export default function GestaoOsListScreen() {
         statusBarTranslucent
         onRequestClose={() => setScannerOpen(false)}
       >
-        <View style={styles.scannerContainer}>
-          <CameraView
-            style={StyleSheet.absoluteFill}
-            facing="back"
-            barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
-            onBarcodeScanned={onScanned}
-          />
+          <View style={styles.scannerContainer}>
+            <CameraView
+              style={StyleSheet.absoluteFill}
+              facing="back"
+              barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+              onBarcodeScanned={onScanned}
+            />
           <View pointerEvents="none" style={styles.scannerOverlay}>
             <View
               style={[
@@ -601,16 +601,16 @@ export default function GestaoOsListScreen() {
               <View style={styles.scannerFrame} />
               <Text style={styles.scannerHint}>Aponte para o QR Code do ativo</Text>
             </View>
-          </View>
-          <TouchableOpacity
+            </View>
+            <TouchableOpacity
             style={[styles.scannerClose, { bottom: Math.max(insets.bottom + 28, 48) }]}
-            onPress={() => setScannerOpen(false)}
-          >
-            <X size={22} color="#fff" />
-            <Text style={styles.scannerCloseText}>Cancelar</Text>
-          </TouchableOpacity>
-        </View>
-      </Modal>
+              onPress={() => setScannerOpen(false)}
+            >
+              <X size={22} color="#fff" />
+              <Text style={styles.scannerCloseText}>Cancelar</Text>
+            </TouchableOpacity>
+          </View>
+        </Modal>
 
       <Modal
         visible={tokenOpen}
@@ -634,7 +634,7 @@ export default function GestaoOsListScreen() {
             </TouchableOpacity>
             <TouchableOpacity onPress={() => setTokenOpen(false)} style={styles.tokenCancel}>
               <Text style={styles.tokenCancelText}>Cancelar</Text>
-            </TouchableOpacity>
+              </TouchableOpacity>
           </Pressable>
         </Pressable>
       </Modal>
@@ -661,7 +661,7 @@ const getStyles = (colors: any, isDark: boolean) =>
       marginBottom: 12,
     },
     companyRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 14 },
-    companyChip: {
+  companyChip: {
       paddingHorizontal: 12,
       paddingVertical: 8,
       borderRadius: 999,
@@ -679,7 +679,7 @@ const getStyles = (colors: any, isDark: boolean) =>
       gap: 6,
       paddingHorizontal: 14,
       paddingVertical: 9,
-      borderRadius: 999,
+    borderRadius: 999,
       backgroundColor: isDark ? colors.card : colors.surface,
       borderWidth: StyleSheet.hairlineWidth * 1.5,
       borderColor: isDark ? 'transparent' : 'rgba(15, 23, 42, 0.08)',
@@ -699,7 +699,7 @@ const getStyles = (colors: any, isDark: boolean) =>
       flexDirection: 'row',
       alignItems: 'center',
       gap: 8,
-      paddingHorizontal: 12,
+    paddingHorizontal: 12,
       height: 44,
       borderRadius: 12,
       backgroundColor: isDark ? colors.card : colors.surface,
@@ -783,8 +783,8 @@ const getStyles = (colors: any, isDark: boolean) =>
       marginBottom: 4,
     },
     locationRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
       gap: 4,
       marginTop: 2,
     },
@@ -807,21 +807,21 @@ const getStyles = (colors: any, isDark: boolean) =>
       height: '100%',
       backgroundColor: '#000',
     },
-    scannerOverlay: {
-      ...StyleSheet.absoluteFillObject,
+  scannerOverlay: {
+    ...StyleSheet.absoluteFillObject,
     },
     scannerCenterBlock: {
       position: 'absolute',
       left: 0,
       right: 0,
-      alignItems: 'center',
+    alignItems: 'center',
       justifyContent: 'center',
-    },
-    scannerFrame: {
+  },
+  scannerFrame: {
       width: 260,
       height: 260,
-      borderWidth: 3,
-      borderColor: '#fff',
+    borderWidth: 3,
+    borderColor: '#fff',
       borderRadius: 20,
       backgroundColor: 'transparent',
     },
@@ -836,19 +836,19 @@ const getStyles = (colors: any, isDark: boolean) =>
       textShadowOffset: { width: 0, height: 1 },
       textShadowRadius: 3,
     },
-    scannerClose: {
-      position: 'absolute',
-      alignSelf: 'center',
-      flexDirection: 'row',
-      alignItems: 'center',
+  scannerClose: {
+    position: 'absolute',
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
       justifyContent: 'center',
-      gap: 8,
+    gap: 8,
       backgroundColor: 'rgba(0,0,0,0.65)',
       paddingHorizontal: 22,
       paddingVertical: 14,
       borderRadius: 999,
-    },
-    scannerCloseText: { color: '#fff', fontWeight: '700' },
+  },
+  scannerCloseText: { color: '#fff', fontWeight: '700' },
     detailOverlay: {
       flex: 1,
       backgroundColor: 'rgba(0,0,0,0.45)',
@@ -956,7 +956,7 @@ const getStyles = (colors: any, isDark: boolean) =>
     actionIconWrap: {
       width: 42,
       height: 42,
-      borderRadius: 12,
+    borderRadius: 12,
       alignItems: 'center',
       justifyContent: 'center',
       backgroundColor: isDark ? 'rgba(220, 38, 38, 0.18)' : 'rgba(220, 38, 38, 0.1)',
@@ -971,4 +971,4 @@ const getStyles = (colors: any, isDark: boolean) =>
     },
     actionCancel: { alignItems: 'center', paddingVertical: 10 },
     actionCancelText: { color: colors.textSecondary, fontWeight: '600', fontSize: 14 },
-  });
+});

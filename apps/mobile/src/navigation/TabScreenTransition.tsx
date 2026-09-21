@@ -83,7 +83,8 @@ export default function TabScreenTransition({ children }: Props) {
       style={[
         styles.root,
         {
-          backgroundColor: colors.background,
+          // Transparente pra o padrão do ThemeBackground aparecer (não cobrir com cinza).
+          backgroundColor: colors.screenRoot,
           opacity,
           transform: [{ translateX }],
         },
