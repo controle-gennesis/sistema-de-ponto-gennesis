@@ -107,6 +107,7 @@ export async function findUserIdsMatchingSearch(search: string): Promise<string[
     SELECT u.id
     FROM users u
     LEFT JOIN employees e ON e."userId" = u.id
+    LEFT JOIN empreiteiros em ON em."userId" = u.id
     WHERE
       lower(unaccent(coalesce(u.name, ''))) LIKE ${pattern} ESCAPE '\'
       OR lower(unaccent(coalesce(u.email, ''))) LIKE ${pattern} ESCAPE '\'
@@ -120,6 +121,11 @@ export async function findUserIdsMatchingSearch(search: string): Promise<string[
       OR lower(unaccent(coalesce(e.client, ''))) LIKE ${pattern} ESCAPE '\'
       OR lower(unaccent(coalesce(e."categoriaFinanceira", ''))) LIKE ${pattern} ESCAPE '\'
       OR lower(unaccent(coalesce(e.modality, ''))) LIKE ${pattern} ESCAPE '\'
+      OR lower(unaccent(coalesce(em.name, ''))) LIKE ${pattern} ESCAPE '\'
+      OR lower(unaccent(coalesce(em."tradeName", ''))) LIKE ${pattern} ESCAPE '\'
+      OR lower(unaccent(coalesce(em.document, ''))) LIKE ${pattern} ESCAPE '\'
+      OR lower(unaccent(coalesce(em.cpf, ''))) LIKE ${pattern} ESCAPE '\'
+      OR lower(unaccent(coalesce(em.specialty, ''))) LIKE ${pattern} ESCAPE '\'
   `;
 
   return rows.map((r) => r.id);

@@ -11,6 +11,7 @@ export interface User {
   createdAt: string;
   updatedAt: string;
   employee?: Employee;
+  empreiteiro?: { id: string } | null;
 }
 
 export interface Employee {

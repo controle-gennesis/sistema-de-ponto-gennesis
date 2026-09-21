@@ -23,6 +23,8 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
+import { useRouter } from 'next/navigation';
+import { EMPREITEIROS_PATH } from '@/lib/postLoginPath';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Card, CardHeader, CardContent } from '@/components/ui/Card';
 import { useTheme } from '@/context/ThemeContext';
@@ -263,7 +265,9 @@ function buildTarefaPreviews(tasks: PlannerTask[], now: Date): TarefaPreview[] {
 export default function HomePage() {
   const handleLogout = useLogout();
   const queryClient = useQueryClient();
-  const { isAdministrator, can, canAccessCollaborationTools } = usePermissions();
+  const router = useRouter();
+  const { isAdministrator, can, canAccessCollaborationTools, isLinkedEmpreiteiro, isLoading } =
+    usePermissions();
   const [now, setNow] = useState<Date>(() => new Date());
   const [profileHydrated, setProfileHydrated] = useState(false);
   const [busyTaskId, setBusyTaskId] = useState<string | null>(null);
@@ -271,6 +275,11 @@ export default function HomePage() {
   useEffect(() => {
     setProfileHydrated(true);
   }, []);
+
+  useEffect(() => {
+    if (isLoading || !isLinkedEmpreiteiro) return;
+    router.replace(EMPREITEIROS_PATH);
+  }, [isLoading, isLinkedEmpreiteiro, router]);
 
   // Não bloqueia o shell: usa cache/storage e atualiza /auth/me em background
   const { data: userData } = useQuery({
@@ -466,6 +475,10 @@ export default function HomePage() {
     });
     return capitalizeFirst(formatter.format(now));
   }, [now]);
+
+  if (isLinkedEmpreiteiro) {
+    return null;
+  }
 
   return (
     <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>

@@ -15,6 +15,7 @@ import {
 import { resolveWorkflowApproverNameKey } from '@/lib/fluigWorkflowApproval';
 import { isSociosDepartment, isSociosBlockedCollaborationPath } from '@/lib/sociosCollaborationAccess';
 import { authService } from '@/lib/auth';
+import { EMPREITEIROS_PATH, isEmpreiteiroAllowedPath } from '@/lib/postLoginPath';
 
 type PermissionItem = { module: string; action: string };
 
@@ -184,13 +185,24 @@ export function usePermissions() {
     (f) => f?.ordemServico === true
   );
 
+  const empreiteirosKey = pk(EMPREITEIROS_PATH);
+  const isLinkedEmpreiteiro =
+    Boolean(user?.empreiteiro?.id) ||
+    Boolean(user?.id && !user?.employee && !isAdministrator);
+
   const can = (moduleKey: string) => {
+    if (isLinkedEmpreiteiro) {
+      return moduleKey === empreiteirosKey;
+    }
     if (isAdministrator || permissionData?.isAdmin) {
       return true;
     }
     return allowedSet.has(moduleKey);
   };
   const canAction = (moduleKey: string, action: string) => {
+    if (isLinkedEmpreiteiro) {
+      return moduleKey === empreiteirosKey && allowedActionSet.has(`${moduleKey}:${action}`);
+    }
     if (isAdministrator || permissionData?.isAdmin) return true;
     return allowedActionSet.has(`${moduleKey}:${action}`);
   };
@@ -224,7 +236,7 @@ export function usePermissions() {
    * (evita flash dos atalhos para Sócios).
    */
   const canAccessCollaborationTools =
-    !isLoadingUser && !!user && !isDepartmentSocios;
+    !isLoadingUser && !!user && !isDepartmentSocios && !isLinkedEmpreiteiro;
 
   const employeesKey = pk('/ponto/funcionarios');
   const contractsKey = pk('/ponto/contratos');
@@ -513,7 +525,7 @@ export function usePermissions() {
       can(pk('/ponto/atestados')) || can(pk('/ponto/gerenciar-atestados')),
     canManageBankHours: can(pk('/ponto/banco-horas')),
     canViewBirthdays: true,
-    canRegisterTime: true,
+    canRegisterTime: !isLinkedEmpreiteiro,
     canViewDashboard: can(pk('/ponto/dashboard')),
     canCreateContracts,
     canEditContracts,
@@ -522,6 +534,7 @@ export function usePermissions() {
 
   return {
     user,
+    isLinkedEmpreiteiro,
     isAuthenticated: !!user,
     userPosition,
     userDepartment,
@@ -623,6 +636,7 @@ export function useRoutePermission(route: string) {
     isDepartmentCompras,
     isDepartmentJuridico,
     canAccessCollaborationTools,
+    isLinkedEmpreiteiro,
     can,
     canAccessContract,
     dpApprovalContractIds,
@@ -646,6 +660,14 @@ export function useRoutePermission(route: string) {
     return { hasAccess: false, isLoading: true, canAccessContract };
   }
 
+  if (isLinkedEmpreiteiro) {
+    return {
+      hasAccess: isEmpreiteiroAllowedPath(route),
+      isLoading: false,
+      canAccessContract,
+    };
+  }
+
   // Setor Sócios: sem chat, agenda, flow, drive nem tasks
   if (!canAccessCollaborationTools && isSociosBlockedCollaborationPath(route)) {
     return { hasAccess: false, isLoading: false, canAccessContract };
@@ -653,18 +675,21 @@ export function useRoutePermission(route: string) {
 
   // Drive / Kanban / Flow: liberados para qualquer usuário autenticado (exceto Sócios acima)
   if (OPEN_ACCESS.has(pk(route))) {
+    if (isLinkedEmpreiteiro) {
+      return { hasAccess: false, isLoading: false, canAccessContract };
+    }
     return { hasAccess: true, isLoading: false, canAccessContract };
   }
 
   const isAdministrator = isElevatedUser;
 
   const routePermissions: Record<string, boolean> = {
-    '/ponto': isAdministrator || permissions.canRegisterTime,
+    '/ponto': !isLinkedEmpreiteiro && (isAdministrator || permissions.canRegisterTime),
     '/ponto/painel-do-sistema': isAdministrator || permissions.canViewDashboard,
     '/ponto/agenda': canAccessCollaborationTools,
     '/ponto/conversas': canAccessCollaborationTools,
     /** Fallback se o dist de permission-modules estiver desatualizado (OPEN_ACCESS). */
-    '/ponto/central-de-ajuda': true,
+    '/ponto/central-de-ajuda': !isLinkedEmpreiteiro,
     /**
      * Aprovações: a página aparece para quem precisa decidir algum bloco.
      * Fichas de Demanda: só Controle → Aprovar Fichas de Demanda + contratos (não usa Gestor).
@@ -729,7 +754,7 @@ export function useRoutePermission(route: string) {
     '/ponto/sistema-gestao-os/equipes':
       isAdministrator || can(pk('/ponto/sistema-gestao-os/equipes')),
     /** Cursos publicados ficam abertos a todo funcionário autenticado. */
-    '/ponto/treinamentos': true,
+    '/ponto/treinamentos': !isLinkedEmpreiteiro,
     '/ponto/treinamentos/administracao':
       isAdministrator || can(pk('/ponto/treinamentos/administracao')),
     /** Parâmetros globais do ponto (cerca virtual) — apenas administradores. */

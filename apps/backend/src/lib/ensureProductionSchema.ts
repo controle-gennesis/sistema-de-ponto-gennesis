@@ -1783,6 +1783,40 @@ async function ensureEmpreiteirosTable(prisma: PrismaClient): Promise<void> {
   await prisma.$executeRawUnsafe(`
     ALTER TABLE "empreiteiros" ADD COLUMN IF NOT EXISTS "endDate" TIMESTAMP(3);
   `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "empreiteiros" ADD COLUMN IF NOT EXISTS "cpf" TEXT;
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "empreiteiros" ADD COLUMN IF NOT EXISTS "userId" TEXT;
+  `);
+  await prisma.$executeRawUnsafe(`
+    UPDATE "empreiteiros"
+    SET "cpf" = "document"
+    WHERE "cpf" IS NULL
+      AND "documentKind" = 'CPF'
+      AND char_length("document") = 11;
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE UNIQUE INDEX IF NOT EXISTS "empreiteiros_cpf_key" ON "empreiteiros"("cpf");
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE UNIQUE INDEX IF NOT EXISTS "empreiteiros_userId_key" ON "empreiteiros"("userId");
+  `);
+  await prisma.$executeRawUnsafe(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'empreiteiros_userId_fkey'
+      ) THEN
+        ALTER TABLE "empreiteiros"
+          ADD CONSTRAINT "empreiteiros_userId_fkey"
+          FOREIGN KEY ("userId") REFERENCES "users"("id")
+          ON DELETE SET NULL ON UPDATE CASCADE;
+      END IF;
+    EXCEPTION WHEN others THEN
+      NULL;
+    END $$;
+  `);
 
   await prisma.$executeRawUnsafe(`
     DO $$
@@ -1866,6 +1900,105 @@ async function ensureEmpreiteirosTable(prisma: PrismaClient): Promise<void> {
           ADD CONSTRAINT "empreiteiro_team_members_empreiteiroId_fkey"
           FOREIGN KEY ("empreiteiroId") REFERENCES "empreiteiros"("id")
           ON DELETE CASCADE ON UPDATE CASCADE;
+      END IF;
+    EXCEPTION WHEN others THEN
+      NULL;
+    END $$;
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "empreiteiro_daily_measurements" (
+      "id" TEXT NOT NULL,
+      "empreiteiroId" TEXT NOT NULL,
+      "workDate" DATE NOT NULL,
+      "description" TEXT NOT NULL,
+      "confirmedBy" TEXT,
+      "quantity" DECIMAL(12, 2),
+      "unit" TEXT,
+      "photos" JSONB NOT NULL DEFAULT '[]',
+      "createdBy" TEXT,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "empreiteiro_daily_measurements_pkey" PRIMARY KEY ("id")
+    );
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE UNIQUE INDEX IF NOT EXISTS "empreiteiro_daily_measurements_empreiteiroId_workDate_key"
+      ON "empreiteiro_daily_measurements"("empreiteiroId", "workDate");
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "empreiteiro_daily_measurements_empreiteiroId_idx"
+      ON "empreiteiro_daily_measurements"("empreiteiroId");
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "empreiteiro_daily_measurements_workDate_idx"
+      ON "empreiteiro_daily_measurements"("workDate");
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "empreiteiro_daily_measurements" ADD COLUMN IF NOT EXISTS "confirmedBy" TEXT;
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "empreiteiro_daily_measurements" ADD COLUMN IF NOT EXISTS "teamPhoto" JSONB;
+  `);
+  await prisma.$executeRawUnsafe(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'empreiteiro_daily_measurements_empreiteiroId_fkey'
+      ) THEN
+        ALTER TABLE "empreiteiro_daily_measurements"
+          ADD CONSTRAINT "empreiteiro_daily_measurements_empreiteiroId_fkey"
+          FOREIGN KEY ("empreiteiroId") REFERENCES "empreiteiros"("id")
+          ON DELETE CASCADE ON UPDATE CASCADE;
+      END IF;
+    EXCEPTION WHEN others THEN
+      NULL;
+    END $$;
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "empreiteiro_daily_measurement_workers" (
+      "id" TEXT NOT NULL,
+      "measurementId" TEXT NOT NULL,
+      "teamMemberId" TEXT,
+      "name" TEXT NOT NULL,
+      "role" TEXT NOT NULL,
+      CONSTRAINT "empreiteiro_daily_measurement_workers_pkey" PRIMARY KEY ("id")
+    );
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "empreiteiro_daily_measurement_workers_measurementId_idx"
+      ON "empreiteiro_daily_measurement_workers"("measurementId");
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "empreiteiro_daily_measurement_workers_teamMemberId_idx"
+      ON "empreiteiro_daily_measurement_workers"("teamMemberId");
+  `);
+  await prisma.$executeRawUnsafe(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'empreiteiro_daily_measurement_workers_measurementId_fkey'
+      ) THEN
+        ALTER TABLE "empreiteiro_daily_measurement_workers"
+          ADD CONSTRAINT "empreiteiro_daily_measurement_workers_measurementId_fkey"
+          FOREIGN KEY ("measurementId") REFERENCES "empreiteiro_daily_measurements"("id")
+          ON DELETE CASCADE ON UPDATE CASCADE;
+      END IF;
+    EXCEPTION WHEN others THEN
+      NULL;
+    END $$;
+  `);
+  await prisma.$executeRawUnsafe(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'empreiteiro_daily_measurement_workers_teamMemberId_fkey'
+      ) THEN
+        ALTER TABLE "empreiteiro_daily_measurement_workers"
+          ADD CONSTRAINT "empreiteiro_daily_measurement_workers_teamMemberId_fkey"
+          FOREIGN KEY ("teamMemberId") REFERENCES "empreiteiro_team_members"("id")
+          ON DELETE SET NULL ON UPDATE CASCADE;
       END IF;
     EXCEPTION WHEN others THEN
       NULL;

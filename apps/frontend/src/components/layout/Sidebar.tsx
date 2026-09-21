@@ -104,6 +104,7 @@ import {
   type MenuSearchDetail,
 } from '@/lib/layoutChrome';
 import { useBrandingLogo } from '@/hooks/useBrandingLogo';
+import { postLoginPath } from '@/lib/postLoginPath';
 
 const FLUIG_APPROVAL_DATASET_IDS = [
   'Processos_Workflow_Aprovacao_G3',
@@ -271,6 +272,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
     userPosition,
     user,
     can,
+    isLinkedEmpreiteiro,
     canAccessDpApproverPages,
     canApproveFd,
     canApproveEspelhoNf,
@@ -712,8 +714,9 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
       return sum + navBadgeCountForHref(item.href);
     }, 0);
 
-  // Verificar se o funcionário precisa bater ponto
-  const requiresTimeClock = user?.employee?.requiresTimeClock !== false;
+  // Verificar se o funcionário precisa bater ponto (empreiteiro não bate ponto)
+  const requiresTimeClock =
+    !isLinkedEmpreiteiro && user?.employee?.requiresTimeClock !== false;
 
   const isEmployee = userRole === 'EMPLOYEE';
   const canOpenUnitReports =
@@ -827,14 +830,14 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             href: '/ponto/treinamentos',
             icon: GraduationCap,
             description: 'Videoaulas, avaliações e certificados',
-            permission: true,
+            permission: !isLinkedEmpreiteiro,
           },
           {
             name: 'Central de Ajuda',
             href: '/ponto/central-de-ajuda',
             icon: HelpCircle,
             description: 'Guias e tutoriais passo a passo do sistema',
-            permission: true,
+            permission: !isLinkedEmpreiteiro,
           },
         ]
       },
@@ -1123,11 +1126,11 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             section: 'Obras'
           },
           {
-            name: 'Empreiteiros',
+            name: 'Empreitas',
             href: '/ponto/empreiteiros',
             icon: HardHat,
-            description: 'Cadastro de empreiteiros da obra',
-            permission: isAdministrator || can(pk('/ponto/empreiteiros')),
+            description: 'Cadastro de empreitas da obra',
+            permission: isAdministrator || can(pk('/ponto/empreiteiros')) || isLinkedEmpreiteiro,
             section: 'Obras'
           },
           {
@@ -1566,6 +1569,15 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
     let filteredCategories = menuCategories.filter((category) =>
       category.items.some((item) => navItemIsVisible(item as SidebarNavItem)),
     );
+
+    if (isLinkedEmpreiteiro) {
+      filteredCategories = menuCategories
+        .map((category) => ({
+          ...category,
+          items: category.items.filter((item) => item.href === '/ponto/empreiteiros'),
+        }))
+        .filter((category) => category.items.length > 0);
+    }
 
     // Aplicar filtro de pesquisa se houver termo de busca
     if (searchTerm.trim()) {
@@ -2174,11 +2186,11 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
               style={{ ['--rail-i' as string]: 0 } as React.CSSProperties}
             >
             <Link
-              href="/ponto/home"
+              href={postLoginPath(user)}
               prefetch={navLinkPrefetch}
               className="sidebar-logo-btn flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl [@media(max-height:820px)]:h-8 [@media(max-height:820px)]:w-8"
-              title="Ir para a página inicial"
-              aria-label="Página inicial"
+              title={isLinkedEmpreiteiro ? 'Empreitas' : 'Ir para a página inicial'}
+              aria-label={isLinkedEmpreiteiro ? 'Empreitas' : 'Página inicial'}
               aria-current={onHomeRoute ? 'page' : undefined}
             >
               <img

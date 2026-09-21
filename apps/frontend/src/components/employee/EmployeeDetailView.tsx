@@ -8,7 +8,7 @@ import {
   Trash2, AlertTriangle, X, Clock, Calendar, User, Download, Edit, Save, Camera,
   FileCheck, Eye, EyeOff, Plus, ChevronDown, ChevronUp, CheckCircle, Upload,
   FileSpreadsheet, Loader2, MoreVertical, DoorOpen, DoorClosed, Utensils,
-  UtensilsCrossed, XCircle, UserX, KeyRound, Pencil, LogIn,
+  UtensilsCrossed, XCircle, UserX, KeyRound, Pencil, LogIn, HardHat,
   Briefcase, Building2, Wallet, type LucideIcon,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
@@ -33,7 +33,9 @@ import { usePermissions } from '@/hooks/usePermissions';
 import { pathToModuleKey } from '@sistema-ponto/permission-modules';
 import api from '@/lib/api';
 import { displayPhoneBR } from '@/lib/phone';
+import { formatCpfInput, onlyDigits } from '@/lib/cpf';
 import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
+import { useCadastroCrudPermissions } from '@/hooks/useCadastroCrudPermissions';
 import {
   SalaryAdjustment, CreateAdjustmentData, UpdateAdjustmentData,
   SalaryDiscount, CreateDiscountData, UpdateDiscountData,
@@ -70,6 +72,37 @@ const RECORD_TYPE_MANUAL_SELECT_OPTIONS = labeledToSelectOptions([
   { value: 'LUNCH_END', label: 'Retorno do Almoço' },
   { value: 'EXIT', label: 'Saída' },
 ]);
+
+const EMPREITEIRO_RELINK_SPECIALTIES = [
+  'Alvenaria / Civil',
+  'Elétrica',
+  'Hidráulica',
+  'Pintura',
+  'Gesso / Drywall',
+  'Marcenaria',
+  'Serralheria',
+  'Impermeabilização',
+  'Cobertura / Telhado',
+  'Ar-condicionado',
+  'Limpeza',
+  'Outros',
+];
+
+function maskCnpjInput(raw: string): string {
+  const digits = onlyDigits(raw).slice(0, 14);
+  return digits
+    .replace(/^(\d{2})(\d)/, '$1.$2')
+    .replace(/^(\d{2})\.(\d{3})(\d)/, '$1.$2.$3')
+    .replace(/\.(\d{3})(\d)/, '.$1/$2')
+    .replace(/(\d{4})(\d)/, '$1-$2');
+}
+
+function maskPhoneInput(raw: string): string {
+  const digits = onlyDigits(raw).slice(0, 11);
+  if (digits.length <= 2) return digits.length ? `(${digits}` : '';
+  if (digits.length <= 7) return `(${digits.slice(0, 2)}) ${digits.slice(2)}`;
+  return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
+}
 
 const pk = pathToModuleKey;
 
@@ -122,6 +155,16 @@ interface Employee {
     polo?: string;
     categoriaFinanceira?: string;
   };
+  empreiteiro?: {
+    id: string;
+    name?: string | null;
+    tradeName?: string | null;
+    specialty?: string | null;
+    phone?: string | null;
+    document?: string | null;
+    cpf?: string | null;
+    email?: string | null;
+  } | null;
 }
 
 export type EmployeeDetailTab = 'info' | 'remuneration' | 'records' | 'permissions' | 'activity';
@@ -225,6 +268,15 @@ export function EmployeeDetailView({
   const [showFacePhotoModal, setShowFacePhotoModal] = useState(false);
   const [facePhotoDraftFile, setFacePhotoDraftFile] = useState<File | null>(null);
   const [facePhotoDraftUrl, setFacePhotoDraftUrl] = useState<string | null>(null);
+  const [showRelinkEmpreiteiroModal, setShowRelinkEmpreiteiroModal] = useState(false);
+  const [relinkForm, setRelinkForm] = useState({
+    name: '',
+    cpf: '',
+    cnpj: '',
+    phone: '',
+    specialty: '',
+    contractId: '',
+  });
   const [permissionTab, setPermissionTab] = useState<PermissionEditorTab>('gerais');
   const [showContractsTab, setShowContractsTab] = useState(false);
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
@@ -1119,6 +1171,8 @@ export function EmployeeDetailView({
     can(pk('/ponto/permissoes')) ||
     canAction(pk('/ponto/permissoes'), 'ver') ||
     can(pk('/ponto/controle/alterar-permissoes'));
+  const empreiteirosCrud = useCadastroCrudPermissions('/ponto/empreiteiros');
+  const canRelinkEmpreiteiro = empreiteirosCrud.canCreate;
   const canChangeEmployeePassword =
     isAdministrator ||
     can(pk('/ponto/controle/alterar-senha-funcionarios')) ||
@@ -1168,7 +1222,73 @@ export function EmployeeDetailView({
     [selectedEmployee?.id, selectedEmployee?.facePhotoUrl]
   );
 
-  const canSetFacePhoto = canEditEmployees || canManageEmployees;
+  const canSetFacePhoto =
+    !selectedEmployee?.empreiteiro?.id && (canEditEmployees || canManageEmployees);
+
+  const { data: relinkContractsData } = useQuery({
+    queryKey: ['contracts-empreiteiro-relink'],
+    queryFn: async () => {
+      const res = await api.get('/contracts', { params: { limit: 500, page: 1 } });
+      return res.data;
+    },
+    enabled: showRelinkEmpreiteiroModal,
+  });
+
+  const relinkContractOptions = useMemo(() => {
+    const rows = ((relinkContractsData?.data || []) as Array<{ id: string; name: string }>).filter(
+      (c) => c.id && c.name
+    );
+    return labeledToSelectOptions(rows.map((c) => ({ value: c.id, label: c.name })));
+  }, [relinkContractsData]);
+
+  const relinkSpecialtyOptions = useMemo(
+    () =>
+      labeledToSelectOptions(
+        EMPREITEIRO_RELINK_SPECIALTIES.map((value) => ({ value, label: value }))
+      ),
+    []
+  );
+
+  const relinkEmpreiteiroMutation = useMutation({
+    mutationFn: async () => {
+      if (!selectedEmployee?.id) throw new Error('Usuário inválido');
+      const cpf = onlyDigits(relinkForm.cpf);
+      const cnpj = onlyDigits(relinkForm.cnpj);
+      const phone = onlyDigits(relinkForm.phone);
+      if (!relinkForm.name.trim()) throw new Error('Informe o nome da empresa');
+      if (cpf.length !== 11) throw new Error('CPF inválido');
+      if (cnpj.length !== 14) throw new Error('CNPJ inválido');
+      if (phone.length < 10) throw new Error('Telefone inválido');
+      if (!relinkForm.specialty) throw new Error('Informe a especialidade');
+      if (!relinkForm.contractId) throw new Error('Informe o contrato');
+      const res = await api.post('/empreiteiros', {
+        name: relinkForm.name.trim(),
+        cpf,
+        cnpj,
+        phone,
+        specialty: relinkForm.specialty,
+        contractId: relinkForm.contractId,
+        contactName: selectedEmployee.name,
+        email: selectedEmployee.email,
+        userId: selectedEmployee.id,
+      });
+      return res.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['employee-detail', userId] });
+      queryClient.invalidateQueries({ queryKey: ['employees'] });
+      queryClient.invalidateQueries({ queryKey: ['empreiteiros'] });
+      setShowRelinkEmpreiteiroModal(false);
+      toast.success('Cadastro de empreita vinculado ao login');
+    },
+    onError: (error: any) => {
+      toast.error(
+        error?.message ||
+          error?.response?.data?.message ||
+          'Não foi possível vincular o cadastro'
+      );
+    },
+  });
 
   const closeFacePhotoModal = () => {
     setShowFacePhotoModal(false);
@@ -1256,15 +1376,22 @@ export function EmployeeDetailView({
     );
   }
 
+  const isEmpreiteiro =
+    Boolean(selectedEmployee.empreiteiro?.id) || !selectedEmployee.employee;
+  const needsEmpreiteiroRelink = isEmpreiteiro && !selectedEmployee.empreiteiro?.id;
+  const canEditEmployeeRecord = canEditEmployees && !isEmpreiteiro;
+
   const tabItems: { id: EmployeeDetailTab; label: string }[] = [
     { id: 'info', label: 'Informações' },
     { id: 'activity', label: 'Rastreio' },
     ...(canManageUserPermissions ? [{ id: 'permissions' as const, label: 'Permissões' }] : []),
   ];
 
-  const positionLabel = [selectedEmployee.employee?.position, selectedEmployee.employee?.department]
-    .filter(Boolean)
-    .join(' de ');
+  const positionLabel = isEmpreiteiro
+    ? ['Empreita', selectedEmployee.empreiteiro?.specialty].filter(Boolean).join(' · ')
+    : [selectedEmployee.employee?.position, selectedEmployee.employee?.department]
+        .filter(Boolean)
+        .join(' de ');
 
   return (
     <div className="w-full space-y-6 pb-12">
@@ -1314,6 +1441,42 @@ export function EmployeeDetailView({
           <p className="mt-1.5 break-all text-sm text-gray-500 dark:text-gray-400">
             {selectedEmployee.email}
           </p>
+          {isEmpreiteiro ? (
+            needsEmpreiteiroRelink ? (
+              <div className="mt-2 space-y-1">
+                <p className="text-sm text-amber-700 dark:text-amber-300">
+                  Login ativo, mas sem cadastro na página de Empreitas.
+                </p>
+                {canRelinkEmpreiteiro ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRelinkForm({
+                        name: selectedEmployee.name || '',
+                        cpf: formatCpfInput(selectedEmployee.cpf || ''),
+                        cnpj: '',
+                        phone: '',
+                        specialty: '',
+                        contractId: '',
+                      });
+                      setShowRelinkEmpreiteiroModal(true);
+                    }}
+                    className="inline-flex items-center gap-1.5 text-sm font-medium text-red-600 hover:underline dark:text-red-400"
+                  >
+                    <HardHat className="h-4 w-4" />
+                    Recriar e vincular cadastro de empreita
+                  </button>
+                ) : null}
+              </div>
+            ) : (
+              <Link
+                href="/ponto/empreiteiros"
+                className="mt-2 inline-block text-sm font-medium text-red-600 hover:underline dark:text-red-400"
+              >
+                Abrir página de empreitas
+              </Link>
+            )
+          ) : null}
         </div>
 
         <div
@@ -1445,7 +1608,7 @@ export function EmployeeDetailView({
                             icon={User}
                             title="Dados Pessoais"
                             subtitle="Identificação e contato do funcionário"
-                            canEdit={canEditEmployees}
+                            canEdit={canEditEmployeeRecord}
                             onEdit={() => {
                               setEditingEmployee(selectedEmployee);
                               setEditVisibleSections(['personal']);
@@ -1476,7 +1639,7 @@ export function EmployeeDetailView({
                             <div>
                               <div className="text-xs text-gray-500 dark:text-gray-400">Telefone</div>
                               <div className="mt-0.5 text-sm font-medium text-gray-900 dark:text-gray-100">
-                                {displayPhoneBR(selectedEmployee.employee?.phone) || '—'}
+                                {displayPhoneBR(selectedEmployee.employee?.phone || selectedEmployee.empreiteiro?.phone) || '—'}
                               </div>
                             </div>
                             <div>
@@ -1503,7 +1666,7 @@ export function EmployeeDetailView({
                             icon={Briefcase}
                             title="Dados Profissionais"
                             subtitle="Vínculo, lotação e informações do contrato"
-                            canEdit={canEditEmployees}
+                            canEdit={canEditEmployeeRecord}
                             onEdit={() => {
                               setEditingEmployee(selectedEmployee);
                               setEditVisibleSections(['professional']);
@@ -1516,19 +1679,25 @@ export function EmployeeDetailView({
                             <div>
                               <div className="text-xs text-gray-500 dark:text-gray-400">Cargo</div>
                               <div className="mt-0.5 text-sm font-medium text-gray-900 dark:text-gray-100">
-                                {selectedEmployee.employee?.position || '—'}
+                                {isEmpreiteiro
+                                  ? 'Empreita'
+                                  : selectedEmployee.employee?.position || '—'}
                               </div>
                             </div>
                             <div>
                               <div className="text-xs text-gray-500 dark:text-gray-400">Setor</div>
                               <div className="mt-0.5 text-sm font-medium text-gray-900 dark:text-gray-100">
-                                {selectedEmployee.employee?.department || '—'}
+                                {isEmpreiteiro
+                                  ? selectedEmployee.empreiteiro?.specialty || 'Obras'
+                                  : selectedEmployee.employee?.department || '—'}
                               </div>
                             </div>
                             <div>
                               <div className="text-xs text-gray-500 dark:text-gray-400">Modalidade</div>
                               <div className="mt-0.5 text-sm font-medium text-gray-900 dark:text-gray-100">
-                                {selectedEmployee.employee?.modality || '—'}
+                                {isEmpreiteiro
+                                  ? 'Empreita'
+                                  : selectedEmployee.employee?.modality || '—'}
                               </div>
                             </div>
                             <div>
@@ -1587,7 +1756,7 @@ export function EmployeeDetailView({
                             icon={Building2}
                             title="Dados Bancários"
                             subtitle="Conta salário e chave PIX"
-                            canEdit={canEditEmployees}
+                            canEdit={canEditEmployeeRecord}
                             onEdit={() => {
                               setEditingEmployee(selectedEmployee);
                               setEditVisibleSections(['bank']);
@@ -1655,7 +1824,7 @@ export function EmployeeDetailView({
                             icon={Wallet}
                             title="Valores e Adicionais"
                             subtitle="Salário-base e benefícios diários"
-                            canEdit={canEditEmployees}
+                            canEdit={canEditEmployeeRecord}
                             onEdit={() => {
                               setEditingEmployee(selectedEmployee);
                               setEditVisibleSections(['remuneration']);
@@ -2919,6 +3088,133 @@ export function EmployeeDetailView({
             </div>
           </AppModalOverlay>
         )}
+
+      {showRelinkEmpreiteiroModal && selectedEmployee ? (
+        <AppModalOverlay className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/40"
+            onClick={() =>
+              !relinkEmpreiteiroMutation.isPending && setShowRelinkEmpreiteiroModal(false)
+            }
+          />
+          <div className="relative w-full max-w-lg rounded-lg bg-white shadow-2xl dark:bg-gray-800">
+            <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4 dark:border-gray-700">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                  Vincular cadastro de empreita
+                </h3>
+                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                  Usa o login atual ({selectedEmployee.email}) sem criar outra conta.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowRelinkEmpreiteiroModal(false)}
+                disabled={relinkEmpreiteiroMutation.isPending}
+                className="rounded-lg p-2 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"
+                aria-label="Fechar"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="space-y-4 px-6 py-5">
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Nome / empresa
+                </label>
+                <input
+                  value={relinkForm.name}
+                  onChange={(e) => setRelinkForm((f) => ({ ...f, name: e.target.value }))}
+                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
+                />
+              </div>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                  <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    CPF
+                  </label>
+                  <input
+                    value={relinkForm.cpf}
+                    onChange={(e) =>
+                      setRelinkForm((f) => ({ ...f, cpf: formatCpfInput(e.target.value) }))
+                    }
+                    className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    CNPJ
+                  </label>
+                  <input
+                    value={relinkForm.cnpj}
+                    onChange={(e) =>
+                      setRelinkForm((f) => ({ ...f, cnpj: maskCnpjInput(e.target.value) }))
+                    }
+                    className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Telefone
+                </label>
+                <input
+                  value={relinkForm.phone}
+                  onChange={(e) =>
+                    setRelinkForm((f) => ({ ...f, phone: maskPhoneInput(e.target.value) }))
+                  }
+                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
+                />
+              </div>
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Especialidade
+                </label>
+                <StringSingleSelectDropdown
+                  value={relinkForm.specialty || undefined}
+                  onChange={(value) => setRelinkForm((f) => ({ ...f, specialty: value }))}
+                  options={relinkSpecialtyOptions}
+                  placeholder="Selecione"
+                />
+              </div>
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Contrato
+                </label>
+                <StringSingleSelectDropdown
+                  value={relinkForm.contractId || undefined}
+                  onChange={(value) => setRelinkForm((f) => ({ ...f, contractId: value }))}
+                  options={relinkContractOptions}
+                  placeholder="Selecione"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 border-t border-gray-200 px-6 py-4 dark:border-gray-700">
+              <button
+                type="button"
+                onClick={() => setShowRelinkEmpreiteiroModal(false)}
+                disabled={relinkEmpreiteiroMutation.isPending}
+                className="rounded-lg px-4 py-2 text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => relinkEmpreiteiroMutation.mutate()}
+                disabled={relinkEmpreiteiroMutation.isPending}
+                className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 font-medium text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                {relinkEmpreiteiroMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <HardHat className="h-4 w-4" />
+                )}
+                Vincular cadastro
+              </button>
+            </div>
+          </div>
+        </AppModalOverlay>
+      ) : null}
     </div>
   );
 }

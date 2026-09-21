@@ -10,6 +10,7 @@ import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import {
   filterOptionsWithAll,
+  labeledToSelectOptions,
   EMPLOYEE_POLO_OPTIONS,
   EMPLOYEE_CATEGORIA_FINANCEIRA_OPTIONS,
   EMPLOYEE_STATUS_FILTER_OPTIONS,
@@ -41,6 +42,23 @@ import { CadastroListLoading } from '@/components/ui/CadastroListSummary';
 const EMPLOYEE_ACTION_MENU_WIDTH_PX = 224; // w-56
 
 const pk = pathToModuleKey;
+
+function isEmpreiteiroRow(emp: {
+  empreiteiro?: { id?: string } | null;
+  employee?: { id?: string } | null;
+}): boolean {
+  return Boolean(emp.empreiteiro?.id) || !emp.employee;
+}
+
+function listModalityValue(emp: {
+  empreiteiro?: { id?: string } | null;
+  employee?: { modality?: string };
+}): string {
+  if (isEmpreiteiroRow(emp)) return 'EMPREITEIRO';
+  const modality = emp.employee?.modality || '';
+  if (modality === 'ESTAGIARIO') return 'ESTAGIÁRIO';
+  return modality;
+}
 
 interface Employee {
   id: string;
@@ -84,6 +102,14 @@ interface Employee {
     polo?: string;
     categoriaFinanceira?: string;
   };
+  empreiteiro?: {
+    id: string;
+    name?: string | null;
+    tradeName?: string | null;
+    specialty?: string | null;
+    phone?: string | null;
+    document?: string | null;
+  } | null;
 }
 
 interface EmployeeListProps {
@@ -349,6 +375,21 @@ export function EmployeeList({
     return employees.filter((emp: Employee) => {
       if (emp.role !== 'EMPLOYEE') return false;
       if (isGennecyBotUser(emp)) return false;
+
+      if (modalityFilter !== 'all' && listModalityValue(emp) !== modalityFilter) {
+        return false;
+      }
+
+      const extrasActive =
+        costCenterFilter !== 'all' ||
+        clientFilter !== 'all' ||
+        companyFilter !== 'all' ||
+        poloFilter !== 'all' ||
+        categoriaFinanceiraFilter !== 'all';
+
+      if (isEmpreiteiroRow(emp)) {
+        return modalityFilter === 'EMPREITEIRO' || !extrasActive;
+      }
       
       if (costCenterFilter !== 'all' && 
           (!emp.employee?.costCenter || !emp.employee.costCenter.toLowerCase().includes(costCenterFilter.toLowerCase()))) {
@@ -369,10 +410,6 @@ export function EmployeeList({
       }
       
       if (categoriaFinanceiraFilter !== 'all' && emp.employee?.categoriaFinanceira !== categoriaFinanceiraFilter) {
-        return false;
-      }
-      
-      if (modalityFilter !== 'all' && emp.employee?.modality !== modalityFilter) {
         return false;
       }
       
@@ -531,7 +568,10 @@ export function EmployeeList({
     []
   );
   const modalityFilterSelectOptions = useMemo(
-    () => filterOptionsWithAll(['Todos', ...MODALITIES_LIST], 'Todas'),
+    () => [
+      ...filterOptionsWithAll(['Todos', ...MODALITIES_LIST], 'Todas'),
+      ...labeledToSelectOptions([{ value: 'EMPREITEIRO', label: 'Empreitas' }]),
+    ],
     []
   );
 
@@ -1158,9 +1198,13 @@ export function EmployeeList({
                 </thead>
                 <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
                   {paginatedEmployees.map((employee: Employee) => {
+                    const isEmpreiteiro = isEmpreiteiroRow(employee);
                     const initials = employee.name.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase();
                     const profilePhotoHref = resolveApiMediaUrl(employee.profilePhotoUrl ?? null);
                     const addedAt = employee.createdAt || employee.employee?.hireDate;
+                    const setorLabel = isEmpreiteiro
+                      ? 'Empreita'
+                      : employee.employee?.department || '—';
                     return (
                       <tr
                         key={employee.id}
@@ -1214,7 +1258,7 @@ export function EmployeeList({
                           </div>
                         </td>
                         <td className="px-3 sm:px-6 py-3 text-sm text-left text-gray-700 dark:text-gray-300">{employee.email || '—'}</td>
-                        <td className="px-3 sm:px-6 py-3 text-sm text-center text-gray-700 dark:text-gray-300">{employee.employee?.department || '—'}</td>
+                        <td className="px-3 sm:px-6 py-3 text-sm text-center text-gray-700 dark:text-gray-300">{setorLabel}</td>
                         <td className="px-3 sm:px-6 py-3 text-center">
                           <span
                             className={`inline-flex items-center justify-center rounded-full px-2.5 py-1 text-xs font-medium ${

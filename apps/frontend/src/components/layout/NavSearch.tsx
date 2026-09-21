@@ -46,6 +46,7 @@ export function NavSearch({ inputRef }: NavSearchProps) {
     canApproveOc,
     canApproveMaterialRequests,
     canAccessCollaborationTools,
+    isLinkedEmpreiteiro,
   } = usePermissions();
   const localInputRef = useRef<HTMLInputElement | null>(null);
   const mobileInputRef = useRef<HTMLInputElement | null>(null);
@@ -87,6 +88,9 @@ export function NavSearch({ inputRef }: NavSearchProps) {
     canApproveMaterialRequests;
 
   const accessible = useMemo(() => {
+    if (isLinkedEmpreiteiro) {
+      return catalog.filter((item) => item.href === '/ponto/empreiteiros');
+    }
     return catalog.filter((item) => {
       if (
         item.href === '/ponto/agenda' ||
@@ -106,7 +110,7 @@ export function NavSearch({ inputRef }: NavSearchProps) {
       if (OPEN_ACCESS.has(key)) return canAccessCollaborationTools;
       return can(key);
     });
-  }, [catalog, can, isAdministrator, canSeeApprovals, canAccessCollaborationTools]);
+  }, [catalog, can, isAdministrator, canSeeApprovals, canAccessCollaborationTools, isLinkedEmpreiteiro]);
 
   const results = useMemo(() => {
     const q = term.trim();

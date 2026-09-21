@@ -17,7 +17,7 @@ export async function findUserByLoginIdentifier(identifier: string) {
   if (isEmailLoginIdentifier(trimmed)) {
     return prisma.user.findUnique({
       where: { email: trimmed.toLowerCase() },
-      include: { employee: true },
+      include: { employee: true, empreiteiro: { select: { id: true } } },
     });
   }
 
@@ -30,6 +30,6 @@ export async function findUserByLoginIdentifier(identifier: string) {
     where: {
       OR: [{ cpf: cpfDigits }, { cpf: cpfMasked }],
     },
-    include: { employee: true },
+    include: { employee: true, empreiteiro: { select: { id: true } } },
   });
 }

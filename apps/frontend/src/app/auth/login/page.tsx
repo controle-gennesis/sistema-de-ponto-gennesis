@@ -14,6 +14,7 @@ import { useTheme } from '@/context/ThemeContext';
 import { Loading } from '@/components/ui/Loading';
 import { useBrandingLogo } from '@/hooks/useBrandingLogo';
 import { persistUnbBranding } from '@/lib/unbBranding';
+import { postLoginPath } from '@/lib/postLoginPath';
 import { authTransitionCover, authTransitionLoginColdEnter, authTransitionRevealIfNeeded, peekAuthTransition } from '@/lib/authTransition';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
 
@@ -61,7 +62,7 @@ export default function LoginPage() {
         authService.setUser(user, remember);
         queryClient.setQueryData(['user'], { success: true, data: user });
         persistUnbBranding(user?.employee?.costCenter);
-        router.replace('/ponto/home');
+        router.replace(postLoginPath(user));
         // Mantém loading até a navegação; evita flash do formulário
       } catch {
         settled = true;
@@ -122,7 +123,7 @@ export default function LoginPage() {
       });
       toast.success('Login realizado com sucesso!');
       await authTransitionCover('to-app');
-      router.push('/ponto/home');
+      router.push(postLoginPath(loginResponse.user));
     } catch (error: any) {
       // Verificar se é erro de credenciais inválidas
       if (error.message?.includes('Credenciais inválidas') || 
