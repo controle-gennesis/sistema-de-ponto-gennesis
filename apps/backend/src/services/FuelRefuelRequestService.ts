@@ -22,6 +22,11 @@ import {
   notifyFuelRequesterReportCompleted,
   notifyFuelRequesterWaitingSupplies,
 } from '../lib/fuelRefuelChatNotify';
+import {
+  buildApprovedByLine,
+  getFuelApprovalNotifyUserIds,
+  notifyApproversWhatsApp,
+} from '../lib/approvalWhatsAppNotify';
 
 export type CreateFuelRefuelRequestInput = {
   requesterId: string;
@@ -141,7 +146,7 @@ export class FuelRefuelRequestService {
 
     const administrativeRegionId = input.administrativeRegionId?.trim() || null;
 
-    return prisma.$transaction(async (tx) => {
+    const row = await prisma.$transaction(async (tx) => {
       const agg = await tx.fuelRefuelRequest.aggregate({ _max: { displayNumber: true } });
       const nextDisplay = (agg._max.displayNumber ?? 0) + 1;
 
@@ -170,6 +175,19 @@ export class FuelRefuelRequestService {
         include: fuelRefuelInclude,
       });
     });
+
+    const approverIds = await getFuelApprovalNotifyUserIds(contract.id);
+    void notifyApproversWhatsApp(
+      approverIds,
+      [
+        '📋 Nova solicitação de abastecimento para aprovação',
+        `Solicitação #${row.displayNumber}`,
+        `Motorista: ${row.driverName}`,
+        'Acesse o sistema para analisar.',
+      ].join('\n')
+    );
+
+    return row;
   }
 
   async listForSupplies(params: {
@@ -293,10 +311,12 @@ export class FuelRefuelRequestService {
       include: fuelRefuelInclude,
     });
 
+    const approvedByLine = await buildApprovedByLine(updated.requesterId, managerId);
     await notifyFuelRequesterWaitingSupplies(
       updated.sourceChatId,
       updated.displayNumber,
       updated.sourceWhatsAppPhone,
+      approvedByLine,
     );
     return updated;
   }

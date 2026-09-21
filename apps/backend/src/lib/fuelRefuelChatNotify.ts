@@ -90,6 +90,7 @@ export async function notifyFuelRequesterWaitingSupplies(
   sourceChatId: string | null | undefined,
   displayNumber: number,
   sourceWhatsAppPhone?: string | null,
+  approvedByLine?: string | null,
 ) {
   const slaHours = await getFuelSuppliesSlaHours();
   const slaLine = formatFuelSuppliesSlaMessage(slaHours);
@@ -99,6 +100,7 @@ export async function notifyFuelRequesterWaitingSupplies(
     sourceWhatsAppPhone,
     [
       `⏳ Solicitação #${displayNumber} registrada.`,
+      ...(approvedByLine ? [`✅ ${approvedByLine}`] : []),
       'Aguardando aprovação do Suprimentos.',
       '',
       slaLine,

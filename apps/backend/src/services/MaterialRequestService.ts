@@ -8,6 +8,11 @@ import {
   assertUserCanApproveMaterialRequestForCostCenter,
 } from '../lib/rmApprovalAccess';
 import { isOcStatusCoveringRmItems } from '../lib/rmProcurementCoverage';
+import {
+  getRmApprovalNotifyUserIds,
+  notifyApproversWhatsApp,
+  notifyRequesterApprovedWhatsApp,
+} from '../lib/approvalWhatsAppNotify';
 
 /** OCs já aprovadas (ou etapas posteriores) — entram na média paga das últimas compras. */
 const EFFECTIVE_PURCHASE_ORDER_STATUSES: PurchaseOrderStatus[] = [
@@ -777,6 +782,17 @@ export class MaterialRequestService {
       MATERIAL_REQUEST_CREATE_TX_OPTIONS,
     );
 
+    const approverIds = await getRmApprovalNotifyUserIds(request.costCenterId);
+    void notifyApproversWhatsApp(
+      approverIds,
+      [
+        '📋 Nova requisição de materiais para aprovação',
+        `Requisição: ${request.requestNumber}`,
+        `Solicitante: ${request.requester?.name ?? 'Colaborador'}`,
+        'Acesse o sistema para analisar.',
+      ].join('\n')
+    );
+
     return request;
   }
 
@@ -1231,6 +1247,14 @@ export class MaterialRequestService {
           userId,
           content: `Observação para correção: ${correctionNote}`,
         },
+      });
+    }
+
+    if (nextStatus === 'APPROVED') {
+      void notifyRequesterApprovedWhatsApp({
+        requesterUserId: existing.requestedBy,
+        approverUserId: userId,
+        subjectLine: `Requisição de materiais ${updated.requestNumber}`,
       });
     }
 

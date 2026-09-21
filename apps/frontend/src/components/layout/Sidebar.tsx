@@ -1079,8 +1079,9 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             permission: isAdministrator || canAccessRelatoriosContratoPage
           },
           {
-            name: 'OCs Boleto e Pix',
-            href: '/ponto/metricas/ocs-boleto-pix',
+            // key estável (legado `ponto_metricas_ocs-boleto-pix`) — href atualizado sem invalidar permissões no banco
+            name: 'Pagamentos de OCs',
+            href: '/ponto/metricas/pagamentos-ocs',
             icon: CreditCard,
             description: 'Ordens de compra do TOTVS (consulta OCSBOLETOPIX)',
             permission: isAdministrator || can(pk('/ponto/metricas/ocs-boleto-pix'))

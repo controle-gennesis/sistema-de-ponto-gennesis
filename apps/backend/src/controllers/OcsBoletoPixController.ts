@@ -2,26 +2,33 @@ import { Response, NextFunction } from 'express';
 import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { getTotvsRmRelatorioFinService } from '../services/TotvsRmRelatorioFinService';
+import { resolveGastosPoloForContract } from '../lib/gastosOperacionaisPolo';
 
 export type OcsBoletoPixItem = {
+  /** Código numérico de polo/coligada retornado pelo TOTVS (coluna POLO). Usado junto com numeroOc como chave para os dados extras (NF/vencimento manuais). */
   coligada: number | null;
   filial: number | null;
+  /** Sigla do polo (DF, GO, RS, PB, ...) resolvida a partir do centro de custo. */
+  poloSigla: string | null;
   idMov: number | null;
   numeroMovimento: string;
-  idSolicitacao: number | null;
-  tipoDeOc: string;
   dataEmissao: string | null;
   fornecedor: string;
   valorLiquido: number;
-  codCondicaoPagto: string;
   condicaoDePagamento: string;
   centroCusto: string;
   status: string;
-  cancelada: boolean;
-  statusPagamento: string;
   dataVencimento: string | null;
   numeroNf: string | null;
   dataEmissaoNf: string | null;
+};
+
+/** Mapa de fallback quando o centro de custo não identifica um polo conhecido. */
+const POLO_CODE_FALLBACK: Record<number, string> = {
+  1: 'DF',
+  2: 'RS',
+  4: 'PB',
+  5: 'GO',
 };
 
 function pickField(row: Record<string, unknown>, ...keys: string[]): unknown {
@@ -91,21 +98,6 @@ function dateSortKey(data: string | null): number {
   return Number.isFinite(t) ? t : Number.NEGATIVE_INFINITY;
 }
 
-function isCanceledStatus(status: string, canceladaFlag: unknown): boolean {
-  if (canceladaFlag != null && canceladaFlag !== '') {
-    const flag = String(canceladaFlag).trim().toLowerCase();
-    if (['1', 's', 'sim', 'true', 'y', 'yes'].includes(flag)) return true;
-    if (['0', 'n', 'nao', 'não', 'false'].includes(flag)) return false;
-  }
-  const s = status.trim().toLowerCase();
-  if (!s) return false;
-  // Evita falso positivo em "não cancelada"
-  if (/n[aã]o\s+cancelad/.test(s)) return false;
-  if (/cancelad/.test(s)) return true;
-  if (s === 'c') return true;
-  return false;
-}
-
 function parseOptionalDateInput(v: unknown): Date | null {
   if (v == null || v === '') return null;
   const ymd = toCalendarDateString(v);
@@ -120,73 +112,32 @@ function extraKey(coligada: number, idMov: number): string {
 }
 
 function mapRow(row: Record<string, unknown>): OcsBoletoPixItem {
-  const status = String(
-    pickField(row, 'STATUS', 'STATUS_MOV', 'STATUSMOV', 'STATUS_OC') ?? ''
+  const status = String(pickField(row, 'STATUS') ?? '').trim();
+  const centroCusto = String(
+    pickField(row, 'CENTRO_DE_CUSTO', 'CENTRODECUSTO') ?? ''
   ).trim();
-  const canceladaFlag = pickField(row, 'CANCELADA', 'STATUSCANCELADO', 'CANCELADO');
-  const cancelada = isCanceledStatus(status, canceladaFlag);
+  const filial = toNullableNumber(pickField(row, 'POLO'));
+  const poloSigla =
+    resolveGastosPoloForContract(centroCusto) ||
+    (filial != null ? POLO_CODE_FALLBACK[filial] ?? null : null);
+  const numeroOc = toNullableNumber(pickField(row, 'NUMERO_DA_OC'));
+
   return {
-    coligada: toNullableNumber(pickField(row, 'COLIGADA', 'CODCOLIGADA')),
-    filial: toNullableNumber(pickField(row, 'FILIAL', 'CODFILIAL')),
-    idMov: toNullableNumber(pickField(row, 'ID_MOV', 'IDMOV', 'IDMOVIMENTO')),
-    numeroMovimento: String(
-      pickField(
-        row,
-        'NUMERO_MOVIMENTO',
-        'NUMEROMOVIMENTO',
-        'NUMERO_MOV',
-        'NUMEROMOV',
-        'NUMMOV',
-        'NUMERO'
-      ) ?? ''
-    ).trim(),
-    idSolicitacao: toNullableNumber(
-      pickField(
-        row,
-        'ID_SOLICITACAO_FLUIG',
-        'IDSOLICITACAOFLUIG',
-        'ID_SOLICITACAO',
-        'IDSOLICITACAO',
-        'ID_SOLICIT',
-        'NR_SOLICITACAO'
-      )
-    ),
-    tipoDeOc: String(pickField(row, 'TIPO_DE_OC', 'TIPODEOC', 'TIPO') ?? '').trim(),
-    dataEmissao: toCalendarDateString(pickField(row, 'DATA_EMISSAO', 'DATAEMISSAO', 'DATA')),
-    fornecedor: String(pickField(row, 'FORNECEDOR', 'NOMEFORNECEDOR') ?? '').trim(),
-    valorLiquido: toNumber(pickField(row, 'VALOR_LIQUIDO', 'VALORLIQUIDO', 'VALOR')),
-    codCondicaoPagto: String(
-      pickField(row, 'COD_CONDICAO_PAGTO', 'CODCONDICAOPAGTO', 'CODCPG') ?? ''
-    ).trim(),
-    condicaoDePagamento: String(
-      pickField(row, 'CONDICAO_DE_PAGAMENTO', 'CONDICAODEPAGAMENTO', 'CONDICAOPAGAMENTO') ?? ''
-    ).trim(),
-    centroCusto: String(
-      pickField(
-        row,
-        'CENTRO_DE_CUSTO',
-        'CENTRODECUSTO',
-        'CENTRO_CUSTO',
-        'CENTROCUSTO',
-        'CCUSTO',
-        'NOMECCUSTO',
-        'CODCCUSTO',
-        'COD_CCUSTO'
-      ) ?? ''
-    ).trim(),
-    status: status || (cancelada ? 'Cancelada' : ''),
-    cancelada,
-    statusPagamento: String(
-      pickField(
-        row,
-        'STATUS_PAGAMENTO',
-        'STATUSPAGAMENTO',
-        'STATUS_PGTO',
-        'STATUSPGTO'
-      ) ?? ''
-    ).trim(),
-    dataVencimento: null,
-    numeroNf: null,
+    // TOTVS não retorna coligada nesta consulta; POLO faz o papel de agrupador junto com o
+    // número da OC para identificar a linha ao salvar dados extras (NF de emissão manual).
+    coligada: filial,
+    filial,
+    poloSigla,
+    idMov: numeroOc,
+    numeroMovimento: numeroOc != null ? String(numeroOc) : '',
+    dataEmissao: toCalendarDateString(pickField(row, 'DATA_EMISSAO')),
+    fornecedor: String(pickField(row, 'FORNECEDOR') ?? '').trim(),
+    valorLiquido: toNumber(pickField(row, 'VALOR')),
+    condicaoDePagamento: String(pickField(row, 'COND_DE_PAG') ?? '').trim(),
+    centroCusto,
+    status,
+    dataVencimento: toCalendarDateString(pickField(row, 'DATA_VENC')),
+    numeroNf: String(pickField(row, 'NUMERO_DA_NF') ?? '').trim() || null,
     dataEmissaoNf: null,
   };
 }

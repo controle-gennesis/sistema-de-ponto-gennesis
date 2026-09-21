@@ -21,6 +21,11 @@ import {
 import { savePersistentUpload } from '../lib/persistentUpload';
 import { fixMulterOriginalName } from '../lib/fixUploadFileName';
 import { OrcamentoService } from '../services/OrcamentoService';
+import {
+  getFdApprovalNotifyUserIds,
+  notifyApproversWhatsApp,
+  notifyRequesterApprovedWhatsApp,
+} from '../lib/approvalWhatsAppNotify';
 
 const fdModuleKey = pathToModuleKey('/ponto/aprovacao-fds');
 const fdsAprovadasModuleKey = pathToModuleKey('/ponto/fds-aprovadas');
@@ -341,6 +346,17 @@ export class DemandSheetApprovalController {
         include: includeDefault,
       });
 
+      const approverIds = await getFdApprovalNotifyUserIds(row.contratoId);
+      void notifyApproversWhatsApp(
+        approverIds,
+        [
+          '📋 Nova ficha de demanda para aprovação',
+          `Ficha: ${row.codFichaDemanda}`,
+          `Obra: ${row.obra}`,
+          'Acesse o sistema para analisar.',
+        ].join('\n')
+      );
+
       return res.status(201).json({ success: true, data: serializeRow(row) });
     } catch (e: unknown) {
       const err = e as { statusCode?: number; message?: string };
@@ -495,6 +511,12 @@ export class DemandSheetApprovalController {
       });
 
       await syncOrcamentoStatusFromFd(updated.anexos, 'aprovado');
+
+      void notifyRequesterApprovedWhatsApp({
+        requesterUserId: row.solicitanteId,
+        approverUserId: req.user.id,
+        subjectLine: `Ficha de demanda ${row.codFichaDemanda}`,
+      });
 
       return res.json({ success: true, data: serializeRow(updated) });
     } catch (e: unknown) {

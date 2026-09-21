@@ -776,7 +776,8 @@ export function useRoutePermission(route: string) {
     '/ponto/contratos/gastos-operacionais':
       isAdministrator || can(pk('/ponto/contratos/gastos-operacionais')),
     '/ponto/metricas/relatorios-contrato': canAccessRelatoriosContratoPage,
-    '/ponto/metricas/ocs-boleto-pix':
+    // key estável (legado `ponto_metricas_ocs-boleto-pix`) — rota atualizada sem invalidar permissões no banco
+    '/ponto/metricas/pagamentos-ocs':
       isAdministrator || can(pk('/ponto/metricas/ocs-boleto-pix')),
     '/ponto/pleitos-gerados': isAdministrator || can(pk('/ponto/pleitos-gerados')),
     '/ponto/aprovacao-fds': isAdministrator || can(pk('/ponto/aprovacao-fds')),

@@ -22,7 +22,7 @@ const EXTRA_PAGE_TITLES: Record<string, { title: string; category?: string; href
   '/ponto/veiculos': { title: 'Veículos', category: 'Cadastros' },
   '/ponto/formularios': { title: 'Formulários', category: 'Cadastros' },
   '/ponto/metricas/relatorios-contrato': { title: 'Relatórios de Contrato', category: 'Métricas' },
-  '/ponto/metricas/ocs-boleto-pix': { title: 'OCs Boleto e Pix', category: 'Métricas' },
+  '/ponto/metricas/pagamentos-ocs': { title: 'Pagamentos de OCs', category: 'Métricas' },
   '/ponto/seguranca-do-trabalho': {
     title: 'Segurança do Trabalho',
     category: 'Departamento Pessoal',

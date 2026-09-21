@@ -24,6 +24,11 @@ import {
 } from '../lib/dpRequestAdmTst';
 import { assertUserCanManageDpRequest } from '../lib/dpApprovalAccess';
 import { createDpContabilidadeFromConcludedInterna } from '../lib/dpContabilidadeFromInterna';
+import {
+  getDpApprovalNotifyUserIds,
+  notifyApproversWhatsApp,
+  notifyRequesterApprovedWhatsApp,
+} from '../lib/approvalWhatsAppNotify';
 
 const DP_REQUEST_TYPES = [
   'ADMISSAO',
@@ -625,6 +630,24 @@ export class DpRequestController {
         });
       });
 
+      if (initialStatus === 'WAITING_MANAGER') {
+        const approverIds = await getDpApprovalNotifyUserIds({
+          contractId: contract?.id ?? null,
+          costCenterId: costCenter.id,
+          isSensitive: isSensitiveDpRequestType(validated.requestType),
+          sectorSolicitante,
+        });
+        void notifyApproversWhatsApp(
+          approverIds,
+          [
+            '📋 Nova solicitação para aprovação',
+            title,
+            `Solicitante: ${employee.user?.name ?? 'Funcionário'}`,
+            'Acesse o sistema para analisar.',
+          ].join('\n')
+        );
+      }
+
       return res.status(201).json({ success: true, data: created });
     } catch (e: unknown) {
       if (e instanceof z.ZodError) {
@@ -808,6 +831,18 @@ export class DpRequestController {
           ),
         },
       });
+
+      const requesterEmployee = await prisma.employee.findUnique({
+        where: { id: dpRequest.employeeId },
+        select: { userId: true },
+      });
+      if (requesterEmployee) {
+        void notifyRequesterApprovedWhatsApp({
+          requesterUserId: requesterEmployee.userId,
+          approverUserId: req.user.id,
+          subjectLine: updated.title,
+        });
+      }
 
       return res.json({ success: true, data: updated });
     } catch (e: unknown) {

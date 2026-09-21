@@ -392,7 +392,7 @@ function inferCategoryFromHref(href: string): string {
     h === '/ponto/contratos/socios' ||
     h === '/ponto/contratos/gastos-operacionais' ||
     h === '/ponto/metricas/relatorios-contrato' ||
-    h === '/ponto/metricas/ocs-boleto-pix'
+    h === '/ponto/metricas/pagamentos-ocs'
   ) {
     return 'Métricas';
   }

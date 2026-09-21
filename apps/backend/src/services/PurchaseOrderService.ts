@@ -18,7 +18,13 @@ import {
 import {
   assertUserCanReturnOcItemToRm,
   assertUserCanReturnOrderToQuoteMap,
+  ocApprovalPhaseForStatus,
 } from '../lib/ocApprovalAccess';
+import {
+  getOcApprovalNotifyUserIds,
+  notifyApproversWhatsApp,
+  notifyRequesterApprovedWhatsApp,
+} from '../lib/approvalWhatsAppNotify';
 
 /** Lock distinto do requestNumber de RM (91827365) — serializa só a sequência de OC. */
 const PURCHASE_ORDER_NUMBER_ADVISORY_LOCK = 91827366;
@@ -1109,16 +1115,60 @@ export class PurchaseOrderService {
     }
   }
 
+  private async notifyOcApprovers(
+    row: Awaited<ReturnType<PurchaseOrderService['createRowInTx']>>,
+  ): Promise<void> {
+    const phase = ocApprovalPhaseForStatus(row.status);
+    if (!phase) return;
+    const approverIds = await getOcApprovalNotifyUserIds({
+      phase,
+      costCenterId: row.materialRequest?.costCenter?.id ?? null,
+    });
+    void notifyApproversWhatsApp(
+      approverIds,
+      [
+        '📋 Nova ordem de compra para aprovação',
+        `OC: ${row.orderNumber}`,
+        `Fornecedor: ${row.supplier?.name ?? '—'}`,
+        'Acesse o sistema para analisar.',
+      ].join('\n'),
+    );
+  }
+
+  private async notifyOcRequesterApproved(
+    orderNumber: string,
+    materialRequestId: string | null,
+    createdBy: string | null,
+    approverUserId: string
+  ): Promise<void> {
+    let requesterUserId = createdBy;
+    if (materialRequestId) {
+      const rm = await prisma.materialRequest.findUnique({
+        where: { id: materialRequestId },
+        select: { requestedBy: true },
+      });
+      if (rm?.requestedBy) requesterUserId = rm.requestedBy;
+    }
+    if (!requesterUserId) return;
+    void notifyRequesterApprovedWhatsApp({
+      requesterUserId,
+      approverUserId,
+      subjectLine: `Ordem de compra ${orderNumber}`,
+    });
+  }
+
   async create(data: CreatePurchaseOrderData, userId: string, options?: CreatePurchaseOrderOptions) {
     const createDataBase = await this.prepareCreatePayload(data, userId, options);
 
-    return prisma.$transaction(async (tx) => {
+    const row = await prisma.$transaction(async (tx) => {
       await tx.$executeRawUnsafe(
         `SELECT pg_advisory_xact_lock(${PURCHASE_ORDER_NUMBER_ADVISORY_LOCK})`,
       );
       const orderNumber = await generateOrderNumber(tx);
       return this.createRowInTx(tx, { ...createDataBase, orderNumber });
     }, PURCHASE_ORDER_CREATE_TX_OPTIONS);
+    void this.notifyOcApprovers(row);
+    return row;
   }
 
   /**
@@ -1136,17 +1186,19 @@ export class PurchaseOrderService {
       prepared.push(await this.prepareCreatePayload(data, userId, options));
     }
 
-    return prisma.$transaction(async (tx) => {
+    const created = await prisma.$transaction(async (tx) => {
       await tx.$executeRawUnsafe(
         `SELECT pg_advisory_xact_lock(${PURCHASE_ORDER_NUMBER_ADVISORY_LOCK})`,
       );
       const orderNumbers = await generateOrderNumbers(tx, prepared.length);
-      const created: Awaited<ReturnType<PurchaseOrderService['createRowInTx']>>[] = [];
+      const rows: Awaited<ReturnType<PurchaseOrderService['createRowInTx']>>[] = [];
       for (let i = 0; i < prepared.length; i++) {
-        created.push(await this.createRowInTx(tx, { ...prepared[i], orderNumber: orderNumbers[i] }));
+        rows.push(await this.createRowInTx(tx, { ...prepared[i], orderNumber: orderNumbers[i] }));
       }
-      return created;
+      return rows;
     }, PURCHASE_ORDER_CREATE_TX_OPTIONS);
+    for (const row of created) void this.notifyOcApprovers(row);
+    return created;
   }
 
   private buildPurchaseOrderListWhere(filters: {
@@ -1799,6 +1851,14 @@ export class PurchaseOrderService {
       void this.syncDocumentsFromStockReceipt(order.orderNumber).catch((err) => {
         console.error('[PurchaseOrder] syncDocumentsFromStockReceipt on APPROVED', order.orderNumber, err);
       });
+      if (userId) {
+        void this.notifyOcRequesterApproved(
+          order.orderNumber,
+          order.materialRequestId,
+          order.createdBy,
+          userId
+        );
+      }
     }
 
     const [e] = await enrichOrdersParcelPlans([updated]);

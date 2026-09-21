@@ -5,12 +5,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'react-hot-toast';
 import {
   AlertTriangle,
-  Building2,
+  Clock,
   CreditCard,
-  ExternalLink,
   Filter,
   Pencil,
-  RefreshCw,
   Search,
   Wallet,
   X,
@@ -39,29 +37,24 @@ import {
 } from '@/components/ui/RowActionMenu';
 import { getListTableRowClassName } from '@/components/ui/listTableUi';
 import { useRowActionMenu } from '@/hooks/useRowActionMenu';
-import { buildFluigWorkflowProcessViewUrl } from '@/lib/fluigWorkflowApproval';
 import api from '@/lib/api';
 import { useRouter } from 'next/navigation';
 
 const PAGE_SIZE = 50;
-const ROUTE = '/ponto/metricas/ocs-boleto-pix';
+const ROUTE = '/ponto/metricas/pagamentos-ocs';
 
 type OcsBoletoPixItem = {
   coligada: number | null;
   filial: number | null;
+  poloSigla: string | null;
   idMov: number | null;
   numeroMovimento: string;
-  idSolicitacao: number | null;
-  tipoDeOc: string;
   dataEmissao: string | null;
   fornecedor: string;
   valorLiquido: number;
-  codCondicaoPagto: string;
   condicaoDePagamento: string;
   centroCusto: string;
   status: string;
-  cancelada: boolean;
-  statusPagamento: string;
   dataVencimento: string | null;
   numeroNf: string | null;
   dataEmissaoNf: string | null;
@@ -88,14 +81,10 @@ const EMPTY_EXTRA_FORM: ExtraForm = {
   dataEmissaoNf: '',
 };
 
-/** '' = todos | ativas | canceladas */
-type StatusFilter = '' | 'ativas' | 'canceladas';
-
 type ListFilters = {
   filial: string;
   centroCusto: string;
-  status: StatusFilter;
-  statusPagamento: string;
+  status: string;
   dataEmissaoDe: string;
   dataEmissaoAte: string;
 };
@@ -104,15 +93,9 @@ const EMPTY_LIST_FILTERS: ListFilters = {
   filial: '',
   centroCusto: '',
   status: '',
-  statusPagamento: '',
   dataEmissaoDe: '',
   dataEmissaoAte: '',
 };
-
-const STATUS_FILTER_OPTIONS = [
-  { value: 'ativas', label: 'Não canceladas' },
-  { value: 'canceladas', label: 'Canceladas' },
-];
 
 function FilterField({
   label,
@@ -176,38 +159,42 @@ function matchesDateRange(value: string | null | undefined, de: string, ate: str
   return true;
 }
 
-function isItemCancelada(item: OcsBoletoPixItem): boolean {
-  if (typeof item.cancelada === 'boolean') return item.cancelada;
-  const s = String(item.status || '').trim().toLowerCase();
-  if (/n[aã]o\s+cancelad/.test(s)) return false;
-  return /cancelad/.test(s) || s === 'c';
-}
-
 function statusLabel(item: OcsBoletoPixItem): string {
-  const raw = String(item.status || '').trim();
-  if (raw) return raw;
-  return isItemCancelada(item) ? 'Cancelada' : 'Ativa';
+  return String(item.status || '').trim() || '—';
 }
 
 function statusBadgeClass(item: OcsBoletoPixItem): string {
-  if (isItemCancelada(item)) {
-    return 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300';
+  const s = String(item.status || '').trim().toUpperCase();
+  if (s === 'PAGO') {
+    return 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300';
   }
-  return 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300';
+  if (s === 'PAGO PARCIALMENTE') {
+    return 'bg-sky-50 text-sky-700 dark:bg-sky-950/40 dark:text-sky-300';
+  }
+  if (s === 'PENDENTE') {
+    return 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300';
+  }
+  return 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300';
 }
 
-function formatPolo(filial: number | null | undefined): string {
-  if (filial == null) return '—';
-  if (filial === 1) return 'DF';
-  if (filial === 5) return 'GO';
-  return String(filial);
+function formatPolo(item: OcsBoletoPixItem): string {
+  return item.poloSigla || (item.filial != null ? String(item.filial) : '—');
 }
 
-function poloFilterLabel(filialValue: string): string {
-  const n = Number(filialValue);
-  if (n === 1) return 'DF';
-  if (n === 5) return 'GO';
-  return filialValue;
+/** Vencida = ainda pendente (não paga, nem parcialmente) e com vencimento no passado. */
+function isOverdueItem(item: OcsBoletoPixItem, todayYmd: string): boolean {
+  if (String(item.status || '').trim().toUpperCase() !== 'PENDENTE') return false;
+  const ymd = dateFieldToYmd(item.dataVencimento);
+  if (!ymd) return false;
+  return ymd < todayYmd;
+}
+
+function todayYmdString(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
 
 function itemRowId(item: OcsBoletoPixItem, index: number): string {
@@ -227,19 +214,15 @@ function matchesSearch(item: OcsBoletoPixItem, q: string) {
   const hay = [
     item.idMov,
     item.numeroMovimento,
-    item.idSolicitacao,
     item.coligada,
     item.filial,
-    formatPolo(item.filial),
-    item.tipoDeOc,
+    formatPolo(item),
     item.fornecedor,
-    item.codCondicaoPagto,
     item.condicaoDePagamento,
     item.centroCusto,
     item.dataEmissao,
     item.status,
     statusLabel(item),
-    item.statusPagamento,
     item.dataVencimento,
     item.numeroNf,
     item.dataEmissaoNf,
@@ -260,6 +243,8 @@ export default function OcsBoletoPixPage() {
   const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<OcsBoletoPixItem | null>(null);
   const [extraForm, setExtraForm] = useState<ExtraForm>(EMPTY_EXTRA_FORM);
+  const [onlyVencidas, setOnlyVencidas] = useState(false);
+  const todayYmd = useMemo(() => todayYmdString(), []);
 
   const handleLogout = () => {
     localStorage.removeItem('token');
@@ -278,10 +263,8 @@ export default function OcsBoletoPixPage() {
   const {
     data,
     isLoading,
-    isFetching,
     isError,
     error,
-    refetch,
   } = useQuery({
     queryKey: ['ocs-boleto-pix'],
     queryFn: async () => {
@@ -302,13 +285,15 @@ export default function OcsBoletoPixPage() {
   const q = searchTerm.trim().toLowerCase();
 
   const filialOptions = useMemo(() => {
-    const set = new Set<string>();
+    const map = new Map<string, string>();
     for (const item of items) {
-      if (item.filial != null) set.add(String(item.filial));
+      if (item.filial == null) continue;
+      const value = String(item.filial);
+      if (!map.has(value)) map.set(value, formatPolo(item));
     }
-    return [...set]
-      .sort((a, b) => Number(a) - Number(b) || a.localeCompare(b, 'pt-BR'))
-      .map((value) => ({ value, label: poloFilterLabel(value) }));
+    return [...map.entries()]
+      .sort((a, b) => Number(a[0]) - Number(b[0]))
+      .map(([value, label]) => ({ value, label }));
   }, [items]);
 
   const centroCustoOptions = useMemo(() => {
@@ -320,16 +305,16 @@ export default function OcsBoletoPixPage() {
     return [...set].sort((a, b) => a.localeCompare(b, 'pt-BR'));
   }, [items]);
 
-  const statusPagamentoOptions = useMemo(() => {
+  const statusOptions = useMemo(() => {
     const set = new Set<string>();
     for (const item of items) {
-      const sp = String(item.statusPagamento || '').trim();
-      if (sp) set.add(sp);
+      const s = String(item.status || '').trim();
+      if (s) set.add(s);
     }
     return [...set].sort((a, b) => a.localeCompare(b, 'pt-BR'));
   }, [items]);
 
-  const filtered = useMemo(() => {
+  const filteredBase = useMemo(() => {
     return items.filter((item) => {
       if (listFilters.filial && String(item.filial ?? '') !== listFilters.filial) {
         return false;
@@ -341,14 +326,6 @@ export default function OcsBoletoPixPage() {
         return false;
       }
       if (
-        listFilters.statusPagamento &&
-        String(item.statusPagamento || '').trim() !== listFilters.statusPagamento
-      ) {
-        return false;
-      }
-      if (listFilters.status === 'ativas' && isItemCancelada(item)) return false;
-      if (listFilters.status === 'canceladas' && !isItemCancelada(item)) return false;
-      if (
         !matchesDateRange(
           item.dataEmissao,
           listFilters.dataEmissaoDe,
@@ -359,7 +336,30 @@ export default function OcsBoletoPixPage() {
       }
       return matchesSearch(item, q);
     });
-  }, [items, listFilters, q]);
+  }, [items, listFilters.filial, listFilters.centroCusto, listFilters.dataEmissaoDe, listFilters.dataEmissaoAte, q]);
+
+  const pendingValor = useMemo(
+    () =>
+      filteredBase
+        .filter((item) => String(item.status || '').trim().toUpperCase() === 'PENDENTE')
+        .reduce((acc, item) => acc + (Number.isFinite(item.valorLiquido) ? item.valorLiquido : 0), 0),
+    [filteredBase]
+  );
+
+  const overdueCount = useMemo(
+    () => filteredBase.filter((item) => isOverdueItem(item, todayYmd)).length,
+    [filteredBase, todayYmd]
+  );
+
+  const filtered = useMemo(() => {
+    return filteredBase.filter((item) => {
+      if (listFilters.status && String(item.status || '').trim() !== listFilters.status) {
+        return false;
+      }
+      if (onlyVencidas && !isOverdueItem(item, todayYmd)) return false;
+      return true;
+    });
+  }, [filteredBase, listFilters.status, onlyVencidas, todayYmd]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
@@ -388,21 +388,13 @@ export default function OcsBoletoPixPage() {
     [filtered]
   );
 
-  const filiaisCount = useMemo(() => {
-    const set = new Set<string>();
-    for (const item of filtered) {
-      if (item.filial != null) set.add(String(item.filial));
-    }
-    return set.size;
-  }, [filtered]);
-
   const hasActiveFilter = Boolean(
     listFilters.filial ||
       listFilters.centroCusto ||
       listFilters.status ||
-      listFilters.statusPagamento ||
       listFilters.dataEmissaoDe ||
-      listFilters.dataEmissaoAte
+      listFilters.dataEmissaoAte ||
+      onlyVencidas
   );
 
   const listRange = getCadastroListRange(currentPage, PAGE_SIZE, filtered.length);
@@ -422,6 +414,7 @@ export default function OcsBoletoPixPage() {
 
   const clearFilters = () => {
     setListFilters(EMPTY_LIST_FILTERS);
+    setOnlyVencidas(false);
     setPage(1);
   };
 
@@ -510,22 +503,14 @@ export default function OcsBoletoPixPage() {
         <div className="space-y-6">
           <div className="flex w-full flex-col items-center text-center">
             <h1 className="w-full text-center text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
-              OCs Boleto e Pix
+              Pagamentos de OCs
             </h1>
             <p className="mt-2 w-full text-center text-sm text-gray-600 dark:text-gray-400 sm:text-base">
-              Ordens de compra do TOTVS RM (consulta OCSBOLETOPIX)
+              Acompanhe o pagamento das ordens de compra
             </p>
           </div>
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-3">
-            <FilterStatCard
-              label="OCs"
-              count={filtered.length.toLocaleString('pt-BR')}
-              icon={CreditCard}
-              iconBg="bg-red-50 dark:bg-red-950/40"
-              iconColor="text-red-600 dark:text-red-400"
-              loading={isLoading}
-            />
             <FilterStatCard
               label="Valor líquido"
               count={formatMoney(totalValor)}
@@ -535,11 +520,19 @@ export default function OcsBoletoPixPage() {
               loading={isLoading}
             />
             <FilterStatCard
-              label="Polos"
-              count={filiaisCount.toLocaleString('pt-BR')}
-              icon={Building2}
-              iconBg="bg-sky-50 dark:bg-sky-950/40"
-              iconColor="text-sky-600 dark:text-sky-400"
+              label="Valor pendente"
+              count={formatMoney(pendingValor)}
+              icon={Clock}
+              iconBg="bg-amber-50 dark:bg-amber-950/40"
+              iconColor="text-amber-600 dark:text-amber-400"
+              loading={isLoading}
+            />
+            <FilterStatCard
+              label="OCs vencidas"
+              count={overdueCount.toLocaleString('pt-BR')}
+              icon={AlertTriangle}
+              iconBg="bg-red-50 dark:bg-red-950/40"
+              iconColor="text-red-600 dark:text-red-400"
               loading={isLoading}
             />
           </div>
@@ -627,15 +620,6 @@ export default function OcsBoletoPixPage() {
                       </button>
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => void refetch()}
-                    disabled={isFetching}
-                    className="flex h-10 shrink-0 items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-60 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
-                  >
-                    <RefreshCw className={`h-4 w-4 ${isFetching ? 'animate-spin' : ''}`} />
-                    Atualizar
-                  </button>
                 </div>
               </div>
             </CardHeader>
@@ -667,18 +651,13 @@ export default function OcsBoletoPixPage() {
                     <table className={`${cadastroListClasses.table} min-w-[72rem]`}>
                       <thead className="border-b border-gray-200 dark:border-gray-700">
                         <tr>
-                          <th className={cadastroListClasses.th}>Nº movimento</th>
                           <th className={cadastroListClasses.th}>Número da OC</th>
-                          <th className={cadastroListClasses.thCenter}>Fluig</th>
                           <th className={cadastroListClasses.thCenter}>Status</th>
-                          <th className={cadastroListClasses.th}>Status pagamento</th>
                           <th className={cadastroListClasses.th}>Emissão</th>
                           <th className={cadastroListClasses.th}>Fornecedor</th>
                           <th className={cadastroListClasses.th}>Centro de custo</th>
-                          <th className={cadastroListClasses.th}>Data venc.</th>
-                          <th className={cadastroListClasses.th}>Nº NF</th>
-                          <th className={cadastroListClasses.th}>Emissão NF</th>
-                          <th className={cadastroListClasses.th}>Tipo de OC</th>
+                          <th className={cadastroListClasses.th}>Data de vencimento</th>
+                          <th className={cadastroListClasses.th}>Número da NF</th>
                           <th className={cadastroListClasses.th}>Condição</th>
                           <th className={cadastroListClasses.thNumeric}>Valor líquido</th>
                           <th className={cadastroListClasses.thCenter}>Polo</th>
@@ -687,10 +666,6 @@ export default function OcsBoletoPixPage() {
                       </thead>
                       <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
                         {pageItems.map((item) => {
-                          const fluigId =
-                            item.idSolicitacao != null && Number.isFinite(item.idSolicitacao)
-                              ? String(item.idSolicitacao)
-                              : '';
                           return (
                             <tr key={item.id} className={getListTableRowClassName(false)}>
                               <td className={cadastroListClasses.tdMono}>
@@ -698,36 +673,11 @@ export default function OcsBoletoPixPage() {
                                   {item.numeroMovimento || '—'}
                                 </span>
                               </td>
-                              <td className={cadastroListClasses.tdMono}>
-                                {item.idMov ?? '—'}
-                              </td>
-                              <td className={cadastroListClasses.tdCenter}>
-                                {fluigId ? (
-                                  <a
-                                    href={buildFluigWorkflowProcessViewUrl(fluigId)}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="inline-flex items-center justify-center gap-1.5 rounded-lg px-1.5 py-1 font-mono text-sm font-semibold text-red-600 transition-colors hover:bg-red-50 hover:text-red-700 dark:text-red-400 dark:hover:bg-red-950/40 dark:hover:text-red-300"
-                                    aria-label={`Abrir solicitação ${fluigId} no Fluig`}
-                                    title="Abrir no Fluig"
-                                  >
-                                    {fluigId}
-                                    <ExternalLink className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                                  </a>
-                                ) : (
-                                  <span className="text-gray-400 dark:text-gray-500">—</span>
-                                )}
-                              </td>
                               <td className={cadastroListClasses.tdCenter}>
                                 <span
                                   className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${statusBadgeClass(item)}`}
                                 >
                                   {statusLabel(item)}
-                                </span>
-                              </td>
-                              <td className={cadastroListClasses.td}>
-                                <span className="line-clamp-2 max-w-[180px]" title={item.statusPagamento || undefined}>
-                                  {item.statusPagamento || '—'}
                                 </span>
                               </td>
                               <td className={`${cadastroListClasses.td} whitespace-nowrap`}>
@@ -752,25 +702,10 @@ export default function OcsBoletoPixPage() {
                               <td className={cadastroListClasses.tdMono}>
                                 {item.numeroNf || '—'}
                               </td>
-                              <td className={`${cadastroListClasses.td} whitespace-nowrap`}>
-                                {formatDate(item.dataEmissaoNf)}
-                              </td>
-                              <td className={cadastroListClasses.tdMuted}>
-                                <span className="line-clamp-2 max-w-[260px]">
-                                  {item.tipoDeOc || '—'}
-                                </span>
-                              </td>
                               <td className={cadastroListClasses.td}>
-                                <div className="flex flex-col gap-0.5">
-                                  <span className="font-medium text-gray-900 dark:text-gray-100">
-                                    {item.condicaoDePagamento || '—'}
-                                  </span>
-                                  {item.codCondicaoPagto ? (
-                                    <span className="text-xs text-gray-500 dark:text-gray-400">
-                                      Cód. {item.codCondicaoPagto}
-                                    </span>
-                                  ) : null}
-                                </div>
+                                <span className="font-medium text-gray-900 dark:text-gray-100">
+                                  {item.condicaoDePagamento || '—'}
+                                </span>
                               </td>
                               <td
                                 className={`${cadastroListClasses.tdNumeric} font-semibold text-gray-900 dark:text-white`}
@@ -778,7 +713,7 @@ export default function OcsBoletoPixPage() {
                                 {formatMoney(item.valorLiquido)}
                               </td>
                               <td className={cadastroListClasses.tdCenter}>
-                                {formatPolo(item.filial)}
+                                {formatPolo(item)}
                               </td>
                               <RowActionMenuCell
                                 isOpen={isRowMenuOpen(item.id)}
@@ -852,24 +787,25 @@ export default function OcsBoletoPixPage() {
             <FilterField label="Status">
               <StringSingleSelectDropdown
                 value={listFilters.status}
-                onChange={(value) => setFilter('status')((value as StatusFilter) || '')}
-                options={STATUS_FILTER_OPTIONS}
-                placeholder="Todos"
-                emptyOptionLabel="Todos"
-                disableSearch
-                matchTriggerWidth
-              />
-            </FilterField>
-            <FilterField label="Status pagamento">
-              <StringSingleSelectDropdown
-                value={listFilters.statusPagamento}
-                onChange={setFilter('statusPagamento')}
-                options={statusPagamentoOptions}
+                onChange={setFilter('status')}
+                options={statusOptions}
                 placeholder="Todos"
                 emptyOptionLabel="Todos"
                 matchTriggerWidth
               />
             </FilterField>
+            <label className="flex cursor-pointer items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300">
+              <input
+                type="checkbox"
+                checked={onlyVencidas}
+                onChange={(e) => {
+                  setOnlyVencidas(e.target.checked);
+                  setPage(1);
+                }}
+                className="h-4 w-4 rounded border-gray-300 text-red-600 focus:ring-red-500 dark:border-gray-600"
+              />
+              Mostrar somente OCs vencidas
+            </label>
             <FilterField label="Data de emissão">
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div className="min-w-0">
