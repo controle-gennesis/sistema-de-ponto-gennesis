@@ -108,8 +108,9 @@ async function stampPhoto(
   ctx.font = `${bodySize}px sans-serif`;
   const lines = [
     formatDateTime(info.capturedAt),
-    formatCoords(info.latitude, info.longitude),
-    ...(info.address ? wrapCanvasText(ctx, info.address, canvas.width - pad * 2) : []),
+    ...(info.address
+      ? wrapCanvasText(ctx, info.address, canvas.width - pad * 2)
+      : [formatCoords(info.latitude, info.longitude)]),
   ];
   const barHeight = pad * 2 + titleSize + lineHeight * lines.length + 8;
 
