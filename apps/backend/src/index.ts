@@ -132,7 +132,7 @@ import { ensureNfeJavaRuntime } from './lib/ensureNfeJavaRuntime';
 import { logNfeRuntimeStatus } from './services/NfeRecebidaService';
 import { LicitacaoController } from './controllers/LicitacaoController';
 import { authenticate, AuthRequest } from './middleware/auth';
-import { removeOrphanUserPermissions, ensureDefaultEmployeeAccessPermissions } from './lib/permissionRegistrySync';
+import { removeOrphanUserPermissions, ensureDefaultEmployeeAccessPermissions, revokeDefaultEmployeeAccessFromLinkedEmpreiteiros } from './lib/permissionRegistrySync';
 import { getPrismaPoolConfig, prisma } from './lib/prisma';
 import { getPasswordHashImplementation } from './lib/passwordHash';
 import { ensureProductionSchema } from './lib/ensureProductionSchema';
@@ -581,6 +581,12 @@ try {
         if (granted > 0) {
           console.log(
             `🔑 Permissões padrão (DP/ADM/TST, Reserva de Veículos, Solicitar Combustível): ${granted} concessão(ões).`
+          );
+        }
+        const { revoked } = await revokeDefaultEmployeeAccessFromLinkedEmpreiteiros();
+        if (revoked > 0) {
+          console.log(
+            `🧹 Permissões padrão removidas de contas de empreiteiro: ${revoked} registro(s).`
           );
         }
       } catch (e) {

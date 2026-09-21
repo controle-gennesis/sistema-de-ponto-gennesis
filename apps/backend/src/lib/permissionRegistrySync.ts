@@ -18,6 +18,7 @@ const VALID_PERMISSION_ACTIONS = new Set<string>([
 
 type PermissionDbClient = {
   user: { findMany: typeof prisma.user.findMany };
+  empreiteiro: { findMany: typeof prisma.empreiteiro.findMany };
   userPermission: {
     findMany: typeof prisma.userPermission.findMany;
     createMany: typeof prisma.userPermission.createMany;
@@ -82,14 +83,27 @@ export async function ensureDefaultEmployeeAccessPermissions(
     );
     if (modules.length === 0) return { granted: 0 };
 
-    const users =
+    const candidateIds =
       userIds && userIds.length > 0
         ? userIds.filter((id) => typeof id === 'string' && id.trim().length > 0)
         : (
             await client.user.findMany({
+              where: { empreiteiro: { is: null } },
               select: { id: true },
             })
           ).map((u) => u.id);
+
+    const linked =
+      candidateIds.length > 0
+        ? await client.empreiteiro.findMany({
+            where: { userId: { in: candidateIds } },
+            select: { userId: true },
+          })
+        : [];
+    const skip = new Set(
+      linked.map((row) => row.userId).filter((id): id is string => Boolean(id))
+    );
+    const users = candidateIds.filter((id) => !skip.has(id));
 
     if (users.length === 0) return { granted: 0 };
 
@@ -144,6 +158,58 @@ export async function ensureDefaultEmployeeAccessPermissions(
         'PostgreSQL indisponível; concessão de permissões padrão ignorada.'
       );
       return { granted: 0 };
+    }
+    throw e;
+  }
+}
+
+/**
+ * Remove Solicitações DP, Reserva de Veículos e Combustível de contas
+ * ligadas a cadastro de empreiteiro — o login delas é só a página de empreiteiros.
+ */
+export async function revokeDefaultEmployeeAccessFromLinkedEmpreiteiros(
+  client: PermissionDbClient = prisma
+): Promise<{ revoked: number }> {
+  try {
+    const modules = DEFAULT_EMPLOYEE_ACCESS_MODULE_KEYS.filter((key) =>
+      isValidPermissionModuleKey(key)
+    );
+    if (modules.length === 0) return { revoked: 0 };
+
+    const linked = await client.empreiteiro.findMany({
+      where: { userId: { not: null } },
+      select: { userId: true },
+    });
+    const withoutEmployee = await client.user.findMany({
+      where: { employee: { is: null } },
+      select: { id: true },
+    });
+    const userIds = [
+      ...new Set(
+        [
+          ...linked.map((row) => row.userId),
+          ...withoutEmployee.map((row) => row.id),
+        ].filter((id): id is string => Boolean(id))
+      ),
+    ];
+    if (userIds.length === 0) return { revoked: 0 };
+
+    const result = await client.userPermission.deleteMany({
+      where: {
+        userId: { in: userIds },
+        module: { in: [...modules] },
+      },
+    });
+    return { revoked: result.count };
+  } catch (e) {
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2021') {
+      return { revoked: 0 };
+    }
+    if (isDatabaseUnreachableError(e)) {
+      console.warn(
+        'PostgreSQL indisponível; remoção de permissões padrão de empreiteiros ignorada.'
+      );
+      return { revoked: 0 };
     }
     throw e;
   }

@@ -641,6 +641,75 @@ router.patch(
   }
 );
 
+/** Admin: remove/substitui NF, boleto ou comprovante na aba Documentos (qualquer fase). */
+router.patch(
+  '/:id/admin/documents',
+  requireAdministrator,
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      if (!req.user?.id) throw createError('Usuário não autenticado', 401);
+      const body = req.body as {
+        kind?: string;
+        action?: string;
+        index?: number;
+        installmentIndex?: number;
+        url?: string;
+        name?: string | null;
+        nfNumber?: string | null;
+      };
+      const kind = String(body.kind || '').trim();
+      const action = String(body.action || '').trim() as 'remove' | 'replace';
+      if (action !== 'remove' && action !== 'replace') {
+        throw createError('Ação inválida', 400);
+      }
+
+      let order;
+      if (kind === 'nf') {
+        order = await service.adminManageNfAttachment(req.params.id, {
+          action,
+          index: Number(body.index),
+          nfUrl: body.url,
+          nfName: body.name,
+          nfNumber: body.nfNumber,
+        });
+      } else if (kind === 'boleto') {
+        order = await service.adminManagePaymentBoleto(req.params.id, {
+          action,
+          installmentIndex: body.installmentIndex,
+          paymentBoletoUrl: body.url,
+          paymentBoletoName: body.name,
+        });
+      } else if (kind === 'comprovante') {
+        order = await service.adminManagePaymentProof(req.params.id, {
+          action,
+          installmentIndex: body.installmentIndex,
+          paymentProofUrl: body.url,
+          paymentProofName: body.name,
+        });
+      } else {
+        throw createError('Tipo de documento inválido', 400);
+      }
+
+      res.json({
+        success: true,
+        data: order,
+        message: action === 'remove' ? 'Documento removido' : 'Documento substituído',
+      });
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        /Ordem de compra não encontrada|inválid|obrigatór|apenas|Índice|Ação|Tipo/.test(
+          error.message
+        )
+      ) {
+        res.status(400).json({ success: false, message: error.message });
+        return;
+      }
+      next(error);
+    }
+  }
+);
+
 router.patch(
   '/:id/payment-boleto-installment-due-dates',
   async (req: AuthRequest, res: Response, next: NextFunction) => {

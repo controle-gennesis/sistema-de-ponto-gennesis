@@ -3938,4 +3938,237 @@ export class PurchaseOrderService {
     }
     return [...ids];
   }
+
+  /**
+   * Admin: remove ou substitui NF em qualquer fase da OC.
+   */
+  async adminManageNfAttachment(
+    id: string,
+    body: {
+      action: 'remove' | 'replace';
+      index: number;
+      nfUrl?: string;
+      nfName?: string | null;
+      nfNumber?: string | null;
+    }
+  ) {
+    const order = await prisma.purchaseOrder.findUnique({
+      where: { id },
+      select: { id: true, orderNumber: true, nfAttachments: true },
+    });
+    if (!order) throw new Error('Ordem de compra não encontrada');
+
+    const list = parseNfAttachments(order.nfAttachments);
+    const index = Math.round(Number(body.index));
+    if (!Number.isInteger(index) || index < 0 || index >= list.length) {
+      throw new Error('Índice da nota fiscal inválido');
+    }
+
+    if (body.action === 'remove') {
+      const [removed] = list.splice(index, 1);
+      if (removed?.number) {
+        await releaseInvoiceNumberForOrder(id, removed.number);
+      }
+    } else {
+      const url = (body.nfUrl || '').trim();
+      if (!url) throw new Error('Arquivo da nota fiscal é obrigatório');
+      const nextNumberRaw = (body.nfNumber || list[index]?.number || '').trim();
+      if (!isValidNfNumber(nextNumberRaw)) {
+        throw new Error('Número da nota fiscal é obrigatório');
+      }
+      const prevNumber = list[index]?.number || null;
+      if (
+        !prevNumber ||
+        normalizeNfNumberKey(prevNumber) !== normalizeNfNumberKey(nextNumberRaw)
+      ) {
+        const nfNumber = await claimInvoiceNumberForOrder(id, nextNumberRaw);
+        if (prevNumber) await releaseInvoiceNumberForOrder(id, prevNumber);
+        list[index] = {
+          url,
+          name: (body.nfName || '').trim() || list[index]?.name || null,
+          uploadedAt: new Date().toISOString(),
+          number: nfNumber,
+        };
+        await prependNfToFinancialControlParcels(order.orderNumber, nfNumber);
+      } else {
+        list[index] = {
+          ...list[index],
+          url,
+          name: (body.nfName || '').trim() || list[index]?.name || null,
+          uploadedAt: new Date().toISOString(),
+        };
+      }
+    }
+
+    const updated = await prisma.purchaseOrder.update({
+      where: { id },
+      data: {
+        nfAttachments: list.length > 0 ? (list as unknown as Prisma.InputJsonValue) : Prisma.JsonNull,
+        updatedAt: new Date(),
+      },
+      include: purchaseOrderIncludeListSummary,
+    });
+    const [e] = await enrichOrdersParcelPlans([updated]);
+    return e;
+  }
+
+  /**
+   * Admin: remove ou substitui boleto (único ou por parcela), sem alterar a fase da OC.
+   */
+  async adminManagePaymentBoleto(
+    id: string,
+    body: {
+      action: 'remove' | 'replace';
+      installmentIndex?: number;
+      paymentBoletoUrl?: string;
+      paymentBoletoName?: string | null;
+    }
+  ) {
+    const order = await prisma.purchaseOrder.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        paymentType: true,
+        paymentCondition: true,
+        paymentBoletoInstallments: true,
+        paymentBoletoUrl: true,
+        paymentBoletoName: true,
+        amountToPay: true,
+        orderDate: true,
+      },
+    });
+    if (!order) throw new Error('Ordem de compra não encontrada');
+    if (order.paymentType !== 'BOLETO') {
+      throw new Error('Boleto aplica-se apenas a OC com pagamento em boleto');
+    }
+
+    const [meta] = await enrichOrdersParcelPlans([order]);
+    const parcelCount = Math.max(1, meta.paymentParcelCount);
+    const index = Math.round(Number(body.installmentIndex ?? 0));
+    if (!Number.isInteger(index) || index < 0 || index >= parcelCount) {
+      throw new Error('Índice de parcela inválido');
+    }
+
+    let inst = parseStoredInstallments(order.paymentBoletoInstallments);
+    while (inst.length < parcelCount) {
+      const days = meta.paymentParcelDueDays[inst.length] ?? 30;
+      inst.push({
+        amount: 0,
+        dueDate: ymdAddDays(order.orderDate, days),
+        boletoUrl: null,
+        boletoName: null,
+        paymentStatus: 'PENDING_BOLETO',
+      });
+    }
+
+    if (body.action === 'remove') {
+      inst[index] = {
+        ...inst[index],
+        boletoUrl: null,
+        boletoName: null,
+      };
+    } else {
+      const url = (body.paymentBoletoUrl || '').trim();
+      if (!url) throw new Error('URL do arquivo do boleto é obrigatória');
+      inst[index] = {
+        ...inst[index],
+        boletoUrl: url,
+        boletoName: (body.paymentBoletoName || '').trim() || null,
+      };
+    }
+
+    const first = inst[0];
+    const updated = await prisma.purchaseOrder.update({
+      where: { id },
+      data: {
+        paymentBoletoInstallments: inst as unknown as Prisma.InputJsonValue,
+        paymentBoletoUrl: first?.boletoUrl || null,
+        paymentBoletoName: first?.boletoName || null,
+        updatedAt: new Date(),
+      },
+      include: purchaseOrderIncludeListSummary,
+    });
+    const [e] = await enrichOrdersParcelPlans([updated]);
+    return e;
+  }
+
+  /**
+   * Admin: remove ou substitui comprovante (geral ou por parcela).
+   */
+  async adminManagePaymentProof(
+    id: string,
+    body: {
+      action: 'remove' | 'replace';
+      installmentIndex?: number;
+      paymentProofUrl?: string;
+      paymentProofName?: string | null;
+    }
+  ) {
+    const order = await prisma.purchaseOrder.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        paymentType: true,
+        paymentCondition: true,
+        paymentBoletoInstallments: true,
+        paymentProofUrl: true,
+        paymentProofName: true,
+      },
+    });
+    if (!order) throw new Error('Ordem de compra não encontrada');
+
+    const url =
+      body.action === 'replace' ? (body.paymentProofUrl || '').trim() : '';
+    if (body.action === 'replace' && !url) {
+      throw new Error('Arquivo do comprovante é obrigatório');
+    }
+    const name =
+      body.action === 'replace'
+        ? (body.paymentProofName || '').trim() || null
+        : null;
+
+    const updateData: Prisma.PurchaseOrderUpdateInput = {
+      updatedAt: new Date(),
+    };
+
+    if (order.paymentType === 'BOLETO') {
+      const [meta] = await enrichOrdersParcelPlans([order]);
+      const parcelCount = Math.max(1, meta.paymentParcelCount);
+      const index = Math.round(Number(body.installmentIndex ?? 0));
+      if (!Number.isInteger(index) || index < 0 || index >= parcelCount) {
+        throw new Error('Índice de parcela inválido');
+      }
+      const inst = parseStoredInstallments(order.paymentBoletoInstallments);
+      while (inst.length < parcelCount) {
+        inst.push({
+          amount: 0,
+          dueDate: '',
+          boletoUrl: null,
+          boletoName: null,
+          paymentStatus: 'PENDING_BOLETO',
+        });
+      }
+      inst[index] = {
+        ...inst[index],
+        installmentProofUrl: body.action === 'remove' ? null : url,
+        installmentProofName: body.action === 'remove' ? null : name,
+      };
+      updateData.paymentBoletoInstallments = inst as unknown as Prisma.InputJsonValue;
+      if (parcelCount === 1 || index === 0) {
+        updateData.paymentProofUrl = body.action === 'remove' ? null : url;
+        updateData.paymentProofName = body.action === 'remove' ? null : name;
+      }
+    } else {
+      updateData.paymentProofUrl = body.action === 'remove' ? null : url;
+      updateData.paymentProofName = body.action === 'remove' ? null : name;
+    }
+
+    const updated = await prisma.purchaseOrder.update({
+      where: { id },
+      data: updateData,
+      include: purchaseOrderIncludeListSummary,
+    });
+    const [e] = await enrichOrdersParcelPlans([updated]);
+    return e;
+  }
 }

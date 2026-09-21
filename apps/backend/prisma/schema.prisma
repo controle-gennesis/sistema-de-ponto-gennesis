@@ -39,6 +39,7 @@ model User {
 
   // Relacionamentos
   employee                                  Employee?
+  empreiteiro                               Empreiteiro?
   loginEvents                               UserLoginEvent[]
   pageVisits                                UserPageVisit[]
   timeRecords                               TimeRecord[]
@@ -2317,6 +2318,7 @@ model Empreiteiro {
   tradeName    String?
   documentKind String
   document     String
+  cpf          String?
   phone        String
   specialty    String
   contractId   String
@@ -2334,13 +2336,17 @@ model Empreiteiro {
   photoUrl     String?
   photoKey     String?
   files        Json     @default("[]")
+  userId       String?  @unique
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
   contract Contract @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  user         User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
   teamMembers EmpreiteiroTeamMember[]
+  dailyMeasurements EmpreiteiroDailyMeasurement[]
 
   @@unique([document])
+  @@unique([cpf])
   @@index([name])
   @@index([isActive])
   @@index([contractId])
@@ -2363,10 +2369,50 @@ model EmpreiteiroTeamMember {
   updatedAt     DateTime @updatedAt
 
   empreiteiro Empreiteiro @relation(fields: [empreiteiroId], references: [id], onDelete: Cascade)
+  dailyWorkers EmpreiteiroDailyMeasurementWorker[]
 
   @@index([empreiteiroId])
   @@index([name])
   @@map("empreiteiro_team_members")
+}
+
+/// Relatório do que a turma produziu no dia (não mistura com notas de pagamento).
+model EmpreiteiroDailyMeasurement {
+  id            String   @id @default(cuid())
+  empreiteiroId String
+  workDate      DateTime @db.Date
+  description   String
+  confirmedBy   String?
+  quantity      Decimal? @db.Decimal(12, 2)
+  unit          String?
+  photos        Json     @default("[]")
+  teamPhoto     Json?
+  createdBy     String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  empreiteiro Empreiteiro                         @relation(fields: [empreiteiroId], references: [id], onDelete: Cascade)
+  workers     EmpreiteiroDailyMeasurementWorker[]
+
+  @@unique([empreiteiroId, workDate])
+  @@index([empreiteiroId])
+  @@index([workDate])
+  @@map("empreiteiro_daily_measurements")
+}
+
+model EmpreiteiroDailyMeasurementWorker {
+  id            String  @id @default(cuid())
+  measurementId String
+  teamMemberId  String?
+  name          String
+  role          String
+
+  measurement EmpreiteiroDailyMeasurement @relation(fields: [measurementId], references: [id], onDelete: Cascade)
+  teamMember  EmpreiteiroTeamMember?      @relation(fields: [teamMemberId], references: [id], onDelete: SetNull)
+
+  @@index([measurementId])
+  @@index([teamMemberId])
+  @@map("empreiteiro_daily_measurement_workers")
 }
 
 /// Compras da Caixinha (Engenharia) — IDs/nomes denormalizados, sem FK para User/Contract/Obra.

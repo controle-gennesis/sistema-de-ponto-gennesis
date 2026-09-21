@@ -8,6 +8,7 @@ import { releaseUserIdentity, buildReleasedIdentity } from '../lib/userIdentityR
 import { ensureDefaultEmployeeAccessPermissions } from '../lib/permissionRegistrySync';
 import { findUserIdsMatchingSearch } from '../lib/normalizeSearchText';
 import { ChatService } from '../services/ChatService';
+import { pathToModuleKey, PERMISSION_ACCESS_ACTION } from '@sistema-ponto/permission-modules';
 
 const chatUploadService = new ChatService();
 const facePhotoSelect = {
@@ -124,9 +125,26 @@ export class UserController {
         };
       }
 
-      if (Object.keys(employeeFilters).length > 0) {
+      const hasEmployeeFieldFilters = Boolean(department || position);
+      if (hasEmployeeFieldFilters) {
         where.employee = employeeFilters;
+      } else if (shouldExcludeAdmin) {
+        // Inclui logins de empreiteiro (sem ficha de funcionário), mesmo se o cadastro
+        // da página de empreiteiros já tiver sido excluído.
+        where.OR = [
+          { employee: employeeFilters },
+          { employee: { is: null } },
+        ];
       }
+
+      const empreiteiroSelect = {
+        id: true,
+        name: true,
+        tradeName: true,
+        specialty: true,
+        phone: true,
+        document: true,
+      } as const;
 
       const employeeSelectLight = {
         id: true,
@@ -174,6 +192,7 @@ export class UserController {
             employee: {
               select: isLight ? employeeSelectLight : employeeSelectFull,
             },
+            empreiteiro: { select: empreiteiroSelect },
           },
           orderBy: { name: 'asc' },
         }),
@@ -205,6 +224,18 @@ export class UserController {
         where: { id },
         include: {
           employee: true,
+          empreiteiro: {
+            select: {
+              id: true,
+              name: true,
+              tradeName: true,
+              specialty: true,
+              phone: true,
+              document: true,
+              cpf: true,
+              email: true,
+            },
+          },
           timeRecords: {
             take: 10,
             orderBy: { createdAt: 'desc' }
@@ -235,7 +266,8 @@ export class UserController {
 
   async createUser(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      const { email, password, name, cpf, role, employeeData } = req.body;
+      const { email, password, name, cpf, role, employeeData, kind, empreiteiroData } = req.body;
+      const isEmpreiteiro = String(kind || '').toUpperCase() === 'EMPREITEIRO' || Boolean(empreiteiroData);
 
       // Verificar se usuário já existe
       const existingUser = await prisma.user.findFirst({
@@ -246,6 +278,90 @@ export class UserController {
 
       if (existingUser) {
         throw createError('Usuário já existe com este email ou CPF', 400);
+      }
+
+      if (isEmpreiteiro) {
+        const companyName = typeof empreiteiroData?.name === 'string' ? empreiteiroData.name.trim() : '';
+        const cnpj = String(empreiteiroData?.cnpj || '').replace(/\D/g, '');
+        const phone = String(empreiteiroData?.phone || req.body?.phone || '').replace(/\D/g, '');
+        const specialty = typeof empreiteiroData?.specialty === 'string' ? empreiteiroData.specialty.trim() : '';
+        const contractId = typeof empreiteiroData?.contractId === 'string' ? empreiteiroData.contractId.trim() : '';
+        const cpfDigits = String(cpf || '').replace(/\D/g, '');
+        const emailNorm = String(email || '').trim().toLowerCase();
+
+        if (!name?.trim()) throw createError('Nome é obrigatório', 400);
+        if (!emailNorm || !emailNorm.includes('@')) throw createError('E-mail inválido', 400);
+        if (cpfDigits.length !== 11) throw createError('CPF é obrigatório e deve ter 11 dígitos', 400);
+        if (!password || String(password).length < 6) throw createError('Senha deve ter pelo menos 6 caracteres', 400);
+        if (!companyName) throw createError('Nome / razão social é obrigatório', 400);
+        if (cnpj.length !== 14) throw createError('CNPJ é obrigatório e deve ter 14 dígitos', 400);
+        if (phone.length < 10) throw createError('Telefone é obrigatório', 400);
+        if (!specialty) throw createError('Especialidade é obrigatória', 400);
+        if (!contractId) throw createError('Contrato é obrigatório', 400);
+
+        const contrato = await prisma.contract.findUnique({ where: { id: contractId } });
+        if (!contrato) throw createError('Contrato não encontrado', 404);
+
+        const duplicateDoc = await prisma.empreiteiro.findFirst({
+          where: { OR: [{ document: cnpj }, { cpf: cpfDigits }] },
+        });
+        if (duplicateDoc) throw createError('Já existe uma empreita com este CPF ou CNPJ', 400);
+
+        const hashedPassword = await hashPassword(password);
+        const created = await prisma.$transaction(async (tx: any) => {
+          const user = await tx.user.create({
+            data: {
+              email: emailNorm,
+              password: hashedPassword,
+              name: String(name).trim(),
+              cpf: cpfDigits,
+              role: 'EMPLOYEE',
+            },
+          });
+          const empreiteiro = await tx.empreiteiro.create({
+            data: {
+              name: companyName,
+              tradeName: empreiteiroData?.tradeName?.trim() || null,
+              documentKind: 'CNPJ',
+              document: cnpj,
+              cpf: cpfDigits,
+              phone,
+              specialty,
+              contractId,
+              contactName: String(name).trim(),
+              email: emailNorm,
+              city: empreiteiroData?.city?.trim() || null,
+              state: empreiteiroData?.state?.trim()?.toUpperCase() || null,
+              pixKey: empreiteiroData?.pixKey?.trim() || null,
+              bank: empreiteiroData?.bank?.trim() || null,
+              agency: empreiteiroData?.agency?.trim() || null,
+              account: empreiteiroData?.account?.trim() || null,
+              userId: user.id,
+            },
+          });
+          await tx.userPermission.create({
+            data: {
+              userId: user.id,
+              module: pathToModuleKey('/ponto/empreiteiros'),
+              action: PERMISSION_ACCESS_ACTION,
+              allowed: true,
+            },
+          });
+          return { user, empreiteiro };
+        });
+
+        res.status(201).json({
+          success: true,
+          data: {
+            id: created.user.id,
+            email: created.user.email,
+            name: created.user.name,
+            cpf: created.user.cpf,
+            empreiteiroId: created.empreiteiro.id,
+          },
+          message: 'Empreita criada com acesso ao sistema',
+        });
+        return;
       }
 
       // Criptografar senha

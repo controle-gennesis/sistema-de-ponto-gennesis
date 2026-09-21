@@ -24,6 +24,9 @@ export type OcDocumentEntry = {
   url?: string;
   fileName?: string;
   pending?: boolean;
+  /** Metadados para admin remover/substituir na aba Documentos. */
+  adminKind?: 'nf' | 'boleto' | 'comprovante' | 'demand-sheet';
+  adminIndex?: number;
 };
 
 export type OcDocumentBlock = {
@@ -173,6 +176,8 @@ export function collectOcDocumentEntries(
             ? row?.boletoName?.trim()
             : effectivePaymentBoletoName(order) || row?.boletoName?.trim()) ||
           `Boleto parcela ${parcelLabel}`,
+        adminKind: 'boleto',
+        adminIndex: index,
       });
       const proofUrl =
         parcelCount > 1
@@ -188,6 +193,8 @@ export function collectOcDocumentEntries(
             ? row?.installmentProofName?.trim()
             : order.paymentProofName?.trim() || row?.installmentProofName?.trim()) ||
           `Comprovante parcela ${parcelLabel}`,
+        adminKind: 'comprovante',
+        adminIndex: index,
       });
     }
   } else {
@@ -196,6 +203,8 @@ export function collectOcDocumentEntries(
       label: 'Comprovante de pagamento',
       url: (order.paymentProofUrl || '').trim() || undefined,
       fileName: order.paymentProofName?.trim() || 'Comprovante pagamento',
+      adminKind: 'comprovante',
+      adminIndex: 0,
     });
     stockAttachments.paymentSlips.forEach((slip, index) => {
       if (!slip.url) return;
@@ -218,6 +227,8 @@ export function collectOcDocumentEntries(
         subtitle: nf.uploadedAt ? new Date(nf.uploadedAt).toLocaleString('pt-BR') : undefined,
         url: nf.url,
         fileName: nf.name || `NF ${index + 1}`,
+        adminKind: 'nf',
+        adminIndex: index,
       });
     });
   } else if (stockAttachments.nf?.url) {

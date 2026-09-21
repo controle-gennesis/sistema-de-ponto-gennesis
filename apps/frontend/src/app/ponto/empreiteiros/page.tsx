@@ -4,7 +4,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { FileText, HardHat, Paperclip, Plus, Search, Trash2, X } from 'lucide-react';
+import { ArrowLeft, ClipboardList, FileText, HardHat, Link2Off, Paperclip, Plus, Search, Trash2, X } from 'lucide-react';
 import {
   CadastroListEmpty,
   CadastroListLoading,
@@ -20,6 +20,7 @@ import {
 } from '@/components/ui/RowActionMenu';
 import { useRowActionMenu } from '@/hooks/useRowActionMenu';
 import { useCadastroCrudPermissions } from '@/hooks/useCadastroCrudPermissions';
+import { usePermissions } from '@/hooks/usePermissions';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
@@ -34,6 +35,7 @@ import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDr
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import { VehicleReturnPhotoField } from '@/components/ui/VehicleReturnPhotoField';
 import { Z_LIGHTBOX } from '@/lib/zIndex';
+import { EmpreiteiroDailyMeasurements } from './EmpreiteiroDailyMeasurements';
 
 type DocumentKind = 'CPF' | 'CNPJ';
 
@@ -43,6 +45,8 @@ interface EmpreiteiroRow {
   tradeName?: string | null;
   documentKind: DocumentKind | string;
   document: string;
+  cpf?: string | null;
+  cnpj?: string | null;
   phone: string;
   specialty: string;
   contractId: string;
@@ -62,6 +66,7 @@ interface EmpreiteiroRow {
   files?: PaymentFile[];
   team?: TeamMemberRow[];
   teamCount?: number;
+  userId?: string | null;
 }
 
 interface PaymentFile {
@@ -132,11 +137,29 @@ function maskPhoneInput(raw: string): string {
   return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
 }
 
-function formatDocumentDisplay(kind: string, document: string): string {
-  const digits = onlyDigits(document);
-  if (kind === 'CNPJ' || digits.length === 14) return maskCnpjInput(digits);
-  if (digits.length === 11) return formatCpfInput(digits);
-  return document || '—';
+function empreiteiroCpfDigits(item: Pick<EmpreiteiroRow, 'cpf' | 'documentKind' | 'document'>): string {
+  const fromField = onlyDigits(item.cpf || '');
+  if (fromField.length === 11) return fromField;
+  if (item.documentKind === 'CPF') return onlyDigits(item.document).slice(0, 11);
+  return '';
+}
+
+function empreiteiroCnpjDigits(item: Pick<EmpreiteiroRow, 'cnpj' | 'documentKind' | 'document'>): string {
+  const fromField = onlyDigits(item.cnpj || '');
+  if (fromField.length === 14) return fromField;
+  if (item.documentKind === 'CNPJ' || onlyDigits(item.document).length === 14) {
+    return onlyDigits(item.document).slice(0, 14);
+  }
+  return '';
+}
+
+function formatEmpreiteiroDocs(item: Pick<EmpreiteiroRow, 'cpf' | 'cnpj' | 'documentKind' | 'document'>): string {
+  const parts: string[] = [];
+  const cpf = empreiteiroCpfDigits(item);
+  const cnpj = empreiteiroCnpjDigits(item);
+  if (cpf) parts.push(formatCpfInput(cpf));
+  if (cnpj) parts.push(maskCnpjInput(cnpj));
+  return parts.join(' · ') || '—';
 }
 
 function formatPhoneDisplay(phone: string): string {
@@ -191,11 +214,21 @@ const emptyTeamMember = (): TeamMemberForm => ({
   photo: '',
 });
 
+function teamDraftFromRow(item: Pick<EmpreiteiroRow, 'team'>): TeamMemberForm[] {
+  return (item.team || []).map((member) => ({
+    name: member.name || '',
+    role: member.role || '',
+    phone: member.phone ? maskPhoneInput(member.phone) : '',
+    document: member.document ? formatCpfInput(member.document) : '',
+    photo: resolveApiMediaUrl(member.photoUrl) || member.photoUrl || '',
+  }));
+}
+
 const emptyForm = {
   name: '',
   tradeName: '',
-  documentKind: 'CPF' as DocumentKind,
-  document: '',
+  cpf: '',
+  cnpj: '',
   phone: '',
   specialty: '',
   contractId: '',
@@ -222,15 +255,18 @@ const labelClass = 'mb-2 block text-sm font-medium text-gray-700 dark:text-gray-
 export default function EmpreiteirosPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const { canCreate, canEdit, canDelete } = useCadastroCrudPermissions('/ponto/empreiteiros');
-  const showActions = canEdit || canDelete;
+  const crud = useCadastroCrudPermissions('/ponto/empreiteiros');
+  const { isLinkedEmpreiteiro } = usePermissions();
   const [searchTerm, setSearchTerm] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [viewingItem, setViewingItem] = useState<EmpreiteiroRow | null>(null);
+  const [pageSection, setPageSection] = useState<'cadastro' | 'medicao'>('cadastro');
+  const [medicaoEmpreitaId, setMedicaoEmpreitaId] = useState<string | null>(null);
   const [previewPhoto, setPreviewPhoto] = useState<{ url: string; alt: string } | null>(null);
   const [editingItem, setEditingItem] = useState<EmpreiteiroRow | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [showDeleteId, setShowDeleteId] = useState<string | null>(null);
+  const [showUnlinkId, setShowUnlinkId] = useState<string | null>(null);
   const [uploadingFile, setUploadingFile] = useState(false);
 
   const openPreviewPhoto = (url?: string | null, alt?: string) => {
@@ -264,6 +300,16 @@ export default function EmpreiteirosPage() {
       return res.data;
     },
   });
+
+  const ownEmpreiteiroId = userData?.data?.empreiteiro?.id as string | undefined;
+  const isOwnEmpreiteiroAccount = isLinkedEmpreiteiro;
+  const canCreate = false;
+  const canManageCadastro = crud.canEdit && !isLinkedEmpreiteiro;
+  const canDelete = crud.canDelete && !isLinkedEmpreiteiro;
+  const canEditDaily = Boolean(ownEmpreiteiroId) && (crud.canEdit || isLinkedEmpreiteiro);
+  const showActions = canManageCadastro || canDelete;
+  const [ownTeamDraft, setOwnTeamDraft] = useState<TeamMemberForm[]>([]);
+  const [savingSelf, setSavingSelf] = useState(false);
 
   const { data: listData, isLoading } = useQuery({
     queryKey: ['empreiteiros', searchTerm],
@@ -374,7 +420,7 @@ export default function EmpreiteirosPage() {
 
   const uploadViewingFile = async (file: File | null | undefined) => {
     if (!file || !viewingItem) return;
-    if (!canEdit) {
+    if (!canManageCadastro) {
       toast.error('Você não tem permissão para anexar.');
       return;
     }
@@ -402,7 +448,7 @@ export default function EmpreiteirosPage() {
   };
 
   const removeViewingFile = async (fileIndex: number) => {
-    if (!viewingItem || !canEdit) return;
+    if (!viewingItem || !canManageCadastro) return;
     try {
       await persistViewingFiles((viewingItem.files || []).filter((_, fi) => fi !== fileIndex));
       toast.success('Arquivo removido');
@@ -420,7 +466,7 @@ export default function EmpreiteirosPage() {
       queryClient.invalidateQueries({ queryKey: ['empreiteiros'] });
       setShowForm(false);
       resetForm();
-      toast.success('Empreiteiro salvo com sucesso!');
+      toast.success('Empreita salva com sucesso!');
     },
     onError: (error: any) => {
       toast.error(error.response?.data?.message || 'Erro ao salvar');
@@ -436,7 +482,7 @@ export default function EmpreiteirosPage() {
       queryClient.invalidateQueries({ queryKey: ['empreiteiros'] });
       setShowForm(false);
       resetForm();
-      toast.success('Empreiteiro atualizado!');
+      toast.success('Empreita atualizada!');
     },
     onError: (error: any) => {
       toast.error(error.response?.data?.message || 'Erro ao atualizar');
@@ -448,38 +494,117 @@ export default function EmpreiteirosPage() {
       const res = await api.delete(`/empreiteiros/${id}`);
       return res.data;
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['empreiteiros'] });
+      queryClient.invalidateQueries({ queryKey: ['employees'] });
       setShowDeleteId(null);
-      toast.success('Registro excluído');
+      toast.success(data?.message || 'Cadastro da empreita excluído. O login foi mantido.');
     },
     onError: (error: any) => {
       toast.error(error.response?.data?.message || 'Erro ao excluir');
     },
   });
 
+  const unlinkMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await api.post(`/empreiteiros/${id}/unlink`);
+      return res.data;
+    },
+    onSuccess: (data, id) => {
+      queryClient.invalidateQueries({ queryKey: ['empreiteiros'] });
+      queryClient.invalidateQueries({ queryKey: ['employees'] });
+      setShowUnlinkId(null);
+      setViewingItem((prev) => (prev?.id === id ? null : prev));
+      toast.success(
+        data?.message ||
+          'Empreita encerrada. O login permanece ativo para vincular a outra empreita.'
+      );
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.message || 'Não foi possível encerrar a empreita');
+    },
+  });
+
   const openDetails = (item: EmpreiteiroRow) => {
     setViewingItem(item);
+    setOwnTeamDraft(teamDraftFromRow(item));
     void api
       .get(`/empreiteiros/${item.id}`)
       .then((res) => {
         const data = res.data?.data as EmpreiteiroRow | undefined;
-        if (data?.id) setViewingItem(data);
+        if (data?.id) {
+          setViewingItem(data);
+          setOwnTeamDraft(teamDraftFromRow(data));
+        }
       })
       .catch(() => undefined);
   };
 
+  const applySelfUpdate = (data: EmpreiteiroRow) => {
+    setViewingItem(data);
+    setOwnTeamDraft(teamDraftFromRow(data));
+    queryClient.invalidateQueries({ queryKey: ['empreiteiros'] });
+  };
+
+  const patchOwnTeamMember = (index: number, partial: Partial<TeamMemberForm>) => {
+    setOwnTeamDraft((prev) => prev.map((member, i) => (i === index ? { ...member, ...partial } : member)));
+  };
+
+  const saveOwnTeam = async () => {
+    if (!viewingItem || !isOwnEmpreiteiroAccount) return;
+    for (let i = 0; i < ownTeamDraft.length; i += 1) {
+      const member = ownTeamDraft[i];
+      if (!member.name.trim()) {
+        toast.error(`Nome da pessoa ${i + 1} da equipe é obrigatório`);
+        return;
+      }
+      if (!member.role.trim()) {
+        toast.error(`Função da pessoa ${i + 1} da equipe é obrigatória`);
+        return;
+      }
+      const document = onlyDigits(member.document);
+      if (document && document.length !== 11) {
+        toast.error(`CPF da pessoa ${i + 1} da equipe deve ter 11 dígitos`);
+        return;
+      }
+    }
+    setSavingSelf(true);
+    try {
+      const res = await api.patch(`/empreiteiros/${viewingItem.id}`, {
+        team: ownTeamDraft.map((member) => ({
+          name: member.name.trim(),
+          role: member.role.trim(),
+          phone: onlyDigits(member.phone),
+          document: onlyDigits(member.document),
+          photo: member.photo || null,
+        })),
+      });
+      const data = res.data?.data as EmpreiteiroRow | undefined;
+      if (data?.id) applySelfUpdate(data);
+      toast.success('Equipe atualizada');
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'Não foi possível salvar a equipe');
+    } finally {
+      setSavingSelf(false);
+    }
+  };
+
   const handleEdit = (item: EmpreiteiroRow) => {
+    if (!canManageCadastro) return;
     setPreviewPhoto(null);
     setViewingItem(null);
     setEditingItem(item);
     setForm({
       name: item.name || '',
       tradeName: item.tradeName || '',
-      documentKind: item.documentKind === 'CNPJ' ? 'CNPJ' : 'CPF',
-      document: item.document
-        ? formatDocumentDisplay(item.documentKind, item.document)
-        : '',
+      cpf: (() => {
+        const digits = empreiteiroCpfDigits(item);
+        return digits ? formatCpfInput(digits) : '';
+      })(),
+      cnpj: (() => {
+        const digits = empreiteiroCnpjDigits(item);
+        return digits ? maskCnpjInput(digits) : '';
+      })(),
       phone: item.phone ? maskPhoneInput(item.phone) : '',
       specialty: item.specialty || '',
       contractId: item.contractId || '',
@@ -510,8 +635,8 @@ export default function EmpreiteirosPage() {
   const buildPayload = () => ({
     name: form.name.trim(),
     tradeName: form.tradeName.trim() || null,
-    documentKind: form.documentKind,
-    document: onlyDigits(form.document),
+    cpf: onlyDigits(form.cpf),
+    cnpj: onlyDigits(form.cnpj),
     phone: onlyDigits(form.phone),
     specialty: form.specialty.trim(),
     contractId: form.contractId.trim(),
@@ -552,12 +677,12 @@ export default function EmpreiteirosPage() {
       toast.error('Especialidade é obrigatória');
       return;
     }
-    if (payload.documentKind === 'CPF' && payload.document.length !== 11) {
-      toast.error('CPF deve ter 11 dígitos');
+    if (payload.cpf.length !== 11) {
+      toast.error('CPF é obrigatório e deve ter 11 dígitos');
       return;
     }
-    if (payload.documentKind === 'CNPJ' && payload.document.length !== 14) {
-      toast.error('CNPJ deve ter 14 dígitos');
+    if (payload.cnpj.length !== 14) {
+      toast.error('CNPJ é obrigatório e deve ter 14 dígitos');
       return;
     }
     if (payload.phone.length < 10) {
@@ -594,7 +719,7 @@ export default function EmpreiteirosPage() {
       return;
     }
     if (editingItem) {
-      if (!canEdit) {
+      if (!canManageCadastro) {
         toast.error('Você não tem permissão para editar.');
         return;
       }
@@ -618,7 +743,32 @@ export default function EmpreiteirosPage() {
     { isParentOpen: showForm }
   );
 
-  const items: EmpreiteiroRow[] = listData?.data || [];
+  const items: EmpreiteiroRow[] = (listData?.data || []).filter((item: EmpreiteiroRow) => {
+    if (!isLinkedEmpreiteiro) return true;
+    return Boolean(ownEmpreiteiroId) && item.id === ownEmpreiteiroId;
+  });
+  const ownEmpreitaItem =
+    items.find((item) => item.id === ownEmpreiteiroId) || items[0] || null;
+  const medicaoTargetItem =
+    items.find((item) => item.id === medicaoEmpreitaId) ||
+    (isOwnEmpreiteiroAccount ? ownEmpreitaItem : null);
+  const showMedicaoPage = pageSection === 'medicao' && Boolean(medicaoTargetItem);
+
+  const openMedicaoPage = (item?: EmpreiteiroRow | null) => {
+    const target =
+      item ||
+      (isOwnEmpreiteiroAccount ? ownEmpreitaItem : null) ||
+      items.find((row) => row.isActive) ||
+      items[0] ||
+      null;
+    if (!target) {
+      toast.error('Nenhuma empreita disponível para medição');
+      return;
+    }
+    setMedicaoEmpreitaId(target.id);
+    setPageSection('medicao');
+    setViewingItem(null);
+  };
 
   const {
     rowActionMenu,
@@ -645,15 +795,94 @@ export default function EmpreiteirosPage() {
     <ProtectedRoute route="/ponto/empreiteiros">
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
         <div className="space-y-6">
-          <div className="text-center">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
-              Empreiteiros
-            </h1>
-            <p className="mt-2 text-sm text-gray-600 dark:text-gray-400 sm:text-base">
-              Cadastre a mão de obra da obra por contrato e especialidade
-            </p>
+          <div className="relative">
+            {showMedicaoPage ? (
+              <button
+                type="button"
+                onClick={() => setPageSection('cadastro')}
+                className="absolute left-0 top-1/2 z-10 inline-flex -translate-y-1/2 items-center gap-2 rounded-lg px-1 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-400 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100"
+              >
+                <ArrowLeft className="h-4 w-4" />
+                Voltar
+              </button>
+            ) : items.length > 0 ? (
+              <button
+                type="button"
+                onClick={() => openMedicaoPage()}
+                className="absolute left-0 top-1/2 z-10 inline-flex h-10 -translate-y-1/2 items-center gap-2 rounded-lg bg-red-600 px-4 text-sm font-semibold text-white transition-colors hover:bg-red-700"
+              >
+                <ClipboardList className="h-4 w-4" />
+                Medições diárias
+              </button>
+            ) : null}
+            <div className="px-28 text-center sm:px-36">
+              <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
+                {showMedicaoPage ? 'Medições diárias' : 'Empreitas'}
+              </h1>
+              <p className="mt-2 text-sm text-gray-600 dark:text-gray-400 sm:text-base">
+                {showMedicaoPage
+                  ? medicaoTargetItem?.name || 'Registro do que a equipe fez no dia'
+                  : isOwnEmpreiteiroAccount
+                    ? 'Seu cadastro, equipe e medição diária'
+                    : 'Mão de obra da obra por contrato e especialidade'}
+              </p>
+            </div>
           </div>
 
+          {showMedicaoPage && medicaoTargetItem ? (
+            <Card className={cadastroListClasses.card}>
+              <CardHeader className={cadastroListClasses.cardHeader}>
+                <div className={cadastroListClasses.cardHeaderRow}>
+                  <div className={cadastroListClasses.cardHeaderIconRow}>
+                    <div className="rounded-lg bg-red-100 p-2 sm:p-3 dark:bg-red-900/30">
+                      <ClipboardList className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6" />
+                    </div>
+                    <div className="min-w-0">
+                      <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                        Medição diária
+                      </h3>
+                      <p className="text-sm text-gray-600 dark:text-gray-400">
+                        {medicaoTargetItem.name}
+                        {medicaoTargetItem.contratoNome
+                          ? ` · ${medicaoTargetItem.contratoNome}`
+                          : ''}
+                      </p>
+                    </div>
+                  </div>
+                  {!isOwnEmpreiteiroAccount && items.length > 1 ? (
+                    <div className="w-full min-w-0 sm:max-w-xs">
+                      <StringSingleSelectDropdown
+                        value={medicaoTargetItem.id}
+                        onChange={(value) => setMedicaoEmpreitaId(value)}
+                        options={labeledToSelectOptions(
+                          items.map((row) => ({
+                            value: row.id,
+                            label: row.contratoNome
+                              ? `${row.name} · ${row.contratoNome}`
+                              : row.name,
+                          }))
+                        )}
+                        placeholder="Selecionar empreita"
+                        matchTriggerWidth
+                      />
+                    </div>
+                  ) : null}
+                </div>
+              </CardHeader>
+              <CardContent className={cadastroListClasses.cardContent}>
+                <EmpreiteiroDailyMeasurements
+                  empreiteiroId={medicaoTargetItem.id}
+                  team={medicaoTargetItem.team || []}
+                  canEdit={
+                    isOwnEmpreiteiroAccount
+                      ? canEditDaily
+                      : canManageCadastro || canEditDaily
+                  }
+                  onPreviewPhoto={openPreviewPhoto}
+                />
+              </CardContent>
+            </Card>
+          ) : (
           <Card className={cadastroListClasses.card}>
             <CardHeader className={cadastroListClasses.cardHeader}>
               <div className={cadastroListClasses.cardHeaderRow}>
@@ -663,7 +892,7 @@ export default function EmpreiteirosPage() {
                   </div>
                   <div className="min-w-0">
                     <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                      Empreiteiros
+                      Empreitas
                     </h3>
                     <p className="text-sm text-gray-600 dark:text-gray-400">
                       {items.length} cadastrado(s)
@@ -671,6 +900,7 @@ export default function EmpreiteirosPage() {
                   </div>
                 </div>
                 <div className={cadastroListClasses.cardToolbar}>
+                  {isLinkedEmpreiteiro ? null : (
                   <div className="relative min-w-0 w-full flex-1 basis-full sm:basis-auto sm:min-w-[240px] sm:w-[280px] sm:flex-none">
                     <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
                     <input
@@ -691,33 +921,23 @@ export default function EmpreiteirosPage() {
                       </button>
                     ) : null}
                   </div>
-                  {canCreate ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        resetForm();
-                        setShowForm(true);
-                      }}
-                      className="flex h-10 items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
-                    >
-                      <Plus className="h-4 w-4 shrink-0" />
-                      <span>Novo empreiteiro</span>
-                    </button>
-                  ) : null}
+                  )}
                 </div>
               </div>
             </CardHeader>
             <CardContent className={cadastroListClasses.cardContent}>
               {isLoading ? (
-                <CadastroListLoading message="Carregando empreiteiros..." />
+                <CadastroListLoading message="Carregando empreitas..." />
               ) : items.length === 0 ? (
                 <CadastroListEmpty
                   icon={HardHat}
-                  title="Nenhum empreiteiro encontrado"
+                  title="Nenhuma empreita encontrada"
                   hint={
-                    searchTerm.trim()
-                      ? 'Tente ajustar a busca'
-                      : 'Cadastre um novo empreiteiro para começar'
+                    isLinkedEmpreiteiro
+                      ? 'Seu cadastro de empreita não está disponível. Fale com a Gennesis.'
+                      : searchTerm.trim()
+                        ? 'Tente ajustar a busca'
+                        : 'Cadastre pelo menu Funcionários e Externos'
                   }
                 />
               ) : (
@@ -726,8 +946,8 @@ export default function EmpreiteirosPage() {
                     startItem={1}
                     endItem={items.length}
                     total={items.length}
-                    itemLabel="empreiteiro"
-                    itemLabelPlural="empreiteiros"
+                    itemLabel="empreita"
+                    itemLabelPlural="empreitas"
                   />
                   <div className="table-scroll">
                     <table className={cadastroListClasses.table}>
@@ -785,7 +1005,7 @@ export default function EmpreiteirosPage() {
                                     {it.name}
                                   </ListRowNavigableLabel>
                                   <p className="text-xs text-gray-500 dark:text-gray-400">
-                                    {formatDocumentDisplay(it.documentKind, it.document)}
+                                    {formatEmpreiteiroDocs(it)}
                                   </p>
                                 </div>
                               </div>
@@ -842,12 +1062,36 @@ export default function EmpreiteirosPage() {
                 <RowActionMenuPortal
                   menu={rowActionMenu}
                   onClose={closeRowActionMenu}
-                  onEdit={canEdit ? () => handleEdit(rowForActionMenu) : undefined}
+                  onEdit={canManageCadastro ? () => handleEdit(rowForActionMenu) : undefined}
                   onDelete={canDelete ? () => setShowDeleteId(rowForActionMenu.id) : undefined}
+                  extraItems={[
+                    {
+                      label: 'Medição diária',
+                      icon: (
+                        <ClipboardList className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
+                      ),
+                      onClick: () => openMedicaoPage(rowForActionMenu),
+                    },
+                    ...((canManageCadastro || canDelete) &&
+                    rowForActionMenu.userId &&
+                    rowForActionMenu.isActive
+                      ? [
+                          {
+                            label: 'Encerrar e desvincular',
+                            tone: 'danger' as const,
+                            icon: (
+                              <Link2Off className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                            ),
+                            onClick: () => setShowUnlinkId(rowForActionMenu.id),
+                          },
+                        ]
+                      : []),
+                  ]}
                 />
               ) : null}
             </CardContent>
           </Card>
+          )}
         </div>
 
         {showForm ? (
@@ -856,7 +1100,7 @@ export default function EmpreiteirosPage() {
             <div className="relative max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-lg bg-white shadow-xl dark:bg-gray-800">
               <div className="sticky top-0 z-10 flex items-center justify-between border-b border-gray-200 bg-white p-6 dark:border-gray-700 dark:bg-gray-800">
                 <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                  {editingItem ? 'Editar empreiteiro' : 'Novo empreiteiro'}
+                  {editingItem ? 'Editar empreita' : 'Nova empreita'}
                 </h2>
                 <button
                   type="button"
@@ -901,45 +1145,24 @@ export default function EmpreiteirosPage() {
                     />
                   </div>
                   <div>
-                    <label className={labelClass}>Tipo de documento *</label>
-                    <div className="flex h-[42px] items-center gap-4">
-                      {(['CPF', 'CNPJ'] as DocumentKind[]).map((kind) => (
-                        <label key={kind} className="flex cursor-pointer items-center gap-2 text-sm text-gray-800 dark:text-gray-200">
-                          <input
-                            type="radio"
-                            name="documentKind"
-                            checked={form.documentKind === kind}
-                            onChange={() =>
-                              patchForm({
-                                documentKind: kind,
-                                document: '',
-                              })
-                            }
-                          />
-                          {kind}
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                  <div>
-                    <label className={labelClass}>
-                      {form.documentKind === 'CNPJ' ? 'CNPJ *' : 'CPF *'}
-                    </label>
+                    <label className={labelClass}>CPF *</label>
                     <input
                       type="text"
                       required
-                      value={form.document}
-                      onChange={(e) =>
-                        patchForm({
-                          document:
-                            form.documentKind === 'CNPJ'
-                              ? maskCnpjInput(e.target.value)
-                              : formatCpfInput(e.target.value),
-                        })
-                      }
-                      placeholder={
-                        form.documentKind === 'CNPJ' ? '00.000.000/0001-00' : '000.000.000-00'
-                      }
+                      value={form.cpf}
+                      onChange={(e) => patchForm({ cpf: formatCpfInput(e.target.value) })}
+                      placeholder="000.000.000-00"
+                      className={inputClass}
+                    />
+                  </div>
+                  <div>
+                    <label className={labelClass}>CNPJ *</label>
+                    <input
+                      type="text"
+                      required
+                      value={form.cnpj}
+                      onChange={(e) => patchForm({ cnpj: maskCnpjInput(e.target.value) })}
+                      placeholder="00.000.000/0001-00"
                       className={inputClass}
                     />
                   </div>
@@ -1103,18 +1326,18 @@ export default function EmpreiteirosPage() {
                     </label>
                   </div>
                   <div className="sm:col-span-2">
-                    <label className={labelClass}>Foto do empreiteiro</label>
+                    <label className={labelClass}>Foto da empreita</label>
                     <VehicleReturnPhotoField
                       value={form.photo}
                       onChange={(value) => patchForm({ photo: value })}
-                      emptyLabel="Adicionar foto do empreiteiro"
-                      photoAlt="Foto do empreiteiro"
+                      emptyLabel="Adicionar foto da empreita"
+                      photoAlt="Foto da empreita"
                     />
                   </div>
                   <div className="sm:col-span-2">
                     <label className={labelClass}>Notas / comprovantes de pagamento</label>
                     <p className="mb-2 text-xs text-gray-500 dark:text-gray-400">
-                      Recibos e notas do que já foi pago a este empreiteiro
+                      Recibos e notas do que já foi pago a esta empreita
                     </p>
                     <input
                       type="file"
@@ -1171,7 +1394,7 @@ export default function EmpreiteirosPage() {
                       <div>
                         <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Equipe</p>
                         <p className="text-xs text-gray-500 dark:text-gray-400">
-                          Pessoas da turma deste empreiteiro no mesmo contrato
+                          Pessoas da turma desta empreita no mesmo contrato
                         </p>
                       </div>
                       <button
@@ -1357,8 +1580,20 @@ export default function EmpreiteirosPage() {
                   <DetailField label="Contrato" value={viewingItem.contratoNome} />
                   <DetailField label="Especialidade" value={viewingItem.specialty} />
                   <DetailField
-                    label="Documento"
-                    value={formatDocumentDisplay(viewingItem.documentKind, viewingItem.document)}
+                    label="CPF"
+                    value={
+                      empreiteiroCpfDigits(viewingItem)
+                        ? formatCpfInput(empreiteiroCpfDigits(viewingItem))
+                        : undefined
+                    }
+                  />
+                  <DetailField
+                    label="CNPJ"
+                    value={
+                      empreiteiroCnpjDigits(viewingItem)
+                        ? maskCnpjInput(empreiteiroCnpjDigits(viewingItem))
+                        : undefined
+                    }
                   />
                   <DetailField label="Telefone" value={formatPhoneDisplay(viewingItem.phone)} />
                   <DetailField label="Responsável" value={viewingItem.contactName} />
@@ -1382,14 +1617,14 @@ export default function EmpreiteirosPage() {
                     Notas / comprovantes de pagamento
                   </p>
                   <p className="mb-2 text-xs text-gray-500 dark:text-gray-400">
-                    Recibos e notas do que já foi pago a este empreiteiro
+                    Recibos e notas do que já foi pago a esta empreita
                   </p>
                   <input
                     type="file"
                     accept="image/*,.pdf,.doc,.docx,application/pdf"
                     className="hidden"
                     id="empreiteiro-view-payment-file"
-                    disabled={uploadingFile || !canEdit}
+                    disabled={uploadingFile || !canManageCadastro}
                     onChange={(e) => {
                       const file = e.target.files?.[0];
                       e.target.value = '';
@@ -1424,7 +1659,7 @@ export default function EmpreiteirosPage() {
                               {file.name || 'arquivo'}
                             </a>
                           )}
-                          {canEdit ? (
+                          {canManageCadastro ? (
                             <button
                               type="button"
                               onClick={() => void removeViewingFile(fileIndex)}
@@ -1437,7 +1672,7 @@ export default function EmpreiteirosPage() {
                         </div>
                       );
                     })}
-                    {canEdit ? (
+                    {canManageCadastro ? (
                       <button
                         type="button"
                         disabled={uploadingFile}
@@ -1458,8 +1693,122 @@ export default function EmpreiteirosPage() {
                 </div>
 
                 <div>
-                  <p className="mb-2 text-sm font-medium text-gray-900 dark:text-gray-100">Equipe</p>
-                  {(viewingItem.team || []).length === 0 ? (
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Equipe</p>
+                      {isOwnEmpreiteiroAccount ? (
+                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                          Adicione as pessoas da sua turma neste contrato
+                        </p>
+                      ) : null}
+                    </div>
+                    {isOwnEmpreiteiroAccount ? (
+                      <button
+                        type="button"
+                        onClick={() => setOwnTeamDraft((prev) => [...prev, emptyTeamMember()])}
+                        className="inline-flex h-9 items-center gap-1 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                      >
+                        <Plus className="h-4 w-4" />
+                        Adicionar pessoa
+                      </button>
+                    ) : null}
+                  </div>
+                  {isOwnEmpreiteiroAccount ? (
+                    <div className="space-y-3">
+                      {ownTeamDraft.length === 0 ? (
+                        <p className="rounded-lg border border-dashed border-gray-300 px-3 py-4 text-sm text-gray-500 dark:border-gray-600 dark:text-gray-400">
+                          Nenhuma pessoa na equipe ainda.
+                        </p>
+                      ) : (
+                        ownTeamDraft.map((member, index) => (
+                          <div
+                            key={`own-team-${index}`}
+                            className="space-y-3 rounded-lg border border-gray-200 p-3 dark:border-gray-700"
+                          >
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                                Pessoa {index + 1}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setOwnTeamDraft((prev) => prev.filter((_, i) => i !== index))
+                                }
+                                className="rounded-md p-1 text-gray-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400"
+                                aria-label={`Remover pessoa ${index + 1}`}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </div>
+                            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                              <div>
+                                <label className={labelClass}>Nome *</label>
+                                <input
+                                  type="text"
+                                  value={member.name}
+                                  onChange={(e) => patchOwnTeamMember(index, { name: e.target.value })}
+                                  placeholder="Nome completo"
+                                  className={inputClass}
+                                />
+                              </div>
+                              <div>
+                                <label className={labelClass}>Função *</label>
+                                <StringSingleSelectDropdown
+                                  value={member.role}
+                                  onChange={(value) => patchOwnTeamMember(index, { role: value })}
+                                  options={teamRoleSelectOptions}
+                                  placeholder="Selecione a função"
+                                  emptyOptionLabel="Selecione a função"
+                                  matchTriggerWidth
+                                />
+                              </div>
+                              <div>
+                                <label className={labelClass}>Telefone</label>
+                                <input
+                                  type="text"
+                                  value={member.phone}
+                                  onChange={(e) =>
+                                    patchOwnTeamMember(index, { phone: maskPhoneInput(e.target.value) })
+                                  }
+                                  placeholder="(00) 90000-0000"
+                                  className={inputClass}
+                                />
+                              </div>
+                              <div>
+                                <label className={labelClass}>CPF</label>
+                                <input
+                                  type="text"
+                                  value={member.document}
+                                  onChange={(e) =>
+                                    patchOwnTeamMember(index, { document: formatCpfInput(e.target.value) })
+                                  }
+                                  placeholder="000.000.000-00"
+                                  className={inputClass}
+                                />
+                              </div>
+                              <div className="sm:col-span-2">
+                                <label className={labelClass}>Foto</label>
+                                <VehicleReturnPhotoField
+                                  value={member.photo}
+                                  onChange={(value) => patchOwnTeamMember(index, { photo: value })}
+                                  emptyLabel="Adicionar foto"
+                                  photoAlt={`Foto de ${member.name || `pessoa ${index + 1}`}`}
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                      <button
+                        type="button"
+                        disabled={savingSelf}
+                        onClick={() => void saveOwnTeam()}
+                        className="inline-flex h-10 w-full items-center justify-center rounded-lg bg-red-600 px-4 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+                      >
+                        {savingSelf ? 'Salvando...' : 'Salvar equipe'}
+                      </button>
+                    </div>
+                  ) : (viewingItem.team || []).length === 0 ? (
                     <p className="rounded-lg border border-dashed border-gray-300 px-3 py-4 text-sm text-gray-500 dark:border-gray-600 dark:text-gray-400">
                       Nenhuma pessoa na equipe.
                     </p>
@@ -1518,7 +1867,7 @@ export default function EmpreiteirosPage() {
                 >
                   Fechar
                 </button>
-                {canEdit ? (
+                {canManageCadastro ? (
                   <button
                     type="button"
                     onClick={() => handleEdit(viewingItem)}
@@ -1562,15 +1911,50 @@ export default function EmpreiteirosPage() {
             )
           : null}
 
+        {showUnlinkId ? (
+          <AppModalOverlay className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/50" onClick={() => setShowUnlinkId(null)} />
+            <div className="relative mx-4 w-full max-w-md rounded-lg bg-white p-6 shadow-xl dark:bg-gray-800">
+              <h3 className="mb-2 text-lg font-semibold text-gray-900 dark:text-gray-100">
+                Encerrar e desvincular?
+              </h3>
+              <p className="mb-4 text-sm text-gray-600 dark:text-gray-400">
+                A empreita fica inativa e o login continua no sistema, sem cadastro de empreita.
+                Depois você religa em Funcionários e Externos → Recriar e vincular cadastro de
+                empreita.
+              </p>
+              <div className="flex justify-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowUnlinkId(null)}
+                  disabled={unlinkMutation.isPending}
+                  className="rounded-lg bg-gray-100 px-4 py-2 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => unlinkMutation.mutate(showUnlinkId)}
+                  disabled={unlinkMutation.isPending}
+                  className="rounded-lg bg-amber-600 px-4 py-2 text-white hover:bg-amber-700 disabled:opacity-50"
+                >
+                  {unlinkMutation.isPending ? 'Encerrando...' : 'Encerrar'}
+                </button>
+              </div>
+            </div>
+          </AppModalOverlay>
+        ) : null}
+
         {showDeleteId ? (
           <AppModalOverlay className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-black/50" onClick={() => setShowDeleteId(null)} />
             <div className="relative mx-4 w-full max-w-md rounded-lg bg-white p-6 shadow-xl dark:bg-gray-800">
               <h3 className="mb-2 text-lg font-semibold text-gray-900 dark:text-gray-100">
-                Excluir registro?
+                Excluir cadastro da empreita?
               </h3>
               <p className="mb-4 text-sm text-gray-600 dark:text-gray-400">
-                Esta ação não pode ser desfeita.
+                Apaga o cadastro, equipe e medições desta empreita. O login do usuário continua
+                ativo para vincular a outra empreita depois.
               </p>
               <div className="flex justify-center gap-3">
                 <button

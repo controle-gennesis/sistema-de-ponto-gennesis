@@ -25,6 +25,8 @@ import {
   Clock,
   LayoutList,
   Undo2,
+  Trash2,
+  Replace,
 } from 'lucide-react';
 import { FinancialControlEntryModal } from '@/components/financeiro/FinancialControlEntryModal';
 import { buildFormFromPurchaseOrder, hasFinancialEntryForOcInstallment } from '@/components/financeiro/financialControlEntry';
@@ -969,6 +971,9 @@ type OcDocumentEntry = {
   url?: string;
   fileName?: string;
   pending?: boolean;
+  /** Metadados para admin remover/substituir na aba Documentos. */
+  adminKind?: 'nf' | 'boleto' | 'comprovante' | 'demand-sheet';
+  adminIndex?: number;
 };
 
 function collectOcDocumentEntries(
@@ -1020,7 +1025,9 @@ function collectOcDocumentEntries(
           (parcelCount > 1
             ? row?.boletoName?.trim()
             : effectivePaymentBoletoName(order) || row?.boletoName?.trim()) ||
-          `Boleto parcela ${parcelLabel}`
+          `Boleto parcela ${parcelLabel}`,
+        adminKind: 'boleto',
+        adminIndex: index,
       });
       const proofUrl =
         parcelCount > 1
@@ -1038,7 +1045,9 @@ function collectOcDocumentEntries(
           (parcelCount > 1
             ? row?.installmentProofName?.trim()
             : order.paymentProofName?.trim() || row?.installmentProofName?.trim()) ||
-          `Comprovante parcela ${parcelLabel}`
+          `Comprovante parcela ${parcelLabel}`,
+        adminKind: 'comprovante',
+        adminIndex: index,
       });
     }
   } else {
@@ -1046,7 +1055,9 @@ function collectOcDocumentEntries(
       id: 'comprovante',
       label: 'Comprovante de pagamento',
       url: (order.paymentProofUrl || '').trim() || undefined,
-      fileName: order.paymentProofName?.trim() || 'Comprovante pagamento'
+      fileName: order.paymentProofName?.trim() || 'Comprovante pagamento',
+      adminKind: 'comprovante',
+      adminIndex: 0,
     });
     stockAttachments.paymentSlips.forEach((slip, index) => {
       if (!slip.url) return;
@@ -1069,7 +1080,9 @@ function collectOcDocumentEntries(
         label: nf.number ? `Nota Fiscal ${nf.number}` : `Nota Fiscal ${index + 1}`,
         subtitle: nf.uploadedAt ? new Date(nf.uploadedAt).toLocaleString('pt-BR') : undefined,
         url: nf.url,
-        fileName: nf.name || `NF ${index + 1}`
+        fileName: nf.name || `NF ${index + 1}`,
+        adminKind: 'nf',
+        adminIndex: index,
       });
     });
   } else if (stockAttachments.nf?.url) {
@@ -1233,7 +1246,10 @@ function OcDetailDocumentItem({
   onView,
   onDownload,
   viewPending = false,
-  downloadPending = false
+  downloadPending = false,
+  onRemove,
+  onReplace,
+  adminBusy = false,
 }: {
   label: string;
   subtitle?: string;
@@ -1244,7 +1260,11 @@ function OcDetailDocumentItem({
   onDownload?: () => void | Promise<void>;
   viewPending?: boolean;
   downloadPending?: boolean;
+  onRemove?: () => void;
+  onReplace?: (file: File) => void;
+  adminBusy?: boolean;
 }) {
+  const replaceInputRef = useRef<HTMLInputElement | null>(null);
   const actionBtnCls =
     'inline-flex items-center justify-center rounded-md p-1.5 text-red-600 transition-colors hover:bg-red-50 hover:text-red-700 disabled:opacity-50 dark:text-red-400 dark:hover:bg-red-950/40 dark:hover:text-red-300';
   const isPending = pending || (!url && !onView && !onDownload);
@@ -1261,11 +1281,77 @@ function OcDetailDocumentItem({
       </div>
       <div className="flex items-center gap-1.5 shrink-0">
         {isPending ? (
-          <span className="inline-flex px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300">
-            Pendente
-          </span>
+          <>
+            <span className="inline-flex px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300">
+              Pendente
+            </span>
+            {onReplace ? (
+              <>
+                <input
+                  ref={replaceInputRef}
+                  type="file"
+                  accept=".pdf,image/*,.doc,.docx,.xls,.xlsx"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    e.target.value = '';
+                    if (file) onReplace(file);
+                  }}
+                />
+                <button
+                  type="button"
+                  disabled={adminBusy}
+                  onClick={() => replaceInputRef.current?.click()}
+                  title="Anexar / substituir"
+                  aria-label={`Anexar ${label}`}
+                  className={actionBtnCls}
+                >
+                  <Replace className="h-5 w-5 shrink-0" />
+                </button>
+              </>
+            ) : null}
+          </>
         ) : url ? (
-          <OcAttachmentActions url={url} fileName={fileName || label} variant="buttons" />
+          <>
+            <OcAttachmentActions url={url} fileName={fileName || label} variant="buttons" />
+            {onReplace ? (
+              <>
+                <input
+                  ref={replaceInputRef}
+                  type="file"
+                  accept=".pdf,image/*,.doc,.docx,.xls,.xlsx"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    e.target.value = '';
+                    if (file) onReplace(file);
+                  }}
+                />
+                <button
+                  type="button"
+                  disabled={adminBusy}
+                  onClick={() => replaceInputRef.current?.click()}
+                  title="Substituir"
+                  aria-label={`Substituir ${label}`}
+                  className={actionBtnCls}
+                >
+                  <Replace className="h-5 w-5 shrink-0" />
+                </button>
+              </>
+            ) : null}
+            {onRemove ? (
+              <button
+                type="button"
+                disabled={adminBusy}
+                onClick={onRemove}
+                title="Remover"
+                aria-label={`Remover ${label}`}
+                className={actionBtnCls}
+              >
+                <Trash2 className="h-5 w-5 shrink-0" />
+              </button>
+            ) : null}
+          </>
         ) : (
           <>
             {onView ? (
@@ -3557,6 +3643,101 @@ export function OcPurchaseOrdersPanel({
     },
     onError: (error: { response?: { data?: { message?: string } }; message?: string }) =>
       toast.error(error.response?.data?.message || error.message || 'Erro ao remover NF')
+  });
+
+  const adminDocumentMutation = useMutation({
+    mutationFn: async (payload: {
+      id: string;
+      kind: 'nf' | 'boleto' | 'comprovante' | 'demand-sheet';
+      action: 'remove' | 'replace';
+      index?: number;
+      installmentIndex?: number;
+      file?: File;
+      nfNumber?: string;
+      materialRequestId?: string;
+      demandAttachments?: Array<{ url: string; name: string }>;
+    }) => {
+      if (payload.kind === 'demand-sheet') {
+        if (!payload.materialRequestId) throw new Error('RM não encontrada');
+        let attachments = [...(payload.demandAttachments || [])];
+        if (payload.action === 'replace') {
+          if (!payload.file) throw new Error('Selecione um arquivo');
+          const fd = new FormData();
+          fd.append('file', payload.file);
+          const up = await api.post('/material-requests/upload-item-attachment', fd);
+          const uploadedUrl = String(up.data?.data?.url || '').trim();
+          const uploadedName = String(
+            up.data?.data?.originalName || up.data?.data?.name || payload.file.name || 'Arquivo'
+          ).trim();
+          if (!uploadedUrl) throw new Error('Falha no upload do arquivo');
+          const uploaded = { url: uploadedUrl, name: uploadedName || 'Arquivo anexado' };
+          const idx = payload.index;
+          if (idx == null || idx < 0 || idx >= attachments.length) {
+            attachments = [...attachments, uploaded];
+          } else {
+            attachments = attachments.map((item, i) => (i === idx ? uploaded : item));
+          }
+        }
+        const res = await api.patch(
+          `/material-requests/${payload.materialRequestId}/admin/demand-sheet-attachments`,
+          { attachments }
+        );
+        return { kind: 'demand-sheet' as const, data: res.data?.data };
+      }
+
+      let url: string | undefined;
+      let name: string | undefined;
+      if (payload.action === 'replace') {
+        if (!payload.file) throw new Error('Selecione um arquivo');
+        const fd = new FormData();
+        fd.append('file', payload.file);
+        const up = await api.post('/purchase-orders/upload-attachment', fd, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
+        url = String(up.data?.data?.url || '').trim();
+        name = String(
+          up.data?.data?.originalName || payload.file.name || 'Arquivo'
+        ).trim();
+        if (!url) throw new Error('Falha no upload do arquivo');
+      }
+
+      const res = await api.patch(`/purchase-orders/${payload.id}/admin/documents`, {
+        kind: payload.kind,
+        action: payload.action,
+        index: payload.index,
+        installmentIndex: payload.installmentIndex,
+        url,
+        name,
+        nfNumber: payload.nfNumber,
+      });
+      return { kind: payload.kind, data: res.data?.data as PurchaseOrder | undefined };
+    },
+    onSuccess: (resp) => {
+      invalidateOcAndLinkedRmQueries(queryClient);
+      if (resp.kind === 'demand-sheet') {
+        const rm = resp.data as PurchaseOrder['materialRequest'] | undefined;
+        if (rm && selectedOrder?.id) {
+          applyOcLocalPatch(queryClient, setSelectedOrder, selectedOrder.id, {
+            materialRequest: {
+              ...(selectedOrder.materialRequest || { requestNumber: '' }),
+              ...rm,
+            },
+          });
+        }
+      } else if (resp.data?.id) {
+        applyOcLocalPatch(queryClient, setSelectedOrder, resp.data.id, {
+          nfAttachments: resp.data.nfAttachments,
+          paymentBoletoUrl: resp.data.paymentBoletoUrl,
+          paymentBoletoName: resp.data.paymentBoletoName,
+          paymentBoletoInstallments: resp.data.paymentBoletoInstallments,
+          paymentProofUrl: resp.data.paymentProofUrl,
+          paymentProofName: resp.data.paymentProofName,
+        });
+      }
+      toast.success('Documento atualizado');
+    },
+    onError: (error: { response?: { data?: { message?: string } }; message?: string }) =>
+      toast.error(error.response?.data?.message || error.message || 'Erro ao atualizar documento'),
   });
 
   const completeOcToFinalizedMutation = useMutation({
@@ -6461,6 +6642,71 @@ export function OcPurchaseOrdersPanel({
                 const demandSheetFiles = parseRmDemandSheetAttachments(selectedOrder.materialRequest);
                 const blockCls =
                   'rounded-xl border border-gray-200 p-4 dark:border-gray-700 space-y-0';
+                const canAdminDocs = isAdministrator;
+                const adminBusy = adminDocumentMutation.isPending;
+                const rmId =
+                  selectedOrder.materialRequestId || selectedOrder.materialRequest?.id || '';
+
+                const adminHandlersForDoc = (doc: OcDocumentEntry) => {
+                  if (!canAdminDocs || !doc.adminKind || doc.adminKind === 'demand-sheet') {
+                    return { onRemove: undefined, onReplace: undefined };
+                  }
+                  const kind = doc.adminKind;
+                  const onRemove =
+                    doc.url
+                      ? () => {
+                          if (!window.confirm(`Remover ${doc.label}?`)) return;
+                          if (kind === 'nf') {
+                            adminDocumentMutation.mutate({
+                              id: selectedOrder.id,
+                              kind: 'nf',
+                              action: 'remove',
+                              index: doc.adminIndex ?? 0,
+                            });
+                          } else {
+                            adminDocumentMutation.mutate({
+                              id: selectedOrder.id,
+                              kind,
+                              action: 'remove',
+                              installmentIndex: doc.adminIndex ?? 0,
+                            });
+                          }
+                        }
+                      : undefined;
+                  const onReplace = (file: File) => {
+                    if (kind === 'nf') {
+                      if (!doc.url) {
+                        toast.error(
+                          'Para anexar a primeira NF, use o fluxo da fase Estoque (número obrigatório).'
+                        );
+                        return;
+                      }
+                      const nfs = parseOcNfAttachments(selectedOrder.nfAttachments);
+                      const nf = nfs[doc.adminIndex ?? 0];
+                      if (!nf?.number?.trim()) {
+                        toast.error('Número da nota fiscal não encontrado neste anexo.');
+                        return;
+                      }
+                      adminDocumentMutation.mutate({
+                        id: selectedOrder.id,
+                        kind: 'nf',
+                        action: 'replace',
+                        index: doc.adminIndex ?? 0,
+                        file,
+                        nfNumber: nf.number,
+                      });
+                      return;
+                    }
+                    adminDocumentMutation.mutate({
+                      id: selectedOrder.id,
+                      kind,
+                      action: 'replace',
+                      installmentIndex: doc.adminIndex ?? 0,
+                      file,
+                    });
+                  };
+                  return { onRemove, onReplace };
+                };
 
                 return (
                   <div id="oc-quote-map" className="scroll-mt-4 space-y-4">
@@ -6471,6 +6717,21 @@ export function OcPurchaseOrdersPanel({
                             label="Arquivo"
                             subtitle="Não anexado na RM"
                             pending
+                            adminBusy={adminBusy}
+                            onReplace={
+                              canAdminDocs && rmId
+                                ? (file) => {
+                                    adminDocumentMutation.mutate({
+                                      id: selectedOrder.id,
+                                      kind: 'demand-sheet',
+                                      action: 'replace',
+                                      materialRequestId: rmId,
+                                      demandAttachments: [],
+                                      file,
+                                    });
+                                  }
+                                : undefined
+                            }
                           />
                         ) : (
                           demandSheetFiles.map((file, index) => (
@@ -6482,6 +6743,40 @@ export function OcPurchaseOrdersPanel({
                               subtitle={file.name}
                               url={file.url}
                               fileName={file.name}
+                              adminBusy={adminBusy}
+                              onReplace={
+                                canAdminDocs && rmId
+                                  ? (nextFile) => {
+                                      adminDocumentMutation.mutate({
+                                        id: selectedOrder.id,
+                                        kind: 'demand-sheet',
+                                        action: 'replace',
+                                        index,
+                                        materialRequestId: rmId,
+                                        demandAttachments: demandSheetFiles,
+                                        file: nextFile,
+                                      });
+                                    }
+                                  : undefined
+                              }
+                              onRemove={
+                                canAdminDocs && rmId
+                                  ? () => {
+                                      if (!window.confirm('Remover este anexo da ficha de demanda?')) {
+                                        return;
+                                      }
+                                      adminDocumentMutation.mutate({
+                                        id: selectedOrder.id,
+                                        kind: 'demand-sheet',
+                                        action: 'remove',
+                                        materialRequestId: rmId,
+                                        demandAttachments: demandSheetFiles.filter(
+                                          (_, i) => i !== index
+                                        ),
+                                      });
+                                    }
+                                  : undefined
+                              }
                             />
                           ))
                         )}
@@ -6550,16 +6845,22 @@ export function OcPurchaseOrdersPanel({
                     {documentBlocks.map((block) => (
                       <OcDetailSection key={block.id} title={block.title} className={blockCls}>
                         <div className="divide-y divide-gray-200 dark:divide-gray-700">
-                          {block.items.map((doc) => (
-                            <OcDetailDocumentItem
-                              key={doc.id}
-                              label={doc.label}
-                              subtitle={doc.subtitle}
-                              url={doc.url}
-                              fileName={doc.fileName}
-                              pending={doc.pending}
-                            />
-                          ))}
+                          {block.items.map((doc) => {
+                            const admin = adminHandlersForDoc(doc);
+                            return (
+                              <OcDetailDocumentItem
+                                key={doc.id}
+                                label={doc.label}
+                                subtitle={doc.subtitle}
+                                url={doc.url}
+                                fileName={doc.fileName}
+                                pending={doc.pending}
+                                adminBusy={adminBusy}
+                                onRemove={admin.onRemove}
+                                onReplace={admin.onReplace}
+                              />
+                            );
+                          })}
                         </div>
                       </OcDetailSection>
                     ))}

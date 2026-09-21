@@ -16,6 +16,7 @@ import { PunchCard } from '@/components/ponto/PunchCard';
 import api from '@/lib/api';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
+import { postLoginPath } from '@/lib/postLoginPath';
 
 const DAY_SELECT_OPTIONS = labeledToSelectOptions(
   Array.from({ length: 31 }, (_, i) => {
@@ -105,9 +106,14 @@ export default function PontoPage() {
     };
   }, []);
 
-  // Verificar se o funcionário precisa bater ponto (após carregar dados do usuário)
-  // Só calcular se userData estiver disponível para evitar erros
-  const requiresTimeClock = userData?.data?.employee?.requiresTimeClock !== false;
+  const isLinkedEmpreiteiro = Boolean(userData?.data?.empreiteiro?.id);
+  const requiresTimeClock =
+    !isLinkedEmpreiteiro && userData?.data?.employee?.requiresTimeClock !== false;
+
+  useEffect(() => {
+    if (loadingUser || !isLinkedEmpreiteiro) return;
+    router.replace(postLoginPath(userData?.data));
+  }, [loadingUser, isLinkedEmpreiteiro, router, userData?.data]);
 
   const { data: todayRecords, isLoading: loadingToday, error: todayRecordsError } = useQuery({
     queryKey: ['today-records'],
@@ -344,6 +350,16 @@ export default function PontoPage() {
   }
 
   const user = userData.data;
+
+  if (isLinkedEmpreiteiro) {
+    return (
+      <Loading
+        message="Redirecionando..."
+        fullScreen
+        size="lg"
+      />
+    );
+  }
 
   // Se houver erro nas queries, mostrar mensagem de erro mas não quebrar a página
   const todayRecordsErrorStatus = (todayRecordsError as any)?.response?.status;

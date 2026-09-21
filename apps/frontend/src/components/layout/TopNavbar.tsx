@@ -134,7 +134,7 @@ export function TopNavbar({
 }: TopNavbarProps) {
   const queryClient = useQueryClient();
   const pathname = usePathname();
-  const { user, userDepartment, userPosition, canAccessCollaborationTools } = usePermissions();
+  const { user, userDepartment, userPosition, canAccessCollaborationTools, isLinkedEmpreiteiro } = usePermissions();
   const { isDark, toggleTheme } = useTheme();
   const { breadcrumbEntities } = usePageTitleOverride();
   const searchInputRef = useRef<HTMLInputElement | null>(null);
@@ -324,7 +324,7 @@ export function TopNavbar({
 
         {/* Busca + ações + perfil */}
         <div className="flex shrink-0 items-center gap-1.5 sm:gap-3">
-          <NavSearch inputRef={searchInputRef} />
+          {isLinkedEmpreiteiro ? null : <NavSearch inputRef={searchInputRef} />}
 
           <NotificationsDropdown chatUnreadCount={chatUnreadCount} />
 

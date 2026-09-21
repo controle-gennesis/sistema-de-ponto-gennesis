@@ -87,6 +87,7 @@ const userMeSelect = {
   createdAt: true,
   updatedAt: true,
   employee: true,
+  empreiteiro: { select: { id: true } },
 } as const;
 
 type SignSessionUser = {

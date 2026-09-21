@@ -68,8 +68,21 @@ router.post(
 );
 
 router.get('/', (req, res, next) => controller.getAll(req as any, res as any, next));
+router.get('/:id/daily-measurements', (req, res, next) =>
+  controller.listDailyMeasurements(req as any, res as any, next)
+);
+router.post('/:id/daily-measurements', (req, res, next) =>
+  controller.createDailyMeasurement(req as any, res as any, next)
+);
+router.patch('/:id/daily-measurements/:measurementId', (req, res, next) =>
+  controller.updateDailyMeasurement(req as any, res as any, next)
+);
+router.delete('/:id/daily-measurements/:measurementId', (req, res, next) =>
+  controller.deleteDailyMeasurement(req as any, res as any, next)
+);
 router.get('/:id', (req, res, next) => controller.getById(req as any, res as any, next));
 router.post('/', (req, res, next) => controller.create(req as any, res as any, next));
+router.post('/:id/unlink', (req, res, next) => controller.unlink(req as any, res as any, next));
 router.patch('/:id', (req, res, next) => controller.update(req as any, res as any, next));
 router.delete('/:id', (req, res, next) => controller.delete(req as any, res as any, next));
 

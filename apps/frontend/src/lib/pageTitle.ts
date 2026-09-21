@@ -97,6 +97,7 @@ function decodePathSegment(segment: string): string {
 /** Rótulo do breadcrumb — Aprovadores Fluig não exibe o sufixo interno «(legado)». */
 function breadcrumbModuleLabel(module: { name: string; href: string }): string {
   if (module.href === '/ponto/fluig/aprovadores') return 'Aprovadores';
+  if (module.href === '/ponto/empreiteiros') return 'Empreitas';
   return module.name;
 }
 

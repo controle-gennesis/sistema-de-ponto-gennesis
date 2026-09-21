@@ -35,6 +35,7 @@ import { PageEnter } from './PageEnter';
 import { bootAuthenticatedPageReveal } from '@/lib/pageReveal';
 import { ImpersonationBanner } from './ImpersonationBanner';
 import { ScheduledNewsGate } from './ScheduledNewsGate';
+import { EMPREITEIROS_PATH, isEmpreiteiroAllowedPath } from '@/lib/postLoginPath';
 
 export { useIsInsideMainLayoutShell } from './MainLayoutShellContext';
 
@@ -123,7 +124,7 @@ function MainLayoutShell({ children, userRole, userName, onLogout }: MainLayoutP
   const [pageRevealReady, setPageRevealReady] = useState(false);
   const [pageFromReload, setPageFromReload] = useState(false);
   const shellRef = useRef<HTMLDivElement>(null);
-  const { user, canAccessCollaborationTools, isLoading: permissionsLoading } = usePermissions();
+  const { user, canAccessCollaborationTools, isLoading: permissionsLoading, isLinkedEmpreiteiro } = usePermissions();
   const displayName = userName || user?.name || '';
   const displayRole = (userRole || user?.role || 'EMPLOYEE') as MainLayoutProps['userRole'];
   const realtimeReady = useDeferredRealtimeReady();
@@ -161,10 +162,16 @@ function MainLayoutShell({ children, userRole, userName, onLogout }: MainLayoutP
   }, []);
 
   useEffect(() => {
+    if (permissionsLoading || !isLinkedEmpreiteiro) return;
+    if (isEmpreiteiroAllowedPath(pathname)) return;
+    router.replace(EMPREITEIROS_PATH);
+  }, [permissionsLoading, isLinkedEmpreiteiro, pathname, router]);
+
+  useEffect(() => {
     if (permissionsLoading || canAccessCollaborationTools) return;
     if (!isSociosBlockedCollaborationPath(pathname)) return;
-    router.replace('/ponto/home');
-  }, [permissionsLoading, canAccessCollaborationTools, pathname, router]);
+    router.replace(isLinkedEmpreiteiro ? EMPREITEIROS_PATH : '/ponto/home');
+  }, [permissionsLoading, canAccessCollaborationTools, isLinkedEmpreiteiro, pathname, router]);
 
   useLayoutEffect(() => {
     setIsCollapsed(resolveClientSidebarCollapsed(pathname));
