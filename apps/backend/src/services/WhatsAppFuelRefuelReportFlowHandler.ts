@@ -1,5 +1,6 @@
 import { FuelTankLevelAfter } from '@prisma/client';
 import { hasStoredPhoto, isWhatsAppSavedMediaReady } from '../lib/flowMedia';
+import { FUEL_LITERS_MAX, parseFlexibleDecimal } from '../lib/parseFlexibleDecimal';
 import { fuelRefuelRequestService } from './FuelRefuelRequestService';
 import type { SendAction } from './WhatsAppBotService';
 
@@ -39,17 +40,6 @@ function waButtons(body: string, extra?: Array<{ id: string; title: string }>): 
 
 function tankLabel(level?: FuelTankLevelAfter): string {
   return TANK_OPTIONS.find((o) => o.level === level)?.label ?? '—';
-}
-
-function parseBrDecimal(input: string): number | null {
-  const cleaned = input
-    .trim()
-    .replace(/r\$\s*/gi, '')
-    .replace(/\s/g, '')
-    .replace(/\./g, '')
-    .replace(',', '.');
-  const n = parseFloat(cleaned);
-  return Number.isFinite(n) && n >= 0 ? n : null;
 }
 
 function parseInteger(input: string): number | null {
@@ -293,10 +283,19 @@ export async function processWhatsAppFuelRefuelReportFlow(params: {
     }
 
     case 'FUEL_REPORT_ASK_LITERS': {
-      const liters = parseBrDecimal(textRaw);
+      const liters = parseFlexibleDecimal(textRaw);
       if (liters == null || liters <= 0) {
         return {
-          sendAction: waButtons('Informe os litros abastecidos (ex.: 45,5).'),
+          sendAction: waButtons('Informe os litros abastecidos (ex.: 45,5 ou 45.5).'),
+          newStatus,
+          newPayload,
+        };
+      }
+      if (liters > FUEL_LITERS_MAX) {
+        return {
+          sendAction: waButtons(
+            `Litros inválidos (máximo ${FUEL_LITERS_MAX} L). Use ponto ou vírgula como decimal (ex.: 14,947).`,
+          ),
           newStatus,
           newPayload,
         };
@@ -310,7 +309,7 @@ export async function processWhatsAppFuelRefuelReportFlow(params: {
     }
 
     case 'FUEL_REPORT_ASK_PRICE': {
-      const price = parseBrDecimal(textRaw);
+      const price = parseFlexibleDecimal(textRaw);
       if (price == null || price <= 0) {
         return {
           sendAction: waButtons('Informe o valor por litro (ex.: 5,89 ou R$ 5,89).'),

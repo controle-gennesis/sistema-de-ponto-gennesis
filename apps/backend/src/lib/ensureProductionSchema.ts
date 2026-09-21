@@ -2212,6 +2212,27 @@ async function ensurePunchPocColumns(prisma: PrismaClient): Promise<void> {
   }
 }
 
+async function repairInflatedFuelLiters(prisma: PrismaClient): Promise<void> {
+  if (!(await tableExists(prisma, 'fuel_refuel_requests'))) return;
+  if (!(await columnExists(prisma, 'fuel_refuel_requests', 'litersRefueled'))) return;
+
+  // Ponto tratado como milhar (ex.: 14.947 → 14947). Corrige dividindo por 1000.
+  const result = await prisma.$executeRawUnsafe(`
+    UPDATE "fuel_refuel_requests"
+    SET
+      "litersRefueled" = ROUND(("litersRefueled"::numeric / 1000), 3),
+      "updatedAt" = CURRENT_TIMESTAMP
+    WHERE "litersRefueled" IS NOT NULL
+      AND "litersRefueled"::numeric >= 1000
+      AND ("litersRefueled"::numeric / 1000) <= 500
+  `);
+  if (typeof result === 'number' && result > 0) {
+    console.warn(
+      `[Schema] Corrigidos ${result} abastecimento(s) com litros inflados (ponto interpretado como milhar).`,
+    );
+  }
+}
+
 export async function ensureProductionSchema(prisma: PrismaClient): Promise<void> {
   try {
     await ensureUnaccentExtension(prisma);
@@ -2263,6 +2284,7 @@ export async function ensureProductionSchema(prisma: PrismaClient): Promise<void
     await ensureEmpreiteirosTable(prisma);
     await ensureCaixinhaPurchasesTable(prisma);
     await ensureCaixinhaAccountsTable(prisma);
+    await repairInflatedFuelLiters(prisma);
     console.log('[Schema] Verificação de tabelas/colunas críticas concluída.');
   } catch (e) {
     console.error('[Schema] Falha ao garantir esquema de produção:', e);

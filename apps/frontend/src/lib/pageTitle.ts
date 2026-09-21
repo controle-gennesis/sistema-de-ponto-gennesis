@@ -52,6 +52,7 @@ const SUB_PATH_TITLES: Record<string, string> = {
   'acompanhamento-mensal': 'Relatório Mensal',
   reunioes: 'Reuniões de Contrato',
   orcamento: 'Orçamentos',
+  analises: 'Análises de Abastecimento',
 };
 
 const MODULES_BY_HREF_LENGTH = [...PERMISSION_MODULES].sort(

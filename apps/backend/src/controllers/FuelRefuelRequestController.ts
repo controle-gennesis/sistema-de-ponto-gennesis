@@ -23,6 +23,7 @@ import {
   type EmployeeCpfLookupResult,
 } from '../lib/employeeCpfLookup';
 import { prisma } from '../lib/prisma';
+import { FUEL_LITERS_MAX } from '../lib/parseFlexibleDecimal';
 import { PhotoService } from '../services/PhotoService';
 
 const photoService = new PhotoService();
@@ -103,7 +104,10 @@ const reportSchema = z.object({
   tankLevelAfter: z.enum(['RESERVE', 'QUARTER', 'HALF', 'THREE_QUARTERS', 'FULL'], {
     required_error: 'Informe o nível do tanque',
   }),
-  litersRefueled: z.coerce.number().positive('Informe os litros abastecidos'),
+  litersRefueled: z.coerce
+    .number()
+    .positive('Informe os litros abastecidos')
+    .max(FUEL_LITERS_MAX, `Litros inválidos (máximo ${FUEL_LITERS_MAX} L por abastecimento)`),
   pricePerLiter: z.coerce.number().positive('Informe o valor por litro'),
   receiptPhotoBase64: z.string().min(1, 'Envie a foto do cupom fiscal'),
   observations: z.string().optional(),

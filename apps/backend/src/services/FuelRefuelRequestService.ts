@@ -13,6 +13,7 @@ import {
   formatRefuelDeadlineLabel,
 } from '../lib/fuelSuppliesSla';
 import { prisma } from '../lib/prisma';
+import { FUEL_LITERS_MAX } from '../lib/parseFlexibleDecimal';
 import { findUserIdsMatchingSearch, findIdsByUnaccentSearch } from '../lib/normalizeSearchText';
 import { createError } from '../middleware/errorHandler';
 import {
@@ -489,6 +490,12 @@ export class FuelRefuelRequestService {
 
     if (!String(input.receiptPhotoUrl || '').trim() && !String(input.receiptPhotoKey || '').trim()) {
       throw createError('Foto do cupom fiscal é obrigatória', 400);
+    }
+    if (!(input.litersRefueled > 0) || input.litersRefueled > FUEL_LITERS_MAX) {
+      throw createError(
+        `Litros inválidos (máximo ${FUEL_LITERS_MAX} L). Use ponto ou vírgula como decimal.`,
+        400,
+      );
     }
 
     const updated = await prisma.fuelRefuelRequest.update({

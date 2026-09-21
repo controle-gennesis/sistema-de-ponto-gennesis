@@ -1,12 +1,10 @@
 'use client';
 
 import React, { useMemo } from 'react';
-import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { format, parseISO, startOfMonth } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import {
-  ArrowLeft,
   Car,
   Droplets,
   Fuel,
@@ -35,6 +33,7 @@ import {
   YAxis,
 } from 'recharts';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
+import { FilterStatCard } from '@/components/ui/FilterStatCard';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
@@ -152,41 +151,6 @@ function useChartTheme() {
   };
 }
 
-function KpiCard({
-  label,
-  value,
-  hint,
-  Icon,
-  iconBg,
-  iconColor,
-}: {
-  label: string;
-  value: string;
-  hint?: string;
-  Icon: LucideIcon;
-  iconBg: string;
-  iconColor: string;
-}) {
-  return (
-    <Card className="w-full">
-      <CardContent className="flex items-start gap-3 p-4 sm:p-5">
-        <div className={`rounded-lg p-2.5 ${iconBg}`}>
-          <Icon className={`h-5 w-5 ${iconColor}`} aria-hidden />
-        </div>
-        <div className="min-w-0 flex-1">
-          <p className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
-            {label}
-          </p>
-          <p className="mt-1 truncate text-xl font-bold text-gray-900 dark:text-gray-100 sm:text-2xl">
-            {value}
-          </p>
-          {hint ? <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{hint}</p> : null}
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
 function ChartCard({
   title,
   subtitle,
@@ -201,19 +165,21 @@ function ChartCard({
   className?: string;
 }) {
   return (
-    <Card className={className}>
-      <CardHeader className="border-b border-gray-100 pb-3 dark:border-gray-700/80">
+    <Card className={`${cadastroListClasses.card} ${className ?? ''}`.trim()}>
+      <CardHeader className={cadastroListClasses.cardHeader}>
         <div className={cadastroListClasses.cardHeaderIconRow}>
-          <div className="shrink-0 rounded-lg bg-blue-100 p-2 dark:bg-blue-900/30 sm:p-2.5">
-            <Icon className="h-5 w-5 text-blue-600 dark:text-blue-400" aria-hidden />
+          <div className="shrink-0 rounded-lg bg-red-100 p-2 dark:bg-red-900/30 sm:p-3">
+            <Icon className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6" aria-hidden />
           </div>
           <div className="min-w-0">
-            <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">{title}</h2>
+            <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100 sm:text-lg">
+              {title}
+            </h2>
             <p className="text-sm text-gray-500 dark:text-gray-400">{subtitle}</p>
           </div>
         </div>
       </CardHeader>
-      <CardContent className="pt-4">{children}</CardContent>
+      <CardContent className={cadastroListClasses.cardContent}>{children}</CardContent>
     </Card>
   );
 }
@@ -465,42 +431,42 @@ function AnalisesCombustivelContent() {
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <KpiCard
+      <div className="grid w-full grid-cols-1 gap-6 sm:grid-cols-2 xl:grid-cols-4">
+        <FilterStatCard
+          icon={Wallet}
           label="Gasto total"
-          value={formatCurrency(insights.totalSpend)}
-          hint={`${insights.reportedCount} abastecimentos com valor`}
-          Icon={Wallet}
+          count={formatCurrency(insights.totalSpend)}
+          subtitle={`${insights.reportedCount} abastecimentos com valor`}
           iconBg="bg-emerald-100 dark:bg-emerald-900/30"
           iconColor="text-emerald-600 dark:text-emerald-400"
         />
-        <KpiCard
+        <FilterStatCard
+          icon={Droplets}
           label="Litros abastecidos"
-          value={formatLiters(insights.totalLiters)}
-          hint={`Ticket médio ${formatCurrency(insights.avgTicket)}`}
-          Icon={Droplets}
+          count={formatLiters(insights.totalLiters)}
+          subtitle={`Ticket médio ${formatCurrency(insights.avgTicket)}`}
           iconBg="bg-sky-100 dark:bg-sky-900/30"
           iconColor="text-sky-600 dark:text-sky-400"
         />
-        <KpiCard
+        <FilterStatCard
+          icon={Gauge}
           label="Preço médio / L"
-          value={formatPrice(insights.weightedAvgPrice)}
-          hint={`Média simples ${formatPrice(insights.avgPrice)}`}
-          Icon={Gauge}
+          count={formatPrice(insights.weightedAvgPrice)}
+          subtitle={`Média simples ${formatPrice(insights.avgPrice)}`}
           iconBg="bg-amber-100 dark:bg-amber-900/30"
           iconColor="text-amber-600 dark:text-amber-400"
         />
-        <KpiCard
+        <FilterStatCard
+          icon={Fuel}
           label="Concluídas"
-          value={String(insights.completedCount)}
-          hint="Solicitações finalizadas"
-          Icon={Fuel}
+          count={insights.completedCount}
+          subtitle="Solicitações finalizadas"
           iconBg="bg-blue-100 dark:bg-blue-900/30"
           iconColor="text-blue-600 dark:text-blue-400"
         />
       </div>
 
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+      <div className="grid w-full grid-cols-1 gap-6 xl:grid-cols-2">
         <ChartCard
           title="Gasto por contrato"
           subtitle="Quais contratos mais consomem orçamento de combustível."
@@ -612,7 +578,7 @@ function AnalisesCombustivelContent() {
         </ChartCard>
       </div>
 
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+      <div className="grid w-full grid-cols-1 gap-6 xl:grid-cols-2">
         <ChartCard
           title="Preço médio do litro"
           subtitle="Variação do R$/L ao longo dos meses (média dos abastecimentos)."
@@ -689,7 +655,7 @@ function AnalisesCombustivelContent() {
         </ChartCard>
       </div>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+      <div className="grid w-full grid-cols-1 gap-6 lg:grid-cols-3">
         <ChartCard
           title="Quem mais gasta"
           subtitle="Top solicitantes por valor total."
@@ -744,23 +710,14 @@ export default function AnalisesCombustivelPage() {
     <ProtectedRoute route="/ponto/solicitacoes-combustivel">
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
         <div className="space-y-6">
-          <div>
-            <Link
-              href="/ponto/solicitacoes-combustivel"
-              className="mb-3 inline-flex items-center gap-1.5 text-sm font-medium text-gray-500 transition-colors hover:text-blue-600 dark:text-gray-400 dark:hover:text-blue-400"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              Voltar à fila
-            </Link>
-            <div className="text-center sm:text-left">
-              <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
-                Análises de Combustível
-              </h1>
-              <p className="mt-2 max-w-2xl text-sm text-gray-600 dark:text-gray-400 sm:text-base">
-                Gastos por contrato, quem mais consome, preço médio do litro e tendências dos
-                abastecimentos concluídos.
-              </p>
-            </div>
+          <div className="text-center">
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
+              Análises de Abastecimento
+            </h1>
+            <p className="mx-auto mt-2 max-w-2xl text-sm text-gray-600 dark:text-gray-400 sm:text-base">
+              Gastos por contrato, quem mais consome, preço médio do litro e tendências dos
+              abastecimentos concluídos.
+            </p>
           </div>
 
           <AnalisesCombustivelContent />

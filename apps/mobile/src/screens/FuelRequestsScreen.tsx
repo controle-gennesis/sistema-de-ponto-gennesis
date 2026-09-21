@@ -211,16 +211,40 @@ function EMPTY_REPORT_FORM(): ReportFormState {
   };
 }
 
-function parseBrDecimal(raw: string): number | null {
-  const cleaned = raw.trim().replace(/\s/g, '');
-  if (!cleaned) return null;
-  if (cleaned.includes(',')) {
-    const n = Number(cleaned.replace(/\./g, '').replace(',', '.'));
-    return Number.isFinite(n) ? n : null;
+function parseFlexibleDecimal(raw: string): number | null {
+  let s = String(raw ?? '')
+    .trim()
+    .replace(/r\$\s*/gi, '')
+    .replace(/\s/g, '');
+  if (!s) return null;
+
+  const hasComma = s.includes(',');
+  const hasDot = s.includes('.');
+
+  if (hasComma && hasDot) {
+    const lastComma = s.lastIndexOf(',');
+    const lastDot = s.lastIndexOf('.');
+    if (lastComma > lastDot) {
+      s = s.replace(/\./g, '').replace(',', '.');
+    } else {
+      s = s.replace(/,/g, '');
+    }
+  } else if (hasComma) {
+    s = s.replace(',', '.');
+  } else if (hasDot) {
+    const parts = s.split('.');
+    if (parts.length > 2) {
+      s = s.replace(/\./g, '');
+    }
   }
-  const n = Number(cleaned);
+
+  s = s.replace(/[^0-9.-]/g, '');
+  if (!s || s === '-' || s === '.') return null;
+  const n = Number(s);
   return Number.isFinite(n) ? n : null;
 }
+
+const FUEL_LITERS_MAX = 500;
 
 function isPendingStatus(status: FuelRefuelStatus) {
   return (
@@ -689,12 +713,19 @@ export default function FuelRequestsScreen() {
       showFormValidationToast('Selecione o nível do tanque', { topOffset: toastTop });
       return;
     }
-    const litersRefueled = parseBrDecimal(reportForm.litersRefueled);
+    const litersRefueled = parseFlexibleDecimal(reportForm.litersRefueled);
     if (litersRefueled == null || litersRefueled <= 0) {
       showFormValidationToast('Informe os litros abastecidos', { topOffset: toastTop });
       return;
     }
-    const pricePerLiter = parseBrDecimal(reportForm.pricePerLiter);
+    if (litersRefueled > FUEL_LITERS_MAX) {
+      showFormValidationToast(
+        `Litros inválidos (máximo ${FUEL_LITERS_MAX} L). Use ponto ou vírgula como decimal.`,
+        { topOffset: toastTop },
+      );
+      return;
+    }
+    const pricePerLiter = parseFlexibleDecimal(reportForm.pricePerLiter);
     if (pricePerLiter == null || pricePerLiter <= 0) {
       showFormValidationToast('Informe o valor por litro', { topOffset: toastTop });
       return;

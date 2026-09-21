@@ -36,6 +36,10 @@ import { CadastroListEmpty, CadastroListLoading } from '@/components/ui/Cadastro
 import { ListPagination } from '@/components/ui/ListPagination';
 import api from '@/lib/api';
 import { hasFuelStoredPhoto, resolveFuelPhotoSrc } from '@/lib/resolveMediaUrl';
+import {
+  FUEL_LITERS_MAX,
+  parseFlexibleDecimal,
+} from '@/lib/parseFlexibleDecimal';
 import { FuelRequestPhoto } from '@/components/fuel/FuelRequestPhoto';
 import {
   getListTableRowClassName,
@@ -345,17 +349,6 @@ function EMPTY_REPORT_FORM(): ReportFormState {
   };
 }
 
-function parseBrDecimal(raw: string): number | null {
-  const cleaned = raw.trim().replace(/\s/g, '');
-  if (!cleaned) return null;
-  if (cleaned.includes(',')) {
-    const n = Number(cleaned.replace(/\./g, '').replace(',', '.'));
-    return Number.isFinite(n) ? n : null;
-  }
-  const n = Number(cleaned);
-  return Number.isFinite(n) ? n : null;
-}
-
 const VEHICLE_TYPE_LABELS: Record<FuelVehicleType, string> = {
   PRIVATE: 'Particular',
   COMPANY: 'Frota',
@@ -382,7 +375,7 @@ const STATUS_BADGE: Record<FuelRefuelStatus, string> = {
     'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-200',
   APPROVED: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200',
   REJECTED: 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200',
-  CANCELLED: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300',
+  CANCELLED: 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200',
 };
 
 const ITEMS_PER_PAGE = 20;
@@ -756,6 +749,7 @@ export default function SolicitacoesCombustivelPage() {
   }, [statsData]);
 
   const listHeader = SUPPLIES_CARD_LIST_CONFIG[cardFilter];
+  const showFuelValueColumns = cardFilter === 'CONCLUDED';
   const ListHeaderIcon = listHeader.Icon;
 
   const selectCardFilter = (filter: SuppliesCardFilter) => {
@@ -811,12 +805,16 @@ export default function SolicitacoesCombustivelPage() {
       toast.error('Selecione o nível do tanque');
       return;
     }
-    const litersRefueled = parseBrDecimal(reportForm.litersRefueled);
+    const litersRefueled = parseFlexibleDecimal(reportForm.litersRefueled);
     if (litersRefueled == null || litersRefueled <= 0) {
       toast.error('Informe os litros abastecidos');
       return;
     }
-    const pricePerLiter = parseBrDecimal(reportForm.pricePerLiter);
+    if (litersRefueled > FUEL_LITERS_MAX) {
+      toast.error(`Litros inválidos (máximo ${FUEL_LITERS_MAX} L). Use ponto ou vírgula como decimal.`);
+      return;
+    }
+    const pricePerLiter = parseFlexibleDecimal(reportForm.pricePerLiter);
     if (pricePerLiter == null || pricePerLiter <= 0) {
       toast.error('Informe o valor por litro');
       return;
@@ -878,13 +876,26 @@ export default function SolicitacoesCombustivelPage() {
     <ProtectedRoute route="/ponto/solicitacoes-combustivel">
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
         <div className="space-y-6">
-          <div className="text-center">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
-              Fila de Abastecimento
-            </h1>
-            <p className="mx-auto mt-2 max-w-2xl text-sm text-gray-600 dark:text-gray-400 sm:text-base">
-              Acompanhe e atenda as solicitações de combustível.
-            </p>
+          <div className="relative flex flex-col items-center gap-3 sm:block">
+            <div className="text-center">
+              <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
+                Fila de Abastecimento
+              </h1>
+              <p className="mx-auto mt-2 max-w-2xl text-sm text-gray-600 dark:text-gray-400 sm:text-base">
+                Acompanhe e atenda as solicitações de combustível.
+              </p>
+            </div>
+            <div className="sm:absolute sm:right-0 sm:top-1/2 sm:-translate-y-1/2">
+              <button
+                type="button"
+                onClick={() => router.push('/ponto/solicitacoes-combustivel/analises')}
+                aria-label="Análises"
+                title="Análises"
+                className="inline-flex h-10 w-10 items-center justify-center rounded-lg text-gray-500 transition-colors hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-100"
+              >
+                <BarChart3 className="h-5 w-5" />
+              </button>
+            </div>
           </div>
 
           <div className="grid w-full grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5">
@@ -954,16 +965,6 @@ export default function SolicitacoesCombustivelPage() {
                       <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
                     ) : null}
                   </button>
-                  <Button
-                    type="button"
-                    variant="primary"
-                    size="sm"
-                    className="h-10 shrink-0 gap-0 px-3 sm:px-4"
-                    icon={<BarChart3 className="h-4 w-4" />}
-                    onClick={() => router.push('/ponto/solicitacoes-combustivel/analises')}
-                  >
-                    <span className="hidden sm:inline">Análises</span>
-                  </Button>
                 </div>
               </div>
             </CardHeader>
@@ -1006,21 +1007,71 @@ export default function SolicitacoesCombustivelPage() {
                     </span>
                   </div>
                   <div className={cadastroListClasses.tableScroll}>
-                    <table className={cadastroListClasses.table}>
+                    <table
+                      className={`${cadastroListClasses.table} table-fixed${
+                        showFuelValueColumns ? ' min-w-[64rem]' : ''
+                      }`}
+                    >
+                      <colgroup>
+                        {showFuelValueColumns ? (
+                          <>
+                            <col className="w-[5%]" />
+                            <col className="w-[12%]" />
+                            <col className="w-[10%]" />
+                            <col className="w-[10%]" />
+                            <col className="w-[12%]" />
+                            <col className="w-[7%]" />
+                            <col className="w-[9%]" />
+                            <col className="w-[10%]" />
+                            <col className="w-[10%]" />
+                            <col className="w-[9%]" />
+                            <col className="w-[6%]" />
+                          </>
+                        ) : (
+                          <>
+                            <col className="w-[6%]" />
+                            <col className="w-[18%]" />
+                            <col className="w-[12%]" />
+                            <col className="w-[14%]" />
+                            <col className="w-[22%]" />
+                            <col className="w-[10%]" />
+                            <col className="w-[12%]" />
+                            <col className="w-[6%]" />
+                          </>
+                        )}
+                      </colgroup>
                       <thead className="border-b border-gray-200 dark:border-gray-700">
                         <tr>
-                          <th className={`${cadastroListClasses.th} w-[7%]`}>ID</th>
-                          <th className={`${cadastroListClasses.th} w-[18%]`}>Solicitante</th>
-                          <th className={`${cadastroListClasses.thCenter} w-[12%]`}>Data abast.</th>
-                          <th className={`${cadastroListClasses.thCenter} w-[14%]`}>Contrato</th>
-                          <th className={`${cadastroListClasses.thCenter} w-[14%]`}>Veículo</th>
-                          <th className={`${cadastroListClasses.thCenter} w-[10%]`}>Tipo</th>
-                          <th className={`${cadastroListClasses.thCenter} w-[13%]`}>Status</th>
+                          <th className={`${cadastroListClasses.th} whitespace-nowrap`}>ID</th>
+                          <th className={cadastroListClasses.th}>Solicitante</th>
+                          <th className={`${cadastroListClasses.thCenter} whitespace-nowrap`}>Data abast.</th>
+                          <th className={cadastroListClasses.thCenter}>Contrato</th>
+                          <th className={cadastroListClasses.thCenter}>Veículo</th>
+                          <th className={`${cadastroListClasses.thCenter} whitespace-nowrap`}>Tipo</th>
+                          {showFuelValueColumns ? (
+                            <>
+                              <th className={`${cadastroListClasses.thCenter} whitespace-nowrap`}>
+                                Litros
+                              </th>
+                              <th className={`${cadastroListClasses.thNumeric} whitespace-nowrap`}>
+                                Valor por litro
+                              </th>
+                              <th className={`${cadastroListClasses.thNumeric} whitespace-nowrap`}>
+                                Valor total
+                              </th>
+                            </>
+                          ) : null}
+                          <th className={`${cadastroListClasses.thCenter} whitespace-nowrap`}>Status</th>
                           <th className={listTableRowClasses.actionTh}>Ação</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
-                        {paginatedRows.map((row) => (
+                        {paginatedRows.map((row) => {
+                          const totalValue = fuelRefuelTotalValue(
+                            row.litersRefueled,
+                            row.pricePerLiter,
+                          );
+                          return (
                           <tr
                             key={row.id}
                             onClick={() => openRequestDetail(row)}
@@ -1054,9 +1105,9 @@ export default function SolicitacoesCombustivelPage() {
                             >
                               {fuelContractLabel(row)}
                             </td>
-                            <td className={cadastroListClasses.tdCenter}>
-                              <div className="leading-snug">
-                                <p className="font-medium text-gray-900 dark:text-gray-100">
+                            <td className={`${cadastroListClasses.tdCenter} min-w-0`}>
+                              <div className="mx-auto min-w-0 max-w-full leading-snug">
+                                <p className="truncate font-medium text-gray-900 dark:text-gray-100">
                                   {row.vehiclePlate}
                                 </p>
                                 {row.vehicleDescription?.trim() ? (
@@ -1074,6 +1125,34 @@ export default function SolicitacoesCombustivelPage() {
                                 ? VEHICLE_TYPE_LABELS[row.vehicleType]
                                 : '—'}
                             </td>
+                            {showFuelValueColumns ? (
+                              <>
+                                <td className={cadastroListClasses.tdCenter}>
+                                  {row.litersRefueled != null
+                                    ? Number(row.litersRefueled).toLocaleString('pt-BR', {
+                                        minimumFractionDigits: 3,
+                                        maximumFractionDigits: 3,
+                                      })
+                                    : '—'}
+                                </td>
+                                <td className={cadastroListClasses.tdNumeric}>
+                                  {row.pricePerLiter != null
+                                    ? Number(row.pricePerLiter).toLocaleString('pt-BR', {
+                                        style: 'currency',
+                                        currency: 'BRL',
+                                      })
+                                    : '—'}
+                                </td>
+                                <td className={`${cadastroListClasses.tdNumeric} font-medium text-gray-900 dark:text-gray-100`}>
+                                  {totalValue != null
+                                    ? totalValue.toLocaleString('pt-BR', {
+                                        style: 'currency',
+                                        currency: 'BRL',
+                                      })
+                                    : '—'}
+                                </td>
+                              </>
+                            ) : null}
                             <td className={cadastroListClasses.tdCenter}>
                               <span
                                 className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${STATUS_BADGE[row.status]}`}
@@ -1114,7 +1193,8 @@ export default function SolicitacoesCombustivelPage() {
                               </div>
                             </td>
                           </tr>
-                        ))}
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>

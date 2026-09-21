@@ -1,5 +1,6 @@
 import { FuelTankLevelAfter } from '@prisma/client';
 import { getPhotoAttachmentFromMessage, hasStoredPhoto } from '../lib/flowMedia';
+import { FUEL_LITERS_MAX, parseFlexibleDecimal } from '../lib/parseFlexibleDecimal';
 import { prisma } from '../lib/prisma';
 import { fuelRefuelRequestService } from './FuelRefuelRequestService';
 
@@ -53,17 +54,6 @@ const TANK_OPTIONS: Array<{ level: FuelTankLevelAfter; label: string }> = [
 
 function tankLabel(level?: FuelTankLevelAfter): string {
   return TANK_OPTIONS.find((o) => o.level === level)?.label ?? '—';
-}
-
-function parseBrDecimal(input: string): number | null {
-  const cleaned = input
-    .trim()
-    .replace(/r\$\s*/gi, '')
-    .replace(/\s/g, '')
-    .replace(/\./g, '')
-    .replace(',', '.');
-  const n = parseFloat(cleaned);
-  return Number.isFinite(n) && n >= 0 ? n : null;
 }
 
 function parseInteger(input: string): number | null {
@@ -287,9 +277,15 @@ export class GennecyFuelRefuelReportFlowService {
       }
 
       case 'ASK_LITERS': {
-        const liters = parseBrDecimal(body);
+        const liters = parseFlexibleDecimal(body);
         if (liters == null || liters <= 0) {
-          return { handled: true, reply: 'Informe os litros abastecidos (ex.: 45,5).' };
+          return { handled: true, reply: 'Informe os litros abastecidos (ex.: 45,5 ou 45.5).' };
+        }
+        if (liters > FUEL_LITERS_MAX) {
+          return {
+            handled: true,
+            reply: `Litros inválidos (máximo ${FUEL_LITERS_MAX} L). Use ponto ou vírgula como decimal (ex.: 14,947).`,
+          };
         }
         await upsertSession(params.chatId, params.userId, 'ASK_PRICE', {
           ...payload,
@@ -299,7 +295,7 @@ export class GennecyFuelRefuelReportFlowService {
       }
 
       case 'ASK_PRICE': {
-        const price = parseBrDecimal(body);
+        const price = parseFlexibleDecimal(body);
         if (price == null || price <= 0) {
           return { handled: true, reply: 'Informe o valor por litro (ex.: 5,89 ou R$ 5,89).' };
         }

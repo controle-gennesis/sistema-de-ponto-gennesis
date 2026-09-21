@@ -47,6 +47,10 @@ import {
   isBlankVehiclePhoto,
 } from '@/components/ui/VehicleReturnPhotoField';
 import { formatPlacaDisplay } from '@/lib/brazilianVehiclePlate';
+import {
+  FUEL_LITERS_MAX,
+  parseFlexibleDecimal,
+} from '@/lib/parseFlexibleDecimal';
 import { toPersonSelectOptions } from '@/lib/personSelectOptions';
 import { FORM_FIELD_INPUT_CLS, FORM_FIELD_TEXTAREA_CLS } from '@/lib/formFieldUi';
 
@@ -221,17 +225,6 @@ function EMPTY_REPORT_FORM(): ReportFormState {
     receiptPhoto: '',
     observations: '',
   };
-}
-
-function parseBrDecimal(raw: string): number | null {
-  const cleaned = raw.trim().replace(/\s/g, '');
-  if (!cleaned) return null;
-  if (cleaned.includes(',')) {
-    const n = Number(cleaned.replace(/\./g, '').replace(',', '.'));
-    return Number.isFinite(n) ? n : null;
-  }
-  const n = Number(cleaned);
-  return Number.isFinite(n) ? n : null;
 }
 
 function formatVehicleLabel(vehicle: FleetVehicle): string {
@@ -768,12 +761,16 @@ export default function SolicitarCombustivelPage() {
       toast.error('Selecione o nível do tanque');
       return;
     }
-    const litersRefueled = parseBrDecimal(reportForm.litersRefueled);
+    const litersRefueled = parseFlexibleDecimal(reportForm.litersRefueled);
     if (litersRefueled == null || litersRefueled <= 0) {
       toast.error('Informe os litros abastecidos');
       return;
     }
-    const pricePerLiter = parseBrDecimal(reportForm.pricePerLiter);
+    if (litersRefueled > FUEL_LITERS_MAX) {
+      toast.error(`Litros inválidos (máximo ${FUEL_LITERS_MAX} L). Use ponto ou vírgula como decimal.`);
+      return;
+    }
+    const pricePerLiter = parseFlexibleDecimal(reportForm.pricePerLiter);
     if (pricePerLiter == null || pricePerLiter <= 0) {
       toast.error('Informe o valor por litro');
       return;
