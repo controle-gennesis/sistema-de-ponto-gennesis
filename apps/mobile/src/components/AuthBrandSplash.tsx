@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { View, Image, StyleSheet, Animated, Easing } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import * as SplashScreen from 'expo-splash-screen';
 
 export const SPLASH_LOGO_SIZE = 96;
 export const SPLASH_BG = '#ce3736';
@@ -12,15 +13,16 @@ export default function AuthBrandSplash({
   logoSize?: number;
 }) {
   const pulse = useRef(new Animated.Value(1)).current;
-  const fade = useRef(new Animated.Value(0)).current;
+  const hidNativeSplash = useRef(false);
+
+  const hideNativeSplash = () => {
+    if (hidNativeSplash.current) return;
+    hidNativeSplash.current = true;
+    void SplashScreen.hideAsync().catch(() => {});
+  };
 
   useEffect(() => {
-    Animated.timing(fade, {
-      toValue: 1,
-      duration: 420,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-    }).start();
+    hideNativeSplash();
 
     const loop = Animated.loop(
       Animated.sequence([
@@ -40,12 +42,12 @@ export default function AuthBrandSplash({
     );
     loop.start();
     return () => loop.stop();
-  }, [fade, pulse]);
+  }, [pulse]);
 
   return (
-    <View style={styles.root}>
+    <View style={styles.root} onLayout={hideNativeSplash}>
       <StatusBar style="light" translucent backgroundColor="transparent" />
-      <Animated.View style={{ opacity: fade, transform: [{ scale: pulse }] }}>
+      <Animated.View style={{ transform: [{ scale: pulse }] }}>
         <Image
           source={require('../../assets/logobranca.png')}
           style={{ width: logoSize, height: logoSize }}

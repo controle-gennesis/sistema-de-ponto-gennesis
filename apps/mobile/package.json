@@ -16,7 +16,8 @@
     "submit:ios": "eas submit --platform ios",
     "lint": "eslint . --ext .js,.jsx,.ts,.tsx",
     "lint:fix": "eslint . --ext .js,.jsx,.ts,.tsx --fix",
-    "type-check": "tsc --noEmit"
+    "type-check": "tsc --noEmit",
+    "postinstall": "patch-package"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.2",
@@ -80,6 +81,7 @@
     "@typescript-eslint/eslint-plugin": "^6.15.0",
     "@typescript-eslint/parser": "^6.15.0",
     "eslint": "^8.56.0",
+    "patch-package": "^8.0.1",
     "typescript": "~6.0.3"
   },
   "keywords": [

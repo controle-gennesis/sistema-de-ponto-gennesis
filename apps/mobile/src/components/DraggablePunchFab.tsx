@@ -13,6 +13,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Clock as PunchClockIcon } from 'lucide-react-native';
 import { useTheme } from '../context/ThemeContext';
 import { getTabBarHeight } from '../navigation/tabBarLayout';
+import { useChromeVisibility } from '../navigation/ChromeVisibilityContext';
 
 const SIZE = 58;
 const MARGIN = 12;
@@ -25,6 +26,7 @@ export default function DraggablePunchFab() {
   const navigation = useNavigation();
   const { colors, isDark } = useTheme();
   const insets = useSafeAreaInsets();
+  const chrome = useChromeVisibility();
   const { width: winW, height: winH } = useWindowDimensions();
 
   const minX = MARGIN;
@@ -149,6 +151,11 @@ export default function DraggablePunchFab() {
   );
 
   if (!ready) return null;
+
+  // Some com a chrome (navbar/tabbar) — sem bolinha solta na tela.
+  if (chrome && !chrome.visible) {
+    return null;
+  }
 
   return (
     <Animated.View

@@ -60,7 +60,7 @@ export default function CronogramaOrcamentoPage() {
 
   if (loadingContract) {
     return (
-      <ProtectedRoute route="/ponto/contratos" contractId={contractId}>
+      <ProtectedRoute route="/ponto/cronogramas" contractId={contractId}>
         <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
           <Loading message="Carregando contrato..." size="lg" />
         </MainLayout>
@@ -70,7 +70,7 @@ export default function CronogramaOrcamentoPage() {
 
   if (!contract?.costCenterId) {
     return (
-      <ProtectedRoute route="/ponto/contratos" contractId={contractId}>
+      <ProtectedRoute route="/ponto/cronogramas" contractId={contractId}>
         <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
           <Card>
             <CardContent className="p-8 text-center">

@@ -15,10 +15,17 @@ import DpRequestsScreen from '../screens/DpRequestsScreen';
 import GestaoOsListScreen from '../screens/GestaoOsListScreen';
 import { usePermissions } from '../hooks/usePermissions';
 import { useTheme } from '../context/ThemeContext';
-import { emitFabBarPress, type FabBarTabName } from './fabBarEvents';
+import { type FabBarTabName } from './fabBarEvents';
 import { useChromeVisibility } from './ChromeVisibilityContext';
-import { getAndroidTabBarBottomPad, getAndroidTabBarHeight, getAndroidTabBarTopPad, isSamsungDevice } from './tabBarLayout';
-import SamsungTabBar from './SamsungTabBar';
+import {
+  getAndroidTabBarBottomPad,
+  getAndroidTabBarHeight,
+  getAndroidTabBarTopPad,
+  getTabBarHeight,
+  isSamsungDevice,
+} from './tabBarLayout';
+import ChromeAwareTabBar from './ChromeAwareTabBar';
+import { wrapTabScreen } from './TabScreenTransition';
 
 export type BottomTabParamList = {
   Home: undefined;
@@ -30,6 +37,13 @@ export type BottomTabParamList = {
 
 const NativeTab = createNativeBottomTabNavigator<BottomTabParamList>();
 const AndroidTab = createBottomTabNavigator<BottomTabParamList>();
+
+/** Só no iOS: fade entre abas (tab bar nativa não anima a troca de tela). */
+const IosHome = wrapTabScreen(HomeScreen);
+const IosCombustivel = wrapTabScreen(FuelRequestsScreen);
+const IosReservas = wrapTabScreen(VehicleReservationsScreen);
+const IosDpRequests = wrapTabScreen(DpRequestsScreen);
+const IosGestaoOs = wrapTabScreen(GestaoOsListScreen);
 
 const FAB_TABS = new Set<string>(['Combustivel', 'Reservas', 'DpRequests', 'GestaoOs']);
 
@@ -47,14 +61,9 @@ function sfIcon(name: string) {
 
 function useFabListeners(onTabChange?: (name: string) => void) {
   const chrome = useChromeVisibility();
-  return ({ route, navigation }: any) => ({
+  return ({ route }: any) => ({
     tabPress: () => {
       chrome?.reveal();
-      const state = navigation.getState();
-      const focused = state.routes[state.index]?.name === route.name;
-      if (focused && FAB_TABS.has(route.name)) {
-        emitFabBarPress(route.name as FabBarTabName);
-      }
     },
     focus: () => {
       chrome?.reveal();
@@ -63,11 +72,13 @@ function useFabListeners(onTabChange?: (name: string) => void) {
   });
 }
 
-/** iPhone: UITabBar nativo + SF Symbols */
+/** iPhone: UITabBar nativo + SF Symbols; some por completo com a navbar (sem pílula). */
 function IosNativeTabs({ onTabChange }: { onTabChange: (name: string) => void }) {
   const { canSeeCombustivel, canSeeReservas, canSeeDpRequests, canSeeGestaoOs } = usePermissions();
   const { colors, isDark } = useTheme();
+  const chrome = useChromeVisibility();
   const listeners = useFabListeners(onTabChange);
+  const tabBarHidden = chrome?.visible === false;
 
   return (
     <NativeTab.Navigator
@@ -79,12 +90,14 @@ function IosNativeTabs({ onTabChange }: { onTabChange: (name: string) => void })
         overrideScrollViewContentInsetAdjustmentBehavior: false,
         tabBarMinimizeBehavior: 'never',
         tabBarBlurEffect: isDark ? 'systemMaterialDark' : 'systemMaterial',
+        // Esconde de verdade (não o minimize que vira bolinha).
+        tabBarStyle: { display: tabBarHidden ? 'none' : 'flex' },
       }}
       screenListeners={listeners}
     >
       <NativeTab.Screen
         name="Home"
-        component={HomeScreen}
+        component={IosHome}
         options={{
           title: 'Início',
           tabBarLabel: 'Início',
@@ -94,7 +107,7 @@ function IosNativeTabs({ onTabChange }: { onTabChange: (name: string) => void })
       {canSeeCombustivel ? (
         <NativeTab.Screen
           name="Combustivel"
-          component={FuelRequestsScreen}
+          component={IosCombustivel}
           options={{
             title: 'Abastecimento',
             tabBarLabel: 'Abastecimento',
@@ -105,7 +118,7 @@ function IosNativeTabs({ onTabChange }: { onTabChange: (name: string) => void })
       {canSeeReservas ? (
         <NativeTab.Screen
           name="Reservas"
-          component={VehicleReservationsScreen}
+          component={IosReservas}
           options={{
             title: 'Frota',
             tabBarLabel: 'Frota',
@@ -116,7 +129,7 @@ function IosNativeTabs({ onTabChange }: { onTabChange: (name: string) => void })
       {canSeeDpRequests ? (
         <NativeTab.Screen
           name="DpRequests"
-          component={DpRequestsScreen}
+          component={IosDpRequests}
           options={{
             title: 'Solicitações',
             tabBarLabel: 'Solicitações',
@@ -127,7 +140,7 @@ function IosNativeTabs({ onTabChange }: { onTabChange: (name: string) => void })
       {canSeeGestaoOs ? (
         <NativeTab.Screen
           name="GestaoOs"
-          component={GestaoOsListScreen}
+          component={IosGestaoOs}
           options={{
             title: 'Chamados',
             tabBarLabel: 'Chamados',
@@ -139,7 +152,7 @@ function IosNativeTabs({ onTabChange }: { onTabChange: (name: string) => void })
   );
 }
 
-/** Android: Lucide, sem pill, sem ripple. Samsung: tab bar custom. */
+/** Android: Lucide + some/volta animado com a navbar. */
 function AndroidLucideTabs({ onTabChange }: { onTabChange: (name: string) => void }) {
   const { canSeeCombustivel, canSeeReservas, canSeeDpRequests, canSeeGestaoOs } = usePermissions();
   const { colors, isDark } = useTheme();
@@ -149,12 +162,14 @@ function AndroidLucideTabs({ onTabChange }: { onTabChange: (name: string) => voi
   const androidTopPad = getAndroidTabBarTopPad();
   const androidBottomPad = getAndroidTabBarBottomPad(insets.bottom);
   const androidTabBarH = getAndroidTabBarHeight(insets.bottom);
+  const tabBarH = getTabBarHeight(insets.bottom);
 
   return (
     <AndroidTab.Navigator
       initialRouteName="Home"
       safeAreaInsets={{ top: 0, right: 0, left: 0, bottom: 0 }}
-      tabBar={samsung ? (props) => <SamsungTabBar {...props} /> : undefined}
+      tabBar={(props) => <ChromeAwareTabBar {...props} />}
+      sceneContainerStyle={{ paddingBottom: tabBarH }}
       screenOptions={({ route }) => ({
         headerShown: false,
         animation: 'none',
@@ -175,7 +190,6 @@ function AndroidLucideTabs({ onTabChange }: { onTabChange: (name: string) => voi
         tabBarAllowFontScaling: true,
         tabBarStyle: samsung
           ? {
-              // Altura/layout vêm do SamsungTabBar; evita estilo da barra padrão
               backgroundColor: 'transparent',
               borderTopWidth: 0,
               elevation: 0,

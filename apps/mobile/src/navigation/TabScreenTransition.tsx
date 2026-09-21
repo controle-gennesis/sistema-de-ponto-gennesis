@@ -1,6 +1,7 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useLayoutEffect, useRef } from 'react';
 import { Animated, Easing, StyleSheet } from 'react-native';
 import { useIsFocused, useNavigationState } from '@react-navigation/native';
+import { useTheme } from '../context/ThemeContext';
 
 type Props = {
   children: React.ReactNode;
@@ -8,22 +9,47 @@ type Props = {
 
 /**
  * A UITabBar nativa troca a tela na hora (sem cross-fade).
- * Este wrapper anima a entrada do conteúdo novo (fade + leve shift).
+ * Este wrapper anima saída/entrada do conteúdo (fade + leve shift)
+ * sem alterar a tab bar nativa.
  */
 export default function TabScreenTransition({ children }: Props) {
   const focused = useIsFocused();
   const index = useNavigationState((s) => s.index);
-  const opacity = useRef(new Animated.Value(1)).current;
+  const { colors } = useTheme();
+  const opacity = useRef(new Animated.Value(focused ? 1 : 0)).current;
   const translateX = useRef(new Animated.Value(0)).current;
   const prevIndexRef = useRef(index);
-  const skipFirst = useRef(true);
+  /** Só a aba inicial (já focada no mount) pula a 1ª animação. */
+  const skipInitialFocused = useRef(focused);
+  const wasFocusedRef = useRef(focused);
+  const animRef = useRef<Animated.CompositeAnimation | null>(null);
+
+  // Ao perder o foco, some rápido pra não ficar sobreposta com a próxima.
+  useLayoutEffect(() => {
+    if (focused) {
+      wasFocusedRef.current = true;
+      return;
+    }
+    if (!wasFocusedRef.current) return;
+    wasFocusedRef.current = false;
+    animRef.current?.stop();
+    animRef.current = Animated.timing(opacity, {
+      toValue: 0,
+      duration: 140,
+      easing: Easing.in(Easing.cubic),
+      useNativeDriver: true,
+    });
+    animRef.current.start();
+  }, [focused, opacity]);
 
   useEffect(() => {
     if (!focused) return;
 
-    if (skipFirst.current) {
-      skipFirst.current = false;
+    if (skipInitialFocused.current) {
+      skipInitialFocused.current = false;
       prevIndexRef.current = index;
+      opacity.setValue(1);
+      translateX.setValue(0);
       return;
     }
 
@@ -31,28 +57,37 @@ export default function TabScreenTransition({ children }: Props) {
     prevIndexRef.current = index;
     const dir = index > from ? 1 : index < from ? -1 : 0;
 
+    animRef.current?.stop();
     opacity.setValue(0);
-    translateX.setValue(dir * 22);
+    translateX.setValue(dir * 18);
 
-    Animated.parallel([
+    animRef.current = Animated.parallel([
       Animated.timing(opacity, {
         toValue: 1,
-        duration: 240,
+        duration: 260,
         easing: Easing.out(Easing.cubic),
         useNativeDriver: true,
       }),
       Animated.timing(translateX, {
         toValue: 0,
-        duration: 280,
+        duration: 300,
         easing: Easing.bezier(0.22, 1, 0.36, 1),
         useNativeDriver: true,
       }),
-    ]).start();
+    ]);
+    animRef.current.start();
   }, [focused, index, opacity, translateX]);
 
   return (
     <Animated.View
-      style={[styles.root, { opacity, transform: [{ translateX }] }]}
+      style={[
+        styles.root,
+        {
+          backgroundColor: colors.background,
+          opacity,
+          transform: [{ translateX }],
+        },
+      ]}
     >
       {children}
     </Animated.View>

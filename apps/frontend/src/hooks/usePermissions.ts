@@ -755,6 +755,7 @@ export function useRoutePermission(route: string) {
       isAdministrator || can(pk('/ponto/metricas/ocs-boleto-pix')),
     '/ponto/pleitos-gerados': isAdministrator || can(pk('/ponto/pleitos-gerados')),
     '/ponto/aprovacao-fds': isAdministrator || can(pk('/ponto/aprovacao-fds')),
+    '/ponto/cronogramas': isAdministrator || can(pk('/ponto/cronogramas')),
     '/ponto/caixinha': isAdministrator || can(pk('/ponto/caixinha')),
     '/ponto/recebimento-entregas': canAccessRecebimentoEntregasRoutePage,
     '/ponto/espelho-nf': isAdministrator || can(pk('/ponto/espelho-nf')),

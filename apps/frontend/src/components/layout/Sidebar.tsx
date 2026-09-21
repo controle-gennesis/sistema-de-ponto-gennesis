@@ -1166,7 +1166,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             href: '/ponto/cronogramas',
             icon: CalendarRange,
             description: 'Cronogramas de obra por orçamento',
-            permission: isAdministrator || can(pk('/ponto/contratos')),
+            permission: isAdministrator || can(pk('/ponto/cronogramas')),
             section: 'Obras'
           },
           {

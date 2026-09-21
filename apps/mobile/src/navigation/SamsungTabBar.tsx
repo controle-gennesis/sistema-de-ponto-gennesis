@@ -4,7 +4,6 @@ import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { House, Fuel, CarFront, Inbox, Wrench, type LucideIcon } from 'lucide-react-native';
 import { useTheme } from '../context/ThemeContext';
-import { emitFabBarPress, type FabBarTabName } from './fabBarEvents';
 import { useChromeVisibility } from './ChromeVisibilityContext';
 import {
   getSamsungTabBarHeight,
@@ -29,8 +28,6 @@ const LABELS: Record<string, string> = {
   DpRequests: 'Solicitações',
   GestaoOs: 'Chamados',
 };
-
-const FAB_TABS = new Set(['Combustivel', 'Reservas', 'DpRequests', 'GestaoOs']);
 
 export default function SamsungTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
@@ -72,10 +69,6 @@ export default function SamsungTabBar({ state, descriptors, navigation }: Bottom
             target: route.key,
             canPreventDefault: true,
           });
-          if (focused && FAB_TABS.has(route.name)) {
-            emitFabBarPress(route.name as FabBarTabName);
-            return;
-          }
           if (!focused && !event.defaultPrevented) {
             navigation.navigate(route.name, route.params);
           }

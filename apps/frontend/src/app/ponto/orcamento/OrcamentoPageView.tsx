@@ -9622,9 +9622,14 @@ export function OrcamentoPageView({
     toast.success('Ficha de demanda exportada (PDF).');
   };
 
-  const protectedRoute = embeddedContractId
-    ? ({ route: '/ponto/orcamento' as const, contractId: embeddedContractId })
-    : ({ route: '/ponto/orcamento' as const, contractId: undefined as string | undefined });
+  const protectedRoute = cronogramaOnly
+    ? ({
+        route: '/ponto/cronogramas' as const,
+        contractId: embeddedContractId || undefined,
+      })
+    : embeddedContractId
+      ? ({ route: '/ponto/orcamento' as const, contractId: embeddedContractId })
+      : ({ route: '/ponto/orcamento' as const, contractId: undefined as string | undefined });
 
   return (
     <ProtectedRoute route={protectedRoute.route} contractId={protectedRoute.contractId}>

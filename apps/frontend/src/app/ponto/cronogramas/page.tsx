@@ -209,7 +209,7 @@ export default function CronogramasPage() {
 
   if (loadingUser) {
     return (
-      <ProtectedRoute route="/ponto/contratos">
+      <ProtectedRoute route="/ponto/cronogramas">
         <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
           <Loading message="Carregando..." fullScreen size="lg" />
         </MainLayout>
@@ -218,7 +218,7 @@ export default function CronogramasPage() {
   }
 
   return (
-    <ProtectedRoute route="/ponto/contratos">
+    <ProtectedRoute route="/ponto/cronogramas">
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
         <div className="space-y-6">
           <div className="text-center">
