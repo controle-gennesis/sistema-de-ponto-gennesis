@@ -705,25 +705,6 @@ body::-webkit-scrollbar:vertical {
   animation: theme-toggle-star-twinkle 1.9s ease-in-out 0.9s infinite;
 }
 
-.nav-search-stars > span:nth-child(1) {
-  animation: theme-toggle-star-twinkle 2.4s ease-in-out infinite;
-}
-.nav-search-stars > span:nth-child(2) {
-  animation: theme-toggle-star-twinkle 3.1s ease-in-out 0.35s infinite;
-}
-.nav-search-stars > span:nth-child(3) {
-  animation: theme-toggle-star-twinkle 2.0s ease-in-out 0.7s infinite;
-}
-.nav-search-stars > span:nth-child(4) {
-  animation: theme-toggle-star-twinkle 2.7s ease-in-out 1.1s infinite;
-}
-.nav-search-stars > span:nth-child(5) {
-  animation: theme-toggle-star-twinkle 2.2s ease-in-out 0.5s infinite;
-}
-.nav-search-stars > span:nth-child(6) {
-  animation: theme-toggle-star-twinkle 3.4s ease-in-out 0.9s infinite;
-}
-
 .theme-toggle:active .theme-toggle-knob.translate-x-8 {
   transform: translateX(2rem) scale(0.92);
 }
@@ -734,15 +715,13 @@ body::-webkit-scrollbar:vertical {
 
 @media (prefers-reduced-motion: reduce) {
   .theme-toggle-moon-active,
-  .theme-toggle-stars > span,
-  .nav-search-stars > span {
+  .theme-toggle-stars > span {
     animation: none;
   }
 
   .theme-toggle,
   .theme-toggle-knob,
-  .theme-toggle svg,
-  .nav-search {
+  .theme-toggle svg {
     transition-duration: 0.01ms !important;
   }
 }

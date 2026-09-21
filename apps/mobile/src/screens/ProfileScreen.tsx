@@ -12,6 +12,7 @@ import {
   Pressable,
   TextInput,
   Platform,
+  InteractionManager,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -129,15 +130,22 @@ export default function ProfileScreen() {
 
   const confirmEnableBiometrics = async () => {
     const identifier = String(user?.email || user?.cpf || '').trim();
-    if (!identifier || !bioPassword) {
+    const password = bioPassword;
+    if (!identifier || !password) {
       Alert.alert('Senha', 'Informe a senha da conta para ativar a biometria.');
       return;
     }
+    // Fecha o modal antes do Face ID — no iOS o Modal bloqueia o prompt biométrico.
+    setBioPasswordOpen(false);
+    setBioPassword('');
     setBioBusy(true);
     try {
-      await enableBiometrics(identifier, bioPassword);
-      setBioPasswordOpen(false);
-      setBioPassword('');
+      await new Promise<void>((resolve) => {
+        InteractionManager.runAfterInteractions(() => {
+          setTimeout(resolve, 500);
+        });
+      });
+      await enableBiometrics(identifier, password);
       Alert.alert('Pronto', `Acesso com ${biometric.label} ativado.`);
     } catch (err) {
       Alert.alert('Biometria', err instanceof Error ? err.message : 'Não foi possível ativar.');
@@ -226,7 +234,7 @@ export default function ProfileScreen() {
 
   return (
     <View style={styles.safeArea}>
-      <StatusBar style="light" />
+      <StatusBar style="light" translucent backgroundColor="transparent" />
       <ScrollView
         style={styles.container}
         contentContainerStyle={styles.scrollContent}

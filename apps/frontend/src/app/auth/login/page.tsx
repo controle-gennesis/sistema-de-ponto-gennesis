@@ -5,7 +5,7 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Eye, EyeOff, UserRound, Lock, AlertCircle, Moon, Sun, ArrowRight, Mail, X } from 'lucide-react';
+import { Eye, EyeOff, UserRound, Lock, AlertCircle, Moon, Sun, ArrowRight } from 'lucide-react';
 import { authService } from '@/lib/auth';
 import { normalizeLoginIdentifierInput } from '@/lib/cpf';
 import { toast } from 'react-hot-toast';
@@ -15,7 +15,6 @@ import { Loading } from '@/components/ui/Loading';
 import { useBrandingLogo } from '@/hooks/useBrandingLogo';
 import { persistUnbBranding } from '@/lib/unbBranding';
 import { authTransitionCover, authTransitionLoginColdEnter, authTransitionRevealIfNeeded, peekAuthTransition } from '@/lib/authTransition';
-import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -30,7 +29,6 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [rememberMe, setRememberMe] = useState(false);
-  const [showHelpModal, setShowHelpModal] = useState(false);
   const [enterAnim, setEnterAnim] = useState(false);
   const [checkingSession, setCheckingSession] = useState(true);
 
@@ -302,13 +300,12 @@ export default function LoginPage() {
                   Permanecer conectado
                 </span>
               </label>
-              <button
-                type="button"
-                onClick={() => setShowHelpModal(true)}
+              <Link
+                href="/auth/esqueci-senha"
                 className="text-sm text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-500 font-medium transition-colors"
               >
                 Esqueceu a senha?
-              </button>
+              </Link>
             </div>
           </div>
 
@@ -334,49 +331,6 @@ export default function LoginPage() {
         </form>
         </div>
       </div>
-
-      {showHelpModal && (
-        <AppModalOverlay
-          className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center bg-black/60 p-4"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="forgot-password-help-title"
-          onClick={() => setShowHelpModal(false)}
-        >
-          <div
-            className="w-full max-w-md rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-5 shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between gap-3">
-              <h3 id="forgot-password-help-title" className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                Esqueceu a senha?
-              </h3>
-              <button
-                type="button"
-                onClick={() => setShowHelpModal(false)}
-                className="rounded-lg p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-800 dark:text-gray-400 dark:hover:text-gray-200"
-                aria-label="Fechar"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
-              Enviamos um link de redefinição para o e-mail cadastrado na sua conta.
-            </p>
-
-            <div className="mt-5">
-              <Link
-                href="/auth/esqueci-senha"
-                className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-red-600 hover:bg-red-700 text-white px-4 py-3 text-sm font-medium transition-colors"
-              >
-                <Mail className="w-4 h-4" />
-                Receber link por e-mail
-              </Link>
-            </div>
-          </div>
-        </AppModalOverlay>
-      )}
 
       {/* Footer */}
       <footer className="w-full py-10">

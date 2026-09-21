@@ -2,7 +2,7 @@
   "expo": {
     "name": "Gennesis Conecta",
     "slug": "sistema-ponto-engenharia",
-    "version": "1.0.7",
+    "version": "1.0.8",
     "orientation": "portrait",
     "icon": "./assets/favicon.png",
     "userInterfaceStyle": "automatic",
@@ -20,12 +20,13 @@
       }
     },
     "android": {
-      "versionCode": 8,
+      "versionCode": 9,
       "adaptiveIcon": {
         "foregroundImage": "./assets/favicon.png",
-        "backgroundColor": "#111827"
+        "backgroundColor": "#ce3736"
       },
       "package": "com.engenharia.sistemaponto",
+      "softwareKeyboardLayoutMode": "pan",
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.ACCESS_FINE_LOCATION",
@@ -42,6 +43,16 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "splash": {
+      "image": "./assets/logobranca.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ce3736"
+    },
+    "androidStatusBar": {
+      "backgroundColor": "#00000000",
+      "barStyle": "light-content",
+      "translucent": true
     },
     "plugins": [
       [
@@ -96,9 +107,10 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/favicon.png",
+          "image": "./assets/logobranca.png",
           "resizeMode": "contain",
-          "backgroundColor": "#111827"
+          "backgroundColor": "#ce3736",
+          "imageWidth": 96
         }
       ],
       [

@@ -17,6 +17,7 @@ import {
   Dimensions,
   Easing,
   Alert,
+  Keyboard,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -53,10 +54,67 @@ export default function LoginScreen({ fromBootSplash = true }: Props) {
   const [error, setError] = useState('');
   const [introDone, setIntroDone] = useState(false);
   const passwordRef = useRef<TextInput>(null);
-  const { login, loginWithBiometrics, biometric, enableBiometrics } = useAuth();
+  const scrollRef = useRef<ScrollView>(null);
+  const {
+    login,
+    loginWithBiometrics,
+    biometric,
+    enableBiometrics,
+    refreshBiometric,
+    isAuthenticated,
+  } = useAuth();
   const insets = useSafeAreaInsets();
   const [bioLoading, setBioLoading] = useState(false);
   const bioPrompted = useRef(false);
+  const bioInFlight = useRef(false);
+  // Anima só o `top` do sheet (JS). O translateY da intro fica num filho — sem conflito.
+  const sheetTopAnim = useRef(new Animated.Value(SHEET_TOP)).current;
+  const sheetTopAnimRef = useRef<Animated.CompositeAnimation | null>(null);
+
+  useEffect(() => {
+    void refreshBiometric();
+  }, [refreshBiometric]);
+
+  useEffect(() => {
+    const showEvt = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvt = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+
+    const runTop = (toValue: number, duration: number) => {
+      sheetTopAnimRef.current?.stop();
+      sheetTopAnimRef.current = Animated.timing(sheetTopAnim, {
+        toValue,
+        duration,
+        easing: Easing.bezier(0.22, 1, 0.36, 1),
+        useNativeDriver: false,
+      });
+      sheetTopAnimRef.current.start();
+    };
+
+    const onShow = Keyboard.addListener(showEvt, (e) => {
+      const kb = e.endCoordinates.height;
+      // Expande o sheet pra cima, mantendo o formulário acima do teclado.
+      const nextTop = Math.max(
+        insets.top + 12,
+        SCREEN_H - kb - Math.min(440, SCREEN_H * 0.58),
+      );
+      runTop(nextTop, Platform.OS === 'ios' ? 260 : 300);
+      if (Platform.OS === 'android') {
+        setTimeout(() => {
+          scrollRef.current?.scrollTo({ y: 0, animated: true });
+        }, 100);
+      }
+    });
+
+    const onHide = Keyboard.addListener(hideEvt, () => {
+      runTop(SHEET_TOP, Platform.OS === 'ios' ? 220 : 260);
+    });
+
+    return () => {
+      onShow.remove();
+      onHide.remove();
+      sheetTopAnimRef.current?.stop();
+    };
+  }, [insets.top, sheetTopAnim]);
 
   const progress = useRef(new Animated.Value(0)).current;
   const titlesAnim = useRef(new Animated.Value(0)).current;
@@ -137,6 +195,9 @@ export default function LoginScreen({ fromBootSplash = true }: Props) {
   };
 
   const handleBiometricLogin = async () => {
+    if (bioInFlight.current || isAuthenticated) return;
+    bioInFlight.current = true;
+    bioPrompted.current = true;
     setError('');
     setBioLoading(true);
     try {
@@ -150,17 +211,18 @@ export default function LoginScreen({ fromBootSplash = true }: Props) {
       setError(err?.message || 'Não foi possível entrar com biometria.');
     } finally {
       setBioLoading(false);
+      bioInFlight.current = false;
     }
   };
 
   useEffect(() => {
-    if (!introDone || !showBiometric || bioPrompted.current) return;
-    bioPrompted.current = true;
+    if (isAuthenticated || !introDone || !showBiometric || bioPrompted.current) return;
     const t = setTimeout(() => {
+      if (isAuthenticated || bioPrompted.current || bioInFlight.current) return;
       void handleBiometricLogin();
-    }, 400);
+    }, 700);
     return () => clearTimeout(t);
-  }, [introDone, showBiometric]);
+  }, [introDone, showBiometric, isAuthenticated]);
 
   const handleLogin = async () => {
     const trimmedIdentifier = identifier.trim();
@@ -196,7 +258,7 @@ export default function LoginScreen({ fromBootSplash = true }: Props) {
 
   return (
     <View style={styles.root}>
-      <StatusBar style="light" />
+      <StatusBar style="light" translucent backgroundColor="transparent" />
 
       <Animated.View
         pointerEvents="none"
@@ -228,23 +290,22 @@ export default function LoginScreen({ fromBootSplash = true }: Props) {
         </Animated.View>
       </Animated.View>
 
-      <Animated.View
-        style={[
-          styles.sheet,
-          {
-            transform: [{ translateY: sheetTranslateY }],
-          },
-        ]}
-      >
-        <KeyboardAvoidingView
-          style={styles.flex}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          keyboardVerticalOffset={24}
+      {/* Outer: anima `top` (JS). Inner: intro translateY (nativo). */}
+      <Animated.View style={[styles.sheet, { top: sheetTopAnim }]}>
+        <Animated.View
+          style={[styles.flex, { transform: [{ translateY: sheetTranslateY }] }]}
         >
+          <KeyboardAvoidingView
+            style={styles.flex}
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 24 : 0}
+          >
           <ScrollView
+            ref={scrollRef}
             style={styles.flex}
             contentContainerStyle={styles.sheetScroll}
             keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
             showsVerticalScrollIndicator={false}
             bounces={false}
           >
@@ -314,7 +375,13 @@ export default function LoginScreen({ fromBootSplash = true }: Props) {
                     if (canSubmit) void handleLogin();
                   }}
                   placeholderTextColor="#9ca3af"
-                  onFocus={() => setFocusedField('password')}
+                  onFocus={() => {
+                    setFocusedField('password');
+                    if (Platform.OS === 'android') {
+                      // Mantém e-mail + senha visíveis (não rola até o rodapé).
+                      setTimeout(() => scrollRef.current?.scrollTo({ y: 48, animated: true }), 100);
+                    }
+                  }}
                   onBlur={() => setFocusedField(null)}
                   editable={!loading && introDone}
                 />
@@ -386,7 +453,8 @@ export default function LoginScreen({ fromBootSplash = true }: Props) {
 
             <Text style={styles.footer}>© {new Date().getFullYear()} Gennesis Conecta</Text>
           </ScrollView>
-        </KeyboardAvoidingView>
+          </KeyboardAvoidingView>
+        </Animated.View>
       </Animated.View>
 
       <Modal
@@ -471,7 +539,6 @@ const getStyles = (bottomInset: number) =>
       left: 0,
       right: 0,
       bottom: 0,
-      top: SHEET_TOP,
       backgroundColor: '#ffffff',
       borderTopLeftRadius: 32,
       borderTopRightRadius: 32,

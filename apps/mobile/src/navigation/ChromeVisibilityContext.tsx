@@ -13,6 +13,7 @@ import {
   Easing,
   NativeScrollEvent,
   NativeSyntheticEvent,
+  Platform,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 
@@ -32,6 +33,9 @@ type ChromeVisibilityContextValue = {
   setHeaderHeight: (height: number) => void;
   reveal: () => void;
   conceal: () => void;
+  menuOpen: boolean;
+  openMenu: () => void;
+  closeMenu: () => void;
   scrollHandlers: ScrollHandlers;
 };
 
@@ -42,7 +46,7 @@ const SHOW_DY = 8;
 const TOP_REVEAL = 18;
 const BOTTOM_LOCK = 28;
 const STOP_REVEAL_MS = 240;
-export const CHROME_HEADER_FALLBACK = 88;
+export const CHROME_HEADER_FALLBACK = Platform.OS === 'android' ? 96 : 110;
 
 export function ChromeVisibilityProvider({ children }: { children: ReactNode }) {
   const progress = useRef(new Animated.Value(1)).current;
@@ -53,6 +57,10 @@ export function ChromeVisibilityProvider({ children }: { children: ReactNode }) 
   const animRef = useRef<Animated.CompositeAnimation | null>(null);
   const [visible, setVisible] = useState(true);
   const [headerHeight, setHeaderHeightState] = useState(CHROME_HEADER_FALLBACK);
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  const openMenu = useCallback(() => setMenuOpen(true), []);
+  const closeMenu = useCallback(() => setMenuOpen(false), []);
 
   const setHeaderHeight = useCallback((height: number) => {
     if (height <= 0) return;
@@ -194,9 +202,12 @@ export function ChromeVisibilityProvider({ children }: { children: ReactNode }) 
       setHeaderHeight,
       reveal,
       conceal,
+      menuOpen,
+      openMenu,
+      closeMenu,
       scrollHandlers,
     }),
-    [progress, visible, headerHeight, setHeaderHeight, reveal, conceal, scrollHandlers],
+    [progress, visible, headerHeight, setHeaderHeight, reveal, conceal, menuOpen, openMenu, closeMenu, scrollHandlers],
   );
 
   return (

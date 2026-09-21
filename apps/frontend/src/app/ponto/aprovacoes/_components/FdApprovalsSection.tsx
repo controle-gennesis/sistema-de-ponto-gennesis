@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Check, ClipboardCheck, Eye, Filter, MoreVertical, Search, X } from 'lucide-react';
+import { Check, CheckCircle, ClipboardCheck, Clock, Eye, Filter, LayoutList, MoreVertical, RotateCcw, Search, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '@/lib/api';
 import { textMatchesSearch } from '@/lib/normalizeSearchText';
@@ -13,7 +13,7 @@ import { CadastroListLoading } from '@/components/ui/CadastroListSummary';
 import { Modal } from '@/components/ui/Modal';
 import { ActionMenuOverlay } from '@/components/ui/ActionMenuOverlay';
 import { usePermissions } from '@/hooks/usePermissions';
-import { formatCurrencyDisplay, type FichaDemandaApprovalRecord } from '@/lib/fichaDemandaApproval';
+import { formatCurrencyDisplay, FD_STATUS_LABELS, type FichaDemandaApprovalRecord } from '@/lib/fichaDemandaApproval';
 import { FichaDemandaDetailModal } from '@/components/engenharia/FichaDemandaDetailModal';
 import {
   getListTableRowClassName,
@@ -25,8 +25,8 @@ import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDr
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import {
   ApprovalPhaseStatCards,
-  DEFAULT_APPROVAL_PHASE_CARDS,
   fetchApprovalPhaseCounts,
+  type ApprovalPhaseStatCard,
 } from './ApprovalPhaseStatCards';
 import {
   APPROVAL_STATUS_COLUMN_TITLE,
@@ -37,17 +37,48 @@ import {
 const FD_PHASES = ['PENDING', 'APPROVED', 'REJECTED', 'ALL'] as const;
 type FdPhaseFilter = (typeof FD_PHASES)[number];
 
+const FD_PHASE_CARDS: ApprovalPhaseStatCard<FdPhaseFilter>[] = [
+  {
+    filter: 'PENDING',
+    label: 'Pendentes',
+    iconBg: 'bg-yellow-100 dark:bg-yellow-900/30',
+    iconColor: 'text-yellow-600 dark:text-yellow-400',
+    Icon: Clock,
+  },
+  {
+    filter: 'APPROVED',
+    label: 'Aprovadas',
+    iconBg: 'bg-green-100 dark:bg-green-900/30',
+    iconColor: 'text-green-600 dark:text-green-400',
+    Icon: CheckCircle,
+  },
+  {
+    filter: 'REJECTED',
+    label: 'Em correção',
+    iconBg: 'bg-orange-100 dark:bg-orange-900/30',
+    iconColor: 'text-orange-600 dark:text-orange-400',
+    Icon: RotateCcw,
+  },
+  {
+    filter: 'ALL',
+    label: 'Todos',
+    iconBg: 'bg-blue-100 dark:bg-blue-900/30',
+    iconColor: 'text-blue-600 dark:text-blue-400',
+    Icon: LayoutList,
+  },
+];
+
 const FD_PHASE_FILTER_OPTIONS = labeledToSelectOptions([
   { value: 'PENDING', label: 'Aguardando aprovação' },
   { value: 'APPROVED', label: 'Aprovadas' },
-  { value: 'REJECTED', label: 'Canceladas' },
+  { value: 'REJECTED', label: 'Em correção' },
   { value: 'ALL', label: 'Todos' },
 ]);
 
 const FD_PHASE_SUBTITLE: Record<FdPhaseFilter, string> = {
   PENDING: 'Aguardando aprovação',
   APPROVED: 'Já aprovadas',
-  REJECTED: 'Canceladas',
+  REJECTED: 'Enviadas para correção',
   ALL: 'Todas as fichas',
 };
 
@@ -142,7 +173,7 @@ export function FdApprovalsSection() {
       return res.data;
     },
     onSuccess: () => {
-      toast.success('Ficha de demanda cancelada.');
+      toast.success('Ficha de demanda enviada para correção.');
       setDetailFd(null);
       void queryClient.invalidateQueries({ queryKey: ['approvals', 'fd'] });
       void queryClient.invalidateQueries({ queryKey: ['demand-sheet-approvals'] });
@@ -150,7 +181,7 @@ export function FdApprovalsSection() {
       void queryClient.invalidateQueries({ queryKey: ['approval-notification-counts'] });
     },
     onError: (err: { response?: { data?: { error?: string } } }) => {
-      toast.error(err.response?.data?.error || 'Erro ao reprovar ficha');
+      toast.error(err.response?.data?.error || 'Erro ao enviar para correção');
     },
   });
 
@@ -162,7 +193,7 @@ export function FdApprovalsSection() {
     <>
       <div className="space-y-6">
         <ApprovalPhaseStatCards
-          cards={DEFAULT_APPROVAL_PHASE_CARDS}
+          cards={FD_PHASE_CARDS}
           activeFilter={fdPhase}
           counts={fdPhaseCounts ?? {}}
           loading={loadingFdCounts}
@@ -174,8 +205,8 @@ export function FdApprovalsSection() {
             <div className="flex items-center space-x-3">
               {(() => {
                 const activeCard =
-                  DEFAULT_APPROVAL_PHASE_CARDS.find((c) => c.filter === fdPhase) ??
-                  DEFAULT_APPROVAL_PHASE_CARDS[0];
+                  FD_PHASE_CARDS.find((c) => c.filter === fdPhase) ??
+                  FD_PHASE_CARDS[0];
                 const PhaseIcon = activeCard.Icon;
                 return (
                   <>
@@ -312,7 +343,10 @@ export function FdApprovalsSection() {
                           {formatCurrencyDisplay(r.faturamentoEstimado)}
                         </td>
                         <td className="px-3 py-4 text-center sm:px-6">
-                          <ApprovalStatusBadge kind={fdToApprovalStatus(r.status)} />
+                          <ApprovalStatusBadge
+                            kind={fdToApprovalStatus(r.status)}
+                            label={FD_STATUS_LABELS[r.status]}
+                          />
                         </td>
                         <td
                           className={`${listTableRowClasses.actionTd} text-center`}
@@ -400,7 +434,7 @@ export function FdApprovalsSection() {
                   className={MENU_ITEM_BORDER_CLASS}
                 >
                   <X className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
-                  <span>Rejeitar</span>
+                  <span>Enviar para correção</span>
                 </button>
               </>
             ) : null}
@@ -437,7 +471,7 @@ export function FdApprovalsSection() {
                       onClick={() => rejectMutation.mutate({ id: detailFd.id })}
                       disabled={approveMutation.isPending || rejectMutation.isPending}
                     >
-                      {rejectMutation.isPending ? 'Rejeitando…' : 'Rejeitar'}
+                      {rejectMutation.isPending ? 'Enviando…' : 'Enviar para correção'}
                     </Button>
                     <Button
                       type="button"

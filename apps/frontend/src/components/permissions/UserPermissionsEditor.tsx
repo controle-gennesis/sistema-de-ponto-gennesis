@@ -407,6 +407,8 @@ function inferCategoryFromHref(href: string): string {
       '/ponto/sistema-gestao-os',
       '/ponto/pleitos-gerados',
       '/ponto/aprovacao-fds',
+      '/ponto/cronogramas',
+      '/ponto/caixinha',
       '/ponto/recebimento-entregas',
       '/ponto/solicitar-materiais',
       '/ponto/solicitar-ferramentas',

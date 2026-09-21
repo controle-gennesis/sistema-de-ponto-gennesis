@@ -10,9 +10,11 @@ import {
   Easing,
   Alert,
   Dimensions,
+  Platform,
+  StatusBar,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Home, Moon, Sun, LogOut, X, Clock, Calendar, Sparkles, Wrench } from 'lucide-react-native';
+import { Home, Moon, Sun, LogOut, X, Clock, Calendar } from 'lucide-react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useTheme } from '../context/ThemeContext';
@@ -28,8 +30,11 @@ interface MenuProps {
   onClose: () => void;
 }
 
-const PANEL_WIDTH = Math.min(360, Math.round(Dimensions.get('window').width * 0.88));
-const CORNER = 24;
+const PANEL_WIDTH = Math.min(
+  Platform.OS === 'android' ? 340 : 360,
+  Math.round(Dimensions.get('window').width * (Platform.OS === 'android' ? 0.88 : 0.88)),
+);
+const CORNER = Platform.OS === 'android' ? 20 : 24;
 
 function MenuItemRow({
   label,
@@ -71,7 +76,7 @@ function MenuItemRow({
 export default function Menu({ visible, onClose }: MenuProps) {
   const { colors, isDark, toggleTheme } = useTheme();
   const { logout, user } = useAuth();
-  const { canSeePonto, canSeeGestaoOs } = usePermissions();
+  const { canSeePonto } = usePermissions();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
@@ -123,17 +128,6 @@ export default function Menu({ visible, onClose }: MenuProps) {
   const links = [
     { key: 'home', label: 'Início', icon: Home, onPress: () => go('Home') },
     { key: 'agenda', label: 'Agenda', icon: Calendar, onPress: () => go('Agenda') },
-    { key: 'assistant', label: 'Assistente de campo', icon: Sparkles, onPress: () => go('FieldAssistant') },
-    ...(canSeeGestaoOs
-      ? [
-          {
-            key: 'unplanned',
-            label: 'Ocorrência não prevista',
-            icon: Wrench,
-            onPress: () => go('GestaoOsUnplanned'),
-          },
-        ]
-      : []),
     ...(canSeePonto
       ? [
           {
@@ -243,8 +237,13 @@ export default function Menu({ visible, onClose }: MenuProps) {
               style={[
                 styles.panel,
                 {
-                  backgroundColor: colors.background,
-                  paddingTop: insets.top,
+                  backgroundColor: colors.surface ?? colors.background,
+                  paddingTop:
+                    (Platform.OS === 'android'
+                      ? insets.top > 0
+                        ? insets.top
+                        : StatusBar.currentHeight ?? 24
+                      : insets.top) + 12,
                   paddingBottom: Math.max(insets.bottom, 16),
                 },
               ]}
@@ -259,36 +258,47 @@ export default function Menu({ visible, onClose }: MenuProps) {
                   },
                 ]}
               >
-                <TouchableOpacity
-                  style={styles.profileRow}
-                  activeOpacity={0.7}
-                  onPress={() => go('Profile')}
-                  accessibilityLabel="Abrir perfil"
-                >
-                  <UserAvatar
-                    uri={user?.profilePhotoUrl}
-                    size={52}
-                    backgroundColor={colors.primary}
-                    iconColor="#fff"
-                  />
-                  <View style={styles.profileText}>
-                    <Text
-                      style={[styles.profileName, { color: colors.text }]}
-                      numberOfLines={1}
-                      ellipsizeMode="tail"
-                    >
-                      {displayName}
-                    </Text>
-                    {displayCpf ? (
+                <View style={styles.profileHeader}>
+                  <TouchableOpacity
+                    style={styles.profileRow}
+                    activeOpacity={0.7}
+                    onPress={() => go('Profile')}
+                    accessibilityLabel="Abrir perfil"
+                  >
+                    <UserAvatar
+                      uri={user?.profilePhotoUrl}
+                      size={Platform.OS === 'android' ? 48 : 52}
+                      backgroundColor={colors.primary}
+                      iconColor="#fff"
+                    />
+                    <View style={styles.profileText}>
                       <Text
-                        style={[styles.profileCpf, { color: colors.textSecondary }]}
+                        style={[styles.profileName, { color: colors.text }]}
                         numberOfLines={1}
+                        ellipsizeMode="tail"
                       >
-                        {displayCpf}
+                        {displayName}
                       </Text>
-                    ) : null}
-                  </View>
-                </TouchableOpacity>
+                      {displayCpf ? (
+                        <Text
+                          style={[styles.profileCpf, { color: colors.textSecondary }]}
+                          numberOfLines={1}
+                        >
+                          {displayCpf}
+                        </Text>
+                      ) : null}
+                    </View>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={onClose}
+                    style={styles.closeBtn}
+                    hitSlop={8}
+                    accessibilityRole="button"
+                    accessibilityLabel="Fechar menu"
+                  >
+                    <X size={20} color={colors.text} strokeWidth={2.2} />
+                  </TouchableOpacity>
+                </View>
               </Animated.View>
 
               <ScrollView
@@ -351,11 +361,7 @@ export default function Menu({ visible, onClose }: MenuProps) {
             onPress={onClose}
             accessibilityRole="button"
             accessibilityLabel="Fechar menu"
-          >
-            <View style={styles.dismissClose}>
-              <X size={24} color="#ffffff" strokeWidth={2.2} />
-            </View>
-          </TouchableOpacity>
+          />
         </View>
       </View>
     </Modal>
@@ -374,6 +380,12 @@ const styles = StyleSheet.create({
   panelSlide: {
     height: '100%',
     maxWidth: 360,
+    ...Platform.select({
+      android: {
+        elevation: 16,
+      },
+      default: {},
+    }),
   },
   panel: {
     flex: 1,
@@ -384,45 +396,61 @@ const styles = StyleSheet.create({
   },
   dismissArea: {
     flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  dismissClose: {
-    width: 44,
-    height: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   profileBlock: {
     borderBottomWidth: StyleSheet.hairlineWidth,
-    paddingBottom: 16,
-    marginBottom: 8,
-    paddingTop: 8,
+    paddingBottom: 18,
+    marginBottom: 10,
+    paddingTop: Platform.OS === 'android' ? 4 : 8,
   },
-  profileRow: {
+  profileHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 14,
-    paddingHorizontal: 4,
+    gap: 4,
+  },
+  closeBtn: {
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  profileRow: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 2,
+    minHeight: 52,
   },
   profileText: {
     flex: 1,
     minWidth: 0,
-    gap: 3,
+    justifyContent: 'center',
+    gap: 4,
   },
   profileName: {
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: '700',
     letterSpacing: -0.3,
+    lineHeight: 22,
   },
   profileCpf: {
     fontSize: 13,
     fontWeight: '500',
     letterSpacing: -0.1,
+    lineHeight: 18,
     fontVariant: ['tabular-nums'],
   },
-  content: { flex: 1 },
-  contentInner: { paddingBottom: 16 },
+  content: {
+    flexGrow: 1,
+    flexShrink: 1,
+  },
+  contentInner: {
+    paddingBottom: 16,
+    flexGrow: 1,
+  },
   item: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -1,0 +1,52 @@
+diff --git a/node_modules/react-native-screens/ios/tabs/host/RNSTabsHostComponentView.mm b/node_modules/react-native-screens/ios/tabs/host/RNSTabsHostComponentView.mm
+index 8b61f5b..4ea704b 100644
+--- a/node_modules/react-native-screens/ios/tabs/host/RNSTabsHostComponentView.mm
++++ b/node_modules/react-native-screens/ios/tabs/host/RNSTabsHostComponentView.mm
+@@ -244,11 +244,46 @@ namespace react = facebook::react;
+     _tabBarHidden = newComponentProps.tabBarHidden;
+ #if RNS_IPHONE_OS_VERSION_AVAILABLE(18_0)
+     if (@available(iOS 18.0, *)) {
+-      [_controller setTabBarHidden:_tabBarHidden animated:NO];
++      // Animação nativa de esconder/mostrar a UITabBar (slide).
++      [_controller setTabBarHidden:_tabBarHidden animated:YES];
+     } else
+ #endif // RNS_IPHONE_OS_VERSION_AVAILABLE(18_0)
+     {
++#if !TARGET_OS_TV
++      UITabBar *tabBar = _controller.tabBar;
++      CGFloat h = CGRectGetHeight(tabBar.bounds);
++      if (h < 1) {
++        h = 49.0;
++      }
++      if (_tabBarHidden) {
++        [UIView animateWithDuration:0.28
++                              delay:0
++                            options:UIViewAnimationOptionCurveEaseInOut
++                         animations:^{
++                           tabBar.transform = CGAffineTransformMakeTranslation(0, h);
++                           tabBar.alpha = 0;
++                         }
++                         completion:^(BOOL finished) {
++                           tabBar.hidden = YES;
++                           tabBar.transform = CGAffineTransformIdentity;
++                           tabBar.alpha = 1;
++                         }];
++      } else {
++        tabBar.hidden = NO;
++        tabBar.alpha = 0;
++        tabBar.transform = CGAffineTransformMakeTranslation(0, h);
++        [UIView animateWithDuration:0.28
++                              delay:0
++                            options:UIViewAnimationOptionCurveEaseOut
++                         animations:^{
++                           tabBar.transform = CGAffineTransformIdentity;
++                           tabBar.alpha = 1;
++                         }
++                         completion:nil];
++      }
++#else
+       _controller.tabBar.hidden = _tabBarHidden;
++#endif // !TARGET_OS_TV
+     }
+   }
+ 

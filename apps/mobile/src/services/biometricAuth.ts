@@ -12,6 +12,8 @@ export type BiometricCapability = {
   label: string;
 };
 
+let inFlightAuth: Promise<boolean> | null = null;
+
 function secureAvailable() {
   return Platform.OS === 'ios' || Platform.OS === 'android';
 }
@@ -67,6 +69,14 @@ export async function getStoredCredentials(): Promise<{
   }
 }
 
+/** Guarda as credenciais sem pedir Face ID de novo. */
+export async function saveBiometricCredentials(identifier: string, password: string) {
+  if (!secureAvailable()) return;
+  await SecureStore.setItemAsync(ENABLED_KEY, '1');
+  await SecureStore.setItemAsync(IDENTIFIER_KEY, identifier.trim());
+  await SecureStore.setItemAsync(PASSWORD_KEY, password);
+}
+
 export async function enableBiometricLogin(identifier: string, password: string) {
   if (!secureAvailable()) {
     throw new Error('Biometria disponível apenas no app nativo.');
@@ -75,11 +85,8 @@ export async function enableBiometricLogin(identifier: string, password: string)
   if (!cap.available) {
     throw new Error(`Cadastre ${cap.label} neste aparelho para ativar o acesso rápido.`);
   }
-  const ok = await authenticateWithBiometrics(`Ativar ${cap.label}`);
-  if (!ok) throw new Error('Biometria não confirmada.');
-  await SecureStore.setItemAsync(ENABLED_KEY, '1');
-  await SecureStore.setItemAsync(IDENTIFIER_KEY, identifier.trim());
-  await SecureStore.setItemAsync(PASSWORD_KEY, password);
+  await authenticateWithBiometrics(`Ativar ${cap.label}`);
+  await saveBiometricCredentials(identifier, password);
 }
 
 export async function disableBiometricLogin() {
@@ -89,14 +96,52 @@ export async function disableBiometricLogin() {
   await SecureStore.deleteItemAsync(PASSWORD_KEY);
 }
 
+function biometricErrorMessage(error: string | undefined, label: string): string {
+  switch (error) {
+    case 'user_cancel':
+    case 'system_cancel':
+    case 'app_cancel':
+      return 'Você cancelou a confirmação. Tente de novo olhando para o aparelho.';
+    case 'user_fallback':
+      return `Use ${label} para entrar, não a senha do iPhone.`;
+    case 'not_enrolled':
+      return `Cadastre ${label} em Ajustes → Face ID e código.`;
+    case 'lockout':
+      return `${label} bloqueado temporariamente. Desbloqueie o iPhone e tente de novo.`;
+    case 'not_available':
+      return `${label} indisponível agora. Feche o app e abra de novo, ou use o app instalado (não o Expo Go).`;
+    case 'missing_usage_description':
+      return 'O Expo Go não tem permissão de Face ID. Recarregar não resolve — isso só funciona no app instalado (build da loja).';
+    case 'authentication_failed':
+      return `${label} não reconheceu. Olhe para o iPhone e tente de novo.`;
+    default:
+      return error
+        ? `${label} não confirmada (${error}). Tente de novo.`
+        : `${label} não confirmada. Tente de novo.`;
+  }
+}
+
 export async function authenticateWithBiometrics(promptMessage?: string): Promise<boolean> {
-  const cap = await getBiometricCapability();
-  if (!cap.available) return false;
-  const result = await LocalAuthentication.authenticateAsync({
-    promptMessage: promptMessage || `Entre com ${cap.label}`,
-    cancelLabel: 'Cancelar',
-    fallbackLabel: 'Usar senha do aparelho',
-    disableDeviceFallback: false,
+  if (inFlightAuth) return inFlightAuth;
+
+  inFlightAuth = (async () => {
+    const cap = await getBiometricCapability();
+    if (!cap.available) {
+      throw new Error(`Cadastre ${cap.label} neste aparelho para continuar.`);
+    }
+
+    const result = await LocalAuthentication.authenticateAsync({
+      promptMessage: promptMessage || `Entre com ${cap.label}`,
+      cancelLabel: 'Cancelar',
+      // Face ID / digital — sem cair na senha do iPhone.
+      disableDeviceFallback: true,
+    });
+
+    if (result.success) return true;
+    throw new Error(biometricErrorMessage(result.error, cap.label));
+  })().finally(() => {
+    inFlightAuth = null;
   });
-  return result.success;
+
+  return inFlightAuth;
 }

@@ -339,7 +339,7 @@ export default function GestaoOsListScreen() {
         style={styles.container}
         contentContainerStyle={[
           styles.scrollContent,
-          { paddingTop: headerOffset + 8, paddingBottom: 120 },
+          { paddingTop: headerOffset + 8, paddingBottom: 28 },
         ]}
         {...chromeScroll}
         refreshControl={

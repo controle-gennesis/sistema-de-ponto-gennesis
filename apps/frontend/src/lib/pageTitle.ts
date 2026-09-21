@@ -6,6 +6,7 @@ export const APP_TITLE = 'Gennesis Conecta';
 const EXTRA_PAGE_TITLES: Record<string, { title: string; category?: string; href?: string }> = {
   '/ponto/home': { title: 'Início' },
   '/ponto/agenda': { title: 'Agenda', category: 'Principal' },
+  '/ponto/cronogramas': { title: 'Cronogramas', category: 'Engenharia', href: '/ponto/cronogramas' },
   '/ponto/aprovacoes': { title: 'Aprovações', category: 'Principal' },
   '/ponto/solicitacoes-gerais': { title: 'Solicitações Internas', category: 'Principal' },
   '/ponto/gerenciar-solicitacoes-gerais': {
@@ -44,6 +45,7 @@ const EXTRA_PAGE_TITLES: Record<string, { title: string; category?: string; href
 const SUB_PATH_TITLES: Record<string, string> = {
   andamento: 'Andamento',
   'cronograma-mensal': 'Cronograma Mensal',
+  cronogramas: 'Cronogramas',
   'historico-os': 'Histórico OS',
   faturamento: 'Faturamento',
   relatorios: 'Relatórios Fotográficos',
@@ -124,6 +126,22 @@ export function resolveBreadcrumbs(pathname: string): BreadcrumbItem[] {
       return [{ label: extra.category }, { label: extra.title, href: extra.href ?? path }];
     }
     return [{ label: extra.title, href: path }];
+  }
+
+  // Rotas aninhadas de páginas extras (ex.: /ponto/cronogramas/:contrato/:orcamento).
+  // Sem isso o fallback cai em ID opaco e o breadcrumb some («Gennesis»).
+  const extraNested = Object.entries(EXTRA_PAGE_TITLES)
+    .sort((a, b) => b[0].length - a[0].length)
+    .find(([basePath]) => path.startsWith(`${basePath}/`));
+  if (extraNested) {
+    const [basePath, meta] = extraNested;
+    const href = meta.href ?? basePath;
+    // Detalhe de cronograma: crumb no singular (lista continua «Cronogramas»).
+    const title = basePath === '/ponto/cronogramas' ? 'Cronograma' : meta.title;
+    if (meta.category) {
+      return [{ label: meta.category }, { label: title, href }];
+    }
+    return [{ label: title, href }];
   }
 
   for (const module of MODULES_BY_HREF_LENGTH) {

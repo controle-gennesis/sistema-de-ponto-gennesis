@@ -20,7 +20,7 @@ export function AprovacoesTabsNav({
   activeTab: AprovacaoTabId;
   onTabChange: (tab: AprovacaoTabId) => void;
 }) {
-  if (tabs.length <= 1) return null;
+  if (tabs.length === 0) return null;
 
   return (
     <AppUnderlineTabList aria-label="Abas de aprovações">

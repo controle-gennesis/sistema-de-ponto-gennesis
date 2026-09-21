@@ -6,13 +6,14 @@ import {
   ScrollView,
   TouchableOpacity,
   RefreshControl,
+  PanResponder,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
-import { useChromeScroll } from '../navigation/ChromeVisibilityContext';
+import { useChromeScroll, useChromeVisibility } from '../navigation/ChromeVisibilityContext';
 import UserAvatar from '../components/UserAvatar';
 import HomeAgendaCard from '../components/HomeAgendaCard';
 import HomeTarefasCard from '../components/HomeTarefasCard';
@@ -34,6 +35,27 @@ export default function HomeScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const styles = useMemo(() => getStyles(colors, isDark), [colors, isDark]);
   const { scrollProps: chromeScroll, headerOffset } = useChromeScroll();
+  const chrome = useChromeVisibility();
+  const openMenu = chrome?.openMenu;
+
+  const edgePan = useMemo(
+    () =>
+      PanResponder.create({
+        // Só compete com o pager quando o gesto é claramente abrir o menu (→).
+        onMoveShouldSetPanResponder: (_, g) =>
+          g.dx > 16 && Math.abs(g.dx) > Math.abs(g.dy) * 1.25,
+        onMoveShouldSetPanResponderCapture: (_, g) =>
+          g.dx > 20 && Math.abs(g.dx) > Math.abs(g.dy) * 1.35,
+        onPanResponderTerminationRequest: () => false,
+        onPanResponderRelease: (_, g) => {
+          if (g.dx > 48 || g.vx > 0.3) openMenu?.();
+        },
+        onPanResponderTerminate: (_, g) => {
+          if (g.dx > 48 || g.vx > 0.3) openMenu?.();
+        },
+      }),
+    [openMenu],
+  );
 
   const displayName = formatMenuDisplayName(user?.name);
 
@@ -57,7 +79,7 @@ export default function HomeScreen() {
     <View style={styles.safeArea}>
       <ScrollView
         style={styles.container}
-        contentContainerStyle={[styles.scrollContent, { paddingTop: headerOffset + 12 }]}
+        contentContainerStyle={[styles.scrollContent, { paddingTop: headerOffset + 16 }]}
         showsVerticalScrollIndicator={false}
         {...chromeScroll}
         refreshControl={
@@ -96,6 +118,8 @@ export default function HomeScreen() {
 
         <HomeTarefasCard />
       </ScrollView>
+      {/* Só a faixa da esquerda — View full-screen (mesmo box-none) atrapalha o swipe do pager */}
+      <View style={styles.edgeHit} {...edgePan.panHandlers} />
     </View>
   );
 }
@@ -107,7 +131,7 @@ const getStyles = (colors: any, isDark: boolean) =>
     scrollContent: {
       paddingHorizontal: 20,
       paddingTop: 8,
-      paddingBottom: 120,
+      paddingBottom: 28,
     },
     greetingRow: {
       flexDirection: 'row',
@@ -128,5 +152,13 @@ const getStyles = (colors: any, isDark: boolean) =>
       fontWeight: '700',
       letterSpacing: -0.5,
       color: colors.text,
+    },
+    edgeHit: {
+      position: 'absolute',
+      left: 0,
+      top: 0,
+      bottom: 0,
+      width: 32,
+      zIndex: 12,
     },
   });

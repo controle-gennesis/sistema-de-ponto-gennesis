@@ -55,6 +55,8 @@ const NO_WORDS = /^(n[aã]o|nao|n|cancelar|cancela)$/i;
 const SKIP_WORDS = /^(n[aã]o|nao|nenhuma|nenhum|-|pular|skip)$/i;
 /** WhatsApp lista no máx. 10 linhas; 1 reservada para “Mais contratos”. */
 const CONTRACT_LIST_PAGE_SIZE = 9;
+const CONTRACT_OTHERS_ID = 'fuel_contract_others';
+const FUEL_DATE_TODAY_ID = 'fuel_date_today';
 
 function waButtons(body: string, extra?: Array<{ id: string; title: string }>): SendAction {
   return {
@@ -65,6 +67,19 @@ function waButtons(body: string, extra?: Array<{ id: string; title: string }>): 
       { id: 'END', title: 'Encerrar' },
     ],
   };
+}
+
+function askRefuelDateAction(body: string): SendAction {
+  return waButtons(body, [
+    { id: FUEL_DATE_TODAY_ID, title: 'Hoje' },
+    { id: 'MENU', title: 'Menu' },
+    { id: 'END', title: 'Encerrar' },
+  ]);
+}
+
+function isFuelDateTodaySelection(content: string, textRaw: string): boolean {
+  if (content === FUEL_DATE_TODAY_ID || content === 'hoje') return true;
+  return /^hoje$/i.test(textRaw.trim());
 }
 
 function waList(
@@ -102,7 +117,12 @@ function formatBrDate(iso: string): string {
 }
 
 function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Sao_Paulo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
 }
 
 function vehicleTypeLabel(type?: FuelVehicleType): string {
@@ -140,20 +160,108 @@ function truncateWaTitle(label: string): string {
   return `${trimmed.slice(0, 21)}...`;
 }
 
-async function listRegisteredContracts(): Promise<ContractOptionPayload[]> {
-  const rows = await prisma.contract.findMany({
-    orderBy: [{ name: 'asc' }, { number: 'asc' }],
-    select: { id: true, name: true, number: true },
-  });
-  return rows.map((row) => ({
+function toContractOption(row: {
+  id: string;
+  name: string;
+  number: string;
+}): ContractOptionPayload {
+  return {
     id: row.id,
     name: row.name.trim() || row.number,
     number: row.number,
-  }));
+  };
+}
+
+/** Contratos ordenados pelos que mais têm abastecimentos (depois por nome). */
+async function listContractsByRefuelFrequency(): Promise<ContractOptionPayload[]> {
+  const [rows, counts] = await Promise.all([
+    prisma.contract.findMany({
+      select: { id: true, name: true, number: true },
+    }),
+    prisma.fuelRefuelRequest.groupBy({
+      by: ['contractId'],
+      where: { contractId: { not: null } },
+      _count: { _all: true },
+    }),
+  ]);
+
+  const countById = new Map<string, number>();
+  for (const row of counts) {
+    if (!row.contractId) continue;
+    countById.set(row.contractId, row._count._all);
+  }
+
+  return rows
+    .map((row) => ({
+      ...toContractOption(row),
+      refuelCount: countById.get(row.id) ?? 0,
+    }))
+    .sort((a, b) => {
+      if (b.refuelCount !== a.refuelCount) return b.refuelCount - a.refuelCount;
+      return a.name.localeCompare(b.name, 'pt-BR');
+    })
+    .map(({ id, name, number }) => ({ id, name, number }));
+}
+
+/** Último contrato usado por este colaborador (user) ou por este WhatsApp. */
+async function findLastUsedContract(params: {
+  requesterUserId?: string | null;
+  phone?: string | null;
+}): Promise<ContractOptionPayload | null> {
+  const or: Array<{ requesterId?: string; sourceWhatsAppPhone?: string }> = [];
+  if (params.requesterUserId) {
+    or.push({ requesterId: params.requesterUserId });
+  }
+  if (params.phone) {
+    or.push({ sourceWhatsAppPhone: params.phone });
+  }
+  if (!or.length) return null;
+
+  const last = await prisma.fuelRefuelRequest.findFirst({
+    where: {
+      contractId: { not: null },
+      status: { not: FuelRefuelRequestStatus.CANCELLED },
+      OR: or,
+    },
+    orderBy: { createdAt: 'desc' },
+    select: {
+      contract: { select: { id: true, name: true, number: true } },
+    },
+  });
+
+  return last?.contract ? toContractOption(last.contract) : null;
 }
 
 function getContractOptions(payload: Record<string, unknown>): ContractOptionPayload[] {
   return (payload.contractOptions as ContractOptionPayload[] | undefined) ?? [];
+}
+
+function getSuggestedContract(payload: Record<string, unknown>): ContractOptionPayload | null {
+  const suggested = payload.suggestedContract as ContractOptionPayload | undefined;
+  if (suggested?.id) return suggested;
+  const options = getContractOptions(payload);
+  const suggestedId = String(payload.suggestedContractId || '').trim();
+  if (!suggestedId) return null;
+  return options.find((item) => item.id === suggestedId) ?? null;
+}
+
+function buildLastContractSuggestionAction(
+  last: ContractOptionPayload,
+  driverName: string,
+): SendAction {
+  return waButtons(
+    [
+      `Identifiquei ${driverName}.`,
+      `Último contrato usado: ${last.name}`,
+      '',
+      'Confirma este contrato ou deseja ver outros?',
+    ].join('\n'),
+    [
+      { id: `fuel_contract_${last.id}`, title: 'Usar este' },
+      { id: CONTRACT_OTHERS_ID, title: 'Outros contratos' },
+      { id: 'MENU', title: 'Menu' },
+    ],
+  );
 }
 
 function buildContractListAction(
@@ -174,13 +282,20 @@ function buildContractListAction(
       title: 'Mais contratos…',
     });
   }
-  return waList(
-    [
-      `Identifiquei ${driverName}.`,
-      'Selecione o contrato desta solicitação:',
-    ].join('\n'),
-    rows,
-    'Ver contratos',
+  const intro =
+    page === 0
+      ? [`Identifiquei ${driverName}.`, 'Selecione o contrato desta solicitação:']
+      : ['Mais contratos — selecione:'];
+  return waList(intro.join('\n'), rows, 'Ver contratos');
+}
+
+function isContractOthersSelection(content: string, textRaw: string): boolean {
+  if (content === CONTRACT_OTHERS_ID) return true;
+  const normalized = textRaw.trim().toLowerCase();
+  return (
+    normalized === 'outros contratos' ||
+    normalized === 'outros' ||
+    normalized === 'outro contrato'
   );
 }
 
@@ -189,15 +304,24 @@ function parseContractSelection(
   textRaw: string,
   payload: Record<string, unknown>,
 ): ContractOptionPayload | null {
+  if (isContractOthersSelection(content, textRaw)) return null;
+
   const options = getContractOptions(payload);
-  const fromId = content.match(/^fuel_contract_(?!more_)(.+)$/i);
+  const fromId = content.match(/^fuel_contract_(?!more_|others$)(.+)$/i);
   if (fromId) {
     const id = fromId[1].trim();
-    return options.find((item) => item.id === id) ?? null;
+    const fromOptions = options.find((item) => item.id === id);
+    if (fromOptions) return fromOptions;
+    const suggested = getSuggestedContract(payload);
+    return suggested?.id === id ? suggested : null;
   }
 
   const nameCandidate = textRaw.trim().toLowerCase();
   if (!nameCandidate) return null;
+  const suggested = getSuggestedContract(payload);
+  if (suggested && suggested.name.trim().toLowerCase() === nameCandidate) {
+    return suggested;
+  }
   return (
     options.find((item) => item.name.trim().toLowerCase() === nameCandidate) ||
     options.find((item) => item.number.trim().toLowerCase() === nameCandidate) ||
@@ -343,10 +467,10 @@ export async function processWhatsAppFuelFlow(params: {
 
   if (startingFromMenu) {
     return {
-      sendAction: waButtons(
+      sendAction: askRefuelDateAction(
         buildFuelFlowStartMessage(
-          `Qual a data para abastecer? (DD/MM/AAAA)\nEx.: ${formatBrDate(todayIso())}`
-        )
+          `Qual a data para abastecer?\nEx.: ${formatBrDate(todayIso())}`,
+        ),
       ),
       newStatus: 'FUEL_ASK_REFUEL_DATE',
       newPayload,
@@ -355,10 +479,14 @@ export async function processWhatsAppFuelFlow(params: {
 
   switch (newStatus) {
     case 'FUEL_ASK_REFUEL_DATE': {
-      const iso = brDateToIso(textRaw);
+      const iso = isFuelDateTodaySelection(content, textRaw)
+        ? todayIso()
+        : brDateToIso(textRaw);
       if (!iso) {
         return {
-          sendAction: waButtons('Data inválida. Informe no formato DD/MM/AAAA (ex.: 08/06/2026).'),
+          sendAction: askRefuelDateAction(
+            'Data inválida. Informe no formato DD/MM/AAAA (ex.: 08/06/2026) ou toque em «Hoje».',
+          ),
           newStatus,
           newPayload,
         };
@@ -381,9 +509,7 @@ export async function processWhatsAppFuelFlow(params: {
       }
       newPayload.route = textRaw.trim();
       return {
-        sendAction: waButtons(
-          'Qual o CPF do condutor? (somente números — precisa estar cadastrado no sistema)',
-        ),
+        sendAction: waButtons('Qual o CPF do condutor?'),
         newStatus: 'FUEL_ASK_DRIVER_CPF',
         newPayload,
       };
@@ -393,7 +519,9 @@ export async function processWhatsAppFuelFlow(params: {
       const cpfDigits = onlyDigits(textRaw);
       if (!cpfDigits || !isValidCpf(cpfDigits)) {
         return {
-          sendAction: waButtons('CPF inválido. Envie os 11 dígitos do CPF do condutor.'),
+          sendAction: waButtons(
+            'CPF inválido. Envie o CPF do condutor (com ou sem pontuação).',
+          ),
           newStatus,
           newPayload,
         };
@@ -409,7 +537,7 @@ export async function processWhatsAppFuelFlow(params: {
         };
       }
 
-      const contracts = await listRegisteredContracts();
+      const contracts = await listContractsByRefuelFrequency();
       if (!contracts.length) {
         return {
           sendAction: waButtons(
@@ -429,7 +557,26 @@ export async function processWhatsAppFuelFlow(params: {
       newPayload.contractListPage = 0;
       delete newPayload.contractId;
       delete newPayload.costCenterLabel;
+      delete newPayload.suggestedContractId;
+      delete newPayload.suggestedContract;
 
+      const lastContract = await findLastUsedContract({
+        requesterUserId: employee.userId,
+        phone,
+      });
+
+      if (lastContract) {
+        newPayload.suggestedContractId = lastContract.id;
+        newPayload.suggestedContract = lastContract;
+        newPayload.contractSelectMode = 'suggest';
+        return {
+          sendAction: buildLastContractSuggestionAction(lastContract, employee.name),
+          newStatus: 'FUEL_SELECT_CONTRACT',
+          newPayload,
+        };
+      }
+
+      newPayload.contractSelectMode = 'list';
       return {
         sendAction: buildContractListAction(contracts, 0, employee.name),
         newStatus: 'FUEL_SELECT_CONTRACT',
@@ -438,9 +585,10 @@ export async function processWhatsAppFuelFlow(params: {
     }
 
     case 'FUEL_SELECT_CONTRACT': {
-      const morePage = parseContractMorePage(content);
-      if (morePage != null) {
-        const options = getContractOptions(newPayload);
+      const driverName = String(newPayload.driverName || 'condutor');
+      const options = getContractOptions(newPayload);
+
+      if (isContractOthersSelection(content, textRaw)) {
         if (!options.length) {
           return {
             sendAction: waButtons('Envie novamente o CPF do condutor.'),
@@ -448,13 +596,28 @@ export async function processWhatsAppFuelFlow(params: {
             newPayload,
           };
         }
+        newPayload.contractSelectMode = 'list';
+        newPayload.contractListPage = 0;
+        return {
+          sendAction: buildContractListAction(options, 0, driverName),
+          newStatus,
+          newPayload,
+        };
+      }
+
+      const morePage = parseContractMorePage(content);
+      if (morePage != null) {
+        if (!options.length) {
+          return {
+            sendAction: waButtons('Envie novamente o CPF do condutor.'),
+            newStatus: 'FUEL_ASK_DRIVER_CPF',
+            newPayload,
+          };
+        }
+        newPayload.contractSelectMode = 'list';
         newPayload.contractListPage = morePage;
         return {
-          sendAction: buildContractListAction(
-            options,
-            morePage,
-            String(newPayload.driverName || 'condutor'),
-          ),
+          sendAction: buildContractListAction(options, morePage, driverName),
           newStatus,
           newPayload,
         };
@@ -462,7 +625,16 @@ export async function processWhatsAppFuelFlow(params: {
 
       const selected = parseContractSelection(content, textRaw, newPayload);
       if (!selected) {
-        const options = getContractOptions(newPayload);
+        if (newPayload.contractSelectMode === 'suggest') {
+          const suggested = getSuggestedContract(newPayload);
+          if (suggested) {
+            return {
+              sendAction: buildLastContractSuggestionAction(suggested, driverName),
+              newStatus,
+              newPayload,
+            };
+          }
+        }
         const page = Number(newPayload.contractListPage || 0);
         if (!options.length) {
           return {
@@ -472,11 +644,7 @@ export async function processWhatsAppFuelFlow(params: {
           };
         }
         return {
-          sendAction: buildContractListAction(
-            options,
-            page,
-            String(newPayload.driverName || 'condutor'),
-          ),
+          sendAction: buildContractListAction(options, page, driverName),
           newStatus,
           newPayload,
         };
@@ -705,9 +873,9 @@ export async function processWhatsAppFuelFlow(params: {
     case 'FUEL_COMPLETE': {
       if (isWhatsAppFuelMenuSelection(content)) {
         return {
-          sendAction: waButtons(
+          sendAction: askRefuelDateAction(
             buildFuelFlowStartMessage(
-              `Qual a data para abastecer? (DD/MM/AAAA)\nEx.: ${formatBrDate(todayIso())}`,
+              `Qual a data para abastecer?\nEx.: ${formatBrDate(todayIso())}`,
             ),
           ),
           newStatus: 'FUEL_ASK_REFUEL_DATE',

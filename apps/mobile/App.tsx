@@ -1,8 +1,9 @@
 import React from 'react';
-import { View, Platform, Animated, Easing } from 'react-native';
+import { View, Platform, Animated, Easing, StatusBar as RNStatusBar } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import * as NavigationBar from 'expo-navigation-bar';
-import { NavigationContainer } from '@react-navigation/native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { NavigationContainer, DefaultTheme, DarkTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -61,9 +62,24 @@ const MIN_SPLASH_MS = 1600;
 
 function AppNavigator() {
   const { isAuthenticated, loading } = useAuth();
+  const { isDark } = useTheme();
   const [minSplashDone, setMinSplashDone] = React.useState(false);
   const [bootFade] = React.useState(() => new Animated.Value(1));
   const [showBootSplash, setShowBootSplash] = React.useState(true);
+
+  const navigationTheme = React.useMemo(() => {
+    const base = isDark ? DarkTheme : DefaultTheme;
+    return {
+      ...base,
+      colors: {
+        ...base.colors,
+          // Precisa ser transparente pra o ThemeBackground (padrão engenharia) aparecer
+          // atrás das telas.
+          background: 'transparent',
+          card: 'transparent',
+      },
+    };
+  }, [isDark]);
 
   React.useEffect(() => {
     const t = setTimeout(() => setMinSplashDone(true), MIN_SPLASH_MS);
@@ -99,7 +115,7 @@ function AppNavigator() {
     return (
       <ThemeBackground>
         <View style={{ flex: 1 }}>
-          <NavigationContainer>
+          <NavigationContainer theme={navigationTheme}>
             <Stack.Navigator screenOptions={{ headerShown: false }}>
               <Stack.Screen name="Main" component={BottomTabNavigator} />
             </Stack.Navigator>
@@ -125,7 +141,7 @@ function AppNavigator() {
 
   const shell = (
     <View style={{ flex: 1, backgroundColor: isAuthenticated ? 'transparent' : SPLASH_BG }}>
-      <NavigationContainer>
+      <NavigationContainer theme={navigationTheme}>
         {isAuthenticated ? (
           <>
             <Stack.Navigator
@@ -188,42 +204,56 @@ function OfflineSyncHost() {
 }
 
 function StatusBarComponent() {
-  const { isDark } = useTheme();
+  const { isDark, colors } = useTheme();
   const { isAuthenticated, loading } = useAuth();
   const onAuthSurface = !loading && !isAuthenticated;
   const barStyle = onAuthSurface || isDark ? 'light' : 'dark';
 
   React.useEffect(() => {
     if (Platform.OS !== 'android') return;
-    // SDK 57+: setButtonStyleAsync foi removido; use setStyle
+    // Status bar transparente pra o fundo do app aparecer atrás (vermelho no perfil, etc.)
+    RNStatusBar.setTranslucent(true);
+    RNStatusBar.setBackgroundColor('transparent', true);
     try {
       NavigationBar.setStyle(barStyle === 'light' ? 'light' : 'dark');
+      // Fundo da navigation bar acompanha o tema (quando a API existir)
+      void NavigationBar.setBackgroundColorAsync?.(
+        onAuthSurface ? '#111827' : colors.appShell ?? colors.background ?? '#ffffff',
+      );
     } catch {
       // Expo Go / plataformas sem suporte nativo
     }
-  }, [barStyle]);
+  }, [barStyle, colors.appShell, colors.background, onAuthSurface]);
 
-  return <StatusBar style={barStyle} />;
+  return (
+    <StatusBar
+      style={barStyle}
+      translucent
+      backgroundColor="transparent"
+    />
+  );
 }
 
 export default function App() {
   return (
-    <SafeAreaProvider>
-      <QueryClientProvider client={queryClient}>
-        <ThemeProvider>
-          <AuthProvider>
-            <NotificationsProvider>
-              <ChromeVisibilityProvider>
-                <OfflineSyncHost />
-                <AppNavigator />
-                <StatusBarComponent />
-                <AppToastHost />
-                <RootOverlayToastHost />
-              </ChromeVisibilityProvider>
-            </NotificationsProvider>
-          </AuthProvider>
-        </ThemeProvider>
-      </QueryClientProvider>
-    </SafeAreaProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        <QueryClientProvider client={queryClient}>
+          <ThemeProvider>
+            <AuthProvider>
+              <NotificationsProvider>
+                <ChromeVisibilityProvider>
+                  <OfflineSyncHost />
+                  <AppNavigator />
+                  <StatusBarComponent />
+                  <AppToastHost />
+                  <RootOverlayToastHost />
+                </ChromeVisibilityProvider>
+              </NotificationsProvider>
+            </AuthProvider>
+          </ThemeProvider>
+        </QueryClientProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }
