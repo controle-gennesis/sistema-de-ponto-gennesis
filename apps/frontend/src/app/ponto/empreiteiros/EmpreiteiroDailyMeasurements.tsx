@@ -79,9 +79,9 @@ function asGeoPhotos(raw: PaymentFile[] | TeamGeoPhoto[] | undefined): TeamGeoPh
   if (!Array.isArray(raw)) return [];
   return raw
     .map((item) => {
-      const latitude = Number((item as TeamGeoPhoto).latitude);
-      const longitude = Number((item as TeamGeoPhoto).longitude);
-      const capturedAt = String((item as TeamGeoPhoto).capturedAt || '');
+      const latitude = Number(item.latitude);
+      const longitude = Number(item.longitude);
+      const capturedAt = String(item.capturedAt || '');
       if (
         !item?.url ||
         !Number.isFinite(latitude) ||
@@ -97,9 +97,9 @@ function asGeoPhotos(raw: PaymentFile[] | TeamGeoPhoto[] | undefined): TeamGeoPh
         key: item.key,
         latitude,
         longitude,
-        accuracy: (item as TeamGeoPhoto).accuracy ?? null,
+        accuracy: item.accuracy ?? null,
         capturedAt: new Date(capturedAt).toISOString(),
-        address: (item as TeamGeoPhoto).address ?? null,
+        address: item.address ?? null,
       } satisfies TeamGeoPhoto;
     })
     .filter((item): item is TeamGeoPhoto => item != null);
