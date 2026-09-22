@@ -6,7 +6,7 @@ function normalizePlate(value: string): string {
 
 export function formatVehiclePlateOptionLabel(plate: string, model?: string | null): string {
   const modelPart = model?.trim();
-  const label = modelPart ? `${plate} — ${modelPart}` : plate;
+  const label = modelPart ? `${plate} - ${modelPart}` : plate;
   return label.length > 24 ? `${label.slice(0, 21)}...` : label;
 }
 

@@ -146,7 +146,7 @@ function buildSummary(payload: Record<string, unknown>): string {
     `• Foto do painel: ${hasStoredPhoto(payload.dashboardPhotoUrl, payload.dashboardPhotoKey) ? 'enviada' : '—'}`,
     `• Observações: ${String(payload.observations || '').trim() || '—'}`,
     '',
-    'Confirma o envio? (sim / não)',
+    'Confirma o envio?',
   ].join('\n');
 }
 
@@ -388,7 +388,7 @@ function mapMatchesToOptions(
   return matches.map((vehicle) => ({
     id: vehicle.id,
     plate: formatPlacaDisplay(vehicle.placaVeic),
-    description: [vehicle.marcaVeic, vehicle.modeloVeic].filter(Boolean).join(' ').trim() || undefined,
+    description: vehicle.modeloVeic?.trim() || undefined,
     frotaPartic: vehicle.frotaPartic,
   }));
 }
@@ -734,9 +734,7 @@ export async function processWhatsAppFuelFlow(params: {
         const option: VehicleOptionPayload = {
           id: registered.id,
           plate: formatPlacaDisplay(registered.placaVeic),
-          description:
-            [registered.marcaVeic, registered.modeloVeic].filter(Boolean).join(' ').trim() ||
-            description,
+          description: registered.modeloVeic?.trim() || description,
           frotaPartic: registered.frotaPartic,
         };
         return askDashboardPhoto(applyVehicleToPayload(newPayload, option));
@@ -761,7 +759,7 @@ export async function processWhatsAppFuelFlow(params: {
       newPayload.dashboardPhotoName = savedMedia!.fileName;
       return {
         sendAction: waButtons(
-          'Alguma observação sobre a solicitação? (opcional — digite «não» para pular)',
+          'Alguma observação sobre a solicitação?',
           [
             { id: 'NAO', title: 'Não' },
             { id: 'MENU', title: 'Menu' },
