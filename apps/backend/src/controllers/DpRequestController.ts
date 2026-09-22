@@ -28,6 +28,7 @@ import {
   getDpApprovalNotifyUserIds,
   notifyApproversWhatsApp,
   notifyRequesterApprovedWhatsApp,
+  notifyRequesterCancelledWhatsApp,
 } from '../lib/approvalWhatsAppNotify';
 
 const DP_REQUEST_TYPES = [
@@ -844,6 +845,19 @@ export class DpRequestController {
         });
       }
 
+      if (dpRequest.costCenterId) {
+        const notifyIds = await getDpApprovalNotifyUserIds({
+          contractId: dpRequest.contractId,
+          costCenterId: dpRequest.costCenterId,
+          isSensitive: isSensitiveDpRequestType(dpRequest.requestType),
+          sectorSolicitante: dpRequest.sectorSolicitante,
+        });
+        void notifyApproversWhatsApp(
+          notifyIds,
+          `✅ ${updated.title} aprovada pelo gestor (${approverName}).`
+        );
+      }
+
       return res.json({ success: true, data: updated });
     } catch (e: unknown) {
       const err = e as { statusCode?: number; message?: string };
@@ -908,6 +922,31 @@ export class DpRequestController {
           ),
         },
       });
+
+      const requesterEmployee = await prisma.employee.findUnique({
+        where: { id: dpRequest.employeeId },
+        select: { userId: true },
+      });
+      if (requesterEmployee) {
+        void notifyRequesterCancelledWhatsApp({
+          requesterUserId: requesterEmployee.userId,
+          actorUserId: req.user.id,
+          subjectLine: updated.title,
+        });
+      }
+
+      if (dpRequest.costCenterId) {
+        const notifyIds = await getDpApprovalNotifyUserIds({
+          contractId: dpRequest.contractId,
+          costCenterId: dpRequest.costCenterId,
+          isSensitive: isSensitiveDpRequestType(dpRequest.requestType),
+          sectorSolicitante: dpRequest.sectorSolicitante,
+        });
+        void notifyApproversWhatsApp(
+          notifyIds,
+          `❌ ${updated.title} rejeitada pelo gestor (${rejecterName}).`
+        );
+      }
 
       return res.json({ success: true, data: updated });
     } catch (e: unknown) {
