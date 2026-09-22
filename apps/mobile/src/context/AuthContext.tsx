@@ -3,6 +3,7 @@ import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { User } from '../types';
 import { buildApiUrl } from '../config/api';
+import { setUnauthorizedHandler } from '../services/api';
 import { serializeLoginIdentifier } from '../lib/cpf';
 import {
   authenticateWithBiometrics,
@@ -18,7 +19,7 @@ import {
 interface AuthContextType {
   user: User | null;
   isAuthenticated: boolean;
-  login: (identifier: string, password: string) => Promise<void>;
+  login: (identifier: string, password: string, rememberMe?: boolean) => Promise<void>;
   loginWithBiometrics: () => Promise<void>;
   logout: () => Promise<void>;
   updateUser: (user: User) => Promise<void>;
@@ -76,6 +77,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   useEffect(() => {
     void loadStoredAuth();
+    // Quando o api.ts detecta token expirado/refresh falho, precisa limpar o `user`
+    // em memória — senão a UI segue achando que está autenticado com storage vazio.
+    setUnauthorizedHandler(() => setUser(null));
+    return () => setUnauthorizedHandler(null);
   }, []);
 
   const hydrateUserFromStorage = async () => {
@@ -116,10 +121,20 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       const enabled = await isBiometricEnabled();
       setBiometric({ ...cap, enabled });
 
-      const token = await storage.getItem('token');
-      const userData = await storage.getItem('user');
-      if (token && userData && !enabled) {
-        setUser(JSON.parse(userData));
+      const remembered = await storage.getItem('rememberMe');
+      if (remembered === '0') {
+        // Usuário desmarcou "Lembrar-me" — não restaura a sessão salva ao reabrir o app.
+        // Mantém a preferência salva (não apaga 'rememberMe') pra que o fallback de
+        // login biométrico, mais abaixo, saiba respeitar essa escolha em vez de
+        // presumir rememberMe=true.
+        await storage.removeItem('token');
+        await storage.removeItem('user');
+      } else {
+        const token = await storage.getItem('token');
+        const userData = await storage.getItem('user');
+        if (token && userData && !enabled) {
+          setUser(JSON.parse(userData));
+        }
       }
     } catch (error) {
       console.error('Erro ao carregar dados de autenticação:', error);
@@ -137,7 +152,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     setUser(userData);
   };
 
-  const login = async (identifier: string, password: string) => {
+  const login = async (identifier: string, password: string, rememberMe: boolean = true) => {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10000);
 
@@ -163,6 +178,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       if (!data.success) throw new Error('Erro ao fazer login');
       const { user: userData, token } = data.data;
       await persistSession(userData, token);
+      await storage.setItem('rememberMe', rememberMe ? '1' : '0');
 
       // Só atualiza as credenciais guardadas — não pede Face ID de novo.
       if (await isBiometricEnabled()) {
@@ -196,7 +212,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     if (!creds) {
       throw new Error('Entre com e-mail/CPF e senha no primeiro acesso.');
     }
-    await login(creds.identifier, creds.password);
+    // Respeita a preferência de "Lembrar-me" salva anteriormente — sem isso o fallback
+    // sempre persistia a sessão (default rememberMe=true), revertendo silenciosamente
+    // uma escolha de "não lembrar" que o usuário tinha feito no último login manual.
+    const remembered = await storage.getItem('rememberMe');
+    await login(creds.identifier, creds.password, remembered !== '0');
   };
 
   const enableBiometrics = async (identifier: string, password: string) => {
@@ -223,6 +243,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     } finally {
       await storage.removeItem('token');
       await storage.removeItem('user');
+      await storage.removeItem('rememberMe');
       setUser(null);
     }
   };

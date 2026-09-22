@@ -10,7 +10,7 @@ import {
 import { isOcStatusCoveringRmItems } from '../lib/rmProcurementCoverage';
 import {
   getRmApprovalNotifyUserIds,
-  notifyApproversWhatsApp,
+  notifyNewPendingApprovalWhatsApp,
   notifyRequesterApprovedWhatsApp,
 } from '../lib/approvalWhatsAppNotify';
 
@@ -783,14 +783,9 @@ export class MaterialRequestService {
     );
 
     const approverIds = await getRmApprovalNotifyUserIds(request.costCenterId);
-    void notifyApproversWhatsApp(
+    void notifyNewPendingApprovalWhatsApp(
       approverIds,
-      [
-        '📋 Nova requisição de materiais para aprovação',
-        `Requisição: ${request.requestNumber}`,
-        `Solicitante: ${request.requester?.name ?? 'Colaborador'}`,
-        'Acesse o sistema para analisar.',
-      ].join('\n')
+      `Requisição de materiais ${request.requestNumber} · Solicitante: ${request.requester?.name ?? 'Colaborador'}`
     );
 
     return request;

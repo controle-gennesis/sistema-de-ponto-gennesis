@@ -30,15 +30,22 @@ export async function getBiometricCapability(): Promise<BiometricCapability> {
       : [];
     const facial = types.includes(LocalAuthentication.AuthenticationType.FACIAL_RECOGNITION);
     const finger = types.includes(LocalAuthentication.AuthenticationType.FINGERPRINT);
-    const label = facial
-      ? Platform.OS === 'ios'
-        ? 'Face ID'
-        : 'reconhecimento facial'
-      : finger
+    const iris = types.includes(LocalAuthentication.AuthenticationType.IRIS);
+    // O aparelho só informa quais sensores existem (hardware), não qual credencial a pessoa
+    // cadastrou de fato — em telefones com sensor de digital e de rosto, não dá pra saber qual
+    // foi cadastrado. Só assume um tipo específico quando o hardware só suporta esse único tipo;
+    // caso contrário usa o rótulo genérico, pra não afirmar errado (ex.: "facial" quando cadastrou digital).
+    const supportedCount = [facial, finger, iris].filter(Boolean).length;
+    const label =
+      supportedCount === 1 && finger
         ? Platform.OS === 'ios'
           ? 'Touch ID'
           : 'digital'
-        : 'biometria';
+        : supportedCount === 1 && facial
+          ? Platform.OS === 'ios'
+            ? 'Face ID'
+            : 'reconhecimento facial'
+          : 'biometria';
     return { available: hasHardware && enrolled, enrolled, label };
   } catch {
     return { available: false, enrolled: false, label: 'biometria' };

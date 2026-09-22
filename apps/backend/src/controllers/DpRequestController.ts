@@ -26,7 +26,8 @@ import { assertUserCanManageDpRequest } from '../lib/dpApprovalAccess';
 import { createDpContabilidadeFromConcludedInterna } from '../lib/dpContabilidadeFromInterna';
 import {
   getDpApprovalNotifyUserIds,
-  notifyApproversWhatsApp,
+  notifyApprovalDecisionWhatsApp,
+  notifyNewPendingApprovalWhatsApp,
   notifyRequesterApprovedWhatsApp,
   notifyRequesterCancelledWhatsApp,
 } from '../lib/approvalWhatsAppNotify';
@@ -638,14 +639,9 @@ export class DpRequestController {
           isSensitive: isSensitiveDpRequestType(validated.requestType),
           sectorSolicitante,
         });
-        void notifyApproversWhatsApp(
+        void notifyNewPendingApprovalWhatsApp(
           approverIds,
-          [
-            '📋 Nova solicitação para aprovação',
-            title,
-            `Solicitante: ${employee.user?.name ?? 'Funcionário'}`,
-            'Acesse o sistema para analisar.',
-          ].join('\n')
+          `${title} · Solicitante: ${employee.user?.name ?? 'Funcionário'}`
         );
       }
 
@@ -852,9 +848,11 @@ export class DpRequestController {
           isSensitive: isSensitiveDpRequestType(dpRequest.requestType),
           sectorSolicitante: dpRequest.sectorSolicitante,
         });
-        void notifyApproversWhatsApp(
+        void notifyApprovalDecisionWhatsApp(
           notifyIds,
-          `✅ ${updated.title} aprovada pelo gestor (${approverName}).`
+          updated.title,
+          `Aprovada pelo gestor (${approverName}).`,
+          true
         );
       }
 
@@ -942,9 +940,11 @@ export class DpRequestController {
           isSensitive: isSensitiveDpRequestType(dpRequest.requestType),
           sectorSolicitante: dpRequest.sectorSolicitante,
         });
-        void notifyApproversWhatsApp(
+        void notifyApprovalDecisionWhatsApp(
           notifyIds,
-          `❌ ${updated.title} rejeitada pelo gestor (${rejecterName}).`
+          updated.title,
+          `Rejeitada pelo gestor (${rejecterName}).`,
+          false
         );
       }
 

@@ -23,7 +23,8 @@ import { fixMulterOriginalName } from '../lib/fixUploadFileName';
 import { OrcamentoService } from '../services/OrcamentoService';
 import {
   getFdApprovalNotifyUserIds,
-  notifyApproversWhatsApp,
+  notifyApprovalDecisionWhatsApp,
+  notifyNewPendingApprovalWhatsApp,
   notifyRequesterApprovedWhatsApp,
   notifyRequesterCancelledWhatsApp,
   resolveActorName,
@@ -349,14 +350,9 @@ export class DemandSheetApprovalController {
       });
 
       const approverIds = await getFdApprovalNotifyUserIds(row.contratoId);
-      void notifyApproversWhatsApp(
+      void notifyNewPendingApprovalWhatsApp(
         approverIds,
-        [
-          '📋 Nova ficha de demanda para aprovação',
-          `Ficha: ${row.codFichaDemanda}`,
-          `Obra: ${row.obra}`,
-          'Acesse o sistema para analisar.',
-        ].join('\n')
+        `Ficha de demanda ${row.codFichaDemanda} · Obra: ${row.obra}`
       );
 
       return res.status(201).json({ success: true, data: serializeRow(row) });
@@ -522,9 +518,11 @@ export class DemandSheetApprovalController {
 
       const approverName = await resolveActorName(req.user.id);
       const notifyIds = await getFdApprovalNotifyUserIds(row.contratoId);
-      void notifyApproversWhatsApp(
+      void notifyApprovalDecisionWhatsApp(
         notifyIds,
-        `✅ Ficha de demanda ${row.codFichaDemanda} aprovada pelo gestor (${approverName}).`
+        `Ficha de demanda ${row.codFichaDemanda}`,
+        `Aprovada pelo gestor (${approverName}).`,
+        true
       );
 
       return res.json({ success: true, data: serializeRow(updated) });
@@ -577,9 +575,11 @@ export class DemandSheetApprovalController {
 
       const rejecterName = await resolveActorName(req.user.id);
       const notifyIds = await getFdApprovalNotifyUserIds(row.contratoId);
-      void notifyApproversWhatsApp(
+      void notifyApprovalDecisionWhatsApp(
         notifyIds,
-        `❌ Ficha de demanda ${row.codFichaDemanda} rejeitada pelo gestor (${rejecterName}).`
+        `Ficha de demanda ${row.codFichaDemanda}`,
+        `Rejeitada pelo gestor (${rejecterName}).`,
+        false
       );
 
       return res.json({ success: true, data: serializeRow(updated) });

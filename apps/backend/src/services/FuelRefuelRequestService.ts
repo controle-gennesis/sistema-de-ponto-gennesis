@@ -27,7 +27,8 @@ import {
   buildApprovedByLine,
   getFuelApprovalNotifyUserIds,
   getFuelSuppliesQueueAccessUserIds,
-  notifyApproversWhatsApp,
+  notifyApprovalDecisionWhatsApp,
+  notifyNewPendingApprovalWhatsApp,
   notifyRequesterCancelledWhatsApp,
   resolveActorName,
 } from '../lib/approvalWhatsAppNotify';
@@ -181,14 +182,9 @@ export class FuelRefuelRequestService {
     });
 
     const approverIds = await getFuelApprovalNotifyUserIds(contract.id);
-    void notifyApproversWhatsApp(
+    void notifyNewPendingApprovalWhatsApp(
       approverIds,
-      [
-        '📋 Nova solicitação de abastecimento para aprovação',
-        `Solicitação #${row.displayNumber}`,
-        `Motorista: ${row.driverName}`,
-        'Acesse o sistema para analisar.',
-      ].join('\n')
+      `Solicitação de abastecimento #${row.displayNumber} · Motorista: ${row.driverName}`
     );
 
     return row;
@@ -326,21 +322,18 @@ export class FuelRefuelRequestService {
     if (updated.contractId) {
       const approverName = await resolveActorName(managerId);
       const gestorApproverIds = await getFuelApprovalNotifyUserIds(updated.contractId);
-      void notifyApproversWhatsApp(
+      void notifyApprovalDecisionWhatsApp(
         gestorApproverIds,
-        `✅ Solicitação de abastecimento #${updated.displayNumber} aprovada pelo gestor (${approverName}). Encaminhada para o Suprimentos.`
+        `Solicitação de abastecimento #${updated.displayNumber}`,
+        `Aprovada pelo gestor (${approverName}). Encaminhada para o Suprimentos.`,
+        true
       );
     }
 
     const queueUserIds = await getFuelSuppliesQueueAccessUserIds();
-    void notifyApproversWhatsApp(
+    void notifyNewPendingApprovalWhatsApp(
       queueUserIds,
-      [
-        '📋 Nova solicitação de abastecimento na fila',
-        `Solicitação #${updated.displayNumber} · ${updated.driverName}`,
-        'Aguardando aprovação do Suprimentos.',
-        'Acesse a Fila de Abastecimento para analisar.',
-      ].join('\n')
+      `Solicitação de abastecimento #${updated.displayNumber} · ${updated.driverName} — aguardando Suprimentos`
     );
 
     return updated;
@@ -373,9 +366,11 @@ export class FuelRefuelRequestService {
     if (updated.contractId) {
       const rejecterName = await resolveActorName(managerId);
       const gestorApproverIds = await getFuelApprovalNotifyUserIds(updated.contractId);
-      void notifyApproversWhatsApp(
+      void notifyApprovalDecisionWhatsApp(
         gestorApproverIds,
-        `❌ Solicitação de abastecimento #${updated.displayNumber} rejeitada pelo gestor (${rejecterName}).`
+        `Solicitação de abastecimento #${updated.displayNumber}`,
+        `Rejeitada pelo gestor (${rejecterName}).`,
+        false
       );
     }
 

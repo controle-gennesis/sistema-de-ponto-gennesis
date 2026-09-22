@@ -745,10 +745,8 @@ export default function SolicitacoesReservaVeiculosPage() {
                                 <span className="text-gray-500 dark:text-gray-400">A definir</span>
                               )}
                             </td>
-                            <td className="max-w-[12rem] px-3 py-4 text-center text-gray-900 dark:text-gray-100 sm:px-6">
-                              <span className="block truncate" title={row.motorista}>
-                                {row.motorista}
-                              </span>
+                            <td className="px-3 py-4 text-center text-gray-900 dark:text-gray-100 sm:px-6">
+                              {row.motorista}
                             </td>
                             <td className="max-w-[180px] truncate px-3 py-4 text-center text-gray-900 dark:text-gray-100 sm:px-6">
                               {row.contrato || '—'}

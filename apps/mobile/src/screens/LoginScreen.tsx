@@ -234,7 +234,7 @@ export default function LoginScreen({ fromBootSplash = true }: Props) {
     setError('');
     setLoading(true);
     try {
-      await login(trimmedIdentifier, password);
+      await login(trimmedIdentifier, password, rememberMe);
       Toast.show({
         type: 'success',
         text1: 'Bem-vindo',

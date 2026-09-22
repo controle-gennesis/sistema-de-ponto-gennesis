@@ -127,6 +127,7 @@ import pncpRoutes from './routes/pncp';
 import { startPncpSyncScheduler } from './services/PncpIngestService';
 import { startNfeAutoFetchScheduler } from './services/NfeRecebidaAutoFetch';
 import { startGoogleCalendarAutoSyncScheduler } from './services/googleCalendarSync';
+import { startBirthdayGreetingScheduler } from './services/BirthdayGreetingScheduler';
 import { ensureNfeSecretsFromEnv } from './lib/ensureNfeSecretsFromEnv';
 import { ensureNfeJavaRuntime } from './lib/ensureNfeJavaRuntime';
 import { logNfeRuntimeStatus } from './services/NfeRecebidaService';
@@ -621,6 +622,12 @@ try {
         startGoogleCalendarAutoSyncScheduler();
       } catch (e) {
         console.error('[google-sync] falha ao agendar:', e);
+      }
+
+      try {
+        startBirthdayGreetingScheduler();
+      } catch (e) {
+        console.error('[birthday-greeting] falha ao agendar:', e);
       }
     })();
 

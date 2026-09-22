@@ -22,7 +22,7 @@ import {
 } from '../lib/ocApprovalAccess';
 import {
   getOcApprovalNotifyUserIds,
-  notifyApproversWhatsApp,
+  notifyNewPendingApprovalWhatsApp,
   notifyRequesterApprovedWhatsApp,
 } from '../lib/approvalWhatsAppNotify';
 
@@ -1124,14 +1124,9 @@ export class PurchaseOrderService {
       phase,
       costCenterId: row.materialRequest?.costCenter?.id ?? null,
     });
-    void notifyApproversWhatsApp(
+    void notifyNewPendingApprovalWhatsApp(
       approverIds,
-      [
-        '📋 Nova ordem de compra para aprovação',
-        `OC: ${row.orderNumber}`,
-        `Fornecedor: ${row.supplier?.name ?? '—'}`,
-        'Acesse o sistema para analisar.',
-      ].join('\n'),
+      `Ordem de compra ${row.orderNumber} · Fornecedor: ${row.supplier?.name ?? '—'}`
     );
   }
 

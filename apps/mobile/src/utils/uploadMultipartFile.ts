@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import { File, UploadType } from 'expo-file-system';
 import { buildApiUrl } from '../config/api';
-import api from '../services/api';
+import api, { refreshAuthToken } from '../services/api';
 
 async function getAuthToken(): Promise<string | null> {
   try {
@@ -58,15 +58,27 @@ export async function uploadMultipartFile<T = unknown>(
     return (json?.data ?? json) as T;
   }
 
-  const token = await getAuthToken();
-  const result = await new File(file.uri).upload(buildApiUrl(path), {
-    uploadType: UploadType.MULTIPART,
-    fieldName,
-    mimeType: file.type || 'image/jpeg',
-    httpMethod: method,
-    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-    parameters: fields,
-  });
+  const doUpload = (token: string | null) =>
+    new File(file.uri).upload(buildApiUrl(path), {
+      uploadType: UploadType.MULTIPART,
+      fieldName,
+      mimeType: file.type || 'image/jpeg',
+      httpMethod: method,
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      parameters: fields,
+    });
+
+  let result = await doUpload(await getAuthToken());
+
+  // Esse upload nativo não passa pelo apiRequest (que faz refresh automático), então
+  // sem isso um token expirado bem na hora de bater o ponto/tirar a foto de perfil
+  // resultava num erro genérico até a pessoa sair e entrar de novo manualmente.
+  if (result.status === 401) {
+    const newToken = await refreshAuthToken();
+    if (newToken) {
+      result = await doUpload(newToken);
+    }
+  }
 
   let json: { message?: string; error?: string; data?: T } = {};
   try {

@@ -10,13 +10,43 @@ import { CONTRACTS_MODULE_KEY } from './contractAccess';
 /** Igual ao gate de acesso da página Fila de Abastecimento (usePermissions.ts). */
 const FUEL_SUPPLIES_QUEUE_MODULE_KEY = pathToModuleKey('/ponto/solicitacoes-combustivel');
 
-/** Envia sem lançar — falha de WhatsApp nunca deve derrubar a criação da solicitação. */
-async function sendApprovalWhatsApp(phone: string, text: string): Promise<void> {
+/** Idioma cadastrado nos templates no Meta Business Manager. */
+const TEMPLATE_LANGUAGE = 'pt_BR';
+
+/**
+ * Templates aprovados no Meta Business Manager (WhatsApp Manager > Modelos de mensagem).
+ * Usar template — em vez de texto livre — é o que permite avisar alguém que nunca
+ * conversou com o bot, ou que não fala há mais de 24h (fora dessa janela, a Meta bloqueia
+ * mensagem de texto livre iniciada pela empresa).
+ */
+type ApprovalTemplateName =
+  | 'nova_solicitacao_pendente'
+  | 'solicitacao_aprovada'
+  | 'solicitacao_rejeitada'
+  | 'solicitacao_cancelada';
+
+/** Envia sem lançar — falha de WhatsApp nunca deve derrubar a criação/decisão da solicitação. */
+async function sendApprovalTemplate(
+  phone: string,
+  template: ApprovalTemplateName,
+  bodyParams: string[]
+): Promise<void> {
   try {
-    await metaWhatsApp.sendText(phone, text);
+    await metaWhatsApp.sendTemplate(phone, template, TEMPLATE_LANGUAGE, bodyParams);
   } catch (err) {
     console.error('[ApprovalWhatsAppNotify] Falha ao enviar WhatsApp:', err);
   }
+}
+
+/** Telefones (Employee.phone) únicos e não vazios de uma lista de userIds. */
+async function resolvePhonesForUserIds(userIds: string[]): Promise<string[]> {
+  const uniqueIds = [...new Set(userIds.filter(Boolean))];
+  if (uniqueIds.length === 0) return [];
+  const employees = await prisma.employee.findMany({
+    where: { userId: { in: uniqueIds }, phone: { not: null } },
+    select: { phone: true },
+  });
+  return [...new Set(employees.map((e) => e.phone!.trim()).filter(Boolean))];
 }
 
 /** Nome de exibição do ator (aprovador/rejeitador), pra usar em mensagens de broadcast. */
@@ -42,6 +72,20 @@ export async function buildApprovedByLine(
   return name ? `Aprovada por ${name}.` : 'Solicitação aprovada.';
 }
 
+/**
+ * Linha "Cancelada por Fulano." — ou "Você cancelou esta solicitação." quando quem cancelou
+ * é o próprio solicitante.
+ */
+async function buildCancelledByLine(requesterUserId: string, actorUserId: string): Promise<string> {
+  if (actorUserId === requesterUserId) return 'Você cancelou esta solicitação.';
+  const actor = await prisma.user.findUnique({
+    where: { id: actorUserId },
+    select: { name: true },
+  });
+  const name = actor?.name?.trim();
+  return name ? `Cancelada por ${name}.` : 'Solicitação cancelada.';
+}
+
 /** Avisa o solicitante original (Employee.phone) que a solicitação dele foi aprovada. Nunca lança. */
 export async function notifyRequesterApprovedWhatsApp(params: {
   requesterUserId: string;
@@ -56,24 +100,10 @@ export async function notifyRequesterApprovedWhatsApp(params: {
     const phone = employee?.phone?.trim();
     if (!phone) return;
     const approvedLine = await buildApprovedByLine(params.requesterUserId, params.approverUserId);
-    await sendApprovalWhatsApp(phone, [`✅ ${params.subjectLine}`, approvedLine].join('\n'));
+    await sendApprovalTemplate(phone, 'solicitacao_aprovada', [params.subjectLine, approvedLine]);
   } catch (err) {
     console.error('[ApprovalWhatsAppNotify] Falha ao notificar aprovação ao solicitante:', err);
   }
-}
-
-/**
- * Linha "Cancelada por Fulano." — ou "Você cancelou esta solicitação." quando quem cancelou
- * é o próprio solicitante.
- */
-async function buildCancelledByLine(requesterUserId: string, actorUserId: string): Promise<string> {
-  if (actorUserId === requesterUserId) return 'Você cancelou esta solicitação.';
-  const actor = await prisma.user.findUnique({
-    where: { id: actorUserId },
-    select: { name: true },
-  });
-  const name = actor?.name?.trim();
-  return name ? `Cancelada por ${name}.` : 'Solicitação cancelada.';
 }
 
 /** Avisa o solicitante original (Employee.phone) que a solicitação dele foi cancelada. Nunca lança. */
@@ -90,25 +120,47 @@ export async function notifyRequesterCancelledWhatsApp(params: {
     const phone = employee?.phone?.trim();
     if (!phone) return;
     const cancelledLine = await buildCancelledByLine(params.requesterUserId, params.actorUserId);
-    await sendApprovalWhatsApp(phone, [`❌ ${params.subjectLine}`, cancelledLine].join('\n'));
+    await sendApprovalTemplate(phone, 'solicitacao_cancelada', [params.subjectLine, cancelledLine]);
   } catch (err) {
     console.error('[ApprovalWhatsAppNotify] Falha ao notificar cancelamento ao solicitante:', err);
   }
 }
 
-/** Dispara em paralelo para todos os userIds com telefone cadastrado (Employee.phone). Nunca lança. */
-export async function notifyApproversWhatsApp(userIds: string[], text: string): Promise<void> {
+/** Avisa (template «nova_solicitacao_pendente») todo mundo com telefone cadastrado nos userIds dados. Nunca lança. */
+export async function notifyNewPendingApprovalWhatsApp(
+  userIds: string[],
+  subjectLine: string
+): Promise<void> {
   try {
-    const uniqueIds = [...new Set(userIds.filter(Boolean))];
-    if (uniqueIds.length === 0) return;
-    const employees = await prisma.employee.findMany({
-      where: { userId: { in: uniqueIds }, phone: { not: null } },
-      select: { phone: true },
-    });
-    const phones = [...new Set(employees.map((e) => e.phone!.trim()).filter(Boolean))];
-    await Promise.allSettled(phones.map((phone) => sendApprovalWhatsApp(phone, text)));
+    const phones = await resolvePhonesForUserIds(userIds);
+    if (phones.length === 0) return;
+    await Promise.allSettled(
+      phones.map((phone) => sendApprovalTemplate(phone, 'nova_solicitacao_pendente', [subjectLine]))
+    );
   } catch (err) {
-    console.error('[ApprovalWhatsAppNotify] Falha ao resolver aprovadores:', err);
+    console.error('[ApprovalWhatsAppNotify] Falha ao resolver aprovadores (nova pendência):', err);
+  }
+}
+
+/**
+ * Avisa (template «solicitacao_aprovada» ou «solicitacao_rejeitada») todo mundo com telefone
+ * cadastrado nos userIds dados sobre a decisão tomada. Nunca lança.
+ */
+export async function notifyApprovalDecisionWhatsApp(
+  userIds: string[],
+  subjectLine: string,
+  decisionLine: string,
+  approved: boolean
+): Promise<void> {
+  try {
+    const phones = await resolvePhonesForUserIds(userIds);
+    if (phones.length === 0) return;
+    const template: ApprovalTemplateName = approved ? 'solicitacao_aprovada' : 'solicitacao_rejeitada';
+    await Promise.allSettled(
+      phones.map((phone) => sendApprovalTemplate(phone, template, [subjectLine, decisionLine]))
+    );
+  } catch (err) {
+    console.error('[ApprovalWhatsAppNotify] Falha ao resolver aprovadores (decisão):', err);
   }
 }
 

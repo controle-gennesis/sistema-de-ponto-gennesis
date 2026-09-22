@@ -134,12 +134,24 @@ function userOwnsReservation(
   return userName.length > 0 && userName === solicitante;
 }
 
+/** Motorista é texto livre (sem vínculo de usuário) — só dá pra comparar pelo nome. */
+function userIsReservationDriver(
+  reservation: { motorista: string },
+  user: { name?: string }
+): boolean {
+  const userName = String(user.name ?? '').trim().toLowerCase();
+  const motorista = reservation.motorista.trim().toLowerCase();
+  return userName.length > 0 && userName === motorista;
+}
+
+/** Quem pode dar baixa: admin, quem solicitou (criou/nome bate com solicitante) ou o motorista da reserva. */
 function userCanSubmitReturn(
-  reservation: { createdById: string | null; solicitante: string },
+  reservation: { createdById: string | null; solicitante: string; motorista: string },
   user: { id: string; name?: string; isAdmin?: boolean }
 ): boolean {
   if (user.isAdmin) return true;
-  return userOwnsReservation(reservation, user);
+  if (userOwnsReservation(reservation, user)) return true;
+  return userIsReservationDriver(reservation, user);
 }
 
 async function buildListWhere(

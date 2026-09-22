@@ -33,6 +33,55 @@ let failedQueue: Array<{
   reject: (reason?: any) => void;
 }> = [];
 
+// Avisa o AuthContext quando a sessão é encerrada aqui dentro (token expirado/refresh
+// falhou), pra ele limpar o `user` em memória — sem isso a UI continuava mostrando o
+// app como autenticado mesmo com o storage já vazio.
+type UnauthorizedHandler = () => void;
+let unauthorizedHandler: UnauthorizedHandler | null = null;
+export const setUnauthorizedHandler = (handler: UnauthorizedHandler | null) => {
+  unauthorizedHandler = handler;
+};
+
+const clearSessionAndNotify = async () => {
+  await storage.removeItem('token');
+  await storage.removeItem('user');
+  unauthorizedHandler?.();
+};
+
+/**
+ * Tenta renovar o token de acesso usando o refresh-token armazenado.
+ * Retorna o novo token em caso de sucesso, ou `null` (e já limpa a sessão) em caso de falha.
+ */
+export const refreshAuthToken = async (): Promise<string | null> => {
+  const token = await storage.getItem('token');
+  if (!token) {
+    await clearSessionAndNotify();
+    return null;
+  }
+  try {
+    const refreshResponse = await fetch(buildApiUrl('/api/auth/refresh-token'), {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+    });
+    if (!refreshResponse.ok) {
+      throw new Error('Erro ao fazer refresh do token');
+    }
+    const refreshData = await refreshResponse.json();
+    const newToken = refreshData?.data?.token;
+    if (!newToken) {
+      throw new Error('Token não recebido na resposta de refresh');
+    }
+    await storage.setItem('token', newToken);
+    return newToken;
+  } catch {
+    await clearSessionAndNotify();
+    return null;
+  }
+};
+
 const processQueue = (error: any, token: string | null = null) => {
   failedQueue.forEach((prom) => {
     if (error) {
@@ -101,66 +150,29 @@ export const apiRequest = async (
       }
 
       isRefreshing = true;
-      const token = await storage.getItem('token');
+      const newToken = await refreshAuthToken();
+      isRefreshing = false;
 
-      // Se não tem token, retornar erro
-      if (!token) {
-        isRefreshing = false;
-        await storage.removeItem('token');
-        await storage.removeItem('user');
-        return response; // Retorna o erro 401 original
-      }
+      if (newToken) {
+        // Processar fila de requisições pendentes
+        processQueue(null, newToken);
 
-      try {
-        // Tentar fazer refresh do token
-        const refreshResponse = await fetch(buildApiUrl('/api/auth/refresh-token'), {
-          method: 'POST',
+        // Retentar a requisição original com novo token
+        const retryOptions = {
+          ...fetchOptions,
           headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json',
+            ...fetchOptions.headers,
+            Authorization: `Bearer ${newToken}`,
           },
-        });
-
-        if (refreshResponse.ok) {
-          const refreshData = await refreshResponse.json();
-          const newToken = refreshData?.data?.token;
-
-          if (newToken) {
-            // Atualizar token no storage
-            await storage.setItem('token', newToken);
-
-            // Processar fila de requisições pendentes
-            processQueue(null, newToken);
-
-            isRefreshing = false;
-
-            // Retentar a requisição original com novo token
-            const retryOptions = {
-              ...fetchOptions,
-              headers: {
-                ...fetchOptions.headers,
-                Authorization: `Bearer ${newToken}`,
-              },
-              _retry: true,
-            };
-            return fetch(url, retryOptions);
-          } else {
-            throw new Error('Token não recebido na resposta de refresh');
-          }
-        } else {
-          throw new Error('Erro ao fazer refresh do token');
-        }
-      } catch (refreshError) {
-        // Se falhar o refresh, processar fila com erro
-        processQueue(refreshError, null);
-        isRefreshing = false;
-
-        await storage.removeItem('token');
-        await storage.removeItem('user');
-        
-        // Retornar o erro original
-        return response;
+          _retry: true,
+        };
+        return fetch(url, retryOptions);
       }
+
+      // Refresh falhou (ou não havia token) — refreshAuthToken já limpou a sessão
+      // e avisou o AuthContext. Processa a fila com erro e retorna o 401 original.
+      processQueue(new Error('Sessão expirada'), null);
+      return response;
     }
 
     return response;

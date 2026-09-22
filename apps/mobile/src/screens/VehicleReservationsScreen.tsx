@@ -865,7 +865,8 @@ export default function VehicleReservationsScreen() {
     r.status === 'APPROVED' &&
     (user?.role === 'ADMIN' ||
       r.createdBy?.id === user?.id ||
-      r.solicitante === user?.name);
+      r.solicitante === user?.name ||
+      r.motorista === user?.name);
 
   const canDelete = (r: VehicleReservation) => r.status === 'PENDING_SUPPLIES';
 

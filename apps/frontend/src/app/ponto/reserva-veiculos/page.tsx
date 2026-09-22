@@ -615,8 +615,11 @@ export default function ReservaVeiculosPage() {
     const userId = String(userData?.data?.id ?? '');
     if (userData?.data?.isAdmin) return true;
     if (reservation.createdBy?.id && reservation.createdBy.id === userId) return true;
+    if (userName.length === 0) return false;
     const solicitante = reservation.solicitante.trim().toLowerCase();
-    return userName.length > 0 && userName === solicitante;
+    if (userName === solicitante) return true;
+    const motorista = reservation.motorista.trim().toLowerCase();
+    return userName === motorista;
   };
 
   const buildRowExtraMenuItems = (reservation: VehicleReservation): RowActionMenuExtraItem[] => {
