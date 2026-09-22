@@ -19,6 +19,12 @@ async function sendApprovalWhatsApp(phone: string, text: string): Promise<void> 
   }
 }
 
+/** Nome de exibição do ator (aprovador/rejeitador), pra usar em mensagens de broadcast. */
+export async function resolveActorName(userId: string): Promise<string> {
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { name: true } });
+  return user?.name?.trim() || 'alguém';
+}
+
 /**
  * Linha "Aprovada por Fulano." — ou "Você aprovou esta solicitação." quando o aprovador é o
  * próprio solicitante (ex.: admin que aprova o próprio pedido).

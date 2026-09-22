@@ -18,6 +18,7 @@ import { findUserIdsMatchingSearch, findIdsByUnaccentSearch } from '../lib/norma
 import { createError } from '../middleware/errorHandler';
 import {
   notifyFuelRequesterApprovedBySupplies,
+  notifyFuelRequesterRejectedByManager,
   notifyFuelRequesterRejectedBySupplies,
   notifyFuelRequesterReportCompleted,
   notifyFuelRequesterWaitingSupplies,
@@ -28,6 +29,7 @@ import {
   getFuelSuppliesQueueAccessUserIds,
   notifyApproversWhatsApp,
   notifyRequesterCancelledWhatsApp,
+  resolveActorName,
 } from '../lib/approvalWhatsAppNotify';
 
 export type CreateFuelRefuelRequestInput = {
@@ -321,10 +323,14 @@ export class FuelRefuelRequestService {
       approvedByLine,
     );
 
-    void notifyApproversWhatsApp(
-      [managerId],
-      `✅ Você aprovou a solicitação de abastecimento #${updated.displayNumber}. Encaminhada para o Suprimentos.`
-    );
+    if (updated.contractId) {
+      const approverName = await resolveActorName(managerId);
+      const gestorApproverIds = await getFuelApprovalNotifyUserIds(updated.contractId);
+      void notifyApproversWhatsApp(
+        gestorApproverIds,
+        `✅ Solicitação de abastecimento #${updated.displayNumber} aprovada pelo gestor (${approverName}). Encaminhada para o Suprimentos.`
+      );
+    }
 
     const queueUserIds = await getFuelSuppliesQueueAccessUserIds();
     void notifyApproversWhatsApp(
@@ -346,7 +352,7 @@ export class FuelRefuelRequestService {
       throw createError('Esta solicitação não está aguardando aprovação', 400);
     }
 
-    return prisma.fuelRefuelRequest.update({
+    const updated = await prisma.fuelRefuelRequest.update({
       where: { id },
       data: {
         status: FuelRefuelRequestStatus.REJECTED,
@@ -356,6 +362,24 @@ export class FuelRefuelRequestService {
       },
       include: fuelRefuelInclude,
     });
+
+    await notifyFuelRequesterRejectedByManager(
+      updated.sourceChatId,
+      updated.displayNumber,
+      reason,
+      updated.sourceWhatsAppPhone,
+    );
+
+    if (updated.contractId) {
+      const rejecterName = await resolveActorName(managerId);
+      const gestorApproverIds = await getFuelApprovalNotifyUserIds(updated.contractId);
+      void notifyApproversWhatsApp(
+        gestorApproverIds,
+        `❌ Solicitação de abastecimento #${updated.displayNumber} rejeitada pelo gestor (${rejecterName}).`
+      );
+    }
+
+    return updated;
   }
 
   async cancel(id: string, actorId: string, opts?: { asSupplies?: boolean }) {
@@ -462,17 +486,6 @@ export class FuelRefuelRequestService {
       updated.sourceWhatsAppPhone,
     );
 
-    const queueUserIds = await getFuelSuppliesQueueAccessUserIds();
-    void notifyApproversWhatsApp(
-      queueUserIds,
-      [
-        '✅ Solicitação de abastecimento aprovada',
-        `Solicitação #${updated.displayNumber} · ${updated.driverName}`,
-        `Posto: ${gasStation.name}`,
-        'Liberada para abastecer.',
-      ].join('\n')
-    );
-
     return updated;
   }
 
@@ -499,6 +512,7 @@ export class FuelRefuelRequestService {
       reason,
       updated.sourceWhatsAppPhone,
     );
+
     return updated;
   }
 

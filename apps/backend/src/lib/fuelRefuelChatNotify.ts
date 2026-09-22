@@ -147,6 +147,24 @@ export async function notifyFuelRequesterApprovedBySupplies(
   await notifyFuelRequester(sourceChatId, sourceWhatsAppPhone, lines.join('\n'));
 }
 
+export async function notifyFuelRequesterRejectedByManager(
+  sourceChatId: string | null | undefined,
+  displayNumber: number,
+  reason: string,
+  sourceWhatsAppPhone?: string | null,
+) {
+  await notifyFuelRequester(
+    sourceChatId,
+    sourceWhatsAppPhone,
+    [
+      `❌ Solicitação #${displayNumber} não aprovada pelo gestor.`,
+      reason.trim() ? `Motivo: ${reason.trim()}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n'),
+  );
+}
+
 export async function notifyFuelRequesterRejectedBySupplies(
   sourceChatId: string | null | undefined,
   displayNumber: number,
