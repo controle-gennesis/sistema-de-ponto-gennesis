@@ -422,13 +422,26 @@ export class FuelRefuelRequestController {
         parseImageContentType(body.dashboardPhotoBase64),
       );
 
+      // Quando o contrato é escolhido explicitamente no formulário, o rótulo salvo deve
+      // refletir esse contrato — não o centro de custo do condutor (podem ser diferentes).
+      let costCenterForRow = costCenterLabel;
+      if (body.contractId) {
+        const chosenContract = await prisma.contract.findUnique({
+          where: { id: body.contractId },
+          select: { name: true, number: true },
+        });
+        if (chosenContract) {
+          costCenterForRow = chosenContract.name?.trim() || chosenContract.number;
+        }
+      }
+
       const row = await fuelRefuelRequestService.create({
         requesterId: user.id,
         refuelDate,
         route: body.route,
         satelliteCityCode: body.satelliteCityCode,
         contractId: body.contractId || driverContractId || undefined,
-        costCenter: costCenterLabel,
+        costCenter: costCenterForRow,
         driverName,
         vehiclePlate: body.vehiclePlate,
         vehicleDescription: body.vehicleDescription,

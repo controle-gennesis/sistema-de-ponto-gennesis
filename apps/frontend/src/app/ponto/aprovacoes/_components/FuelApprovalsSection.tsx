@@ -90,11 +90,12 @@ function fuelContractLabel(row: {
   costCenter?: string | null;
   contract?: { number?: string; name?: string } | null;
 }): string {
-  if (row.costCenter?.trim()) return row.costCenter.trim();
   if (row.contract?.number && row.contract?.name) {
     return `${row.contract.number} — ${row.contract.name}`;
   }
-  return row.contract?.number || row.contract?.name || '—';
+  if (row.contract?.name?.trim()) return row.contract.name.trim();
+  if (row.contract?.number?.trim()) return row.contract.number.trim();
+  return row.costCenter?.trim() || '—';
 }
 
 const VEHICLE_TYPE_LABELS: Record<FuelVehicleType, string> = {
