@@ -8401,10 +8401,11 @@ export function OrcamentoPageView({
     setDraftCalc(p => { const n = { ...p }; delete n[draftKey]; return n; });
   };
 
-  const handleCalcChange = (draftKey: string, raw: string, onCommit: (n: number) => void) => {
+  const handleCalcChange = (draftKey: string, raw: string, _onCommit: (n: number) => void) => {
+    // Só atualiza o rascunho local enquanto digita — commitar a cada tecla recalculava o
+    // orçamento inteiro (useMemo de itensCalculados) a cada caractere, travando a página em
+    // orçamentos grandes. O valor só é aplicado de fato no onBlur (handleCalcBlur).
     setDraftCalc(p => ({ ...p, [draftKey]: raw }));
-    const n = parseCalcOrNumber(raw);
-    if (n !== null) onCommit(n);
   };
 
   const commitPlanilhaQtdCompra = useCallback((lineKey: string, raw: string) => {
@@ -11704,7 +11705,8 @@ export function OrcamentoPageView({
                   </div>
                 )}
 
-                <div className={!loadingFromApi && orcamentoViewTab === 'montagem' ? 'space-y-6' : 'hidden'}>
+                {!loadingFromApi && orcamentoViewTab === 'montagem' && (
+                <div className="space-y-6">
                 {subtitulosAdicionados.length === 0 && !loadingFromApi && (
                   <div role="status" className={ORCAMENTO_SECAO_VAZIA_SHELL}>
                     <div className={`mb-5 ${ORCAMENTO_ICON_SOFT_BOX}`}>
@@ -12036,20 +12038,19 @@ export function OrcamentoPageView({
                                         {row.tipoUnidade !== 'un' ? (
                                           <span className="text-sm font-medium text-gray-900 dark:text-gray-100">{row.quantidade.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</span>
                                         ) : (
-                                          <input
-                                            type="text"
-                                            inputMode="decimal"
-                                            value={
-                                              draftCalc[`qtd|${row.key}`] ??
-                                              (row.quantidade === 0
+                                          <FdCampoLocal
+                                            committedValue={
+                                              row.quantidade === 0
                                                 ? ''
                                                 : row.quantidade.toLocaleString('pt-BR', {
                                                     minimumFractionDigits: 2,
                                                     maximumFractionDigits: 4
-                                                  }))
+                                                  })
                                             }
-                                            onChange={e => handleCalcChange(`qtd|${row.key}`, e.target.value, n => setQuantidadeItem(row.key, Math.max(0, n)))}
-                                            onBlur={e => handleCalcBlur(`qtd|${row.key}`, draftCalc[`qtd|${row.key}`] ?? e.target.value, n => setQuantidadeItem(row.key, Math.max(0, n)))}
+                                            onCommit={raw =>
+                                              setQuantidadeItem(row.key, Math.max(0, parseMedicaoBlurNumber(raw) ?? 0))
+                                            }
+                                            inputMode="decimal"
                                             placeholder="0"
                                             className={`${inputGradeCls} text-center tabular-nums`}
                                           />
@@ -12163,6 +12164,7 @@ export function OrcamentoPageView({
                   </>
                 )}
                 </div>
+                )}
               </CardContent>
             </Card>
           )}

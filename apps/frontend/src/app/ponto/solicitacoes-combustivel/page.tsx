@@ -1009,32 +1009,32 @@ export default function SolicitacoesCombustivelPage() {
                   <div className={cadastroListClasses.tableScroll}>
                     <table
                       className={`${cadastroListClasses.table} table-fixed${
-                        showFuelValueColumns ? ' min-w-[64rem]' : ''
+                        showFuelValueColumns ? ' min-w-[64rem]' : ' min-w-[50rem]'
                       }`}
                     >
                       <colgroup>
                         {showFuelValueColumns ? (
                           <>
                             <col className="w-[5%]" />
-                            <col className="w-[12%]" />
-                            <col className="w-[10%]" />
-                            <col className="w-[10%]" />
-                            <col className="w-[12%]" />
+                            <col className="w-[16%]" />
+                            <col className="w-[9%]" />
+                            <col className="w-[14%]" />
+                            <col className="w-[11%]" />
+                            <col className="w-[6%]" />
                             <col className="w-[7%]" />
-                            <col className="w-[9%]" />
+                            <col className="w-[8%]" />
+                            <col className="w-[8%]" />
                             <col className="w-[10%]" />
-                            <col className="w-[10%]" />
-                            <col className="w-[9%]" />
                             <col className="w-[6%]" />
                           </>
                         ) : (
                           <>
-                            <col className="w-[6%]" />
-                            <col className="w-[18%]" />
-                            <col className="w-[12%]" />
-                            <col className="w-[14%]" />
+                            <col className="w-[5%]" />
                             <col className="w-[22%]" />
-                            <col className="w-[10%]" />
+                            <col className="w-[11%]" />
+                            <col className="w-[18%]" />
+                            <col className="w-[18%]" />
+                            <col className="w-[8%]" />
                             <col className="w-[12%]" />
                             <col className="w-[6%]" />
                           </>
@@ -1082,7 +1082,7 @@ export default function SolicitacoesCombustivelPage() {
                                 {row.displayNumber}
                               </ListRowNavigableLabel>
                             </td>
-                            <td className={`${cadastroListClasses.tdTruncate} truncate`} title={row.requester.name}>
+                            <td className={`${cadastroListClasses.tdTruncate} whitespace-nowrap`}>
                               {row.requester.name}
                             </td>
                             <td className={cadastroListClasses.tdCenter}>
@@ -1099,10 +1099,7 @@ export default function SolicitacoesCombustivelPage() {
                                 </p>
                               </div>
                             </td>
-                            <td
-                              className={`${cadastroListClasses.tdCenter} truncate`}
-                              title={fuelContractLabel(row)}
-                            >
+                            <td className={cadastroListClasses.tdCenter}>
                               {fuelContractLabel(row)}
                             </td>
                             <td className={`${cadastroListClasses.tdCenter} min-w-0`}>
@@ -1155,7 +1152,7 @@ export default function SolicitacoesCombustivelPage() {
                             ) : null}
                             <td className={cadastroListClasses.tdCenter}>
                               <span
-                                className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${STATUS_BADGE[row.status]}`}
+                                className={`inline-flex whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-semibold ${STATUS_BADGE[row.status]}`}
                               >
                                 {STATUS_LABELS[row.status]}
                               </span>
