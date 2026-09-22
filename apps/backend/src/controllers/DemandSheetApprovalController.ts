@@ -25,6 +25,8 @@ import {
   getFdApprovalNotifyUserIds,
   notifyApproversWhatsApp,
   notifyRequesterApprovedWhatsApp,
+  notifyRequesterCancelledWhatsApp,
+  resolveActorName,
 } from '../lib/approvalWhatsAppNotify';
 
 const fdModuleKey = pathToModuleKey('/ponto/aprovacao-fds');
@@ -518,6 +520,13 @@ export class DemandSheetApprovalController {
         subjectLine: `Ficha de demanda ${row.codFichaDemanda}`,
       });
 
+      const approverName = await resolveActorName(req.user.id);
+      const notifyIds = await getFdApprovalNotifyUserIds(row.contratoId);
+      void notifyApproversWhatsApp(
+        notifyIds,
+        `✅ Ficha de demanda ${row.codFichaDemanda} aprovada pelo gestor (${approverName}).`
+      );
+
       return res.json({ success: true, data: serializeRow(updated) });
     } catch (e: unknown) {
       const err = e as { statusCode?: number; message?: string };
@@ -559,6 +568,19 @@ export class DemandSheetApprovalController {
       });
 
       await syncOrcamentoStatusFromFd(updated.anexos, 'em_correcao');
+
+      void notifyRequesterCancelledWhatsApp({
+        requesterUserId: row.solicitanteId,
+        actorUserId: req.user.id,
+        subjectLine: `Ficha de demanda ${row.codFichaDemanda}`,
+      });
+
+      const rejecterName = await resolveActorName(req.user.id);
+      const notifyIds = await getFdApprovalNotifyUserIds(row.contratoId);
+      void notifyApproversWhatsApp(
+        notifyIds,
+        `❌ Ficha de demanda ${row.codFichaDemanda} rejeitada pelo gestor (${rejecterName}).`
+      );
 
       return res.json({ success: true, data: serializeRow(updated) });
     } catch (e: unknown) {
