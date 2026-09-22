@@ -56,6 +56,40 @@ export async function notifyRequesterApprovedWhatsApp(params: {
   }
 }
 
+/**
+ * Linha "Cancelada por Fulano." — ou "Você cancelou esta solicitação." quando quem cancelou
+ * é o próprio solicitante.
+ */
+async function buildCancelledByLine(requesterUserId: string, actorUserId: string): Promise<string> {
+  if (actorUserId === requesterUserId) return 'Você cancelou esta solicitação.';
+  const actor = await prisma.user.findUnique({
+    where: { id: actorUserId },
+    select: { name: true },
+  });
+  const name = actor?.name?.trim();
+  return name ? `Cancelada por ${name}.` : 'Solicitação cancelada.';
+}
+
+/** Avisa o solicitante original (Employee.phone) que a solicitação dele foi cancelada. Nunca lança. */
+export async function notifyRequesterCancelledWhatsApp(params: {
+  requesterUserId: string;
+  actorUserId: string;
+  subjectLine: string;
+}): Promise<void> {
+  try {
+    const employee = await prisma.employee.findFirst({
+      where: { userId: params.requesterUserId, phone: { not: null } },
+      select: { phone: true },
+    });
+    const phone = employee?.phone?.trim();
+    if (!phone) return;
+    const cancelledLine = await buildCancelledByLine(params.requesterUserId, params.actorUserId);
+    await sendApprovalWhatsApp(phone, [`❌ ${params.subjectLine}`, cancelledLine].join('\n'));
+  } catch (err) {
+    console.error('[ApprovalWhatsAppNotify] Falha ao notificar cancelamento ao solicitante:', err);
+  }
+}
+
 /** Dispara em paralelo para todos os userIds com telefone cadastrado (Employee.phone). Nunca lança. */
 export async function notifyApproversWhatsApp(userIds: string[], text: string): Promise<void> {
   try {

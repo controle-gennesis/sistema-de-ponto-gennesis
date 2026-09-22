@@ -762,6 +762,11 @@ export async function processWhatsAppFuelFlow(params: {
       return {
         sendAction: waButtons(
           'Alguma observação sobre a solicitação? (opcional — digite «não» para pular)',
+          [
+            { id: 'NAO', title: 'Não' },
+            { id: 'MENU', title: 'Menu' },
+            { id: 'END', title: 'Encerrar' },
+          ],
         ),
         newStatus: 'FUEL_ASK_OBSERVATIONS',
         newPayload,
@@ -771,7 +776,11 @@ export async function processWhatsAppFuelFlow(params: {
     case 'FUEL_ASK_OBSERVATIONS': {
       newPayload.observations = SKIP_WORDS.test(textRaw) ? '' : textRaw.trim();
       return {
-        sendAction: waButtons(buildSummary(newPayload)),
+        sendAction: waButtons(buildSummary(newPayload), [
+          { id: 'SIM', title: 'Sim' },
+          { id: 'NAO', title: 'Não' },
+          { id: 'MENU', title: 'Menu' },
+        ]),
         newStatus: 'FUEL_CONFIRM',
         newPayload,
       };

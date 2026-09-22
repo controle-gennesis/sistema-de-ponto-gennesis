@@ -27,6 +27,7 @@ import {
   getFuelApprovalNotifyUserIds,
   getFuelSuppliesQueueAccessUserIds,
   notifyApproversWhatsApp,
+  notifyRequesterCancelledWhatsApp,
 } from '../lib/approvalWhatsAppNotify';
 
 export type CreateFuelRefuelRequestInput = {
@@ -319,6 +320,23 @@ export class FuelRefuelRequestService {
       updated.sourceWhatsAppPhone,
       approvedByLine,
     );
+
+    void notifyApproversWhatsApp(
+      [managerId],
+      `✅ Você aprovou a solicitação de abastecimento #${updated.displayNumber}. Encaminhada para o Suprimentos.`
+    );
+
+    const queueUserIds = await getFuelSuppliesQueueAccessUserIds();
+    void notifyApproversWhatsApp(
+      queueUserIds,
+      [
+        '📋 Nova solicitação de abastecimento na fila',
+        `Solicitação #${updated.displayNumber} · ${updated.driverName}`,
+        'Aguardando aprovação do Suprimentos.',
+        'Acesse a Fila de Abastecimento para analisar.',
+      ].join('\n')
+    );
+
     return updated;
   }
 
@@ -355,11 +373,19 @@ export class FuelRefuelRequestService {
       }
     }
 
-    return prisma.fuelRefuelRequest.update({
+    const updated = await prisma.fuelRefuelRequest.update({
       where: { id },
       data: { status: FuelRefuelRequestStatus.CANCELLED },
       include: fuelRefuelInclude,
     });
+
+    void notifyRequesterCancelledWhatsApp({
+      requesterUserId: updated.requesterId,
+      actorUserId: actorId,
+      subjectLine: `Solicitação de abastecimento #${updated.displayNumber}`,
+    });
+
+    return updated;
   }
 
   async countPendingManager(
