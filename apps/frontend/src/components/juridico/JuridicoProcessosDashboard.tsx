@@ -298,8 +298,8 @@ function RankBarChart({
             labelStyle={theme.tipLabelStyle}
             itemStyle={theme.tipItemStyle}
             cursor={{ fill: theme.barCursor }}
-            formatter={(value: number) => [formatValue(value), 'Total']}
-            labelFormatter={(label: string) => String(label)}
+            formatter={(value) => [formatValue(Number(value ?? 0)), 'Total']}
+            labelFormatter={(label) => String(label ?? '')}
           />
           <Bar dataKey="value" radius={[0, 6, 6, 0]} maxBarSize={26} animationDuration={650}>
             {data.map((item, index) => (
@@ -311,7 +311,7 @@ function RankBarChart({
               offset={8}
               fill={theme.chartLabel}
               fontSize={11}
-              formatter={(value: number) => formatValue(Number(value))}
+              formatter={(value) => formatValue(Number(value ?? 0))}
             />
           </Bar>
         </BarChart>
@@ -365,8 +365,8 @@ function VerticalRankBarChart({
             labelStyle={theme.tipLabelStyle}
             itemStyle={theme.tipItemStyle}
             cursor={{ fill: theme.barCursor }}
-            formatter={(value: number) => [formatValue(value), 'Total']}
-            labelFormatter={(label: string) => String(label)}
+            formatter={(value) => [formatValue(Number(value ?? 0)), 'Total']}
+            labelFormatter={(label) => String(label ?? '')}
           />
           <Bar dataKey="value" radius={[8, 8, 0, 0]} maxBarSize={42} animationDuration={650}>
             {data.map((item, index) => (
@@ -378,7 +378,7 @@ function VerticalRankBarChart({
               offset={6}
               fill={theme.chartLabel}
               fontSize={10}
-              formatter={(value: number) => formatValue(Number(value))}
+              formatter={(value) => formatValue(Number(value ?? 0))}
             />
           </Bar>
         </BarChart>
@@ -491,8 +491,8 @@ function LollipopChart({
             labelStyle={theme.tipLabelStyle}
             itemStyle={theme.tipItemStyle}
             cursor={{ fill: theme.barCursor }}
-            formatter={(value: number) => [formatValue(value), 'Total']}
-            labelFormatter={(label: string) => String(label)}
+            formatter={(value) => [formatValue(Number(value ?? 0)), 'Total']}
+            labelFormatter={(label) => String(label ?? '')}
           />
           <Bar dataKey="value" radius={[999, 999, 999, 999]} maxBarSize={5} animationDuration={650}>
             {data.map((item, index) => (
@@ -504,7 +504,7 @@ function LollipopChart({
               offset={10}
               fill={theme.chartLabel}
               fontSize={11}
-              formatter={(value: number) => formatValue(Number(value))}
+              formatter={(value) => formatValue(Number(value ?? 0))}
             />
           </Bar>
         </BarChart>
@@ -560,7 +560,7 @@ function DonutChart({
               contentStyle={theme.tipStyle}
               labelStyle={theme.tipLabelStyle}
               itemStyle={theme.tipItemStyle}
-              formatter={(value: number, name: string) => [formatValue(value), name]}
+              formatter={(value, name) => [formatValue(Number(value ?? 0)), name]}
             />
           </PieChart>
         </ResponsiveContainer>
@@ -1219,12 +1219,13 @@ export function JuridicoProcessosDashboard() {
                         contentStyle={theme.tipStyle}
                         labelStyle={theme.tipLabelStyle}
                         itemStyle={theme.tipItemStyle}
-                        formatter={(value: number) => [formatCount(value), 'Acordos']}
-                        labelFormatter={(label: string) => {
-                          const mes = acordosMes.find((item) => item.label === label);
+                        formatter={(value) => [formatCount(Number(value ?? 0)), 'Acordos']}
+                        labelFormatter={(label) => {
+                          const labelStr = String(label ?? '');
+                          const mes = acordosMes.find((item) => item.label === labelStr);
                           return mes && mes.valor > 0
-                            ? `${label} · ${formatFullBRL(mes.valor)}`
-                            : String(label);
+                            ? `${labelStr} · ${formatFullBRL(mes.valor)}`
+                            : labelStr;
                         }}
                       />
                       <Line

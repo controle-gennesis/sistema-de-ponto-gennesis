@@ -1,10 +1,11 @@
 import { Request, Response, NextFunction } from 'express';
 import type { AppError } from './errorHandler';
+import { isTrustedOrigin } from '../lib/trustedOrigin';
 
 export const notFound = (req: Request, res: Response, next: NextFunction) => {
   // Garantir que headers CORS sejam enviados mesmo em caso de 404
   const origin = req.headers.origin;
-  if (origin && (origin.includes('gennesisconecta.com.br') || origin.includes('railway.app') || origin.includes('localhost'))) {
+  if (origin && isTrustedOrigin(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Access-Control-Allow-Credentials', 'true');
   }

@@ -631,8 +631,8 @@ export default function HomePage() {
                           />
                           <Tooltip
                             cursor={{ fill: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)' }}
-                            formatter={(value: number, name: string) => [
-                              value,
+                            formatter={(value, name) => [
+                              Number(value ?? 0),
                               name === 'atual' ? 'Esta semana' : 'Semana anterior',
                             ]}
                             labelFormatter={(label, payload) => {

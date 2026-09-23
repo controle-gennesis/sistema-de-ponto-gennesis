@@ -630,7 +630,7 @@ function AnalisesCombustivelContent() {
                   />
                   <Tooltip
                     contentStyle={theme.tipStyle}
-                    formatter={(value: number) => [formatCurrency(value), 'Gasto']}
+                    formatter={(value) => [formatCurrency(Number(value ?? 0)), 'Gasto']}
                     labelFormatter={(_, payload) =>
                       (payload?.[0]?.payload as { fullName?: string } | undefined)?.fullName ?? ''
                     }
@@ -680,10 +680,11 @@ function AnalisesCombustivelContent() {
                   />
                   <Tooltip
                     contentStyle={theme.tipStyle}
-                    formatter={(value: number, name: string) => {
-                      if (name === 'gasto') return [formatCurrency(value), 'Gasto'];
-                      if (name === 'litros') return [formatLiters(value), 'Litros'];
-                      return [value, name];
+                    formatter={(value, name) => {
+                      const numValue = Number(value ?? 0);
+                      if (name === 'gasto') return [formatCurrency(numValue), 'Gasto'];
+                      if (name === 'litros') return [formatLiters(numValue), 'Litros'];
+                      return [numValue, name];
                     }}
                   />
                   <Legend />
@@ -734,7 +735,7 @@ function AnalisesCombustivelContent() {
                   />
                   <Tooltip
                     contentStyle={theme.tipStyle}
-                    formatter={(value: number) => [formatPrice(value), 'Preço médio/L']}
+                    formatter={(value) => [formatPrice(Number(value ?? 0)), 'Preço médio/L']}
                   />
                   <Line
                     type="monotone"
@@ -779,7 +780,7 @@ function AnalisesCombustivelContent() {
                   </Pie>
                   <Tooltip
                     contentStyle={theme.tipStyle}
-                    formatter={(value: number) => [formatCurrency(value), 'Gasto']}
+                    formatter={(value) => [formatCurrency(Number(value ?? 0)), 'Gasto']}
                   />
                   <Legend />
                 </PieChart>

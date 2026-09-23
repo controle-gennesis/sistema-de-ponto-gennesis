@@ -26,14 +26,15 @@ type ExtratoFluxoDiarioChartProps = {
   emptyMessage?: string;
 };
 
-function chartTooltipFormatter(value: number, name: string) {
+function chartTooltipFormatter(value: unknown, name: unknown) {
   const label =
     name === 'entrada'
       ? 'Entradas (acumulado)'
       : name === 'saida'
         ? 'Saídas (acumulado)'
         : 'Valor (acumulado)';
-  return [formatExtratoFluxoCurrency(value), label];
+  const numValue = Array.isArray(value) ? Number(value[0] ?? 0) : Number(value ?? 0);
+  return [formatExtratoFluxoCurrency(numValue), label];
 }
 
 export function ExtratoFluxoDiarioChart({

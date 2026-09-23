@@ -1,6 +1,8 @@
 ﻿import { Router, Request, Response, NextFunction } from 'express';
 import multer from 'multer';
 import { authenticate, AuthRequest } from '../middleware/auth';
+import { requireModuleAccess } from '../middleware/permissionAuth';
+import { pathToModuleKey } from '@sistema-ponto/permission-modules';
 import { uploadImport, handleUploadError } from '../middleware/upload';
 import { FinancialControlController } from '../controllers/FinancialControlController';
 import { createError } from '../middleware/errorHandler';
@@ -9,6 +11,7 @@ import { fixMulterOriginalName } from '../lib/fixUploadFileName';
 
 const router = Router();
 const controller = new FinancialControlController();
+const financialControlModule = pathToModuleKey('/ponto/financeiro/controle-financeiro');
 
 const attachmentUpload = multer({
   storage: multer.memoryStorage(),
@@ -25,6 +28,7 @@ const attachmentUpload = multer({
 });
 
 router.use(authenticate);
+router.use(requireModuleAccess(financialControlModule));
 
 router.post('/upload-attachment', (req: AuthRequest, res: Response, next: NextFunction) => {
   attachmentUpload.single('file')(req, res, (err: unknown) => {

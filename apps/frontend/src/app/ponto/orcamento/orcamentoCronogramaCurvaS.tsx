@@ -28,9 +28,10 @@ type Props = {
   inModal?: boolean;
 };
 
-function tooltipFormatter(value: number, name: string) {
+function tooltipFormatter(value: unknown, name: unknown) {
   const label = name === 'planPct' ? 'Planejado' : 'Real';
-  return [`${value.toFixed(1).replace('.', ',')}%`, label];
+  const numValue = Array.isArray(value) ? Number(value[0] ?? 0) : Number(value ?? 0);
+  return [`${numValue.toFixed(1).replace('.', ',')}%`, label];
 }
 
 export function CronogramaCurvaSPanel({

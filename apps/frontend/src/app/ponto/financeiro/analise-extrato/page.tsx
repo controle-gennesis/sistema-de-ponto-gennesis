@@ -2152,7 +2152,7 @@ const skeletonPulse = 'animate-pulse rounded-md bg-gray-200/90 dark:bg-gray-700/
 type ExtratoSearchFilterBarProps = {
   searchQuery: string;
   onSearchQueryChange: (value: string) => void;
-  searchInputRef: React.RefObject<HTMLInputElement>;
+  searchInputRef: React.RefObject<HTMLInputElement | null>;
   onOpenFilters: () => void;
   hasActiveFilters: boolean;
   disabled?: boolean;

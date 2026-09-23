@@ -6,6 +6,7 @@ import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { whatsAppBot } from '../services/WhatsAppBotService';
 import { metaWhatsApp } from '../services/MetaWhatsAppService';
+import { verifyMetaWebhookSignature } from '../lib/verifyMetaWebhookSignature';
 
 /** Token que a Meta envia no GET do webhook; deve ser igual ao configurado no App. */
 const META_VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN || 'gennesis_whatsapp_verify';
@@ -43,6 +44,18 @@ export class WhatsAppController {
    */
   async handleWebhook(req: Request, res: Response, next: NextFunction) {
     try {
+      const rawBody = (req as Request & { rawBody?: Buffer }).rawBody;
+      const signatureValid = verifyMetaWebhookSignature(
+        rawBody,
+        req.headers['x-hub-signature-256'],
+        process.env.WHATSAPP_APP_SECRET
+      );
+      if (!signatureValid) {
+        console.warn('[WhatsApp Webhook] Assinatura inválida — requisição rejeitada (não veio da Meta).');
+        res.status(401).send('Invalid signature');
+        return;
+      }
+
       const body = req.body || {};
 
       // Log para debug: ver se a Meta está chamando o webhook

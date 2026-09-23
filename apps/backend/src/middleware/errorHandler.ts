@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import { isTrustedOrigin } from '../lib/trustedOrigin';
 
 export interface AppError extends Error {
   statusCode?: number;
@@ -163,7 +164,7 @@ export const errorHandler = (
 
   // 🔸 Garantir que headers CORS sejam enviados mesmo em caso de erro
   const origin = req.headers.origin;
-  if (origin && (origin.includes('gennesisconecta.com.br') || origin.includes('railway.app') || origin.includes('localhost'))) {
+  if (origin && isTrustedOrigin(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Access-Control-Allow-Credentials', 'true');
   }

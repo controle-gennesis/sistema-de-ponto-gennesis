@@ -40,6 +40,7 @@ import rateLimit from 'express-rate-limit';
 
 import { errorHandler } from './middleware/errorHandler';
 import { notFound } from './middleware/notFound';
+import { isTrustedOrigin } from './lib/trustedOrigin';
 import { backendUploadsRoot } from './lib/uploads';
 import { persistentUploadsS3Fallback } from './lib/persistentUpload';
 import authRoutes from './routes/auth';
@@ -179,18 +180,10 @@ const allowedOrigins = [
   'http://localhost:19006'
 ];
 
-function isTrustedAppOrigin(origin: string): boolean {
-  return (
-    origin.includes('gennesisconecta.com.br') ||
-    origin.includes('railway.app') ||
-    origin.includes('localhost')
-  );
-}
-
 // Função para verificar se a origem é permitida
 const isOriginAllowed = (origin: string | undefined): boolean => {
   if (!origin) return true; // Permitir requisições sem origem (ex: Postman)
-  if (isTrustedAppOrigin(origin)) return true;
+  if (isTrustedOrigin(origin)) return true;
   return allowedOrigins.includes(origin);
 };
 
@@ -269,7 +262,7 @@ const rateLimit429Handler = (
   message: string,
 ) => {
   const origin = req.headers.origin;
-  if (origin && (origin.includes('gennesisconecta.com.br') || origin.includes('railway.app') || origin.includes('localhost'))) {
+  if (origin && isTrustedOrigin(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Access-Control-Allow-Credentials', 'true');
   }
@@ -350,7 +343,16 @@ app.use('/api/auth/reset-password', passwordResetLimiter);
 
 // Logging
 app.use(morgan('combined'));
-app.use(express.json({ limit: '50mb' }));
+app.use(
+  express.json({
+    limit: '50mb',
+    // Guarda o corpo bruto (antes do parse) para o webhook da Meta poder validar a
+    // assinatura HMAC — o hash precisa ser calculado sobre os bytes exatos recebidos.
+    verify: (req, _res, buf) => {
+      (req as express.Request & { rawBody?: Buffer }).rawBody = buf;
+    },
+  })
+);
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Sempre servir ficheiros gravados em disco (RM, OC/boleto, mensagens, etc.).

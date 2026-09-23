@@ -100,9 +100,9 @@ function GastosFluxoMensalChart({
               width={52}
             />
             <Tooltip
-              formatter={(value: number, name: string) => {
+              formatter={(value, name) => {
                 const kind = name === 'entrada' ? 'entrada' : name === 'saida' ? 'saida' : 'valor';
-                return [formatExtratoFluxoCurrency(value), seriesLabel(mode, kind)];
+                return [formatExtratoFluxoCurrency(Number(value ?? 0)), seriesLabel(mode, kind)];
               }}
               labelFormatter={(_, payload) => {
                 const monthKey = payload?.[0]?.payload?.monthKey as string | undefined;
@@ -254,15 +254,16 @@ function GastosFluxoProjecaoAnualChart({
               width={52}
             />
             <Tooltip
-              formatter={(value: number, name: string) => {
-                const projetado = name.endsWith('Proj');
-                const label = name.startsWith('entrada')
+              formatter={(value, name) => {
+                const nameStr = String(name ?? '');
+                const projetado = nameStr.endsWith('Proj');
+                const label = nameStr.startsWith('entrada')
                   ? 'Recebidos (acum.)'
-                  : name.startsWith('saida')
+                  : nameStr.startsWith('saida')
                     ? 'Gastos (acum.)'
                     : 'Lucro líquido (acum.)';
                 return [
-                  formatExtratoFluxoCurrency(value),
+                  formatExtratoFluxoCurrency(Number(value ?? 0)),
                   projetado ? `${label} (projetado)` : label
                 ];
               }}

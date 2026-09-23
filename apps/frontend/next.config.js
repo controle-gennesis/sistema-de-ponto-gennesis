@@ -12,16 +12,17 @@ const nextConfig = {
   images: { unoptimized: true },
   experimental: {
     ...(isTurbopack ? {} : { esmExternals: 'loose' }),
-    // Equivalente Turbopack dos aliases do webpack abaixo (usado em `next dev --turbo`).
-    turbo: {
-      resolveAlias: {
-        'victory-vendor/d3-scale': 'd3-scale',
-        'victory-vendor/d3-shape': 'd3-shape',
-      },
+  },
+  // Equivalente Turbopack dos aliases do webpack abaixo (usado em `next dev --turbo`).
+  // Renomeado de `experimental.turbo` para `turbopack` (Next 15).
+  turbopack: {
+    resolveAlias: {
+      'victory-vendor/d3-scale': 'd3-scale',
+      'victory-vendor/d3-shape': 'd3-shape',
     },
   },
   compiler: { styledComponents: false },
-  swcMinify: true,
+  // `swcMinify` foi removido no Next 15 — a minificação via SWC já é o padrão sempre ligado.
   reactStrictMode: false,
   /** Railway/CI: id estável por commit evita rebuild total a cada deploy (menos tempo e menos OOM). Dev local pode variar por timestamp se não houver GIT SHA. */
   generateBuildId: async () =>

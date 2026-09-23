@@ -2,6 +2,12 @@
 
 import Link from 'next/link';
 
+// Evita a pré-renderização estática de /404 no build (Next 15 + React 19 lançam
+// "Objects are not valid as a React child" nesse passo específico, mesmo com essa
+// página e o layout raiz sem nada de estranho — é a etapa interna de export estático
+// do Next que quebra). Renderizar sob demanda em vez de pré-gerar não muda nada visível.
+export const dynamic = 'force-dynamic';
+
 export default function NotFound() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50">

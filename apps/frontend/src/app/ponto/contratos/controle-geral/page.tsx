@@ -476,7 +476,7 @@ export default function ControleGeralContratosPage() {
                                 <Link
                                   href={`/ponto/contratos/${c.id}`}
                                   className="inline-flex items-center gap-1 text-sm text-blue-600 dark:text-blue-400 hover:underline"
-                                  onClick={(e) => e.stopPropagation()}
+                                  onClick={(e: React.MouseEvent) => e.stopPropagation()}
                                 >
                                   <ExternalLink className="h-4 w-4" />
                                   Ver

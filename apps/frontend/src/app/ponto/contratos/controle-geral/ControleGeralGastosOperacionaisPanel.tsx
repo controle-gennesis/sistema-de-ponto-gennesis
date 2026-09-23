@@ -2420,7 +2420,7 @@ export function ControleGeralGastosOperacionaisPanel({
                                       return (
                                         <Link
                                           href={detailPath}
-                                          onClick={(event) => event.stopPropagation()}
+                                          onClick={(event: React.MouseEvent) => event.stopPropagation()}
                                           className="inline-flex items-center gap-1.5 text-blue-600 hover:text-blue-700 hover:underline dark:text-blue-400 dark:hover:text-blue-300"
                                         >
                                           <span>{row.contract}</span>
@@ -2435,7 +2435,7 @@ export function ControleGeralGastosOperacionaisPanel({
                                   {enableContractFluxoModal && resolveContractDetailPath(row.contract) ? (
                                     <Link
                                       href={resolveContractDetailPath(row.contract)!}
-                                      onClick={(e) => e.stopPropagation()}
+                                      onClick={(e: React.MouseEvent) => e.stopPropagation()}
                                       className="inline-flex shrink-0 rounded p-0.5 text-blue-600 opacity-70 hover:bg-blue-50 hover:opacity-100 dark:text-blue-400 dark:hover:bg-blue-950/40"
                                       title="Abrir cadastro do contrato"
                                       aria-label={`Abrir cadastro de ${row.contract}`}

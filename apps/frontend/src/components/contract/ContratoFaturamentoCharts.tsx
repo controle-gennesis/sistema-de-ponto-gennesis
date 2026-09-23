@@ -250,7 +250,7 @@ function FaturamentoDonutCard({
                     contentStyle={theme.tipStyle}
                     labelStyle={theme.tipLabelStyle}
                     itemStyle={theme.tipItemStyle}
-                    formatter={(value: number, name: string) => [formatCurrency(Number(value) || 0), name]}
+                    formatter={(value, name) => [formatCurrency(Number(value) || 0), name]}
                   />
                 </PieChart>
               </ResponsiveContainer>
@@ -373,9 +373,9 @@ function FluxoLinhaCard({
                   contentStyle={theme.tipStyle}
                   labelStyle={theme.tipLabelStyle}
                   itemStyle={theme.tipItemStyle}
-                  formatter={(value: number, name: string) => [
+                  formatter={(value, name) => [
                     formatExtratoFluxoCurrency(Number(value) || 0),
-                    fluxoSeriesLabel(name),
+                    fluxoSeriesLabel(String(name ?? '')),
                   ]}
                 />
                 <Legend wrapperStyle={{ fontSize: 12 }} formatter={(value) => fluxoSeriesLabel(String(value))} />

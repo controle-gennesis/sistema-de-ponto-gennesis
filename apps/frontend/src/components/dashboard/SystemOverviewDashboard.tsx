@@ -306,7 +306,7 @@ function DonutCard({
                       <Cell key={entry.status} fill={entry.color} />
                     ))}
                   </Pie>
-                  <Tooltip contentStyle={theme.tipStyle} formatter={(value: number, name: string) => [`${value}`, name]} />
+                  <Tooltip contentStyle={theme.tipStyle} formatter={(value, name) => [`${value}`, name]} />
                 </PieChart>
               </ResponsiveContainer>
               <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
@@ -681,7 +681,7 @@ export function SystemOverviewDashboard() {
                   <Radar name="Pendências" dataKey="value" stroke="#b91c1c" fill="#b91c1c" fillOpacity={0.28} strokeWidth={2} />
                   <Tooltip
                     contentStyle={theme.tipStyle}
-                    formatter={(_v: number, _n: string, item: { payload?: { full?: number; subject?: string } }) => [
+                    formatter={(_v, _n, item: { payload?: { full?: number; subject?: string } }) => [
                       `${item.payload?.full ?? 0}`,
                       item.payload?.subject || 'Valor',
                     ]}
@@ -814,7 +814,7 @@ export function SystemOverviewDashboard() {
                   >
                     <PolarAngleAxis type="number" domain={[0, 100]} tick={false} />
                     <RadialBar background dataKey="value" cornerRadius={10} />
-                    <Tooltip contentStyle={theme.tipStyle} formatter={(v: number) => [`${v}%`, 'Concluídas']} />
+                    <Tooltip contentStyle={theme.tipStyle} formatter={(v) => [`${v}%`, 'Concluídas']} />
                   </RadialBarChart>
                 </ResponsiveContainer>
                 <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">

@@ -101,8 +101,8 @@ export function FlowEditor({ diagram, onBack }: Props) {
   const connectMoveListenerRef = useRef<((event: MouseEvent) => void) | null>(null);
 
   const initial = useMemo(() => parseStoredFlow(diagram.nodes, diagram.edges), [diagram.id]);
-  const [nodes, setNodes, onNodesChange] = useNodesState(initial.nodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(initial.edges);
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>(initial.nodes);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(initial.edges);
 
   const {
     undo,
@@ -173,8 +173,8 @@ export function FlowEditor({ diagram, onBack }: Props) {
     setHandToolActive((active) => {
       const next = !active;
       if (next) {
-        setNodes((nds) => nds.map((node) => ({ ...node, selected: false })));
-        setEdges((eds) => eds.map((edge) => ({ ...edge, selected: false })));
+        setNodes((nds: Node[]) => nds.map((node: Node) => ({ ...node, selected: false })));
+        setEdges((eds: Edge[]) => eds.map((edge: Edge) => ({ ...edge, selected: false })));
       }
       return next;
     });
@@ -186,8 +186,8 @@ export function FlowEditor({ diagram, onBack }: Props) {
   );
 
   const selectAllElements = useCallback(() => {
-    setNodes((nds) => nds.map((node) => ({ ...node, selected: true })));
-    setEdges((eds) => eds.map((edge) => ({ ...edge, selected: true })));
+    setNodes((nds: Node[]) => nds.map((node: Node) => ({ ...node, selected: true })));
+    setEdges((eds: Edge[]) => eds.map((edge: Edge) => ({ ...edge, selected: true })));
   }, [setNodes, setEdges]);
 
   const copySelection = useCallback(() => {
@@ -238,13 +238,13 @@ export function FlowEditor({ diagram, onBack }: Props) {
     });
 
     setNodes(next);
-    setEdges((eds) => eds.filter((edge) => !edge.selected));
+    setEdges((eds: Edge[]) => eds.filter((edge: Edge) => !edge.selected));
   }, [nodes, commitBeforeMutation, setNodes, setEdges]);
 
   const selectEdge = useCallback(
     (edgeId: string) => {
-      setNodes((nds) => nds.map((node) => ({ ...node, selected: false })));
-      setEdges((eds) => eds.map((edge) => ({ ...edge, selected: edge.id === edgeId })));
+      setNodes((nds: Node[]) => nds.map((node: Node) => ({ ...node, selected: false })));
+      setEdges((eds: Edge[]) => eds.map((edge: Edge) => ({ ...edge, selected: edge.id === edgeId })));
       reactFlowWrapper.current?.focus();
     },
     [setNodes, setEdges],
@@ -265,8 +265,8 @@ export function FlowEditor({ diagram, onBack }: Props) {
       event.preventDefault();
       event.stopPropagation();
       if (!node.selected) {
-        setNodes((nds) => nds.map((n) => ({ ...n, selected: n.id === node.id })));
-        setEdges((eds) => eds.map((e) => ({ ...e, selected: false })));
+        setNodes((nds: Node[]) => nds.map((n: Node) => ({ ...n, selected: n.id === node.id })));
+        setEdges((eds: Edge[]) => eds.map((e: Edge) => ({ ...e, selected: false })));
       }
       setCanvasContextMenu({ x: event.clientX, y: event.clientY });
     },
@@ -279,8 +279,8 @@ export function FlowEditor({ diagram, onBack }: Props) {
       event.preventDefault();
       event.stopPropagation();
       if (!edge.selected) {
-        setNodes((nds) => nds.map((n) => ({ ...n, selected: false })));
-        setEdges((eds) => eds.map((e) => ({ ...e, selected: e.id === edge.id })));
+        setNodes((nds: Node[]) => nds.map((n: Node) => ({ ...n, selected: false })));
+        setEdges((eds: Edge[]) => eds.map((e: Edge) => ({ ...e, selected: e.id === edge.id })));
       }
       setCanvasContextMenu({ x: event.clientX, y: event.clientY });
     },
@@ -450,7 +450,7 @@ export function FlowEditor({ diagram, onBack }: Props) {
       };
       const next = inferMissingEdgeHandles(normalized, nodes);
       const handlesPinned = Boolean(next.sourceHandle?.trim() && next.targetHandle?.trim());
-      setEdges((eds) =>
+      setEdges((eds: Edge[]) =>
         reconnectEdge(oldEdge, next, eds).map((edge) => {
           if (edge.id !== oldEdge.id) return normalizeFlowEdge(edge);
           const data = {
@@ -521,7 +521,7 @@ export function FlowEditor({ diagram, onBack }: Props) {
       const edgeId = `edge-${Date.now()}`;
       pendingConnectRef.current = { edgeId };
 
-      setEdges((eds) =>
+      setEdges((eds: Edge[]) =>
         addEdge(
           normalizeFlowEdge({
             id: edgeId,
@@ -573,8 +573,8 @@ export function FlowEditor({ diagram, onBack }: Props) {
 
       const { edgeId } = pending;
 
-      setEdges((eds) => {
-        const edge = eds.find((item) => item.id === edgeId);
+      setEdges((eds: Edge[]) => {
+        const edge = eds.find((item: Edge) => item.id === edgeId);
         if (!edge) return eds;
 
         const sourceHandle = fromHandle ?? edge.sourceHandle?.trim() ?? null;
@@ -586,7 +586,7 @@ export function FlowEditor({ diagram, onBack }: Props) {
           ...(sourceHandle && targetHandle ? { handlesPinned: true } : {}),
         };
 
-        return eds.map((item) =>
+        return eds.map((item: Edge) =>
           item.id === edgeId
             ? normalizeFlowEdge({
                 ...item,
@@ -643,10 +643,10 @@ export function FlowEditor({ diagram, onBack }: Props) {
         });
         const nextEdges = [...canvasEdges, newEdge];
 
-        setNodes((nds) =>
+        setNodes((nds: Node[]) =>
           syncLaneHierarchy(
             applyAppendToNodes(
-              nds.map((n) => ({ ...n, selected: false })),
+              nds.map((n: Node) => ({ ...n, selected: false })),
               nextEdges,
               selectedSource.id,
               {
@@ -683,9 +683,9 @@ export function FlowEditor({ diagram, onBack }: Props) {
 
       const newId = nextNodeId(type);
 
-      setNodes((nds) =>
+      setNodes((nds: Node[]) =>
         syncLaneHierarchy([
-          ...nds.map((n) => ({ ...n, selected: false })),
+          ...nds.map((n: Node) => ({ ...n, selected: false })),
           {
             id: newId,
             type,
@@ -700,7 +700,7 @@ export function FlowEditor({ diagram, onBack }: Props) {
       );
 
       if (selectedSource && selectedSource.type !== 'bpmnLane') {
-        setEdges((eds) => [
+        setEdges((eds: Edge[]) => [
           ...eds,
           buildForwardFlowEdge({
             id: `e-${selectedSource.id}-${newId}`,
@@ -758,8 +758,8 @@ export function FlowEditor({ diagram, onBack }: Props) {
       if (handToolActive || node.type !== LANE_NODE_TYPE) return;
       if (event.ctrlKey || event.metaKey || event.shiftKey) return;
 
-      setNodes((nds) =>
-        nds.map((n) => {
+      setNodes((nds: Node[]) =>
+        nds.map((n: Node) => {
           if (n.id === node.id) return { ...n, selected: true };
           if (n.type === LANE_NODE_TYPE) return { ...n, selected: false };
           return n;
@@ -774,8 +774,8 @@ export function FlowEditor({ diagram, onBack }: Props) {
       if (node.type === LANE_NODE_TYPE) {
         activeLaneDragIdRef.current = node.id;
         laneDragSnapshotRef.current = snapshotStackedLanePositions(nodesRef.current, node.id);
-        setNodes((nds) =>
-          nds.map((n) => {
+        setNodes((nds: Node[]) =>
+          nds.map((n: Node) => {
             if (n.id === node.id) return { ...n, selected: true };
             if (n.type === LANE_NODE_TYPE) return { ...n, selected: false, dragging: false };
             return n;
@@ -797,9 +797,9 @@ export function FlowEditor({ diagram, onBack }: Props) {
       laneDragSnapshotRef.current = null;
       setAlignmentGuides([]);
       if (!wasLaneDrag) {
-        setNodes((nds) => syncLaneHierarchy(nds));
+        setNodes((nds: Node[]) => syncLaneHierarchy(nds));
         const movedIds = new Set([node.id]);
-        setEdges((currentEdges) => {
+        setEdges((currentEdges: Edge[]) => {
           const cleared = releaseEdgeRoutesForNodes(currentEdges, movedIds);
           return syncEdgeHandlesForMovedNodes(nodesRef.current, cleared, movedIds);
         });
@@ -908,7 +908,7 @@ export function FlowEditor({ diagram, onBack }: Props) {
         !activeLaneDragIdRef.current && changes.some((change) => change.type === 'dimensions');
 
       if (hasLaneResize) {
-        setNodes((currentNodes) => {
+        setNodes((currentNodes: Node[]) => {
           let next = applyNodeChanges(changes, currentNodes);
           for (const change of changes) {
             if (change.type !== 'dimensions' || !change.dimensions) continue;
@@ -937,7 +937,7 @@ export function FlowEditor({ diagram, onBack }: Props) {
         setAlignmentGuides(guides);
       }
 
-      setNodes((currentNodes) => {
+      setNodes((currentNodes: Node[]) => {
         const filteredChanges = filterIndependentLanePositionChanges(
           currentNodes,
           changes,
@@ -964,7 +964,7 @@ export function FlowEditor({ diagram, onBack }: Props) {
         if (change.type === 'position') movedNodeIds.add(change.id);
       }
       if (movedNodeIds.size > 0) {
-        setEdges((currentEdges) => releaseEdgeRoutesForNodes(currentEdges, movedNodeIds));
+        setEdges((currentEdges: Edge[]) => releaseEdgeRoutesForNodes(currentEdges, movedNodeIds));
       }
     },
     [handToolActive, commitBeforeMutation, setNodes, setEdges],

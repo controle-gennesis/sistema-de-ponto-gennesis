@@ -63,9 +63,10 @@ export function ExtratoFluxoMensalChart({
     [items, mode]
   );
 
-  const tooltipFormatter = (value: number, name: string) => {
+  const tooltipFormatter = (value: unknown, name: unknown) => {
     const kind = name === 'entrada' ? 'entrada' : name === 'saida' ? 'saida' : 'valor';
-    return [formatExtratoFluxoCurrency(value), seriesLabel(mode, kind)];
+    const numValue = Array.isArray(value) ? Number(value[0] ?? 0) : Number(value ?? 0);
+    return [formatExtratoFluxoCurrency(numValue), seriesLabel(mode, kind)];
   };
 
   if (series.length === 0) {

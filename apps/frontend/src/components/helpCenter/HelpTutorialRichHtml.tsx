@@ -1,12 +1,28 @@
 'use client';
 
 import React, { useMemo } from 'react';
+// isomorphic-dompurify (não 'dompurify' puro) porque este componente também roda no
+// servidor durante o SSR do Next.js, onde não existe `window`/DOM — o pacote plano
+// quebra nesse ambiente (DOMPurify.sanitize não é função sem um DOM real).
+import DOMPurify from 'isomorphic-dompurify';
+
+/**
+ * O sanitizador anterior era um regex caseiro (remover <script>, remover on*=, remover
+ * "javascript:") — tem bypasses conhecidos (ex: `<svg/onload=...>` sem espaço antes do
+ * atributo, ou `javascript&#58;` com o protocolo escapado em entidade HTML). O editor
+ * (HelpRichTextEditor) só produz um conjunto pequeno de tags — mantemos só essas na lista
+ * de permissão do DOMPurify, que faz sanitização real via parser de DOM, não regex.
+ */
+const ALLOWED_TAGS = [
+  'p', 'div', 'span', 'br',
+  'h1', 'h2',
+  'ul', 'ol', 'li',
+  'a', 'b', 'strong', 'i', 'em', 'u',
+];
+const ALLOWED_ATTR = ['href', 'target', 'rel'];
 
 function sanitizeRichHtml(html: string): string {
-  return String(html || '')
-    .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, '')
-    .replace(/\son\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
-    .replace(/javascript:/gi, '');
+  return DOMPurify.sanitize(String(html || ''), { ALLOWED_TAGS, ALLOWED_ATTR });
 }
 
 export function HelpTutorialRichHtml({ html }: { html: string }) {

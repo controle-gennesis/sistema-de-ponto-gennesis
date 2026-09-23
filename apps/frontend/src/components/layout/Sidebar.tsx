@@ -1741,7 +1741,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
                       href={resolveNavHref(child.href)}
                       prefetch={navLinkPrefetch}
                       onMouseEnter={navDataPrefetchForHref(child.href)}
-                      onClick={(event) => {
+                      onClick={(event: React.MouseEvent) => {
                         if (!isCurrentHref(child.href)) return;
                         event.preventDefault();
                         bumpNavPop(child.href);
@@ -1775,7 +1775,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
           href={resolveNavHref(item.href)}
           prefetch={navLinkPrefetch}
           onMouseEnter={navDataPrefetchForHref(item.href)}
-          onClick={(event) => {
+          onClick={(event: React.MouseEvent) => {
             if (!isCurrentHref(item.href)) return;
             event.preventDefault();
             bumpNavPop(item.href);
@@ -2225,7 +2225,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
                     <Link
                       href={singleItem.href}
                       prefetch={navLinkPrefetch}
-                      onClick={(event) => {
+                      onClick={(event: React.MouseEvent) => {
                         if (!isCurrentHref(singleItem.href)) return;
                         event.preventDefault();
                         bumpRailPop(category.id);
@@ -2288,7 +2288,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
                   prefetch={navLinkPrefetch}
                   aria-label={`Conversas${chatUnreadCount > 0 ? `, ${chatUnreadCount} não lidas` : ''}`}
                   aria-current={isFooterShortcutActive('/ponto/conversas') ? 'page' : undefined}
-                  onClick={(event) => {
+                  onClick={(event: React.MouseEvent) => {
                     if (!isFooterShortcutActive('/ponto/conversas')) return;
                     event.preventDefault();
                     bumpRailPop('footer:conversas');
@@ -2312,7 +2312,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
                   prefetch={navLinkPrefetch}
                   aria-label="Tasks"
                   aria-current={isFooterShortcutActive('/ponto/kanban') ? 'page' : undefined}
-                  onClick={(event) => {
+                  onClick={(event: React.MouseEvent) => {
                     if (!isFooterShortcutActive('/ponto/kanban')) return;
                     event.preventDefault();
                     bumpRailPop('footer:kanban');
@@ -2335,7 +2335,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
                   prefetch={navLinkPrefetch}
                   aria-label="Agenda"
                   aria-current={isFooterShortcutActive('/ponto/agenda') ? 'page' : undefined}
-                  onClick={(event) => {
+                  onClick={(event: React.MouseEvent) => {
                     if (!isFooterShortcutActive('/ponto/agenda')) return;
                     event.preventDefault();
                     bumpRailPop('footer:agenda');
@@ -2358,7 +2358,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
                   prefetch={navLinkPrefetch}
                   aria-label="Flow"
                   aria-current={isFooterShortcutActive('/ponto/flow') ? 'page' : undefined}
-                  onClick={(event) => {
+                  onClick={(event: React.MouseEvent) => {
                     if (!isFooterShortcutActive('/ponto/flow')) return;
                     event.preventDefault();
                     bumpRailPop('footer:flow');
@@ -2381,7 +2381,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
                   prefetch={navLinkPrefetch}
                   aria-label="Drive"
                   aria-current={isFooterShortcutActive('/ponto/drive') ? 'page' : undefined}
-                  onClick={(event) => {
+                  onClick={(event: React.MouseEvent) => {
                     if (!isFooterShortcutActive('/ponto/drive')) return;
                     event.preventDefault();
                     bumpRailPop('footer:drive');

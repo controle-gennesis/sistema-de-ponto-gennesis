@@ -40,15 +40,17 @@ type ExtratoFluxoProjecaoAnualChartProps = {
   emptyMessage?: string;
 };
 
-function chartTooltipFormatter(value: number, name: string) {
+function chartTooltipFormatter(value: unknown, name: unknown) {
+  const nameStr = String(name ?? '');
   const label =
-    name.startsWith('entrada')
+    nameStr.startsWith('entrada')
       ? 'Entradas (acum.)'
-      : name.startsWith('saida')
+      : nameStr.startsWith('saida')
         ? 'Saídas (acum.)'
         : 'Valor (acum.)';
-  const projetado = name.endsWith('Proj');
-  return [formatExtratoFluxoCurrency(value), projetado ? `${label} (projetado)` : label];
+  const projetado = nameStr.endsWith('Proj');
+  const numValue = Array.isArray(value) ? Number(value[0] ?? 0) : Number(value ?? 0);
+  return [formatExtratoFluxoCurrency(numValue), projetado ? `${label} (projetado)` : label];
 }
 
 export function ExtratoFluxoProjecaoAnualChart({
@@ -129,7 +131,7 @@ export function ExtratoFluxoProjecaoAnualChart({
               width={52}
             />
             <Tooltip
-              formatter={(value: number, name: string) => chartTooltipFormatter(value, name)}
+              formatter={chartTooltipFormatter}
               labelFormatter={(_, payload) => {
                 const row = payload?.[0]?.payload as ChartRow | undefined;
                 if (!row?.monthKey) return '';

@@ -617,7 +617,7 @@ export function EmployeeActivityInsights({
                         />
                         <Tooltip
                           cursor={{ fill: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)' }}
-                          formatter={(value: number) => [value, 'Eventos']}
+                          formatter={(value) => [Number(value ?? 0), 'Eventos']}
                           labelFormatter={(label) => `Horário ${label}`}
                           contentStyle={{
                             backgroundColor: chartTooltipBg,
