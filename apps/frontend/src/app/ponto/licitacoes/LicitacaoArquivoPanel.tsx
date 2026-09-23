@@ -654,7 +654,7 @@ export function LicitacaoArquivoPanel() {
                       ))}
                     </Pie>
                     <Tooltip
-                      formatter={(value: number) => [`${value}`, 'Qtd.']}
+                      formatter={(value) => [`${Number(value ?? 0)}`, 'Qtd.']}
                       contentStyle={{ fontSize: 12 }}
                     />
                     <Legend wrapperStyle={{ fontSize: 11 }} />
