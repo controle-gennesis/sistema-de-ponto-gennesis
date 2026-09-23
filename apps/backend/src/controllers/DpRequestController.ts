@@ -4,6 +4,7 @@ import { Prisma } from '@prisma/client';
 import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { createError } from '../middleware/errorHandler';
+import { isConcurrentUpdateConflict, CONCURRENT_UPDATE_CONFLICT_MESSAGE } from '../lib/prismaConflict';
 import {
   assertCanAttachCostCenterToDpRequest,
   assertCanAttachContractToDpRequest,
@@ -803,7 +804,11 @@ export class DpRequestController {
       const approverName = await getUserDisplayName(req.user.id);
 
       const updated = await prisma.dpRequest.update({
-        where: { id: requestId },
+        // Compare-and-swap: só grava se o status continuar WAITING_MANAGER (o que foi lido e
+        // validado acima) — evita que duplo clique/aprovação concorrente sobrescreva uma
+        // decisão que já aconteceu nesse meio-tempo. Se não bater, o Prisma lança P2025,
+        // tratado no catch abaixo como 409.
+        where: { id: requestId, status: 'WAITING_MANAGER' },
         data: {
           status: 'IN_REVIEW_DP',
           managerApprovedBy: req.user.id,
@@ -858,6 +863,9 @@ export class DpRequestController {
 
       return res.json({ success: true, data: updated });
     } catch (e: unknown) {
+      if (isConcurrentUpdateConflict(e)) {
+        return res.status(409).json({ error: CONCURRENT_UPDATE_CONFLICT_MESSAGE });
+      }
       const err = e as { statusCode?: number; message?: string };
       if (err?.statusCode && typeof err.statusCode === 'number') {
         return res.status(err.statusCode).json({ error: err.message || 'Erro' });
@@ -895,7 +903,7 @@ export class DpRequestController {
       const rejecterName = await getUserDisplayName(req.user.id);
 
       const updated = await prisma.dpRequest.update({
-        where: { id: requestId },
+        where: { id: requestId, status: 'WAITING_MANAGER' },
         data: {
           status: 'CANCELLED',
           managerApprovedBy: null,
@@ -952,6 +960,9 @@ export class DpRequestController {
     } catch (e: unknown) {
       if (e instanceof z.ZodError) {
         return res.status(400).json({ error: 'Dados inválidos', details: e.issues });
+      }
+      if (isConcurrentUpdateConflict(e)) {
+        return res.status(409).json({ error: CONCURRENT_UPDATE_CONFLICT_MESSAGE });
       }
       const err = e as { statusCode?: number; message?: string };
       if (err?.statusCode && typeof err.statusCode === 'number') {

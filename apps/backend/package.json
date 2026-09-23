@@ -25,6 +25,7 @@
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
+    "@sentry/node": "^11.0.0",
     "@sistema-ponto/permission-modules": "file:../../packages/permission-modules",
     "@types/bcrypt": "^6.0.0",
     "@types/moment": "^2.11.29",

@@ -167,6 +167,12 @@ function employeeName(
   row: Record<string, unknown>,
   employeeNameById?: Map<string, string>
 ): string {
+  const ids = Array.isArray(row.employeeIds)
+    ? row.employeeIds.filter((id): id is string => typeof id === 'string' && !!id.trim())
+    : null;
+  if (ids?.length) {
+    return ids.map((id) => employeeNameById?.get(id) ?? id).join(', ');
+  }
   const id = toTrimmedString(row.employeeId);
   if (!id) return '—';
   return employeeNameById?.get(id) ?? id;

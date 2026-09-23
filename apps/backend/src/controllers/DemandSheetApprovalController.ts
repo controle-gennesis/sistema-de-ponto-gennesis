@@ -7,6 +7,7 @@ import {
 } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { createError } from '../middleware/errorHandler';
+import { isConcurrentUpdateConflict, CONCURRENT_UPDATE_CONFLICT_MESSAGE } from '../lib/prismaConflict';
 import { AuthRequest } from '../middleware/auth';
 import {
   assertUserCanApproveFd,
@@ -496,7 +497,8 @@ export class DemandSheetApprovalController {
       const payload = managerDecisionSchema.parse(req.body);
 
       const updated = await prisma.demandSheetApproval.update({
-        where: { id },
+        // Compare-and-swap — ver comentário equivalente em DpRequestController.approveManager.
+        where: { id, status: 'WAITING_MANAGER' },
         data: {
           status: 'APPROVED',
           managerApprovedBy: req.user.id,
@@ -527,6 +529,9 @@ export class DemandSheetApprovalController {
 
       return res.json({ success: true, data: serializeRow(updated) });
     } catch (e: unknown) {
+      if (isConcurrentUpdateConflict(e)) {
+        return res.status(409).json({ error: CONCURRENT_UPDATE_CONFLICT_MESSAGE });
+      }
       const err = e as { statusCode?: number; message?: string };
       if (err?.statusCode) {
         return res.status(err.statusCode).json({ error: err.message || 'Erro' });
@@ -553,7 +558,7 @@ export class DemandSheetApprovalController {
       const reason = payload.comment?.trim() || 'Reprovada pelo gestor';
 
       const updated = await prisma.demandSheetApproval.update({
-        where: { id },
+        where: { id, status: 'WAITING_MANAGER' },
         data: {
           status: 'REJECTED',
           managerApprovedBy: null,
@@ -584,6 +589,9 @@ export class DemandSheetApprovalController {
 
       return res.json({ success: true, data: serializeRow(updated) });
     } catch (e: unknown) {
+      if (isConcurrentUpdateConflict(e)) {
+        return res.status(409).json({ error: CONCURRENT_UPDATE_CONFLICT_MESSAGE });
+      }
       const err = e as { statusCode?: number; message?: string };
       if (err?.statusCode) {
         return res.status(err.statusCode).json({ error: err.message || 'Erro' });

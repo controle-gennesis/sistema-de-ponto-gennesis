@@ -89,7 +89,7 @@ const retificacaoItemSchema = z.object({
 });
 
 const horaExtraItemSchema = z.object({
-  employeeId: str,
+  employeeIds: z.array(str).min(1).max(50),
   justificativa: str,
   datas: str,
   anexoAutorizacao: dpAttachmentSchema,
@@ -183,6 +183,51 @@ function uniqueEmployeeRefine<T extends { employeeId: string }>(
   });
 }
 
+/** Igual a uniqueEmployeeRefine, mas para linhas com múltiplos colaboradores (employeeIds: string[]). */
+/**
+ * Compatibilidade: o app mobile ainda envia `employeeId` (singular) por linha de hora
+ * extra. O web já manda `employeeIds` (array, multi-colaborador). Normaliza pro formato
+ * novo antes de validar, pra não quebrar o mobile enquanto ele não for atualizado.
+ */
+function normalizeHoraExtraDetails(input: unknown): unknown {
+  if (!input || typeof input !== 'object') return input;
+  const data = input as Record<string, unknown>;
+  if (!Array.isArray(data.horasExtras)) return input;
+  return {
+    ...data,
+    horasExtras: data.horasExtras.map((item) => {
+      if (!item || typeof item !== 'object') return item;
+      const row = item as Record<string, unknown>;
+      if (Array.isArray(row.employeeIds)) return row;
+      if (typeof row.employeeId === 'string' && row.employeeId.trim()) {
+        return { ...row, employeeIds: [row.employeeId] };
+      }
+      return row;
+    }),
+  };
+}
+
+function uniqueEmployeeIdsRefine<T extends { employeeIds: string[] }>(
+  arrayKey: string,
+  data: Record<string, T[]>,
+  ctx: z.RefinementCtx
+) {
+  const seen = new Set<string>();
+  const items = data[arrayKey] ?? [];
+  items.forEach((item, rowIndex) => {
+    item.employeeIds.forEach((employeeId, idIndex) => {
+      if (seen.has(employeeId)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [arrayKey, rowIndex, 'employeeIds', idIndex],
+          message: 'Não é permitido repetir o mesmo colaborador',
+        });
+      }
+      seen.add(employeeId);
+    });
+  });
+}
+
 function employeeArraySchema<T extends z.ZodTypeAny>(itemSchema: T) {
   return z.array(itemSchema).min(1).max(20);
 }
@@ -223,9 +268,12 @@ export const dpDetailsSchemas = {
   RETIFICACAO_ALOCACAO: z
     .object({ retificacoes: employeeArraySchema(retificacaoItemSchema) })
     .superRefine((data, ctx) => uniqueEmployeeRefine('retificacoes', data, ctx)),
-  HORA_EXTRA: z
-    .object({ horasExtras: employeeArraySchema(horaExtraItemSchema) })
-    .superRefine((data, ctx) => uniqueEmployeeRefine('horasExtras', data, ctx)),
+  HORA_EXTRA: z.preprocess(
+    normalizeHoraExtraDetails,
+    z
+      .object({ horasExtras: employeeArraySchema(horaExtraItemSchema) })
+      .superRefine((data, ctx) => uniqueEmployeeIdsRefine('horasExtras', data, ctx))
+  ),
   BENEFICIOS_VIAGEM: z
     .object({ viagensBeneficio: employeeArraySchema(viagemBeneficioItemSchema) })
     .superRefine((data, ctx) => uniqueEmployeeRefine('viagensBeneficio', data, ctx)),

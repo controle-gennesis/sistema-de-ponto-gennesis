@@ -88,12 +88,15 @@ const userMeSelect = {
   updatedAt: true,
   employee: true,
   empreiteiro: { select: { id: true } },
+  tokenVersion: true,
 } as const;
 
 type SignSessionUser = {
   id: string;
   email: string;
   role: string;
+  /** tokenVersion atual do usuário; embutido no token para permitir revogação no logout */
+  tokenVersion: number;
 };
 
 function signSessionToken(
@@ -104,6 +107,7 @@ function signSessionToken(
     id: user.id,
     email: user.email,
     role: user.role,
+    tv: user.tokenVersion,
   };
   if (opts?.impersonating && opts.originalAdminId) {
     payload.impersonating = true;
@@ -247,6 +251,7 @@ export class AuthController {
         id: user.id,
         email: user.email,
         role: user.role,
+        tokenVersion: user.tokenVersion,
       });
 
       try {
@@ -255,8 +260,8 @@ export class AuthController {
         console.error('[Auth] Falha ao registrar histórico de login:', trackErr);
       }
 
-      // Remover senha da resposta
-      const { password: _, ...userWithoutPassword } = user;
+      // Remover senha e tokenVersion (interno) da resposta
+      const { password: _, tokenVersion: __, ...userWithoutPassword } = user;
 
       return res.json({
         success: true,
@@ -297,10 +302,12 @@ export class AuthController {
       res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
       res.setHeader('Pragma', 'no-cache');
 
+      const { tokenVersion: _tokenVersion, ...userWithoutTokenVersion } = user;
+
       return res.json({
         success: true,
         data: {
-          ...user,
+          ...userWithoutTokenVersion,
           impersonation: req.user?.impersonating
             ? {
                 active: true,
@@ -355,7 +362,7 @@ export class AuthController {
       }
 
       const token = signSessionToken(
-        { id: target.id, email: target.email, role: target.role },
+        { id: target.id, email: target.email, role: target.role, tokenVersion: target.tokenVersion },
         {
           impersonating: true,
           originalAdminId: req.user.id,
@@ -406,10 +413,12 @@ export class AuthController {
         console.error('[Auth] Falha ao registrar impersonação:', trackErr);
       }
 
+      const { tokenVersion: _targetTokenVersion, ...targetWithoutTokenVersion } = target;
+
       return res.json({
         success: true,
         data: {
-          user: target,
+          user: targetWithoutTokenVersion,
           token,
           impersonation: {
             active: true,
@@ -454,6 +463,7 @@ export class AuthController {
         id: admin.id,
         email: admin.email,
         role: admin.role,
+        tokenVersion: admin.tokenVersion,
       });
 
       try {
@@ -491,10 +501,12 @@ export class AuthController {
         console.error('[Auth] Falha ao registrar fim da impersonação:', trackErr);
       }
 
+      const { tokenVersion: _adminTokenVersion, ...adminWithoutTokenVersion } = admin;
+
       return res.json({
         success: true,
         data: {
-          user: admin,
+          user: adminWithoutTokenVersion,
           token,
           impersonation: null,
         },
@@ -559,6 +571,15 @@ export class AuthController {
         } catch (trackError) {
           console.error('Falha ao registrar logout:', trackError);
         }
+        try {
+          // Invalida o token atual (e qualquer outro já emitido) incrementando a versão
+          await prisma.user.update({
+            where: { id: req.user.id },
+            data: { tokenVersion: { increment: 1 } },
+          });
+        } catch (revokeError) {
+          console.error('Falha ao revogar sessão no logout:', revokeError);
+        }
       }
       return res.json({
         success: true,
@@ -572,10 +593,10 @@ export class AuthController {
   async refreshToken(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       // authenticate já validou usuário ativo em req.user
-      const { id, email, role, impersonating, originalAdminId } = req.user!;
+      const { id, email, role, impersonating, originalAdminId, tokenVersion } = req.user!;
 
       const token = signSessionToken(
-        { id, email, role },
+        { id, email, role, tokenVersion },
         impersonating && originalAdminId
           ? { impersonating: true, originalAdminId, expiresIn: '2h' }
           : { expiresIn: '7d' }
@@ -594,10 +615,10 @@ export class AuthController {
   // Refresh via authenticateForRefresh (já validou usuário ativo)
   async publicRefreshToken(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      const { id, email, role, impersonating, originalAdminId } = req.user!;
+      const { id, email, role, impersonating, originalAdminId, tokenVersion } = req.user!;
 
       const token = signSessionToken(
-        { id, email, role },
+        { id, email, role, tokenVersion },
         impersonating && originalAdminId
           ? { impersonating: true, originalAdminId, expiresIn: '2h' }
           : { expiresIn: '7d' }
@@ -642,17 +663,29 @@ export class AuthController {
       // Criptografar nova senha
       const hashedNewPassword = await hashPassword(newPassword);
 
-      // Atualizar senha e marcar como não é mais primeiro login
-      await prisma.user.update({
+      // Atualizar senha, marcar como não é mais primeiro login e revogar outras sessões
+      const updated = await prisma.user.update({
         where: { id: userId },
         data: {
           password: hashedNewPassword,
           isFirstLogin: false,
-        }
+          tokenVersion: { increment: 1 },
+        },
+        select: { id: true, email: true, role: true, tokenVersion: true },
+      });
+
+      // A troca de senha revoga TODAS as sessões, inclusive a atual — emite um
+      // token novo já com a versão revogada para não deslogar quem está trocando.
+      const newToken = signSessionToken({
+        id: updated.id,
+        email: updated.email,
+        role: updated.role,
+        tokenVersion: updated.tokenVersion,
       });
 
       return res.json({
         success: true,
+        data: { token: newToken },
         message: 'Senha alterada com sucesso'
       });
     } catch (error) {
@@ -759,7 +792,7 @@ export class AuthController {
       await prisma.$transaction([
         prisma.user.update({
           where: { id: record.userId },
-          data: { password: hashedPassword, isFirstLogin: false },
+          data: { password: hashedPassword, isFirstLogin: false, tokenVersion: { increment: 1 } },
         }),
         prisma.passwordResetToken.update({
           where: { id: record.id },

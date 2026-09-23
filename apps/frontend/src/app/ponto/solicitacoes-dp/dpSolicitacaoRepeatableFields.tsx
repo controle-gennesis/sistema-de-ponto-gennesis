@@ -6,6 +6,7 @@ import { Input as BaseInput } from '@/components/ui/Input';
 import { DatePickerField } from '@/components/ui/DatePickerField';
 import { DateTimePickerField } from '@/components/ui/DateTimePickerField';
 import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
+import { MultiSelectSearchDropdown } from '@/components/ui/MultiSelectSearchDropdown';
 import type { MultiSelectSearchOption } from '@/components/ui/MultiSelectSearchDropdown';
 import { QuantityStepperInput } from '@/components/ui/QuantityStepperInput';
 import { CARGOS_AVAILABLE } from '@/constants/cargos';
@@ -20,6 +21,7 @@ import {
   useRepeatableList,
   parseArrayField,
   rowEmployeeOptions,
+  multiRowEmployeeOptions,
   MAX_SOLICITACAO_ITENS,
   MAX_ADMISSAO_CANDIDATOS,
   ButtonSeg,
@@ -1156,14 +1158,14 @@ export function RetificacaoAlocacaoRepeatableFields({
 }
 
 type HoraExtraRow = {
-  employeeId: string;
+  employeeIds: string[];
   justificativa: string;
   inicioPeriodo: string;
   fimPeriodo: string;
 };
 
 function emptyHoraExtraRow(): HoraExtraRow {
-  return { employeeId: '', justificativa: '', inicioPeriodo: '', fimPeriodo: '' };
+  return { employeeIds: [], justificativa: '', inicioPeriodo: '', fimPeriodo: '' };
 }
 
 export function HoraExtraRepeatableFields({
@@ -1181,8 +1183,13 @@ export function HoraExtraRepeatableFields({
     'horasExtras',
     (row) => {
       const range = splitRange(row.datas);
+      const employeeIds = Array.isArray(row.employeeIds)
+        ? row.employeeIds.filter((id): id is string => typeof id === 'string' && !!id)
+        : typeof row.employeeId === 'string' && row.employeeId
+          ? [row.employeeId]
+          : [];
       return {
-        employeeId: String(row.employeeId ?? ''),
+        employeeIds,
         justificativa: String(row.justificativa ?? ''),
         inicioPeriodo: String(row.inicioPeriodo ?? range.inicio),
         fimPeriodo: String(row.fimPeriodo ?? range.fim),
@@ -1194,12 +1201,14 @@ export function HoraExtraRepeatableFields({
       if (!employeeIds.length) return null;
       const justificativa = String(legacyDetails.justificativa ?? '');
       const range = splitRange(legacyDetails.datas);
-      return employeeIds.map((employeeId) => ({
-        employeeId,
-        justificativa,
-        inicioPeriodo: range.inicio,
-        fimPeriodo: range.fim,
-      }));
+      return [
+        {
+          employeeIds,
+          justificativa,
+          inicioPeriodo: range.inicio,
+          fimPeriodo: range.fim,
+        },
+      ];
     }
   );
 
@@ -1235,13 +1244,17 @@ export function HoraExtraRepeatableFields({
             onHoraExtraFile(index, null);
           }}
         >
-          <SearchSelectField
-            label="Colaborador *"
-            value={row.employeeId}
-            onChange={(employeeId) => patchRow(index, { employeeId })}
-            options={rowEmployeeOptions(employeeOptions, horasExtras, index)}
-            placeholder="Selecionar colaborador..."
-          />
+          <div>
+            <label className={labelCls}>Colaborador(es) *</label>
+            <MultiSelectSearchDropdown
+              selected={row.employeeIds}
+              onChange={(employeeIds) => patchRow(index, { employeeIds })}
+              options={multiRowEmployeeOptions(employeeOptions, horasExtras, index)}
+              placeholder="Selecionar colaborador(es)..."
+              searchPlaceholder="Pesquisar..."
+              noFocusRing
+            />
+          </div>
           <div>
             <label className={labelCls}>Justificativa *</label>
             <textarea

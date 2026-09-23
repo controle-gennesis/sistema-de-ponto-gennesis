@@ -4,6 +4,7 @@ import { X, Eye, EyeOff, Lock, CheckCircle } from 'lucide-react';
 import { Button } from './Button';
 import { Input } from './Input';
 import api from '@/lib/api';
+import { authService } from '@/lib/auth';
 import { useModalCloseConfirm } from '@/hooks/useModalCloseConfirm';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
 
@@ -88,6 +89,14 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({
       });
 
       const data = response.data;
+
+      // Trocar a senha revoga a sessão atual no backend — salva o token novo
+      // devolvido na resposta para o usuário não ser deslogado no próprio ato.
+      const newToken = data?.data?.token;
+      if (typeof newToken === 'string' && newToken) {
+        const rememberMe = typeof window !== 'undefined' && !!localStorage.getItem('token');
+        authService.setToken(newToken, rememberMe);
+      }
 
       // Mostrar mensagem de sucesso
       setSuccess(true);

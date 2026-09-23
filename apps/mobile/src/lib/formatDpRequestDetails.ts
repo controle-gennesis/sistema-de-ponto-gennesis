@@ -59,6 +59,12 @@ function employeeName(
   row: Record<string, unknown>,
   nameById?: Map<string, string>,
 ): string {
+  const ids = Array.isArray(row.employeeIds)
+    ? row.employeeIds.filter((id): id is string => typeof id === 'string' && !!id.trim())
+    : null;
+  if (ids?.length) {
+    return ids.map((id) => nameById?.get(id) ?? id).join(', ');
+  }
   const id = str(row.employeeId);
   if (!id) return '—';
   return nameById?.get(id) ?? id;

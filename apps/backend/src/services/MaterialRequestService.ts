@@ -1215,7 +1215,10 @@ export class MaterialRequestService {
     }
 
     const updated = await prisma.materialRequest.update({
-      where: { id },
+      // Compare-and-swap: só grava se o status continuar o mesmo lido/validado acima
+      // (`existing.status`) — evita que duplo clique/decisão concorrente sobrescreva uma
+      // mudança de status que já aconteceu nesse meio-tempo.
+      where: { id, status: existing.status },
       data: updateData,
       include: {
         requester: {
@@ -1427,7 +1430,7 @@ export class MaterialRequestService {
     }
 
     return await prisma.materialRequest.update({
-      where: { id },
+      where: { id, status: request.status },
       data: {
         status: 'CANCELLED',
         updatedAt: new Date()

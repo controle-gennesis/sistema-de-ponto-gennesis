@@ -21,6 +21,18 @@ export function rowEmployeeOptions(
   );
 }
 
+/** Variante de rowEmployeeOptions para linhas com múltiplos colaboradores (ex.: Hora extra). */
+export function multiRowEmployeeOptions(
+  allOptions: MultiSelectSearchOption[],
+  rows: { employeeIds: string[] }[],
+  index: number
+): MultiSelectSearchOption[] {
+  const usedInOtherRows = new Set(
+    rows.flatMap((row, i) => (i !== index ? row.employeeIds : []))
+  );
+  return allOptions.filter((opt) => !usedInOtherRows.has(opt.value));
+}
+
 export function RepeatableCard({
   title,
   index,

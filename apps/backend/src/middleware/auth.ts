@@ -18,6 +18,8 @@ export interface AuthRequest extends Request {
     impersonating?: boolean;
     /** id do administrador que iniciou a impersonação */
     originalAdminId?: string;
+    /** versão do token no momento da emissão (ver revogação de sessão abaixo) */
+    tokenVersion: number;
   };
 }
 
@@ -27,8 +29,21 @@ type JwtAuthClaims = {
   role?: string;
   impersonating?: boolean;
   originalAdminId?: string;
+  /** tokenVersion do usuário no momento em que o token foi emitido */
+  tv?: number;
   exp?: number;
 };
+
+/**
+ * Um token só é válido se `tv` (capturado no login) bater com o `tokenVersion`
+ * atual do usuário no banco. Logout e troca de senha incrementam essa coluna,
+ * o que revoga instantaneamente qualquer token emitido antes — sem precisar
+ * de blacklist. Tokens antigos (emitidos antes desta feature) não têm `tv`;
+ * tratamos ausência como 0 para não deslogar todo mundo no deploy.
+ */
+function isTokenVersionValid(decoded: JwtAuthClaims, currentTokenVersion: number): boolean {
+  return (decoded.tv ?? 0) === currentTokenVersion;
+}
 
 function attachUserFromDecoded(
   decoded: JwtAuthClaims,
@@ -36,6 +51,7 @@ function attachUserFromDecoded(
     id: string;
     email: string;
     role: string;
+    tokenVersion: number;
     employee?: { position: string | null } | null;
   }
 ) {
@@ -44,6 +60,7 @@ function attachUserFromDecoded(
     email: user.email,
     role: user.role,
     isAdmin: (user.employee?.position || '').toLowerCase() === 'administrador',
+    tokenVersion: user.tokenVersion,
     ...(decoded.impersonating && decoded.originalAdminId
       ? {
           impersonating: true as const,
@@ -95,6 +112,7 @@ export const authenticate = async (
         email: true,
         role: true,
         isActive: true,
+        tokenVersion: true,
         employee: {
           select: {
             position: true,
@@ -109,6 +127,10 @@ export const authenticate = async (
 
     if (!user.isActive) {
       throw createError('Usuário inativo', 401);
+    }
+
+    if (!isTokenVersionValid(decoded, user.tokenVersion)) {
+      throw createError('Sessão encerrada. Faça login novamente.', 401);
     }
 
     req.user = attachUserFromDecoded(decoded, user);
@@ -225,6 +247,7 @@ export const optionalAuth = async (
           email: true,
           role: true,
           isActive: true,
+          tokenVersion: true,
           employee: {
             select: {
               position: true,
@@ -233,13 +256,8 @@ export const optionalAuth = async (
         },
       });
 
-      if (user && user.isActive) {
-        req.user = {
-          id: user.id,
-          email: user.email,
-          role: user.role,
-          isAdmin: (user.employee?.position || '').toLowerCase() === 'administrador',
-        };
+      if (user && user.isActive && isTokenVersionValid(decoded, user.tokenVersion)) {
+        req.user = attachUserFromDecoded(decoded, user);
       }
     }
 
@@ -311,6 +329,7 @@ export const authenticateForRefresh = async (
         email: true,
         role: true,
         isActive: true,
+        tokenVersion: true,
         employee: {
           select: {
             position: true,
@@ -321,6 +340,10 @@ export const authenticateForRefresh = async (
 
     if (!user || !user.isActive) {
       throw createError('Usuário não encontrado ou inativo', 401);
+    }
+
+    if (!isTokenVersionValid(decoded, user.tokenVersion)) {
+      throw createError('Sessão encerrada. Faça login novamente.', 401);
     }
 
     req.user = attachUserFromDecoded(decoded, user);

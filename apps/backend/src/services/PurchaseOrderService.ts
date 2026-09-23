@@ -1817,8 +1817,13 @@ export class PurchaseOrderService {
     }
 
     const updated = await prisma.$transaction(async (tx) => {
+      // Compare-and-swap: só grava se o status continuar o mesmo lido/validado acima (`st`).
+      // Sem isso, duas requisições concorrentes (duplo clique, retry de rede) podiam passar
+      // ambas na validação e a segunda sobrescrever silenciosamente o resultado da primeira.
+      // Se outra requisição já mudou o status nesse meio-tempo, o Prisma lança P2025
+      // (nenhum registro bateu com o `where`), tratado como 409 pelo errorHandler global.
       const po = await tx.purchaseOrder.update({
-        where: { id },
+        where: { id, status: st },
         data,
         // Resposta leve — o front atualiza a lista summary; detalhe completo vem do GET :id
         include: purchaseOrderIncludeListSummary

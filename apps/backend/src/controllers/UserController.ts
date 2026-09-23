@@ -47,7 +47,9 @@ export class UserController {
         where: { id },
         data: {
           password: hashedPassword,
-          isFirstLogin: false
+          isFirstLogin: false,
+          // Revoga sessões já abertas do usuário — quem trocou a senha decide, não a sessão antiga
+          tokenVersion: { increment: 1 },
         }
       });
 

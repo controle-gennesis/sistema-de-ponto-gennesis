@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  backend:
+    name: Backend (typecheck + testes)
+    runs-on: ubuntu-latest
+    env:
+      # Placeholder — o Prisma só precisa de uma URL sintaticamente válida para gerar
+      # o client (não conecta em banco nenhum aqui).
+      DATABASE_URL: postgresql://user:password@localhost:5432/ci
+      JWT_SECRET: ci-placeholder-secret
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Gerar client do Prisma
+        run: npm run db:generate -w @sistema-ponto/backend
+
+      - name: Typecheck
+        run: cd apps/backend && npx tsc --noEmit
+
+      - name: Testes
+        run: cd apps/backend && npm test
+
+  frontend:
+    name: Frontend (typecheck + build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Typecheck
+        run: cd apps/frontend && npx tsc --noEmit
+
+      - name: Build de produção
+        run: cd apps/frontend && npm run build
+        env:
+          NEXT_PUBLIC_API_URL: http://localhost:5000/api

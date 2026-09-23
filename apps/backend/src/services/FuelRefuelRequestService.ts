@@ -301,7 +301,10 @@ export class FuelRefuelRequestService {
     }
 
     const updated = await prisma.fuelRefuelRequest.update({
-      where: { id },
+      // Compare-and-swap: evita duplo clique/duas aprovações concorrentes decidirem a mesma
+      // solicitação ao mesmo tempo — se o status mudou entre o read acima e agora, o Prisma
+      // lança P2025 (tratado como 409 pelo errorHandler global) em vez de sobrescrever.
+      where: { id, status: row.status },
       data: {
         status: FuelRefuelRequestStatus.PENDING_SUPPLIES,
         managerApprovedBy: managerId,
@@ -346,7 +349,7 @@ export class FuelRefuelRequestService {
     }
 
     const updated = await prisma.fuelRefuelRequest.update({
-      where: { id },
+      where: { id, status: row.status },
       data: {
         status: FuelRefuelRequestStatus.REJECTED,
         managerApprovedBy: managerId,
@@ -393,7 +396,7 @@ export class FuelRefuelRequestService {
     }
 
     const updated = await prisma.fuelRefuelRequest.update({
-      where: { id },
+      where: { id, status: row.status },
       data: { status: FuelRefuelRequestStatus.CANCELLED },
       include: fuelRefuelInclude,
     });
@@ -454,7 +457,7 @@ export class FuelRefuelRequestService {
     const refuelDeadlineAt = computeRefuelDeadlineAt(amount, input.refuelDeadlineUnit);
 
     const updated = await prisma.fuelRefuelRequest.update({
-      where: { id },
+      where: { id, status: row.status },
       data: {
         status: FuelRefuelRequestStatus.AWAITING_REFUEL,
         gasStationId: gasStation.id,
@@ -491,7 +494,7 @@ export class FuelRefuelRequestService {
     }
 
     const updated = await prisma.fuelRefuelRequest.update({
-      where: { id },
+      where: { id, status: row.status },
       data: {
         status: FuelRefuelRequestStatus.REJECTED,
         suppliesApprovedBy: suppliesUserId,

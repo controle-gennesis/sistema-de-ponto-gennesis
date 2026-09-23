@@ -186,6 +186,14 @@ class AuthService {
         throw new Error(text || 'Erro ao alterar senha');
       }
     }
+
+    // Trocar a senha revoga a sessão atual no backend — salva o token novo
+    // devolvido na resposta para o usuário não ser deslogado no próprio ato.
+    const body = await this.parseJson(response);
+    if (body?.data?.token) {
+      const rememberMe = typeof window !== 'undefined' && !!localStorage.getItem(this.tokenKey);
+      this.setToken(body.data.token, rememberMe);
+    }
   }
 
   setToken(token: string, rememberMe: boolean = true): void {

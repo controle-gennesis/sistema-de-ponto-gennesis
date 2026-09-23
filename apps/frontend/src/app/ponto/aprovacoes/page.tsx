@@ -388,10 +388,15 @@ function formatDetailEntryValue(
       .map((item, index) => {
         if (!item || typeof item !== 'object') return '';
         const row = item as Record<string, unknown>;
-        const employeeId = String(row.employeeId ?? '').trim();
-        const nome = employeeId
-          ? employeeNameById?.get(employeeId) ?? employeeId
-          : '—';
+        const employeeIds = Array.isArray(row.employeeIds)
+          ? row.employeeIds.map((id) => String(id ?? '').trim()).filter(Boolean)
+          : [];
+        const nome = employeeIds.length
+          ? employeeIds.map((id) => employeeNameById?.get(id) ?? id).join(', ')
+          : (() => {
+              const employeeId = String(row.employeeId ?? '').trim();
+              return employeeId ? employeeNameById?.get(employeeId) ?? employeeId : '—';
+            })();
         return `${index + 1}. ${nome}`;
       })
       .filter(Boolean)

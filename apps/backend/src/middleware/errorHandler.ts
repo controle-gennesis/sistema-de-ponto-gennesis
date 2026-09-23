@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { isTrustedOrigin } from '../lib/trustedOrigin';
+import { Sentry } from '../lib/sentry';
 
 export interface AppError extends Error {
   statusCode?: number;
@@ -122,6 +123,13 @@ export const errorHandler = (
     } else if (code === 'P2011') {
       message = 'Campo obrigatório não preenchido ou nulo onde o banco exige valor';
       statusCode = 400;
+    } else if (code === 'P2025') {
+      // Update/delete cujo `where` não bateu com nenhum registro — inclui o caso de
+      // compare-and-swap (where com status esperado) perdendo a corrida para outra
+      // requisição concorrente que já alterou o registro.
+      message =
+        'Este registro não foi encontrado ou já foi alterado por outra ação (por exemplo, já aprovado/rejeitado por outra pessoa). Atualize a página e tente novamente.';
+      statusCode = 409;
     }
 
     error = {
@@ -161,6 +169,15 @@ export const errorHandler = (
   // 🔸 Fallback — Erro genérico
   const statusCode = error.statusCode || 500;
   const message = error.message || 'Erro interno do servidor';
+
+  // 🔸 Só reporta ao Sentry falhas inesperadas (5xx) — 4xx é fluxo normal (validação, 401, etc.)
+  if (statusCode >= 500) {
+    Sentry.captureException(err, {
+      contexts: {
+        request: { method: req.method, path: req.path },
+      },
+    });
+  }
 
   // 🔸 Garantir que headers CORS sejam enviados mesmo em caso de erro
   const origin = req.headers.origin;

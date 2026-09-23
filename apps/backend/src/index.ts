@@ -13,6 +13,7 @@ console.log(`   🗄️  Database: ${process.env.DATABASE_URL ? '✅ Configurada
 console.log(`   🔐 JWT Secret: ${process.env.JWT_SECRET ? '✅ Configurada' : '❌ Não configurada'}`);
 console.log(`   ☁️  AWS S3: ${process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY ? '✅ Configurado' : '❌ Não configurado'}`);
 console.log(`   📦 Bucket: ${process.env.AWS_S3_BUCKET || 'sistema-ponto-fotos'}`);
+console.log(`   🛰️  Sentry: ${process.env.SENTRY_DSN ? '✅ Configurado' : '⚠️  Não configurado (erros não são reportados)'}`);
 console.log(`   📊 Fluig API: ${process.env.FLUIG_CONSUMER_KEY && process.env.FLUIG_ACCESS_TOKEN ? '✅ Configurado' : '❌ Não configurado'}`);
 const totvsRmOk =
   !!(process.env.TOTVS_RM_BASE_URL || '').trim() &&
@@ -37,6 +38,9 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import compression from 'compression';
 import rateLimit from 'express-rate-limit';
+
+import { initSentry, Sentry } from './lib/sentry';
+initSentry();
 
 import { errorHandler } from './middleware/errorHandler';
 import { notFound } from './middleware/notFound';
@@ -146,8 +150,12 @@ logNfeRuntimeStatus();
 const licitacaoExtraCtrl = new LicitacaoController();
 
 // Sem isto, uma rejeição solta (ex.: worker externo ausente) encerra o processo no Node 18.
+// `uncaughtException` não é interceptado aqui de propósito: registrar um listener próprio
+// impede o Node de encerrar o processo sozinho (comportamento padrão), deixando o app rodando
+// em estado corrompido. A integração padrão do Sentry já captura e sai do processo do jeito certo.
 process.on('unhandledRejection', (reason) => {
   console.error('[unhandledRejection]', reason instanceof Error ? reason.stack : reason);
+  Sentry.captureException(reason instanceof Error ? reason : new Error(String(reason)));
 });
 
 const prismaPool = getPrismaPoolConfig();
