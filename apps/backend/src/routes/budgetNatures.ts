@@ -11,13 +11,17 @@ const budgetNatureModule = pathToModuleKey('/ponto/natureza-orcamentaria');
 
 // Todas as rotas requerem autenticação
 router.use(authenticate);
-router.use(requireModuleAccess(budgetNatureModule));
 
-// Import route (file upload)
-router.post('/import', uploadImport.single('file'), (req: Request, res: Response, next: NextFunction) => controller.importFile(req, res, next), handleUploadError);
-
+// Leitura: qualquer usuário autenticado pode listar/ver naturezas (é só um picklist de
+// referência usado em outras telas, como o cadastro de Materiais e Serviços — não exige
+// a permissão de gerenciar a página "Natureza Orçamentária").
 router.get('/', (req, res, next) => controller.getAll(req as any, res as any, next));
 router.get('/:id', (req, res, next) => controller.getById(req as any, res as any, next));
+
+// Escrita: só quem tem acesso à página "Natureza Orçamentária".
+router.use(requireModuleAccess(budgetNatureModule));
+
+router.post('/import', uploadImport.single('file'), (req: Request, res: Response, next: NextFunction) => controller.importFile(req, res, next), handleUploadError);
 router.post('/', (req, res, next) => controller.create(req as any, res as any, next));
 router.patch('/:id', (req, res, next) => controller.update(req as any, res as any, next));
 router.delete('/:id', (req, res, next) => controller.delete(req as any, res as any, next));
