@@ -5,9 +5,10 @@ import { MedicalCertificateService } from '../services/MedicalCertificateService
 import { PhotoService } from '../services/PhotoService';
 import path from 'path';
 import fs from 'fs';
-import AWS from 'aws-sdk';
+import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import { prisma } from '../lib/prisma';
 import { findUserIdsMatchingSearch } from '../lib/normalizeSearchText';
+import { s3BodyToBuffer } from '../lib/awsS3Compat';
 
 const medicalCertificateService = new MedicalCertificateService();
 
@@ -550,20 +551,22 @@ export class MedicalCertificateController {
         return res.sendFile(filePath);
       } else {
         // Modo S3: baixar e enviar como stream
-        const s3 = new AWS.S3({
-          accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-          secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+        const s3 = new S3Client({
+          credentials: {
+            accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
+            secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
+          },
           region: process.env.AWS_REGION || 'us-east-1'
         });
         const bucketName = process.env.AWS_S3_BUCKET || 'sistema-ponto-fotos';
-        
+
         const params = {
           Bucket: bucketName,
           Key: certificate.fileKey
         };
-        
-        const s3Object = await s3.getObject(params).promise();
-        
+
+        const s3Object = await s3.send(new GetObjectCommand(params));
+
         const ext = path.extname(certificate.fileName || '').toLowerCase();
         const contentType = {
           '.pdf': 'application/pdf',
@@ -573,10 +576,10 @@ export class MedicalCertificateController {
           '.doc': 'application/msword',
           '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
         }[ext] || s3Object.ContentType || 'application/octet-stream';
-        
+
         res.setHeader('Content-Type', contentType);
         res.setHeader('Content-Disposition', `attachment; filename="${certificate.fileName || 'atestado' + ext}"`);
-        return res.send(s3Object.Body);
+        return res.send(await s3BodyToBuffer(s3Object.Body));
       }
     } catch (error) {
       return next(error);

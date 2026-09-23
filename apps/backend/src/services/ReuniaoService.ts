@@ -1,10 +1,12 @@
-import AWS from 'aws-sdk';
+import { S3Client, GetObjectCommand, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import fs from 'fs';
 import path from 'path';
 import { randomUUID } from 'crypto';
 import { formatMonthLabel, getIsoMonthKey } from '../lib/monthPeriod';
 import { formatWeekLabel, getFortnightKey } from '../lib/weekPeriod';
 import { backendUploadsRoot } from '../lib/uploads';
+import { isS3NoSuchKey, s3BodyToString } from '../lib/awsS3Compat';
 
 export type ReuniaoFieldType =
   | 'text'
@@ -437,7 +439,7 @@ function normalizeReuniaoData(raw: unknown): ReuniaoData {
 }
 
 export class ReuniaoService {
-  private s3: AWS.S3 | null;
+  private s3: S3Client | null;
   private bucketName: string;
   private useLocal: boolean;
   private localBasePath: string;
@@ -450,9 +452,11 @@ export class ReuniaoService {
 
     this.s3 = this.useLocal
       ? null
-      : new AWS.S3({
-          accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-          secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+      : new S3Client({
+          credentials: {
+            accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
+            secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
+          },
           region: process.env.AWS_REGION || 'us-east-1',
         });
 
@@ -574,10 +578,10 @@ export class ReuniaoService {
       return JSON.parse(content) as T;
     }
     try {
-      const result = await this.s3!.getObject({ Bucket: this.bucketName, Key: key }).promise();
-      return JSON.parse(result.Body!.toString('utf-8')) as T;
+      const result = await this.s3!.send(new GetObjectCommand({ Bucket: this.bucketName, Key: key }));
+      return JSON.parse(await s3BodyToString(result.Body)) as T;
     } catch (err: unknown) {
-      if ((err as { code?: string }).code === 'NoSuchKey') return null;
+      if (isS3NoSuchKey(err)) return null;
       throw err;
     }
   }
@@ -590,9 +594,9 @@ export class ReuniaoService {
       fs.writeFileSync(filePath, json, 'utf-8');
       return;
     }
-    await this.s3!
-      .putObject({ Bucket: this.bucketName, Key: key, Body: json, ContentType: 'application/json' })
-      .promise();
+    await this.s3!.send(
+      new PutObjectCommand({ Bucket: this.bucketName, Key: key, Body: json, ContentType: 'application/json' })
+    );
   }
 
   private async deleteKey(key: string): Promise<void> {
@@ -601,7 +605,7 @@ export class ReuniaoService {
       if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
       return;
     }
-    await this.s3!.deleteObject({ Bucket: this.bucketName, Key: key }).promise();
+    await this.s3!.send(new DeleteObjectCommand({ Bucket: this.bucketName, Key: key }));
   }
 
   // ---- Template do formulário ----
@@ -982,15 +986,15 @@ export class ReuniaoService {
     }
 
     const key = `reunioes-anexos/${contractId}/${reuniaoId}/${fileName}`;
-    await this.s3
-      .upload({
+    await this.s3.send(
+      new PutObjectCommand({
         Bucket: this.bucketName,
         Key: key,
         Body: file.buffer,
         ContentType: file.mimetype || 'application/octet-stream',
         ACL: 'private',
       })
-      .promise();
+    );
 
     return {
       key,
@@ -1006,7 +1010,9 @@ export class ReuniaoService {
     if (this.useLocal || !this.s3) {
       return `/uploads/${key}`;
     }
-    return this.s3.getSignedUrlPromise('getObject', { Bucket: this.bucketName, Key: key, Expires: 3600 });
+    return getSignedUrl(this.s3, new GetObjectCommand({ Bucket: this.bucketName, Key: key }), {
+      expiresIn: 3600,
+    });
   }
 
   async deleteAnexoFile(key: string): Promise<void> {
@@ -1015,6 +1021,6 @@ export class ReuniaoService {
       if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
       return;
     }
-    await this.s3!.deleteObject({ Bucket: this.bucketName, Key: key }).promise();
+    await this.s3!.send(new DeleteObjectCommand({ Bucket: this.bucketName, Key: key }));
   }
 }

@@ -1,7 +1,18 @@
-import AWS from 'aws-sdk';
+import {
+  S3Client,
+  PutObjectCommand,
+  GetObjectCommand,
+  DeleteObjectCommand,
+  ListObjectsV2Command,
+  HeadObjectCommand,
+  HeadBucketCommand,
+  CreateBucketCommand,
+} from '@aws-sdk/client-s3';
+import { getSignedUrl as getS3SignedUrl } from '@aws-sdk/s3-request-presigner';
 import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
 import fs from 'fs';
+import { buildS3Location, s3BodyToBuffer } from '../lib/awsS3Compat';
 
 export interface PhotoUploadResult {
   url: string;
@@ -18,8 +29,9 @@ export interface PhotoValidation {
 }
 
 export class PhotoService {
-  private s3: AWS.S3 | null;
+  private s3: S3Client | null;
   private bucketName: string;
+  private region: string;
   private useLocal: boolean;
 
   constructor() {
@@ -28,13 +40,17 @@ export class PhotoService {
       || !process.env.AWS_ACCESS_KEY_ID
       || !process.env.AWS_SECRET_ACCESS_KEY;
 
+    this.region = process.env.AWS_REGION || 'us-east-1';
+
     // Configurar AWS S3 quando aplicável
-    this.s3 = this.useLocal ? null : new AWS.S3({
-      accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-      region: process.env.AWS_REGION || 'us-east-1'
+    this.s3 = this.useLocal ? null : new S3Client({
+      credentials: {
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
+      },
+      region: this.region,
     });
-    
+
     this.bucketName = process.env.AWS_S3_BUCKET || 'sistema-ponto-fotos';
     
     // Log de configuração do PhotoService
@@ -156,25 +172,26 @@ export class PhotoService {
       const fileExtension = this.getFileExtension(photo.mimetype || 'image/jpeg');
       const fileName = `ponto/${userId}/${uuidv4()}.${fileExtension}`;
 
-      const uploadParams = {
-        Bucket: this.bucketName,
-        Key: fileName,
-        Body: photo.buffer || photo.data,
-        ContentType: photo.mimetype || 'image/jpeg',
-        ACL: 'private',
-        Metadata: {
-          userId,
-          uploadedAt: new Date().toISOString(),
-          originalName: photo.originalname || 'ponto.jpg'
-        }
-      } as AWS.S3.PutObjectRequest;
+      await this.s3.send(
+        new PutObjectCommand({
+          Bucket: this.bucketName,
+          Key: fileName,
+          Body: photo.buffer || photo.data,
+          ContentType: photo.mimetype || 'image/jpeg',
+          ACL: 'private',
+          Metadata: {
+            userId,
+            uploadedAt: new Date().toISOString(),
+            originalName: photo.originalname || 'ponto.jpg'
+          }
+        })
+      );
 
-      const result = await this.s3.upload(uploadParams).promise();
-      
-      console.log(`✅ Upload concluído - URL: ${result.Location}`);
+      const location = buildS3Location(this.bucketName, this.region, fileName);
+      console.log(`✅ Upload concluído - URL: ${location}`);
 
       return {
-        url: result.Location,
+        url: location,
         key: fileName,
         size: photo.size || 0,
         contentType: photo.mimetype || 'image/jpeg'
@@ -240,21 +257,22 @@ export class PhotoService {
 
     if (!this.useLocal && this.s3) {
       const s3Key = `vehicle-reservations/${userId}/${fileName}`;
-      const uploadParams = {
-        Bucket: this.bucketName,
-        Key: s3Key,
-        Body: buffer,
-        ContentType: contentType,
-        ACL: 'private',
-        Metadata: {
-          userId,
-          uploadedAt: new Date().toISOString(),
-          originalName: originalName || fileName
-        }
-      } as AWS.S3.PutObjectRequest;
-      const result = await this.s3.upload(uploadParams).promise();
+      await this.s3.send(
+        new PutObjectCommand({
+          Bucket: this.bucketName,
+          Key: s3Key,
+          Body: buffer,
+          ContentType: contentType,
+          ACL: 'private',
+          Metadata: {
+            userId,
+            uploadedAt: new Date().toISOString(),
+            originalName: originalName || fileName
+          }
+        })
+      );
       return {
-        url: result.Location,
+        url: buildS3Location(this.bucketName, this.region, s3Key),
         key: s3Key,
         size: buffer.length,
         contentType
@@ -276,8 +294,8 @@ export class PhotoService {
         return `${publicUrlBase}/${key}`.replace(/\s/g, '%20');
       }
 
-      const params = { Bucket: this.bucketName, Key: key, Expires: expiresIn };
-      return await (this.s3 as AWS.S3).getSignedUrlPromise('getObject', params);
+      const command = new GetObjectCommand({ Bucket: this.bucketName, Key: key });
+      return await getS3SignedUrl(this.s3 as S3Client, command, { expiresIn });
     } catch (error) {
       if (error instanceof Error) {
         throw new Error(`Erro ao gerar URL: ${error.message}`);
@@ -296,7 +314,7 @@ export class PhotoService {
         return;
       }
 
-      await (this.s3 as AWS.S3).deleteObject({ Bucket: this.bucketName, Key: key }).promise();
+      await (this.s3 as S3Client).send(new DeleteObjectCommand({ Bucket: this.bucketName, Key: key }));
     } catch (error) {
       if (error instanceof Error) {
         throw new Error(`Erro ao deletar foto: ${error.message}`);
@@ -324,7 +342,7 @@ export class PhotoService {
       }
 
       const params = { Bucket: this.bucketName, Prefix: `ponto/${userId}/`, MaxKeys: limit };
-      const result = await (this.s3 as AWS.S3).listObjectsV2(params).promise();
+      const result = await (this.s3 as S3Client).send(new ListObjectsV2Command(params));
       const photos = await Promise.all((result.Contents || []).map(async (object) => {
         const signedUrl = await this.getSignedUrl(object.Key!, 3600);
         return { key: object.Key!, url: signedUrl, size: object.Size || 0, lastModified: object.LastModified || new Date() };
@@ -384,7 +402,7 @@ export class PhotoService {
       }
 
       const params = { Bucket: this.bucketName, Key: key };
-      const result = await (this.s3 as AWS.S3).headObject(params).promise();
+      const result = await (this.s3 as S3Client).send(new HeadObjectCommand(params));
       return {
         size: result.ContentLength || 0,
         lastModified: result.LastModified || new Date(),
@@ -415,7 +433,7 @@ export class PhotoService {
       return true; // Local storage is always accessible
     }
     try {
-      await (this.s3 as AWS.S3).headBucket({ Bucket: this.bucketName }).promise();
+      await (this.s3 as S3Client).send(new HeadBucketCommand({ Bucket: this.bucketName }));
       return true;
     } catch (error) {
       return false;
@@ -453,10 +471,10 @@ export class PhotoService {
       }
       if (!this.useLocal && this.s3) {
         try {
-          const obj = await this.s3
-            .getObject({ Bucket: this.bucketName, Key: resolvedKey })
-            .promise();
-          if (obj.Body) return Buffer.from(obj.Body as Buffer);
+          const obj = await this.s3.send(
+            new GetObjectCommand({ Bucket: this.bucketName, Key: resolvedKey })
+          );
+          if (obj.Body) return await s3BodyToBuffer(obj.Body);
         } catch (error) {
           console.warn('[PhotoService] getImageBytes S3', error);
         }
@@ -491,7 +509,7 @@ export class PhotoService {
     try {
       const exists = await this.checkBucketAccess();
       if (!exists) {
-        await (this.s3 as AWS.S3).createBucket({ Bucket: this.bucketName }).promise();
+        await (this.s3 as S3Client).send(new CreateBucketCommand({ Bucket: this.bucketName }));
         console.log(`Bucket ${this.bucketName} criado com sucesso`);
       }
     } catch (error) {

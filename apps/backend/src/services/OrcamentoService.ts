@@ -1,7 +1,8 @@
-import AWS from 'aws-sdk';
+import { S3Client, GetObjectCommand, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import fs from 'fs';
 import path from 'path';
 import { randomUUID } from 'crypto';
+import { isS3NoSuchKey, s3BodyToString } from '../lib/awsS3Compat';
 
 export interface OrcamentoData {
   servicos: unknown[];
@@ -108,7 +109,7 @@ function extractCronogramaResumoFromMeta(meta: Record<string, unknown> | undefin
 }
 
 export class OrcamentoService {
-  private s3: AWS.S3 | null;
+  private s3: S3Client | null;
   private bucketName: string;
   private useLocal: boolean;
   private localBasePath: string;
@@ -136,9 +137,11 @@ export class OrcamentoService {
 
     this.s3 = this.useLocal
       ? null
-      : new AWS.S3({
-          accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-          secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+      : new S3Client({
+          credentials: {
+            accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
+            secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
+          },
           region: process.env.AWS_REGION || 'us-east-1'
         });
 
@@ -261,12 +264,10 @@ export class OrcamentoService {
 
     // S3: migra só se não houver índice com orçamentos
     try {
-      const idxObj = await this.s3!.getObject({ Bucket: this.bucketName, Key: this.getIndexKey(centroCustoId) }).promise();
-      const rawIdx = idxObj.Body
-        ? typeof idxObj.Body === 'string'
-          ? idxObj.Body
-          : idxObj.Body.toString('utf-8')
-        : '';
+      const idxObj = await this.s3!.send(
+        new GetObjectCommand({ Bucket: this.bucketName, Key: this.getIndexKey(centroCustoId) })
+      );
+      const rawIdx = idxObj.Body ? await s3BodyToString(idxObj.Body) : '';
       if (rawIdx) {
         const idx = JSON.parse(rawIdx) as OrcamentoIndex;
         if (idx?.orcamentos?.length) {
@@ -275,17 +276,17 @@ export class OrcamentoService {
         }
       }
     } catch (err: unknown) {
-      const e = err as { code?: string };
-      if (e?.code !== 'NoSuchKey') throw err;
+      if (!isS3NoSuchKey(err)) throw err;
     }
 
     let legacyBody: string | undefined;
     try {
-      const r = await this.s3!.getObject({ Bucket: this.bucketName, Key: this.getLegacyDataKey(centroCustoId) }).promise();
-      legacyBody = r.Body ? (typeof r.Body === 'string' ? r.Body : r.Body.toString('utf-8')) : undefined;
+      const r = await this.s3!.send(
+        new GetObjectCommand({ Bucket: this.bucketName, Key: this.getLegacyDataKey(centroCustoId) })
+      );
+      legacyBody = r.Body ? await s3BodyToString(r.Body) : undefined;
     } catch (err: unknown) {
-      const e = err as { code?: string };
-      if (e?.code === 'NoSuchKey') {
+      if (isS3NoSuchKey(err)) {
         this.migratedCentros.add(centroCustoId);
         return;
       }
@@ -309,22 +310,26 @@ export class OrcamentoService {
       servicos: legacy.servicos || [],
       imports: legacy.imports || []
     });
-    await this.s3!.putObject({
-      Bucket: this.bucketName,
-      Key: this.getOrcamentoDataKey(centroCustoId, id),
-      Body: JSON.stringify({ sessaoOrcamento: legacy.sessaoOrcamento }),
-      ContentType: 'application/json'
-    }).promise();
+    await this.s3!.send(
+      new PutObjectCommand({
+        Bucket: this.bucketName,
+        Key: this.getOrcamentoDataKey(centroCustoId, id),
+        Body: JSON.stringify({ sessaoOrcamento: legacy.sessaoOrcamento }),
+        ContentType: 'application/json'
+      })
+    );
     const index: OrcamentoIndex = {
       ultimoOrcamentoId: id,
       orcamentos: [{ id, nome, updatedAt }]
     };
-    await this.s3!.putObject({
-      Bucket: this.bucketName,
-      Key: this.getIndexKey(centroCustoId),
-      Body: JSON.stringify(index),
-      ContentType: 'application/json'
-    }).promise();
+    await this.s3!.send(
+      new PutObjectCommand({
+        Bucket: this.bucketName,
+        Key: this.getIndexKey(centroCustoId),
+        Body: JSON.stringify(index),
+        ContentType: 'application/json'
+      })
+    );
     this.migratedCentros.add(centroCustoId);
   }
 
@@ -341,12 +346,14 @@ export class OrcamentoService {
           ...(typeof idx.listaFinVersion === 'number' ? { listaFinVersion: idx.listaFinVersion } : {})
         };
       }
-      const result = await this.s3!.getObject({
-        Bucket: this.bucketName,
-        Key: this.getIndexKey(centroCustoId)
-      }).promise();
+      const result = await this.s3!.send(
+        new GetObjectCommand({
+          Bucket: this.bucketName,
+          Key: this.getIndexKey(centroCustoId)
+        })
+      );
       if (!result.Body) return null;
-      const body = typeof result.Body === 'string' ? result.Body : result.Body.toString('utf-8');
+      const body = await s3BodyToString(result.Body);
       const idx = JSON.parse(body) as OrcamentoIndex;
       return {
         ultimoOrcamentoId: idx.ultimoOrcamentoId,
@@ -354,8 +361,7 @@ export class OrcamentoService {
         ...(typeof idx.listaFinVersion === 'number' ? { listaFinVersion: idx.listaFinVersion } : {})
       };
     } catch (err: unknown) {
-      const e = err as { code?: string };
-      if (e?.code === 'NoSuchKey') return null;
+      if (isS3NoSuchKey(err)) return null;
       if (this.useLocal) return null;
       throw err;
     }
@@ -457,12 +463,14 @@ export class OrcamentoService {
       fs.writeFileSync(this.localIndexPath(centroCustoId), body, 'utf-8');
       return;
     }
-    await this.s3!.putObject({
-      Bucket: this.bucketName,
-      Key: this.getIndexKey(centroCustoId),
-      Body: body,
-      ContentType: 'application/json'
-    }).promise();
+    await this.s3!.send(
+      new PutObjectCommand({
+        Bucket: this.bucketName,
+        Key: this.getIndexKey(centroCustoId),
+        Body: body,
+        ContentType: 'application/json'
+      })
+    );
   }
 
   /** Lê arquivo JSON do orçamento (sem merge com serviços do contrato). */
@@ -475,16 +483,17 @@ export class OrcamentoService {
         if (!fs.existsSync(p)) return null;
         return JSON.parse(fs.readFileSync(p, 'utf-8')) as OrcamentoData;
       }
-      const result = await this.s3!.getObject({
-        Bucket: this.bucketName,
-        Key: this.getOrcamentoDataKey(centroCustoId, orcamentoId)
-      }).promise();
+      const result = await this.s3!.send(
+        new GetObjectCommand({
+          Bucket: this.bucketName,
+          Key: this.getOrcamentoDataKey(centroCustoId, orcamentoId)
+        })
+      );
       if (!result.Body) return null;
-      const body = typeof result.Body === 'string' ? result.Body : result.Body.toString('utf-8');
+      const body = await s3BodyToString(result.Body);
       return JSON.parse(body) as OrcamentoData;
     } catch (err: unknown) {
-      const e = err as { code?: string };
-      if (e?.code === 'NoSuchKey') return null;
+      if (isS3NoSuchKey(err)) return null;
       if (this.useLocal) return null;
       throw err;
     }
@@ -497,16 +506,17 @@ export class OrcamentoService {
         if (!fs.existsSync(p)) return null;
         return JSON.parse(fs.readFileSync(p, 'utf-8')) as ServicosPadraoData;
       }
-      const result = await this.s3!.getObject({
-        Bucket: this.bucketName,
-        Key: this.getServicosPadraoKey(centroCustoId)
-      }).promise();
+      const result = await this.s3!.send(
+        new GetObjectCommand({
+          Bucket: this.bucketName,
+          Key: this.getServicosPadraoKey(centroCustoId)
+        })
+      );
       if (!result.Body) return null;
-      const body = typeof result.Body === 'string' ? result.Body : result.Body.toString('utf-8');
+      const body = await s3BodyToString(result.Body);
       return JSON.parse(body) as ServicosPadraoData;
     } catch (err: unknown) {
-      const e = err as { code?: string };
-      if (e?.code === 'NoSuchKey') return null;
+      if (isS3NoSuchKey(err)) return null;
       if (this.useLocal) return null;
       throw err;
     }
@@ -548,10 +558,12 @@ export class OrcamentoService {
         const p = this.localServicosPadraoPath(centroCustoId);
         if (fs.existsSync(p)) fs.unlinkSync(p);
       } else {
-        await this.s3!.deleteObject({
-          Bucket: this.bucketName,
-          Key: this.getServicosPadraoKey(centroCustoId)
-        }).promise();
+        await this.s3!.send(
+          new DeleteObjectCommand({
+            Bucket: this.bucketName,
+            Key: this.getServicosPadraoKey(centroCustoId)
+          })
+        );
       }
       this.invalidatePadraoCache(centroCustoId);
       this.invalidateOrcamentoCache(centroCustoId);
@@ -567,12 +579,14 @@ export class OrcamentoService {
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(this.localServicosPadraoPath(centroCustoId), body, 'utf-8');
     } else {
-      await this.s3!.putObject({
-        Bucket: this.bucketName,
-        Key: this.getServicosPadraoKey(centroCustoId),
-        Body: body,
-        ContentType: 'application/json'
-      }).promise();
+      await this.s3!.send(
+        new PutObjectCommand({
+          Bucket: this.bucketName,
+          Key: this.getServicosPadraoKey(centroCustoId),
+          Body: body,
+          ContentType: 'application/json'
+        })
+      );
     }
     this.invalidatePadraoCache(centroCustoId);
     this.invalidateOrcamentoCache(centroCustoId);
@@ -733,12 +747,14 @@ export class OrcamentoService {
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(this.localOrcamentoPath(centroCustoId, orcamentoId), body, 'utf-8');
     } else {
-      await this.s3!.putObject({
-        Bucket: this.bucketName,
-        Key: this.getOrcamentoDataKey(centroCustoId, orcamentoId),
-        Body: body,
-        ContentType: 'application/json'
-      }).promise();
+      await this.s3!.send(
+        new PutObjectCommand({
+          Bucket: this.bucketName,
+          Key: this.getOrcamentoDataKey(centroCustoId, orcamentoId),
+          Body: body,
+          ContentType: 'application/json'
+        })
+      );
     }
     const updatedAt = new Date().toISOString();
     const meta = (nextSessao as { meta?: Record<string, unknown> } | undefined)?.meta;
@@ -853,12 +869,14 @@ export class OrcamentoService {
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(this.localOrcamentoPath(centroCustoId, id), body, 'utf-8');
     } else {
-      await this.s3!.putObject({
-        Bucket: this.bucketName,
-        Key: this.getOrcamentoDataKey(centroCustoId, id),
-        Body: body,
-        ContentType: 'application/json'
-      }).promise();
+      await this.s3!.send(
+        new PutObjectCommand({
+          Bucket: this.bucketName,
+          Key: this.getOrcamentoDataKey(centroCustoId, id),
+          Body: body,
+          ContentType: 'application/json'
+        })
+      );
     }
     await this.writeIndex(centroCustoId, {
       ultimoOrcamentoId: id,
@@ -892,10 +910,12 @@ export class OrcamentoService {
       if (fs.existsSync(p)) fs.unlinkSync(p);
     } else {
       try {
-        await this.s3!.deleteObject({
-          Bucket: this.bucketName,
-          Key: this.getOrcamentoDataKey(centroCustoId, orcamentoId)
-        }).promise();
+        await this.s3!.send(
+          new DeleteObjectCommand({
+            Bucket: this.bucketName,
+            Key: this.getOrcamentoDataKey(centroCustoId, orcamentoId)
+          })
+        );
       } catch {
         /* ok */
       }
@@ -951,16 +971,17 @@ export class OrcamentoService {
         const raw = fs.readFileSync(filePath, 'utf-8');
         return JSON.parse(raw) as unknown[];
       }
-      const result = await this.s3!.getObject({
-        Bucket: this.bucketName,
-        Key: this.getComposicoesGeralKey()
-      }).promise();
+      const result = await this.s3!.send(
+        new GetObjectCommand({
+          Bucket: this.bucketName,
+          Key: this.getComposicoesGeralKey()
+        })
+      );
       if (!result.Body) return null;
-      const body = typeof result.Body === 'string' ? result.Body : result.Body.toString('utf-8');
+      const body = await s3BodyToString(result.Body);
       return JSON.parse(body) as unknown[];
     } catch (err: unknown) {
-      const e = err as { code?: string };
-      if (e?.code === 'NoSuchKey') return null;
+      if (isS3NoSuchKey(err)) return null;
       if (this.useLocal) return null;
       throw err;
     }
@@ -974,11 +995,13 @@ export class OrcamentoService {
       fs.writeFileSync(path.join(dir, 'data.json'), body, 'utf-8');
       return;
     }
-    await this.s3!.putObject({
-      Bucket: this.bucketName,
-      Key: this.getComposicoesGeralKey(),
-      Body: body,
-      ContentType: 'application/json'
-    }).promise();
+    await this.s3!.send(
+      new PutObjectCommand({
+        Bucket: this.bucketName,
+        Key: this.getComposicoesGeralKey(),
+        Body: body,
+        ContentType: 'application/json'
+      })
+    );
   }
 }

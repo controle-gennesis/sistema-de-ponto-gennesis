@@ -1,8 +1,9 @@
-import AWS from 'aws-sdk';
+import { S3Client, GetObjectCommand, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import fs from 'fs';
 import path from 'path';
 import { randomUUID } from 'crypto';
 import { backendUploadsRoot } from '../lib/uploads';
+import { isS3NoSuchKey, s3BodyToString } from '../lib/awsS3Compat';
 
 export type FormularioFieldType =
   | 'text'
@@ -153,7 +154,7 @@ function emptyStep(): FormularioStep {
 }
 
 export class FormularioTemplateService {
-  private s3: AWS.S3 | null;
+  private s3: S3Client | null;
   private bucketName: string;
   private useLocal: boolean;
   private localBasePath: string;
@@ -166,9 +167,11 @@ export class FormularioTemplateService {
 
     this.s3 = this.useLocal
       ? null
-      : new AWS.S3({
-          accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-          secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+      : new S3Client({
+          credentials: {
+            accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
+            secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
+          },
           region: process.env.AWS_REGION || 'us-east-1',
         });
 
@@ -188,10 +191,10 @@ export class FormularioTemplateService {
       return JSON.parse(content) as T;
     }
     try {
-      const result = await this.s3!.getObject({ Bucket: this.bucketName, Key: key }).promise();
-      return JSON.parse(result.Body!.toString('utf-8')) as T;
+      const result = await this.s3!.send(new GetObjectCommand({ Bucket: this.bucketName, Key: key }));
+      return JSON.parse(await s3BodyToString(result.Body)) as T;
     } catch (err: unknown) {
-      if ((err as { code?: string }).code === 'NoSuchKey') return null;
+      if (isS3NoSuchKey(err)) return null;
       throw err;
     }
   }
@@ -204,14 +207,14 @@ export class FormularioTemplateService {
       fs.writeFileSync(filePath, json, 'utf-8');
       return;
     }
-    await this.s3!
-      .putObject({
+    await this.s3!.send(
+      new PutObjectCommand({
         Bucket: this.bucketName,
         Key: key,
         Body: json,
         ContentType: 'application/json',
       })
-      .promise();
+    );
   }
 
   private async deleteKey(key: string): Promise<void> {
@@ -220,7 +223,7 @@ export class FormularioTemplateService {
       if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
       return;
     }
-    await this.s3!.deleteObject({ Bucket: this.bucketName, Key: key }).promise();
+    await this.s3!.send(new DeleteObjectCommand({ Bucket: this.bucketName, Key: key }));
   }
 
   private async readIndex(): Promise<FormularioIndexFile> {

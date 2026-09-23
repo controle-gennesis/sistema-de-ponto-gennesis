@@ -1,9 +1,22 @@
-import AWS from 'aws-sdk';
+import {
+  S3Client,
+  GetBucketCorsCommand,
+  PutBucketCorsCommand,
+  GetObjectCommand,
+  PutObjectCommand,
+  DeleteObjectCommand,
+  HeadObjectCommand,
+  type CORSRule,
+} from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { Upload } from '@aws-sdk/lib-storage';
+import { NodeHttpHandler } from '@smithy/node-http-handler';
 import { v4 as uuidv4 } from 'uuid';
 import fs from 'fs';
 import path from 'path';
 import { DriveFile, DriveFolder, DriveFolderSharePermission } from '@prisma/client';
 import { prisma } from '../lib/prisma';
+import { s3BodyToBuffer } from '../lib/awsS3Compat';
 
 /** Limite padrão: 5 GB (vídeos longos). Override via DRIVE_MAX_FILE_SIZE (bytes). */
 export const DRIVE_MAX_FILE_SIZE_BYTES = parseInt(
@@ -32,16 +45,18 @@ export interface DriveUploadResult {
 }
 
 export class DriveService {
-  private s3: AWS.S3;
+  private s3: S3Client;
   private bucketName: string;
 
   constructor() {
-    this.s3 = new AWS.S3({
-      accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+    this.s3 = new S3Client({
+      credentials: {
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
+      },
       region: process.env.AWS_REGION || 'us-east-1',
       // Uploads grandes (multipart ~GB) — sem cortar no meio
-      httpOptions: { timeout: 0, connectTimeout: 120_000 },
+      requestHandler: new NodeHttpHandler({ requestTimeout: 0, connectionTimeout: 120_000 }),
     });
     this.bucketName = process.env.AWS_S3_BUCKET || 'sistema-ponto-fotos';
   }
@@ -68,13 +83,13 @@ export class DriveService {
       ]),
     );
 
-    let existingRules: AWS.S3.CORSRule[] = [];
+    let existingRules: CORSRule[] = [];
     try {
-      const current = await this.s3.getBucketCors({ Bucket: this.bucketName }).promise();
+      const current = await this.s3.send(new GetBucketCorsCommand({ Bucket: this.bucketName }));
       existingRules = current.CORSRules || [];
     } catch (err: any) {
       // Sem CORS ainda (NoSuchCORSConfiguration)
-      if (err?.code !== 'NoSuchCORSConfiguration') {
+      if (err?.name !== 'NoSuchCORSConfiguration' && err?.code !== 'NoSuchCORSConfiguration') {
         console.warn('[drive] getBucketCors:', err?.message || err);
       }
     }
@@ -90,8 +105,8 @@ export class DriveService {
       for (const m of rule.AllowedMethods || []) methods.add(m);
     }
 
-    await this.s3
-      .putBucketCors({
+    await this.s3.send(
+      new PutBucketCorsCommand({
         Bucket: this.bucketName,
         CORSConfiguration: {
           CORSRules: [
@@ -105,7 +120,7 @@ export class DriveService {
           ],
         },
       })
-      .promise();
+    );
 
     console.log(
       `[drive] CORS do bucket ${this.bucketName} atualizado (${originSet.size} origens) para upload direto.`,
@@ -461,12 +476,11 @@ export class DriveService {
     const s3Key = await this.buildDriveS3Key(userId, name, input.folderId);
     const expiresIn = 6 * 3600;
 
-    const uploadUrl = await this.s3.getSignedUrlPromise('putObject', {
-      Bucket: this.bucketName,
-      Key: s3Key,
-      ContentType: contentType,
-      Expires: expiresIn,
-    });
+    const uploadUrl = await getSignedUrl(
+      this.s3,
+      new PutObjectCommand({ Bucket: this.bucketName, Key: s3Key, ContentType: contentType }),
+      { expiresIn }
+    );
 
     return { uploadUrl, s3Key, contentType, expiresIn };
   }
@@ -487,16 +501,18 @@ export class DriveService {
 
     let actualSize = input.size;
     try {
-      const head = await this.s3
-        .headObject({ Bucket: this.bucketName, Key: input.s3Key })
-        .promise();
+      const head = await this.s3.send(
+        new HeadObjectCommand({ Bucket: this.bucketName, Key: input.s3Key })
+      );
       if (typeof head.ContentLength === 'number') actualSize = head.ContentLength;
     } catch {
       throw new Error('Upload incompleto — arquivo não encontrado no armazenamento');
     }
 
     if (actualSize > DRIVE_MAX_FILE_SIZE_BYTES) {
-      await this.s3.deleteObject({ Bucket: this.bucketName, Key: input.s3Key }).promise().catch(() => {});
+      await this.s3
+        .send(new DeleteObjectCommand({ Bucket: this.bucketName, Key: input.s3Key }))
+        .catch(() => {});
       throw new Error('Arquivo excede o limite permitido');
     }
 
@@ -542,25 +558,23 @@ export class DriveService {
 
     try {
       // Sem ACL: buckets com "Bucket owner enforced" rejeitam ACL e o upload trava/falha.
-      await this.s3
-        .upload(
-          {
-            Bucket: this.bucketName,
-            Key: s3Key,
-            Body: body,
-            ContentType: file.mimetype || 'application/octet-stream',
-            ContentDisposition: `attachment; filename="${encodeURIComponent(file.originalname)}"`,
-            Metadata: {
-              userid: userId,
-              uploadedat: new Date().toISOString(),
-            },
-          } as AWS.S3.PutObjectRequest,
-          {
-            partSize: 16 * 1024 * 1024,
-            queueSize: 3,
+      const upload = new Upload({
+        client: this.s3,
+        params: {
+          Bucket: this.bucketName,
+          Key: s3Key,
+          Body: body,
+          ContentType: file.mimetype || 'application/octet-stream',
+          ContentDisposition: `attachment; filename="${encodeURIComponent(file.originalname)}"`,
+          Metadata: {
+            userid: userId,
+            uploadedat: new Date().toISOString(),
           },
-        )
-        .promise();
+        },
+        partSize: 16 * 1024 * 1024,
+        queueSize: 3,
+      });
+      await upload.done();
 
       const record = await prisma.driveFile.create({
         data: {
@@ -585,24 +599,30 @@ export class DriveService {
   async getSignedDownloadUrl(fileId: string, userId: string, expiresIn = 3600): Promise<string> {
     const file = await this.assertUserCanAccessFile(fileId, userId);
 
-    return this.s3.getSignedUrlPromise('getObject', {
-      Bucket: this.bucketName,
-      Key: file.s3Key,
-      Expires: expiresIn,
-      ResponseContentDisposition: `attachment; filename="${encodeURIComponent(file.originalName)}"`,
-    });
+    return getSignedUrl(
+      this.s3,
+      new GetObjectCommand({
+        Bucket: this.bucketName,
+        Key: file.s3Key,
+        ResponseContentDisposition: `attachment; filename="${encodeURIComponent(file.originalName)}"`,
+      }),
+      { expiresIn }
+    );
   }
 
   /** URL assinada para exibir no browser (sem forçar download) — imagens no Drive, etc. */
   async getSignedPreviewUrl(fileId: string, userId: string, expiresIn = 600): Promise<string> {
     const file = await this.assertUserCanAccessFile(fileId, userId);
 
-    return this.s3.getSignedUrlPromise('getObject', {
-      Bucket: this.bucketName,
-      Key: file.s3Key,
-      Expires: expiresIn,
-      ResponseContentType: file.mimeType || 'application/octet-stream',
-    });
+    return getSignedUrl(
+      this.s3,
+      new GetObjectCommand({
+        Bucket: this.bucketName,
+        Key: file.s3Key,
+        ResponseContentType: file.mimeType || 'application/octet-stream',
+      }),
+      { expiresIn }
+    );
   }
 
   /** Baixa o objeto do S3 para gerar preview no cliente (PDF, planilha, etc.). */
@@ -616,26 +636,12 @@ export class DriveService {
       throw new Error('Arquivo grande demais para pré-visualização');
     }
 
-    const result = await this.s3
-      .getObject({ Bucket: this.bucketName, Key: file.s3Key })
-      .promise();
+    const result = await this.s3.send(
+      new GetObjectCommand({ Bucket: this.bucketName, Key: file.s3Key })
+    );
 
-    const body = result.Body;
-    if (!body) throw new Error('Conteúdo indisponível');
-
-    let buffer: Buffer;
-    if (Buffer.isBuffer(body)) {
-      buffer = body;
-    } else if (body instanceof Uint8Array) {
-      buffer = Buffer.from(body);
-    } else if (body instanceof ArrayBuffer) {
-      buffer = Buffer.from(new Uint8Array(body));
-    } else if (typeof (body as { transformToByteArray?: () => Promise<Uint8Array> }).transformToByteArray === 'function') {
-      const bytes = await (body as { transformToByteArray: () => Promise<Uint8Array> }).transformToByteArray();
-      buffer = Buffer.from(bytes);
-    } else {
-      buffer = Buffer.from(Uint8Array.from(body as ArrayLike<number>));
-    }
+    if (!result.Body) throw new Error('Conteúdo indisponível');
+    const buffer = await s3BodyToBuffer(result.Body);
 
     return {
       buffer,
@@ -975,7 +981,7 @@ export class DriveService {
 
   private async deleteS3Object(key: string): Promise<void> {
     try {
-      await this.s3.deleteObject({ Bucket: this.bucketName, Key: key }).promise();
+      await this.s3.send(new DeleteObjectCommand({ Bucket: this.bucketName, Key: key }));
     } catch {
       // Ignorar
     }

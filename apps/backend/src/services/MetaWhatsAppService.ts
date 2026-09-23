@@ -4,15 +4,17 @@
  */
 import axios from 'axios';
 import * as path from 'path';
-import AWS from 'aws-sdk';
+import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { v4 as uuidv4 } from 'uuid';
+import { s3BodyToBuffer } from '../lib/awsS3Compat';
 
 const GRAPH_API_BASE = 'https://graph.facebook.com/v21.0';
 
 export class MetaWhatsAppService {
   private phoneNumberId: string;
   private accessToken: string;
-  private s3: AWS.S3 | null;
+  private s3: S3Client | null;
   private bucketName: string;
   private useS3: boolean;
 
@@ -24,9 +26,11 @@ export class MetaWhatsAppService {
       !!process.env.AWS_SECRET_ACCESS_KEY &&
       (process.env.STORAGE_PROVIDER || '').toLowerCase() !== 'local';
     this.s3 = this.useS3
-      ? new AWS.S3({
-          accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-          secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+      ? new S3Client({
+          credentials: {
+            accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
+            secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
+          },
           region: process.env.AWS_REGION || 'us-east-1'
         })
       : null;
@@ -210,7 +214,7 @@ export class MetaWhatsAppService {
           }
         };
 
-        await this.s3.upload(uploadParams).promise();
+        await this.s3.send(new PutObjectCommand(uploadParams));
 
         return {
           fileUrl: '', // Gerado sob demanda em getConversation
@@ -247,10 +251,9 @@ export class MetaWhatsAppService {
   async getObjectBuffer(key: string): Promise<{ buffer: Buffer; contentType: string } | null> {
     if (!this.useS3 || !this.s3) return null;
     try {
-      const obj = await this.s3.getObject({ Bucket: this.bucketName, Key: key }).promise();
+      const obj = await this.s3.send(new GetObjectCommand({ Bucket: this.bucketName, Key: key }));
       if (!obj.Body) return null;
-      const body = obj.Body;
-      const buffer = Buffer.isBuffer(body) ? body : Buffer.from(body as ArrayBuffer);
+      const buffer = await s3BodyToBuffer(obj.Body);
       return {
         buffer,
         contentType: obj.ContentType || 'application/octet-stream'
@@ -265,10 +268,8 @@ export class MetaWhatsAppService {
   async getSignedUrlForMedia(key: string): Promise<string | null> {
     if (!this.useS3 || !this.s3) return null;
     try {
-      return await this.s3.getSignedUrlPromise('getObject', {
-        Bucket: this.bucketName,
-        Key: key,
-        Expires: 60 * 60 * 24 * 7 // 7 dias
+      return await getSignedUrl(this.s3, new GetObjectCommand({ Bucket: this.bucketName, Key: key }), {
+        expiresIn: 60 * 60 * 24 * 7 // 7 dias
       });
     } catch {
       return null;

@@ -1,10 +1,11 @@
 import fs from 'fs';
 import path from 'path';
 import { RequestHandler } from 'express';
-import AWS from 'aws-sdk';
+import { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 import { v4 as uuidv4 } from 'uuid';
 import { backendUploadsRoot } from './uploads';
 import { fixMulterOriginalName } from './fixUploadFileName';
+import { s3BodyToBuffer } from './awsS3Compat';
 
 type UploadFileInput = {
   folder: string;
@@ -34,12 +35,14 @@ function s3Enabled(): boolean {
   );
 }
 
-function getS3(): { client: AWS.S3; bucket: string } | null {
+function getS3(): { client: S3Client; bucket: string } | null {
   if (!s3Enabled()) return null;
   return {
-    client: new AWS.S3({
-      accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+    client: new S3Client({
+      credentials: {
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
+      },
       region: process.env.AWS_REGION || 'us-east-1',
     }),
     bucket: process.env.AWS_S3_BUCKET || 'sistema-ponto-fotos',
@@ -104,15 +107,15 @@ export async function savePersistentUpload(input: UploadFileInput): Promise<Uplo
   const s3 = getS3();
   if (s3) {
     try {
-      await s3.client
-        .upload({
+      await s3.client.send(
+        new PutObjectCommand({
           Bucket: s3.bucket,
           Key: key,
           Body: input.buffer,
           ContentType: contentType,
           ACL: 'private',
         })
-        .promise();
+      );
       return { url, key, fileName, originalName };
     } catch (error) {
       console.warn(`[persistentUpload] Falha S3 em ${key}. Gravando local.`, error);
@@ -153,15 +156,15 @@ export async function savePersistentUploadFromPath(input: {
   const s3 = getS3();
   if (s3) {
     try {
-      await s3.client
-        .upload({
+      await s3.client.send(
+        new PutObjectCommand({
           Bucket: s3.bucket,
           Key: key,
           Body: fs.createReadStream(input.diskPath),
           ContentType: contentType,
           ACL: 'private',
         })
-        .promise();
+      );
       return { url, key, fileName, originalName };
     } catch (error) {
       console.warn(`[persistentUpload] Falha S3 em ${key}. Gravando local.`, error);
@@ -190,7 +193,7 @@ export async function deletePersistentUpload(keyOrUrl: string | null | undefined
   const s3 = getS3();
   if (!s3) return;
   try {
-    await s3.client.deleteObject({ Bucket: s3.bucket, Key: key }).promise();
+    await s3.client.send(new DeleteObjectCommand({ Bucket: s3.bucket, Key: key }));
   } catch {
     // ignore
   }
@@ -219,15 +222,15 @@ export async function savePersistentBuffer(input: {
   const s3 = getS3();
   if (s3) {
     try {
-      await s3.client
-        .upload({
+      await s3.client.send(
+        new PutObjectCommand({
           Bucket: s3.bucket,
           Key: key,
           Body: input.buffer,
           ContentType: input.mimeType || 'application/octet-stream',
           ACL: 'private',
         })
-        .promise();
+      );
       if (input.keepLocalCopy) {
         saveLocally(folder, fileName, input.buffer);
       }
@@ -256,10 +259,9 @@ export async function readPersistentUpload(keyOrUrl: string): Promise<Buffer | n
   const s3 = getS3();
   if (!s3) return null;
   try {
-    const obj = await s3.client.getObject({ Bucket: s3.bucket, Key: key }).promise();
+    const obj = await s3.client.send(new GetObjectCommand({ Bucket: s3.bucket, Key: key }));
     if (!obj.Body) return null;
-    if (Buffer.isBuffer(obj.Body)) return obj.Body;
-    return Buffer.from(obj.Body as ArrayBuffer);
+    return await s3BodyToBuffer(obj.Body);
   } catch {
     return null;
   }
@@ -292,11 +294,11 @@ export function persistentUploadsS3Fallback(): RequestHandler {
         return;
       }
 
-      const obj = await s3.client.getObject({ Bucket: s3.bucket, Key: relative }).promise();
+      const obj = await s3.client.send(new GetObjectCommand({ Bucket: s3.bucket, Key: relative }));
       if (obj.ContentType) res.setHeader('Content-Type', obj.ContentType);
       if (obj.ContentLength != null) res.setHeader('Content-Length', String(obj.ContentLength));
       res.setHeader('Cache-Control', 'private, max-age=3600');
-      res.status(200).send(obj.Body);
+      res.status(200).send(await s3BodyToBuffer(obj.Body));
     } catch {
       next();
     }

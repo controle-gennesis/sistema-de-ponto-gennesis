@@ -1,10 +1,11 @@
 import { ChatStatus, ChatType, Prisma } from '@prisma/client';
-import AWS from 'aws-sdk';
+import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
 import fs from 'fs';
 import { prisma } from '../lib/prisma';
 import { gennecyBotUserWhereExclude } from '../lib/gennecyBotUser';
+import { buildS3Location } from '../lib/awsS3Compat';
 
 const CHAT_TOPIC_DELETE_ALLOWED_EMAILS = new Set(['controle@gennesisengenharia.com.br']);
 
@@ -52,8 +53,9 @@ export interface SendMessageData {
 }
 
 export class ChatService {
-  private s3: AWS.S3 | null;
+  private s3: S3Client | null;
   private bucketName: string;
+  private region: string;
   private useLocal: boolean;
 
   // Função auxiliar para normalizar departamentos (remove acentos e converte para uppercase)
@@ -99,10 +101,13 @@ export class ChatService {
       || !process.env.AWS_ACCESS_KEY_ID
       || !process.env.AWS_SECRET_ACCESS_KEY;
 
-    this.s3 = this.useLocal ? null : new AWS.S3({
-      accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-      region: process.env.AWS_REGION || 'us-east-1'
+    this.region = process.env.AWS_REGION || 'us-east-1';
+    this.s3 = this.useLocal ? null : new S3Client({
+      credentials: {
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
+      },
+      region: this.region,
     });
 
     this.bucketName = process.env.AWS_S3_BUCKET || 'sistema-ponto-fotos';
@@ -2478,18 +2483,18 @@ export class ChatService {
       Key: fileName,
       Body: file.buffer,
       ContentType: file.mimetype || 'application/octet-stream',
-      ACL: 'private'
-    } as AWS.S3.PutObjectRequest;
+      ACL: 'private' as const
+    };
 
     try {
-      const uploadPromise = this.s3.upload(uploadParams).promise();
+      const uploadPromise = this.s3.send(new PutObjectCommand(uploadParams));
       const timeoutPromise = new Promise<never>((_, reject) => {
         setTimeout(() => reject(new Error('Timeout ao enviar arquivo para o S3')), 15000);
       });
-      const result = await Promise.race([uploadPromise, timeoutPromise]) as AWS.S3.ManagedUpload.SendData;
+      await Promise.race([uploadPromise, timeoutPromise]);
 
       return {
-        url: result.Location,
+        url: buildS3Location(this.bucketName, this.region, fileName),
         key: fileName,
         size: file.size,
         mimeType: file.mimetype || 'application/octet-stream'

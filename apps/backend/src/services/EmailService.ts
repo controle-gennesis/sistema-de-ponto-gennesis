@@ -1,4 +1,4 @@
-import nodemailer from 'nodemailer';
+import nodemailer, { Transporter } from 'nodemailer';
 import { Resend } from 'resend';
 import { APP_NAME } from '../lib/appBranding';
 
@@ -18,7 +18,7 @@ function cleanEnv(value: string | undefined): string {
 }
 
 class EmailService {
-  private transporter: nodemailer.Transporter | null = null;
+  private transporter: Transporter | null = null;
   private resend: Resend | null = null;
   private useResend: boolean = false;
 
@@ -73,7 +73,7 @@ class EmailService {
           reject(new Error('Timeout ao verificar conexão SMTP'));
         }, 15000); // 15 segundos para verificação
 
-        this.transporter!.verify((error) => {
+        this.transporter!.verify((error: Error | null) => {
           clearTimeout(timeout);
           if (error) {
             reject(error);

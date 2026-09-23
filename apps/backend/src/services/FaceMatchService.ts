@@ -1,4 +1,4 @@
-import AWS from 'aws-sdk';
+import { RekognitionClient, CompareFacesCommand } from '@aws-sdk/client-rekognition';
 import { PhotoService } from './PhotoService';
 
 export type FaceMatchStatus =
@@ -27,14 +27,16 @@ function rekognitionReady(): boolean {
 
 export class FaceMatchService {
   private photoService = new PhotoService();
-  private rekognition: AWS.Rekognition | null = null;
+  private rekognition: RekognitionClient | null = null;
 
-  private client(): AWS.Rekognition | null {
+  private client(): RekognitionClient | null {
     if (!rekognitionReady()) return null;
     if (!this.rekognition) {
-      this.rekognition = new AWS.Rekognition({
-        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+      this.rekognition = new RekognitionClient({
+        credentials: {
+          accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
+          secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
+        },
         region: process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || 'us-east-1',
       });
     }
@@ -102,13 +104,13 @@ export class FaceMatchService {
     }
 
     try {
-      const result = await client
-        .compareFaces({
+      const result = await client.send(
+        new CompareFacesCommand({
           SourceImage: { Bytes: source },
           TargetImage: { Bytes: target },
           SimilarityThreshold: Math.max(1, Math.min(99, DEFAULT_THRESHOLD)),
         })
-        .promise();
+      );
 
       const match = (result.FaceMatches || []).sort(
         (a, b) => Number(b.Similarity || 0) - Number(a.Similarity || 0)
