@@ -224,7 +224,8 @@ export function emptyChecklistState(
   sections: ChecklistSectionDef[] = LICITACAO_CHECKLIST
 ): Record<string, ChecklistItemState> {
   const state: Record<string, ChecklistItemState> = {};
-  for (const section of sections) {
+  const list = Array.isArray(sections) ? sections : LICITACAO_CHECKLIST;
+  for (const section of list) {
     for (const item of section.items) {
       state[checklistItemKey(section.id, item.id)] = { checked: false, comentario: '' };
     }
@@ -236,7 +237,8 @@ export function mergeChecklistFromSaved(
   saved: Record<string, Partial<ChecklistItemState>> | null | undefined,
   sections: ChecklistSectionDef[] = LICITACAO_CHECKLIST
 ): Record<string, ChecklistItemState> {
-  const base = emptyChecklistState(sections);
+  const list = Array.isArray(sections) ? sections : LICITACAO_CHECKLIST;
+  const base = emptyChecklistState(list);
   if (!saved) return base;
   for (const [key, val] of Object.entries(saved)) {
     if (!base[key] || !val) continue;

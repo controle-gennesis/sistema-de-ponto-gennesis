@@ -1,7 +1,9 @@
 import {
+  addLicitacaoOrcamentoAnexo,
   getOrCreateLicitacaoOrcamentoView,
   getOrcamentoLineTemplate,
   putOrcamentoLineTemplate,
+  removeLicitacaoOrcamentoAnexo,
   saveLicitacaoOrcamentoForLicitacao,
 } from '../services/LicitacaoOrcamentoService';
 import { Response, NextFunction } from 'express';
@@ -12,6 +14,7 @@ import { prisma } from '../lib/prisma';
 import { licitacaoService } from '../services/LicitacaoService';
 import {
   isLicitacaoArquivadaMotivo,
+  isLicitacaoAnaliseEtapa,
   type LicitacaoArquivadaMotivo,
 } from '../services/licitacaoStore';
 import {
@@ -70,7 +73,7 @@ const upload = multer({
   limits: { fileSize: 15 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     const allowed =
-      /\.(pdf|png|jpe?g|webp|gif|txt|xlsx|xls)$/i.test(file.originalname) ||
+      /\.(pdf|png|jpe?g|webp|gif|txt|xlsx|xls|csv|docx?)$/i.test(file.originalname) ||
       [
         'application/pdf',
         'image/png',
@@ -80,9 +83,12 @@ const upload = multer({
         'text/plain',
         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         'application/vnd.ms-excel',
+        'text/csv',
+        'application/msword',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       ].includes(file.mimetype);
     if (!allowed) {
-      cb(new Error('Formato não suportado. Envie PDF, imagem, TXT ou planilha Excel.'));
+      cb(new Error('Formato não suportado. Envie PDF, imagem, Word, TXT ou planilha Excel.'));
       return;
     }
     cb(null, true);
@@ -690,14 +696,23 @@ export class LicitacaoController {
       const arquivadaMotivo = isLicitacaoArquivadaMotivo(arquivadaMotivoRaw)
         ? arquivadaMotivoRaw
         : undefined;
+      const analiseEtapaRaw =
+        typeof req.query.analiseEtapa === 'string' ? req.query.analiseEtapa.trim().toLowerCase() : '';
+      const analiseEtapa = isLicitacaoAnaliseEtapa(analiseEtapaRaw) ? analiseEtapaRaw : undefined;
+      const emArquivoRaw =
+        typeof req.query.emArquivo === 'string' ? req.query.emArquivo.trim().toLowerCase() : '';
+      const emArquivo =
+        emArquivoRaw === 'true' || emArquivoRaw === '1' ? true : undefined;
       const data = await licitacaoService.list({
         search,
         dataInicio,
         dataFim,
         regiaoKey,
         estado,
-        arquivada,
+        arquivada: emArquivo ? true : arquivada,
         arquivadaMotivo,
+        analiseEtapa,
+        emArquivo,
       });
       res.json({ success: true, data });
     } catch (error) {
@@ -772,6 +787,7 @@ export class LicitacaoController {
         linkNotebookLm: body.linkNotebookLm,
         analiseUsuario: body.analiseUsuario,
         checklistAnalise: body.checklistAnalise,
+        analisePreliminar: body.analisePreliminar,
         naoSeHabilita: body.naoSeHabilita,
         naoSeHabilitaItens: body.naoSeHabilitaItens,
         decisaoAnaliseFinal: body.decisaoAnaliseFinal,
@@ -859,7 +875,7 @@ export class LicitacaoController {
         encerrada: 'Status definido como encerrada.',
         em_andamento: 'Status definido como em andamento.',
         vencidas: 'Status definido como vencida.',
-        aguardando_aprovacao: 'Status definido como aguardando aprovação.',
+        aguardando_aprovacao: 'Status definido como Análise diretoria.',
         orcamento: 'Status definido como orçamento.',
       };
       res.json({ success: true, data, message: messageByMotivo[motivo] });
@@ -872,6 +888,69 @@ export class LicitacaoController {
     try {
       const data = await licitacaoService.desarquivarAnalise(req.params.id);
       res.json({ success: true, data, message: 'Análise restaurada para a fila.' });
+    } catch (error) {
+      next(error instanceof Error ? createError(error.message, 400) : error);
+    }
+  }
+
+  async enviarParaArquivo(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const motivoRaw =
+        typeof req.body?.motivo === 'string' ? req.body.motivo.trim().toLowerCase() : '';
+      const motivo = isLicitacaoArquivadaMotivo(motivoRaw)
+        ? (motivoRaw as LicitacaoArquivadaMotivo)
+        : undefined;
+      const data = await licitacaoService.enviarParaArquivo(req.params.id, motivo);
+      res.json({
+        success: true,
+        data,
+        message: 'Licitação enviada para o Arquivo.',
+      });
+    } catch (error) {
+      next(error instanceof Error ? createError(error.message, 400) : error);
+    }
+  }
+
+  async setStatusSelecionado(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const motivoRaw =
+        typeof req.body?.motivo === 'string' ? req.body.motivo.trim().toLowerCase() : '';
+      if (!isLicitacaoArquivadaMotivo(motivoRaw)) {
+        throw createError(
+          'Informe o status: suspensa, declinada, encerrada, em_andamento ou vencidas.',
+          400
+        );
+      }
+      const data = await licitacaoService.setStatusSelecionado(
+        req.params.id,
+        motivoRaw as LicitacaoArquivadaMotivo
+      );
+      res.json({
+        success: true,
+        data,
+        message: 'Status selecionado. Clique em Arquivar para enviar ao Arquivo.',
+      });
+    } catch (error) {
+      next(error instanceof Error ? createError(error.message, 400) : error);
+    }
+  }
+
+  async setAnaliseEtapa(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const etapaRaw =
+        typeof req.body?.etapa === 'string' ? req.body.etapa.trim().toLowerCase() : '';
+      if (!isLicitacaoAnaliseEtapa(etapaRaw)) {
+        throw createError('Informe a etapa: preliminar ou em_analise.', 400);
+      }
+      const data = await licitacaoService.setAnaliseEtapa(req.params.id, etapaRaw);
+      res.json({
+        success: true,
+        data,
+        message:
+          etapaRaw === 'em_analise'
+            ? 'Enviada para a aba Em Análise.'
+            : 'Enviada para a aba Análise Preliminar.',
+      });
     } catch (error) {
       next(error instanceof Error ? createError(error.message, 400) : error);
     }
@@ -975,7 +1054,7 @@ export class LicitacaoController {
     try {
       const data = await saveLicitacaoOrcamentoForLicitacao({
         licitacaoId: req.params.id,
-        inputs: req.body?.inputs ?? req.body,
+        registro: req.body?.registro ?? req.body,
         userId: req.user!.id,
       });
       res.json({ success: true, data });
@@ -983,6 +1062,37 @@ export class LicitacaoController {
       const message = error instanceof Error ? error.message : 'Erro ao salvar orçamento';
       const status =
         message.includes('não encontrad') ? 404 : message.includes('status Orçamento') ? 400 : 400;
+      next(error instanceof Error ? createError(message, status) : error);
+    }
+  }
+
+  async uploadOrcamentoAnexo(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.file?.buffer) throw createError('Selecione um arquivo', 400);
+      const data = await addLicitacaoOrcamentoAnexo({
+        licitacaoId: req.params.id,
+        userId: req.user!.id,
+        file: req.file,
+      });
+      res.status(201).json({ success: true, data });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Erro ao anexar documento';
+      const status = message.includes('não encontrad') ? 404 : 400;
+      next(error instanceof Error ? createError(message, status) : error);
+    }
+  }
+
+  async removeOrcamentoAnexo(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const data = await removeLicitacaoOrcamentoAnexo({
+        licitacaoId: req.params.id,
+        anexoId: req.params.anexoId,
+        userId: req.user!.id,
+      });
+      res.json({ success: true, data });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Erro ao remover anexo';
+      const status = message.includes('não encontrad') ? 404 : 400;
       next(error instanceof Error ? createError(message, status) : error);
     }
   }

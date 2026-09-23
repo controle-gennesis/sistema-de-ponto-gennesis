@@ -5,7 +5,10 @@ import {
   type LotBreakdownColumn,
   type LotBreakdownTabConfig
 } from '../lib/controleGeralLotBreakdown';
-import { NFS_TAB_GASTOS_COST_CENTERS } from '../lib/controleGeralGastosMapping';
+import {
+  getNfsTabGastosCostCenters,
+  normalizeCostCenterKey
+} from '../lib/controleGeralGastosMapping';
 import { normalizeGastosOperacionaisContractName } from '../lib/gastosOperacionaisContractAliases';
 import { isExcludedNotaForTab } from '../lib/controleNfsExcludedNotes';
 
@@ -134,6 +137,7 @@ export const CONTROLE_NFS_SHEET_TABS: ControleNfsSheetTab[] = [
     sheetName: 'CAPITANIA FLUVIAL'
   },
   { key: 'confea', label: 'CONFEA', sheetName: 'CONFEA' },
+  { key: 'cna-subsolo', label: 'CNA - SUBSOLO', sheetName: 'CNA - SUBSOLO' },
   { key: 'mapa', label: 'MAPA', sheetName: 'MAPA' },
   { key: 'fhe-df', label: 'FHE DF', sheetName: 'FHE DF' },
   { key: 'hfa', label: 'HFA', sheetName: 'HFA' },
@@ -163,6 +167,124 @@ export const CONTROLE_NFS_SHEET_TABS: ControleNfsSheetTab[] = [
   { key: 'ufg', label: 'UFG', sheetName: 'UFG' }
 ];
 
+/** Abas da planilha que não são contratos NFS (gastos, relatórios, etc.). */
+const NFS_SHEET_NAME_DENYLIST_PREFIXES = [
+  'query base',
+  'base de gastos',
+  'teto de gastos',
+  'controle gennesis',
+  'mes / ano',
+  'relatorio',
+  'controle anual',
+  'pagina'
+] as const;
+
+const SHEET_LIST_CACHE_TTL_MS = 5 * 60 * 1000;
+let sheetListCache: { expiresAt: number; names: string[] } | null = null;
+let resolvedTabsCache: { expiresAt: number; tabs: ControleNfsSheetTab[] } | null = null;
+
+function decodeHtmlviewSheetName(raw: string): string {
+  return raw
+    .replace(/\\u([0-9a-fA-F]{4})/g, (_, hex: string) => String.fromCharCode(parseInt(hex, 16)))
+    .replace(/\\"/g, '"')
+    .replace(/\\\//g, '/')
+    .replace(/\\'/g, "'");
+}
+
+function isDeniedNfsSheetName(name: string): boolean {
+  const key = normalizeCostCenterKey(name);
+  if (!key) return true;
+  return NFS_SHEET_NAME_DENYLIST_PREFIXES.some(
+    (prefix) => key === prefix || key.startsWith(`${prefix} `) || key.startsWith(`${prefix}-`)
+  );
+}
+
+async function listControleNfsSpreadsheetSheetNames(forceRefresh = false): Promise<string[]> {
+  if (!forceRefresh && sheetListCache && sheetListCache.expiresAt > Date.now()) {
+    return sheetListCache.names;
+  }
+
+  const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId()}/htmlview`;
+  const response = await fetch(url, {
+    headers: {
+      Accept: 'text/html,text/plain,*/*',
+      'Cache-Control': 'no-cache',
+      Pragma: 'no-cache'
+    },
+    cache: 'no-store'
+  } as RequestInit & { cache?: 'no-store' });
+
+  if (!response.ok) {
+    throw new Error(`Falha ao listar abas NFS (${response.status}).`);
+  }
+
+  const html = await response.text();
+  const names: string[] = [];
+  const seen = new Set<string>();
+  const pattern = /items\.push\(\{name:\s*"([^"]+)"/g;
+  let match: RegExpExecArray | null = pattern.exec(html);
+  while (match) {
+    const name = decodeHtmlviewSheetName(match[1]).trim();
+    const key = normalizeCostCenterKey(name);
+    if (name && key && !seen.has(key)) {
+      seen.add(key);
+      names.push(name);
+    }
+    match = pattern.exec(html);
+  }
+
+  sheetListCache = {
+    names,
+    expiresAt: Date.now() + SHEET_LIST_CACHE_TTL_MS
+  };
+  return names;
+}
+
+/**
+ * Lista estática + abas novas da planilha (ex.: CNA - SUBSOLO).
+ * Contratos novos passam a ser lidos sem deploy de alias.
+ */
+export async function resolveControleNfsSheetTabs(
+  forceRefresh = false
+): Promise<ControleNfsSheetTab[]> {
+  if (!forceRefresh && resolvedTabsCache && resolvedTabsCache.expiresAt > Date.now()) {
+    return resolvedTabsCache.tabs;
+  }
+
+  const tabs = [...CONTROLE_NFS_SHEET_TABS];
+  const knownSheetKeys = new Set(
+    CONTROLE_NFS_SHEET_TABS.map((tab) => normalizeCostCenterKey(tab.sheetName))
+  );
+  const knownTabKeys = new Set(CONTROLE_NFS_SHEET_TABS.map((tab) => tab.key));
+
+  try {
+    const discovered = await listControleNfsSpreadsheetSheetNames(forceRefresh);
+    for (const sheetName of discovered) {
+      if (isDeniedNfsSheetName(sheetName)) continue;
+      const sheetKey = normalizeCostCenterKey(sheetName);
+      if (knownSheetKeys.has(sheetKey)) continue;
+
+      const key = slugifyTabKey(sheetName);
+      if (!key || knownTabKeys.has(key)) continue;
+
+      knownSheetKeys.add(sheetKey);
+      knownTabKeys.add(key);
+      tabs.push({ key, label: sheetName, sheetName });
+    }
+  } catch (error) {
+    console.warn(
+      '[controle-nfs] Falha ao descobrir abas novas; usando lista estática:',
+      error instanceof Error ? error.message : error
+    );
+  }
+
+  resolvedTabsCache = {
+    tabs,
+    expiresAt: Date.now() + SHEET_LIST_CACHE_TTL_MS
+  };
+  return tabs;
+}
+
 type GvizCell = { v?: string | number | boolean | null; f?: string | null } | null;
 type GvizRow = { c?: GvizCell[] | null };
 type GvizTable = {
@@ -184,13 +306,15 @@ type SheetCacheEntry = {
 const sheetCache = new Map<string, SheetCacheEntry>();
 let totalsSummaryCache: { expiresAt: number; data: ControleNfsTotalsSummary } | null = null;
 /** Invalida caches em memória após mudanças no cálculo (ex.: Conta Vinculada / aba MAPA). */
-const NFS_TOTALS_CACHE_VERSION = 7;
+const NFS_TOTALS_CACHE_VERSION = 8;
 let loadedNfsTotalsCacheVersion = 0;
 
 function invalidateStaleNfsTotalsCache(): void {
   if (loadedNfsTotalsCacheVersion === NFS_TOTALS_CACHE_VERSION) return;
   loadedNfsTotalsCacheVersion = NFS_TOTALS_CACHE_VERSION;
   totalsSummaryCache = null;
+  sheetListCache = null;
+  resolvedTabsCache = null;
 }
 
 function spreadsheetId(): string {
@@ -1030,8 +1154,9 @@ function hasActiveTotalsFilters(filters?: ControleNfsTotalsFilters): boolean {
   if (!filters) return false;
 
   const tabKeys = filters.tabKeys?.filter(Boolean) ?? [];
+  const allTabsCount = (resolvedTabsCache?.tabs ?? CONTROLE_NFS_SHEET_TABS).length;
   const allTabsSelected =
-    tabKeys.length === 0 || tabKeys.length >= CONTROLE_NFS_SHEET_TABS.length;
+    tabKeys.length === 0 || tabKeys.length >= allTabsCount;
 
   const dateFilter = filters.dateFilter;
   const hasDateFilter = Boolean(
@@ -1051,21 +1176,25 @@ function hasActiveTotalsFilters(filters?: ControleNfsTotalsFilters): boolean {
   );
 }
 
-function resolveTabsForTotals(tabKeys?: string[]): ControleNfsSheetTab[] {
+function resolveTabsForTotals(
+  tabKeys: string[] | undefined,
+  allTabs: readonly ControleNfsSheetTab[]
+): ControleNfsSheetTab[] {
   const normalized = (tabKeys ?? []).map((key) => key.trim()).filter(Boolean);
-  if (normalized.length === 0) return CONTROLE_NFS_SHEET_TABS;
+  if (normalized.length === 0) return [...allTabs];
 
   const allowed = new Set(normalized);
-  return CONTROLE_NFS_SHEET_TABS.filter((tab) => allowed.has(tab.key));
+  return allTabs.filter((tab) => allowed.has(tab.key));
 }
 
 export function listControleNfsTabs(): ControleNfsSheetTab[] {
-  return CONTROLE_NFS_SHEET_TABS;
+  return resolvedTabsCache?.tabs ?? CONTROLE_NFS_SHEET_TABS;
 }
 
 export function findControleNfsTab(tabKey: string): ControleNfsSheetTab | undefined {
   const normalized = tabKey.trim().toLowerCase();
-  return CONTROLE_NFS_SHEET_TABS.find((tab) => tab.key === normalized);
+  const tabs = resolvedTabsCache?.tabs ?? CONTROLE_NFS_SHEET_TABS;
+  return tabs.find((tab) => tab.key === normalized);
 }
 
 function slugifyTabKey(value: string): string {
@@ -1079,8 +1208,9 @@ function slugifyTabKey(value: string): string {
 
 function resolveTabForFetch(tabKey: string, sheetNameOverride?: string): ControleNfsSheetTab {
   const sheetName = sheetNameOverride?.trim();
+  const tabs = resolvedTabsCache?.tabs ?? CONTROLE_NFS_SHEET_TABS;
   if (sheetName) {
-    const fromSheetName = CONTROLE_NFS_SHEET_TABS.find((tab) => tab.sheetName === sheetName);
+    const fromSheetName = tabs.find((tab) => tab.sheetName === sheetName);
     if (fromSheetName) return fromSheetName;
 
     const normalizedKey = tabKey.trim().toLowerCase();
@@ -1169,7 +1299,10 @@ async function getProcessedSheetForTab(tab: ControleNfsSheetTab): Promise<{
   const cacheKey = `${spreadsheetId()}:${tab.sheetName}`;
   const cached = sheetCache.get(cacheKey);
   if (!cached) {
-    return { headers: [], rows: [] };
+    throw new Error(`Aba "${tab.sheetName}" não ficou disponível após a consulta.`);
+  }
+  if (!cached.processedHeaders.length) {
+    throw new Error(`Aba "${tab.sheetName}" retornou sem colunas legíveis.`);
   }
   return {
     headers: cached.processedHeaders,
@@ -1177,39 +1310,105 @@ async function getProcessedSheetForTab(tab: ControleNfsSheetTab): Promise<{
   };
 }
 
-/** Carrega todas as abas NFS uma vez (reusa cache em memória). */
-export async function loadProcessedNfsSheetsByTabKey(
-  forceRefresh = false
-): Promise<Map<string, { headers: string[]; rows: string[][] }>> {
-  if (forceRefresh) {
-    sheetCache.clear();
+export type ControleNfsTabLoadError = {
+  tabKey: string;
+  sheetName: string;
+  message: string;
+};
+
+export type ControleNfsProcessedSheet = {
+  headers: string[];
+  rows: string[][];
+  loadError?: string;
+};
+
+export type ControleNfsLoadResult = {
+  byTabKey: Map<string, ControleNfsProcessedSheet>;
+  loadErrors: ControleNfsTabLoadError[];
+};
+
+const NFS_SHEET_LOAD_CONCURRENCY = 4;
+const NFS_SHEET_LOAD_MAX_ATTEMPTS = 3;
+
+async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  concurrency: number,
+  worker: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+
+  async function runWorker(): Promise<void> {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await worker(items[index], index);
+    }
   }
 
-  const processedSheets = await Promise.all(
-    CONTROLE_NFS_SHEET_TABS.map(async (tab) => {
-      try {
-        return await getProcessedSheetForTab(tab);
-      } catch (firstError) {
-        // Retry único: carga paralela de muitas abas pode falhar por rate-limit do Google.
-        try {
-          await new Promise((resolve) => setTimeout(resolve, 400 + Math.floor(Math.random() * 600)));
-          return await getProcessedSheetForTab(tab);
-        } catch (retryError) {
-          console.warn(
-            `[controle-nfs] Falha ao carregar aba "${tab.sheetName}" (${tab.key}):`,
-            retryError instanceof Error ? retryError.message : retryError,
-            '| 1ª tentativa:',
-            firstError instanceof Error ? firstError.message : firstError
-          );
-          return { headers: [] as string[], rows: [] as string[][] };
-        }
+  const pool = Array.from({ length: Math.min(concurrency, items.length) }, () => runWorker());
+  await Promise.all(pool);
+  return results;
+}
+
+async function loadOneProcessedSheet(
+  tab: ControleNfsSheetTab
+): Promise<ControleNfsProcessedSheet> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= NFS_SHEET_LOAD_MAX_ATTEMPTS; attempt++) {
+    try {
+      const sheet = await getProcessedSheetForTab(tab);
+      return { headers: sheet.headers, rows: sheet.rows };
+    } catch (error) {
+      lastError = error;
+      if (attempt < NFS_SHEET_LOAD_MAX_ATTEMPTS) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, 350 * attempt + Math.floor(Math.random() * 500))
+        );
       }
-    })
+    }
+  }
+
+  const message =
+    lastError instanceof Error ? lastError.message : `Falha ao carregar a aba "${tab.sheetName}".`;
+  console.warn(`[controle-nfs] Falha ao carregar aba "${tab.sheetName}" (${tab.key}):`, message);
+  return {
+    headers: [],
+    rows: [],
+    loadError: message
+  };
+}
+
+/** Carrega todas as abas NFS (em lotes) e reporta falhas por aba. */
+export async function loadProcessedNfsSheetsByTabKey(
+  forceRefresh = false
+): Promise<ControleNfsLoadResult> {
+  if (forceRefresh) {
+    sheetCache.clear();
+    sheetListCache = null;
+    resolvedTabsCache = null;
+  }
+
+  const tabs = await resolveControleNfsSheetTabs(forceRefresh);
+  const processedSheets = await mapWithConcurrency(
+    tabs,
+    NFS_SHEET_LOAD_CONCURRENCY,
+    (tab) => loadOneProcessedSheet(tab)
   );
 
-  return new Map(
-    CONTROLE_NFS_SHEET_TABS.map((tab, index) => [tab.key, processedSheets[index]])
-  );
+  const byTabKey = new Map(tabs.map((tab, index) => [tab.key, processedSheets[index]]));
+  const loadErrors: ControleNfsTabLoadError[] = [];
+  for (let index = 0; index < tabs.length; index++) {
+    const sheet = processedSheets[index];
+    if (!sheet.loadError) continue;
+    loadErrors.push({
+      tabKey: tabs[index].key,
+      sheetName: tabs[index].sheetName,
+      message: sheet.loadError
+    });
+  }
+
+  return { byTabKey, loadErrors };
 }
 
 function parseOptionalDateParam(value: unknown): string | undefined {
@@ -1264,7 +1463,7 @@ export function parseControleNfsTotalsFilters(query: {
 export async function fetchControleNfsTotalsSummary(
   forceRefresh = false,
   filters?: ControleNfsTotalsFilters,
-  preloadedByTabKey?: Map<string, { headers: string[]; rows: string[][] }>
+  preloadedByTabKey?: Map<string, ControleNfsProcessedSheet>
 ): Promise<ControleNfsTotalsSummary> {
   invalidateStaleNfsTotalsCache();
   if (forceRefresh && !preloadedByTabKey) {
@@ -1294,11 +1493,12 @@ export async function fetchControleNfsTotalsSummary(
     return totalsSummaryCache.data;
   }
 
-  const tabsToCompute = resolveTabsForTotals(filters?.tabKeys);
+  const allTabs = await resolveControleNfsSheetTabs(false);
+  const tabsToCompute = resolveTabsForTotals(filters?.tabKeys, allTabs);
   const processedByTabKey =
-    preloadedByTabKey ?? (await loadProcessedNfsSheetsByTabKey(false));
+    preloadedByTabKey ?? (await loadProcessedNfsSheetsByTabKey(false)).byTabKey;
 
-  const processedSheets = CONTROLE_NFS_SHEET_TABS.map(
+  const processedSheets = allTabs.map(
     (tab) => processedByTabKey.get(tab.key) ?? { headers: [], rows: [] }
   );
 
@@ -1366,6 +1566,8 @@ export type ControleNfsLotFaturamento = {
   valorRecebido: number;
   contaVinculada: number;
   hasContaVinculadaColumn: boolean;
+  /** Preenchido quando a aba NFS falhou ao carregar — não tratar totais como zero real. */
+  loadError?: string;
 };
 
 function findLotBreakdownColumnIndex(headers: string[], lotColumn: LotBreakdownColumn): number {
@@ -1458,14 +1660,20 @@ function computeLotFaturamentoForTab(
 }
 
 function computeAllLotFaturamento(
-  processedByTabKey: Map<string, { headers: string[]; rows: string[][] }>,
+  processedByTabKey: Map<string, ControleNfsProcessedSheet>,
   computeOptions?: NfsTotalsComputeOptions
 ): ControleNfsLotFaturamento[] {
   const results: ControleNfsLotFaturamento[] = [];
 
   for (const config of NFS_TAB_LOT_BREAKDOWN) {
     const processed = processedByTabKey.get(config.tabKey);
-    if (!processed || processed.headers.length === 0) {
+    const loadError =
+      processed?.loadError ||
+      (!processed || processed.headers.length === 0
+        ? `Erro ao capturar a aba NFS "${config.tabKey}". Recarregue.`
+        : undefined);
+
+    if (loadError || !processed) {
       for (const lot of config.lots) {
         results.push({
           tabKey: config.tabKey,
@@ -1475,7 +1683,9 @@ function computeAllLotFaturamento(
           valorLiquido: 0,
           valorRecebido: 0,
           contaVinculada: 0,
-          hasContaVinculadaColumn: false
+          hasContaVinculadaColumn: false,
+          loadError:
+            loadError ?? `Erro ao capturar a aba NFS "${config.tabKey}". Recarregue.`
         });
       }
       continue;
@@ -1540,21 +1750,32 @@ export function parseIndependentPeriodFilter(query: {
 
 export async function fetchNfsLotFaturamento(
   computeOptions?: NfsTotalsComputeOptions,
-  preloadedByTabKey?: Map<string, { headers: string[]; rows: string[][] }>
+  preloadedByTabKey?: Map<string, ControleNfsProcessedSheet>
 ): Promise<ControleNfsLotFaturamento[]> {
   if (preloadedByTabKey) {
     return computeAllLotFaturamento(preloadedByTabKey, computeOptions);
   }
 
-  const processedByTabKey = new Map<string, { headers: string[]; rows: string[][] }>();
+  const processedByTabKey = new Map<string, ControleNfsProcessedSheet>();
 
   for (const config of NFS_TAB_LOT_BREAKDOWN) {
-    const tab = CONTROLE_NFS_SHEET_TABS.find((item) => item.key === config.tabKey);
+    const tab =
+      listControleNfsTabs().find((item) => item.key === config.tabKey) ??
+      CONTROLE_NFS_SHEET_TABS.find((item) => item.key === config.tabKey);
     if (!tab) continue;
 
-    await fetchControleNfsSheet(tab.key, tab.sheetName);
-    const processed = await getProcessedSheetForTab(tab);
-    processedByTabKey.set(config.tabKey, processed);
+    try {
+      processedByTabKey.set(config.tabKey, await loadOneProcessedSheet(tab));
+    } catch (error) {
+      processedByTabKey.set(config.tabKey, {
+        headers: [],
+        rows: [],
+        loadError:
+          error instanceof Error
+            ? error.message
+            : `Erro ao capturar a aba "${tab.sheetName}". Recarregue.`
+      });
+    }
   }
 
   return computeAllLotFaturamento(processedByTabKey, computeOptions);
@@ -1636,7 +1857,7 @@ function sumRecebidoByMonthForRows(
 }
 
 export function buildRecebidoMensalByGastosContract(
-  processedByTabKey: Map<string, { headers: string[]; rows: string[][] }>,
+  processedByTabKey: Map<string, ControleNfsProcessedSheet>,
   recebimentoApuracaoFilter?: RecebimentoApuracaoFilter,
   independentPeriodFilter?: ControleNfsIndependentPeriodFilter
 ): RecebidoMensalByGastosContractEntry[] {
@@ -1682,13 +1903,13 @@ export function buildRecebidoMensalByGastosContract(
     }
   }
 
-  for (const tab of CONTROLE_NFS_SHEET_TABS) {
+  for (const tab of listControleNfsTabs()) {
     if (tabHasLotBreakdown(tab.key)) continue;
 
     const processed = processedByTabKey.get(tab.key);
     if (!processed || processed.headers.length === 0) continue;
 
-    const centers = NFS_TAB_GASTOS_COST_CENTERS[tab.key] ?? [];
+    const centers = getNfsTabGastosCostCenters(tab);
     if (!centers.length) continue;
 
     const monthMap = sumRecebidoByMonthForRows(
@@ -1714,14 +1935,14 @@ export function buildRecebidoMensalByGastosContract(
 export async function fetchRecebidoMensalByGastosContract(
   forceRefresh = false,
   recebimentoApuracaoFilter?: RecebimentoApuracaoFilter,
-  preloadedByTabKey?: Map<string, { headers: string[]; rows: string[][] }>,
+  preloadedByTabKey?: Map<string, ControleNfsProcessedSheet>,
   independentPeriodFilter?: ControleNfsIndependentPeriodFilter
 ): Promise<{
   entries: RecebidoMensalByGastosContractEntry[];
   fetchedAt: string;
 }> {
   const processedByTabKey =
-    preloadedByTabKey ?? (await loadProcessedNfsSheetsByTabKey(forceRefresh));
+    preloadedByTabKey ?? (await loadProcessedNfsSheetsByTabKey(forceRefresh)).byTabKey;
 
   return {
     entries: buildRecebidoMensalByGastosContract(
