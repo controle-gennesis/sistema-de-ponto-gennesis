@@ -8,10 +8,10 @@ import {
   fetchNfsLotFaturamento,
   fetchRecebidoMensalByGastosContract,
   loadProcessedNfsSheetsByTabKey,
-  listControleNfsTabs,
   parseControleNfsTotalsFilters,
   parseEmissaoApuracaoFilters,
   parseIndependentPeriodFilter,
+  resolveControleNfsSheetTabs,
   toNfsTotalsComputeOptions,
   type ControleNfsTotalsFilters
 } from '../services/ControleNfsSheetsService';
@@ -27,10 +27,12 @@ import { buildFaturamentoByGastosContract } from '../lib/buildFaturamentoByGasto
 export class ControleNfsController {
   async listTabs(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
     try {
+      const forceRefresh = req.query.refresh === '1' || req.query.refresh === 'true';
+      const tabs = await resolveControleNfsSheetTabs(forceRefresh);
       res.json({
         success: true,
         data: {
-          tabs: listControleNfsTabs()
+          tabs
         }
       });
     } catch (error) {
@@ -200,18 +202,42 @@ export class ControleNfsController {
             }
           : undefined;
 
-      const processedByTabKey = await loadProcessedNfsSheetsByTabKey(forceRefresh);
+      const loaded = await loadProcessedNfsSheetsByTabKey(forceRefresh);
+      const processedByTabKey = loaded.byTabKey;
+      const nfsTabs = await resolveControleNfsSheetTabs(false);
 
-      // Recovery: carga paralela pode falhar na aba MAPA (rate-limit Google).
-      if (!(processedByTabKey.get('mapa')?.rows?.length)) {
+      const clearLoadError = (tabKey: string) => {
+        const idx = loaded.loadErrors.findIndex((error) => error.tabKey === tabKey);
+        if (idx >= 0) loaded.loadErrors.splice(idx, 1);
+      };
+
+      // Recovery: carga pode falhar na aba MAPA (rate-limit Google).
+      if (processedByTabKey.get('mapa')?.loadError || !(processedByTabKey.get('mapa')?.rows?.length)) {
         try {
-          await fetchControleNfsSheet('mapa', 'MAPA', true);
-          const recovered = await loadProcessedNfsSheetsByTabKey(false);
-          const mapa = recovered.get('mapa');
-          if (mapa) processedByTabKey.set('mapa', mapa);
+          const mapa = await fetchControleNfsSheet('mapa', 'MAPA', true);
+          if (mapa.headers.length > 0) {
+            processedByTabKey.set('mapa', { headers: mapa.headers, rows: mapa.rows });
+            clearLoadError('mapa');
+          }
         } catch (error) {
           console.warn(
             '[controle-nfs] recovery MAPA falhou:',
+            error instanceof Error ? error.message : error
+          );
+        }
+      }
+
+      // Recovery dedicado SES (lotes 10/12/14/17): falha silenciosa virava R$ 0,00.
+      if (processedByTabKey.get('ses')?.loadError || !(processedByTabKey.get('ses')?.headers?.length)) {
+        try {
+          const ses = await fetchControleNfsSheet('ses', 'SES', true);
+          if (ses.headers.length > 0) {
+            processedByTabKey.set('ses', { headers: ses.headers, rows: ses.rows });
+            clearLoadError('ses');
+          }
+        } catch (error) {
+          console.warn(
+            '[controle-nfs] recovery SES falhou:',
             error instanceof Error ? error.message : error
           );
         }
@@ -222,7 +248,12 @@ export class ControleNfsController {
         summary.faturamentoByLot ??
         (await fetchNfsLotFaturamento(toNfsTotalsComputeOptions(filters), processedByTabKey));
 
-      const entries = buildFaturamentoByGastosContract(summary.byTab, nfsLotFaturamento);
+      const entries = buildFaturamentoByGastosContract(
+        summary.byTab,
+        nfsLotFaturamento,
+        nfsTabs,
+        loaded.loadErrors
+      );
       const recebidoMensal = await fetchRecebidoMensalByGastosContract(
         false,
         apuracaoFilter,
@@ -235,6 +266,7 @@ export class ControleNfsController {
         data: {
           entries,
           recebidoMensalEntries: recebidoMensal.entries,
+          loadErrors: loaded.loadErrors,
           fetchedAt: new Date().toISOString()
         }
       });

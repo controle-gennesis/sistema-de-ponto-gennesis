@@ -1,60 +1,110 @@
 'use client';
 
-import React, { useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import React, { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  Calculator,
+  Archive,
   ChevronDown,
-  ChevronRight,
+  ClipboardList,
   Download,
-  Info,
+  ExternalLink,
+  FileText,
   Loader2,
-  Plus,
+  Paperclip,
   RefreshCw,
   Save,
   Search,
   Trash2,
+  X,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
+import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
 import api from '@/lib/api';
-import { exportLicitacaoOrcamentoPdf } from '@/lib/exportLicitacaoOrcamentoPdf';
-import {
-  formatCurrencyInputBrFromNumber,
-  maskCurrencyInputBrOrEmpty,
-  parseCurrencyInputBr,
-} from '@/lib/maskCurrencyBr';
+import { formatCurrencyInputBrFromNumber, maskCurrencyInputBrOrEmpty, parseCurrencyInputBr } from '@/lib/maskCurrencyBr';
+import { resolveApiMediaUrl } from '@/lib/resolveMediaUrl';
 import { buildLicitacaoTituloDisplay } from './licitacaoDisplay';
+import { LicitacaoAnalisesCarregadas } from './LicitacaoAnalisesCarregadas';
 import {
-  addExpenseType,
-  computeLicitacaoOrcamentoResult,
-  DEFAULT_LICITACAO_ORCAMENTO_FORMULAS,
-  emptyLicitacaoOrcamentoInputs,
-  getLicitacaoOrcamentoFormulaFieldGroups,
-  LICITACAO_ORCAMENTO_FORMULA_LABELS,
-  LICITACAO_ORCAMENTO_FORMULA_ORDER,
-  normalizeLicitacaoOrcamentoInputs,
-  removeExpenseType,
-  renameExpenseType,
-  resolveBdiComponentBase,
-  resolveCategoryTotals,
-  resolveEncargosBase,
-  syncDualFromMoney,
-  syncDualFromPercent,
-  withResyncedDualFields,
-  type DualMoneyPercent,
-  type LicitacaoOrcamentoFormulaKey,
-  type LicitacaoOrcamentoInputs,
-  type LicitacaoOrcamentoLine,
-  type LicitacaoOrcamentoLineCategory,
-  type LicitacaoOrcamentoResult,
-} from './licitacaoOrcamentoCalc';
+  buildChecklistResumo,
+  emptyChecklistState,
+  LICITACAO_CHECKLIST,
+  mergeChecklistFromSaved,
+  type ChecklistSectionDef,
+} from './licitacaoChecklist';
+import type { NaoSeHabilitaItem } from './LicitacaoNaoSeHabilitaPanel';
 
 const BRASIL_UFS = [
   'AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 'MT', 'MS', 'MG',
   'PA', 'PB', 'PR', 'PE', 'PI', 'RJ', 'RN', 'RS', 'RO', 'RR', 'SC', 'SP', 'SE', 'TO',
 ] as const;
+
+type ArquivadaMotivo =
+  | 'suspensa'
+  | 'declinada'
+  | 'encerrada'
+  | 'em_andamento'
+  | 'vencidas'
+  | 'aguardando_aprovacao'
+  | 'orcamento';
+
+const STATUS_OPTIONS: Array<{ value: ArquivadaMotivo; label: string; singular: string }> = [
+  { value: 'aguardando_aprovacao', label: 'Análise diretoria', singular: 'Análise diretoria' },
+  { value: 'orcamento', label: 'Orçamento', singular: 'Orçamento' },
+  { value: 'suspensa', label: 'Suspensas', singular: 'Suspensa' },
+  { value: 'declinada', label: 'Declinadas', singular: 'Declinada' },
+  { value: 'encerrada', label: 'Encerradas', singular: 'Encerrada' },
+  { value: 'em_andamento', label: 'Em andamento', singular: 'Em andamento' },
+  { value: 'vencidas', label: 'Vencidas', singular: 'Vencida' },
+];
+
+const STATUS_ARQUIVO_PERMITIDOS: ArquivadaMotivo[] = [
+  'suspensa',
+  'declinada',
+  'encerrada',
+  'em_andamento',
+  'vencidas',
+];
+
+function isStatusArquivoPermitido(value: unknown): value is ArquivadaMotivo {
+  return (
+    typeof value === 'string' &&
+    (STATUS_ARQUIVO_PERMITIDOS as readonly string[]).includes(value)
+  );
+}
+function isMotivoValue(value: unknown): value is ArquivadaMotivo {
+  return STATUS_OPTIONS.some((item) => item.value === value);
+}
+
+function resolveMotivo(item: {
+  arquivadaMotivo?: string | null;
+  analiseJson?: { arquivadaMotivo?: unknown; statusSelecionado?: unknown } | null;
+} | null): ArquivadaMotivo | null {
+  if (!item) return null;
+  if (isMotivoValue(item.arquivadaMotivo)) return item.arquivadaMotivo;
+  const fromJson = item.analiseJson?.arquivadaMotivo;
+  if (isMotivoValue(fromJson)) return fromJson;
+  return null;
+}
+
+function resolveStatusSelecionado(item: {
+  analiseJson?: { statusSelecionado?: unknown } | null;
+} | null): ArquivadaMotivo | null {
+  const raw = item?.analiseJson?.statusSelecionado;
+  if (isMotivoValue(raw) && isStatusArquivoPermitido(raw)) return raw;
+  return null;
+}
+
+function resolveStatusParaArquivar(item: {
+  arquivadaMotivo?: string | null;
+  analiseJson?: { arquivadaMotivo?: unknown; statusSelecionado?: unknown } | null;
+} | null): ArquivadaMotivo | null {
+  return resolveStatusSelecionado(item) ?? resolveMotivo(item);
+}
+
+function motivoSingular(motivo: ArquivadaMotivo): string {
+  return STATUS_OPTIONS.find((item) => item.value === motivo)?.singular ?? motivo;
+}
 
 type DecisaoAnaliseFinal = 'participar' | 'participar_consorcio' | 'nao_participar';
 
@@ -108,6 +158,13 @@ function formatDateOnly(iso?: string | null): string {
   }
 }
 
+function formatFileSize(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 type LicitacaoRegiaoTab = { key: string; label: string };
 
 type LicitacaoListItem = {
@@ -124,6 +181,17 @@ type LicitacaoListItem = {
   updatedAt?: string;
   analiseJson?: {
     decisaoAnaliseFinal?: DecisaoAnaliseFinal | null;
+    arquivadaMotivo?: string | null;
+    statusSelecionado?: string | null;
+    analisePreliminar?: unknown;
+    linkNotebookLm?: string | null;
+    analiseUsuario?: string | null;
+    responsavelAnalise?: string | null;
+    checklistAnalise?: Record<string, { checked: boolean; comentario: string }>;
+    naoSeHabilita?: boolean;
+    naoSeHabilitaItens?: NaoSeHabilitaItem[];
+    analiseFinalTexto?: string | null;
+    emArquivo?: boolean;
     origemRegiao?: {
       estado?: string | null;
       rowSnapshot?: Record<string, string> | null;
@@ -131,270 +199,51 @@ type LicitacaoListItem = {
   } | null;
 };
 
+type OrcamentoAnexo = {
+  id: string;
+  name: string;
+  url: string;
+  mimeType: string;
+  size: number;
+  uploadedAt: string;
+};
+
+type OrcamentoRegistro = {
+  mode?: 'externo';
+  valor: number | null;
+  dataOrcamento: string;
+  observacao: string;
+  anexos: OrcamentoAnexo[];
+};
+
 type OrcamentoPayload = {
   id: string;
   licitacaoId: string;
-  inputs: LicitacaoOrcamentoInputs;
-  result: LicitacaoOrcamentoResult;
+  registro: OrcamentoRegistro;
   draft?: boolean;
   updatedAt?: string;
 };
 
-function formatCurrency(value: number): string {
-  return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-}
-
-function formatPercent(value: number): string {
-  return `${value.toLocaleString('pt-BR', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}%`;
-}
-
-const ORCAMENTO_FIELD_DEFINITIONS: Record<string, string> = {
-  'Preço-teto / referência do edital':
-    'Valor máximo de referência do edital (preço-teto). Serve de base para desconto simulado e para o desconto máximo.',
-  'Encargos sociais':
-    'Encargos sobre a mão de obra (INSS, FGTS, etc.). Podem ser informados em R$ ou % sobre o total de mão de obra.',
-  'Margem mínima':
-    'Lucro mínimo que a empresa aceita manter no preço. É o limite de segurança: o preço não pode cair a ponto de a margem real ficar abaixo disso.',
-  'Desconto simulado':
-    'Desconto de teste sobre o preço-teto, para simular o que aconteceria se a empresa desse aquele desconto no lance. Não é o desconto máximo permitido.',
-  'Custo indireto':
-    'Despesas indiretas do BDI (administração, suporte, etc.), em R$ ou % sobre custo direto + encargos.',
-  Lucro:
-    'Parte do BDI que representa o lucro desejado da empresa, em R$ ou % sobre custo direto + encargos.',
-  Tributo:
-    'Tributos/impostos incluídos no BDI, em R$ ou % sobre custo direto + encargos.',
-  'Custo direto total':
-    'Soma de todos os tipos de gasto (mão de obra, material, sistemas, etc.).',
-  BDI:
-    'Bonificações e Despesas Indiretas: custo indireto + lucro + tributo. Aparece em R$ e em % sobre o custo direto + encargos.',
-  Impostos:
-    'Valor de tributos considerado no resultado (em geral o mesmo informado em Tributo).',
-  'Preço mínimo viável':
-    'Menor preço de venda que ainda cobre custo direto, encargos e BDI, respeitando a margem mínima. Abaixo disso, a participação deixa de ser interessante.',
-  'Desconto máximo':
-    'Maior desconto (%) em relação ao preço-teto do edital sem ir abaixo do preço mínimo viável.',
-  'Margem no desconto simulado':
-    'Margem real (%) que sobraria se o lance fosse o preço-teto menos o desconto simulado. Compare com a margem mínima: se for menor, o desconto simulado é agressivo demais.',
+const EMPTY_REGISTRO: OrcamentoRegistro = {
+  mode: 'externo',
+  valor: null,
+  dataOrcamento: '',
+  observacao: '',
+  anexos: [],
 };
 
-function FieldInfoButton({ definition }: { definition: string }) {
-  const [open, setOpen] = useState(false);
-  const [coords, setCoords] = useState<{ top: number; left: number } | null>(null);
-  const rootRef = useRef<HTMLSpanElement>(null);
-  const tipRef = useRef<HTMLSpanElement>(null);
-
-  useLayoutEffect(() => {
-    if (!open) {
-      setCoords(null);
-      return;
-    }
-
-    const place = () => {
-      const anchor = rootRef.current;
-      const tip = tipRef.current;
-      if (!anchor || !tip) return;
-
-      const rect = anchor.getBoundingClientRect();
-      const tipWidth = tip.offsetWidth;
-      const tipHeight = tip.offsetHeight;
-      const margin = 8;
-
-      let left = rect.left;
-      if (left + tipWidth > window.innerWidth - margin) {
-        left = rect.right - tipWidth;
-      }
-      if (left < margin) left = margin;
-
-      let top = rect.bottom + 6;
-      if (top + tipHeight > window.innerHeight - margin) {
-        const above = rect.top - tipHeight - 6;
-        if (above >= margin) top = above;
-      }
-
-      setCoords({ top, left });
-    };
-
-    place();
-    const raf = requestAnimationFrame(place);
-    window.addEventListener('scroll', place, true);
-    window.addEventListener('resize', place);
-    return () => {
-      cancelAnimationFrame(raf);
-      window.removeEventListener('scroll', place, true);
-      window.removeEventListener('resize', place);
-    };
-  }, [open, definition]);
-
-  useEffect(() => {
-    if (!open) return;
-    const onPointerDown = (event: PointerEvent) => {
-      const target = event.target as Node;
-      if (rootRef.current?.contains(target) || tipRef.current?.contains(target)) return;
-      setOpen(false);
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false);
-    };
-    document.addEventListener('pointerdown', onPointerDown);
-    document.addEventListener('keydown', onKeyDown);
-    return () => {
-      document.removeEventListener('pointerdown', onPointerDown);
-      document.removeEventListener('keydown', onKeyDown);
-    };
-  }, [open]);
-
-  return (
-    <span ref={rootRef} className="relative inline-flex shrink-0">
-      <button
-        type="button"
-        onClick={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          setOpen((v) => !v);
-        }}
-        className="inline-flex items-center justify-center text-gray-400 transition-colors hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
-        aria-label="Ver definição"
-        aria-expanded={open}
-        title="Ver definição"
-      >
-        <Info className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden />
-      </button>
-      {open
-        ? createPortal(
-            <span
-              ref={tipRef}
-              role="tooltip"
-              style={{
-                position: 'fixed',
-                top: coords?.top ?? 0,
-                left: coords?.left ?? 0,
-                visibility: coords ? 'visible' : 'hidden',
-              }}
-              className="z-[200] w-64 rounded-lg border border-gray-200 bg-white p-2.5 text-left text-[11px] font-normal normal-case leading-relaxed tracking-normal text-gray-700 shadow-lg dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200"
-            >
-              {definition}
-            </span>,
-            document.body,
-          )
-        : null}
-    </span>
-  );
-}
-
-function MoneyField({
-  label,
-  value,
-  onChange,
-  placeholder = 'R$ 0,00',
-  definition,
-}: {
-  label?: string;
-  value: number;
-  onChange: (value: number) => void;
-  placeholder?: string;
-  definition?: string;
-}) {
-  const display =
-    value === 0 ? '' : formatCurrencyInputBrFromNumber(value);
-
-  return (
-    <label className="block">
-      {label ? (
-        <span className="mb-1 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
-          {label}
-          {definition ? <FieldInfoButton definition={definition} /> : null}
-        </span>
-      ) : null}
-      <input
-        type="text"
-        inputMode="numeric"
-        autoComplete="off"
-        value={display}
-        placeholder={placeholder}
-        onChange={(e) => {
-          const masked = maskCurrencyInputBrOrEmpty(e.target.value);
-          onChange(parseCurrencyInputBr(masked) ?? 0);
-        }}
-        className="h-9 w-full rounded-md border border-gray-300 bg-white px-2 text-right text-sm tabular-nums text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-      />
-    </label>
-  );
-}
-
-function DualMoneyPercentField({
-  label,
-  value,
-  base,
-  onChange,
-  definition,
-}: {
-  label: string;
-  value: DualMoneyPercent;
-  base: number;
-  onChange: (next: DualMoneyPercent) => void;
-  definition?: string;
-}) {
-  return (
-    <div className="rounded-lg border border-gray-200 p-3 dark:border-gray-700">
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <span className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
-          {label}
-        </span>
-        {definition ? <FieldInfoButton definition={definition} /> : null}
-      </div>
-      <div className="grid grid-cols-2 gap-2">
-        <label className="block">
-          <span className="mb-1 block text-[10px] font-medium text-gray-500">Valor (R$)</span>
-          <input
-            type="text"
-            inputMode="numeric"
-            autoComplete="off"
-            value={
-              value.money === 0 ? '' : formatCurrencyInputBrFromNumber(value.money)
-            }
-            placeholder="R$ 0,00"
-            onChange={(e) => {
-              const masked = maskCurrencyInputBrOrEmpty(e.target.value);
-              onChange(syncDualFromMoney(parseCurrencyInputBr(masked) ?? 0, base));
-            }}
-            className="h-9 w-full rounded-md border border-gray-300 bg-white px-2 text-right text-sm tabular-nums text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-          />
-        </label>
-        <label className="block">
-          <span className="mb-1 block text-[10px] font-medium text-gray-500">Percentual (%)</span>
-          <div className="relative">
-            <input
-              type="number"
-              step="0.01"
-              min={0}
-              value={value.percent === 0 ? '' : Number(value.percent.toFixed(4))}
-              placeholder="0"
-              onChange={(e) => {
-                const raw = e.target.value.trim();
-                onChange(syncDualFromPercent(raw ? Number(raw) || 0 : 0, base));
-              }}
-              className="h-9 w-full rounded-md border border-gray-300 bg-white px-2 pr-8 text-right text-sm tabular-nums text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-            />
-            <span className="pointer-events-none absolute inset-y-0 right-2.5 flex items-center text-xs text-gray-400">
-              %
-            </span>
-          </div>
-        </label>
-      </div>
-    </div>
-  );
-}
+const inputClassName =
+  'h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100';
 
 export function LicitacaoOrcamentoPanel() {
   const queryClient = useQueryClient();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const hydratedLicitacaoId = useRef<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [inputs, setInputs] = useState<LicitacaoOrcamentoInputs>(emptyLicitacaoOrcamentoInputs());
+  const [valorLabel, setValorLabel] = useState('');
+  const [dataOrcamento, setDataOrcamento] = useState('');
+  const [observacao, setObservacao] = useState('');
   const [dirty, setDirty] = useState(false);
-  const [exportingPdf, setExportingPdf] = useState(false);
-  const [showFormulas, setShowFormulas] = useState(false);
 
   const [search, setSearch] = useState('');
   const [dataInicio, setDataInicio] = useState('');
@@ -402,6 +251,7 @@ export function LicitacaoOrcamentoPanel() {
   const [regiaoKey, setRegiaoKey] = useState('');
   const [estado, setEstado] = useState('');
   const [decisaoFilter, setDecisaoFilter] = useState<DecisaoAnaliseFinal | ''>('');
+  const [listModalOpen, setListModalOpen] = useState(false);
   const deferredSearch = useDeferredValue(search.trim());
 
   const { data: regiaoTabs = [] } = useQuery({
@@ -442,9 +292,7 @@ export function LicitacaoOrcamentoPanel() {
 
   const list = useMemo(() => {
     if (!decisaoFilter) return listRaw;
-    return listRaw.filter(
-      (item) => item.analiseJson?.decisaoAnaliseFinal === decisaoFilter
-    );
+    return listRaw.filter((item) => item.analiseJson?.decisaoAnaliseFinal === decisaoFilter);
   }, [decisaoFilter, listRaw]);
 
   useEffect(() => {
@@ -458,6 +306,15 @@ export function LicitacaoOrcamentoPanel() {
       setSelectedId(null);
     }
   }, [list, selectedId]);
+
+  useEffect(() => {
+    if (!listModalOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setListModalOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [listModalOpen]);
 
   const selectedMeta = useMemo(
     () => list.find((item) => item.id === selectedId) ?? null,
@@ -479,26 +336,207 @@ export function LicitacaoOrcamentoPanel() {
   });
 
   useEffect(() => {
-    if (!orcamento?.inputs) return;
-    setInputs(normalizeLicitacaoOrcamentoInputs(orcamento.inputs));
+    if (!selectedId) {
+      hydratedLicitacaoId.current = null;
+      return;
+    }
+    if (!orcamento || orcamento.licitacaoId !== selectedId) return;
+    if (hydratedLicitacaoId.current === selectedId) return;
+    hydratedLicitacaoId.current = selectedId;
+    const registro = orcamento.registro ?? EMPTY_REGISTRO;
+    setValorLabel(formatCurrencyInputBrFromNumber(registro.valor));
+    setDataOrcamento(registro.dataOrcamento || '');
+    setObservacao(registro.observacao || '');
     setDirty(false);
-  }, [orcamento]);
+  }, [orcamento, selectedId]);
 
-  const liveResult = useMemo(() => computeLicitacaoOrcamentoResult(inputs), [inputs]);
+  const { data: checklistTemplateQuery } = useQuery({
+    queryKey: ['licitacao-checklist-template'],
+    queryFn: async () => {
+      try {
+        const res = await api.get('/licitacoes/checklist-template');
+        return {
+          sections: (res.data?.data ?? LICITACAO_CHECKLIST) as ChecklistSectionDef[],
+          canManage: Boolean(res.data?.canManage),
+        };
+      } catch {
+        return {
+          sections: LICITACAO_CHECKLIST,
+          canManage: false,
+        };
+      }
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+  const checklistSections = Array.isArray(checklistTemplateQuery?.sections)
+    ? checklistTemplateQuery.sections
+    : LICITACAO_CHECKLIST;
+
+  const { data: selectedDetail } = useQuery({
+    queryKey: ['licitacao', selectedId],
+    queryFn: async () => {
+      const res = await api.get(`/licitacoes/${selectedId}`);
+      return res.data?.data as LicitacaoListItem;
+    },
+    enabled: Boolean(selectedId),
+    staleTime: 0,
+  });
+
+  const selectedAnalise = selectedDetail ?? selectedMeta;
+  const statusSelecionado = resolveStatusSelecionado(selectedAnalise);
+  const statusAtual = statusSelecionado ?? resolveMotivo(selectedAnalise) ?? 'orcamento';
+  const statusSelectRef = useRef<HTMLSelectElement | null>(null);
+  const [statusSelectHighlight, setStatusSelectHighlight] = useState(false);
+
+  const viabilidadeSections = useMemo(() => {
+    if (!selectedAnalise) return [];
+    const state = mergeChecklistFromSaved(
+      selectedAnalise.analiseJson?.checklistAnalise,
+      checklistSections
+    );
+    return buildChecklistResumo(
+      checklistSections,
+      state ?? emptyChecklistState(checklistSections)
+    );
+  }, [checklistSections, selectedAnalise]);
+
+  const alterarStatusMutation = useMutation({
+    mutationFn: async ({ id, motivo }: { id: string; motivo: ArquivadaMotivo }) => {
+      const res = await api.patch(`/licitacoes/${id}/arquivar`, { motivo });
+      return { data: res.data?.data, motivo };
+    },
+    onSuccess: ({ motivo }) => {
+      toast.success(
+        motivo === 'orcamento'
+          ? 'Status mantido em Orçamento.'
+          : motivo === 'aguardando_aprovacao'
+            ? 'Enviada para Análise Diretoria.'
+            : `Status alterado para ${motivoSingular(motivo)}.`
+      );
+      setStatusSelectHighlight(false);
+      if (motivo !== 'orcamento') {
+        setSelectedId(null);
+      }
+      void queryClient.invalidateQueries({ queryKey: ['licitacoes'] });
+      void queryClient.invalidateQueries({ queryKey: ['licitacao', selectedId] });
+      void refetchList();
+    },
+    onError: (err: { response?: { data?: { message?: string } } }) => {
+      toast.error(err.response?.data?.message ?? 'Erro ao alterar status');
+    },
+  });
+
+  const setStatusSelecionadoMutation = useMutation({
+    mutationFn: async ({ id, motivo }: { id: string; motivo: ArquivadaMotivo }) => {
+      const res = await api.patch(`/licitacoes/${id}/status-selecionado`, { motivo });
+      return {
+        data: res.data?.data as LicitacaoListItem,
+        message:
+          (res.data?.message as string | undefined) ??
+          'Status selecionado. Clique em Arquivar para enviar ao Arquivo.',
+      };
+    },
+    onSuccess: ({ data, message }) => {
+      toast.success(message);
+      setStatusSelectHighlight(false);
+      if (data?.id) {
+        queryClient.setQueryData(['licitacao', data.id], data);
+      }
+      void queryClient.invalidateQueries({ queryKey: ['licitacoes'] });
+      void refetchList();
+    },
+    onError: (err: { response?: { data?: { message?: string } } }) => {
+      toast.error(err.response?.data?.message ?? 'Erro ao selecionar status');
+    },
+  });
+
+  const enviarArquivoMutation = useMutation({
+    mutationFn: async ({ id, motivo }: { id: string; motivo: ArquivadaMotivo }) => {
+      const res = await api.patch(`/licitacoes/${id}/enviar-arquivo`, { motivo });
+      return res.data?.data;
+    },
+    onSuccess: () => {
+      toast.success('Licitação enviada para o Arquivo.');
+      setSelectedId(null);
+      setStatusSelectHighlight(false);
+      void queryClient.invalidateQueries({ queryKey: ['licitacoes'] });
+      void refetchList();
+    },
+    onError: (err: { response?: { data?: { message?: string } } }) => {
+      toast.error(err.response?.data?.message ?? 'Erro ao arquivar');
+    },
+  });
+
+  useEffect(() => {
+    setStatusSelectHighlight(false);
+  }, [selectedId]);
+
+  const handleArquivar = () => {
+    if (!selectedId || enviarArquivoMutation.isPending) return;
+    const motivo = resolveStatusParaArquivar(selectedAnalise);
+    if (!motivo || !isStatusArquivoPermitido(motivo)) {
+      setStatusSelectHighlight(true);
+      toast.error(
+        'Selecione um status permitido e depois clique em Arquivar: Suspensa, Declinada, Encerrada, Em andamento ou Vencida.'
+      );
+      window.setTimeout(() => statusSelectRef.current?.focus(), 0);
+      return;
+    }
+    if (
+      !window.confirm(
+        `Enviar esta licitação para o Arquivo com status "${motivoSingular(motivo)}"?`
+      )
+    ) {
+      return;
+    }
+    enviarArquivoMutation.mutate({ id: selectedId, motivo });
+  };
+
+  const handleStatusChange = (motivo: ArquivadaMotivo) => {
+    if (!selectedId || !isMotivoValue(motivo)) return;
+    if (isStatusArquivoPermitido(motivo)) {
+      if (statusSelecionado === motivo) return;
+      setStatusSelecionadoMutation.mutate({ id: selectedId, motivo });
+      return;
+    }
+    if (motivo === 'orcamento') {
+      if (resolveMotivo(selectedAnalise) === 'orcamento' && !statusSelecionado) return;
+      // Voltar a só Orçamento: limpa seleção via re-arquivar orcamento
+      if (!window.confirm('Manter na aba Orçamento?')) return;
+      alterarStatusMutation.mutate({ id: selectedId, motivo: 'orcamento' });
+      return;
+    }
+    if (motivo === 'aguardando_aprovacao') {
+      if (
+        !window.confirm(
+          'Enviar para Análise Diretoria? A licitação sairá da aba Orçamento.'
+        )
+      ) {
+        return;
+      }
+      alterarStatusMutation.mutate({ id: selectedId, motivo });
+      return;
+    }
+  };
+  const anexos = orcamento?.registro?.anexos ?? [];
 
   const saveMutation = useMutation({
     mutationFn: async () => {
       if (!selectedId) throw new Error('Selecione uma licitação');
       const res = await api.put(`/licitacoes/${selectedId}/orcamento`, {
-        inputs: normalizeLicitacaoOrcamentoInputs(inputs),
+        registro: {
+          mode: 'externo',
+          valor: parseCurrencyInputBr(valorLabel),
+          dataOrcamento,
+          observacao,
+        },
       });
       return res.data?.data as OrcamentoPayload;
     },
     onSuccess: (data) => {
-      toast.success('Orçamento salvo');
+      toast.success('Orçamento cadastrado');
       setDirty(false);
       queryClient.setQueryData(['licitacao-orcamento', selectedId], data);
-      if (data?.inputs) setInputs(normalizeLicitacaoOrcamentoInputs(data.inputs));
     },
     onError: (error: unknown) => {
       const message =
@@ -508,317 +546,324 @@ export function LicitacaoOrcamentoPanel() {
     },
   });
 
-  const patchInputs = (patch: Partial<LicitacaoOrcamentoInputs>) => {
-    setInputs((prev) => withResyncedDualFields({ ...prev, ...patch }));
-    setDirty(true);
-  };
-
-  const bdiComponentBase = useMemo(() => resolveBdiComponentBase(inputs), [inputs]);
-  const encargosBase = useMemo(() => resolveEncargosBase(inputs), [inputs]);
-  const descontoBase = inputs.precoReferenciaEdital;
-
-  const resetFormula = (key: LicitacaoOrcamentoFormulaKey) => {
-    patchInputs({
-      formulas: {
-        ...inputs.formulas,
-        [key]: DEFAULT_LICITACAO_ORCAMENTO_FORMULAS[key],
-      },
-    });
-  };
-
-  const handleExportPdf = async () => {
-    if (!selectedMeta) return;
-    setExportingPdf(true);
-    try {
-      await exportLicitacaoOrcamentoPdf({
-        titulo: buildLicitacaoTituloDisplay(selectedMeta),
-        numeroProcesso: selectedMeta.numeroProcesso,
-        orgao: selectedMeta.orgao,
-        inputs,
-        result: liveResult,
+  const uploadMutation = useMutation({
+    mutationFn: async (file: File) => {
+      if (!selectedId) throw new Error('Selecione uma licitação');
+      const form = new FormData();
+      form.append('file', file);
+      const res = await api.post(`/licitacoes/${selectedId}/orcamento/anexo`, form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
       });
-      toast.success('PDF gerado');
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Falha ao exportar PDF');
-    } finally {
-      setExportingPdf(false);
-    }
-  };
+      return res.data?.data as OrcamentoPayload;
+    },
+    onSuccess: (data) => {
+      toast.success('Documento anexado');
+      queryClient.setQueryData(['licitacao-orcamento', selectedId], data);
+    },
+    onError: (error: unknown) => {
+      const message =
+        (error as { response?: { data?: { message?: string } } })?.response?.data?.message ||
+        (error instanceof Error ? error.message : 'Não foi possível anexar o documento');
+      toast.error(message);
+    },
+    onSettled: () => {
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    },
+  });
 
-  const resultCards: Array<{
-    label: string;
-    value: string;
-    tone?: string;
-    definition?: string;
-  }> = [
-    {
-      label: 'Custo direto total',
-      value: formatCurrency(liveResult.custoDiretoTotal),
-      definition: ORCAMENTO_FIELD_DEFINITIONS['Custo direto total'],
+  const removeAnexoMutation = useMutation({
+    mutationFn: async (anexoId: string) => {
+      if (!selectedId) throw new Error('Selecione uma licitação');
+      const res = await api.delete(`/licitacoes/${selectedId}/orcamento/anexo/${anexoId}`);
+      return res.data?.data as OrcamentoPayload;
     },
-    {
-      label: 'Encargos sociais',
-      value: formatCurrency(liveResult.encargosSociaisValor),
-      definition: ORCAMENTO_FIELD_DEFINITIONS['Encargos sociais'],
+    onSuccess: (data) => {
+      toast.success('Anexo removido');
+      queryClient.setQueryData(['licitacao-orcamento', selectedId], data);
     },
-    {
-      label: 'BDI',
-      value: `${formatPercent(liveResult.bdiPercent)} · ${formatCurrency(liveResult.bdiValor)}`,
-      definition: ORCAMENTO_FIELD_DEFINITIONS.BDI,
+    onError: (error: unknown) => {
+      const message =
+        (error as { response?: { data?: { message?: string } } })?.response?.data?.message ||
+        (error instanceof Error ? error.message : 'Não foi possível remover o anexo');
+      toast.error(message);
     },
-    {
-      label: 'Custo indireto',
-      value: formatCurrency(liveResult.custoIndiretoTotal),
-      definition: ORCAMENTO_FIELD_DEFINITIONS['Custo indireto'],
-    },
-    {
-      label: 'Impostos',
-      value: formatCurrency(liveResult.impostosValor),
-      definition: ORCAMENTO_FIELD_DEFINITIONS.Impostos,
-    },
-    {
-      label: 'Preço mínimo viável',
-      value: formatCurrency(liveResult.precoMinimoViavel),
-      tone: 'text-amber-700 dark:text-amber-300',
-      definition: ORCAMENTO_FIELD_DEFINITIONS['Preço mínimo viável'],
-    },
-    {
-      label: 'Desconto máximo',
-      value: formatPercent(liveResult.descontoMaximoPercentual),
-      tone: 'text-emerald-700 dark:text-emerald-300',
-      definition: ORCAMENTO_FIELD_DEFINITIONS['Desconto máximo'],
-    },
-    {
-      label: 'Margem no desconto simulado',
-      value: formatPercent(liveResult.margemRealSimulada),
-      tone:
-        liveResult.margemRealSimulada < inputs.margemMinima.percent
-          ? 'text-rose-700 dark:text-rose-300'
-          : 'text-emerald-700 dark:text-emerald-300',
-      definition: ORCAMENTO_FIELD_DEFINITIONS['Margem no desconto simulado'],
-    },
-  ];
+  });
 
-  const filterInputClassName =
-    'h-8 w-full rounded-md border border-gray-300 bg-white px-2 text-xs dark:border-gray-700 dark:bg-gray-900';
-
-  const categoryTotals = useMemo(() => resolveCategoryTotals(inputs), [inputs]);
-  const formulaFieldGroups = useMemo(
-    () => getLicitacaoOrcamentoFormulaFieldGroups(inputs.expenseTypes),
-    [inputs.expenseTypes]
+  const filterFieldClassName =
+    'h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100';
+  const filterLabelClassName =
+    'mb-1.5 block text-[11px] font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400';
+  const hasActiveFilters = Boolean(
+    search.trim() || dataInicio || dataFim || regiaoKey || estado || decisaoFilter
   );
 
-  const addLine = (category: LicitacaoOrcamentoLineCategory) => {
-    const line: LicitacaoOrcamentoLine = {
-      id:
-        typeof crypto !== 'undefined' && crypto.randomUUID
-          ? crypto.randomUUID()
-          : `line-${Date.now()}`,
-      category,
-      description: '',
-      amount: 0,
-    };
-    patchInputs({ lines: [...inputs.lines, line] });
-  };
-
-  const handleAddExpenseType = () => {
-    const label = window.prompt('Nome do novo tipo de gasto:');
-    if (!label?.trim()) return;
-    setInputs((prev) => withResyncedDualFields(addExpenseType(prev, label)));
-    setDirty(true);
-  };
-
-  const handleRenameExpenseType = (typeId: string, currentLabel: string) => {
-    const label = window.prompt('Renomear tipo de gasto:', currentLabel);
-    if (!label?.trim() || label.trim() === currentLabel) return;
-    setInputs((prev) => withResyncedDualFields(renameExpenseType(prev, typeId, label)));
-    setDirty(true);
-  };
-
-  const handleRemoveExpenseType = (typeId: string, label: string) => {
-    if (
-      !window.confirm(
-        `Remover o tipo "${label}" e todas as linhas dele? Esta ação não remove tipos padrão.`
-      )
-    ) {
-      return;
-    }
-    setInputs((prev) => withResyncedDualFields(removeExpenseType(prev, typeId)));
-    setDirty(true);
-  };
-
-  const updateLine = (id: string, patch: Partial<LicitacaoOrcamentoLine>) => {
-    patchInputs({
-      lines: inputs.lines.map((line) => (line.id === id ? { ...line, ...patch } : line)),
-    });
-  };
-
-  const removeLine = (id: string) => {
-    patchInputs({ lines: inputs.lines.filter((line) => line.id !== id) });
-  };
-
   return (
-    <div className="grid gap-5 lg:grid-cols-[20rem_minmax(0,1fr)]">
-      <Card padding="none" className="overflow-hidden shadow-sm">
-        <CardHeader className="space-y-2.5 border-b border-gray-100 px-4 pb-3 pt-4 dark:border-gray-800">
-          <div className="flex items-center justify-between gap-2">
-            <div>
-              <h2 className="text-xs font-semibold uppercase tracking-wider text-gray-500">
-                Orçamento
-              </h2>
-              <p className="mt-0.5 text-xs text-gray-400">
-                {list.length} {list.length === 1 ? 'licitação' : 'licitações'}
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => refetchList()}
-              className="rounded-md p-1.5 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"
-              title="Atualizar lista"
-            >
-              <RefreshCw className="h-4 w-4" />
-            </button>
-          </div>
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm text-gray-500 dark:text-gray-400">
+          Use a lista para localizar e abrir um processo.
+          {hasActiveFilters ? (
+            <span className="ml-1 text-xs text-red-600 dark:text-red-400">
+              ({list.length} filtrada{list.length === 1 ? '' : 's'})
+            </span>
+          ) : null}
+        </p>
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            onClick={() => refetchList()}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800"
+            title="Atualizar lista"
+          >
+            <RefreshCw className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => setListModalOpen(true)}
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-red-600 px-4 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-red-700"
+          >
+            <ClipboardList className="h-4 w-4" />
+            Licitações
+            <span className="rounded-full bg-white/20 px-2 py-0.5 text-[11px] font-semibold tabular-nums">
+              {list.length}
+            </span>
+          </button>
+        </div>
+      </div>
 
-          <div className="space-y-2.5">
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
-              <input
-                type="text"
-                placeholder="Buscar..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="h-9 w-full rounded-md border border-gray-300 bg-white py-1.5 pl-8 pr-2 text-sm dark:border-gray-700 dark:bg-gray-900"
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <input
-                type="date"
-                aria-label="De"
-                value={dataInicio}
-                onChange={(e) => setDataInicio(e.target.value)}
-                className={filterInputClassName}
-              />
-              <input
-                type="date"
-                aria-label="Até"
-                value={dataFim}
-                min={dataInicio || undefined}
-                onChange={(e) => setDataFim(e.target.value)}
-                className={filterInputClassName}
-              />
-            </div>
-            <select
-              aria-label="Região"
-              value={regiaoKey}
-              onChange={(e) => setRegiaoKey(e.target.value)}
-              className={filterInputClassName}
+      {listModalOpen ? (
+        <AppModalOverlay className="app-modal-overlay fixed inset-0 z-[2100] flex items-center justify-center p-3">
+          <div
+            className="absolute inset-0 bg-black/50"
+            onClick={() => setListModalOpen(false)}
+            aria-hidden
+          />
+          <aside
+            className="relative z-10 w-[min(100%,56rem)]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <Card
+              padding="none"
+              className="flex h-[min(900px,92vh)] flex-col overflow-hidden shadow-2xl"
             >
-              <option value="">Todas as regiões</option>
-              {regiaoTabs.map((tab) => (
-                <option key={tab.key} value={tab.key}>
-                  {tab.label}
-                </option>
-              ))}
-            </select>
-            <select
-              aria-label="Estado"
-              value={estado}
-              onChange={(e) => setEstado(e.target.value)}
-              className={filterInputClassName}
-            >
-              <option value="">Todos os estados</option>
-              {BRASIL_UFS.map((uf) => (
-                <option key={uf} value={uf}>
-                  {uf}
-                </option>
-              ))}
-            </select>
-            <select
-              aria-label="Decisão de participação"
-              value={decisaoFilter}
-              onChange={(e) =>
-                setDecisaoFilter(e.target.value as DecisaoAnaliseFinal | '')
-              }
-              className={filterInputClassName}
-            >
-              <option value="">Todas as decisões</option>
-              {DECISAO_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </div>
-        </CardHeader>
-        <CardContent className="max-h-[min(70vh,720px)] space-y-1 overflow-y-auto p-2">
-          {loadingList ? (
-            <div className="flex items-center justify-center gap-2 py-10 text-sm text-gray-500">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Carregando…
-            </div>
-          ) : list.length === 0 ? (
-            <p className="px-3 py-8 text-center text-sm text-gray-500">
-              Nenhuma licitação encontrada com status <strong>Orçamento</strong>
-              {deferredSearch || dataInicio || dataFim || regiaoKey || estado || decisaoFilter
-                ? ' para os filtros atuais'
-                : ''}
-              .
-            </p>
-          ) : (
-            list.map((item) => {
-              const active = item.id === selectedId;
-              const decisao = isDecisaoValue(item.analiseJson?.decisaoAnaliseFinal)
-                ? item.analiseJson!.decisaoAnaliseFinal!
-                : null;
-              const statusDate = formatDateOnly(item.arquivadaEm ?? item.updatedAt);
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => setSelectedId(item.id)}
-                  className={`w-full rounded-lg px-3 py-2.5 text-left transition-colors ${
-                    active
-                      ? 'bg-red-50 text-red-900 dark:bg-red-950/40 dark:text-red-100'
-                      : 'hover:bg-gray-50 dark:hover:bg-gray-800/60'
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0 truncate text-sm font-medium">
-                      {buildLicitacaoTituloDisplay(item)}
-                    </div>
-                    <div className="flex shrink-0 flex-col items-end gap-1">
-                      <span
-                        className={`rounded-full px-2 py-0.5 text-[10px] font-medium leading-tight ${statusBadgeClass(active)}`}
-                      >
-                        Orçamento
-                      </span>
-                      {decisao ? (
-                        <span
-                          className={`rounded-full px-2 py-0.5 text-[10px] font-medium leading-tight ${decisaoBadgeClass(decisao, active)}`}
-                        >
-                          {decisaoLabel(decisao)}
-                        </span>
-                      ) : null}
-                    </div>
+              <CardHeader className="shrink-0 space-y-3 border-b border-gray-100 px-4 pb-3 pt-4 dark:border-gray-800">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <h2 className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+                      Licitações
+                    </h2>
+                    <p className="mt-0.5 text-xs text-gray-400">
+                      {list.length} {list.length === 1 ? 'licitação' : 'licitações'}
+                      {hasActiveFilters ? ' (filtradas)' : ''}
+                    </p>
                   </div>
-                  <div
-                    className={`mt-0.5 truncate text-xs ${active ? 'text-red-700/80 dark:text-red-200/80' : 'text-gray-500'}`}
+                  <button
+                    type="button"
+                    title="Fechar"
+                    aria-label="Fechar lista"
+                    onClick={() => setListModalOpen(false)}
+                    className="rounded-md p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-800 dark:hover:bg-gray-800 dark:hover:text-gray-200"
                   >
-                    {statusDate || item.orgao || item.numeroProcesso || 'Sem órgão/processo'}
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+
+                <div className="space-y-2.5">
+                  <div className="relative min-w-0">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                    <input
+                      type="text"
+                      placeholder="Buscar órgão, processo ou título..."
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                      className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
+                    />
                   </div>
-                </button>
-              );
-            })
-          )}
-        </CardContent>
-      </Card>
+
+                  <div className="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-5">
+                    <label className="min-w-0">
+                      <span className={filterLabelClassName}>De</span>
+                      <input
+                        type="date"
+                        aria-label="De"
+                        value={dataInicio}
+                        onChange={(e) => setDataInicio(e.target.value)}
+                        className={filterFieldClassName}
+                      />
+                    </label>
+                    <label className="min-w-0">
+                      <span className={filterLabelClassName}>Até</span>
+                      <input
+                        type="date"
+                        aria-label="Até"
+                        value={dataFim}
+                        min={dataInicio || undefined}
+                        onChange={(e) => setDataFim(e.target.value)}
+                        className={filterFieldClassName}
+                      />
+                    </label>
+                    <label className="min-w-0">
+                      <span className={filterLabelClassName}>Região</span>
+                      <select
+                        aria-label="Região"
+                        value={regiaoKey}
+                        onChange={(e) => setRegiaoKey(e.target.value)}
+                        className={filterFieldClassName}
+                      >
+                        <option value="">Todas</option>
+                        {regiaoTabs.map((tab) => (
+                          <option key={tab.key} value={tab.key}>
+                            {tab.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="min-w-0">
+                      <span className={filterLabelClassName}>Estado</span>
+                      <select
+                        aria-label="Estado"
+                        value={estado}
+                        onChange={(e) => setEstado(e.target.value)}
+                        className={filterFieldClassName}
+                      >
+                        <option value="">Todos</option>
+                        {BRASIL_UFS.map((uf) => (
+                          <option key={uf} value={uf}>
+                            {uf}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="min-w-0 col-span-2 md:col-span-1">
+                      <span className={filterLabelClassName}>Decisão</span>
+                      <select
+                        aria-label="Decisão de participação"
+                        value={decisaoFilter}
+                        onChange={(e) =>
+                          setDecisaoFilter(e.target.value as DecisaoAnaliseFinal | '')
+                        }
+                        className={filterFieldClassName}
+                      >
+                        <option value="">Todas</option>
+                        {DECISAO_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+
+                  {hasActiveFilters ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSearch('');
+                        setDataInicio('');
+                        setDataFim('');
+                        setRegiaoKey('');
+                        setEstado('');
+                        setDecisaoFilter('');
+                      }}
+                      className="w-fit text-xs font-medium text-red-600 hover:text-red-700 dark:text-red-400"
+                    >
+                      Limpar filtros
+                    </button>
+                  ) : null}
+                </div>
+              </CardHeader>
+              <CardContent className="flex min-h-0 flex-1 flex-col overflow-hidden px-3 pb-3 pt-2">
+                {loadingList ? (
+                  <div className="flex flex-1 items-center justify-center py-10">
+                    <Loader2 className="h-5 w-5 animate-spin text-red-600" />
+                  </div>
+                ) : list.length === 0 ? (
+                  <p className="py-10 text-center text-sm text-gray-500">
+                    Nenhuma licitação encontrada com status <strong>Orçamento</strong>
+                    {hasActiveFilters ? ' para os filtros atuais' : ''}.
+                  </p>
+                ) : (
+                  <ul
+                    className="min-h-0 flex-1 divide-y divide-gray-200 overflow-y-auto pr-0.5 dark:divide-gray-700"
+                    role="listbox"
+                    aria-label="Licitações"
+                  >
+                    {list.map((item) => {
+                      const active = item.id === selectedId;
+                      const decisao = isDecisaoValue(item.analiseJson?.decisaoAnaliseFinal)
+                        ? item.analiseJson!.decisaoAnaliseFinal!
+                        : null;
+                      const statusDate = formatDateOnly(item.arquivadaEm ?? item.updatedAt);
+                      return (
+                        <li key={item.id} className="py-0.5 first:pt-0 last:pb-0">
+                          <button
+                            type="button"
+                            role="option"
+                            aria-selected={active}
+                            onClick={() => {
+                              setSelectedId(item.id);
+                              setListModalOpen(false);
+                            }}
+                            className={`w-full rounded-lg px-4 py-3 text-left transition-colors ${
+                              active
+                                ? 'bg-red-600 text-white shadow-sm'
+                                : 'hover:bg-gray-100 dark:hover:bg-gray-800'
+                            }`}
+                          >
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                              <p className="min-w-0 whitespace-normal break-words text-sm font-medium">
+                                {buildLicitacaoTituloDisplay(item)}
+                              </p>
+                              <div className="flex shrink-0 flex-row flex-wrap items-center gap-1">
+                                <span
+                                  className={`rounded-full px-2 py-0.5 text-[10px] font-medium leading-tight ${statusBadgeClass(active)}`}
+                                >
+                                  Orçamento
+                                </span>
+                                {decisao ? (
+                                  <span
+                                    className={`rounded-full px-2 py-0.5 text-[10px] font-medium leading-tight ${decisaoBadgeClass(decisao, active)}`}
+                                  >
+                                    {decisaoLabel(decisao)}
+                                  </span>
+                                ) : null}
+                              </div>
+                            </div>
+                            <p
+                              className={`mt-1 text-xs ${active ? 'text-red-100' : 'text-gray-500'}`}
+                            >
+                              {statusDate || item.orgao || item.numeroProcesso || 'Sem órgão/processo'}
+                            </p>
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </CardContent>
+            </Card>
+          </aside>
+        </AppModalOverlay>
+      ) : null}
 
       <div className="space-y-5">
         {!selectedId ? (
-          <Card className="shadow-sm">
-            <CardContent className="py-12 text-center text-sm text-gray-500">
-              Selecione uma licitação à esquerda.
+          <Card className="border-dashed shadow-sm">
+            <CardContent className="flex flex-col items-center justify-center py-16 text-center">
+              <p className="font-medium text-gray-900 dark:text-gray-100">
+                Selecione uma licitação na lista
+              </p>
+              <p className="mt-1 max-w-sm text-sm text-gray-500 dark:text-gray-400">
+                Abra a lista de licitações para cadastrar o orçamento do processo.
+              </p>
+              <button
+                type="button"
+                onClick={() => setListModalOpen(true)}
+                className="mt-5 inline-flex h-10 items-center gap-2 rounded-lg bg-red-600 px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-red-700"
+              >
+                <ClipboardList className="h-4 w-4" />
+                Abrir lista de licitações
+              </button>
             </CardContent>
           </Card>
         ) : loadingOrcamento && !orcamento ? (
@@ -829,34 +874,76 @@ export function LicitacaoOrcamentoPanel() {
             </CardContent>
           </Card>
         ) : (
+          <>
           <Card className="shadow-sm">
             <CardHeader className="flex flex-col gap-3 border-b border-gray-100 px-5 py-4 dark:border-gray-800 sm:flex-row sm:items-start sm:justify-between">
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
-                  <Calculator className="h-5 w-5 text-red-600" aria-hidden />
+                  <ClipboardList className="h-5 w-5 text-red-600" aria-hidden />
                   <h2 className="truncate text-lg font-semibold text-gray-900 dark:text-gray-100">
                     {selectedMeta ? buildLicitacaoTituloDisplay(selectedMeta) : 'Orçamento'}
                   </h2>
                 </div>
                 <p className="mt-1 text-sm text-gray-500">
-                  Calcule o desconto máximo sem comprometer a margem mínima.
-                  {orcamento?.draft ? ' (rascunho ainda não salvo)' : null}
+                  Cadastre o orçamento feito fora do sistema e anexe o documento.
+                  {orcamento?.draft ? ' (ainda não cadastrado)' : null}
                   {fetchingOrcamento ? ' · atualizando…' : null}
                 </p>
               </div>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex shrink-0 flex-wrap items-center gap-2">
                 <button
                   type="button"
-                  onClick={handleExportPdf}
-                  disabled={exportingPdf}
-                  className="inline-flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-800 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                  onClick={() => setListModalOpen(true)}
+                  className="inline-flex h-10 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-800 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800"
                 >
-                  {exportingPdf ? (
+                  <ClipboardList className="h-4 w-4" />
+                  Lista
+                </button>
+                <label className="relative inline-flex items-center">
+                  <ChevronDown
+                    className="pointer-events-none absolute right-2.5 h-4 w-4 text-gray-400"
+                    aria-hidden
+                  />
+                  <select
+                    ref={statusSelectRef}
+                    aria-label="Status"
+                    disabled={
+                      !selectedId ||
+                      alterarStatusMutation.isPending ||
+                      enviarArquivoMutation.isPending ||
+                      setStatusSelecionadoMutation.isPending
+                    }
+                    value={statusAtual}
+                    onChange={(e) => {
+                      const motivo = e.target.value as ArquivadaMotivo;
+                      if (!isMotivoValue(motivo)) return;
+                      handleStatusChange(motivo);
+                    }}
+                    className={`inline-flex h-10 appearance-none rounded-lg border bg-white py-1.5 pl-3 pr-8 text-sm font-medium text-gray-800 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800 ${
+                      statusSelectHighlight
+                        ? 'border-red-500 ring-2 ring-red-500/40 dark:border-red-400'
+                        : 'border-gray-300 dark:border-gray-600'
+                    }`}
+                  >
+                    {STATUS_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  disabled={!selectedId || enviarArquivoMutation.isPending}
+                  onClick={handleArquivar}
+                  className="inline-flex h-10 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-800 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800"
+                >
+                  {enviarArquivoMutation.isPending ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
                   ) : (
-                    <Download className="h-4 w-4" />
+                    <Archive className="h-4 w-4" />
                   )}
-                  Exportar PDF
+                  Arquivar
                 </button>
                 <button
                   type="button"
@@ -869,341 +956,190 @@ export function LicitacaoOrcamentoPanel() {
                   ) : (
                     <Save className="h-4 w-4" />
                   )}
-                  Salvar
+                  Salvar Orçamento
                 </button>
               </div>
             </CardHeader>
             <CardContent className="space-y-6 px-5 py-5">
-              <section>
-                <div className="max-w-sm">
-                  <MoneyField
-                    label="Preço-teto / referência do edital"
-                    value={inputs.precoReferenciaEdital}
-                    onChange={(precoReferenciaEdital) => patchInputs({ precoReferenciaEdital })}
-                    definition={ORCAMENTO_FIELD_DEFINITIONS['Preço-teto / referência do edital']}
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="block min-w-0">
+                  <span className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-gray-500">
+                    Valor do orçamento
+                  </span>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={valorLabel}
+                    onChange={(e) => {
+                      setValorLabel(maskCurrencyInputBrOrEmpty(e.target.value));
+                      setDirty(true);
+                    }}
+                    placeholder="R$ 0,00"
+                    className={inputClassName}
                   />
-                </div>
-              </section>
+                </label>
+                <label className="block min-w-0">
+                  <span className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-gray-500">
+                    Data do orçamento
+                  </span>
+                  <input
+                    type="date"
+                    value={dataOrcamento}
+                    onChange={(e) => {
+                      setDataOrcamento(e.target.value);
+                      setDirty(true);
+                    }}
+                    className={inputClassName}
+                  />
+                </label>
+              </div>
 
-              <section className="space-y-4">
-                <div className="flex flex-wrap items-start justify-between gap-3">
+              <label className="block">
+                <span className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-gray-500">
+                  Observações
+                </span>
+                <textarea
+                  value={observacao}
+                  onChange={(e) => {
+                    setObservacao(e.target.value);
+                    setDirty(true);
+                  }}
+                  rows={4}
+                  placeholder="Informações do orçamento feito fora do sistema…"
+                  className="min-h-[6rem] w-full resize-y rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+                />
+              </label>
+
+              <section className="space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-                      Gastos por tipo
+                      Documento do orçamento
                     </h3>
-                    <p className="mt-1 text-xs text-gray-500">
-                      Cada tipo é a soma das suas linhas. Ao salvar, a estrutura vira padrão para
-                      orçamentos futuros. Novos tipos entram como variáveis nas fórmulas.
+                    <p className="mt-0.5 text-xs text-gray-500">
+                      Anexe o arquivo gerado fora do sistema (PDF, Word ou planilha).
                     </p>
                   </div>
                   <button
                     type="button"
-                    onClick={handleAddExpenseType}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-gray-800 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploadMutation.isPending}
+                    className="inline-flex h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm font-semibold text-gray-800 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
                   >
-                    <Plus className="h-3.5 w-3.5" />
-                    Novo tipo de gasto
-                  </button>
-                </div>
-
-                {inputs.expenseTypes.map((category) => {
-                  const categoryLines = inputs.lines.filter(
-                    (line) => line.category === category.id
-                  );
-                  const total = categoryTotals[category.id] ?? 0;
-
-                  return (
-                    <div
-                      key={category.id}
-                      className="rounded-lg border border-gray-200 p-3 dark:border-gray-700"
-                    >
-                      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                        <div className="min-w-0">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-                              {category.label}
-                            </h4>
-                            <code className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[10px] text-gray-500 dark:bg-gray-800 dark:text-gray-400">
-                              {category.id}
-                            </code>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                handleRenameExpenseType(category.id, category.label)
-                              }
-                              className="text-[11px] text-red-600 hover:underline"
-                            >
-                              Renomear
-                            </button>
-                            {!category.builtin ? (
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  handleRemoveExpenseType(category.id, category.label)
-                                }
-                                className="text-[11px] text-rose-600 hover:underline"
-                              >
-                                Remover tipo
-                              </button>
-                            ) : null}
-                          </div>
-                          <p className="text-xs tabular-nums text-gray-500">
-                            Total: {formatCurrency(total)}
-                          </p>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => addLine(category.id)}
-                          className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 px-2.5 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800"
-                        >
-                          <Plus className="h-3.5 w-3.5" />
-                          Adicionar linha
-                        </button>
-                      </div>
-
-                      {categoryLines.length === 0 ? (
-                        <p className="rounded-md border border-dashed border-gray-300 px-3 py-4 text-center text-xs text-gray-500 dark:border-gray-600">
-                          Nenhuma linha em {category.label.toLowerCase()}. O total fica
-                          R$&nbsp;0,00.
-                        </p>
-                      ) : (
-                        <div className="space-y-2">
-                          {categoryLines.map((line) => (
-                            <div
-                              key={line.id}
-                              className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_10rem_auto]"
-                            >
-                              <input
-                                value={line.description}
-                                onChange={(e) =>
-                                  updateLine(line.id, { description: e.target.value })
-                                }
-                                placeholder="Descrição da linha"
-                                className="h-9 rounded-md border border-gray-300 bg-white px-2 text-sm dark:border-gray-600 dark:bg-gray-800"
-                              />
-                              <MoneyField
-                                value={line.amount}
-                                onChange={(amount) => updateLine(line.id, { amount })}
-                              />
-                              <button
-                                type="button"
-                                onClick={() => removeLine(line.id)}
-                                className="inline-flex h-9 w-9 items-center justify-center rounded-md text-gray-400 hover:bg-rose-50 hover:text-rose-600"
-                                title="Remover linha"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </section>
-
-              <section>
-                <h3 className="mb-3 text-sm font-semibold text-gray-900 dark:text-gray-100">
-                  Percentuais e valores
-                </h3>
-                <p className="mb-3 text-xs text-gray-500">
-                  Preencha R$ ou % — o outro valor é calculado automaticamente. Encargos usam o
-                  total de mão de obra; custo indireto, lucro, tributo e margem usam custo direto +
-                  encargos
-                  {bdiComponentBase > 0 ? ` (${formatCurrency(bdiComponentBase)})` : ''}; desconto
-                  simulado usa o preço-teto.
-                </p>
-                <div className="grid gap-3 lg:grid-cols-3">
-                  <DualMoneyPercentField
-                    label="Encargos sociais"
-                    value={inputs.encargosSociais}
-                    base={encargosBase}
-                    onChange={(encargosSociais) => patchInputs({ encargosSociais })}
-                    definition={ORCAMENTO_FIELD_DEFINITIONS['Encargos sociais']}
-                  />
-                  <DualMoneyPercentField
-                    label="Margem mínima"
-                    value={inputs.margemMinima}
-                    base={bdiComponentBase}
-                    onChange={(margemMinima) => patchInputs({ margemMinima })}
-                    definition={ORCAMENTO_FIELD_DEFINITIONS['Margem mínima']}
-                  />
-                  <DualMoneyPercentField
-                    label="Desconto simulado"
-                    value={inputs.descontoSimulado}
-                    base={descontoBase}
-                    onChange={(descontoSimulado) => patchInputs({ descontoSimulado })}
-                    definition={ORCAMENTO_FIELD_DEFINITIONS['Desconto simulado']}
-                  />
-                  <DualMoneyPercentField
-                    label="Custo indireto"
-                    value={inputs.custoIndireto}
-                    base={bdiComponentBase}
-                    onChange={(custoIndireto) => patchInputs({ custoIndireto })}
-                    definition={ORCAMENTO_FIELD_DEFINITIONS['Custo indireto']}
-                  />
-                  <DualMoneyPercentField
-                    label="Lucro"
-                    value={inputs.lucro}
-                    base={bdiComponentBase}
-                    onChange={(lucro) => patchInputs({ lucro })}
-                    definition={ORCAMENTO_FIELD_DEFINITIONS.Lucro}
-                  />
-                  <DualMoneyPercentField
-                    label="Tributo"
-                    value={inputs.tributo}
-                    base={bdiComponentBase}
-                    onChange={(tributo) => patchInputs({ tributo })}
-                    definition={ORCAMENTO_FIELD_DEFINITIONS.Tributo}
-                  />
-                </div>
-              </section>
-
-              <section>
-                <h3 className="mb-3 text-sm font-semibold text-gray-900 dark:text-gray-100">
-                  Resultado do orçamento
-                </h3>
-                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                  {resultCards.map((card) => (
-                    <div
-                      key={card.label}
-                      className="rounded-lg border border-gray-200 bg-gray-50/70 px-3 py-3 dark:border-gray-700 dark:bg-gray-900/40"
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="text-[11px] font-medium uppercase tracking-wide text-gray-500">
-                          {card.label}
-                        </div>
-                        {card.definition ? (
-                          <FieldInfoButton definition={card.definition} />
-                        ) : null}
-                      </div>
-                      <div
-                        className={`mt-1 text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100 ${card.tone ?? ''}`}
-                      >
-                        {card.value}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </section>
-
-              <section>
-                <label className="block">
-                  <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-gray-500">
-                    Observações
-                  </span>
-                  <textarea
-                    value={inputs.notes ?? ''}
-                    onChange={(e) => patchInputs({ notes: e.target.value })}
-                    rows={3}
-                    className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800"
-                    placeholder="Notas do orçamento…"
-                  />
-                </label>
-              </section>
-
-              <section className="rounded-lg border border-gray-200 dark:border-gray-700">
-                <button
-                  type="button"
-                  onClick={() => setShowFormulas((v) => !v)}
-                  className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left"
-                  aria-expanded={showFormulas}
-                >
-                  <span className="flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-gray-100">
-                    {showFormulas ? (
-                      <ChevronDown className="h-4 w-4 text-gray-500" />
+                    {uploadMutation.isPending ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
                     ) : (
-                      <ChevronRight className="h-4 w-4 text-gray-500" />
+                      <Paperclip className="h-4 w-4" />
                     )}
-                    Fórmulas (editáveis)
-                  </span>
-                  <span className="text-xs text-gray-500">
-                    {showFormulas ? 'Recolher' : 'Expandir'}
-                  </span>
-                </button>
-                {showFormulas ? (
-                  <div className="space-y-3 border-t border-gray-200 px-3 py-3 dark:border-gray-700">
-                    <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50/80 p-3 dark:border-gray-600 dark:bg-gray-900/40">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300">
-                        Campos para montar as fórmulas
-                      </p>
-                      <p className="mt-1 text-xs text-gray-500">
-                        Use os nomes técnicos abaixo nas expressões. Operadores: + − * / ( ).
-                        Cada resultado pode ser referenciado nas fórmulas seguintes.
-                      </p>
-                      <div className="mt-3 space-y-3">
-                        {formulaFieldGroups.map((group) => (
-                          <div key={group.title}>
-                            <p className="mb-1.5 text-[11px] font-medium text-gray-600 dark:text-gray-400">
-                              {group.title}
-                            </p>
-                            <ul className="grid gap-1 sm:grid-cols-2">
-                              {group.fields.map((field) => (
-                                <li
-                                  key={field.name}
-                                  className="flex min-w-0 items-baseline gap-2 rounded-md bg-white/70 px-2 py-1 dark:bg-gray-800/60"
-                                >
-                                  <code className="shrink-0 font-mono text-[11px] text-red-700 dark:text-red-400">
-                                    {field.name}
-                                  </code>
-                                  <span className="truncate text-[11px] text-gray-500">
-                                    {field.label}
-                                  </span>
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                    {LICITACAO_ORCAMENTO_FORMULA_ORDER.map((key) => (
-                      <div
-                        key={key}
-                        className="rounded-lg border border-gray-200 p-3 dark:border-gray-700"
-                      >
-                        <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
-                          <div className="text-sm font-medium text-gray-800 dark:text-gray-100">
-                            {LICITACAO_ORCAMENTO_FORMULA_LABELS[key]}
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs tabular-nums text-gray-500">
-                              {key.includes('percent') ||
-                              key === 'bdi_percent' ||
-                              key === 'margem_real_simulada'
-                                ? formatPercent(liveResult.formulaValues[key] ?? 0)
-                                : formatCurrency(liveResult.formulaValues[key] ?? 0)}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => resetFormula(key)}
-                              className="text-xs text-red-600 hover:underline"
-                            >
-                              Restaurar
-                            </button>
-                          </div>
-                        </div>
-                        <textarea
-                          value={inputs.formulas[key]}
-                          onChange={(e) =>
-                            patchInputs({
-                              formulas: { ...inputs.formulas, [key]: e.target.value },
-                            })
-                          }
-                          rows={2}
-                          className="w-full rounded-md border border-gray-300 bg-white px-2.5 py-2 font-mono text-xs text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-                        />
-                        {liveResult.formulaErrors[key] ? (
-                          <p className="mt-1 text-xs text-rose-600">
-                            {liveResult.formulaErrors[key]}
-                          </p>
-                        ) : null}
-                      </div>
-                    ))}
+                    {uploadMutation.isPending ? 'Enviando…' : 'Anexar documento'}
+                  </button>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    className="hidden"
+                    accept=".pdf,.doc,.docx,.xlsx,.xls,.csv,.png,.jpg,.jpeg,.webp,.txt,application/pdf"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) uploadMutation.mutate(file);
+                    }}
+                  />
+                </div>
+
+                {anexos.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-gray-300 px-4 py-8 text-center text-sm text-gray-500 dark:border-gray-700">
+                    Nenhum documento anexado.
                   </div>
-                ) : null}
+                ) : (
+                  <ul className="divide-y divide-gray-100 overflow-hidden rounded-lg border border-gray-200 dark:divide-gray-800 dark:border-gray-700">
+                    {anexos.map((anexo) => {
+                      const href = resolveApiMediaUrl(anexo.url);
+                      return (
+                        <li
+                          key={anexo.id}
+                          className="flex items-center gap-3 bg-white px-3 py-2.5 dark:bg-gray-950"
+                        >
+                          <FileText className="h-4 w-4 shrink-0 text-gray-400" aria-hidden />
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-medium text-gray-900 dark:text-gray-100">
+                              {anexo.name}
+                            </p>
+                            <p className="text-xs text-gray-500">
+                              {formatFileSize(anexo.size)}
+                              {anexo.uploadedAt
+                                ? ` · ${formatDateOnly(anexo.uploadedAt)}`
+                                : ''}
+                            </p>
+                          </div>
+                          {href ? (
+                            <a
+                              href={href}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"
+                              title="Abrir documento"
+                              aria-label={`Abrir ${anexo.name}`}
+                            >
+                              <ExternalLink className="h-4 w-4" />
+                            </a>
+                          ) : null}
+                          {href ? (
+                            <a
+                              href={href}
+                              download={anexo.name}
+                              className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"
+                              title="Baixar documento"
+                              aria-label={`Baixar ${anexo.name}`}
+                            >
+                              <Download className="h-4 w-4" />
+                            </a>
+                          ) : null}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (window.confirm(`Remover o anexo “${anexo.name}”?`)) {
+                                removeAnexoMutation.mutate(anexo.id);
+                              }
+                            }}
+                            disabled={removeAnexoMutation.isPending}
+                            className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-red-600 hover:bg-red-50 disabled:opacity-50 dark:text-red-400 dark:hover:bg-red-950/40"
+                            title="Remover anexo"
+                            aria-label={`Remover ${anexo.name}`}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
               </section>
             </CardContent>
           </Card>
+
+          {selectedAnalise ? (
+            <LicitacaoAnalisesCarregadas
+              className="mt-1"
+              titulo={buildLicitacaoTituloDisplay(selectedAnalise)}
+              showPreliminar
+              analisePreliminar={selectedAnalise.analiseJson?.analisePreliminar}
+              showNotebook
+              linkNotebookLm={selectedAnalise.analiseJson?.linkNotebookLm}
+              showEmAnaliseResumo
+              analiseUsuario={selectedAnalise.analiseJson?.analiseUsuario}
+              responsavelAnalise={selectedAnalise.analiseJson?.responsavelAnalise}
+              viabilidadeSections={viabilidadeSections}
+              naoSeHabilita={selectedAnalise.analiseJson?.naoSeHabilita === true}
+              naoSeHabilitaItens={selectedAnalise.analiseJson?.naoSeHabilitaItens ?? []}
+              showDiretoria
+              decisaoLabel={
+                selectedAnalise.analiseJson?.decisaoAnaliseFinal
+                  ? decisaoLabel(selectedAnalise.analiseJson.decisaoAnaliseFinal)
+                  : null
+              }
+              analiseFinalTexto={selectedAnalise.analiseJson?.analiseFinalTexto}
+            />
+          ) : null}
+          </>
         )}
       </div>
     </div>

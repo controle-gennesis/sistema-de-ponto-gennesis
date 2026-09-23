@@ -46,12 +46,32 @@ export function normalizeCostCenterKey(value: string): string {
     .trim();
 }
 
+/**
+ * Centros de custo da aba NFS. Abas novas (descobertas na planilha) sem mapa
+ * explícito usam o próprio nome da aba — assim CNA - SUBSOLO casa sozinho.
+ */
+export function getNfsTabGastosCostCenters(tab: {
+  key: string;
+  label: string;
+  sheetName: string;
+}): readonly string[] {
+  const explicit = NFS_TAB_GASTOS_COST_CENTERS[tab.key];
+  if (explicit && explicit.length > 0) return explicit;
+
+  const fallback = [tab.sheetName, tab.label]
+    .map((value) => value.trim())
+    .filter(Boolean);
+  return Array.from(new Set(fallback));
+}
+
 /** Mapeia nome normalizado da Base de Gastos → tabKey NFS. */
-export function buildGastosLookupKeys(): Map<string, string> {
+export function buildGastosLookupKeys(
+  tabs: readonly { key: string; label: string; sheetName: string }[] = CONTROLE_NFS_SHEET_TABS
+): Map<string, string> {
   const lookup = new Map<string, string>();
 
-  for (const tab of CONTROLE_NFS_SHEET_TABS) {
-    const centers = NFS_TAB_GASTOS_COST_CENTERS[tab.key] ?? [];
+  for (const tab of tabs) {
+    const centers = getNfsTabGastosCostCenters(tab);
     for (const center of centers) {
       lookup.set(normalizeCostCenterKey(center), tab.key);
     }
@@ -62,7 +82,10 @@ export function buildGastosLookupKeys(): Map<string, string> {
   return lookup;
 }
 
-export function resolveNfsTabKeyForGastosContract(contractName: string): string | null {
-  const lookup = buildGastosLookupKeys();
+export function resolveNfsTabKeyForGastosContract(
+  contractName: string,
+  tabs?: readonly { key: string; label: string; sheetName: string }[]
+): string | null {
+  const lookup = buildGastosLookupKeys(tabs ?? CONTROLE_NFS_SHEET_TABS);
   return lookup.get(normalizeCostCenterKey(contractName)) ?? null;
 }

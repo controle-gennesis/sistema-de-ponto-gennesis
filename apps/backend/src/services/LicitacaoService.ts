@@ -53,8 +53,10 @@ import {
   licitacaoStoreListDocumentos,
   licitacaoStoreUpdate,
   type LicitacaoArquivadaMotivo,
+  type LicitacaoAnaliseEtapa,
   type LicitacaoListFilters,
   isLicitacaoArquivadaMotivo,
+  resolveAnaliseEtapa,
 } from './licitacaoStore';
 
 const UPLOAD_SUBDIR = 'licitacoes';
@@ -139,6 +141,32 @@ export type LicitacaoOrigemRegiao = {
   rowSnapshot?: Record<string, string> | null;
 };
 
+export type LicitacaoAnalisePreliminar = {
+  cabecalho?: string;
+  rows?: Array<{
+    id?: string;
+    label?: string;
+    value?: string;
+    currency?: boolean;
+    heightPx?: number;
+  }>;
+  /** Campos legados (antes das linhas dinâmicas). */
+  abertura?: string;
+  objeto?: string;
+  habilitacao?: string;
+  valor?: string;
+  tabelasReferencia?: string;
+  local?: string;
+  lote?: string;
+  adesao?: string;
+  consorcio?: string;
+  vigencia?: string;
+  prorrogacao?: string;
+  modoDisputa?: string;
+  julgamento?: string;
+  descontoMaximo?: string;
+};
+
 export type LicitacaoAnalisePersistida = {
   ultimaExtracao?: (LicitacaoExtracao & { extraidoEm?: string; respostaBruta?: string }) | null;
   historicoExtracoes: Array<LicitacaoExtracao & { extraidoEm: string; respostaBruta?: string }>;
@@ -154,6 +182,7 @@ export type LicitacaoAnalisePersistida = {
   analiseUsuario?: string | null;
   analiseUsuarioAtualizadaEm?: string | null;
   checklistAnalise?: Record<string, { checked: boolean; comentario: string | null }>;
+  analisePreliminar?: LicitacaoAnalisePreliminar | null;
   linkNotebookLm?: string | null;
   naoSeHabilita?: boolean;
   naoSeHabilitaItens?: Array<{ id: string; title: string; isDone: boolean }>;
@@ -165,6 +194,14 @@ export type LicitacaoAnalisePersistida = {
   decisaoAnaliseFinalEm?: string | null;
   analiseFinalTexto?: string | null;
   analiseFinalTextoAtualizadaEm?: string | null;
+  /** Enviada para a aba Arquivo (fluxo finalizado). */
+  emArquivo?: boolean;
+  emArquivoEm?: string | null;
+  /**
+   * Status escolhido para arquivar (suspensa/declinada/encerrada/em_andamento/vencidas)
+   * sem sair da etapa atual. Só Análise diretoria / Orçamento movem de aba.
+   */
+  statusSelecionado?: string | null;
 };
 
 export const LICITACAO_DECISAO_ANALISE_FINAL = [
@@ -284,6 +321,66 @@ function parseOrigemRegiao(raw: unknown): LicitacaoOrigemRegiao | null {
   };
 }
 
+function parseAnalisePreliminar(raw: unknown): LicitacaoAnalisePreliminar | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const o = raw as Record<string, unknown>;
+  const out: LicitacaoAnalisePreliminar = {};
+  let hasAny = false;
+
+  if (typeof o.cabecalho === 'string') {
+    out.cabecalho = o.cabecalho;
+    hasAny = true;
+  }
+
+  if (Array.isArray(o.rows)) {
+    const rows: NonNullable<LicitacaoAnalisePreliminar['rows']> = [];
+    for (const entry of o.rows) {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+      const row = entry as Record<string, unknown>;
+      const label = typeof row.label === 'string' ? row.label : '';
+      const value = typeof row.value === 'string' ? row.value : '';
+      const id = typeof row.id === 'string' ? row.id : undefined;
+      rows.push({
+        ...(id ? { id } : {}),
+        label,
+        value,
+        currency: row.currency === true,
+        ...(typeof row.heightPx === 'number' && Number.isFinite(row.heightPx)
+          ? { heightPx: row.heightPx }
+          : {}),
+      });
+    }
+    if (rows.length > 0) {
+      out.rows = rows;
+      hasAny = true;
+    }
+  }
+
+  const legacyKeys = [
+    'abertura',
+    'objeto',
+    'habilitacao',
+    'valor',
+    'tabelasReferencia',
+    'local',
+    'lote',
+    'adesao',
+    'consorcio',
+    'vigencia',
+    'prorrogacao',
+    'modoDisputa',
+    'julgamento',
+    'descontoMaximo',
+  ] as const;
+  for (const key of legacyKeys) {
+    if (typeof o[key] === 'string') {
+      out[key] = o[key];
+      hasAny = true;
+    }
+  }
+  return hasAny ? out : null;
+}
+
 function parseAnaliseJson(raw: unknown): LicitacaoAnalisePersistida {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
     return { historicoExtracoes: [], conversas: [] };
@@ -308,6 +405,7 @@ function parseAnaliseJson(raw: unknown): LicitacaoAnalisePersistida {
       typeof o.analiseUsuarioAtualizadaEm === 'string' ? o.analiseUsuarioAtualizadaEm : null,
     linkNotebookLm: typeof o.linkNotebookLm === 'string' ? o.linkNotebookLm : null,
     checklistAnalise: parseChecklistAnalise(o.checklistAnalise),
+    analisePreliminar: parseAnalisePreliminar(o.analisePreliminar),
     naoSeHabilita: o.naoSeHabilita === true,
     naoSeHabilitaItens: parseNaoSeHabilitaItens(o.naoSeHabilitaItens),
     analiseManualFinalizada: o.analiseManualFinalizada === true,
@@ -326,6 +424,12 @@ function parseAnaliseJson(raw: unknown): LicitacaoAnalisePersistida {
     analiseFinalTexto: typeof o.analiseFinalTexto === 'string' ? o.analiseFinalTexto : null,
     analiseFinalTextoAtualizadaEm:
       typeof o.analiseFinalTextoAtualizadaEm === 'string' ? o.analiseFinalTextoAtualizadaEm : null,
+    emArquivo: o.emArquivo === true,
+    emArquivoEm: typeof o.emArquivoEm === 'string' ? o.emArquivoEm : null,
+    statusSelecionado:
+      typeof o.statusSelecionado === 'string' && isLicitacaoArquivadaMotivo(o.statusSelecionado)
+        ? o.statusSelecionado
+        : null,
   };
 }
 
@@ -343,11 +447,35 @@ export function parseResponsavelAnaliseIds(raw: string | null | undefined): stri
   return ids;
 }
 
-/** Primeiro e segundo nome para exibição concatenada. */
+/** Partículas de nome que não devem ficar sozinhas como “segundo nome”. */
+const NAME_PARTICLES = new Set([
+  'de',
+  'da',
+  'do',
+  'das',
+  'dos',
+  'e',
+  'di',
+  'du',
+  'des',
+  'del',
+  'della',
+  'van',
+  'von',
+]);
+
+/**
+ * Nome curto para exibição: em geral 1º + 2º.
+ * Se o 2º for partícula (ex.: Fernanda de Carvalho), usa 1º + 2º + 3º.
+ */
 export function shortPersonName(fullName: string | null | undefined): string {
   const parts = (fullName ?? '').trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) return 'Usuário';
   if (parts.length === 1) return parts[0];
+  if (parts.length === 2) return `${parts[0]} ${parts[1]}`;
+  if (NAME_PARTICLES.has(parts[1].toLowerCase())) {
+    return `${parts[0]} ${parts[1]} ${parts[2]}`;
+  }
   return `${parts[0]} ${parts[1]}`;
 }
 
@@ -395,6 +523,8 @@ function mergeAnaliseJson(
       patch.linkNotebookLm !== undefined ? patch.linkNotebookLm : base.linkNotebookLm,
     checklistAnalise:
       patch.checklistAnalise !== undefined ? patch.checklistAnalise : base.checklistAnalise,
+    analisePreliminar:
+      patch.analisePreliminar !== undefined ? patch.analisePreliminar : base.analisePreliminar,
     naoSeHabilita:
       patch.naoSeHabilita !== undefined ? patch.naoSeHabilita : base.naoSeHabilita,
     naoSeHabilitaItens:
@@ -425,6 +555,10 @@ function mergeAnaliseJson(
       patch.analiseFinalTextoAtualizadaEm !== undefined
         ? patch.analiseFinalTextoAtualizadaEm
         : base.analiseFinalTextoAtualizadaEm,
+    emArquivo: patch.emArquivo !== undefined ? patch.emArquivo : base.emArquivo,
+    emArquivoEm: patch.emArquivoEm !== undefined ? patch.emArquivoEm : base.emArquivoEm,
+    statusSelecionado:
+      patch.statusSelecionado !== undefined ? patch.statusSelecionado : base.statusSelecionado,
   };
 }
 
@@ -512,6 +646,7 @@ function serializeLicitacao(row: {
   arquivada?: boolean;
   arquivadaEm?: Date | null;
   arquivadaMotivo?: LicitacaoArquivadaMotivo | null;
+  analiseEtapa?: LicitacaoAnaliseEtapa | string | null;
   createdBy: string;
   createdAt: Date;
   updatedAt: Date;
@@ -550,6 +685,7 @@ function serializeLicitacao(row: {
     arquivada: row.arquivada === true,
     arquivadaEm: row.arquivadaEm ? row.arquivadaEm.toISOString() : null,
     arquivadaMotivo: resolveArquivadaMotivo(row),
+    analiseEtapa: resolveAnaliseEtapa(row.analiseEtapa),
     analiseJson: serializeAnaliseJsonForClient(enriched.analiseJson),
     documentos: row.documentos?.map((d) => ({
       ...d,
@@ -575,6 +711,8 @@ export class LicitacaoService {
       estado: filters.estado,
       arquivada: filters.arquivada,
       arquivadaMotivo: filters.arquivadaMotivo,
+      analiseEtapa: filters.analiseEtapa,
+      emArquivo: filters.emArquivo,
     });
 
     return rows.map(serializeLicitacao);
@@ -645,6 +783,7 @@ export class LicitacaoService {
       numeroProcesso: data.numeroProcesso,
       orgao: data.orgao,
       modalidade: data.modalidade,
+      analiseEtapa: 'preliminar',
     });
     return serializeLicitacao(row);
   }
@@ -664,6 +803,7 @@ export class LicitacaoService {
       linkNotebookLm: string;
       analiseUsuario: string;
       checklistAnalise: Record<string, { checked: boolean; comentario: string }>;
+      analisePreliminar: LicitacaoAnalisePreliminar | null;
       naoSeHabilita: boolean;
       naoSeHabilitaItens: Array<{ id: string; title: string; isDone: boolean }>;
       decisaoAnaliseFinal: LicitacaoDecisaoAnaliseFinal | null;
@@ -675,6 +815,7 @@ export class LicitacaoService {
       data.linkNotebookLm !== undefined ||
       data.analiseUsuario !== undefined ||
       data.checklistAnalise !== undefined ||
+      data.analisePreliminar !== undefined ||
       data.naoSeHabilita !== undefined ||
       data.naoSeHabilitaItens !== undefined;
     const hasAnaliseFinal =
@@ -707,6 +848,9 @@ export class LicitacaoService {
           ? { linkNotebookLm: data.linkNotebookLm.trim() || null }
           : {}),
         ...(checklistPatch !== undefined ? { checklistAnalise: checklistPatch } : {}),
+        ...(data.analisePreliminar !== undefined
+          ? { analisePreliminar: parseAnalisePreliminar(data.analisePreliminar) }
+          : {}),
         ...(data.naoSeHabilita !== undefined
           ? { naoSeHabilita: data.naoSeHabilita === true }
           : {}),
@@ -897,7 +1041,10 @@ export class LicitacaoService {
       arquivada: true,
       arquivadaEm: current.arquivadaEm ?? new Date(),
       arquivadaMotivo: motivo,
-      analiseJson: mergeAnaliseJson(current.analiseJson, { arquivadaMotivo: motivo }),
+      analiseJson: mergeAnaliseJson(current.analiseJson, {
+        arquivadaMotivo: motivo,
+        statusSelecionado: null,
+      }),
     });
     return serializeLicitacao(row);
   }
@@ -911,7 +1058,121 @@ export class LicitacaoService {
       arquivada: false,
       arquivadaEm: null,
       arquivadaMotivo: null,
-      analiseJson: mergeAnaliseJson(current.analiseJson, { arquivadaMotivo: null }),
+      analiseJson: mergeAnaliseJson(current.analiseJson, {
+        arquivadaMotivo: null,
+        emArquivo: false,
+        emArquivoEm: null,
+        statusSelecionado: null,
+      }),
+    });
+    return serializeLicitacao(row);
+  }
+
+  async enviarParaArquivo(id: string, motivo?: LicitacaoArquivadaMotivo) {
+    const current = await licitacaoStoreGetById(id);
+    if (!current) throw new Error('Licitação não encontrada');
+
+    const STATUS_ARQUIVO_PERMITIDOS: LicitacaoArquivadaMotivo[] = [
+      'suspensa',
+      'declinada',
+      'encerrada',
+      'em_andamento',
+      'vencidas',
+    ];
+
+    const analise = parseAnaliseJson(current.analiseJson);
+    const fromSelecionado =
+      typeof analise.statusSelecionado === 'string' &&
+      isLicitacaoArquivadaMotivo(analise.statusSelecionado)
+        ? analise.statusSelecionado
+        : null;
+
+    const resolved =
+      (motivo && isLicitacaoArquivadaMotivo(motivo) ? motivo : null) ??
+      fromSelecionado ??
+      resolveArquivadaMotivo(current);
+    if (!resolved) {
+      throw new Error(
+        'Informe o status antes de arquivar (suspensa, declinada, encerrada, em andamento ou vencidas).'
+      );
+    }
+    if (!STATUS_ARQUIVO_PERMITIDOS.includes(resolved)) {
+      throw new Error(
+        'Status não permitido para o Arquivo. Use: suspensa, declinada, encerrada, em andamento ou vencidas.'
+      );
+    }
+
+    if (current.arquivada && analise.emArquivo === true && resolveArquivadaMotivo(current) === resolved) {
+      return serializeLicitacao(current);
+    }
+
+    const row = await licitacaoStoreUpdate(id, {
+      arquivada: true,
+      arquivadaEm: current.arquivadaEm ?? new Date(),
+      arquivadaMotivo: resolved,
+      analiseJson: mergeAnaliseJson(current.analiseJson, {
+        arquivadaMotivo: resolved,
+        statusSelecionado: null,
+        emArquivo: true,
+        emArquivoEm: analise.emArquivoEm ?? new Date().toISOString(),
+      }),
+    });
+    return serializeLicitacao(row);
+  }
+
+  async setStatusSelecionado(id: string, motivo: LicitacaoArquivadaMotivo) {
+    const current = await licitacaoStoreGetById(id);
+    if (!current) throw new Error('Licitação não encontrada');
+
+    const STATUS_ARQUIVO_PERMITIDOS: LicitacaoArquivadaMotivo[] = [
+      'suspensa',
+      'declinada',
+      'encerrada',
+      'em_andamento',
+      'vencidas',
+    ];
+    if (!STATUS_ARQUIVO_PERMITIDOS.includes(motivo)) {
+      throw new Error(
+        'Status inválido. Use: suspensa, declinada, encerrada, em andamento ou vencidas.'
+      );
+    }
+
+    const analise = parseAnaliseJson(current.analiseJson);
+    if (analise.statusSelecionado === motivo) {
+      return serializeLicitacao(current);
+    }
+
+    const row = await licitacaoStoreUpdate(id, {
+      analiseJson: mergeAnaliseJson(current.analiseJson, {
+        statusSelecionado: motivo,
+      }),
+    });
+    return serializeLicitacao(row);
+  }
+
+  async setAnaliseEtapa(id: string, etapa: LicitacaoAnaliseEtapa) {
+    const current = await licitacaoStoreGetById(id);
+    if (!current) throw new Error('Licitação não encontrada');
+
+    const atual = resolveAnaliseEtapa(current.analiseEtapa);
+    if (!current.arquivada && atual === etapa) {
+      return serializeLicitacao(current);
+    }
+
+    const row = await licitacaoStoreUpdate(id, {
+      analiseEtapa: etapa,
+      ...(current.arquivada
+        ? {
+            arquivada: false,
+            arquivadaEm: null,
+            arquivadaMotivo: null,
+            analiseJson: mergeAnaliseJson(current.analiseJson, {
+              arquivadaMotivo: null,
+              emArquivo: false,
+              emArquivoEm: null,
+            }),
+          }
+        : {}),
     });
     return serializeLicitacao(row);
   }

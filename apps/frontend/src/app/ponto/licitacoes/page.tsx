@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState, useDeferredVa
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import {
+  Archive,
   ChevronDown,
   ClipboardList,
   Download,
@@ -11,8 +12,6 @@ import {
   FileText,
   Hand,
   Loader2,
-  Maximize2,
-  Minimize2,
   Info,
   Save,
   Search,
@@ -30,8 +29,16 @@ import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
 import api from '@/lib/api';
 import { exportLicitacaoAnalisePdf } from '@/lib/exportLicitacaoAnalisePdf';
+import { exportLicitacaoAnalisePreliminarPdf } from '@/lib/exportLicitacaoAnalisePreliminarPdf';
 import { LicitacaoChecklistEditor } from './LicitacaoChecklistEditor';
 import { LicitacaoChecklistResumo } from './LicitacaoChecklistResumo';
+import { LicitacaoAnalisePreliminarForm } from './LicitacaoAnalisePreliminarForm';
+import { LicitacaoAnalisesCarregadas } from './LicitacaoAnalisesCarregadas';
+import {
+  emptyAnalisePreliminar,
+  parseAnalisePreliminar,
+  type AnalisePreliminarData,
+} from './licitacaoAnalisePreliminar';
 import {
   LicitacaoNaoSeHabilitaPanel,
   type NaoSeHabilitaItem,
@@ -39,6 +46,7 @@ import {
 import { LicitacoesRegiaoPanel } from './LicitacoesRegiaoPanel';
 import { BancoCatsPanel } from './BancoCatsPanel';
 import { LicitacaoOrcamentoPanel } from './LicitacaoOrcamentoPanel';
+import { LicitacaoArquivoPanel } from './LicitacaoArquivoPanel';
 import { buildLicitacaoTituloDisplay } from './licitacaoDisplay';
 import {
   emptyChecklistState,
@@ -58,6 +66,7 @@ const DRIVE_CATS_URL =
 const NOTEBOOK_LM_LOGIN_EMAIL = 'contratos.licitacoesgennesis@gmail.com';
 
 const LICITACAO_SELECTED_ID_KEY = 'licitacoes:selectedId';
+const LICITACAO_SELECTED_ID_PRELIMINAR_KEY = 'licitacoes:selectedId:preliminar';
 const LICITACAO_VIEW_MODE_KEY = 'licitacoes:viewMode';
 const AUTO_SAVE_MS = 60_000;
 
@@ -66,7 +75,21 @@ const BRASIL_UFS = [
   'PA', 'PB', 'PR', 'PE', 'PI', 'RJ', 'RN', 'RS', 'RO', 'RR', 'SC', 'SP', 'SE', 'TO',
 ] as const;
 
-type LicitacaoViewMode = 'analise' | 'arquivadas' | 'orcamento' | 'regioes' | 'banco-cats';
+type LicitacaoViewMode =
+  | 'analise'
+  | 'preliminar'
+  | 'arquivadas'
+  | 'orcamento'
+  | 'arquivo'
+  | 'regioes'
+  | 'banco-cats'
+  | 'consulta-rapida-cats';
+
+type LicitacaoAnaliseEtapa = 'preliminar' | 'em_analise';
+
+function resolveAnaliseEtapa(value: unknown): LicitacaoAnaliseEtapa {
+  return value === 'preliminar' ? 'preliminar' : 'em_analise';
+}
 
 type LicitacaoArquivadaMotivo =
   | 'suspensa'
@@ -83,7 +106,7 @@ const ARQUIVADA_MOTIVO_OPTIONS: Array<{
   singular: string;
   confirm: string;
 }> = [
-  { value: 'aguardando_aprovacao', label: 'Aguardando aprovação', singular: 'Aguardando aprovação', confirm: 'aguardando aprovação' },
+  { value: 'aguardando_aprovacao', label: 'Análise diretoria', singular: 'Análise diretoria', confirm: 'análise diretoria' },
   { value: 'orcamento', label: 'Orçamento', singular: 'Orçamento', confirm: 'orçamento' },
   { value: 'suspensa', label: 'Suspensas', singular: 'Suspensa', confirm: 'suspensa' },
   { value: 'declinada', label: 'Declinadas', singular: 'Declinada', confirm: 'declinada' },
@@ -92,7 +115,22 @@ const ARQUIVADA_MOTIVO_OPTIONS: Array<{
   { value: 'vencidas', label: 'Vencidas', singular: 'Vencida', confirm: 'vencida' },
 ];
 
-/** Status que permanecem na lista de Análise final (Orçamento tem aba própria). */
+/** Status permitidos para enviar à aba Arquivo. */
+const STATUS_ARQUIVO_PERMITIDOS: LicitacaoArquivadaMotivo[] = [
+  'suspensa',
+  'declinada',
+  'encerrada',
+  'em_andamento',
+  'vencidas',
+];
+
+function isStatusArquivoPermitido(value: unknown): value is LicitacaoArquivadaMotivo {
+  return (
+    typeof value === 'string' &&
+    (STATUS_ARQUIVO_PERMITIDOS as readonly string[]).includes(value)
+  );
+}
+/** Status que permanecem na lista de Análise Diretoria (Orçamento tem aba própria). */
 const ANALISE_FINAL_MOTIVO_OPTIONS = ARQUIVADA_MOTIVO_OPTIONS.filter(
   (item) => item.value !== 'orcamento'
 );
@@ -108,6 +146,22 @@ function resolveArquivadaMotivo(
   const fromJson = lic.analiseJson?.arquivadaMotivo;
   if (isArquivadaMotivoValue(fromJson)) return fromJson;
   return null;
+}
+
+function resolveStatusSelecionado(
+  lic: Pick<Licitacao, 'analiseJson'> | null | undefined
+): LicitacaoArquivadaMotivo | null {
+  const raw = lic?.analiseJson?.statusSelecionado;
+  if (isArquivadaMotivoValue(raw) && isStatusArquivoPermitido(raw)) return raw;
+  return null;
+}
+
+/** Status a usar no Arquivar: seleção pendente ou status já definido (ex.: Diretoria). */
+function resolveStatusParaArquivar(
+  lic: Pick<Licitacao, 'arquivadaMotivo' | 'analiseJson'> | null | undefined
+): LicitacaoArquivadaMotivo | null {
+  if (!lic) return null;
+  return resolveStatusSelecionado(lic) ?? resolveArquivadaMotivo(lic);
 }
 
 function arquivadaMotivoLabel(motivo?: LicitacaoArquivadaMotivo | null): string {
@@ -227,6 +281,7 @@ type LicitacaoAnaliseJson = {
   analiseUsuario?: string | null;
   analiseUsuarioAtualizadaEm?: string | null;
   checklistAnalise?: Record<string, { checked: boolean; comentario: string }>;
+  analisePreliminar?: AnalisePreliminarData | null;
   linkNotebookLm?: string | null;
   naoSeHabilita?: boolean;
   naoSeHabilitaItens?: NaoSeHabilitaItem[];
@@ -236,6 +291,9 @@ type LicitacaoAnaliseJson = {
   arquivadaMotivo?: string | null;
   decisaoAnaliseFinal?: LicitacaoDecisaoAnaliseFinal | null;
   analiseFinalTexto?: string | null;
+  emArquivo?: boolean;
+  emArquivoEm?: string | null;
+  statusSelecionado?: string | null;
   origemRegiao?: {
     regiaoKey?: string | null;
     regiaoLabel?: string | null;
@@ -262,6 +320,7 @@ type Licitacao = {
   arquivada?: boolean;
   arquivadaEm?: string | null;
   arquivadaMotivo?: LicitacaoArquivadaMotivo | null;
+  analiseEtapa?: LicitacaoAnaliseEtapa | null;
   documentos: LicitacaoDocumento[];
   creator?: { id: string; name: string };
   createdAt: string;
@@ -386,11 +445,17 @@ export default function LicitacoesPage() {
 
   const [search, setSearch] = useState('');
   const deferredSearch = useDeferredValue(search);
+  const [searchPreliminar, setSearchPreliminar] = useState('');
+  const deferredSearchPreliminar = useDeferredValue(searchPreliminar);
   const [dataInicio, setDataInicio] = useState('');
   const [dataFim, setDataFim] = useState('');
   const [regiaoKey, setRegiaoKey] = useState('');
   const [planilhaRegiaoKey, setPlanilhaRegiaoKey] = useState('centro-oeste');
   const [estado, setEstado] = useState('');
+  const [dataInicioPreliminar, setDataInicioPreliminar] = useState('');
+  const [dataFimPreliminar, setDataFimPreliminar] = useState('');
+  const [regiaoKeyPreliminar, setRegiaoKeyPreliminar] = useState('');
+  const [estadoPreliminar, setEstadoPreliminar] = useState('');
   const [arquivadaMotivoFilter, setArquivadaMotivoFilter] = useState<LicitacaoArquivadaMotivo | ''>(
     ''
   );
@@ -398,12 +463,19 @@ export default function LicitacoesPage() {
     LicitacaoDecisaoAnaliseFinal | ''
   >('');
   const [listPanelExpanded, setListPanelExpanded] = useState(false);
-  const [selectedId, setSelectedIdState] = useState<string | null>(() => {
+  const [selectedIdAnalise, setSelectedIdAnaliseState] = useState<string | null>(() => {
     if (typeof window === 'undefined') return null;
     return sessionStorage.getItem(LICITACAO_SELECTED_ID_KEY);
   });
+  const [selectedIdPreliminar, setSelectedIdPreliminarState] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    return sessionStorage.getItem(LICITACAO_SELECTED_ID_PRELIMINAR_KEY);
+  });
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
+  const [statusSelectHighlight, setStatusSelectHighlight] = useState(false);
+  const statusSelectRef = useRef<HTMLSelectElement | null>(null);
   const [responsavelAnalise, setResponsavelAnalise] = useState('');
   const [linkNotebookLm, setLinkNotebookLm] = useState('');
   const [naoSeHabilita, setNaoSeHabilita] = useState(false);
@@ -415,11 +487,35 @@ export default function LicitacoesPage() {
   const [checklistState, setChecklistState] = useState<Record<string, ChecklistItemState>>(
     () => emptyChecklistState()
   );
+  const [analisePreliminar, setAnalisePreliminar] = useState<AnalisePreliminarData>(() =>
+    emptyAnalisePreliminar()
+  );
   const [viewMode, setViewModeState] = useState<LicitacaoViewMode>(() => {
     if (typeof window === 'undefined') return 'analise';
     const saved = sessionStorage.getItem(LICITACAO_VIEW_MODE_KEY);
-    if (saved === 'regioes' || saved === 'arquivadas' || saved === 'banco-cats' || saved === 'orcamento') return saved;
+    if (
+      saved === 'regioes' ||
+      saved === 'arquivadas' ||
+      saved === 'preliminar' ||
+      saved === 'banco-cats' ||
+      saved === 'consulta-rapida-cats' ||
+      saved === 'orcamento' ||
+      saved === 'arquivo'
+    ) {
+      return saved;
+    }
     return 'analise';
+  });
+  const [mountedCatsPanels, setMountedCatsPanels] = useState<{
+    banco: boolean;
+    rapida: boolean;
+  }>(() => {
+    if (typeof window === 'undefined') return { banco: false, rapida: false };
+    const saved = sessionStorage.getItem(LICITACAO_VIEW_MODE_KEY);
+    return {
+      banco: saved === 'banco-cats',
+      rapida: saved === 'consulta-rapida-cats',
+    };
   });
 
   const setViewMode = useCallback((mode: LicitacaoViewMode) => {
@@ -430,7 +526,48 @@ export default function LicitacoesPage() {
   }, []);
 
   const isArquivadasView = viewMode === 'arquivadas';
-  const showAnaliseLayout = viewMode === 'analise' || viewMode === 'arquivadas';
+  const isPreliminarView = viewMode === 'preliminar';
+  const showAnaliseLayout =
+    viewMode === 'analise' || viewMode === 'arquivadas' || viewMode === 'preliminar';
+  const isCatsView = viewMode === 'banco-cats' || viewMode === 'consulta-rapida-cats';
+
+  const selectedId = isPreliminarView ? selectedIdPreliminar : selectedIdAnalise;
+  const listSearch = isPreliminarView ? searchPreliminar : search;
+  const listDeferredSearch = isPreliminarView ? deferredSearchPreliminar : deferredSearch;
+  const listDataInicio = isPreliminarView ? dataInicioPreliminar : dataInicio;
+  const listDataFim = isPreliminarView ? dataFimPreliminar : dataFim;
+  const listRegiaoKey = isPreliminarView ? regiaoKeyPreliminar : regiaoKey;
+  const listEstado = isPreliminarView ? estadoPreliminar : estado;
+
+  const setSelectedId = useCallback(
+    (id: string | null) => {
+      const persist = (key: string, value: string | null) => {
+        if (typeof window === 'undefined') return;
+        if (value) sessionStorage.setItem(key, value);
+        else sessionStorage.removeItem(key);
+      };
+      if (isPreliminarView) {
+        setSelectedIdPreliminarState(id);
+        persist(LICITACAO_SELECTED_ID_PRELIMINAR_KEY, id);
+        return;
+      }
+      setSelectedIdAnaliseState(id);
+      persist(LICITACAO_SELECTED_ID_KEY, id);
+    },
+    [isPreliminarView]
+  );
+
+  useEffect(() => {
+    if (viewMode === 'banco-cats') {
+      setMountedCatsPanels((prev) => (prev.banco ? prev : { ...prev, banco: true }));
+      return;
+    }
+    if (viewMode === 'consulta-rapida-cats') {
+      setMountedCatsPanels((prev) => (prev.rapida ? prev : { ...prev, rapida: true }));
+      return;
+    }
+    setMountedCatsPanels({ banco: false, rapida: false });
+  }, [viewMode]);
 
   useEffect(() => {
     if (!listPanelExpanded) return;
@@ -441,13 +578,6 @@ export default function LicitacoesPage() {
     return () => window.removeEventListener('keydown', onKey);
   }, [listPanelExpanded]);
 
-  const setSelectedId = useCallback((id: string | null) => {
-    setSelectedIdState(id);
-    if (typeof window === 'undefined') return;
-    if (id) sessionStorage.setItem(LICITACAO_SELECTED_ID_KEY, id);
-    else sessionStorage.removeItem(LICITACAO_SELECTED_ID_KEY);
-  }, []);
-
   const analiseManualRef = useRef({
     responsavelAnalise: '',
     linkNotebookLm: '',
@@ -455,6 +585,7 @@ export default function LicitacoesPage() {
     decisaoAnaliseFinal: null as LicitacaoDecisaoAnaliseFinal | null,
     analiseFinalTexto: '',
     checklistState: {} as Record<string, ChecklistItemState>,
+    analisePreliminar: emptyAnalisePreliminar(),
     naoSeHabilita: false,
     naoSeHabilitaItens: [] as NaoSeHabilitaItem[],
   });
@@ -512,26 +643,33 @@ export default function LicitacoesPage() {
     refetchInterval: viewMode === 'regioes' ? 30_000 : false,
   });
 
+  const listAnaliseEtapa: LicitacaoAnaliseEtapa | undefined = isArquivadasView
+    ? undefined
+    : isPreliminarView
+      ? 'preliminar'
+      : 'em_analise';
+
   const { data: listRaw = [], isLoading: loadingList } = useQuery({
     queryKey: [
       'licitacoes',
-      isArquivadasView ? 'arquivadas' : 'ativas',
-      deferredSearch,
-      dataInicio,
-      dataFim,
-      regiaoKey,
-      estado,
+      isArquivadasView ? 'arquivadas' : listAnaliseEtapa ?? 'ativas',
+      listDeferredSearch,
+      listDataInicio,
+      listDataFim,
+      listRegiaoKey,
+      listEstado,
       isArquivadasView ? arquivadaMotivoFilter : '',
     ],
     queryFn: async () => {
       const params: Record<string, string> = {
         arquivada: isArquivadasView ? 'true' : 'false',
       };
-      if (deferredSearch.trim()) params.search = deferredSearch.trim();
-      if (dataInicio) params.dataInicio = dataInicio;
-      if (dataFim) params.dataFim = dataFim;
-      if (regiaoKey) params.regiaoKey = regiaoKey;
-      if (estado) params.estado = estado;
+      if (listDeferredSearch.trim()) params.search = listDeferredSearch.trim();
+      if (listDataInicio) params.dataInicio = listDataInicio;
+      if (listDataFim) params.dataFim = listDataFim;
+      if (listRegiaoKey) params.regiaoKey = listRegiaoKey;
+      if (listEstado) params.estado = listEstado;
+      if (listAnaliseEtapa) params.analiseEtapa = listAnaliseEtapa;
       if (isArquivadasView && arquivadaMotivoFilter) {
         params.arquivadaMotivo = arquivadaMotivoFilter;
       }
@@ -544,10 +682,12 @@ export default function LicitacoesPage() {
     enabled: showAnaliseLayout,
   });
 
-  // Análise final: arquivadas, exceto as enviadas para a aba Orçamento.
+  // Análise Diretoria: arquivadas, exceto as enviadas para a aba Orçamento.
+  // Em Análise / Análise Preliminar: listas separadas por etapa.
   const list = useMemo(
     () =>
       listRaw.filter((item) => {
+        if (item.analiseJson?.emArquivo === true) return false;
         if (isArquivadasView) {
           if (item.arquivada !== true) return false;
           if (resolveArquivadaMotivo(item) === 'orcamento') return false;
@@ -562,26 +702,34 @@ export default function LicitacoesPage() {
           }
           return true;
         }
-        return item.arquivada !== true;
+        if (item.arquivada === true) return false;
+        const etapa = resolveAnaliseEtapa(item.analiseEtapa);
+        return isPreliminarView ? etapa === 'preliminar' : etapa === 'em_analise';
       }),
-    [arquivadaMotivoFilter, decisaoAnaliseFinalFilter, isArquivadasView, listRaw]
+    [
+      arquivadaMotivoFilter,
+      decisaoAnaliseFinalFilter,
+      isArquivadasView,
+      isPreliminarView,
+      listRaw,
+    ]
   );
 
   useEffect(() => {
-    if (!isArquivadasView || !selectedId || loadingList) return;
-    if (list.length === 0 || list.some((item) => item.id === selectedId)) return;
+    if (!showAnaliseLayout || !selectedId || loadingList) return;
+    if (list.some((item) => item.id === selectedId)) return;
     setSelectedId(null);
-  }, [isArquivadasView, list, loadingList, selectedId]);
+  }, [list, loadingList, selectedId, setSelectedId, showAnaliseLayout]);
 
   const hasActiveFilters = Boolean(
-    dataInicio ||
-      dataFim ||
-      regiaoKey ||
-      estado ||
+    listDataInicio ||
+      listDataFim ||
+      listRegiaoKey ||
+      listEstado ||
       arquivadaMotivoFilter ||
       decisaoAnaliseFinalFilter
   );
-  const hasSearchOrFilters = Boolean(search.trim() || hasActiveFilters);
+  const hasSearchOrFilters = Boolean(listSearch.trim() || hasActiveFilters);
 
   const { data: selected, isLoading: loadingSelected } = useQuery({
     queryKey: ['licitacao', selectedId],
@@ -632,6 +780,7 @@ export default function LicitacoesPage() {
       decisaoAnaliseFinal,
       analiseFinalTexto,
       checklistState,
+      analisePreliminar,
       naoSeHabilita,
       naoSeHabilitaItens,
     };
@@ -642,6 +791,7 @@ export default function LicitacoesPage() {
     decisaoAnaliseFinal,
     analiseFinalTexto,
     checklistState,
+    analisePreliminar,
     naoSeHabilita,
     naoSeHabilitaItens,
   ]);
@@ -649,6 +799,7 @@ export default function LicitacoesPage() {
   useEffect(() => {
     if (!selectedId) {
       hasUserEditedRef.current = false;
+      setHasUnsavedChanges(false);
       setResponsavelAnalise('');
       setLinkNotebookLm('');
       setNaoSeHabilita(false);
@@ -657,6 +808,7 @@ export default function LicitacoesPage() {
       setDecisaoAnaliseFinal(null);
       setAnaliseFinalTexto('');
       setChecklistState(emptyChecklistState(checklistSections));
+      setAnalisePreliminar(emptyAnalisePreliminar());
       return;
     }
     if (!selected || selected.id !== selectedId) return;
@@ -664,6 +816,8 @@ export default function LicitacoesPage() {
 
     loadedForLicitacaoIdRef.current = selectedId;
     hasUserEditedRef.current = false;
+    setHasUnsavedChanges(false);
+    setSaveStatus('idle');
 
     const savedResponsavelId = selected.analiseJson?.responsavelAnaliseId?.trim() ?? '';
     const savedResponsavel = selected.analiseJson?.responsavelAnalise?.trim() ?? '';
@@ -701,7 +855,11 @@ export default function LicitacoesPage() {
     setChecklistState(
       mergeChecklistFromSaved(selected.analiseJson?.checklistAnalise, checklistSections)
     );
-  }, [selectedId, selected, checklistSections]);
+    const fallbackCabecalho = tituloParaExibicao(selected, list);
+    setAnalisePreliminar(
+      parseAnalisePreliminar(selected.analiseJson?.analisePreliminar, fallbackCabecalho)
+    );
+  }, [selectedId, selected, checklistSections, list]);
 
   useEffect(() => {
     if (!selectedId) {
@@ -803,6 +961,7 @@ export default function LicitacoesPage() {
         decisaoAnaliseFinal: payload.decisaoAnaliseFinal,
         analiseFinalTexto: payload.analiseFinalTexto,
         checklistAnalise: serializeChecklistForSave(payload.checklistState),
+        analisePreliminar: payload.analisePreliminar,
         naoSeHabilita: payload.naoSeHabilita,
         naoSeHabilitaItens: payload.naoSeHabilitaItens,
       });
@@ -813,6 +972,8 @@ export default function LicitacoesPage() {
     },
     onSuccess: ({ licitacao, silent, id }) => {
       queryClient.setQueryData(['licitacao', id], licitacao);
+      hasUserEditedRef.current = false;
+      setHasUnsavedChanges(false);
       setSaveStatus('saved');
       if (!silent) toast.success('Checklist e análise salvos');
       void queryClient.invalidateQueries({ queryKey: ['licitacoes'] });
@@ -847,6 +1008,7 @@ export default function LicitacoesPage() {
       decisaoAnaliseFinal,
       analiseFinalTexto,
       checklistState,
+      analisePreliminar,
       naoSeHabilita,
       naoSeHabilitaItens,
     };
@@ -863,6 +1025,7 @@ export default function LicitacoesPage() {
     decisaoAnaliseFinal,
     analiseFinalTexto,
     checklistState,
+    analisePreliminar,
     naoSeHabilita,
     naoSeHabilitaItens,
   ]);
@@ -879,6 +1042,7 @@ export default function LicitacoesPage() {
         decisaoAnaliseFinal,
         analiseFinalTexto,
         checklistState,
+        analisePreliminar,
         naoSeHabilita,
         naoSeHabilitaItens,
       };
@@ -1018,6 +1182,36 @@ export default function LicitacoesPage() {
     [triggerSave]
   );
 
+  const handleAnalisePreliminarChange = useCallback(
+    (next: AnalisePreliminarData) => {
+      hasUserEditedRef.current = true;
+      setHasUnsavedChanges(true);
+      setAnalisePreliminar(next);
+      analiseManualRef.current = { ...analiseManualRef.current, analisePreliminar: next };
+      triggerSave();
+    },
+    [triggerSave]
+  );
+
+  const handleExportPreliminarPdf = useCallback(async () => {
+    setExportingPdf(true);
+    try {
+      const manual = analiseManualRef.current;
+      await exportLicitacaoAnalisePreliminarPdf({
+        data: manual.analisePreliminar,
+        titulo: tituloParaExibicao(display ?? selected, list),
+        responsavelAnalise:
+          manual.responsavelAnalise.trim() || userData?.data?.name?.trim() || '',
+        linkNotebookLm: manual.linkNotebookLm,
+      });
+      toast.success('Análise preliminar exportada em PDF.');
+    } catch {
+      toast.error('Erro ao gerar o PDF. Tente novamente.');
+    } finally {
+      setExportingPdf(false);
+    }
+  }, [display, list, selected, userData?.data?.name]);
+
   const assumirAnaliseMutation = useMutation({
     mutationFn: async () => {
       const id = selectedIdRef.current;
@@ -1072,6 +1266,7 @@ export default function LicitacoesPage() {
   const handleLinkNotebookLmChange = useCallback(
     (value: string) => {
       hasUserEditedRef.current = true;
+      setHasUnsavedChanges(true);
       setLinkNotebookLm(value);
       analiseManualRef.current = { ...analiseManualRef.current, linkNotebookLm: value };
       triggerSave();
@@ -1227,6 +1422,110 @@ export default function LicitacoesPage() {
     },
   });
 
+  const enviarArquivoMutation = useMutation({
+    mutationFn: async ({
+      id,
+      motivo,
+    }: {
+      id: string;
+      motivo?: LicitacaoArquivadaMotivo;
+    }) => {
+      const res = await api.patch(`/licitacoes/${id}/enviar-arquivo`, {
+        ...(motivo ? { motivo } : {}),
+      });
+      return res.data?.data as Licitacao;
+    },
+    onSuccess: (licitacao) => {
+      toast.success('Licitação enviada para o Arquivo.');
+      if (selectedId === licitacao.id) setSelectedId(null);
+      queryClient.removeQueries({ queryKey: ['licitacao', licitacao.id] });
+      void queryClient.invalidateQueries({ queryKey: ['licitacoes'] });
+    },
+    onError: (err: { response?: { data?: { message?: string } } }) => {
+      toast.error(err.response?.data?.message ?? 'Erro ao enviar para o Arquivo');
+    },
+  });
+
+  const setStatusSelecionadoMutation = useMutation({
+    mutationFn: async ({
+      id,
+      motivo,
+    }: {
+      id: string;
+      motivo: LicitacaoArquivadaMotivo;
+    }) => {
+      const res = await api.patch(`/licitacoes/${id}/status-selecionado`, { motivo });
+      return {
+        licitacao: res.data?.data as Licitacao,
+        message:
+          (res.data?.message as string | undefined) ??
+          'Status selecionado. Clique em Arquivar para enviar ao Arquivo.',
+      };
+    },
+    onSuccess: ({ licitacao, message }) => {
+      toast.success(message);
+      setStatusSelectHighlight(false);
+      queryClient.setQueryData(['licitacao', licitacao.id], licitacao);
+      void queryClient.invalidateQueries({ queryKey: ['licitacoes'] });
+    },
+    onError: (err: { response?: { data?: { message?: string } } }) => {
+      toast.error(err.response?.data?.message ?? 'Erro ao selecionar status');
+    },
+  });
+
+  const handleEnviarParaArquivo = useCallback(() => {
+    if (!selectedId || enviarArquivoMutation.isPending) return;
+    const motivo = display ? resolveStatusParaArquivar(display) : null;
+    if (!motivo || !isStatusArquivoPermitido(motivo)) {
+      setStatusSelectHighlight(true);
+      toast.error(
+        'Selecione um status permitido e depois clique em Arquivar: Suspensa, Declinada, Encerrada, Em andamento ou Vencida.'
+      );
+      window.setTimeout(() => {
+        statusSelectRef.current?.focus();
+      }, 0);
+      return;
+    }
+    if (
+      !window.confirm(
+        `Enviar esta licitação para o Arquivo com status "${arquivadaMotivoLabel(motivo)}"?`
+      )
+    ) {
+      return;
+    }
+    setStatusSelectHighlight(false);
+    enviarArquivoMutation.mutate({ id: selectedId, motivo });
+  }, [display, enviarArquivoMutation, selectedId]);
+
+  const setAnaliseEtapaMutation = useMutation({
+    mutationFn: async ({
+      id,
+      etapa,
+    }: {
+      id: string;
+      etapa: LicitacaoAnaliseEtapa;
+    }) => {
+      const res = await api.patch(`/licitacoes/${id}/analise-etapa`, { etapa });
+      return {
+        licitacao: res.data?.data as Licitacao,
+        message:
+          (res.data?.message as string | undefined) ??
+          (etapa === 'em_analise'
+            ? 'Enviada para a aba Em Análise.'
+            : 'Enviada para a aba Análise Preliminar.'),
+      };
+    },
+    onSuccess: ({ licitacao, message }) => {
+      toast.success(message);
+      if (selectedId === licitacao.id) setSelectedId(null);
+      queryClient.removeQueries({ queryKey: ['licitacao', licitacao.id] });
+      void queryClient.invalidateQueries({ queryKey: ['licitacoes'] });
+    },
+    onError: (err: { response?: { data?: { message?: string } } }) => {
+      toast.error(err.response?.data?.message ?? 'Erro ao alterar etapa da análise');
+    },
+  });
+
   const handleAtualizarStatusAnalise = useCallback(
     (motivo: LicitacaoArquivadaMotivo) => {
       if (!selectedId || arquivarMutation.isPending) return;
@@ -1234,15 +1533,69 @@ export default function LicitacoesPage() {
       if (atual === motivo) return;
       const confirmMessage =
         motivo === 'orcamento'
-          ? 'Enviar para Orçamento? A análise sairá da Análise final e ficará disponível na aba Orçamento.'
-          : isArquivadasView
-            ? `Alterar status para ${arquivadaMotivoConfirmLabel(motivo)}?`
-            : `Definir status como ${arquivadaMotivoConfirmLabel(motivo)}? A análise sairá da lista de processos e ficará disponível em Análise final.`;
+          ? 'Enviar para Orçamento? A análise ficará disponível na aba Orçamento.'
+          : motivo === 'aguardando_aprovacao'
+            ? isArquivadasView
+              ? 'Alterar status para Análise diretoria?'
+              : 'Enviar para Análise Diretoria? A análise sairá da lista atual e ficará disponível na aba Análise Diretoria.'
+            : isArquivadasView
+              ? `Alterar status para ${arquivadaMotivoConfirmLabel(motivo)}?`
+              : `Definir status como ${arquivadaMotivoConfirmLabel(motivo)}?`;
       if (!window.confirm(confirmMessage)) return;
       arquivarMutation.mutate({ id: selectedId, motivo });
     },
     [arquivarMutation, display, isArquivadasView, selectedId]
   );
+
+  const handleStatusSelect = useCallback(
+    (motivo: LicitacaoArquivadaMotivo) => {
+      if (!selectedId) return;
+      // Em Preliminar / Em Análise: status de arquivo só seleciona; Arquivar envia depois.
+      if (!isArquivadasView && isStatusArquivoPermitido(motivo)) {
+        const atual = display ? resolveStatusSelecionado(display) : null;
+        if (atual === motivo) return;
+        setStatusSelecionadoMutation.mutate({ id: selectedId, motivo });
+        return;
+      }
+      // Análise diretoria / Orçamento (ou troca de status já na Diretoria)
+      handleAtualizarStatusAnalise(motivo);
+    },
+    [
+      display,
+      handleAtualizarStatusAnalise,
+      isArquivadasView,
+      selectedId,
+      setStatusSelecionadoMutation,
+    ]
+  );
+
+  useEffect(() => {
+    setStatusSelectHighlight(false);
+  }, [selectedId]);
+
+  const handleEnviarParaEmAnalise = useCallback(() => {
+    if (!selectedId || setAnaliseEtapaMutation.isPending) return;
+    if (
+      !window.confirm(
+        'Enviar para Em Análise? O processo sairá da Análise Preliminar e ficará disponível na aba Em Análise.'
+      )
+    ) {
+      return;
+    }
+    setAnaliseEtapaMutation.mutate({ id: selectedId, etapa: 'em_analise' });
+  }, [selectedId, setAnaliseEtapaMutation]);
+
+  const handleEnviarParaAnalisePreliminar = useCallback(() => {
+    if (!selectedId || setAnaliseEtapaMutation.isPending) return;
+    if (
+      !window.confirm(
+        'Voltar para Análise Preliminar? O processo sairá de Em Análise e ficará disponível na aba Análise Preliminar.'
+      )
+    ) {
+      return;
+    }
+    setAnaliseEtapaMutation.mutate({ id: selectedId, etapa: 'preliminar' });
+  }, [selectedId, setAnaliseEtapaMutation]);
 
   const handleDesarquivarAnalise = useCallback(() => {
     if (!selectedId || desarquivarMutation.isPending) return;
@@ -1298,159 +1651,221 @@ export default function LicitacoesPage() {
     (isClaimedByMe || (isAdminUser && isClaimed));
   const canLiberarAnalise = isClaimed && (isClaimedByMe || isAdminUser);
 
-  const renderLicitacaoListPanelContent = (expanded: boolean) => (
+  const filterFieldClassName =
+    'h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100';
+  const filterLabelClassName =
+    'mb-1.5 block text-[11px] font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400';
+
+  const clearListFilters = () => {
+    if (isPreliminarView) {
+      setSearchPreliminar('');
+      setDataInicioPreliminar('');
+      setDataFimPreliminar('');
+      setRegiaoKeyPreliminar('');
+      setEstadoPreliminar('');
+    } else {
+      setSearch('');
+      setDataInicio('');
+      setDataFim('');
+      setRegiaoKey('');
+      setEstado('');
+    }
+    setArquivadaMotivoFilter('');
+    setDecisaoAnaliseFinalFilter('');
+  };
+
+  const renderLicitacaoListToolbar = () => (
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <p className="text-sm text-gray-500 dark:text-gray-400">
+        Use a lista para localizar e abrir um processo.
+        {hasActiveFilters || listSearch.trim() ? (
+          <span className="ml-1 text-xs text-red-600 dark:text-red-400">
+            ({list.length} filtrada{list.length === 1 ? '' : 's'})
+          </span>
+        ) : null}
+      </p>
+      <button
+        type="button"
+        onClick={() => setListPanelExpanded(true)}
+        className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg bg-red-600 px-4 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-red-700"
+      >
+        <ClipboardList className="h-4 w-4" />
+        Licitações
+        <span className="rounded-full bg-white/20 px-2 py-0.5 text-[11px] font-semibold tabular-nums">
+          {list.length}
+        </span>
+      </button>
+    </div>
+  );
+
+  const renderLicitacaoListModal = () => (
     <>
-      <CardHeader className="shrink-0 space-y-2.5 border-b border-gray-100 px-4 pb-3 pt-4 dark:border-gray-800">
+      <CardHeader className="shrink-0 space-y-3 border-b border-gray-100 px-4 pb-3 pt-4 dark:border-gray-800">
         <div className="flex items-center justify-between gap-2">
           <div className="min-w-0">
             <h2 className="text-xs font-semibold uppercase tracking-wider text-gray-500">
               Licitações
             </h2>
-            {expanded && list.length > 0 ? (
-              <p className="mt-0.5 text-xs text-gray-400">
-                {list.length} {list.length === 1 ? 'licitação' : 'licitações'}
-                {hasActiveFilters ? ' (filtradas)' : ''}
-              </p>
-            ) : null}
+            <p className="mt-0.5 text-xs text-gray-400">
+              {list.length} {list.length === 1 ? 'licitação' : 'licitações'}
+              {hasActiveFilters || listSearch.trim() ? ' (filtradas)' : ''}
+            </p>
           </div>
-          <div className="flex shrink-0 items-center gap-1">
-            <button
-              type="button"
-              title={expanded ? 'Recolher lista' : 'Expandir lista'}
-              aria-label={expanded ? 'Recolher lista' : 'Expandir lista'}
-              aria-expanded={expanded}
-              onClick={() => setListPanelExpanded((v) => !v)}
-              className="rounded-md p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-800 dark:hover:bg-gray-800 dark:hover:text-gray-200"
-            >
-              {expanded ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
-            </button>
-            {expanded ? (
-              <button
-                type="button"
-                title="Fechar"
-                aria-label="Fechar lista expandida"
-                onClick={() => setListPanelExpanded(false)}
-                className="rounded-md p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-800 dark:hover:bg-gray-800 dark:hover:text-gray-200"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            ) : null}
-          </div>
-        </div>
-        <div
-          className={
-            expanded ? 'grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3' : 'space-y-2.5'
-          }
-        >
-          <div className={expanded ? 'relative sm:col-span-2 lg:col-span-3' : 'relative'}>
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
-            <input
-              type="text"
-              placeholder="Buscar..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="h-9 w-full rounded-md border border-gray-300 bg-white py-1.5 pl-8 pr-2 text-sm dark:border-gray-700 dark:bg-gray-900"
-            />
-          </div>
-          <div
-            className={
-              expanded ? 'grid grid-cols-2 gap-2 sm:col-span-2 lg:col-span-3' : 'grid grid-cols-2 gap-2'
-            }
-          >
-            <input
-              type="date"
-              aria-label="De"
-              value={dataInicio}
-              onChange={(e) => setDataInicio(e.target.value)}
-              className="h-8 rounded-md border border-gray-300 bg-white px-2 text-xs dark:border-gray-700 dark:bg-gray-900"
-            />
-            <input
-              type="date"
-              aria-label="Até"
-              value={dataFim}
-              min={dataInicio || undefined}
-              onChange={(e) => setDataFim(e.target.value)}
-              className="h-8 rounded-md border border-gray-300 bg-white px-2 text-xs dark:border-gray-700 dark:bg-gray-900"
-            />
-          </div>
-          <select
-            aria-label="Região"
-            value={regiaoKey}
-            onChange={(e) => setRegiaoKey(e.target.value)}
-            className="h-8 w-full rounded-md border border-gray-300 bg-white px-2 text-xs dark:border-gray-700 dark:bg-gray-900"
-          >
-            <option value="">Todas as regiões</option>
-            {regiaoTabs.map((tab) => (
-              <option key={tab.key} value={tab.key}>
-                {tab.label}
-              </option>
-            ))}
-          </select>
-          <select
-            aria-label="Estado"
-            value={estado}
-            onChange={(e) => setEstado(e.target.value)}
-            className="h-8 w-full rounded-md border border-gray-300 bg-white px-2 text-xs dark:border-gray-700 dark:bg-gray-900"
-          >
-            <option value="">Todos os estados</option>
-            {BRASIL_UFS.map((uf) => (
-              <option key={uf} value={uf}>
-                {uf}
-              </option>
-            ))}
-          </select>
-          {isArquivadasView ? (
-            <select
-              aria-label="Categoria do arquivamento"
-              value={arquivadaMotivoFilter}
-              onChange={(e) =>
-                setArquivadaMotivoFilter(e.target.value as LicitacaoArquivadaMotivo | '')
-              }
-              className="h-8 w-full rounded-md border border-gray-300 bg-white px-2 text-xs dark:border-gray-700 dark:bg-gray-900"
-            >
-              <option value="">Todas as categorias</option>
-              {ANALISE_FINAL_MOTIVO_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          ) : null}
-          {isArquivadasView ? (
-            <select
-              aria-label="Decisão de participação"
-              value={decisaoAnaliseFinalFilter}
-              onChange={(e) =>
-                setDecisaoAnaliseFinalFilter(e.target.value as LicitacaoDecisaoAnaliseFinal | '')
-              }
-              className="h-8 w-full rounded-md border border-gray-300 bg-white px-2 text-xs dark:border-gray-700 dark:bg-gray-900"
-            >
-              <option value="">Todas as decisões</option>
-              {DECISAO_ANALISE_FINAL_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          ) : null}
-        </div>
-        {hasActiveFilters ? (
           <button
             type="button"
-            onClick={() => {
-              setSearch('');
-              setDataInicio('');
-              setDataFim('');
-              setRegiaoKey('');
-              setEstado('');
-              setArquivadaMotivoFilter('');
-              setDecisaoAnaliseFinalFilter('');
-            }}
-            className="text-left text-xs text-red-600 hover:text-red-700 dark:text-red-400"
+            title="Fechar"
+            aria-label="Fechar lista"
+            onClick={() => setListPanelExpanded(false)}
+            className="rounded-md p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-800 dark:hover:bg-gray-800 dark:hover:text-gray-200"
           >
-            Limpar filtros
+            <X className="h-4 w-4" />
           </button>
-        ) : null}
+        </div>
+
+        <div className="space-y-2.5">
+          <div className="relative min-w-0">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+            <input
+              type="text"
+              placeholder="Buscar órgão, processo ou título..."
+              value={listSearch}
+              onChange={(e) =>
+                isPreliminarView
+                  ? setSearchPreliminar(e.target.value)
+                  : setSearch(e.target.value)
+              }
+              className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
+            />
+          </div>
+
+          <div
+            className={`grid grid-cols-2 gap-2 ${
+              isArquivadasView ? 'md:grid-cols-3 xl:grid-cols-6' : 'md:grid-cols-4'
+            }`}
+          >
+            <label className="min-w-0">
+              <span className={filterLabelClassName}>De</span>
+              <input
+                type="date"
+                aria-label="De"
+                value={listDataInicio}
+                onChange={(e) =>
+                  isPreliminarView
+                    ? setDataInicioPreliminar(e.target.value)
+                    : setDataInicio(e.target.value)
+                }
+                className={filterFieldClassName}
+              />
+            </label>
+            <label className="min-w-0">
+              <span className={filterLabelClassName}>Até</span>
+              <input
+                type="date"
+                aria-label="Até"
+                value={listDataFim}
+                min={listDataInicio || undefined}
+                onChange={(e) =>
+                  isPreliminarView
+                    ? setDataFimPreliminar(e.target.value)
+                    : setDataFim(e.target.value)
+                }
+                className={filterFieldClassName}
+              />
+            </label>
+            <label className="min-w-0">
+              <span className={filterLabelClassName}>Região</span>
+              <select
+                aria-label="Região"
+                value={listRegiaoKey}
+                onChange={(e) =>
+                  isPreliminarView
+                    ? setRegiaoKeyPreliminar(e.target.value)
+                    : setRegiaoKey(e.target.value)
+                }
+                className={filterFieldClassName}
+              >
+                <option value="">Todas</option>
+                {regiaoTabs.map((tab) => (
+                  <option key={tab.key} value={tab.key}>
+                    {tab.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="min-w-0">
+              <span className={filterLabelClassName}>Estado</span>
+              <select
+                aria-label="Estado"
+                value={listEstado}
+                onChange={(e) =>
+                  isPreliminarView
+                    ? setEstadoPreliminar(e.target.value)
+                    : setEstado(e.target.value)
+                }
+                className={filterFieldClassName}
+              >
+                <option value="">Todos</option>
+                {BRASIL_UFS.map((uf) => (
+                  <option key={uf} value={uf}>
+                    {uf}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {isArquivadasView ? (
+              <label className="min-w-0">
+                <span className={filterLabelClassName}>Categoria</span>
+                <select
+                  aria-label="Categoria do arquivamento"
+                  value={arquivadaMotivoFilter}
+                  onChange={(e) =>
+                    setArquivadaMotivoFilter(e.target.value as LicitacaoArquivadaMotivo | '')
+                  }
+                  className={filterFieldClassName}
+                >
+                  <option value="">Todas</option>
+                  {ANALISE_FINAL_MOTIVO_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+            {isArquivadasView ? (
+              <label className="min-w-0">
+                <span className={filterLabelClassName}>Decisão</span>
+                <select
+                  aria-label="Decisão de participação"
+                  value={decisaoAnaliseFinalFilter}
+                  onChange={(e) =>
+                    setDecisaoAnaliseFinalFilter(
+                      e.target.value as LicitacaoDecisaoAnaliseFinal | ''
+                    )
+                  }
+                  className={filterFieldClassName}
+                >
+                  <option value="">Todas</option>
+                  {DECISAO_ANALISE_FINAL_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+          </div>
+
+          {hasActiveFilters || listSearch.trim() ? (
+            <button
+              type="button"
+              onClick={clearListFilters}
+              className="w-fit text-xs font-medium text-red-600 hover:text-red-700 dark:text-red-400"
+            >
+              Limpar filtros
+            </button>
+          ) : null}
+        </div>
       </CardHeader>
 
       <CardContent className="flex min-h-0 flex-1 flex-col overflow-hidden px-3 pb-3 pt-2">
@@ -1465,8 +1880,10 @@ export default function LicitacoesPage() {
               : isArquivadasView
                 ? arquivadaMotivoFilter || decisaoAnaliseFinalFilter
                   ? 'Nenhuma análise com os filtros selecionados.'
-                  : 'Nenhuma análise em Análise final.'
-                : 'Nenhum processo com aceite. Aceite licitações na aba Por região.'}
+                  : 'Nenhuma análise em Análise Diretoria.'
+                : isPreliminarView
+                  ? 'Nenhum processo na Análise Preliminar. Aceite licitações na aba Por região.'
+                  : 'Nenhum processo em Em Análise. Envie processos pela Análise Preliminar (Status → Em Análise).'}
           </p>
         ) : (
           <ul
@@ -1498,36 +1915,22 @@ export default function LicitacoesPage() {
                     aria-selected={active}
                     onClick={() => {
                       setSelectedId(item.id);
-                      if (expanded) setListPanelExpanded(false);
+                      setListPanelExpanded(false);
                     }}
-                    className={`w-full rounded-lg text-left transition-colors ${
-                      expanded ? 'px-4 py-3 pr-10' : 'px-3 py-2.5 pr-9'
-                    } ${
+                    className={`w-full rounded-lg px-4 py-3 pr-10 text-left transition-colors ${
                       active
                         ? 'bg-red-600 text-white shadow-sm'
                         : 'hover:bg-gray-100 dark:hover:bg-gray-800'
                     }`}
                   >
-                    <div
-                      className={`flex gap-3 ${
-                        expanded
-                          ? 'flex-col sm:flex-row sm:items-start sm:justify-between'
-                          : 'items-start justify-between'
-                      }`}
-                    >
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                       <p
-                        className={`min-w-0 text-sm font-medium ${
-                          expanded ? 'whitespace-normal break-words' : 'truncate'
-                        }`}
+                        className="min-w-0 whitespace-normal break-words text-sm font-medium"
                         title={titulo}
                       >
                         {titulo}
                       </p>
-                      <div
-                        className={`flex shrink-0 gap-1 ${
-                          expanded ? 'flex-row flex-wrap items-center' : 'flex-col items-end'
-                        }`}
-                      >
+                      <div className="flex shrink-0 flex-row flex-wrap items-center gap-1">
                         <span
                           className={`rounded-full px-2 py-0.5 text-[10px] font-medium leading-tight ${licitacaoStatusBadgeClass(item, active, isArquivadasView)}`}
                         >
@@ -1543,38 +1946,28 @@ export default function LicitacoesPage() {
                       </div>
                     </div>
                     <p className={`mt-1 text-xs ${active ? 'text-red-100' : 'text-gray-500'}`}>
-                      {expanded ? (
+                      <span>{statusDate}</span>
+                      {item.estado ? (
                         <>
-                          <span>{statusDate}</span>
-                          {item.estado ? (
-                            <>
-                              {' · '}
-                              <span>{item.estado}</span>
-                            </>
-                          ) : null}
-                          {item.regiaoKey ? (
-                            <>
-                              {' · '}
-                              <span>
-                                {regiaoTabs.find((t) => t.key === item.regiaoKey)?.label ??
-                                  item.regiaoKey}
-                              </span>
-                            </>
-                          ) : null}
-                          {responsavelLabel ? (
-                            <>
-                              {' · '}
-                              <span>{responsavelLabel}</span>
-                            </>
-                          ) : null}
+                          {' · '}
+                          <span>{item.estado}</span>
                         </>
-                      ) : (
+                      ) : null}
+                      {item.regiaoKey ? (
                         <>
-                          {statusLabel}
-                          {decisaoLabel ? ` · ${decisaoLabel}` : ''} · {statusDate}
-                          {responsavelLabel ? ` · ${responsavelLabel}` : ''}
+                          {' · '}
+                          <span>
+                            {regiaoTabs.find((t) => t.key === item.regiaoKey)?.label ??
+                              item.regiaoKey}
+                          </span>
                         </>
-                      )}
+                      ) : null}
+                      {responsavelLabel ? (
+                        <>
+                          {' · '}
+                          <span>{responsavelLabel}</span>
+                        </>
+                      ) : null}
                     </p>
                   </button>
                   <button
@@ -1607,6 +2000,7 @@ export default function LicitacoesPage() {
       </CardContent>
     </>
   );
+
 
   if (loadingUser) {
     return (
@@ -1666,10 +2060,13 @@ export default function LicitacoesPage() {
             {(
               [
                 { id: 'orcamento' as const, label: 'Orçamento' },
-                { id: 'arquivadas' as const, label: 'Análise Final' },
+                { id: 'arquivadas' as const, label: 'Análise Diretoria' },
                 { id: 'analise' as const, label: 'Em Análise' },
+                { id: 'preliminar' as const, label: 'Análise Preliminar' },
                 { id: 'regioes' as const, label: 'Por Região' },
                 { id: 'banco-cats' as const, label: 'Banco CATs' },
+                { id: 'consulta-rapida-cats' as const, label: 'Consulta Rápida - CATs' },
+                { id: 'arquivo' as const, label: 'Arquivo' },
               ] as const
             ).map((tab) => {
               const active = viewMode === tab.id;
@@ -1689,7 +2086,7 @@ export default function LicitacoesPage() {
             })}
           </AppUnderlineTabList>
 
-          {viewMode === 'banco-cats' ? (
+          {isCatsView ? (
             <div
               role="note"
               className="flex flex-col gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-800/60 dark:bg-amber-950/30 sm:flex-row sm:items-center sm:justify-between"
@@ -1767,13 +2164,32 @@ export default function LicitacoesPage() {
 
           {viewMode === 'regioes' ? (
             <LicitacoesRegiaoPanel regiaoKey={planilhaRegiaoKey} />
-          ) : viewMode === 'banco-cats' ? (
-            <BancoCatsPanel />
+          ) : viewMode === 'arquivo' ? (
+            <LicitacaoArquivoPanel />
+          ) : isCatsView ? (
+            <>
+              {mountedCatsPanels.banco ? (
+                <div
+                  hidden={viewMode !== 'banco-cats'}
+                  aria-hidden={viewMode !== 'banco-cats'}
+                >
+                  <BancoCatsPanel instanceId="banco-cats" />
+                </div>
+              ) : null}
+              {mountedCatsPanels.rapida ? (
+                <div
+                  hidden={viewMode !== 'consulta-rapida-cats'}
+                  aria-hidden={viewMode !== 'consulta-rapida-cats'}
+                >
+                  <BancoCatsPanel instanceId="consulta-rapida-cats" />
+                </div>
+              ) : null}
+            </>
           ) : viewMode === 'orcamento' ? (
             <LicitacaoOrcamentoPanel />
           ) : (
-            <div className="flex flex-col gap-5 lg:flex-row lg:items-start">
-            {/* Sidebar — modal em portal quando expandida (evita bug de transform do PageEnter) */}
+            <div className="space-y-5">
+            {renderLicitacaoListToolbar()}
             {listPanelExpanded ? (
               <AppModalOverlay className="app-modal-overlay fixed inset-0 z-[2100] flex items-center justify-center p-3">
                 <div
@@ -1789,23 +2205,13 @@ export default function LicitacoesPage() {
                     padding="none"
                     className="flex h-[min(900px,92vh)] flex-col overflow-hidden shadow-2xl"
                   >
-                    {renderLicitacaoListPanelContent(true)}
+                    {renderLicitacaoListModal()}
                   </Card>
                 </aside>
               </AppModalOverlay>
-            ) : (
-              <aside className="w-full shrink-0 lg:w-72 xl:w-80">
-                <Card
-                  padding="none"
-                  className="flex h-[min(380px,45vh)] flex-col overflow-hidden shadow-sm lg:sticky lg:top-4 lg:h-[calc(100vh-8rem)] lg:max-h-[calc(100vh-8rem)]"
-                >
-                  {renderLicitacaoListPanelContent(false)}
-                </Card>
-              </aside>
-            )}
+            ) : null}
 
-            {/* Conteúdo principal */}
-            <main className="min-w-0 flex-1 space-y-5">
+            <main className="min-w-0 space-y-5">
               {!selectedId ? (
                 <Card className="border-dashed">
                   <CardContent className="flex flex-col items-center justify-center py-20 text-center">
@@ -1817,9 +2223,19 @@ export default function LicitacoesPage() {
                     </p>
                     <p className="mt-1 max-w-sm text-sm text-gray-500 dark:text-gray-400">
                       {isArquivadasView
-                        ? 'Consulte as análises finalizadas pela lista ao lado.'
-                        : 'Processos aparecem aqui após o aceite em Por região.'}
+                        ? 'Abra a lista de licitações para consultar as análises da Diretoria.'
+                        : isPreliminarView
+                          ? 'Abra a lista de licitações para escolher um processo. Eles aparecem após o aceite em Por região.'
+                          : 'Abra a lista de licitações para escolher um processo. Eles chegam aqui ao enviar da Análise Preliminar.'}
                     </p>
+                    <button
+                      type="button"
+                      onClick={() => setListPanelExpanded(true)}
+                      className="mt-5 inline-flex h-10 items-center gap-2 rounded-lg bg-red-600 px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-red-700"
+                    >
+                      <ClipboardList className="h-4 w-4" />
+                      Abrir lista de licitações
+                    </button>
                   </CardContent>
                 </Card>
               ) : loadingSelected || !display ? (
@@ -1863,6 +2279,14 @@ export default function LicitacoesPage() {
                         </p>
                       </div>
                       <div className="flex shrink-0 flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setListPanelExpanded(true)}
+                          className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-800 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800"
+                        >
+                          <ClipboardList className="h-4 w-4" />
+                          Lista
+                        </button>
                         {isArquivadasView ? (
                           <>
                             <label className="relative inline-flex items-center">
@@ -1871,15 +2295,21 @@ export default function LicitacoesPage() {
                                 aria-hidden
                               />
                               <select
+                                ref={statusSelectRef}
                                 aria-label="Status"
                                 disabled={arquivarMutation.isPending || desarquivarMutation.isPending}
                                 value={display ? resolveArquivadaMotivo(display) ?? '' : ''}
                                 onChange={(e) => {
                                   const motivo = e.target.value as LicitacaoArquivadaMotivo | '';
                                   if (!motivo) return;
-                                  handleAtualizarStatusAnalise(motivo);
+                                  setStatusSelectHighlight(false);
+                                  handleStatusSelect(motivo);
                                 }}
-                                className="inline-flex h-9 appearance-none rounded-lg border border-gray-300 bg-white py-1.5 pl-3 pr-8 text-sm font-medium text-gray-800 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800"
+                                className={`inline-flex h-9 appearance-none rounded-lg border bg-white py-1.5 pl-3 pr-8 text-sm font-medium text-gray-800 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800 ${
+                                  statusSelectHighlight
+                                    ? 'border-red-500 ring-2 ring-red-500/40 dark:border-red-400'
+                                    : 'border-gray-300 dark:border-gray-600'
+                                }`}
                               >
                                 <option value="" disabled>
                                   Status
@@ -1893,7 +2323,7 @@ export default function LicitacoesPage() {
                             </label>
                             <button
                               type="button"
-                              disabled={desarquivarMutation.isPending}
+                              disabled={desarquivarMutation.isPending || enviarArquivoMutation.isPending}
                               onClick={handleDesarquivarAnalise}
                               className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
                             >
@@ -1906,6 +2336,19 @@ export default function LicitacoesPage() {
                                 'Reabrir análise'
                               )}
                             </button>
+                            <button
+                              type="button"
+                              disabled={enviarArquivoMutation.isPending || desarquivarMutation.isPending}
+                              onClick={handleEnviarParaArquivo}
+                              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
+                            >
+                              {enviarArquivoMutation.isPending ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Archive className="h-4 w-4" />
+                              )}
+                              Arquivar
+                            </button>
                           </>
                         ) : !display.arquivada ? (
                           <label className="relative inline-flex items-center">
@@ -1914,24 +2357,50 @@ export default function LicitacoesPage() {
                               aria-hidden
                             />
                             <select
+                              ref={statusSelectRef}
                               aria-label="Status"
                               disabled={
                                 saveAnaliseMutation.isPending ||
                                 arquivarMutation.isPending ||
-                                finalizarAnaliseMutation.isPending
+                                finalizarAnaliseMutation.isPending ||
+                                setAnaliseEtapaMutation.isPending ||
+                                enviarArquivoMutation.isPending ||
+                                setStatusSelecionadoMutation.isPending
                               }
-                              defaultValue=""
+                              value={display ? resolveStatusSelecionado(display) ?? '' : ''}
                               onChange={(e) => {
-                                const motivo = e.target.value as LicitacaoArquivadaMotivo | '';
-                                e.currentTarget.value = '';
-                                if (!motivo) return;
-                                handleAtualizarStatusAnalise(motivo);
+                                const value = e.target.value;
+                                if (!value) return;
+                                if (value === '__em_analise__') {
+                                  setStatusSelectHighlight(false);
+                                  handleEnviarParaEmAnalise();
+                                  return;
+                                }
+                                if (value === '__preliminar__') {
+                                  setStatusSelectHighlight(false);
+                                  handleEnviarParaAnalisePreliminar();
+                                  return;
+                                }
+                                handleStatusSelect(value as LicitacaoArquivadaMotivo);
                               }}
-                              className="inline-flex h-9 appearance-none rounded-lg border border-gray-300 bg-white py-1.5 pl-3 pr-8 text-sm font-medium text-gray-800 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800"
+                              className={`inline-flex h-9 appearance-none rounded-lg border bg-white py-1.5 pl-3 pr-8 text-sm font-medium text-gray-800 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800 ${
+                                statusSelectHighlight
+                                  ? 'border-red-500 ring-2 ring-red-500/40 dark:border-red-400'
+                                  : 'border-gray-300 dark:border-gray-600'
+                              }`}
                             >
                               <option value="" disabled>
-                                {arquivarMutation.isPending ? 'Salvando…' : 'Status'}
+                                {arquivarMutation.isPending ||
+                                setAnaliseEtapaMutation.isPending ||
+                                setStatusSelecionadoMutation.isPending
+                                  ? 'Salvando…'
+                                  : 'Status'}
                               </option>
+                              {isPreliminarView ? (
+                                <option value="__em_analise__">Em Análise</option>
+                              ) : (
+                                <option value="__preliminar__">Análise Preliminar</option>
+                              )}
                               {ARQUIVADA_MOTIVO_OPTIONS.map((option) => (
                                 <option key={option.value} value={option.value}>
                                   {option.label}
@@ -1939,6 +2408,21 @@ export default function LicitacoesPage() {
                               ))}
                             </select>
                           </label>
+                        ) : null}
+                        {!display.arquivada ? (
+                          <button
+                            type="button"
+                            disabled={enviarArquivoMutation.isPending || arquivarMutation.isPending}
+                            onClick={handleEnviarParaArquivo}
+                            className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
+                          >
+                            {enviarArquivoMutation.isPending ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Archive className="h-4 w-4" />
+                            )}
+                            Arquivar
+                          </button>
                         ) : null}
                         <button
                           type="button"
@@ -2025,14 +2509,44 @@ export default function LicitacoesPage() {
                     </Card>
                   ) : null}
 
+                  {!isPreliminarView && !isArquivadasView ? (
+                    <LicitacaoAnalisesCarregadas
+                      titulo={display ? buildLicitacaoTituloDisplay(display) : undefined}
+                      showPreliminar
+                      analisePreliminar={analisePreliminar}
+                      showNotebook
+                      linkNotebookLm={linkNotebookLm}
+                      showEmAnaliseResumo={false}
+                    />
+                  ) : null}
+
+                  {isArquivadasView ? (
+                    <LicitacaoAnalisesCarregadas
+                      titulo={display ? buildLicitacaoTituloDisplay(display) : undefined}
+                      showPreliminar
+                      analisePreliminar={analisePreliminar}
+                      showNotebook
+                      linkNotebookLm={linkNotebookLm}
+                      showEmAnaliseResumo
+                      analiseUsuario={analiseUsuario}
+                      responsavelAnalise={responsavelAnalise}
+                      viabilidadeSections={checklistResumo}
+                      naoSeHabilita={naoSeHabilita}
+                      naoSeHabilitaItens={naoSeHabilitaItens}
+                    />
+                  ) : null}
+
+                  {!isArquivadasView ? (
                   <Card padding="none" className="shadow-sm">
                     <CardContent className="px-5 py-3">
                       <label className="block">
                         <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
                           Link do caderno no Notebook LM
-                          <span className="ml-0.5 text-red-600" aria-hidden="true">
-                            *
-                          </span>
+                          {!isPreliminarView ? (
+                            <span className="ml-0.5 text-red-600" aria-hidden="true">
+                              *
+                            </span>
+                          ) : null}
                         </span>
                         <div className="flex flex-wrap items-center gap-2">
                           <input
@@ -2056,42 +2570,77 @@ export default function LicitacoesPage() {
                           ) : null}
                         </div>
                         <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                          Obrigatório para finalizar a análise.
+                          {isPreliminarView
+                            ? 'O link será incluído no PDF da análise preliminar.'
+                            : 'Obrigatório para finalizar a análise.'}
                         </p>
                       </label>
                     </CardContent>
                   </Card>
+                  ) : null}
 
-                  <LicitacaoNaoSeHabilitaPanel
-                    enabled={naoSeHabilita}
-                    onEnabledChange={handleNaoSeHabilitaChange}
-                    items={naoSeHabilitaItens}
-                    onItemsChange={handleNaoSeHabilitaItensChange}
-                    disabled={!canEditAnaliseManual || saveAnaliseMutation.isPending}
-                  />
+                  {!isPreliminarView && !isArquivadasView ? (
+                    <LicitacaoNaoSeHabilitaPanel
+                      enabled={naoSeHabilita}
+                      onEnabledChange={handleNaoSeHabilitaChange}
+                      items={naoSeHabilitaItens}
+                      onItemsChange={handleNaoSeHabilitaItensChange}
+                      disabled={!canEditAnaliseManual || saveAnaliseMutation.isPending}
+                    />
+                  ) : null}
 
+                  {!isArquivadasView ? (
                   <Card padding="none" className="flex flex-col overflow-hidden shadow-sm">
                     <CardHeader className="shrink-0 border-b border-gray-100 px-5 py-3 dark:border-gray-800">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <div className="flex items-center gap-2">
                           <ClipboardList className="h-5 w-5 text-red-600" />
                           <h3 className="font-semibold text-gray-900 dark:text-gray-100">
-                            Checklist
+                            {isPreliminarView ? 'Análise Preliminar' : 'Checklist'}
                           </h3>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => void handleExportChecklistPdf()}
-                          disabled={exportingPdf || !selected}
-                          className="inline-flex h-9 items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-800 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
-                        >
-                          {exportingPdf ? (
-                            <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-                          ) : (
-                            <Download className="h-4 w-4" aria-hidden />
-                          )}
-                          {exportingPdf ? 'Gerando PDF…' : 'Exportar Checklist'}
-                        </button>
+                        <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1">
+                          {isPreliminarView &&
+                          (hasUnsavedChanges || saveStatus !== 'saved') ? (
+                            <p className="whitespace-nowrap text-xs text-amber-700 dark:text-amber-300">
+                              Salve a análise para liberar a exportação do PDF.
+                            </p>
+                          ) : null}
+                          <button
+                            type="button"
+                            onClick={() =>
+                              void (isPreliminarView
+                                ? handleExportPreliminarPdf()
+                                : handleExportChecklistPdf())
+                            }
+                            disabled={
+                              exportingPdf ||
+                              !selected ||
+                              (isPreliminarView &&
+                                (hasUnsavedChanges ||
+                                  saveStatus !== 'saved' ||
+                                  saveAnaliseMutation.isPending))
+                            }
+                            title={
+                              isPreliminarView &&
+                              (hasUnsavedChanges || saveStatus !== 'saved')
+                                ? 'Salve a análise antes de exportar'
+                                : undefined
+                            }
+                            className="inline-flex h-9 shrink-0 items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-800 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700"
+                          >
+                            {exportingPdf ? (
+                              <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                            ) : (
+                              <Download className="h-4 w-4" aria-hidden />
+                            )}
+                            {exportingPdf
+                              ? 'Gerando PDF…'
+                              : isPreliminarView
+                                ? 'Exportar PDF'
+                                : 'Exportar Checklist'}
+                          </button>
+                        </div>
                       </div>
                     </CardHeader>
                     <CardContent className="flex flex-col gap-3 px-5 py-4">
@@ -2186,6 +2735,48 @@ export default function LicitacoesPage() {
                           </p>
                         ) : null}
                       </div>
+                      {isPreliminarView ? (
+                        <div className="space-y-3">
+                          <LicitacaoAnalisePreliminarForm
+                            key={selectedId}
+                            value={analisePreliminar}
+                            onChange={handleAnalisePreliminarChange}
+                            disabled={
+                              saveAnaliseMutation.isPending ||
+                              finalizarAnaliseMutation.isPending ||
+                              !canEditAnaliseManual
+                            }
+                          />
+                          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-gray-100 pt-3 dark:border-gray-800">
+                            <span className="text-xs text-gray-500">
+                              {saveAnaliseMutation.isPending || saveStatus === 'saving'
+                                ? 'Salvando…'
+                                : saveStatus === 'saved'
+                                  ? 'Salvo'
+                                  : saveStatus === 'error'
+                                    ? 'Erro ao salvar'
+                                    : !isClaimed
+                                      ? 'Assuma a tarefa para editar'
+                                      : 'Salva automaticamente'}
+                            </span>
+                            {!isArquivadasView ? (
+                              <button
+                                type="button"
+                                disabled={
+                                  !canEditAnaliseManual ||
+                                  saveAnaliseMutation.isPending ||
+                                  finalizarAnaliseMutation.isPending ||
+                                  arquivarMutation.isPending
+                                }
+                                onClick={handleSaveAnaliseNow}
+                                className="rounded-lg bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+                              >
+                                Salvar agora
+                              </button>
+                            ) : null}
+                          </div>
+                        </div>
+                      ) : (
                       <div className="rounded-lg border border-gray-200 bg-gray-50/50 px-3 py-3 dark:border-gray-700 dark:bg-gray-950/30">
                         <LicitacaoChecklistEditor
                           key={selectedId}
@@ -2203,9 +2794,12 @@ export default function LicitacoesPage() {
                           managingItems={updateChecklistTemplateMutation.isPending}
                         />
                       </div>
+                      )}
                     </CardContent>
                   </Card>
+                  ) : null}
 
+                  {!isPreliminarView && !isArquivadasView ? (
                   <Card padding="none" className="flex flex-col overflow-hidden shadow-sm">
                     <CardHeader className="shrink-0 border-b border-gray-100 px-5 py-3 dark:border-gray-800">
                       <div className="flex items-center gap-2">
@@ -2285,7 +2879,9 @@ export default function LicitacoesPage() {
                       </div>
                     </CardContent>
                   </Card>
+                  ) : null}
 
+                  {!isPreliminarView ? (
                   <Card padding="none" className="shadow-sm">
                     <CardHeader className="border-b border-gray-100 px-5 py-4 dark:border-gray-800">
                       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -2322,6 +2918,7 @@ export default function LicitacoesPage() {
                       />
                     </CardContent>
                   </Card>
+                  ) : null}
                 </>
               )}
             </main>

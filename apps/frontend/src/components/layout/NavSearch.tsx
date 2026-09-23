@@ -37,6 +37,7 @@ export function NavSearch({ inputRef }: NavSearchProps) {
   const {
     can,
     isAdministrator,
+    canAccessLicitacoesPage,
     canAccessDpApproverPages,
     canApproveFd,
     canApproveEspelhoNf,
@@ -103,12 +104,23 @@ export function NavSearch({ inputRef }: NavSearchProps) {
         return true;
       }
       if (item.href === '/ponto/aprovacoes') return canSeeApprovals;
+      if (item.href === '/ponto/licitacoes' || item.href === '/ponto/licitacoes-pncp') {
+        return canAccessLicitacoesPage;
+      }
       if (isAdministrator) return true;
       const key = pathToModuleKey(item.href);
       if (OPEN_ACCESS.has(key)) return canAccessCollaborationTools;
       return can(key);
     });
-  }, [catalog, can, isAdministrator, canSeeApprovals, canAccessCollaborationTools, isLinkedEmpreiteiro]);
+  }, [
+    catalog,
+    can,
+    isAdministrator,
+    canAccessLicitacoesPage,
+    canSeeApprovals,
+    canAccessCollaborationTools,
+    isLinkedEmpreiteiro,
+  ]);
 
   const results = useMemo(() => {
     const q = term.trim();

@@ -11,6 +11,11 @@ export type FaturamentoByGastosContractEntry = {
   recebido: number;
   /** null = aba/contrato sem coluna Conta Vinculada. */
   contaVinculada: number | null;
+  /**
+   * Se preenchido, a captura da planilha NFS falhou.
+   * Não exibir R$ 0,00 — pedir para recarregar.
+   */
+  loadError?: string;
 };
 
 export type NfsContractTotals = {
@@ -18,6 +23,7 @@ export type NfsContractTotals = {
   liquido: number;
   recebido: number;
   contaVinculada: number | null;
+  loadError?: string;
 };
 
 const EMPTY_NFS_TOTALS: NfsContractTotals = {
@@ -49,7 +55,8 @@ export function buildFaturamentoByContractLookup(
       faturamento: entry.faturamento,
       liquido: entry.liquido,
       recebido: entry.recebido,
-      contaVinculada: entry.contaVinculada ?? null
+      contaVinculada: entry.contaVinculada ?? null,
+      ...(entry.loadError ? { loadError: entry.loadError } : {})
     };
     for (const key of lookupKeysForContract(entry.contract)) {
       map.set(key, totals);
@@ -79,6 +86,13 @@ export function resolveContractContaVinculada(
   lookup: Map<string, NfsContractTotals>
 ): number | null {
   return resolveContractNfsTotals(contract, lookup).contaVinculada;
+}
+
+export function resolveContractNfsLoadError(
+  contract: string,
+  lookup: Map<string, NfsContractTotals>
+): string | undefined {
+  return resolveContractNfsTotals(contract, lookup).loadError;
 }
 
 export function resolveContractNfsTotals(

@@ -38,8 +38,22 @@ router.patch('/:id/liberar-analise', (req, res, next) => ctrl.liberarAnaliseManu
 router.patch('/:id/finalizar-analise', (req, res, next) => ctrl.finalizarAnaliseManual(req, res, next));
 router.patch('/:id/arquivar', (req, res, next) => ctrl.arquivarAnalise(req, res, next));
 router.patch('/:id/desarquivar', (req, res, next) => ctrl.desarquivarAnalise(req, res, next));
+router.patch('/:id/analise-etapa', (req, res, next) => ctrl.setAnaliseEtapa(req, res, next));
 router.get('/:id/orcamento', (req, res, next) => ctrl.getOrcamento(req, res, next));
 router.put('/:id/orcamento', (req, res, next) => ctrl.saveOrcamento(req, res, next));
+router.post('/:id/orcamento/anexo', (req: AuthRequest, res: Response, next: NextFunction) => {
+  ctrl.uploadMiddleware(req, res, (err: unknown) => {
+    if (err) {
+      const msg = err instanceof Error ? err.message : 'Erro no upload';
+      res.status(400).json({ success: false, message: msg });
+      return;
+    }
+    void ctrl.uploadOrcamentoAnexo(req, res, next);
+  });
+});
+router.delete('/:id/orcamento/anexo/:anexoId', (req, res, next) =>
+  ctrl.removeOrcamentoAnexo(req, res, next)
+);
 router.patch('/:id', (req, res, next) => ctrl.update(req, res, next));
 router.delete('/:id', (req, res, next) => ctrl.delete(req, res, next));
 

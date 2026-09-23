@@ -114,6 +114,7 @@ import {
   resolveContractContaVinculada,
   resolveContractFaturamento,
   resolveContractLiquido,
+  resolveContractNfsLoadError,
   resolveContractNfsTotals,
   resolveContractRecebido,
   type FaturamentoByGastosContractEntry
@@ -153,6 +154,8 @@ export type GastosOperacionaisRow = {
   faturamentoAcumulado?: number;
   liquidoAcumulado?: number;
   recebidoAcumulado?: number;
+  /** Erro de captura NFS — não tratar totais como zero real. */
+  nfsLoadError?: string;
   /** null = contrato sem coluna Conta Vinculada na planilha de NF's. */
   contaVinculadaAcumulado?: number | null;
   tetoOrcamentario?: number;
@@ -256,6 +259,29 @@ function formatCurrency(value: number) {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2
   }).format(value);
+}
+
+function renderNfsAmountOrError(
+  value: number | undefined,
+  loadError: string | undefined,
+  onRetry?: () => void
+) {
+  if (loadError) {
+    return (
+      <button
+        type="button"
+        onClick={(event) => {
+          event.stopPropagation();
+          onRetry?.();
+        }}
+        title={`${loadError} Clique para recarregar.`}
+        className="mx-auto block max-w-[9.5rem] rounded-md px-1 py-0.5 text-left text-[11px] font-semibold leading-snug text-amber-700 underline-offset-2 hover:underline dark:text-amber-300"
+      >
+        Erro na captura — recarregue
+      </button>
+    );
+  }
+  return formatCurrency(value ?? 0);
 }
 
 function formatGastosNaturezaDate(iso: string): string {
@@ -949,7 +975,7 @@ export function ControleGeralGastosOperacionaisPanel({
   } = useQuery({
     enabled: showFaturamentoColumn,
     queryKey: [
-      'controle-geral-faturamento-by-contract-v30-recebido-por-emissao',
+      'controle-geral-faturamento-by-contract-v33-load-error-not-zero',
       emissaoFilter.emissaoPeriodFrom,
       emissaoFilter.emissaoPeriodTo,
       emissaoFilter.recebimentoPeriodFrom,
@@ -976,6 +1002,7 @@ export function ControleGeralGastosOperacionaisPanel({
         data?: {
           entries?: FaturamentoByGastosContractEntry[];
           recebidoMensalEntries?: RecebidoMensalByGastosContractEntry[];
+          loadErrors?: Array<{ tabKey: string; sheetName: string; message: string }>;
         };
       }>('/controle-nfs/summary/faturamento-by-gastos-contract', {
         params,
@@ -984,7 +1011,8 @@ export function ControleGeralGastosOperacionaisPanel({
 
       return {
         entries: res.data?.data?.entries ?? [],
-        recebidoMensal: res.data?.data?.recebidoMensalEntries ?? []
+        recebidoMensal: res.data?.data?.recebidoMensalEntries ?? [],
+        loadErrors: res.data?.data?.loadErrors ?? []
       };
     },
     staleTime: 5 * 60 * 1000,
@@ -1013,6 +1041,11 @@ export function ControleGeralGastosOperacionaisPanel({
 
   const faturamentoByContract = faturamentoQueryData?.entries ?? [];
   const recebidoMensalByContract = faturamentoQueryData?.recebidoMensal ?? [];
+  const nfsLoadErrors = faturamentoQueryData?.loadErrors ?? [];
+  const nfsLoadErrorCount = useMemo(
+    () => faturamentoByContract.filter((entry) => Boolean(entry.loadError)).length,
+    [faturamentoByContract]
+  );
 
   const isPanelLoading = isLoading;
 
@@ -1230,6 +1263,9 @@ export function ControleGeralGastosOperacionaisPanel({
           : undefined,
         contaVinculadaAcumulado: showFaturamentoColumn
           ? resolveContractContaVinculada(row.contract, faturamentoLookup)
+          : undefined,
+        nfsLoadError: showFaturamentoColumn
+          ? resolveContractNfsLoadError(row.contract, faturamentoLookup)
           : undefined,
         tetoOrcamentario: showTetoOrcamentarioColumn
           ? resolveContractTetoOrcamentario(
@@ -2192,6 +2228,35 @@ export function ControleGeralGastosOperacionaisPanel({
       </CardHeader>
 
       <CardContent className={cadastroListClasses.cardContent}>
+        {showFaturamentoColumn && nfsLoadErrorCount > 0 ? (
+          <div className="mb-4 flex flex-col gap-2 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-700/60 dark:bg-amber-950/40 dark:text-amber-100 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-2">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+              <p>
+                Falha ao capturar faturamento/líquido/recebido em{' '}
+                <strong>{nfsLoadErrorCount}</strong> contrato(s)
+                {nfsLoadErrors.length > 0
+                  ? ` (abas: ${nfsLoadErrors.map((error) => error.sheetName).join(', ')})`
+                  : ''}
+                . Não exibimos R$ 0,00 nesses casos — recarregue a planilha.
+              </p>
+            </div>
+            {onRetry ? (
+              <button
+                type="button"
+                onClick={onRetry}
+                disabled={isPanelLoading || fetchingFaturamento}
+                className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-50"
+              >
+                <RefreshCw
+                  className={`h-3.5 w-3.5 ${fetchingFaturamento ? 'animate-spin' : ''}`}
+                  aria-hidden
+                />
+                Recarregar
+              </button>
+            ) : null}
+          </div>
+        ) : null}
         {isPanelLoading ? (
           <div className="flex items-center justify-center gap-2 py-12 text-gray-500 dark:text-gray-400">
             <Loader2 className="h-5 w-5 animate-spin" aria-hidden />
@@ -2447,17 +2512,29 @@ export function ControleGeralGastosOperacionaisPanel({
                               </td>
                               {showFaturamentoColumn ? (
                                 <td className={`${amountCurrencyCellClassName} text-green-600 dark:text-green-400`}>
-                                  {formatCurrency(row.faturamentoAcumulado ?? 0)}
+                                  {renderNfsAmountOrError(
+                                    row.faturamentoAcumulado,
+                                    row.nfsLoadError,
+                                    onRetry
+                                  )}
                                 </td>
                               ) : null}
                               {showFaturamentoColumn ? (
                                 <td className={`${amountCurrencyCellClassName} text-blue-600 dark:text-blue-400`}>
-                                  {formatCurrency(row.liquidoAcumulado ?? 0)}
+                                  {renderNfsAmountOrError(
+                                    row.liquidoAcumulado,
+                                    row.nfsLoadError,
+                                    onRetry
+                                  )}
                                 </td>
                               ) : null}
                               {showFaturamentoColumn ? (
                                 <td className={`${amountCurrencyCellClassName} text-sky-600 dark:text-sky-400`}>
-                                  {formatCurrency(row.recebidoAcumulado ?? 0)}
+                                  {renderNfsAmountOrError(
+                                    row.recebidoAcumulado,
+                                    row.nfsLoadError,
+                                    onRetry
+                                  )}
                                 </td>
                               ) : null}
                               {showTetoOrcamentarioColumn ? (
@@ -2538,19 +2615,25 @@ export function ControleGeralGastosOperacionaisPanel({
                               ) : null}
                               {showFaturamentoColumn ? (
                                 <td
-                                  className={`${amountCurrencyCellClassName} ${lucroLiquidoClassName(
-                                    calcLucroLiquido(
-                                      row.recebidoAcumulado ?? 0,
-                                      row.totalAcumulado
-                                    )
-                                  )}`}
+                                  className={`${amountCurrencyCellClassName} ${
+                                    row.nfsLoadError
+                                      ? 'text-amber-700 dark:text-amber-300'
+                                      : lucroLiquidoClassName(
+                                          calcLucroLiquido(
+                                            row.recebidoAcumulado ?? 0,
+                                            row.totalAcumulado
+                                          )
+                                        )
+                                  }`}
                                 >
-                                  {formatCurrency(
-                                    calcLucroLiquido(
-                                      row.recebidoAcumulado ?? 0,
-                                      row.totalAcumulado
-                                    )
-                                  )}
+                                  {row.nfsLoadError
+                                    ? renderNfsAmountOrError(undefined, row.nfsLoadError, onRetry)
+                                    : formatCurrency(
+                                        calcLucroLiquido(
+                                          row.recebidoAcumulado ?? 0,
+                                          row.totalAcumulado
+                                        )
+                                      )}
                                 </td>
                               ) : null}
                               {showTetoOrcamentarioColumn ? (
@@ -2568,28 +2651,40 @@ export function ControleGeralGastosOperacionaisPanel({
                               ) : null}
                               {showFaturamentoColumn ? (
                                 <td
-                                  className={`${amountPercentCellClassName} ${gastoFaturamentoPercentClassName(
-                                    row.totalAcumulado,
-                                    row.faturamentoAcumulado ?? 0
-                                  )}`}
+                                  className={`${amountPercentCellClassName} ${
+                                    row.nfsLoadError
+                                      ? 'text-amber-700 dark:text-amber-300'
+                                      : gastoFaturamentoPercentClassName(
+                                          row.totalAcumulado,
+                                          row.faturamentoAcumulado ?? 0
+                                        )
+                                  }`}
                                 >
-                                  {formatGastoFaturamentoPercent(
-                                    row.totalAcumulado,
-                                    row.faturamentoAcumulado ?? 0
-                                  )}
+                                  {row.nfsLoadError
+                                    ? '—'
+                                    : formatGastoFaturamentoPercent(
+                                        row.totalAcumulado,
+                                        row.faturamentoAcumulado ?? 0
+                                      )}
                                 </td>
                               ) : null}
                               {showFaturamentoColumn ? (
                                 <td
-                                  className={`${amountPercentCellClassName} ${gastoRecebidoPercentClassName(
-                                    row.totalAcumulado,
-                                    row.recebidoAcumulado ?? 0
-                                  )}`}
+                                  className={`${amountPercentCellClassName} ${
+                                    row.nfsLoadError
+                                      ? 'text-amber-700 dark:text-amber-300'
+                                      : gastoRecebidoPercentClassName(
+                                          row.totalAcumulado,
+                                          row.recebidoAcumulado ?? 0
+                                        )
+                                  }`}
                                 >
-                                  {formatGastoRecebidoPercent(
-                                    row.totalAcumulado,
-                                    row.recebidoAcumulado ?? 0
-                                  )}
+                                  {row.nfsLoadError
+                                    ? '—'
+                                    : formatGastoRecebidoPercent(
+                                        row.totalAcumulado,
+                                        row.recebidoAcumulado ?? 0
+                                      )}
                                 </td>
                               ) : null}
                               {showFaturamentoColumn ? (

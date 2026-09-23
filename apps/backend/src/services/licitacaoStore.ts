@@ -20,6 +20,20 @@ export function isLicitacaoArquivadaMotivo(value: unknown): value is LicitacaoAr
   );
 }
 
+export const LICITACAO_ANALISE_ETAPAS = ['preliminar', 'em_analise'] as const;
+export type LicitacaoAnaliseEtapa = (typeof LICITACAO_ANALISE_ETAPAS)[number];
+
+export function isLicitacaoAnaliseEtapa(value: unknown): value is LicitacaoAnaliseEtapa {
+  return (
+    typeof value === 'string' &&
+    (LICITACAO_ANALISE_ETAPAS as readonly string[]).includes(value)
+  );
+}
+
+export function resolveAnaliseEtapa(value: unknown): LicitacaoAnaliseEtapa {
+  return isLicitacaoAnaliseEtapa(value) ? value : 'em_analise';
+}
+
 export type LicitacaoRow = {
   id: string;
   titulo: string;
@@ -36,6 +50,7 @@ export type LicitacaoRow = {
   arquivada: boolean;
   arquivadaEm: Date | null;
   arquivadaMotivo: LicitacaoArquivadaMotivo | null;
+  analiseEtapa: LicitacaoAnaliseEtapa;
   createdBy: string;
   createdAt: Date;
   updatedAt: Date;
@@ -67,6 +82,7 @@ type LicitacaoDbRow = {
   arquivada: boolean | null;
   arquivadaEm: Date | null;
   arquivadaMotivo: string | null;
+  analiseEtapa: string | null;
   createdBy: string;
   createdAt: Date;
   updatedAt: Date;
@@ -93,6 +109,7 @@ function mapRow(row: LicitacaoDbRow) {
     arquivadaMotivo: isLicitacaoArquivadaMotivo(row.arquivadaMotivo)
       ? row.arquivadaMotivo
       : null,
+    analiseEtapa: resolveAnaliseEtapa(row.analiseEtapa),
     createdBy: row.createdBy,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -131,6 +148,9 @@ export type LicitacaoListFilters = {
   /** undefined = ativas (não arquivadas); true = só arquivadas; 'all' = todas */
   arquivada?: boolean | 'all';
   arquivadaMotivo?: LicitacaoArquivadaMotivo;
+  analiseEtapa?: LicitacaoAnaliseEtapa;
+  /** true = aba Arquivo; false/undefined = exclui itens em arquivo das demais listas */
+  emArquivo?: boolean;
 };
 
 function parseDateOnly(value?: string): Date | null {
@@ -187,9 +207,22 @@ export async function licitacaoStoreList(filters: LicitacaoListFilters = {}) {
     )`
   );
 
-  if (filters.arquivada === true) {
+  if (filters.emArquivo === true) {
+    conditions.push(
+      Prisma.sql`COALESCE((l."analiseJson"->>'emArquivo')::boolean, FALSE) = TRUE`
+    );
+  } else {
+    conditions.push(
+      Prisma.sql`COALESCE((l."analiseJson"->>'emArquivo')::boolean, FALSE) = FALSE`
+    );
+  }
+
+  if (filters.emArquivo === true) {
+    // Arquivo: todas as arquivadas enviadas ao arquivo (inclui orçamento).
     conditions.push(Prisma.sql`COALESCE(l.arquivada, FALSE) = TRUE`);
-    // Sem motivo específico: Análise final — Orçamento tem aba própria.
+  } else if (filters.arquivada === true) {
+    conditions.push(Prisma.sql`COALESCE(l.arquivada, FALSE) = TRUE`);
+    // Sem motivo específico: Análise Diretoria — Orçamento tem aba própria.
     if (!filters.arquivadaMotivo) {
       conditions.push(Prisma.sql`(l."arquivadaMotivo" IS DISTINCT FROM 'orcamento')`);
     }
@@ -199,10 +232,20 @@ export async function licitacaoStoreList(filters: LicitacaoListFilters = {}) {
   if (filters.arquivadaMotivo) {
     conditions.push(Prisma.sql`l."arquivadaMotivo" = ${filters.arquivadaMotivo}`);
   }
+  if (
+    filters.emArquivo !== true &&
+    filters.arquivada !== true &&
+    filters.arquivada !== 'all' &&
+    filters.analiseEtapa
+  ) {
+    conditions.push(
+      Prisma.sql`COALESCE(l."analiseEtapa", 'em_analise') = ${filters.analiseEtapa}`
+    );
+  }
 
   const whereSql = Prisma.sql`WHERE ${Prisma.join(conditions, ' AND ')}`;
   const orderSql =
-    filters.arquivada === true
+    filters.emArquivo === true || filters.arquivada === true
       ? Prisma.sql`ORDER BY COALESCE(l."arquivadaEm", l."updatedAt") DESC`
       : Prisma.sql`ORDER BY l."updatedAt" DESC`;
 
@@ -212,6 +255,7 @@ export async function licitacaoStoreList(filters: LicitacaoListFilters = {}) {
           l.id, l.titulo, l."numeroProcesso", l.orgao, l.modalidade, l.status,
           l.objeto, l."valorEstimado", l.estado, l."regiaoKey", l."vigenciaContrato", l."analiseJson",
           COALESCE(l.arquivada, FALSE) AS arquivada, l."arquivadaEm", l."arquivadaMotivo",
+          COALESCE(l."analiseEtapa", 'em_analise') AS "analiseEtapa",
           l."createdBy", l."createdAt", l."updatedAt",
           u.id AS creator_id, u.name AS creator_name
         FROM licitacoes l
@@ -234,6 +278,7 @@ export async function licitacaoStoreGetById(id: string) {
       l.id, l.titulo, l."numeroProcesso", l.orgao, l.modalidade, l.status,
       l.objeto, l."valorEstimado", l.estado, l."regiaoKey", l."vigenciaContrato", l."analiseJson",
       COALESCE(l.arquivada, FALSE) AS arquivada, l."arquivadaEm", l."arquivadaMotivo",
+      COALESCE(l."analiseEtapa", 'em_analise') AS "analiseEtapa",
       l."createdBy", l."createdAt", l."updatedAt",
       u.id AS creator_id, u.name AS creator_name
     FROM licitacoes l
@@ -267,15 +312,22 @@ export async function licitacaoStoreCreate(
     regiaoKey?: string;
     status?: string;
     analiseJson?: Record<string, unknown>;
+    analiseEtapa?: LicitacaoAnaliseEtapa;
   }
 ) {
   const id = uuidv4();
   const now = new Date();
   const analiseJson = data.analiseJson ? JSON.stringify(data.analiseJson) : null;
+  const analiseEtapa = resolveAnaliseEtapa(data.analiseEtapa ?? 'preliminar');
+  await getPrisma().$executeRawUnsafe(`
+    ALTER TABLE "licitacoes"
+    ADD COLUMN IF NOT EXISTS "analiseEtapa" TEXT NOT NULL DEFAULT 'em_analise'
+  `);
   await getPrisma().$executeRaw`
     INSERT INTO licitacoes (
       id, titulo, "numeroProcesso", orgao, modalidade, status,
       objeto, "valorEstimado", estado, "regiaoKey", "analiseJson",
+      "analiseEtapa",
       "createdBy", "createdAt", "updatedAt"
     ) VALUES (
       ${id},
@@ -289,6 +341,7 @@ export async function licitacaoStoreCreate(
       ${data.estado?.trim().toUpperCase() || null},
       ${data.regiaoKey?.trim().toLowerCase() || null},
       ${analiseJson}::jsonb,
+      ${analiseEtapa},
       ${userId},
       ${now},
       ${now}
@@ -316,6 +369,7 @@ export async function licitacaoStoreUpdate(
     arquivada: boolean;
     arquivadaEm: Date | null;
     arquivadaMotivo: LicitacaoArquivadaMotivo | null;
+    analiseEtapa: LicitacaoAnaliseEtapa;
   }>
 ) {
   const current = await licitacaoStoreGetById(id);
@@ -341,6 +395,10 @@ export async function licitacaoStoreUpdate(
     data.arquivadaEm !== undefined ? data.arquivadaEm : current.arquivadaEm;
   const arquivadaMotivo =
     data.arquivadaMotivo !== undefined ? data.arquivadaMotivo : current.arquivadaMotivo;
+  const analiseEtapa =
+    data.analiseEtapa !== undefined
+      ? resolveAnaliseEtapa(data.analiseEtapa)
+      : resolveAnaliseEtapa(current.analiseEtapa);
   const now = new Date();
 
   await getPrisma().$executeRawUnsafe(`
@@ -354,6 +412,11 @@ export async function licitacaoStoreUpdate(
   await getPrisma().$executeRawUnsafe(`
     ALTER TABLE "licitacoes"
     ADD COLUMN IF NOT EXISTS "arquivadaMotivo" TEXT
+  `);
+
+  await getPrisma().$executeRawUnsafe(`
+    ALTER TABLE "licitacoes"
+    ADD COLUMN IF NOT EXISTS "analiseEtapa" TEXT NOT NULL DEFAULT 'em_analise'
   `);
 
   await getPrisma().$executeRawUnsafe(
@@ -372,8 +435,9 @@ export async function licitacaoStoreUpdate(
       arquivada = $12,
       "arquivadaEm" = $13,
       "arquivadaMotivo" = $14,
-      "updatedAt" = $15
-    WHERE id = $16`,
+      "analiseEtapa" = $15,
+      "updatedAt" = $16
+    WHERE id = $17`,
     titulo,
     numeroProcesso,
     orgao,
@@ -388,6 +452,7 @@ export async function licitacaoStoreUpdate(
     arquivada === true,
     arquivadaEm,
     arquivadaMotivo,
+    analiseEtapa,
     now,
     id
   );

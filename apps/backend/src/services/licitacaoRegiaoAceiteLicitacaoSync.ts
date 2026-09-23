@@ -199,6 +199,7 @@ export async function ensureLicitacaoForAceite(
     estado,
     regiaoKey: aceite.regiaoKey?.trim().toLowerCase() || undefined,
     status: 'EM_ANALISE',
+    analiseEtapa: 'preliminar',
     analiseJson: buildAnaliseJson(aceite),
   });
 
