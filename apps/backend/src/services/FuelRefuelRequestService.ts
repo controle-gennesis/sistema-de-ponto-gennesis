@@ -57,6 +57,7 @@ export type SuppliesApproveFuelRefuelInput = {
   gasStationId: string;
   refuelDeadlineAmount: number;
   refuelDeadlineUnit: FuelRefuelDeadlineUnit;
+  releasedAmountReais: number;
   comment?: string | null;
 };
 
@@ -122,8 +123,34 @@ async function presentFuelRowPhotos<T extends FuelPhotoFields & { satelliteCityC
   };
 }
 
-async function presentFuelRowsPhotos<T extends FuelPhotoFields>(rows: T[]) {
-  return Promise.all(rows.map((row) => presentFuelRowPhotos(row)));
+async function attachReleasedAmounts<T extends { id: string }>(
+  rows: T[]
+): Promise<Array<T & { releasedAmountReais: number | null }>> {
+  if (rows.length === 0) return [];
+  try {
+    const extras = await prisma.$queryRaw<Array<{ id: string; amount: unknown }>>`
+      SELECT id, "releasedAmountReais" AS amount
+      FROM "fuel_refuel_requests"
+      WHERE id IN (${Prisma.join(rows.map((row) => row.id))})
+    `;
+    const byId = new Map(
+      extras.map((row) => {
+        const n = row.amount == null ? null : Number(row.amount);
+        return [row.id, n != null && Number.isFinite(n) ? n : null] as const;
+      })
+    );
+    return rows.map((row) => ({
+      ...row,
+      releasedAmountReais: byId.get(row.id) ?? null,
+    }));
+  } catch {
+    return rows.map((row) => ({ ...row, releasedAmountReais: null }));
+  }
+}
+
+async function presentFuelRowsPhotos<T extends FuelPhotoFields & { id: string }>(rows: T[]) {
+  const withPhotos = await Promise.all(rows.map((row) => presentFuelRowPhotos(row)));
+  return attachReleasedAmounts(withPhotos);
 }
 
 export class FuelRefuelRequestService {
@@ -261,7 +288,9 @@ export class FuelRefuelRequestService {
   }
 
   async getByIdForApi(id: string) {
-    return presentFuelRowPhotos(await this.getById(id));
+    const presented = await presentFuelRowPhotos(await this.getById(id));
+    const [withAmount] = await attachReleasedAmounts([presented]);
+    return withAmount;
   }
 
   async adminUpdateContract(id: string, contractId: string) {
@@ -454,6 +483,11 @@ export class FuelRefuelRequestService {
       throw createError('Selecione um posto vinculado ao contrato da solicitação', 400);
     }
 
+    const releasedAmountReais = Number(input.releasedAmountReais);
+    if (!Number.isFinite(releasedAmountReais) || releasedAmountReais <= 0) {
+      throw createError('Informe o valor que será liberado', 400);
+    }
+
     const refuelDeadlineAt = computeRefuelDeadlineAt(amount, input.refuelDeadlineUnit);
 
     const updated = await prisma.fuelRefuelRequest.update({
@@ -471,6 +505,17 @@ export class FuelRefuelRequestService {
       include: fuelRefuelInclude,
     });
 
+    await prisma.$executeRawUnsafe(
+      `
+        UPDATE "fuel_refuel_requests"
+        SET "releasedAmountReais" = $1,
+            "updatedAt" = CURRENT_TIMESTAMP
+        WHERE id = $2
+      `,
+      releasedAmountReais,
+      updated.id
+    );
+
     await notifyFuelRequesterApprovedBySupplies(
       updated.sourceChatId,
       updated.displayNumber,
@@ -484,7 +529,7 @@ export class FuelRefuelRequestService {
       updated.sourceWhatsAppPhone,
     );
 
-    return updated;
+    return this.getByIdForApi(updated.id);
   }
 
   async suppliesReject(id: string, suppliesUserId: string, reason: string) {

@@ -23,6 +23,7 @@ import {
   type EmployeeCpfLookupResult,
 } from '../lib/employeeCpfLookup';
 import { prisma } from '../lib/prisma';
+import { getFuelQuotaBalance, listFuelQuotaBalances } from '../lib/fuelWeeklyQuota';
 import { FUEL_LITERS_MAX } from '../lib/parseFlexibleDecimal';
 import { PhotoService } from '../services/PhotoService';
 
@@ -70,6 +71,7 @@ const suppliesApproveSchema = z.object({
   gasStationId: z.string().min(1, 'Selecione o posto para abastecimento'),
   refuelDeadlineAmount: z.coerce.number().int().min(1).max(365),
   refuelDeadlineUnit: z.enum(['HOURS', 'DAYS']),
+  releasedAmountReais: z.number().positive('Informe o valor que será liberado'),
 });
 
 const rejectSchema = z.object({
@@ -726,6 +728,7 @@ export class FuelRefuelRequestController {
         gasStationId: body.gasStationId,
         refuelDeadlineAmount: body.refuelDeadlineAmount,
         refuelDeadlineUnit: body.refuelDeadlineUnit,
+        releasedAmountReais: body.releasedAmountReais,
         comment: body.comment,
       });
       res.json({ success: true, data: row, message: 'Solicitação atendida — colaborador liberado para abastecer' });
@@ -801,6 +804,32 @@ export class FuelRefuelRequestController {
     }
   }
 
+  async getQuotaBalance(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const user = req.user;
+      if (!user) throw createError('Usuário não autenticado', 401);
+
+      const contractId = String(req.query.contractId || '').trim();
+      const data = await getFuelQuotaBalance(contractId);
+      res.json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async listQuotaBalances(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const user = req.user;
+      if (!user) throw createError('Usuário não autenticado', 401);
+      await assertUserHasFuelSuppliesAccess(user.id, user.isAdmin);
+
+      const data = await listFuelQuotaBalances();
+      res.json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  }
+
   /** Cota semanal (em tanques) por contrato + preço do tanque, usados na fila de Abastecimento. */
   async getQuotaConfig(req: AuthRequest, res: Response, next: NextFunction) {
     try {
@@ -808,24 +837,51 @@ export class FuelRefuelRequestController {
       if (!user) throw createError('Usuário não autenticado', 401);
       if (!user.isAdmin) throw createError('Acesso permitido apenas para Administrador', 403);
 
-      const [settings, contracts] = await Promise.all([
+      const [settings, contracts, parentRows] = await Promise.all([
         prisma.companySettings.findFirst({ select: { fuelTankPriceReais: true } }),
         prisma.contract.findMany({
           orderBy: [{ name: 'asc' }, { number: 'asc' }],
-          select: { id: true, name: true, number: true, weeklyFuelTankQuota: true },
+          select: {
+            id: true,
+            name: true,
+            number: true,
+            weeklyFuelTankQuota: true,
+          },
         }),
+        prisma.$queryRaw<Array<{ id: string; parentId: string | null }>>`
+          SELECT id, "fuelQuotaParentContractId" AS "parentId"
+          FROM "contracts"
+        `,
       ]);
+
+      const parentById = new Map(
+        parentRows.map((c) => [c.id, c.parentId || null] as const)
+      );
+      const resolveRoot = (id: string) => {
+        const seen = new Set<string>();
+        let current = id;
+        while (parentById.get(current)) {
+          if (seen.has(current)) break;
+          seen.add(current);
+          current = parentById.get(current) as string;
+        }
+        return current;
+      };
 
       res.json({
         success: true,
         data: {
           tankPriceReais: Number(settings?.fuelTankPriceReais ?? 350),
-          contracts: contracts.map((c) => ({
-            id: c.id,
-            name: c.name.trim() || c.number,
-            number: c.number,
-            weeklyTankQuota: c.weeklyFuelTankQuota == null ? null : Number(c.weeklyFuelTankQuota),
-          })),
+          contracts: contracts.map((c) => {
+            const rootId = resolveRoot(c.id);
+            return {
+              id: c.id,
+              name: c.name.trim() || c.number,
+              number: c.number,
+              weeklyTankQuota: c.weeklyFuelTankQuota == null ? null : Number(c.weeklyFuelTankQuota),
+              fuelQuotaParentContractId: rootId === c.id ? null : rootId,
+            };
+          }),
         },
       });
     } catch (error) {
@@ -861,16 +917,151 @@ export class FuelRefuelRequestController {
       if (!user) throw createError('Usuário não autenticado', 401);
       if (!user.isAdmin) throw createError('Acesso permitido apenas para Administrador', 403);
 
-      const body = z
-        .object({ weeklyFuelTankQuota: z.number().positive().nullable() })
-        .parse(req.body);
+      const contractId = req.params.contractId;
+      const parsed = z
+        .object({
+          weeklyFuelTankQuota: z.number().positive().nullable().optional(),
+          fuelQuotaParentContractId: z.string().nullable().optional(),
+          dissolveGroup: z.boolean().optional(),
+        })
+        .safeParse(req.body);
+      if (!parsed.success) {
+        throw createError(
+          parsed.error.issues[0]?.message || 'Dados inválidos para atualizar a cota',
+          400
+        );
+      }
+      const body = parsed.data;
 
-      await prisma.contract.update({
-        where: { id: req.params.contractId },
-        data: { weeklyFuelTankQuota: body.weeklyFuelTankQuota },
+      const rows = await prisma.$queryRaw<
+        Array<{ id: string; parentId: string | null }>
+      >`
+        SELECT id, "fuelQuotaParentContractId" AS "parentId"
+        FROM "contracts"
+      `;
+      const parentById = new Map(rows.map((c) => [c.id, c.parentId || null] as const));
+      if (!parentById.has(contractId)) throw createError('Contrato não encontrado', 404);
+
+      const resolveRoot = (id: string) => {
+        const seen = new Set<string>();
+        let currentId = id;
+        while (parentById.get(currentId)) {
+          if (seen.has(currentId)) break;
+          seen.add(currentId);
+          currentId = parentById.get(currentId) as string;
+        }
+        return currentId;
+      };
+
+      let nextParent = parentById.get(contractId) || null;
+      let nextQuota: number | null | undefined;
+
+      if (body.fuelQuotaParentContractId !== undefined || body.dissolveGroup) {
+        const requested = (body.fuelQuotaParentContractId || '').trim() || null;
+        if (!requested) {
+          nextParent = null;
+        } else {
+          if (requested === contractId) {
+            throw createError('Um contrato não pode ser agrupado consigo mesmo', 400);
+          }
+          if (!parentById.has(requested)) {
+            throw createError('Contrato do grupo não encontrado', 404);
+          }
+          const rootId = resolveRoot(requested);
+          if (rootId === contractId) {
+            throw createError('Esse agrupamento formaria um ciclo', 400);
+          }
+          nextParent = rootId;
+          nextQuota = null;
+        }
+      }
+
+      if (body.weeklyFuelTankQuota !== undefined) {
+        if (nextParent) {
+          throw createError(
+            'Este contrato usa a cota de outro. Altere a cota no contrato dono do grupo.',
+            400
+          );
+        }
+        nextQuota = body.weeklyFuelTankQuota;
+      }
+
+      if (
+        body.fuelQuotaParentContractId === undefined &&
+        body.weeklyFuelTankQuota === undefined &&
+        !body.dissolveGroup
+      ) {
+        throw createError('Nada para atualizar', 400);
+      }
+
+      if (body.dissolveGroup || (body.fuelQuotaParentContractId !== undefined && !nextParent)) {
+        const idsToClear = body.dissolveGroup
+          ? rows
+              .filter((row) => row.id !== contractId && resolveRoot(row.id) === contractId)
+              .map((row) => row.id)
+          : [contractId];
+
+        for (const id of idsToClear) {
+          await prisma.$executeRawUnsafe(
+            `
+              UPDATE "contracts"
+              SET "fuelQuotaParentContractId" = NULL,
+                  "updatedAt" = CURRENT_TIMESTAMP
+              WHERE id = $1
+            `,
+            id
+          );
+        }
+
+        res.json({
+          success: true,
+          message: body.dissolveGroup ? 'Grupo desfeito' : 'Contrato desagrupado',
+        });
+        return;
+      }
+
+      if (nextQuota === undefined) {
+        await prisma.$executeRawUnsafe(
+          `
+            UPDATE "contracts"
+            SET "fuelQuotaParentContractId" = $1,
+                "updatedAt" = CURRENT_TIMESTAMP
+            WHERE id = $2
+          `,
+          nextParent,
+          contractId
+        );
+      } else if (nextParent) {
+        await prisma.$executeRawUnsafe(
+          `
+            UPDATE "contracts"
+            SET "fuelQuotaParentContractId" = $1,
+                "weeklyFuelTankQuota" = NULL,
+                "updatedAt" = CURRENT_TIMESTAMP
+            WHERE id = $2
+          `,
+          nextParent,
+          contractId
+        );
+      } else {
+        await prisma.$executeRawUnsafe(
+          `
+            UPDATE "contracts"
+            SET "weeklyFuelTankQuota" = $1,
+                "updatedAt" = CURRENT_TIMESTAMP
+            WHERE id = $2
+          `,
+          nextQuota,
+          contractId
+        );
+      }
+
+      res.json({
+        success: true,
+        message: body.fuelQuotaParentContractId !== undefined
+          ? 'Contratos agrupados'
+          : 'Cota semanal atualizada',
       });
-
-      res.json({ success: true, message: 'Cota semanal atualizada' });
     } catch (error) {
       next(error);
     }

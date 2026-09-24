@@ -1386,11 +1386,15 @@ model Contract {
   /// Cota de abastecimento por semana, em tanques (ex.: 1.5). Nulo = sem cota configurada (sem limite).
   /// O valor em R$ é tanques × CompanySettings.fuelTankPriceReais, dividido entre todos os veículos do contrato.
   weeklyFuelTankQuota Decimal? @db.Decimal(6, 2)
+  /// Se preenchido, este contrato usa a cota do contrato apontado (e dos demais no mesmo grupo).
+  fuelQuotaParentContractId String?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
   // Relacionamentos
   costCenter                CostCenter                 @relation(fields: [costCenterId], references: [id], onDelete: Restrict)
+  fuelQuotaParent           Contract?                  @relation("FuelQuotaGroup", fields: [fuelQuotaParentContractId], references: [id], onDelete: SetNull)
+  fuelQuotaChildren         Contract[]                 @relation("FuelQuotaGroup")
   billings                  ContractBilling[]
   annualValues              ContractAnnualValue[]
   addenda                   ContractAddendum[]
@@ -1410,6 +1414,7 @@ model Contract {
 
   @@index([costCenterId])
   @@index([number])
+  @@index([fuelQuotaParentContractId])
   @@map("contracts")
 }
 
@@ -3665,6 +3670,8 @@ model FuelRefuelRequest {
   suppliesApprovedBy      String?
   suppliesApprovedAt      DateTime?
   suppliesApprovalComment String?
+  /// Valor em R$ liberado pelo Suprimentos para este abastecimento.
+  releasedAmountReais     Decimal?            @db.Decimal(12, 2)
   suppliesRejectionReason String?
   /// Prazo para o solicitante realizar o abastecimento apÃ³s liberaÃ§Ã£o do Suprimentos
   refuelDeadlineAt        DateTime?

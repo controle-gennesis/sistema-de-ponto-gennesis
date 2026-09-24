@@ -2240,6 +2240,12 @@ async function ensureFuelWeeklyQuotaColumns(prisma: PrismaClient): Promise<void>
   await prisma.$executeRawUnsafe(`
     ALTER TABLE "company_settings" ADD COLUMN IF NOT EXISTS "fuelTankPriceReais" DECIMAL(10,2) NOT NULL DEFAULT 350;
   `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "contracts" ADD COLUMN IF NOT EXISTS "fuelQuotaParentContractId" TEXT;
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "fuel_refuel_requests" ADD COLUMN IF NOT EXISTS "releasedAmountReais" DECIMAL(12,2);
+  `);
 }
 
 async function repairInflatedFuelLiters(prisma: PrismaClient): Promise<void> {

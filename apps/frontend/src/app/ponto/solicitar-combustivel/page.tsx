@@ -558,6 +558,23 @@ export default function SolicitarCombustivelPage() {
     staleTime: 10 * 60 * 1000,
   });
 
+  const { data: selectedQuota, isFetching: loadingSelectedQuota } = useQuery({
+    queryKey: ['fuel-quota-balance', formData.contractId],
+    queryFn: async () => {
+      const res = await api.get('/fuel-refuel-requests/quota-balance', {
+        params: { contractId: formData.contractId },
+      });
+      return res.data?.data as {
+        unlimited: boolean;
+        remainingReais: number | null;
+        weeklyBudgetReais: number | null;
+        usedReais: number;
+      };
+    },
+    enabled: showForm && Boolean(formData.contractId),
+    staleTime: 15_000,
+  });
+
   const contractSelectOptions = useMemo(
     () =>
       ((contractsRes?.data ?? []) as Array<{ id: string; name: string; number?: string }>).map(
@@ -1322,6 +1339,25 @@ export default function SolicitarCombustivelPage() {
                   searchPlaceholder="Pesquisar contrato..."
                   emptyOptionsMessage="Nenhum contrato disponível."
                 />
+                {formData.contractId ? (
+                  <p
+                    className={`mt-1.5 text-xs ${
+                      selectedQuota && !selectedQuota.unlimited && (selectedQuota.remainingReais ?? 0) <= 0
+                        ? 'font-medium text-red-600 dark:text-red-400'
+                        : 'text-gray-500 dark:text-gray-400'
+                    }`}
+                  >
+                    {loadingSelectedQuota && !selectedQuota
+                      ? 'Consultando saldo da semana…'
+                      : selectedQuota?.unlimited
+                        ? 'Cota desta semana: sem limite'
+                        : selectedQuota
+                          ? `Disponível nesta semana: ${Number(
+                              selectedQuota.remainingReais ?? 0
+                            ).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`
+                          : null}
+                  </p>
+                ) : null}
               </div>
             </FormSection>
 

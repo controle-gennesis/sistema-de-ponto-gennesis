@@ -580,8 +580,24 @@ try {
   server.headersTimeout = longMs + 60_000;
   // Node 18+: 0 = sem limite de tempo da requisição
   (server as http.Server & { requestTimeout?: number }).requestTimeout = 0;
+  // Handler ANTES do WebSocket: senão o `ws` reemite EADDRINUSE e o processo morre.
+  let listenRetries = 0;
+  server.on('error', (err: NodeJS.ErrnoException) => {
+    if (err.code === 'EADDRINUSE' && listenRetries < 8) {
+      listenRetries += 1;
+      const waitMs = 750 * listenRetries;
+      console.warn(
+        `⚠️ Porta ${PORT} ainda ocupada (tentativa ${listenRetries}/8). Nova tentativa em ${waitMs}ms...`
+      );
+      setTimeout(() => server.listen(PORT, '0.0.0.0'), waitMs);
+      return;
+    }
+    console.error('❌ Erro no servidor HTTP:', err);
+    process.exit(1);
+  });
   attachCallSignaling(server);
   server.listen(PORT, '0.0.0.0', () => {
+    listenRetries = 0;
     void (async () => {
       try {
         await ensureProductionSchema(prisma);

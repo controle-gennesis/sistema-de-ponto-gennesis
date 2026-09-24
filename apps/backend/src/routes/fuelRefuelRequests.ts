@@ -52,6 +52,12 @@ router.get(
 router.get('/', requireFuelSuppliesAccess, (req, res, next) =>
   fuelRefuelRequestController.list(req, res, next),
 );
+router.get('/quota-balance', (req, res, next) =>
+  fuelRefuelRequestController.getQuotaBalance(req, res, next),
+);
+router.get('/quota-balances', requireFuelSuppliesAccess, (req, res, next) =>
+  fuelRefuelRequestController.listQuotaBalances(req, res, next),
+);
 router.get('/quota-config', requireAdministrator, (req, res, next) =>
   fuelRefuelRequestController.getQuotaConfig(req, res, next),
 );
