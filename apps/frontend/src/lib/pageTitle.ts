@@ -99,6 +99,7 @@ function decodePathSegment(segment: string): string {
 function breadcrumbModuleLabel(module: { name: string; href: string }): string {
   if (module.href === '/ponto/fluig/aprovadores') return 'Aprovadores';
   if (module.href === '/ponto/empreiteiros') return 'Empreitas';
+  if (module.href === '/ponto/juridico/processos') return 'Processos';
   return module.name;
 }
 

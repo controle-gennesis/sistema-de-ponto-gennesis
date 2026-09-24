@@ -422,7 +422,7 @@ export function JuridicoImportModal({ isOpen, onClose, onImported }: Props) {
     <Modal
       isOpen={isOpen}
       onClose={handleClose}
-      title="Importar processos ativos"
+      title="Importar processos"
       size="5xl"
       confirmBeforeClose={!!report && !importing}
       confirmCloseMessage="Descartar a planilha e os arquivos selecionados?"

@@ -867,6 +867,9 @@ export function useRoutePermission(route: string) {
     '/ponto/natureza-orcamentaria': isAdministrator || can(pk('/ponto/natureza-orcamentaria')),
     '/ponto/formularios': isAdministrator || can(pk('/ponto/formularios')),
     '/ponto/noticias': isAdministrator || can(pk('/ponto/noticias')),
+    '/ponto/juridico/processos': isAdministrator || can(pk('/ponto/juridico/processos-ativos')),
+    '/ponto/juridico/processos/dashboard':
+      isAdministrator || can(pk('/ponto/juridico/processos-ativos/dashboard')),
     '/ponto/juridico/processos-ativos': isAdministrator || can(pk('/ponto/juridico/processos-ativos')),
     '/ponto/juridico/processos-ativos/dashboard':
       isAdministrator || can(pk('/ponto/juridico/processos-ativos/dashboard')),

@@ -36,6 +36,8 @@ export type JuridicoProcesso = {
   periodoInicio?: string | null;
   periodoFim?: string | null;
   representanteAutor?: string | null;
+  advogadoId?: string | null;
+  advogado?: string | null;
   acordo?: string | null;
   valorCausa?: string | number | null;
   statusSentenca?: string | null;

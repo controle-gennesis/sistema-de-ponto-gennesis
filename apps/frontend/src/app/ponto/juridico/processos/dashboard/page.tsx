@@ -30,7 +30,7 @@ export default function ProcessosAtivosDashboardPage() {
   }
 
   return (
-    <ProtectedRoute route="/ponto/juridico/processos-ativos/dashboard">
+    <ProtectedRoute route="/ponto/juridico/processos/dashboard">
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
         <div className="space-y-6">
           <div className="text-center">

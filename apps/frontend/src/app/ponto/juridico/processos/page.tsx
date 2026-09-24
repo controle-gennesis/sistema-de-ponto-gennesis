@@ -369,15 +369,15 @@ export default function ProcessosAtivosPage() {
     'Erro ao carregar processos';
 
   return (
-    <ProtectedRoute route="/ponto/juridico/processos-ativos">
+    <ProtectedRoute route="/ponto/juridico/processos">
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
         <div className="space-y-6">
           <div className="text-center">
             <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
-              Processos Ativos
+              Processos
             </h1>
             <p className="mx-auto mt-2 max-w-2xl text-sm text-gray-600 dark:text-gray-400 sm:text-base">
-              Acompanhe os processos jurídicos ativos
+              Acompanhe os processos jurídicos
             </p>
           </div>
 
@@ -520,7 +520,7 @@ export default function ProcessosAtivosPage() {
                               key={row.id}
                               className={getListTableRowClassName(true)}
                               onClick={() =>
-                                router.push(`/ponto/juridico/processos-ativos/${row.id}`)
+                                router.push(`/ponto/juridico/processos/${row.id}`)
                               }
                             >
                               {COLUMNS.map((col) => {

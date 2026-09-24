@@ -59,6 +59,21 @@ const nextConfig = {
         source: '/ponto/espelho-nf/contas-bancarias',
         destination: '/ponto/contas-bancarias',
         permanent: true
+      },
+      {
+        source: '/ponto/juridico/processos-ativos',
+        destination: '/ponto/juridico/processos',
+        permanent: true
+      },
+      {
+        source: '/ponto/juridico/processos-ativos/dashboard',
+        destination: '/ponto/juridico/processos/dashboard',
+        permanent: true
+      },
+      {
+        source: '/ponto/juridico/processos-ativos/:id',
+        destination: '/ponto/juridico/processos/:id',
+        permanent: true
       }
     ];
   },

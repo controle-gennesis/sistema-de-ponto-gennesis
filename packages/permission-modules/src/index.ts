@@ -225,8 +225,8 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
     category: 'Engenharia',
   },
   // Jurídico
-  { key: pathToModuleKey('/ponto/juridico/processos-ativos'), name: 'Processos Ativos', href: '/ponto/juridico/processos-ativos', category: 'Jurídico' },
-  { key: pathToModuleKey('/ponto/juridico/processos-ativos/dashboard'), name: 'Dashboards dos Processos', href: '/ponto/juridico/processos-ativos/dashboard', category: 'Jurídico' },
+  { key: pathToModuleKey('/ponto/juridico/processos-ativos'), name: 'Processos', href: '/ponto/juridico/processos', category: 'Jurídico' },
+  { key: pathToModuleKey('/ponto/juridico/processos-ativos/dashboard'), name: 'Dashboards dos Processos', href: '/ponto/juridico/processos/dashboard', category: 'Jurídico' },
   // Suprimentos
   { key: pathToModuleKey('/ponto/gerenciar-materiais'), name: 'Requisições de Materiais', href: '/ponto/gerenciar-materiais', category: 'Suprimentos' },
   { key: pathToModuleKey('/ponto/mapa-cotacao'), name: 'Mapa de Cotação', href: '/ponto/mapa-cotacao', category: 'Suprimentos' },

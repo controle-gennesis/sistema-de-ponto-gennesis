@@ -119,7 +119,7 @@ export default function ProcessoAtivoDetailPage() {
 
   useBreadcrumbEntity(
     numeroProcesso && id
-      ? { label: numeroProcesso, href: `/ponto/juridico/processos-ativos/${id}` }
+      ? { label: numeroProcesso, href: `/ponto/juridico/processos/${id}` }
       : null,
   );
 
@@ -174,7 +174,7 @@ export default function ProcessoAtivoDetailPage() {
   }
 
   return (
-    <ProtectedRoute route="/ponto/juridico/processos-ativos">
+    <ProtectedRoute route="/ponto/juridico/processos">
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
         <div className="space-y-6">
           {isError || !processo ? (
@@ -244,6 +244,7 @@ export default function ProcessoAtivoDetailPage() {
                         value={formatProcessoStatus(processo.statusProcesso)}
                       />
                       <Field label="Decisão do STF" value={cellText(processo.decisaoStf)} />
+                      <Field label="Advogado" value={cellText(processo.advogado)} />
                       <Field
                         label="Representante do autor"
                         value={cellText(processo.representanteAutor)}
@@ -303,7 +304,7 @@ export default function ProcessoAtivoDetailPage() {
                 <CardHeader className={cadastroListClasses.cardHeader}>
                   <SectionHeader
                     icon={Paperclip}
-                    title={`Anexos / atas (${processo.anexos?.length || 0})`}
+                    title={`Anexos (${processo.anexos?.length || 0})`}
                     subtitle="Documentos e atas vinculados ao processo"
                     actions={
                       <>

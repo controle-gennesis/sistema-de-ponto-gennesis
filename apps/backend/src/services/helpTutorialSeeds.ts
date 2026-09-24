@@ -725,15 +725,15 @@ export const HELP_TUTORIAL_SEEDS: HelpTutorialCreateInput[] = [
   // ——— Jurídico ———
   {
     slug: 'usar-processos-ativos',
-    title: 'Usar Processos Ativos (Jurídico)',
+    title: 'Usar Processos (Jurídico)',
     summary: 'Como consultar processos jurídicos em andamento.',
     setor: 'Jurídico',
     keywords: ['jurídico', 'processos', 'causa'],
-    href: '/ponto/juridico/processos-ativos',
+    href: '/ponto/juridico/processos',
     steps: [
       {
-        title: 'Abra Processos Ativos',
-        body: 'No menu Jurídico, acesse Processos Ativos.',
+        title: 'Abra Processos',
+        body: 'No menu Jurídico, acesse Processos.',
       },
       {
         title: 'Filtre a carteira',
@@ -751,7 +751,7 @@ export const HELP_TUTORIAL_SEEDS: HelpTutorialCreateInput[] = [
     summary: 'Como ler indicadores de causas, sentenças e acordos.',
     setor: 'Jurídico',
     keywords: ['dashboard', 'jurídico', 'indicadores'],
-    href: '/ponto/juridico/processos-ativos/dashboard',
+    href: '/ponto/juridico/processos/dashboard',
     steps: [
       {
         title: 'Abra o Dashboard',

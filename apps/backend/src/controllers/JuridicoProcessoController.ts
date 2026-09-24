@@ -263,6 +263,8 @@ type ProcessoInput = {
   periodoInicio?: string;
   periodoFim?: string;
   representanteAutor?: string;
+  advogadoId?: string;
+  advogado?: string;
   acordo?: string;
   valorCausa?: unknown;
   statusSentenca?: string;
@@ -319,6 +321,8 @@ function buildProcessoData(row: ProcessoInput) {
     periodoInicio: opt(row.periodoInicio),
     periodoFim: opt(row.periodoFim),
     representanteAutor: opt(row.representanteAutor),
+    advogadoId: opt(row.advogadoId),
+    advogado: opt(row.advogado),
     acordo: opt(row.acordo),
     valorCausa: parseMoney(row.valorCausa),
     statusSentenca: opt(row.statusSentenca),
@@ -476,6 +480,7 @@ export class JuridicoProcessoController {
             { status: { contains: q, mode: 'insensitive' } },
             { statusProcesso: { contains: q, mode: 'insensitive' } },
             { representanteAutor: { contains: q, mode: 'insensitive' } },
+            { advogado: { contains: q, mode: 'insensitive' } },
           ],
         });
       }

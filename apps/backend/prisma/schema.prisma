@@ -5071,6 +5071,8 @@ model JuridicoProcesso {
   periodoInicio        String?
   periodoFim           String?
   representanteAutor   String?
+  advogadoId           String?
+  advogado             String?
   acordo               String?
   valorCausa           Decimal? @db.Decimal(14, 2)
   statusSentenca       String?

@@ -1511,6 +1511,8 @@ async function ensureJuridicoProcessosTables(prisma: PrismaClient): Promise<void
       "periodoInicio" TEXT,
       "periodoFim" TEXT,
       "representanteAutor" TEXT,
+      "advogadoId" TEXT,
+      "advogado" TEXT,
       "acordo" TEXT,
       "valorCausa" DECIMAL(14, 2),
       "statusSentenca" TEXT,
@@ -1589,6 +1591,17 @@ async function ensureJuridicoProcessosTables(prisma: PrismaClient): Promise<void
         ON DELETE CASCADE ON UPDATE CASCADE;
     EXCEPTION WHEN duplicate_object THEN NULL;
     END $$;
+  `);
+}
+
+async function ensureJuridicoProcessoAdvogadoColumns(prisma: PrismaClient): Promise<void> {
+  if (!(await tableExists(prisma, 'juridico_processos'))) return;
+  if (await columnExists(prisma, 'juridico_processos', 'advogadoId')) return;
+  console.warn('[Schema] Colunas juridico_processos.advogado ausentes — adicionando.');
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "juridico_processos"
+      ADD COLUMN IF NOT EXISTS "advogadoId" TEXT,
+      ADD COLUMN IF NOT EXISTS "advogado" TEXT;
   `);
 }
 
@@ -2296,6 +2309,7 @@ export async function ensureProductionSchema(prisma: PrismaClient): Promise<void
     await ensurePunchPocColumns(prisma);
     await ensureSupportTicketsSchema(prisma);
     await ensureJuridicoProcessosTables(prisma);
+    await ensureJuridicoProcessoAdvogadoColumns(prisma);
     await ensureOcsBoletoPixExtrasTable(prisma);
     await ensureObrasTable(prisma);
     await ensureEmpreiteirosTable(prisma);

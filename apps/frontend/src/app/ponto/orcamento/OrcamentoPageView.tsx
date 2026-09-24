@@ -64,6 +64,7 @@ import {
   prefetchOrcafascioOrcamentosList,
 } from '@/lib/orcafascioOrcamentosCache';
 import {
+  hydrateOrcamentoDetailCache,
   invalidateOrcamentoDetailCache,
   loadOrcamentoDetailCached,
   peekOrcamentoDetailCache,
@@ -88,6 +89,7 @@ import {
 import { cadastroListClasses } from '@/components/ui/RowActionMenu';
 import { OrcamentoMedicaoPainel } from './OrcamentoMedicaoPainel';
 import { OrcamentoCronogramaPainel } from './OrcamentoCronogramaPainel';
+import { TabelaJanelaSpacer, useOrcamentoTabelaJanela } from './useOrcamentoTabelaJanela';
 import {
   calcularDataFimOrcamento,
   calcularStatusCronograma,
@@ -2821,6 +2823,40 @@ async function fetchOrcamentoDetail(centroCustoId: string, orcamentoId: string):
   }
 }
 
+/** Pinta na hora com o que já está no aparelho (RAM / sessão / backup). O GET só confirma. */
+function tryHydrateLocalOrcamento(
+  centroCustoId: string,
+  orcamentoId: string
+): {
+  servicos: ServicoPadrao[];
+  imports: ImportRecord[];
+  sessaoOrcamento: SessaoOrcamentoPersist | null;
+} | null {
+  const cachedRaw = peekOrcamentoDetailCache(centroCustoId, orcamentoId);
+  if (cachedRaw) {
+    const parsed = parseOrcamentoDetailRaw(cachedRaw);
+    if (parsed) return parsed;
+  }
+  const sessaoLocal = loadSessaoOrcamento(centroCustoId, orcamentoId);
+  const doc = sessaoLocal?.servicosDocumento;
+  if (Array.isArray(doc) && doc.length > 0) {
+    return {
+      servicos: doc,
+      imports: loadImports(centroCustoId),
+      sessaoOrcamento: sessaoLocal,
+    };
+  }
+  const snapshot = getLatestUsefulSnapshot(centroCustoId, orcamentoId);
+  if (snapshot && Array.isArray(snapshot.servicos) && snapshot.servicos.length > 0) {
+    return {
+      servicos: snapshot.servicos,
+      imports: Array.isArray(snapshot.imports) ? snapshot.imports : loadImports(centroCustoId),
+      sessaoOrcamento: snapshot.sessaoOrcamento ?? sessaoLocal,
+    };
+  }
+  return null;
+}
+
 /**
  * Monta o body do PUT. Orçamentos importados enviam `servicos` só no **arquivo deste orçamento**
  * (espelho de `servicosDocumento`), para `getOrcamento` não preencher `servicos` com o catálogo
@@ -4213,10 +4249,13 @@ const MoedaCelula = memo(function MoedaCelula({
   );
 });
 
+const FD_COMMIT_DEBOUNCE_MS = 180;
+
 /**
  * Input da Ficha de Demanda: estado local enquanto digita.
  * Por padrão só notifica o pai no blur — evita re-render da grade inteira a cada tecla.
- * Campos de moeda passam `mask` + `commitOnChange` para formatar e recalcular na hora.
+ * Campos de moeda passam `mask` + `commitOnChange` para formatar na hora e
+ * só recalcular totais depois de uma pausa curta (sem travar a digitação).
  */
 const FdCampoLocal = memo(function FdCampoLocal({
   committedValue,
@@ -4239,15 +4278,42 @@ const FdCampoLocal = memo(function FdCampoLocal({
 }) {
   const [local, setLocal] = useState(committedValue);
   const focusedRef = useRef(false);
+  const commitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onCommitRef = useRef(onCommit);
+  onCommitRef.current = onCommit;
 
   useEffect(() => {
     if (!focusedRef.current) setLocal(committedValue);
   }, [committedValue]);
 
-  const applyValue = (raw: string, shouldCommit: boolean) => {
+  useEffect(
+    () => () => {
+      if (commitTimerRef.current) clearTimeout(commitTimerRef.current);
+    },
+    []
+  );
+
+  const flushCommit = (value: string) => {
+    if (commitTimerRef.current) {
+      clearTimeout(commitTimerRef.current);
+      commitTimerRef.current = null;
+    }
+    onCommitRef.current(value);
+  };
+
+  const applyValue = (raw: string, shouldCommit: boolean, immediate?: boolean) => {
     const next = mask ? mask(raw) : raw;
     setLocal(next);
-    if (shouldCommit) onCommit(next);
+    if (!shouldCommit) return;
+    if (immediate || !commitOnChange) {
+      flushCommit(next);
+      return;
+    }
+    if (commitTimerRef.current) clearTimeout(commitTimerRef.current);
+    commitTimerRef.current = setTimeout(() => {
+      commitTimerRef.current = null;
+      onCommitRef.current(next);
+    }, FD_COMMIT_DEBOUNCE_MS);
   };
 
   return (
@@ -4265,7 +4331,7 @@ const FdCampoLocal = memo(function FdCampoLocal({
       onChange={(e) => applyValue(e.target.value, Boolean(commitOnChange))}
       onBlur={(e) => {
         focusedRef.current = false;
-        applyValue(e.target.value, true);
+        applyValue(e.target.value, true, true);
       }}
     />
   );
@@ -4488,6 +4554,7 @@ export function OrcamentoPageView({
   const [memorialItemKey, setMemorialItemKey] = useState<string | null>(null);
   // Draft para campos que aceitam cálculos (2+3, 10/2, etc) - avalia no blur
   const [draftCalc, setDraftCalc] = useState<Record<string, string>>({});
+  const calcCommitTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const [insumosAnaliticoManuais, setInsumosAnaliticoManuais] = useState<Record<string, InsumoAnaliticoManual[]>>({});
   const [insumosAnaliticoOcultos, setInsumosAnaliticoOcultos] = useState<string[]>([]);
   /** Menu botão direito — composição, insumo do catálogo ou insumo manual. */
@@ -4874,11 +4941,10 @@ export function OrcamentoPageView({
     if (!centroCustoId || !orcamentoAtivoId) return;
     let cancelled = false;
     const oid = orcamentoAtivoId;
-    const cachedRaw = peekOrcamentoDetailCache(centroCustoId, oid);
-    const hasWarmCache = Boolean(cachedRaw);
+    const localReady = tryHydrateLocalOrcamento(centroCustoId, oid);
 
-    // Com cache quente: não zera a UI nem mostra o spinner do S3.
-    if (!hasWarmCache) {
+    // Com dado local: não zera a UI nem espera o S3.
+    if (!localReady) {
       setLoadingFromApi(true);
       setServicos([]);
       setImports([]);
@@ -5036,17 +5102,31 @@ export function OrcamentoPageView({
       carregarCatalogoContratoEmBackground(servicosDoOrcamento, sessaoApi, importado);
     };
 
-    // Aplica cache imediatamente (mesmo padrão do select Orçafascio).
-    if (cachedRaw) {
-      const parsed = parseOrcamentoDetailRaw(cachedRaw);
-      if (parsed) aplicarApiData(parsed);
+    let painted = false;
+    if (localReady) {
+      aplicarApiData(localReady);
+      painted = true;
     }
 
-    fetchOrcamentoDetail(centroCustoId, oid).then((apiData) => {
+    const apiPromise = fetchOrcamentoDetail(centroCustoId, oid);
+
+    void (async () => {
+      if (!painted) {
+        const fromDisk = await hydrateOrcamentoDetailCache(centroCustoId, oid);
+        if (cancelled) return;
+        const parsedDisk = fromDisk ? parseOrcamentoDetailRaw(fromDisk) : null;
+        if (parsedDisk) {
+          aplicarApiData(parsedDisk);
+          setLoadingFromApi(false);
+          painted = true;
+        }
+      }
+
+      const apiData = await apiPromise;
       if (cancelled) return;
       if (apiData) {
         aplicarApiData(apiData);
-      } else if (!hasWarmCache) {
+      } else if (!painted) {
         const sessaoLocal = loadSessaoOrcamento(centroCustoId, oid);
         const importadoLocal = sessaoLocal?.meta?.importadoPlanilha === true;
         const svcs = importadoLocal ? loadServicos(centroCustoId) : [];
@@ -5078,7 +5158,7 @@ export function OrcamentoPageView({
         carregarCatalogoContratoEmBackground(svcs, sessaoLocal, importadoLocal);
       }
       setLoadingFromApi(false);
-    });
+    })();
     return () => {
       cancelled = true;
       setLoadingFromApi(false);
@@ -7402,6 +7482,27 @@ export function OrcamentoPageView({
     itensOcultosNoOrcamento,
   ]);
 
+  const itensCalculadosPorBlocoNome = useMemo(() => {
+    const m = new Map<string, typeof itensCalculados>();
+    for (const r of itensCalculados) {
+      const k = `${r.servicoNome}\0${r.subtituloNome}`;
+      const arr = m.get(k);
+      if (arr) arr.push(r);
+      else m.set(k, [r]);
+    }
+    return m;
+  }, [itensCalculados]);
+
+  const itensCalculadosPorServicoNome = useMemo(() => {
+    const m = new Map<string, typeof itensCalculados>();
+    for (const r of itensCalculados) {
+      const arr = m.get(r.servicoNome);
+      if (arr) arr.push(r);
+      else m.set(r.servicoNome, [r]);
+    }
+    return m;
+  }, [itensCalculados]);
+
   /** Todos os itens do orçamento na ordem da memória de cálculo (inclui UN e medições dimensionais). */
   const itensMemoriaCalculoLista = useMemo(() => itensCalculados, [itensCalculados]);
 
@@ -7543,14 +7644,7 @@ export function OrcamentoPageView({
     // Sempre monta a árvore (também fora das abas pesadas) para exportar Orçamento completo.
     if (subtitulosAdicionados.length === 0) return out;
     const insumosOcultosSet = new Set(insumosAnaliticoOcultos);
-
-    const itensPorBlocoNome = new Map<string, typeof itensCalculados>();
-    for (const r of itensCalculados) {
-      const k = `${r.servicoNome}\0${r.subtituloNome}`;
-      const arr = itensPorBlocoNome.get(k);
-      if (arr) arr.push(r);
-      else itensPorBlocoNome.set(k, [r]);
-    }
+    const itensPorBlocoNome = itensCalculadosPorBlocoNome;
 
     const servicoNumero = new Map<string, number>();
     let nextMain = 0;
@@ -7655,7 +7749,7 @@ export function OrcamentoPageView({
     return out;
   }, [
     subtitulosAdicionados,
-    itensCalculados,
+    itensCalculadosPorBlocoNome,
     mapaComposicoes,
     insumosAnaliticoOcultos,
   ]);
@@ -7892,8 +7986,8 @@ export function OrcamentoPageView({
         : 'Orçamentos'
   );
 
-  /** Ficha de demanda: só composições e insumos (sem faixas de título/subtítulo). */
-  const linhasFichaDemanda = useMemo(() => {
+  /** Árvore da FD sem valores digitados — não reconstrói a cada tecla. */
+  const linhasAnaliticoFichaBase = useMemo(() => {
     if (orcamentoViewTab !== 'planilhaAnalitica' || deferredOrcamentoViewTab !== 'planilhaAnalitica') return [];
     const composicaoPorKey = analiticoComposicaoPorKey;
     const totalInsumosBasePorComposicao = analiticoInsumosCountPorParent;
@@ -7980,6 +8074,20 @@ export function OrcamentoPageView({
         }
       }
     }
+    return linhasAnaliticoFicha;
+  }, [
+    orcamentoViewTab,
+    deferredOrcamentoViewTab,
+    linhasAnaliticoOrcamento,
+    analiticoComposicaoPorKey,
+    analiticoInsumosCountPorParent,
+    insumosAnaliticoManuais,
+  ]);
+
+  /** Ficha de demanda: só composições e insumos (sem faixas de título/subtítulo). */
+  const linhasFichaDemanda = useMemo(() => {
+    if (orcamentoViewTab !== 'planilhaAnalitica' || deferredOrcamentoViewTab !== 'planilhaAnalitica') return [];
+    const linhasAnaliticoFicha = linhasAnaliticoFichaBase;
 
     const insumosPorComposicao = new Map<
       string,
@@ -8214,10 +8322,7 @@ export function OrcamentoPageView({
   }, [
     orcamentoViewTab,
     deferredOrcamentoViewTab,
-    linhasAnaliticoOrcamento,
-    analiticoComposicaoPorKey,
-    analiticoInsumosCountPorParent,
-    insumosAnaliticoManuais,
+    linhasAnaliticoFichaBase,
     planilhaQtdDeferred,
     planilhaVlDeferred,
     planilhaTipoInsumo,
@@ -8320,6 +8425,15 @@ export function OrcamentoPageView({
     analiticoInsumosCountPorParent,
     insumosAnaliticoManuais,
   ]);
+
+  const janelaAnalitico = useOrcamentoTabelaJanela(
+    orcamentoViewTab === 'analitico' ? linhasAnaliticoOrcamento.length : 0,
+    { rowHeight: 44, overscan: 28, enabled: orcamentoViewTab === 'analitico' }
+  );
+  const janelaFd = useOrcamentoTabelaJanela(
+    orcamentoViewTab === 'planilhaAnalitica' ? linhasAnaliticoComManuais.length : 0,
+    { rowHeight: 48, overscan: 28, enabled: orcamentoViewTab === 'planilhaAnalitica' }
+  );
 
   const resumoSecoesFicha = useMemo(() => {
     const empty = {
@@ -8753,18 +8867,28 @@ export function OrcamentoPageView({
   };
 
   const handleCalcBlur = (draftKey: string, raw: string, onCommit: (n: number) => void) => {
+    const pending = calcCommitTimersRef.current[draftKey];
+    if (pending) {
+      clearTimeout(pending);
+      delete calcCommitTimersRef.current[draftKey];
+    }
     const n = parseMedicaoBlurNumber(raw);
     onCommit(n ?? 0);
-    setDraftCalc(p => { const n = { ...p }; delete n[draftKey]; return n; });
+    setDraftCalc(p => { const next = { ...p }; delete next[draftKey]; return next; });
   };
 
   const handleCalcChange = (draftKey: string, raw: string, onCommit: (n: number) => void) => {
     setDraftCalc(p => ({ ...p, [draftKey]: raw }));
     const n = parseMedicaoBlurNumber(raw);
     if (n === null && String(raw ?? '').trim() !== '') return;
-    startTransition(() => {
-      onCommit(n ?? 0);
-    });
+    const timers = calcCommitTimersRef.current;
+    if (timers[draftKey]) clearTimeout(timers[draftKey]);
+    timers[draftKey] = setTimeout(() => {
+      delete timers[draftKey];
+      startTransition(() => {
+        onCommit(n ?? 0);
+      });
+    }, FD_COMMIT_DEBOUNCE_MS);
   };
 
   const commitPlanilhaQtdCompra = useCallback((lineKey: string, raw: string) => {
@@ -10797,8 +10921,10 @@ export function OrcamentoPageView({
                             <th className="px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600">Total</th>
                           </tr>
                         </thead>
-                        <tbody className="divide-y divide-gray-200/80 dark:divide-gray-700">
-                          {linhasAnaliticoOrcamento.map((l, idxLinha) => {
+                        <tbody ref={janelaAnalitico.tbodyRef} className="divide-y divide-gray-200/80 dark:divide-gray-700">
+                          <TabelaJanelaSpacer height={janelaAnalitico.topPad} colSpan={11} />
+                          {linhasAnaliticoOrcamento.slice(janelaAnalitico.start, janelaAnalitico.end).map((l, i) => {
+                            const idxLinha = janelaAnalitico.start + i;
                             if (l.kind === 'tituloServico') {
                               return (
                                 <tr key={l.key} className={`bg-red-600 dark:bg-red-950/90 ${gradeTableRowTrCls} ${gradeTituloSubtituloRowTrCls}`}>
@@ -11044,6 +11170,7 @@ export function OrcamentoPageView({
                               </React.Fragment>
                             );
                           })}
+                          <TabelaJanelaSpacer height={janelaAnalitico.bottomPad} colSpan={11} />
                         </tbody>
                       </table>
                     </div>
@@ -11299,8 +11426,9 @@ export function OrcamentoPageView({
                                 </th>
                               </tr>
                             </thead>
-                            <tbody className="divide-y divide-gray-200/80 dark:divide-gray-700">
-                              {linhasAnaliticoComManuais.map((l) => {
+                            <tbody ref={janelaFd.tbodyRef} className="divide-y divide-gray-200/80 dark:divide-gray-700">
+                              <TabelaJanelaSpacer height={janelaFd.topPad} colSpan={19} />
+                              {linhasAnaliticoComManuais.slice(janelaFd.start, janelaFd.end).map((l) => {
                                 const itemW =
                                   'w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2.5 align-middle text-center text-sm tabular-nums';
                                 if (l.kind === 'tituloServico') {
@@ -11401,8 +11529,8 @@ export function OrcamentoPageView({
                                   let somaVlUnitCompraRealInsumos = 0;
                                   let temAlgumVlUnitCompraReal = false;
                                   for (const ins of filhos) {
-                                    const qC = planilhaQuantidadeCompra[ins.key];
-                                    const vReal = planilhaValorUnitCompraReal[ins.key];
+                                    const qC = planilhaQtdDeferred[ins.key];
+                                    const vReal = planilhaVlDeferred[ins.key];
                                     const vOrc = ins.valorUnit;
                                     if (vReal !== undefined && Number.isFinite(vReal)) {
                                       somaVlUnitCompraRealInsumos += vReal;
@@ -11563,8 +11691,10 @@ export function OrcamentoPageView({
                                     </tr>
                                   );
                                 }
-                                const qC = planilhaQuantidadeCompra[l.key];
-                                const vReal = planilhaValorUnitCompraReal[l.key];
+                                const qCLive = planilhaQuantidadeCompra[l.key];
+                                const vRealLive = planilhaValorUnitCompraReal[l.key];
+                                const qC = planilhaQtdDeferred[l.key];
+                                const vReal = planilhaVlDeferred[l.key];
                                 const vOrc = l.valorUnit;
                                 const valorUnitEstimado = vOrc * PLANILHA_FATOR_CUSTO_ESTIMADO;
                                 const custoEst = l.total * PLANILHA_FATOR_CUSTO_ESTIMADO;
@@ -11685,8 +11815,8 @@ export function OrcamentoPageView({
                                     >
                                       <FdCampoLocal
                                         committedValue={
-                                          qC !== undefined
-                                            ? qC.toLocaleString('pt-BR', {
+                                          qCLive !== undefined
+                                            ? qCLive.toLocaleString('pt-BR', {
                                                 minimumFractionDigits: 2,
                                                 maximumFractionDigits: 4,
                                               })
@@ -11721,8 +11851,8 @@ export function OrcamentoPageView({
                                         </span>
                                         <FdCampoLocal
                                           committedValue={
-                                            vReal !== undefined
-                                              ? vReal.toLocaleString('pt-BR', {
+                                            vRealLive !== undefined
+                                              ? vRealLive.toLocaleString('pt-BR', {
                                                   minimumFractionDigits: 2,
                                                   maximumFractionDigits: 2,
                                                 })
@@ -11788,6 +11918,7 @@ export function OrcamentoPageView({
                                   </tr>
                                 );
                               })}
+                              <TabelaJanelaSpacer height={janelaFd.bottomPad} colSpan={19} />
                             </tbody>
                           </table>
                         </div>
@@ -12153,8 +12284,9 @@ export function OrcamentoPageView({
                               }
                             }
                             return subtitulosAdicionados.map((bloco, blocoIndex) => {
-                        const rowsDoBloco = itensCalculados.filter(r => r.servicoNome === bloco.servicoNome && r.subtituloNome === bloco.subtituloNome);
-                        const rowsDoTitulo = itensCalculados.filter(r => r.servicoNome === bloco.servicoNome);
+                        const rowsDoBloco =
+                          itensCalculadosPorBlocoNome.get(`${bloco.servicoNome}\0${bloco.subtituloNome}`) ?? [];
+                        const rowsDoTitulo = itensCalculadosPorServicoNome.get(bloco.servicoNome) ?? [];
                         const resumoSubtitulo = somarLinhasMontagem(rowsDoBloco);
                         const resumoTitulo = somarLinhasMontagem(rowsDoTitulo);
                         const mesmoTituloSubtitulo =

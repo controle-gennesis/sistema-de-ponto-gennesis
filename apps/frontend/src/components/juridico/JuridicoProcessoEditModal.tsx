@@ -8,6 +8,9 @@ import { Modal } from '@/components/ui/Modal';
 import { DatePickerField } from '@/components/ui/DatePickerField';
 import { TimePickerField } from '@/components/ui/TimePickerField';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
+import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
+import { toPersonSelectOptions } from '@/lib/personSelectOptions';
+import { fetchEmployeeSelectOptions } from '@/lib/employeeSelectOptions';
 import {
   formatCurrencyInputBrFromNumber,
   maskCurrencyInputBrOrEmpty,
@@ -48,6 +51,8 @@ type FormState = {
   periodoInicio: string;
   periodoFim: string;
   representanteAutor: string;
+  advogadoId: string;
+  advogado: string;
   decisaoStf: string;
   agravoInstrumento: string;
   objeto: string;
@@ -90,6 +95,8 @@ const EMPTY_FORM: FormState = {
   periodoInicio: '',
   periodoFim: '',
   representanteAutor: '',
+  advogadoId: '',
+  advogado: '',
   decisaoStf: '',
   agravoInstrumento: '',
   objeto: '',
@@ -186,6 +193,8 @@ function processoToForm(processo: JuridicoProcesso): FormState {
     periodoInicio: dateToPickerValue(processo.periodoInicio),
     periodoFim: dateToPickerValue(processo.periodoFim),
     representanteAutor: textToInput(processo.representanteAutor),
+    advogadoId: textToInput(processo.advogadoId),
+    advogado: textToInput(processo.advogado),
     decisaoStf: textToInput(processo.decisaoStf),
     agravoInstrumento: textToInput(processo.agravoInstrumento),
     objeto: textToInput(processo.objeto),
@@ -294,6 +303,34 @@ export function JuridicoProcessoEditModal({
       return res.data?.data as JuridicoProcesso;
     },
   });
+
+  const { data: employees = [] } = useQuery({
+    queryKey: ['employees-for-juridico-processo'],
+    queryFn: fetchEmployeeSelectOptions,
+    enabled: isOpen,
+    staleTime: 10 * 60 * 1000,
+  });
+
+  const advogadoOptions = useMemo(() => {
+    const options = toPersonSelectOptions(
+      employees.map((employee) => ({
+        value: employee.id,
+        name: employee.name,
+        cpf: employee.cpf,
+        profilePhotoUrl: employee.profilePhotoUrl,
+      })),
+    );
+    const currentId = form.advogadoId.trim();
+    const currentName = form.advogado.trim();
+    if (currentId && !options.some((o) => o.value === currentId)) {
+      options.unshift({
+        value: currentId,
+        label: currentName || currentId,
+        searchText: currentName || currentId,
+      });
+    }
+    return options;
+  }, [employees, form.advogado, form.advogadoId]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -477,6 +514,27 @@ export function JuridicoProcessoEditModal({
                 value={form.presencial}
                 onChange={setField('presencial')}
                 placeholder="Ex: Sim, Não ou Remoto"
+              />
+            </Field>
+            <Field label="Advogado">
+              <SingleSelectSearchDropdown
+                value={form.advogadoId}
+                onChange={(id) => {
+                  const employee = employees.find((e) => e.id === id);
+                  setForm((prev) => ({
+                    ...prev,
+                    advogadoId: id,
+                    advogado: employee?.name || (id ? prev.advogado : ''),
+                  }));
+                  setDirty(true);
+                }}
+                options={advogadoOptions}
+                placeholder="Selecionar funcionário"
+                searchPlaceholder="Pesquisar funcionário..."
+                emptyOptionLabel="Sem advogado"
+                emptyOptionsMessage="Nenhum funcionário encontrado"
+                emptySearchMessage="Nenhum funcionário corresponde à busca"
+                matchTriggerWidth
               />
             </Field>
             <Field label="Representante do autor" className="sm:col-span-2">

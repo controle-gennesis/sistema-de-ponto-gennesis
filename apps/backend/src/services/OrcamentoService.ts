@@ -615,15 +615,22 @@ export class OrcamentoService {
     centroCustoId: string,
     orcamentoId: string
   ): Promise<OrcamentoData | null> {
-    await this.migrateLegacyIfNeeded(centroCustoId);
     const raw = await this.readOrcamentoFile(centroCustoId, orcamentoId);
     if (!raw) return null;
-    const padrao = await this.getServicosPadrao(centroCustoId);
     const rawObj = raw as unknown as Record<string, unknown>;
     const docTemServicos = Object.prototype.hasOwnProperty.call(rawObj, 'servicos');
-    const servicos = docTemServicos && Array.isArray(rawObj.servicos) ? rawObj.servicos : padrao.servicos;
+    // Documento importado já traz a árvore — não espera o catálogo do contrato (outro GET no S3).
+    if (docTemServicos && Array.isArray(rawObj.servicos)) {
+      return {
+        servicos: rawObj.servicos,
+        imports: Array.isArray(rawObj.imports) ? rawObj.imports : [],
+        composicoes: [],
+        sessaoOrcamento: raw.sessaoOrcamento
+      };
+    }
+    const padrao = await this.getServicosPadrao(centroCustoId);
     return {
-      servicos,
+      servicos: padrao.servicos,
       imports: padrao.imports,
       composicoes: [],
       sessaoOrcamento: raw.sessaoOrcamento
