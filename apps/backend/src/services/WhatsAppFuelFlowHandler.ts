@@ -21,7 +21,10 @@ import {
   formatVehiclePlateOptionLabel,
 } from '../lib/fuelVehiclePlateLookup';
 import { formatPlacaDisplay } from '../lib/brazilianVehiclePlate';
-import { tryFormatFuelQuotaWeekLine } from '../lib/fuelWeeklyQuota';
+import {
+  WEEKLY_QUOTA_EXCEEDED_MESSAGE,
+  tryGetFuelQuotaWeekNotice,
+} from '../lib/fuelWeeklyQuota';
 import { fuelRefuelRequestService } from './FuelRefuelRequestService';
 import type { SendAction } from './WhatsAppBotService';
 
@@ -250,22 +253,31 @@ function buildLastContractSuggestionAction(
   last: ContractOptionPayload,
   driverName: string,
   quotaLine?: string | null,
+  quotaExhausted?: boolean,
 ): SendAction {
   return waButtons(
     [
       `Identifiquei ${driverName}.`,
       `Último contrato usado: ${last.name}`,
       quotaLine,
+      quotaExhausted ? WEEKLY_QUOTA_EXCEEDED_MESSAGE : null,
       '',
-      'Confirma este contrato ou deseja ver outros?',
+      quotaExhausted
+        ? 'Este contrato não pode ser usado agora. Deseja ver outros?'
+        : 'Confirma este contrato ou deseja ver outros?',
     ]
       .filter((line) => line != null && line !== '')
       .join('\n'),
-    [
-      { id: `fuel_contract_${last.id}`, title: 'Usar este' },
-      { id: CONTRACT_OTHERS_ID, title: 'Outros contratos' },
-      { id: 'MENU', title: 'Menu' },
-    ],
+    quotaExhausted
+      ? [
+          { id: CONTRACT_OTHERS_ID, title: 'Outros contratos' },
+          { id: 'MENU', title: 'Menu' },
+        ]
+      : [
+          { id: `fuel_contract_${last.id}`, title: 'Usar este' },
+          { id: CONTRACT_OTHERS_ID, title: 'Outros contratos' },
+          { id: 'MENU', title: 'Menu' },
+        ],
   );
 }
 
@@ -574,11 +586,13 @@ export async function processWhatsAppFuelFlow(params: {
         newPayload.suggestedContractId = lastContract.id;
         newPayload.suggestedContract = lastContract;
         newPayload.contractSelectMode = 'suggest';
+        const lastNotice = await tryGetFuelQuotaWeekNotice(lastContract.id);
         return {
           sendAction: buildLastContractSuggestionAction(
             lastContract,
             employee.name,
-            await tryFormatFuelQuotaWeekLine(lastContract.id),
+            lastNotice?.line,
+            lastNotice?.exhausted,
           ),
           newStatus: 'FUEL_SELECT_CONTRACT',
           newPayload,
@@ -637,11 +651,13 @@ export async function processWhatsAppFuelFlow(params: {
         if (newPayload.contractSelectMode === 'suggest') {
           const suggested = getSuggestedContract(newPayload);
           if (suggested) {
+            const suggestedNotice = await tryGetFuelQuotaWeekNotice(suggested.id);
             return {
               sendAction: buildLastContractSuggestionAction(
                 suggested,
                 driverName,
-                await tryFormatFuelQuotaWeekLine(suggested.id),
+                suggestedNotice?.line,
+                suggestedNotice?.exhausted,
               ),
               newStatus,
               newPayload,
@@ -663,14 +679,37 @@ export async function processWhatsAppFuelFlow(params: {
         };
       }
 
+      const selectedNotice = await tryGetFuelQuotaWeekNotice(selected.id);
+      if (selectedNotice?.exhausted) {
+        delete newPayload.contractId;
+        delete newPayload.costCenterLabel;
+        newPayload.contractSelectMode = 'suggest';
+        return {
+          sendAction: waButtons(
+            [
+              `Contrato ${selected.name}.`,
+              selectedNotice.line,
+              WEEKLY_QUOTA_EXCEEDED_MESSAGE,
+              '',
+              'Selecione outro contrato para continuar.',
+            ].join('\n'),
+            [
+              { id: CONTRACT_OTHERS_ID, title: 'Outros contratos' },
+              { id: 'MENU', title: 'Menu' },
+            ],
+          ),
+          newStatus,
+          newPayload,
+        };
+      }
+
       newPayload.contractId = selected.id;
       newPayload.costCenterLabel = selected.name;
-      const quotaLine = await tryFormatFuelQuotaWeekLine(selected.id);
       return {
         sendAction: waButtons(
           [
             `Contrato selecionado: ${selected.name}.`,
-            quotaLine,
+            selectedNotice?.line,
             '',
             'Informe os 2 últimos dígitos da placa do veículo.',
           ]

@@ -15,7 +15,10 @@ import {
   formatFuelOutsideHoursWarning,
 } from '../lib/fuelAttendanceHours';
 import { getPhotoAttachmentFromMessage, hasStoredPhoto } from '../lib/flowMedia';
-import { tryFormatFuelQuotaWeekLine } from '../lib/fuelWeeklyQuota';
+import {
+  WEEKLY_QUOTA_EXCEEDED_MESSAGE,
+  tryGetFuelQuotaWeekNotice,
+} from '../lib/fuelWeeklyQuota';
 import { fuelRefuelRequestService } from './FuelRefuelRequestService';
 import { messageHasSupportIntent } from './GennecySupportFlowService';
 
@@ -423,17 +426,33 @@ export class GennecyFuelFlowService {
           };
         }
 
+        const selectedNotice = await tryGetFuelQuotaWeekNotice(selected.id);
+        if (selectedNotice?.exhausted) {
+          await upsertSession(params.chatId, params.userId, 'ASK_CONTRACT', payload);
+          return {
+            handled: true,
+            reply: [
+              `Contrato **${selected.name}**.`,
+              selectedNotice.line,
+              WEEKLY_QUOTA_EXCEEDED_MESSAGE,
+              '',
+              'Escolha outro contrato da lista:',
+              '',
+              formatContractChoiceList(options),
+            ].join('\n'),
+          };
+        }
+
         await upsertSession(params.chatId, params.userId, 'ASK_VEHICLE', {
           ...payload,
           contractId: selected.id,
           costCenterLabel: selected.name,
         });
-        const quotaLine = await tryFormatFuelQuotaWeekLine(selected.id);
         return {
           handled: true,
           reply: [
             `Contrato selecionado: **${selected.name}**.`,
-            quotaLine,
+            selectedNotice?.line,
             '',
             'Qual o veículo? Informe a placa (ex.: ABC1D23) ou placa — modelo (ex.: ABC1D23 — Strada).',
           ]

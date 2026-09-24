@@ -163,6 +163,20 @@ export async function getFuelQuotaBalance(contractId: string): Promise<FuelQuota
   return buildBalanceForOwner(owner, memberIds, tankPriceReais, week, spendRows, id);
 }
 
+export const WEEKLY_QUOTA_EXCEEDED_MESSAGE =
+  'Este contrato já ultrapassou o limite semanal. Entre em contato com o Gestor.';
+
+export function isWeeklyQuotaExhausted(balance: FuelQuotaBalance): boolean {
+  return !balance.unlimited && (balance.remainingReais ?? 0) <= 0;
+}
+
+export async function assertWeeklyQuotaAvailable(contractId: string): Promise<void> {
+  const balance = await getFuelQuotaBalance(contractId);
+  if (isWeeklyQuotaExhausted(balance)) {
+    throw createError(WEEKLY_QUOTA_EXCEEDED_MESSAGE, 400);
+  }
+}
+
 export function formatFuelQuotaWeekLine(balance: FuelQuotaBalance): string {
   if (balance.unlimited) return 'Cota desta semana: sem limite';
   const remaining = (balance.remainingReais ?? 0).toLocaleString('pt-BR', {
@@ -175,6 +189,21 @@ export function formatFuelQuotaWeekLine(balance: FuelQuotaBalance): string {
 export async function tryFormatFuelQuotaWeekLine(contractId: string): Promise<string | null> {
   try {
     return formatFuelQuotaWeekLine(await getFuelQuotaBalance(contractId));
+  } catch {
+    return null;
+  }
+}
+
+export async function tryGetFuelQuotaWeekNotice(contractId: string): Promise<{
+  line: string;
+  exhausted: boolean;
+} | null> {
+  try {
+    const balance = await getFuelQuotaBalance(contractId);
+    return {
+      line: formatFuelQuotaWeekLine(balance),
+      exhausted: isWeeklyQuotaExhausted(balance),
+    };
   } catch {
     return null;
   }

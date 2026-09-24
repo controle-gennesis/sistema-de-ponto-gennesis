@@ -275,14 +275,20 @@ function FuelCreateFormHeader({
   );
 }
 
+const WEEKLY_QUOTA_EXCEEDED_MESSAGE =
+  'Este contrato já ultrapassou o limite semanal. Entre em contato com o Gestor.';
+
 function FuelCreateFormFooter({
   isPending,
+  submitDisabled,
   onSubmit,
 }: {
   isPending: boolean;
+  submitDisabled?: boolean;
   onSubmit: () => void;
 }) {
   const requestClose = useModalRequestClose();
+  const cannotSubmit = isPending || Boolean(submitDisabled);
   return (
     <div className="flex shrink-0 flex-wrap justify-end gap-2 border-t border-gray-200 px-5 py-3 dark:border-gray-700">
       <button
@@ -295,7 +301,7 @@ function FuelCreateFormFooter({
       </button>
       <button
         type="button"
-        disabled={isPending}
+        disabled={cannotSubmit}
         onClick={onSubmit}
         className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-red-700 disabled:opacity-50 dark:bg-red-700 dark:hover:bg-red-800"
       >
@@ -839,6 +845,14 @@ export default function SolicitarCombustivelPage() {
       toast.error('Envie a foto do painel');
       return;
     }
+    if (
+      selectedQuota &&
+      !selectedQuota.unlimited &&
+      (selectedQuota.remainingReais ?? 0) <= 0
+    ) {
+      toast.error(WEEKLY_QUOTA_EXCEEDED_MESSAGE);
+      return;
+    }
 
     createMutation.mutate({
       refuelDate: formData.refuelDate,
@@ -1340,23 +1354,32 @@ export default function SolicitarCombustivelPage() {
                   emptyOptionsMessage="Nenhum contrato disponível."
                 />
                 {formData.contractId ? (
-                  <p
-                    className={`mt-1.5 text-xs ${
-                      selectedQuota && !selectedQuota.unlimited && (selectedQuota.remainingReais ?? 0) <= 0
-                        ? 'font-medium text-red-600 dark:text-red-400'
-                        : 'text-gray-500 dark:text-gray-400'
-                    }`}
-                  >
-                    {loadingSelectedQuota && !selectedQuota
-                      ? 'Consultando saldo da semana…'
-                      : selectedQuota?.unlimited
-                        ? 'Cota desta semana: sem limite'
-                        : selectedQuota
-                          ? `Disponível nesta semana: ${Number(
-                              selectedQuota.remainingReais ?? 0
-                            ).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`
-                          : null}
-                  </p>
+                  <div className="mt-1.5 space-y-1">
+                    <p
+                      className={`text-xs ${
+                        selectedQuota && !selectedQuota.unlimited && (selectedQuota.remainingReais ?? 0) <= 0
+                          ? 'font-medium text-red-600 dark:text-red-400'
+                          : 'text-gray-500 dark:text-gray-400'
+                      }`}
+                    >
+                      {loadingSelectedQuota && !selectedQuota
+                        ? 'Consultando saldo da semana…'
+                        : selectedQuota?.unlimited
+                          ? 'Cota desta semana: sem limite'
+                          : selectedQuota
+                            ? `Disponível nesta semana: ${Number(
+                                selectedQuota.remainingReais ?? 0
+                              ).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`
+                            : null}
+                    </p>
+                    {selectedQuota &&
+                    !selectedQuota.unlimited &&
+                    (selectedQuota.remainingReais ?? 0) <= 0 ? (
+                      <p className="text-xs font-medium text-red-600 dark:text-red-400">
+                        {WEEKLY_QUOTA_EXCEEDED_MESSAGE}
+                      </p>
+                    ) : null}
+                  </div>
                 ) : null}
               </div>
             </FormSection>
@@ -1467,6 +1490,11 @@ export default function SolicitarCombustivelPage() {
 
           <FuelCreateFormFooter
             isPending={createMutation.isPending}
+            submitDisabled={Boolean(
+              selectedQuota &&
+                !selectedQuota.unlimited &&
+                (selectedQuota.remainingReais ?? 0) <= 0
+            )}
             onSubmit={submitForm}
           />
         </Modal>

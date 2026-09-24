@@ -15,6 +15,7 @@ import {
 import { prisma } from '../lib/prisma';
 import { FUEL_LITERS_MAX } from '../lib/parseFlexibleDecimal';
 import { findUserIdsMatchingSearch, findIdsByUnaccentSearch } from '../lib/normalizeSearchText';
+import { assertWeeklyQuotaAvailable } from '../lib/fuelWeeklyQuota';
 import { createError } from '../middleware/errorHandler';
 import {
   notifyFuelRequesterApprovedBySupplies,
@@ -167,6 +168,8 @@ export class FuelRefuelRequestService {
       select: { id: true, name: true, number: true },
     });
     if (!contract) throw createError('Contrato não encontrado', 404);
+
+    await assertWeeklyQuotaAvailable(contract.id);
 
     const costCenterLabel =
       costCenter || contract.name.trim() || contract.number;

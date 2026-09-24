@@ -265,10 +265,11 @@ function WeeklyQuotaPanel({
               {visible.map((g) => {
                 const remaining = g.remainingReais;
                 const over = remaining != null && remaining < 0;
-                const pct =
+                const usedPct =
                   !g.unlimited && g.weeklyBudgetReais && g.weeklyBudgetReais > 0
-                    ? Math.max(0, Math.min(100, ((remaining ?? 0) / g.weeklyBudgetReais) * 100))
+                    ? (g.usedReais / g.weeklyBudgetReais) * 100
                     : 0;
+                const barPct = Math.max(0, Math.min(100, usedPct));
                 return (
                   <tr key={g.ownerContractId}>
                     <td className="py-2.5 pr-3">
@@ -278,10 +279,14 @@ function WeeklyQuotaPanel({
                       {!g.unlimited && g.weeklyBudgetReais ? (
                         <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-700/70">
                           <div
-                            className={`h-full rounded-full ${
-                              over ? 'bg-red-500' : pct < 25 ? 'bg-amber-500' : 'bg-emerald-500'
+                            className={`h-full rounded-full transition-[width] duration-500 ${
+                              over
+                                ? 'bg-red-500'
+                                : usedPct >= 80
+                                  ? 'bg-amber-500'
+                                  : 'bg-emerald-500'
                             }`}
-                            style={{ width: `${over ? 100 : pct}%` }}
+                            style={{ width: `${barPct}%` }}
                           />
                         </div>
                       ) : null}
