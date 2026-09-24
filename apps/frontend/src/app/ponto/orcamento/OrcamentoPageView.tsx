@@ -1388,6 +1388,122 @@ function parseOrcafascioBudgetIdMeta(metaRaw: Record<string, unknown> | undefine
   return typeof v === 'string' && v.trim() ? v.trim() : undefined;
 }
 
+type OrcafascioDadosMeta = {
+  code?: string;
+  description?: string;
+  state?: string;
+  socialCharges?: boolean;
+  /** true = desonerado · false = onerado */
+  exempt?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+function parseBoolFlagOrcafascio(v: unknown): boolean | undefined {
+  if (typeof v === 'boolean') return v;
+  if (v === 1 || v === '1' || v === 'true' || v === 'True') return true;
+  if (v === 0 || v === '0' || v === 'false' || v === 'False') return false;
+  return undefined;
+}
+
+function extrairDadosCabecalhoOrcafascio(
+  raw: Record<string, unknown> | null | undefined
+): OrcafascioDadosMeta | undefined {
+  if (!raw) return undefined;
+  const code = String(raw.code ?? raw.codigo ?? '').trim();
+  const description = String(raw.description ?? raw.descricao ?? '').trim();
+  const state = String(raw.state ?? raw.uf ?? raw.estado ?? '').trim();
+  const socialCharges = parseBoolFlagOrcafascio(
+    raw.socialCharges ?? raw.social_charges ?? raw.leis_sociais
+  );
+  const exempt = parseBoolFlagOrcafascio(raw.exempt ?? raw.desonerado ?? raw.is_exempt);
+  const createdAt = String(raw.createdAt ?? raw.created_at ?? '').trim();
+  const updatedAt = String(raw.updatedAt ?? raw.updated_at ?? '').trim();
+  if (!code && !description && !state && socialCharges == null && exempt == null && !createdAt && !updatedAt) {
+    return undefined;
+  }
+  return {
+    ...(code ? { code } : {}),
+    ...(description ? { description } : {}),
+    ...(state ? { state } : {}),
+    ...(socialCharges != null ? { socialCharges } : {}),
+    ...(exempt != null ? { exempt } : {}),
+    ...(createdAt ? { createdAt } : {}),
+    ...(updatedAt ? { updatedAt } : {}),
+  };
+}
+
+function parseOrcafascioDadosMeta(raw: unknown): OrcafascioDadosMeta | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  return extrairDadosCabecalhoOrcafascio(raw as Record<string, unknown>);
+}
+
+function formatarDataHoraOrcafascio(raw?: string): string {
+  if (!raw) return '—';
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return raw;
+  return d.toLocaleString('pt-BR');
+}
+
+function rotuloEncargosOrcafascio(exempt?: boolean): string {
+  if (exempt == null) return '—';
+  return exempt ? 'Desonerado' : 'Onerado';
+}
+
+function rotuloSimNaoOrcafascio(v?: boolean): string {
+  if (v == null) return '—';
+  return v ? 'Sim' : 'Não';
+}
+
+function rotuloModoArredondamentoDados(modo?: ModoArredondamento): string {
+  if (modo === 'truncar') return 'Truncar';
+  if (modo === 'arredondar') return 'Arredondar';
+  if (modo === 'nenhum') return 'Não arredondar';
+  return '—';
+}
+
+function acharCabecalhoOrcafascioNaCache(
+  budgetId?: string,
+  code?: string
+): OrcafascioDadosMeta | undefined {
+  const idNorm = (budgetId || '').trim();
+  const codeNorm = (code || '').trim().toLowerCase();
+  if (!idNorm && !codeNorm) return undefined;
+  const searches = Array.from(new Set(['', codeNorm].filter((s) => s != null)));
+  for (const search of searches) {
+    const items = peekOrcafascioOrcamentosCache(search)?.items ?? [];
+    const hit = items.find((i) => {
+      const id = idOrcamentoOrcafascioParaApi(i as OrcafascioOrcamentoItem);
+      if (idNorm && id === idNorm) return true;
+      if (codeNorm && String(i.code || '').trim().toLowerCase() === codeNorm) return true;
+      return false;
+    });
+    if (hit) return extrairDadosCabecalhoOrcafascio(hit as Record<string, unknown>);
+  }
+  return undefined;
+}
+
+function DadosCampo({
+  label,
+  children,
+  wide,
+}: {
+  label: string;
+  children: React.ReactNode;
+  wide?: boolean;
+}) {
+  return (
+    <div className={wide ? 'min-w-0 sm:col-span-2 xl:col-span-3' : 'min-w-0'}>
+      <dt className="text-[11px] font-medium uppercase tracking-[0.08em] text-gray-500 dark:text-gray-400">
+        {label}
+      </dt>
+      <dd className="mt-1 text-sm font-medium text-gray-900 dark:text-gray-100 break-words">
+        {children}
+      </dd>
+    </div>
+  );
+}
+
 export interface OrcafascioListResponse<T> {
   total: number;
   per_page: number;
@@ -1855,6 +1971,8 @@ type OrcamentoMeta = {
   modoArredondamento?: ModoArredondamento;
   /** Id do orçamento no Orçafascio — usado para atualizar composições depois da importação. */
   orcafascioBudgetId?: string;
+  /** Cabeçalho do orçamento no Orçafascio (desonerado, UF, leis sociais, etc.). */
+  orcafascioDados?: OrcafascioDadosMeta;
   /** Totais do sintético Orçafascio (referência na importação; a barra usa a soma das linhas). */
   totaisOrcafascio?: {
     semBdi: number;
@@ -2276,6 +2394,7 @@ function loadSessaoOrcamento(centroCustoId: string | null, orcamentoId: string |
               ? metaRaw.modoArredondamento
               : undefined,
           orcafascioBudgetId: parseOrcafascioBudgetIdMeta(metaRaw),
+          orcafascioDados: parseOrcafascioDadosMeta(metaRaw.orcafascioDados),
           statusAprovacao: normalizarStatusAprovacaoOrcamento(metaRaw.statusAprovacao),
           fichaDemandaPct: (() => {
             const n = Number(metaRaw.fichaDemandaPct);
@@ -2622,6 +2741,7 @@ function parseOrcamentoDetailRaw(d: {
             ? metaRaw.modoArredondamento
             : undefined,
         orcafascioBudgetId: parseOrcafascioBudgetIdMeta(metaRaw),
+        orcafascioDados: parseOrcafascioDadosMeta(metaRaw.orcafascioDados),
         statusAprovacao: normalizarStatusAprovacaoOrcamento(metaRaw.statusAprovacao),
         fichaDemandaPct: (() => {
           const n = Number(metaRaw.fichaDemandaPct);
@@ -6309,6 +6429,9 @@ export function OrcamentoPageView({
         usarMemoriaCalculo,
         modoArredondamento,
         orcafascioBudgetId: idOrcamentoOrcafascioParaApi(orcafascioOrcamentoDetalhe) || undefined,
+        orcafascioDados: extrairDadosCabecalhoOrcafascio(
+          orcafascioOrcamentoDetalhe as Record<string, unknown>
+        ),
         // Não grava totalComBdi do sintético Orçafascio aqui — esse total pode
         // divergir da montagem. O Total da lista vem do rodapé (totalComDescontoEBdi).
         ...(finApi.totalComBdi > 0
@@ -6411,6 +6534,50 @@ export function OrcamentoPageView({
         typeof meta.usarMemoriaCalculo === 'boolean' ||
         /Importado do Orçafascio/i.test(meta.descricao || ''))
   );
+
+  const orcafascioDadosExibicao = useMemo(() => {
+    if (meta.orcafascioDados) return meta.orcafascioDados;
+    if (!orcamentoVeioOrcafascio) return undefined;
+    return acharCabecalhoOrcafascioNaCache(meta.orcafascioBudgetId, meta.osNumeroPasta);
+  }, [meta.orcafascioDados, meta.orcafascioBudgetId, meta.osNumeroPasta, orcamentoVeioOrcafascio]);
+
+  useEffect(() => {
+    if (!orcamentoVeioOrcafascio || meta.orcafascioDados) return;
+    const fromCache = acharCabecalhoOrcafascioNaCache(meta.orcafascioBudgetId, meta.osNumeroPasta);
+    if (fromCache) {
+      setMeta((m) => (m.orcafascioDados ? m : { ...m, orcafascioDados: fromCache }));
+      return;
+    }
+    const search = (meta.osNumeroPasta || '').trim();
+    if (!search && !meta.orcafascioBudgetId) return;
+    let cancelled = false;
+    void loadOrcafascioOrcamentosList({ search: search || undefined })
+      .then((listed) => {
+        if (cancelled) return;
+        const idNorm = (meta.orcafascioBudgetId || '').trim();
+        const codeNorm = search.toLowerCase();
+        const hit = listed.items.find((i) => {
+          const id = idOrcamentoOrcafascioParaApi(i as OrcafascioOrcamentoItem);
+          if (idNorm && id === idNorm) return true;
+          if (codeNorm && String(i.code || '').trim().toLowerCase() === codeNorm) return true;
+          return false;
+        });
+        const dados = hit ? extrairDadosCabecalhoOrcafascio(hit as Record<string, unknown>) : undefined;
+        if (!dados) return;
+        setMeta((m) => (m.orcafascioDados ? m : { ...m, orcafascioDados: dados }));
+      })
+      .catch(() => {
+        // Lista do Orçafascio indisponível: a aba segue só com o que já está salvo.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    orcamentoVeioOrcafascio,
+    meta.orcafascioDados,
+    meta.orcafascioBudgetId,
+    meta.osNumeroPasta,
+  ]);
 
   const resolverOrcafascioBudgetIdAtual = async (): Promise<string> => {
     if (meta.orcafascioBudgetId) return meta.orcafascioBudgetId;
@@ -6543,9 +6710,12 @@ export function OrcamentoPageView({
       const manuaisNext = remapearRegistroPorChave(insumosAnaliticoManuais, chaveParaNovaKey);
 
       const finApi = extrairMetaFinanceiraOrcafascio(linhas);
+      const orcafascioDadosRefresh =
+        acharCabecalhoOrcafascioNaCache(budgetId, meta.osNumeroPasta) ?? meta.orcafascioDados;
       const nextMeta: OrcamentoMeta = {
         ...meta,
         orcafascioBudgetId: budgetId,
+        ...(orcafascioDadosRefresh ? { orcafascioDados: orcafascioDadosRefresh } : {}),
         ...(finApi.totalComBdi > 0
           ? {
               totaisOrcafascio: {
@@ -10448,10 +10618,24 @@ export function OrcamentoPageView({
                   <section className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 overflow-hidden">
                     <div className="px-4 sm:px-5 py-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50/70 dark:bg-gray-800/40">
                       <div className="flex flex-wrap items-center justify-between gap-3">
-                        <div>
+                        <div className="flex min-w-0 flex-wrap items-center gap-2.5">
                           <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 break-words">
                             {nomeOrcamentoRascunho || 'Orçamento sem nome'}
                           </h3>
+                          <span className={orcamentoStatusBadgeClass(statusAprovacaoAtivo)}>
+                            {ORCAMENTO_STATUS_LABELS[statusAprovacaoAtivo]}
+                          </span>
+                          {orcamentoVeioOrcafascio && orcafascioDadosExibicao?.exempt != null ? (
+                            <span
+                              className={`inline-flex items-center justify-center rounded-full px-2.5 py-1 text-xs font-medium whitespace-nowrap ${
+                                orcafascioDadosExibicao.exempt
+                                  ? 'bg-emerald-100 text-emerald-900 dark:bg-emerald-900/30 dark:text-emerald-200'
+                                  : 'bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200'
+                              }`}
+                            >
+                              {rotuloEncargosOrcafascio(orcafascioDadosExibicao.exempt)}
+                            </span>
+                          ) : null}
                         </div>
                         <button
                           type="button"
@@ -10465,96 +10649,121 @@ export function OrcamentoPageView({
                       </div>
                     </div>
 
-                    <div className="px-4 sm:px-5 py-4 grid grid-cols-1 xl:grid-cols-2 gap-6">
-                      <div className="space-y-2">
-                        <p className="text-xs uppercase tracking-[0.08em] text-gray-500 dark:text-gray-400 mb-2.5">Identificação</p>
-                        <div className="space-y-2">
-                          {[
-                            ['OS/Nº da pasta', meta.osNumeroPasta || '—'],
-                            ['Prazo de execução (dias)', meta.prazoExecucaoDias || '—'],
-                            ['Status', ORCAMENTO_STATUS_LABELS[statusAprovacaoAtivo]]
-                          ].map(([label, value]) => (
-                            <div key={label} className="grid grid-cols-[10.5rem_1fr] gap-3">
-                              <span className="text-xs text-gray-500 dark:text-gray-400">{label}</span>
-                              {label === 'Status' ? (
-                                <span className={orcamentoStatusBadgeClass(statusAprovacaoAtivo)}>
-                                  {value}
-                                </span>
-                              ) : (
-                                <span className="text-sm font-medium text-gray-900 dark:text-gray-100 break-words">{value}</span>
-                              )}
-                            </div>
-                          ))}
-                        </div>
+                    <div className="px-4 sm:px-5 py-5 space-y-6">
+                      <div>
+                        <p className="mb-3 text-xs uppercase tracking-[0.08em] text-gray-500 dark:text-gray-400">
+                          Identificação
+                        </p>
+                        <dl className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2 xl:grid-cols-3">
+                          <DadosCampo label="OS/Nº da pasta">{meta.osNumeroPasta || '—'}</DadosCampo>
+                          <DadosCampo label="Prazo de execução (dias)">{meta.prazoExecucaoDias || '—'}</DadosCampo>
+                          <DadosCampo label="Origem">
+                            {orcamentoVeioOrcafascio
+                              ? 'Orçafascio'
+                              : meta.importadoPlanilha
+                                ? 'Planilha'
+                                : 'Manual'}
+                          </DadosCampo>
+                          <DadosCampo label="Data de início">{formatDataBr(meta.dataAbertura)}</DadosCampo>
+                          <DadosCampo label="Data de fim">
+                            {formatDataBr(
+                              meta.dataEnvio ||
+                                calcularDataFimOrcamento(
+                                  meta.dataAbertura,
+                                  meta.dataEnvio,
+                                  meta.prazoExecucaoDias
+                                )
+                            )}
+                          </DadosCampo>
+                          <DadosCampo label="Responsável pelo orçamento">
+                            {meta.responsavelOrcamento || '—'}
+                          </DadosCampo>
+                          <DadosCampo label="Orçamento realizado por">
+                            {meta.orcamentoRealizadoPor || '—'}
+                          </DadosCampo>
+                          <DadosCampo label="Desconto (%)">{meta.descontoPercentual || '0'}</DadosCampo>
+                          <DadosCampo label="BDI (%)">{meta.bdiPercentual || '0'}</DadosCampo>
+                          {typeof meta.usarMemoriaCalculo === 'boolean' ? (
+                            <DadosCampo label="Memória de cálculo">
+                              {rotuloSimNaoOrcafascio(meta.usarMemoriaCalculo)}
+                            </DadosCampo>
+                          ) : null}
+                          {meta.modoArredondamento ? (
+                            <DadosCampo label="Arredondamento">
+                              {rotuloModoArredondamentoDados(meta.modoArredondamento)}
+                            </DadosCampo>
+                          ) : null}
+                          {typeof meta.fichaDemandaPct === 'number' ? (
+                            <DadosCampo label="Ficha de demanda">{`${meta.fichaDemandaPct}%`}</DadosCampo>
+                          ) : null}
+                        </dl>
                       </div>
-                      <div className="space-y-2">
-                        <p className="text-xs uppercase tracking-[0.08em] text-gray-500 dark:text-gray-400 mb-2.5">Datas</p>
-                        <div className="space-y-2">
-                          {[
-                            ['Data de início', formatDataBr(meta.dataAbertura)],
-                            [
-                              'Data de fim',
-                              formatDataBr(
-                                meta.dataEnvio ||
-                                  calcularDataFimOrcamento(
-                                    meta.dataAbertura,
-                                    meta.dataEnvio,
-                                    meta.prazoExecucaoDias
-                                  )
-                              )
-                            ]
-                          ].map(([label, value]) => (
-                            <div key={label} className="grid grid-cols-[10.5rem_1fr] gap-3">
-                              <span className="text-xs text-gray-500 dark:text-gray-400">{label}</span>
-                              <span className="text-sm font-medium text-gray-900 dark:text-gray-100 break-words">{value}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                      <div className="space-y-2">
-                        <p className="text-xs uppercase tracking-[0.08em] text-gray-500 dark:text-gray-400 mb-2.5">Responsáveis</p>
-                        <div className="space-y-2">
-                          {[
-                            ['Responsável pelo orçamento', meta.responsavelOrcamento || '—'],
-                            ['Orçamento realizado por', meta.orcamentoRealizadoPor || '—']
-                          ].map(([label, value]) => (
-                            <div key={label} className="grid grid-cols-[10.5rem_1fr] gap-3">
-                              <span className="text-xs text-gray-500 dark:text-gray-400">{label}</span>
-                              <span className="text-sm font-medium text-gray-900 dark:text-gray-100 break-words">{value}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                      <div className="space-y-2">
-                        <p className="text-xs uppercase tracking-[0.08em] text-gray-500 dark:text-gray-400 mb-2.5">Percentuais</p>
-                        <div className="space-y-2">
-                          {[
-                            ['Desconto (%)', meta.descontoPercentual || '0'],
-                            ['BDI (%)', meta.bdiPercentual || '0']
-                          ].map(([label, value]) => (
-                            <div key={label} className="grid grid-cols-[10.5rem_1fr] gap-3">
-                              <span className="text-xs text-gray-500 dark:text-gray-400">{label}</span>
-                              <span className="text-sm font-medium text-gray-900 dark:text-gray-100 break-words">{value}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
 
-                    <div className="px-4 sm:px-5 py-4 border-t border-gray-200 dark:border-gray-700 grid grid-cols-1 xl:grid-cols-2 gap-6">
-                      <div className="space-y-2">
-                        <p className="text-xs uppercase tracking-[0.08em] text-gray-500 dark:text-gray-400 mb-2.5">Descrição</p>
-                        <p className="text-sm font-medium text-gray-900 dark:text-gray-100 break-words">
-                          {meta.descricao || '—'}
+                      {orcamentoVeioOrcafascio ? (
+                        <div>
+                          <p className="mb-3 text-xs uppercase tracking-[0.08em] text-gray-500 dark:text-gray-400">
+                            Orçafascio
+                          </p>
+                          <dl className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2 xl:grid-cols-3">
+                            <DadosCampo label="Código">
+                              {orcafascioDadosExibicao?.code || meta.osNumeroPasta || '—'}
+                            </DadosCampo>
+                            <DadosCampo label="Encargos">
+                              {rotuloEncargosOrcafascio(orcafascioDadosExibicao?.exempt)}
+                            </DadosCampo>
+                            <DadosCampo label="Leis sociais">
+                              {rotuloSimNaoOrcafascio(orcafascioDadosExibicao?.socialCharges)}
+                            </DadosCampo>
+                            <DadosCampo label="UF">{orcafascioDadosExibicao?.state || '—'}</DadosCampo>
+                            <DadosCampo label="Criado em">
+                              {formatarDataHoraOrcafascio(orcafascioDadosExibicao?.createdAt)}
+                            </DadosCampo>
+                            <DadosCampo label="Atualizado em">
+                              {formatarDataHoraOrcafascio(orcafascioDadosExibicao?.updatedAt)}
+                            </DadosCampo>
+                            {meta.orcafascioBudgetId ? (
+                              <DadosCampo label="ID Orçafascio">
+                                <span className="break-all font-mono text-xs">{meta.orcafascioBudgetId}</span>
+                              </DadosCampo>
+                            ) : null}
+                            {meta.totaisOrcafascio ? (
+                              <>
+                                <DadosCampo label="Total sem BDI (Orçafascio)">
+                                  {fmtCalcMoeda(meta.totaisOrcafascio.semBdi)}
+                                </DadosCampo>
+                                <DadosCampo label="BDI (Orçafascio)">
+                                  {fmtCalcMoeda(meta.totaisOrcafascio.bdi)}
+                                </DadosCampo>
+                                <DadosCampo label="Total com BDI (Orçafascio)">
+                                  {fmtCalcMoeda(meta.totaisOrcafascio.comBdi)}
+                                </DadosCampo>
+                              </>
+                            ) : null}
+                            {orcafascioDadosExibicao?.description ? (
+                              <DadosCampo label="Descrição no Orçafascio" wide>
+                                {orcafascioDadosExibicao.description}
+                              </DadosCampo>
+                            ) : null}
+                          </dl>
+                        </div>
+                      ) : null}
+
+                      <div>
+                        <p className="mb-3 text-xs uppercase tracking-[0.08em] text-gray-500 dark:text-gray-400">
+                          Descrição e reajustes
                         </p>
-                      </div>
-                      <div className="space-y-2">
-                        <p className="text-xs uppercase tracking-[0.08em] text-gray-500 dark:text-gray-400 mb-2.5">Reajustes (%)</p>
-                        <p className="text-sm font-medium text-gray-900 dark:text-gray-100 break-words">
-                          {(meta.reajustes ?? []).length > 0
-                            ? meta.reajustes.map((r, idx) => `${r.nome || `Reajuste ${idx + 1}`}: ${r.percentual || '0'}%`).join(' | ')
-                            : '—'}
-                        </p>
+                        <dl className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2">
+                          <DadosCampo label="Descrição" wide>
+                            {meta.descricao || '—'}
+                          </DadosCampo>
+                          <DadosCampo label="Reajustes (%)" wide>
+                            {(meta.reajustes ?? []).length > 0
+                              ? meta.reajustes
+                                  .map((r, idx) => `${r.nome || `Reajuste ${idx + 1}`}: ${r.percentual || '0'}%`)
+                                  .join(' · ')
+                              : '—'}
+                          </DadosCampo>
+                        </dl>
                       </div>
                     </div>
                   </section>
@@ -12694,6 +12903,32 @@ export function OrcamentoPageView({
                   <p className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">Código</p>
                   <p className="font-mono text-gray-900 dark:text-gray-100">
                     {(orcafascioOrcamentoDetalhe.code as string) || '—'}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">Encargos</p>
+                  <p className="text-gray-900 dark:text-gray-100">
+                    {rotuloEncargosOrcafascio(
+                      parseBoolFlagOrcafascio(
+                        (orcafascioOrcamentoDetalhe as Record<string, unknown>).exempt
+                      )
+                    )}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">Leis sociais</p>
+                  <p className="text-gray-900 dark:text-gray-100">
+                    {rotuloSimNaoOrcafascio(
+                      parseBoolFlagOrcafascio(
+                        (orcafascioOrcamentoDetalhe as Record<string, unknown>).social_charges
+                      )
+                    )}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">UF</p>
+                  <p className="text-gray-900 dark:text-gray-100">
+                    {String((orcafascioOrcamentoDetalhe as Record<string, unknown>).state || '').trim() || '—'}
                   </p>
                 </div>
                 <div>
