@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { authenticate } from '../middleware/auth';
+import { authenticate, requireAdministrator } from '../middleware/auth';
 import { requireFuelApproverAccess, requireFuelSuppliesAccess } from '../middleware/permissionAuth';
 import { fuelRefuelRequestController } from '../controllers/FuelRefuelRequestController';
 
@@ -51,6 +51,15 @@ router.get(
 );
 router.get('/', requireFuelSuppliesAccess, (req, res, next) =>
   fuelRefuelRequestController.list(req, res, next),
+);
+router.get('/quota-config', requireAdministrator, (req, res, next) =>
+  fuelRefuelRequestController.getQuotaConfig(req, res, next),
+);
+router.patch('/quota-config/tank-price', requireAdministrator, (req, res, next) =>
+  fuelRefuelRequestController.updateTankPrice(req, res, next),
+);
+router.patch('/quota-config/contracts/:contractId', requireAdministrator, (req, res, next) =>
+  fuelRefuelRequestController.updateContractQuota(req, res, next),
 );
 router.put('/:id/supplies-approve', requireFuelSuppliesAccess, (req, res, next) =>
   fuelRefuelRequestController.suppliesApprove(req, res, next),

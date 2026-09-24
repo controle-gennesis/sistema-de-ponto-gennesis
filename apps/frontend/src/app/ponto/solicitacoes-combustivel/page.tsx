@@ -18,6 +18,7 @@ import {
   MoreVertical,
   Pencil,
   Search,
+  Settings,
   Users,
   X,
   XCircle,
@@ -41,6 +42,7 @@ import {
   parseFlexibleDecimal,
 } from '@/lib/parseFlexibleDecimal';
 import { FuelRequestPhoto } from '@/components/fuel/FuelRequestPhoto';
+import { FuelQuotaConfigModal } from './FuelQuotaConfigModal';
 import {
   getListTableRowClassName,
   ListRowNavigableLabel,
@@ -448,6 +450,7 @@ export default function SolicitacoesCombustivelPage() {
   const [refuelDateFrom, setRefuelDateFrom] = useState('');
   const [refuelDateTo, setRefuelDateTo] = useState('');
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
+  const [isQuotaConfigOpen, setIsQuotaConfigOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [selected, setSelected] = useState<FuelRefuelRequest | null>(null);
   const [suppliesComment, setSuppliesComment] = useState('');
@@ -885,7 +888,18 @@ export default function SolicitacoesCombustivelPage() {
                 Acompanhe e atenda as solicitações de combustível.
               </p>
             </div>
-            <div className="sm:absolute sm:right-0 sm:top-1/2 sm:-translate-y-1/2">
+            <div className="flex items-center gap-1 sm:absolute sm:right-0 sm:top-1/2 sm:-translate-y-1/2">
+              {isAdministrator ? (
+              <button
+                type="button"
+                onClick={() => setIsQuotaConfigOpen(true)}
+                aria-label="Configurar cotas"
+                title="Configurar cotas"
+                className="inline-flex h-10 w-10 items-center justify-center rounded-lg text-gray-500 transition-colors hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-100"
+              >
+                <Settings className="h-5 w-5" />
+              </button>
+              ) : null}
               <button
                 type="button"
                 onClick={() => router.push('/ponto/solicitacoes-combustivel/analises')}
@@ -2063,6 +2077,13 @@ export default function SolicitacoesCombustivelPage() {
             </div>
           ) : null}
         </Modal>
+
+        {isAdministrator ? (
+        <FuelQuotaConfigModal
+          isOpen={isQuotaConfigOpen}
+          onClose={() => setIsQuotaConfigOpen(false)}
+        />
+        ) : null}
 
         <Modal
           isOpen={isFiltersOpen}

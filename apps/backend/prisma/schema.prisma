@@ -378,6 +378,8 @@ model CompanySettings {
   vacationDaysPerYear  Int      @default(30)
   /// Prazo informado ao solicitante de combustÃ­vel (horas Ãºteis atÃ© atendimento do Suprimentos)
   fuelSuppliesSlaHours Int      @default(24)
+  /// Valor (R$) equivalente a 1 tanque, usado no cÃ¡lculo da cota semanal de cada contrato
+  fuelTankPriceReais   Decimal  @default(350) @db.Decimal(10, 2)
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 
@@ -1381,6 +1383,9 @@ model Contract {
   allowBillingImportWithoutOsPleito Boolean @default(false)
   /// ID legado (AppSheet / importações)
   externalId       String?  @unique
+  /// Cota de abastecimento por semana, em tanques (ex.: 1.5). Nulo = sem cota configurada (sem limite).
+  /// O valor em R$ é tanques × CompanySettings.fuelTankPriceReais, dividido entre todos os veículos do contrato.
+  weeklyFuelTankQuota Decimal? @db.Decimal(6, 2)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
