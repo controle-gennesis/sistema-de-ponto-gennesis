@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { memo, startTransition, useCallback, useEffect, useRef, useState } from 'react';
 import { Info, Plus, Trash2 } from 'lucide-react';
 import {
   ROTULO_COLUNA_MEDICAO_OPCOES,
@@ -44,10 +44,6 @@ type Props = {
   onRemoveLinhaContagem?: (idx: number) => void;
   dim: DimensoesItem;
   ehCargaEntulho: boolean;
-  draftCalc: Record<string, string>;
-  setDraftCalc: React.Dispatch<React.SetStateAction<Record<string, string>>>;
-  handleCalcChange: (draftKey: string, raw: string, onCommit: (n: number) => void) => void;
-  handleCalcBlur: (draftKey: string, raw: string, onCommit: (n: number) => void) => void;
   updateLinhaMedicao: (itemKey: string, idx: number, campo: keyof LinhaMedicao, valor: number | string) => void;
   updateRotuloColunaMedicao?: (
     campo: 'descricao' | 'C' | 'L' | 'H' | 'N' | 'pct',
@@ -93,7 +89,86 @@ const inputBloqueadoCls = inputGradeBloqueadoCls;
 const inputThDescricaoCls =
   'box-border min-h-[2.75rem] w-full min-w-0 border-0 rounded-none bg-transparent px-3 py-2.5 text-left text-[11px] font-bold uppercase tracking-wide text-gray-700 shadow-none outline-none ring-0 transition-[background-color,box-shadow] placeholder:text-gray-400 dark:text-gray-200 dark:placeholder:text-slate-500 sm:px-3.5 focus:z-[1] focus:bg-red-50/90 dark:focus:bg-red-950/35 focus:ring-1 focus:ring-inset focus:ring-red-500 dark:focus:ring-red-400 disabled:cursor-not-allowed disabled:opacity-60';
 
-export function OrcamentoMedicaoPainel({
+const MEMORIAL_COMMIT_MS = 180;
+
+function parseMedicaoBlurNumber(raw: string): number | null {
+  const text = String(raw ?? '').trim();
+  if (text.startsWith('=')) {
+    const s = text.slice(1).trim().replace(/,/g, '.');
+    if (!s || !/^[\d\s+\-*/.()]+$/.test(s)) return null;
+    try {
+      const result = new Function(`return (${s})`)();
+      return typeof result === 'number' && isFinite(result) ? result : null;
+    } catch {
+      return null;
+    }
+  }
+  const t = text.replace(/^=/, '').trim();
+  if (!t) return null;
+  if (t.includes(',')) {
+    const n = Number(t.replace(/\./g, '').replace(',', '.'));
+    return Number.isFinite(n) ? n : null;
+  }
+  if (/^\d{1,3}(\.\d{3})+$/.test(t)) {
+    const n = Number(t.replace(/\./g, ''));
+    return Number.isFinite(n) ? n : null;
+  }
+  const n = Number(t);
+  return Number.isFinite(n) ? n : null;
+}
+
+const MemorialCampoLocal = memo(function MemorialCampoLocal({
+  committedValue,
+  onCommit,
+  className,
+  placeholder,
+  title,
+  inputMode,
+  ariaLabel,
+  disabled,
+}: {
+  committedValue: string;
+  onCommit: (raw: string) => void;
+  className?: string;
+  placeholder?: string;
+  title?: string;
+  inputMode?: React.HTMLAttributes<HTMLInputElement>['inputMode'];
+  ariaLabel?: string;
+  disabled?: boolean;
+}) {
+  const [local, setLocal] = useState(committedValue);
+  const focusedRef = useRef(false);
+  const onCommitRef = useRef(onCommit);
+  onCommitRef.current = onCommit;
+
+  useEffect(() => {
+    if (!focusedRef.current) setLocal(committedValue);
+  }, [committedValue]);
+
+  return (
+    <input
+      type="text"
+      inputMode={inputMode}
+      placeholder={placeholder}
+      title={title}
+      aria-label={ariaLabel}
+      disabled={disabled}
+      autoComplete="off"
+      className={className}
+      value={local}
+      onFocus={() => {
+        focusedRef.current = true;
+      }}
+      onChange={(e) => setLocal(e.target.value)}
+      onBlur={() => {
+        focusedRef.current = false;
+        onCommitRef.current(local);
+      }}
+    />
+  );
+});
+
+export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
   rowKey,
   tipoUnidade,
   itemRotulo,
@@ -108,10 +183,6 @@ export function OrcamentoMedicaoPainel({
   onRemoveLinhaContagem,
   dim,
   ehCargaEntulho,
-  draftCalc,
-  setDraftCalc,
-  handleCalcChange,
-  handleCalcBlur,
   updateLinhaMedicao,
   updateRotuloColunaMedicao,
   addLinhaMedicao,
@@ -119,6 +190,44 @@ export function OrcamentoMedicaoPainel({
   removeLinhaMedicao
 }: Props) {
   const tipo = tipoUnidade;
+
+  const [draftCalc, setDraftCalc] = useState<Record<string, string>>({});
+  const calcCommitTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+
+  const handleCalcBlur = useCallback((draftKey: string, raw: string, onCommit: (n: number) => void) => {
+    const pending = calcCommitTimersRef.current[draftKey];
+    if (pending) {
+      clearTimeout(pending);
+      delete calcCommitTimersRef.current[draftKey];
+    }
+    const n = parseMedicaoBlurNumber(raw);
+    startTransition(() => onCommit(n ?? 0));
+    setDraftCalc((p) => {
+      if (!(draftKey in p)) return p;
+      const next = { ...p };
+      delete next[draftKey];
+      return next;
+    });
+  }, []);
+
+  const handleCalcChange = useCallback((draftKey: string, raw: string, onCommit: (n: number) => void) => {
+    setDraftCalc((p) => ({ ...p, [draftKey]: raw }));
+    const n = parseMedicaoBlurNumber(raw);
+    if (n === null && String(raw ?? '').trim() !== '') return;
+    const timers = calcCommitTimersRef.current;
+    if (timers[draftKey]) clearTimeout(timers[draftKey]);
+    timers[draftKey] = setTimeout(() => {
+      delete timers[draftKey];
+      startTransition(() => onCommit(n ?? 0));
+    }, MEMORIAL_COMMIT_MS);
+  }, []);
+
+  useEffect(
+    () => () => {
+      Object.values(calcCommitTimersRef.current).forEach(clearTimeout);
+    },
+    []
+  );
 
   const [menuCtxMedicao, setMenuCtxMedicao] = useState<{ left: number; top: number; idx: number } | null>(null);
   const [menuCtxContagem, setMenuCtxContagem] = useState<{
@@ -347,13 +456,12 @@ export function OrcamentoMedicaoPainel({
     return (
       <tr className={gradeTableRowTrCls}>
         <th className={`${thFirst} !p-0 align-middle`}>
-          <input
-            type="text"
-            value={dim.rotulosColunas?.descricao ?? 'DESCRIÇÃO: '}
-            onChange={e => updateRotuloColunaMedicao?.('descricao', e.target.value)}
+          <MemorialCampoLocal
+            committedValue={dim.rotulosColunas?.descricao ?? 'DESCRIÇÃO: '}
+            onCommit={(raw) => updateRotuloColunaMedicao?.('descricao', raw)}
             disabled={!updateRotuloColunaMedicao}
             className={inputThDescricaoCls}
-            aria-label="Rótulo da coluna Descrição"
+            ariaLabel="Rótulo da coluna Descrição"
           />
         </th>
         {renderRotuloSelect('C', ehCargaEntulho && !podeEditarC0 ? 'Origem demolição' : undefined, 'th')}
@@ -385,12 +493,11 @@ export function OrcamentoMedicaoPainel({
         onContextMenu={ehCargaEntulho ? undefined : e => abrirMenuCtxMedicao(e, idx)}
       >
         <td className={`${thFirst} !p-0 align-middle`}>
-          <input
-            type="text"
-            value={ln.descricao ?? 'DESCRIÇÃO: '}
-            onChange={e => updateLinhaMedicao(rowKey, idx, 'descricao', e.target.value)}
+          <MemorialCampoLocal
+            committedValue={ln.descricao ?? 'DESCRIÇÃO: '}
+            onCommit={(raw) => updateLinhaMedicao(rowKey, idx, 'descricao', raw)}
             className={inputThDescricaoCls}
-            aria-label="Descrição da linha de cabeçalho de seção"
+            ariaLabel="Descrição da linha de cabeçalho de seção"
           />
         </td>
         {renderRotuloSelect('C', ehCargaEntulho && !podeEditarC0 ? 'Origem demolição' : undefined, 'td')}
@@ -620,11 +727,10 @@ export function OrcamentoMedicaoPainel({
               <span className={unCargaCls}>{unNoFimCarga}</span>
             </div>
           ) : (
-            <input
-              type="text"
+            <MemorialCampoLocal
+              committedValue={ln.descricao || ''}
+              onCommit={(raw) => updateLinhaMedicao(rowKey, idx, 'descricao', raw)}
               placeholder="Ex: COBERTURA DAS CALDEIRAS"
-              value={ln.descricao || ''}
-              onChange={e => updateLinhaMedicao(rowKey, idx, 'descricao', e.target.value)}
               className={`${inputCls} !px-3 text-left sm:!px-3.5`}
             />
           )}
@@ -853,11 +959,10 @@ export function OrcamentoMedicaoPainel({
                     onContextMenu={e => abrirMenuCtxContagem(e, idx)}
                   >
                     <td className={tdFirstBody}>
-                      <input
-                        type="text"
+                      <MemorialCampoLocal
+                        committedValue={ln.descricao ?? ''}
+                        onCommit={(raw) => onUpdateLinhaContagem?.(idx, 'descricao', raw)}
                         placeholder="Ex: Pavimento 1"
-                        value={ln.descricao ?? ''}
-                        onChange={e => onUpdateLinhaContagem?.(idx, 'descricao', e.target.value)}
                         className={`${inputCls} !px-3 text-left sm:!px-3.5`}
                       />
                     </td>
@@ -1106,4 +1211,4 @@ export function OrcamentoMedicaoPainel({
       {portalMenuCtxMedicao}
     </>
   );
-}
+});

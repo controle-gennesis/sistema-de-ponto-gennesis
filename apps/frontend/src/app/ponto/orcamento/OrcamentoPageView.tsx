@@ -4450,6 +4450,7 @@ export function OrcamentoPageView({
   /** Atrasa recálculos pesados da FD após commit — a digitação não espera a grade. */
   const planilhaQtdDeferred = useDeferredValue(planilhaQuantidadeCompra);
   const planilhaVlDeferred = useDeferredValue(planilhaValorUnitCompraReal);
+  const dimensoesPorItemDeferred = useDeferredValue(dimensoesPorItem);
   const [novoServicoNome, setNovoServicoNome] = useState('');
   const [showAddServico, setShowAddServico] = useState(false);
   const [isImportandoOrcamento, setIsImportandoOrcamento] = useState(false);
@@ -4552,9 +4553,6 @@ export function OrcamentoPageView({
     deferredOrcamentoViewTab === 'memorial';
   const abaPesadaPendente = abaOrcamentoPesada && deferredOrcamentoViewTab !== orcamentoViewTab;
   const [memorialItemKey, setMemorialItemKey] = useState<string | null>(null);
-  // Draft para campos que aceitam cálculos (2+3, 10/2, etc) - avalia no blur
-  const [draftCalc, setDraftCalc] = useState<Record<string, string>>({});
-  const calcCommitTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const [insumosAnaliticoManuais, setInsumosAnaliticoManuais] = useState<Record<string, InsumoAnaliticoManual[]>>({});
   const [insumosAnaliticoOcultos, setInsumosAnaliticoOcultos] = useState<string[]>([]);
   /** Menu botão direito — composição, insumo do catálogo ou insumo manual. */
@@ -7368,7 +7366,7 @@ export function OrcamentoPageView({
           i,
           composicao
         );
-        const dim = dimensoesPorItem[itemKey];
+        const dim = dimensoesPorItemDeferred[itemKey];
         const tipoAuto = inferirTipoUnidadePorDimensao(dim?.linhas);
         const tipoDaComp = parseUnidadeComposicao(composicao?.unidade ?? i.unidade);
         const tipoUnidade: TipoUnidadeFormula = (tipoDaComp && tipoDaComp !== 'un') ? tipoDaComp : tipoAuto;
@@ -7477,7 +7475,7 @@ export function OrcamentoPageView({
     meta.modoArredondamento,
     subtitulosAdicionados,
     quantidadesPorItem,
-    dimensoesPorItem,
+    dimensoesPorItemDeferred,
     mapaComposicoes,
     itensOcultosNoOrcamento,
   ]);
@@ -8834,20 +8832,22 @@ export function OrcamentoPageView({
     }));
   };
 
-  const updateLinhaMedicao = (itemKey: string, idx: number, campo: keyof LinhaMedicao, valor: number | string) => {
-    setDimensoesPorItem(prev => {
-      const atual = prev[itemKey];
-      if (!atual?.linhas?.[idx]) return prev;
-      const novaLinhas = [...atual.linhas];
-      const v = campo === 'descricao' ? valor : (typeof valor === 'number' ? valor : parseFloat(String(valor)) || 0);
-      const updated: LinhaMedicao = { ...novaLinhas[idx], [campo]: v } as LinhaMedicao;
-      if (campo === 'C' || campo === 'L' || campo === 'H' || campo === 'N') {
-        updated.valorManual = undefined;
-      }
-      novaLinhas[idx] = updated;
-      return { ...prev, [itemKey]: { ...atual, linhas: novaLinhas } };
+  const updateLinhaMedicao = useCallback((itemKey: string, idx: number, campo: keyof LinhaMedicao, valor: number | string) => {
+    startTransition(() => {
+      setDimensoesPorItem(prev => {
+        const atual = prev[itemKey];
+        if (!atual?.linhas?.[idx]) return prev;
+        const novaLinhas = [...atual.linhas];
+        const v = campo === 'descricao' ? valor : (typeof valor === 'number' ? valor : parseFloat(String(valor)) || 0);
+        const updated: LinhaMedicao = { ...novaLinhas[idx], [campo]: v } as LinhaMedicao;
+        if (campo === 'C' || campo === 'L' || campo === 'H' || campo === 'N') {
+          updated.valorManual = undefined;
+        }
+        novaLinhas[idx] = updated;
+        return { ...prev, [itemKey]: { ...atual, linhas: novaLinhas } };
+      });
     });
-  };
+  }, []);
 
   const updateRotuloColunaMedicao = (
     itemKey: string,
@@ -8868,31 +8868,6 @@ export function OrcamentoPageView({
         }
       }
     }));
-  };
-
-  const handleCalcBlur = (draftKey: string, raw: string, onCommit: (n: number) => void) => {
-    const pending = calcCommitTimersRef.current[draftKey];
-    if (pending) {
-      clearTimeout(pending);
-      delete calcCommitTimersRef.current[draftKey];
-    }
-    const n = parseMedicaoBlurNumber(raw);
-    onCommit(n ?? 0);
-    setDraftCalc(p => { const next = { ...p }; delete next[draftKey]; return next; });
-  };
-
-  const handleCalcChange = (draftKey: string, raw: string, onCommit: (n: number) => void) => {
-    setDraftCalc(p => ({ ...p, [draftKey]: raw }));
-    const n = parseMedicaoBlurNumber(raw);
-    if (n === null && String(raw ?? '').trim() !== '') return;
-    const timers = calcCommitTimersRef.current;
-    if (timers[draftKey]) clearTimeout(timers[draftKey]);
-    timers[draftKey] = setTimeout(() => {
-      delete timers[draftKey];
-      startTransition(() => {
-        onCommit(n ?? 0);
-      });
-    }, FD_COMMIT_DEBOUNCE_MS);
   };
 
   const commitPlanilhaQtdCompra = useCallback((lineKey: string, raw: string) => {
@@ -9035,21 +9010,23 @@ export function OrcamentoPageView({
     setDimensoesPorItem(prevDim => ({ ...prevDim, [itemKey]: { ...atual, linhasContagem } }));
   };
 
-  const updateLinhaContagem = (
+  const updateLinhaContagem = useCallback((
     itemKey: string,
     idx: number,
     campo: 'descricao' | 'quantidade',
     valor: string | number
   ) => {
-    setDimensoesPorItem(prev => {
-      const atual = prev[itemKey];
-      if (!atual?.linhasContagem?.[idx]) return prev;
-      const novaLinhas = [...atual.linhasContagem];
-      const v = campo === 'descricao' ? String(valor) : Math.max(0, Number(valor) || 0);
-      novaLinhas[idx] = { ...novaLinhas[idx], [campo]: v } as LinhaContagem;
-      return { ...prev, [itemKey]: { ...atual, linhasContagem: novaLinhas } };
+    startTransition(() => {
+      setDimensoesPorItem(prev => {
+        const atual = prev[itemKey];
+        if (!atual?.linhasContagem?.[idx]) return prev;
+        const novaLinhas = [...atual.linhasContagem];
+        const v = campo === 'descricao' ? String(valor) : Math.max(0, Number(valor) || 0);
+        novaLinhas[idx] = { ...novaLinhas[idx], [campo]: v } as LinhaContagem;
+        return { ...prev, [itemKey]: { ...atual, linhasContagem: novaLinhas } };
+      });
     });
-  };
+  }, []);
 
   const removeLinhaContagem = (itemKey: string, idx: number) => {
     const atual = dimensoesPorItem[itemKey];
@@ -12149,10 +12126,6 @@ export function OrcamentoPageView({
                                 }
                               }
                               ehCargaEntulho={ehComposicaoCargaEntulho(row.item.descricao)}
-                              draftCalc={draftCalc}
-                              setDraftCalc={setDraftCalc}
-                              handleCalcChange={handleCalcChange}
-                              handleCalcBlur={handleCalcBlur}
                               updateLinhaMedicao={updateLinhaMedicao}
                               updateRotuloColunaMedicao={(campo, rotulo) =>
                                 updateRotuloColunaMedicao(row.key, campo, rotulo)
