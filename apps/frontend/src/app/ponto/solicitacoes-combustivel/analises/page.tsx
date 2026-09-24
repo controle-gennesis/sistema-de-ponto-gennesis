@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { format, parseISO, startOfMonth } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import {
+  CalendarDays,
   Car,
   Droplets,
   Filter,
@@ -204,6 +205,112 @@ function ChartCard({
       </CardHeader>
       <CardContent className={cadastroListClasses.cardContent}>{children}</CardContent>
     </Card>
+  );
+}
+
+type FuelQuotaGroup = {
+  ownerContractId: string;
+  ownerName: string;
+  weeklyBudgetReais: number | null;
+  usedReais: number;
+  remainingReais: number | null;
+  unlimited: boolean;
+};
+
+function formatWeekLabel(isoStart?: string, isoEnd?: string) {
+  if (!isoStart || !isoEnd) return 'esta semana';
+  const start = new Date(isoStart);
+  const end = new Date(new Date(isoEnd).getTime() - 1);
+  return `${format(start, 'dd/MM', { locale: ptBR })} a ${format(end, 'dd/MM', { locale: ptBR })}`;
+}
+
+function WeeklyQuotaPanel({
+  groups,
+  weekStart,
+  weekEnd,
+  isLoading,
+}: {
+  groups: FuelQuotaGroup[];
+  weekStart?: string;
+  weekEnd?: string;
+  isLoading: boolean;
+}) {
+  const visible = groups.filter((g) => !g.unlimited || g.usedReais > 0);
+  return (
+    <ChartCard
+      title="Disponível na semana"
+      subtitle={`Quanto ainda resta da cota de cada contrato (${formatWeekLabel(weekStart, weekEnd)}).`}
+      Icon={CalendarDays}
+    >
+      {isLoading ? (
+        <div className="flex justify-center py-8">
+          <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+        </div>
+      ) : visible.length === 0 ? (
+        <p className="py-6 text-center text-sm text-gray-500 dark:text-gray-400">
+          Nenhuma cota semanal configurada. Defina em Configurar cotas.
+        </p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-gray-200 text-left text-xs font-medium uppercase tracking-wide text-gray-500 dark:border-gray-700 dark:text-gray-400">
+                <th className="py-2 pr-3">Contrato</th>
+                <th className="py-2 px-3 text-right">Cota</th>
+                <th className="py-2 px-3 text-right">Usado</th>
+                <th className="py-2 pl-3 text-right">Disponível</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+              {visible.map((g) => {
+                const remaining = g.remainingReais;
+                const over = remaining != null && remaining < 0;
+                const pct =
+                  !g.unlimited && g.weeklyBudgetReais && g.weeklyBudgetReais > 0
+                    ? Math.max(0, Math.min(100, ((remaining ?? 0) / g.weeklyBudgetReais) * 100))
+                    : 0;
+                return (
+                  <tr key={g.ownerContractId}>
+                    <td className="py-2.5 pr-3">
+                      <div className="font-medium text-gray-900 dark:text-gray-100">
+                        {g.ownerName}
+                      </div>
+                      {!g.unlimited && g.weeklyBudgetReais ? (
+                        <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-700/70">
+                          <div
+                            className={`h-full rounded-full ${
+                              over ? 'bg-red-500' : pct < 25 ? 'bg-amber-500' : 'bg-emerald-500'
+                            }`}
+                            style={{ width: `${over ? 100 : pct}%` }}
+                          />
+                        </div>
+                      ) : null}
+                    </td>
+                    <td className="whitespace-nowrap py-2.5 px-3 text-right tabular-nums text-gray-600 dark:text-gray-300">
+                      {g.unlimited ? 'Sem limite' : formatCurrency(g.weeklyBudgetReais ?? 0)}
+                    </td>
+                    <td className="whitespace-nowrap py-2.5 px-3 text-right tabular-nums text-gray-600 dark:text-gray-300">
+                      {formatCurrency(g.usedReais)}
+                    </td>
+                    <td
+                      className={`whitespace-nowrap py-2.5 pl-3 text-right text-sm font-semibold tabular-nums ${
+                        g.unlimited
+                          ? 'text-gray-500 dark:text-gray-400'
+                          : over
+                            ? 'text-red-600 dark:text-red-400'
+                            : 'text-emerald-600 dark:text-emerald-400'
+                      }`}
+                    >
+                      {g.unlimited ? '—' : formatCurrency(remaining ?? 0)}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </ChartCard>
   );
 }
 
@@ -420,6 +527,28 @@ function AnalisesCombustivelContent() {
     staleTime: 30_000,
   });
 
+  const { data: quotaData, isLoading: loadingQuota } = useQuery({
+    queryKey: ['fuel-quota-balances'],
+    queryFn: async () => {
+      const res = await api.get('/fuel-refuel-requests/quota-balances');
+      return res.data?.data as {
+        weekStart: string;
+        weekEnd: string;
+        groups: FuelQuotaGroup[];
+      };
+    },
+    staleTime: 15_000,
+  });
+
+  const weeklyQuotaCard = (
+    <WeeklyQuotaPanel
+      groups={quotaData?.groups ?? []}
+      weekStart={quotaData?.weekStart}
+      weekEnd={quotaData?.weekEnd}
+      isLoading={loadingQuota}
+    />
+  );
+
   const filteredRows = useMemo(() => {
     if (!dateFrom && !dateTo) return rows;
     return rows.filter((row) => {
@@ -529,6 +658,7 @@ function AnalisesCombustivelContent() {
       <div className="space-y-6">
         {periodFilterBar}
         {filtersModal}
+        {weeklyQuotaCard}
         <div className="py-16 text-center">
           <p className="text-gray-600 dark:text-gray-400">Não foi possível carregar os dados.</p>
           <button
@@ -548,6 +678,7 @@ function AnalisesCombustivelContent() {
       <div className="space-y-6">
         {periodFilterBar}
         {filtersModal}
+        {weeklyQuotaCard}
         <CadastroListEmpty
           icon={Fuel}
           title={hasPeriodFilter ? 'Sem abastecimentos neste período' : 'Ainda sem abastecimentos concluídos'}
@@ -565,6 +696,7 @@ function AnalisesCombustivelContent() {
     <div className="space-y-6">
       {periodFilterBar}
       {filtersModal}
+      {weeklyQuotaCard}
       <div className="grid w-full grid-cols-1 gap-6 sm:grid-cols-2 xl:grid-cols-4">
         <FilterStatCard
           icon={Wallet}

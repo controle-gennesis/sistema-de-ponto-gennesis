@@ -291,6 +291,10 @@ async function teardownGroupCall(callId: string, grp: GroupSession, toastMsg?: s
  */
 export function attachCallSignaling(server: Server): void {
   const wss = new WebSocketServer({ server, path: '/ws/calls' });
+  // Sem isto, EADDRINUSE no HTTP vira unhandled 'error' no ws e o Node morre.
+  wss.on('error', (err) => {
+    console.warn('[ws/calls]', err instanceof Error ? err.message : err);
+  });
 
   wss.on('connection', (ws: ExtWebSocket, req) => {
     const url = new URL(req.url || '/', 'http://localhost');

@@ -44,18 +44,25 @@ class AuthService {
   }
 
   async login(credentials: LoginCredentials, rememberMe: boolean = true): Promise<AuthResponse> {
-    const response = await fetch(this.authUrl('/login'), {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-      },
-      body: JSON.stringify({
-        identifier: serializeLoginIdentifier(credentials.identifier),
-        password: credentials.password,
-        source: 'web',
-      }),
-    });
+    let response: Response;
+    try {
+      response = await fetch(this.authUrl('/login'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify({
+          identifier: serializeLoginIdentifier(credentials.identifier),
+          password: credentials.password,
+          source: 'web',
+        }),
+      });
+    } catch {
+      throw new Error(
+        'Não foi possível conectar à API (localhost:5000). Confira se o backend está no ar.'
+      );
+    }
 
     const body = await this.parseJson(response);
 
@@ -114,8 +121,8 @@ class AuthService {
         },
         body: JSON.stringify({ source: 'web' }),
       });
-    } catch (error) {
-      console.error('Erro ao fazer logout:', error);
+    } catch {
+      // API offline: encerra a sessão local mesmo assim.
     } finally {
       this.clearAuth();
     }

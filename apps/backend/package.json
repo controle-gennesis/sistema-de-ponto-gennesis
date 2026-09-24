@@ -5,7 +5,8 @@
   "main": "dist/index.js",
   "scripts": {
     "postinstall": "node scripts/prisma-generate-safe.js",
-    "dev": "tsx watch --clear-screen=false src/index.ts",
+    "dev": "tsx src/index.ts",
+    "dev:watch": "tsx watch --clear-screen=false src/index.ts",
     "dev:nodemon": "nodemon",
     "build:permission-modules": "cd ../.. && npm run build -w @sistema-ponto/permission-modules",
     "build": "npm run build:permission-modules && npm run db:generate && tsc",

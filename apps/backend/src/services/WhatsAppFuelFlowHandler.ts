@@ -21,6 +21,7 @@ import {
   formatVehiclePlateOptionLabel,
 } from '../lib/fuelVehiclePlateLookup';
 import { formatPlacaDisplay } from '../lib/brazilianVehiclePlate';
+import { tryFormatFuelQuotaWeekLine } from '../lib/fuelWeeklyQuota';
 import { fuelRefuelRequestService } from './FuelRefuelRequestService';
 import type { SendAction } from './WhatsAppBotService';
 
@@ -248,14 +249,18 @@ function getSuggestedContract(payload: Record<string, unknown>): ContractOptionP
 function buildLastContractSuggestionAction(
   last: ContractOptionPayload,
   driverName: string,
+  quotaLine?: string | null,
 ): SendAction {
   return waButtons(
     [
       `Identifiquei ${driverName}.`,
       `Último contrato usado: ${last.name}`,
+      quotaLine,
       '',
       'Confirma este contrato ou deseja ver outros?',
-    ].join('\n'),
+    ]
+      .filter((line) => line != null && line !== '')
+      .join('\n'),
     [
       { id: `fuel_contract_${last.id}`, title: 'Usar este' },
       { id: CONTRACT_OTHERS_ID, title: 'Outros contratos' },
@@ -570,7 +575,11 @@ export async function processWhatsAppFuelFlow(params: {
         newPayload.suggestedContract = lastContract;
         newPayload.contractSelectMode = 'suggest';
         return {
-          sendAction: buildLastContractSuggestionAction(lastContract, employee.name),
+          sendAction: buildLastContractSuggestionAction(
+            lastContract,
+            employee.name,
+            await tryFormatFuelQuotaWeekLine(lastContract.id),
+          ),
           newStatus: 'FUEL_SELECT_CONTRACT',
           newPayload,
         };
@@ -629,7 +638,11 @@ export async function processWhatsAppFuelFlow(params: {
           const suggested = getSuggestedContract(newPayload);
           if (suggested) {
             return {
-              sendAction: buildLastContractSuggestionAction(suggested, driverName),
+              sendAction: buildLastContractSuggestionAction(
+                suggested,
+                driverName,
+                await tryFormatFuelQuotaWeekLine(suggested.id),
+              ),
               newStatus,
               newPayload,
             };
@@ -652,13 +665,17 @@ export async function processWhatsAppFuelFlow(params: {
 
       newPayload.contractId = selected.id;
       newPayload.costCenterLabel = selected.name;
+      const quotaLine = await tryFormatFuelQuotaWeekLine(selected.id);
       return {
         sendAction: waButtons(
           [
             `Contrato selecionado: ${selected.name}.`,
+            quotaLine,
             '',
             'Informe os 2 últimos dígitos da placa do veículo.',
-          ].join('\n'),
+          ]
+            .filter((line) => line != null && line !== '')
+            .join('\n'),
         ),
         newStatus: 'FUEL_ASK_PLATE_SUFFIX',
         newPayload,

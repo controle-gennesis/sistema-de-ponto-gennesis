@@ -15,6 +15,7 @@ import {
   formatFuelOutsideHoursWarning,
 } from '../lib/fuelAttendanceHours';
 import { getPhotoAttachmentFromMessage, hasStoredPhoto } from '../lib/flowMedia';
+import { tryFormatFuelQuotaWeekLine } from '../lib/fuelWeeklyQuota';
 import { fuelRefuelRequestService } from './FuelRefuelRequestService';
 import { messageHasSupportIntent } from './GennecySupportFlowService';
 
@@ -427,13 +428,17 @@ export class GennecyFuelFlowService {
           contractId: selected.id,
           costCenterLabel: selected.name,
         });
+        const quotaLine = await tryFormatFuelQuotaWeekLine(selected.id);
         return {
           handled: true,
           reply: [
             `Contrato selecionado: **${selected.name}**.`,
+            quotaLine,
             '',
             'Qual o veículo? Informe a placa (ex.: ABC1D23) ou placa — modelo (ex.: ABC1D23 — Strada).',
-          ].join('\n'),
+          ]
+            .filter((line) => line != null && line !== '')
+            .join('\n'),
         };
       }
 

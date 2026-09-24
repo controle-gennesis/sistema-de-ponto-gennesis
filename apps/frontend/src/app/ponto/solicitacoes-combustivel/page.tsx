@@ -61,6 +61,10 @@ import {
   isBlankVehiclePhoto,
 } from '@/components/ui/VehicleReturnPhotoField';
 import { FORM_FIELD_INPUT_CLS, FORM_FIELD_TEXTAREA_CLS } from '@/lib/formFieldUi';
+import {
+  maskCurrencyInputBrOrEmpty,
+  parseCurrencyInputBr,
+} from '@/lib/maskCurrencyBr';
 
 type FuelVehicleType = 'PRIVATE' | 'COMPANY';
 type FuelTankLevelAfter = 'RESERVE' | 'QUARTER' | 'HALF' | 'THREE_QUARTERS' | 'FULL';
@@ -296,6 +300,7 @@ type FuelRefuelRequest = {
   managerRejectionReason?: string | null;
   suppliesApprovedAt?: string | null;
   suppliesApprovalComment?: string | null;
+  releasedAmountReais?: number | null;
   suppliesRejectionReason?: string | null;
   odometerKm?: number | null;
   tankLevelAfter?: FuelTankLevelAfter | null;
@@ -318,6 +323,21 @@ type FuelRefuelRequest = {
   managerApprover?: { id: string; name: string } | null;
   suppliesApprover?: { id: string; name: string } | null;
 };
+
+type FuelQuotaBalance = {
+  ownerName: string;
+  weeklyTankQuota: number | null;
+  tankPriceReais: number;
+  weeklyBudgetReais: number | null;
+  usedReais: number;
+  remainingReais: number | null;
+  unlimited: boolean;
+};
+
+function formatReais(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value)) return '—';
+  return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+}
 
 const TANK_LEVEL_OPTIONS: Array<{ value: FuelTankLevelAfter; label: string }> = [
   { value: 'RESERVE', label: 'Reserva' },
@@ -459,6 +479,7 @@ export default function SolicitacoesCombustivelPage() {
   const [editContractId, setEditContractId] = useState('');
   const [refuelDeadlineAmount, setRefuelDeadlineAmount] = useState('24');
   const [refuelDeadlineUnit, setRefuelDeadlineUnit] = useState<FuelRefuelDeadlineUnit>('HOURS');
+  const [releasedAmountInput, setReleasedAmountInput] = useState('');
   const [rejectReason, setRejectReason] = useState('');
   const [showRejectForm, setShowRejectForm] = useState(false);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
@@ -517,23 +538,37 @@ export default function SolicitacoesCombustivelPage() {
     refetchOnMount: 'always',
   });
 
+  const { data: quotaBalance } = useQuery({
+    queryKey: ['fuel-quota-balance', selected?.contract?.id],
+    queryFn: async () => {
+      const res = await api.get('/fuel-refuel-requests/quota-balance', {
+        params: { contractId: selected!.contract!.id },
+      });
+      return res.data?.data as FuelQuotaBalance;
+    },
+    enabled: Boolean(selected?.contract?.id),
+  });
+
   const approveMutation = useMutation({
     mutationFn: async ({
       id,
       gasStationId,
       amount,
       unit,
+      releasedAmountReais,
     }: {
       id: string;
       gasStationId: string;
       amount: number;
       unit: FuelRefuelDeadlineUnit;
+      releasedAmountReais: number;
     }) => {
       const res = await api.put(`/fuel-refuel-requests/${id}/supplies-approve`, {
         comment: suppliesComment.trim() || undefined,
         gasStationId,
         refuelDeadlineAmount: amount,
         refuelDeadlineUnit: unit,
+        releasedAmountReais,
       });
       return res.data;
     },
@@ -544,10 +579,12 @@ export default function SolicitacoesCombustivelPage() {
       setApproveGasStationId('');
       setRefuelDeadlineAmount('24');
       setRefuelDeadlineUnit('HOURS');
+      setReleasedAmountInput('');
       setShowRejectForm(false);
       void queryClient.invalidateQueries({ queryKey: ['fuel-refuel-requests'] });
       void queryClient.invalidateQueries({ queryKey: ['fuel-refuel-requests-supplies'] });
       void queryClient.invalidateQueries({ queryKey: ['fuel-supplies-pending-count'] });
+      void queryClient.invalidateQueries({ queryKey: ['fuel-quota-balance'] });
     },
     onError: (err: { response?: { data?: { error?: string } } }) => {
       toast.error(err.response?.data?.error || 'Erro ao aprovar solicitação');
@@ -860,6 +897,7 @@ export default function SolicitacoesCombustivelPage() {
       setSuppliesComment('');
       setRefuelDeadlineAmount('24');
       setRefuelDeadlineUnit('HOURS');
+      setReleasedAmountInput('');
     }
   }, [selected?.id, selected?.status]);
 
@@ -1302,6 +1340,7 @@ export default function SolicitacoesCombustivelPage() {
             setSelected(null);
             setSuppliesComment('');
             setApproveGasStationId('');
+            setReleasedAmountInput('');
             setRejectReason('');
             setShowRejectForm(false);
             setShowCancelConfirm(false);
@@ -1453,6 +1492,13 @@ export default function SolicitacoesCombustivelPage() {
                       {fuelContractLabel(selected)}
                     </p>
                   )}
+                  {quotaBalance ? (
+                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                      {quotaBalance.unlimited
+                        ? 'Cota semanal: sem limite'
+                        : `Restante da cota semanal: ${formatReais(quotaBalance.remainingReais)}`}
+                    </p>
+                  ) : null}
                 </div>
                 <div>
                   <span className="font-medium text-gray-500 dark:text-gray-400">Condutor</span>
@@ -1503,6 +1549,9 @@ export default function SolicitacoesCombustivelPage() {
                         ? ` — ${format(new Date(selected.suppliesApprovedAt), 'dd/MM/yyyy HH:mm', {
                             locale: ptBR,
                           })}`
+                        : ''}
+                      {selected.releasedAmountReais != null
+                        ? ` · ${formatReais(Number(selected.releasedAmountReais))}`
                         : ''}
                     </p>
                   ) : selected.status === 'PENDING_SUPPLIES' || selected.status === 'APPROVED' ? (
@@ -1765,9 +1814,68 @@ export default function SolicitacoesCombustivelPage() {
                   {!showRejectForm ? (
                     <>
                       <p className="text-sm text-gray-600 dark:text-gray-400">
-                        Libere o abastecimento informando um posto do contrato da solicitação e o
-                        prazo para o solicitante ir ao posto.
+                        Libere o abastecimento informando o valor, um posto do contrato da
+                        solicitação e o prazo para o solicitante ir ao posto.
                       </p>
+                      {quotaBalance ? (
+                        <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-800/60">
+                          {quotaBalance.unlimited ? (
+                            <p className="text-gray-700 dark:text-gray-300">
+                              Cota semanal de {quotaBalance.ownerName}: sem limite configurado.
+                            </p>
+                          ) : (
+                            <div className="space-y-1 text-gray-700 dark:text-gray-300">
+                              <p>
+                                Cota semanal de {quotaBalance.ownerName}:{' '}
+                                <span className="font-medium">
+                                  {formatReais(quotaBalance.weeklyBudgetReais)}
+                                </span>
+                              </p>
+                              <p>Já usado nesta semana: {formatReais(quotaBalance.usedReais)}</p>
+                              <p>
+                                Restante:{' '}
+                                <span
+                                  className={
+                                    (quotaBalance.remainingReais ?? 0) < 0
+                                      ? 'font-medium text-red-600 dark:text-red-400'
+                                      : 'font-medium'
+                                  }
+                                >
+                                  {formatReais(quotaBalance.remainingReais)}
+                                </span>
+                              </p>
+                              {parseCurrencyInputBr(releasedAmountInput) ? (
+                                <p>
+                                  Depois desta liberação:{' '}
+                                  <span
+                                    className={
+                                      (quotaBalance.remainingReais ?? 0) -
+                                        (parseCurrencyInputBr(releasedAmountInput) || 0) <
+                                      0
+                                        ? 'font-medium text-red-600 dark:text-red-400'
+                                        : 'font-medium'
+                                    }
+                                  >
+                                    {formatReais(
+                                      (quotaBalance.remainingReais ?? 0) -
+                                        (parseCurrencyInputBr(releasedAmountInput) || 0)
+                                    )}
+                                  </span>
+                                </p>
+                              ) : null}
+                            </div>
+                          )}
+                        </div>
+                      ) : null}
+                      <Input
+                        label="Valor a liberar (R$) *"
+                        inputMode="numeric"
+                        value={releasedAmountInput}
+                        onChange={(e) =>
+                          setReleasedAmountInput(maskCurrencyInputBrOrEmpty(e.target.value))
+                        }
+                        placeholder="R$ 0,00"
+                      />
                       <div>
                         <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
                           Posto para abastecimento *
@@ -1843,6 +1951,10 @@ export default function SolicitacoesCombustivelPage() {
                           type="button"
                           onClick={() => {
                             const amount = Number(refuelDeadlineAmount);
+                            const releasedAmountReais = parseCurrencyInputBr(releasedAmountInput);
+                            if (!releasedAmountReais || releasedAmountReais <= 0) {
+                              return toast.error('Informe o valor que será liberado');
+                            }
                             if (!approveGasStationId) {
                               return toast.error('Selecione o posto para abastecimento');
                             }
@@ -1854,12 +1966,14 @@ export default function SolicitacoesCombustivelPage() {
                               gasStationId: approveGasStationId,
                               amount,
                               unit: refuelDeadlineUnit,
+                              releasedAmountReais,
                             });
                           }}
                           disabled={
                             approveMutation.isPending ||
                             !approveGasStationId ||
-                            !refuelDeadlineAmount.trim()
+                            !refuelDeadlineAmount.trim() ||
+                            !releasedAmountInput.trim()
                           }
                         >
                           {approveMutation.isPending ? 'Atendendo...' : 'Atender solicitação'}

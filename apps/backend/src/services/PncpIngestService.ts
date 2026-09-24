@@ -1124,8 +1124,8 @@ export async function startPncpIngestBackgroundSafe(
 
 export function startPncpSyncScheduler(): void {
   if (cronStarted) return;
-  if (!envBool('PNCP_SYNC_ENABLED', true)) {
-    console.log('[pncp-sync] desabilitado (PNCP_SYNC_ENABLED=false)');
+  if (!envBool('PNCP_SYNC_ENABLED', process.env.NODE_ENV === 'production')) {
+    console.log('[pncp-sync] desabilitado no desenvolvimento (defina PNCP_SYNC_ENABLED=true para ligar)');
     return;
   }
 
