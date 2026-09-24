@@ -800,6 +800,81 @@ export class FuelRefuelRequestController {
       return next(error);
     }
   }
+
+  /** Cota semanal (em tanques) por contrato + preço do tanque, usados na fila de Abastecimento. */
+  async getQuotaConfig(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const user = req.user;
+      if (!user) throw createError('Usuário não autenticado', 401);
+      if (!user.isAdmin) throw createError('Acesso permitido apenas para Administrador', 403);
+
+      const [settings, contracts] = await Promise.all([
+        prisma.companySettings.findFirst({ select: { fuelTankPriceReais: true } }),
+        prisma.contract.findMany({
+          orderBy: [{ name: 'asc' }, { number: 'asc' }],
+          select: { id: true, name: true, number: true, weeklyFuelTankQuota: true },
+        }),
+      ]);
+
+      res.json({
+        success: true,
+        data: {
+          tankPriceReais: Number(settings?.fuelTankPriceReais ?? 350),
+          contracts: contracts.map((c) => ({
+            id: c.id,
+            name: c.name.trim() || c.number,
+            number: c.number,
+            weeklyTankQuota: c.weeklyFuelTankQuota == null ? null : Number(c.weeklyFuelTankQuota),
+          })),
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async updateTankPrice(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const user = req.user;
+      if (!user) throw createError('Usuário não autenticado', 401);
+      if (!user.isAdmin) throw createError('Acesso permitido apenas para Administrador', 403);
+
+      const body = z.object({ tankPriceReais: z.number().positive() }).parse(req.body);
+
+      const settings = await prisma.companySettings.findFirst({ select: { id: true } });
+      if (!settings) throw createError('Configurações da empresa não encontradas', 404);
+
+      await prisma.companySettings.update({
+        where: { id: settings.id },
+        data: { fuelTankPriceReais: body.tankPriceReais },
+      });
+
+      res.json({ success: true, message: 'Valor do tanque atualizado' });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async updateContractQuota(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const user = req.user;
+      if (!user) throw createError('Usuário não autenticado', 401);
+      if (!user.isAdmin) throw createError('Acesso permitido apenas para Administrador', 403);
+
+      const body = z
+        .object({ weeklyFuelTankQuota: z.number().positive().nullable() })
+        .parse(req.body);
+
+      await prisma.contract.update({
+        where: { id: req.params.contractId },
+        data: { weeklyFuelTankQuota: body.weeklyFuelTankQuota },
+      });
+
+      res.json({ success: true, message: 'Cota semanal atualizada' });
+    } catch (error) {
+      next(error);
+    }
+  }
 }
 
 export const fuelRefuelRequestController = new FuelRefuelRequestController();

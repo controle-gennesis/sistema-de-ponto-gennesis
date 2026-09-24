@@ -2220,6 +2220,15 @@ async function ensurePunchPocColumns(prisma: PrismaClient): Promise<void> {
   }
 }
 
+async function ensureFuelWeeklyQuotaColumns(prisma: PrismaClient): Promise<void> {
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "contracts" ADD COLUMN IF NOT EXISTS "weeklyFuelTankQuota" DECIMAL(6,2);
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "company_settings" ADD COLUMN IF NOT EXISTS "fuelTankPriceReais" DECIMAL(10,2) NOT NULL DEFAULT 350;
+  `);
+}
+
 async function repairInflatedFuelLiters(prisma: PrismaClient): Promise<void> {
   if (!(await tableExists(prisma, 'fuel_refuel_requests'))) return;
   if (!(await columnExists(prisma, 'fuel_refuel_requests', 'litersRefueled'))) return;
@@ -2293,6 +2302,7 @@ export async function ensureProductionSchema(prisma: PrismaClient): Promise<void
     await ensureCaixinhaPurchasesTable(prisma);
     await ensureCaixinhaAccountsTable(prisma);
     await repairInflatedFuelLiters(prisma);
+    await ensureFuelWeeklyQuotaColumns(prisma);
     console.log('[Schema] Verificação de tabelas/colunas críticas concluída.');
   } catch (e) {
     console.error('[Schema] Falha ao garantir esquema de produção:', e);
