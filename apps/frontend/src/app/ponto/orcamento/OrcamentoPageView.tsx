@@ -35,7 +35,8 @@ import {
   Calendar,
   CalendarCheck,
   ArrowRight,
-  TrendingUp
+  TrendingUp,
+  RefreshCw
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { FilterStatCard } from '@/components/ui/FilterStatCard';
@@ -51,6 +52,7 @@ import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import api from '@/lib/api';
 import { FichaDemandaApprovalFormModal } from '@/components/engenharia/FichaDemandaApprovalFormModal';
 import {
+  currencyDigitsToFormatted,
   formatCurrencyInput,
   formToApiPayload,
   type FichaDemandaApprovalFormState,
@@ -76,7 +78,7 @@ import { ActionMenuOverlay } from '@/components/ui/ActionMenuOverlay';
 import { DatePickerField } from '@/components/ui/DatePickerField';
 import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
 import { formatCadastroListId } from '@/components/ui/CadastroListSummary';
-import { TableCheckbox } from '@/components/ui/Checkbox';
+import { Checkbox, TableCheckbox } from '@/components/ui/Checkbox';
 import {
   getListTableRowClassName,
   ListRowNavigableLabel,
@@ -110,8 +112,13 @@ import {
   tdPlanilhaTipoCls,
   planilhaTipoVazioCls
 } from './orcamentoGradeCellClasses';
-import { calcV, calcularQuantidadeLinha, inferirTipoUnidadePorDimensao } from './orcamentoMedicaoCalc';
-import type { LinhaMedicao, DimensoesItem, TipoUnidadeFormula } from './orcamentoMedicaoTypes';
+import {
+  calcV,
+  calcularQuantidadeLinha,
+  calcularQuantidadeContagem,
+  inferirTipoUnidadePorDimensao
+} from './orcamentoMedicaoCalc';
+import type { LinhaMedicao, LinhaContagem, DimensoesItem, TipoUnidadeFormula } from './orcamentoMedicaoTypes';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
 export type { LinhaMedicao, TipoUnidadeFormula, DimensoesItem } from './orcamentoMedicaoTypes';
 
@@ -1274,19 +1281,111 @@ function montarServicosDeLinhasOrcafascio(
   return { servicos, composicoes: Array.from(composicoesMap.values()) };
 }
 
-/** Junta todas as listas candidatas do endpoint de detalhe (`_items`, `budget`, raiz…). */
-function colecionarListasOrcamentoDetalheResposta(body: unknown): Record<string, unknown>[] {
-  const acc: Record<string, unknown>[] = [];
-  acc.push(...normalizarListaApiOrcamento(body));
-  if (body && typeof body === 'object') {
-    const o = body as Record<string, unknown>;
-    if ('_items' in o && o._items !== undefined) acc.push(...normalizarListaApiOrcamento(o._items));
-    const bud = o.budget;
-    if (bud !== null && typeof bud === 'object') acc.push(...normalizarListaApiOrcamento(bud));
-    const comps = o.compositions ?? o.services;
-    if (comps !== undefined) acc.push(...normalizarListaApiOrcamento(comps));
+function chaveDeItemKeyOrcamento(key: string): string {
+  const parts = String(key).split('|');
+  return parts.length >= 3 ? parts.slice(2).join('|') : key;
+}
+
+function remapearRegistroPorChave<T>(
+  prev: Record<string, T>,
+  chaveParaNovaKey: Map<string, string>
+): Record<string, T> {
+  const next: Record<string, T> = {};
+  for (const [oldKey, val] of Object.entries(prev)) {
+    const nova = chaveParaNovaKey.get(oldKey) ?? chaveParaNovaKey.get(chaveDeItemKeyOrcamento(oldKey));
+    if (nova && next[nova] === undefined) next[nova] = val;
   }
-  return acc;
+  return next;
+}
+
+function remapearListaChavesOrcamento(prev: string[], chaveParaNovaKey: Map<string, string>): string[] {
+  const next: string[] = [];
+  const seen = new Set<string>();
+  for (const k of prev) {
+    const insumoIdx = k.indexOf('|insumo|');
+    if (insumoIdx > 0) {
+      const parent = k.slice(0, insumoIdx);
+      const suffix = k.slice(insumoIdx);
+      const novaParent =
+        chaveParaNovaKey.get(parent) ?? chaveParaNovaKey.get(chaveDeItemKeyOrcamento(parent));
+      if (novaParent) {
+        const nk = `${novaParent}${suffix}`;
+        if (!seen.has(nk)) {
+          seen.add(nk);
+          next.push(nk);
+        }
+      }
+      continue;
+    }
+    const nova = chaveParaNovaKey.get(k) ?? chaveParaNovaKey.get(chaveDeItemKeyOrcamento(k));
+    if (nova && !seen.has(nova)) {
+      seen.add(nova);
+      next.push(nova);
+    }
+  }
+  return next;
+}
+
+function coletarChavesComposicao(servicos: ServicoPadrao[]): Set<string> {
+  const out = new Set<string>();
+  for (const s of servicos) {
+    for (const sub of s.subtitulos) {
+      for (const it of sub.itens) out.add(it.chave);
+    }
+  }
+  return out;
+}
+
+/** Reaproveita ids de serviço/subtítulo pelo nome para não perder quantidade e memória. */
+function mesclarArvoreServicosOrcafascio(
+  atuais: ServicoPadrao[],
+  novos: ServicoPadrao[]
+): { servicos: ServicoPadrao[]; chaveParaNovaKey: Map<string, string>; chavesNovas: Set<string> } {
+  const servicoPorNome = new Map(atuais.map((s) => [s.nome.trim().toLowerCase(), s]));
+  const chaveParaNovaKey = new Map<string, string>();
+  const chavesNovas = new Set<string>();
+
+  const servicos = novos.map((ns) => {
+    const existente = servicoPorNome.get(ns.nome.trim().toLowerCase());
+    const id = existente?.id ?? crypto.randomUUID();
+    const subPorNome = new Map((existente?.subtitulos ?? []).map((s) => [s.nome.trim().toLowerCase(), s]));
+    return {
+      id,
+      nome: ns.nome,
+      subtitulos: ns.subtitulos.map((nsub) => {
+        const exSub = subPorNome.get(nsub.nome.trim().toLowerCase());
+        const subId = exSub?.id ?? crypto.randomUUID();
+        for (const it of nsub.itens) {
+          const newKey = `${id}|${subId}|${it.chave}`;
+          chavesNovas.add(newKey);
+          chaveParaNovaKey.set(it.chave, newKey);
+          chaveParaNovaKey.set(newKey, newKey);
+          const exItem = exSub?.itens.find((x) => x.chave === it.chave);
+          if (exItem) chaveParaNovaKey.set(`${id}|${subId}|${exItem.chave}`, newKey);
+        }
+        return { id: subId, nome: nsub.nome, itens: nsub.itens };
+      }),
+    };
+  });
+
+  for (const s of atuais) {
+    for (const sub of s.subtitulos) {
+      for (const it of sub.itens) {
+        const oldKey = `${s.id}|${sub.id}|${it.chave}`;
+        if (!chaveParaNovaKey.has(oldKey)) {
+          const nova = chaveParaNovaKey.get(it.chave);
+          if (nova) chaveParaNovaKey.set(oldKey, nova);
+        }
+      }
+    }
+  }
+
+  return { servicos, chaveParaNovaKey, chavesNovas };
+}
+
+function parseOrcafascioBudgetIdMeta(metaRaw: Record<string, unknown> | undefined): string | undefined {
+  const v = metaRaw?.orcafascioBudgetId;
+  return typeof v === 'string' && v.trim() ? v.trim() : undefined;
 }
 
 export interface OrcafascioListResponse<T> {
@@ -1742,6 +1841,20 @@ type OrcamentoMeta = {
   revisaoCount: number; // 0 = sem revisão; ao salvar vira 1 => R01
   /** Orçamento criado pela importação da planilha: quantidades vêm da planilha; memória de cálculo oculta. */
   importadoPlanilha?: boolean;
+  /**
+   * Escolha feita na importação do Orçafascio: usar memória de cálculo pra preencher as quantidades.
+   * `true` = quantidades zeradas na importação, coluna travada, preenchimento pela aba Memória de Cálculo.
+   * `false` = quantidades vêm do Orçafascio e ficam travadas (sem edição).
+   * `undefined` = orçamento antigo/de outra origem — mantém o comportamento anterior (coluna "un" editável direto).
+   */
+  usarMemoriaCalculo?: boolean;
+  /**
+   * Escolha feita na importação do Orçafascio: como calcular os subtotais por item.
+   * `undefined` = orçamento antigo/de outra origem — mantém o comportamento anterior (truncar, igual sempre foi).
+   */
+  modoArredondamento?: ModoArredondamento;
+  /** Id do orçamento no Orçafascio — usado para atualizar composições depois da importação. */
+  orcafascioBudgetId?: string;
   /** Totais do sintético Orçafascio (referência na importação; a barra usa a soma das linhas). */
   totaisOrcafascio?: {
     semBdi: number;
@@ -2033,7 +2146,7 @@ function classeLevantamentoCondicional(lev: number): string {
   if (lev >= 50 && lev < 80.99) {
     return 'font-medium bg-yellow-50 text-yellow-900 dark:bg-yellow-500/15 dark:text-yellow-200';
   }
-  if (lev >= 80.99 && lev <= 120) {
+  if (lev >= 80.99) {
     return 'font-medium bg-red-50 text-red-900 dark:bg-red-500/15 dark:text-red-200';
   }
   return '';
@@ -2048,7 +2161,7 @@ function classeValorTotalCondicional(valorPct: number): string {
   if (valorPct >= 50 && valorPct <= 60) {
     return 'font-medium bg-yellow-50 text-yellow-900 dark:bg-yellow-500/15 dark:text-yellow-200';
   }
-  if (valorPct >= 61 && valorPct <= 100) {
+  if (valorPct >= 61) {
     return 'font-medium bg-red-50 text-red-900 dark:bg-red-500/15 dark:text-red-200';
   }
   return '';
@@ -2154,6 +2267,15 @@ function loadSessaoOrcamento(centroCustoId: string | null, orcamentoId: string |
           revisaoCount:
             typeof metaRaw.revisaoCount === 'number' && isFinite(metaRaw.revisaoCount) ? metaRaw.revisaoCount : 0,
           importadoPlanilha: metaRaw.importadoPlanilha === true,
+          usarMemoriaCalculo:
+            typeof metaRaw.usarMemoriaCalculo === 'boolean' ? metaRaw.usarMemoriaCalculo : undefined,
+          modoArredondamento:
+            metaRaw.modoArredondamento === 'truncar' ||
+            metaRaw.modoArredondamento === 'arredondar' ||
+            metaRaw.modoArredondamento === 'nenhum'
+              ? metaRaw.modoArredondamento
+              : undefined,
+          orcafascioBudgetId: parseOrcafascioBudgetIdMeta(metaRaw),
           statusAprovacao: normalizarStatusAprovacaoOrcamento(metaRaw.statusAprovacao),
           fichaDemandaPct: (() => {
             const n = Number(metaRaw.fichaDemandaPct);
@@ -2491,6 +2613,15 @@ function parseOrcamentoDetailRaw(d: {
         revisaoCount:
           typeof metaRaw.revisaoCount === 'number' && isFinite(metaRaw.revisaoCount) ? metaRaw.revisaoCount : 0,
         importadoPlanilha: metaRaw.importadoPlanilha === true,
+        usarMemoriaCalculo:
+          typeof metaRaw.usarMemoriaCalculo === 'boolean' ? metaRaw.usarMemoriaCalculo : undefined,
+        modoArredondamento:
+          metaRaw.modoArredondamento === 'truncar' ||
+          metaRaw.modoArredondamento === 'arredondar' ||
+          metaRaw.modoArredondamento === 'nenhum'
+            ? metaRaw.modoArredondamento
+            : undefined,
+        orcafascioBudgetId: parseOrcafascioBudgetIdMeta(metaRaw),
         statusAprovacao: normalizarStatusAprovacaoOrcamento(metaRaw.statusAprovacao),
         fichaDemandaPct: (() => {
           const n = Number(metaRaw.fichaDemandaPct);
@@ -2603,6 +2734,15 @@ function montarPayloadSalvarOrcamento(
   };
 }
 
+/** Importação/gravação de orçamento grande no S3 passa fácil dos 30s padrão do axios. */
+const ORCAMENTO_API_WRITE_TIMEOUT_MS = 240000;
+
+function isOrcamentoRequestTimeout(err: unknown): boolean {
+  const code = (err as { code?: string } | null)?.code;
+  const message = err instanceof Error ? err.message : String((err as { message?: string } | null)?.message || '');
+  return code === 'ECONNABORTED' || /timeout/i.test(message);
+}
+
 async function saveOrcamentoToApi(
   centroCustoId: string,
   orcamentoId: string,
@@ -2612,7 +2752,9 @@ async function saveOrcamentoToApi(
     sessaoOrcamento?: SessaoOrcamentoPersist | null;
   }
 ): Promise<void> {
-  await api.put(`/orcamento/${centroCustoId}/orcamentos/${orcamentoId}`, data);
+  await api.put(`/orcamento/${centroCustoId}/orcamentos/${orcamentoId}`, data, {
+    timeout: ORCAMENTO_API_WRITE_TIMEOUT_MS,
+  });
   seedOrcamentoDetailCache(centroCustoId, orcamentoId, {
     servicos: data.servicos,
     imports: data.imports,
@@ -2624,31 +2766,41 @@ async function criarOrcamentoApi(
   centroCustoId: string,
   nome?: string
 ): Promise<{ id: string; nome: string; updatedAt: string }> {
-  const res = await api.post(`/orcamento/${centroCustoId}/orcamentos`, { nome });
+  const res = await api.post(`/orcamento/${centroCustoId}/orcamentos`, { nome }, {
+    timeout: ORCAMENTO_API_WRITE_TIMEOUT_MS,
+  });
   return res.data;
 }
 
 async function excluirOrcamentoApi(centroCustoId: string, orcamentoId: string): Promise<void> {
-  await api.delete(`/orcamento/${centroCustoId}/orcamentos/${orcamentoId}`);
+  await api.delete(`/orcamento/${centroCustoId}/orcamentos/${orcamentoId}`, {
+    timeout: ORCAMENTO_API_WRITE_TIMEOUT_MS,
+  });
   invalidateOrcamentoDetailCache(centroCustoId, orcamentoId);
 }
 
 async function renomearOrcamentoApi(centroCustoId: string, orcamentoId: string, nome: string): Promise<void> {
-  await api.patch(`/orcamento/${centroCustoId}/orcamentos/${orcamentoId}`, { nome });
+  await api.patch(`/orcamento/${centroCustoId}/orcamentos/${orcamentoId}`, { nome }, {
+    timeout: ORCAMENTO_API_WRITE_TIMEOUT_MS,
+  });
 }
 
 async function saveServicosPadraoToApi(
   centroCustoId: string,
   data: { servicos: ServicoPadrao[]; imports: ImportRecord[] }
 ): Promise<void> {
-  await api.put(`/orcamento/${centroCustoId}/servicos-padrao`, data);
+  await api.put(`/orcamento/${centroCustoId}/servicos-padrao`, data, {
+    timeout: ORCAMENTO_API_WRITE_TIMEOUT_MS,
+  });
 }
 
 async function fetchServicosPadraoFromApi(
   centroCustoId: string
 ): Promise<{ servicos: ServicoPadrao[]; imports: ImportRecord[] } | null> {
   try {
-    const res = await api.get(`/orcamento/${centroCustoId}/servicos-padrao`);
+    const res = await api.get(`/orcamento/${centroCustoId}/servicos-padrao`, {
+      timeout: ORCAMENTO_API_WRITE_TIMEOUT_MS,
+    });
     const root = res?.data;
     const d = root?.data && typeof root.data === 'object' ? root.data : root;
     return {
@@ -2690,7 +2842,9 @@ async function fetchComposicoesGeral(): Promise<ComposicaoItem[]> {
 
 async function saveComposicoesGeralToApi(items: ComposicaoItem[]) {
   try {
-    await api.put('/orcamento/composicoes/geral', { items });
+    await api.put('/orcamento/composicoes/geral', { items }, {
+      timeout: ORCAMENTO_API_WRITE_TIMEOUT_MS,
+    });
     composicoesGeralCache = { items, fetchedAt: Date.now() };
   } catch (err) {
     console.warn('Erro ao salvar composições no S3:', err);
@@ -3735,97 +3889,37 @@ function truncarMoeda2(n: number): number {
   return (sign * cents) / 100;
 }
 
+/** Igual a truncarMoeda2, mas arredondando (pra cima ou pra baixo) em vez de truncar. */
+function arredondarMoeda2(n: number): number {
+  if (!Number.isFinite(n)) return 0;
+  const sign = n < 0 ? -1 : 1;
+  const abs = Math.abs(n);
+  const cents = Math.round(abs * 100 + 1e-8);
+  return (sign * cents) / 100;
+}
+
+export type ModoArredondamento = 'truncar' | 'arredondar' | 'nenhum';
+
+/**
+ * Opção escolhida na importação do Orçafascio (que usa 9 casas decimais internamente) — controla
+ * como os subtotais por item são calculados aqui, pra reduzir divergência com o valor de lá:
+ * - truncar: trunca em 2 casas (padrão TCU, igual ao truncarMoeda2 — comportamento de sempre).
+ * - arredondar: arredonda em 2 casas normalmente.
+ * - nenhum: mantém a precisão cheia (sem cortar em 2 casas) — só a exibição arredonda pra tela.
+ */
+function aplicarModoArredondamento(n: number, modo: ModoArredondamento | undefined): number {
+  if (!Number.isFinite(n)) return 0;
+  if (modo === 'arredondar') return arredondarMoeda2(n);
+  if (modo === 'nenhum') return n;
+  return truncarMoeda2(n);
+}
+
 function fmtCalcNumero(n: number, casas = 2) {
   return Number(n).toLocaleString('pt-BR', { minimumFractionDigits: casas, maximumFractionDigits: casas });
 }
 
 function fmtCalcMoeda(n: number) {
   return `R$ ${fmtCalcNumero(n, 2)}`;
-}
-
-type DetalheInsumoOrcSecao = {
-  item: string;
-  key: string;
-  qtdOrc: number;
-  valorUnitOrc: number;
-  custoOrc: number;
-  custoEst: number;
-  qtdCompra: number | undefined;
-  valorUnitReal: number | undefined;
-  custoReal: number;
-};
-
-/** Totais agregados por subtítulo (1.x) ou por composição (1.x.y) para tooltips de linha de título/subtítulo. */
-type DetalheAggSecao = {
-  item: string;
-  custoOrc: number;
-  custoEst: number;
-  custoReal: number;
-  insumoKeys: string[];
-  /** Chaves das linhas composição — realce nas colunas de custo orçamento / estimado / real (totais por linha). */
-  composicaoKeys: string[];
-};
-
-function compararChaveItemNumero(a: string, b: string): number {
-  const pa = a.split('.').map((x) => parseInt(x, 10) || 0);
-  const pb = b.split('.').map((x) => parseInt(x, 10) || 0);
-  const len = Math.max(pa.length, pb.length);
-  for (let i = 0; i < len; i++) {
-    const da = pa[i] ?? 0;
-    const db = pb[i] ?? 0;
-    if (da !== db) return da - db;
-  }
-  return 0;
-}
-
-/** Realça a célula «Custo orçamento» de cada composição (ou insumo) cujo valor entra na soma. */
-function hoverIdsAggCustoOrc(lista: DetalheAggSecao[]): string[] {
-  return lista.flatMap((a) => {
-    const keys = a.composicaoKeys.length > 0 ? a.composicaoKeys : a.insumoKeys;
-    return keys.map((k) => `custo-orc-${k}`);
-  });
-}
-
-function hoverIdsAggCustoEst(lista: DetalheAggSecao[]): string[] {
-  return lista.flatMap((a) => {
-    const keys = a.composicaoKeys.length > 0 ? a.composicaoKeys : a.insumoKeys;
-    return keys.map((k) => `custo-est-${k}`);
-  });
-}
-
-/** Mesma lógica de `hoverIdsAggCustoOrc`: realça a coluna «Custo real» de cada composição/insumo da soma. */
-function hoverIdsAggCustoReal(lista: DetalheAggSecao[]): string[] {
-  return lista.flatMap((a) => {
-    const keys = a.composicaoKeys.length > 0 ? a.composicaoKeys : a.insumoKeys;
-    return keys.map((k) => `custo-real-${k}`);
-  });
-}
-
-const CLASSE_CELULA_HOVER_FONTE =
-  'bg-blue-50 ring-2 ring-inset ring-blue-500 dark:bg-blue-950/35 dark:ring-blue-400';
-
-/**
- * Tooltip da linha do serviço (item 1): realça só as células de total de cada subtítulo (1.1, 1.2…),
- * não as composições (1.1.1…) abaixo.
- */
-function hoverIdsTituloServicoPorBloco(
-  lista: DetalheAggSecao[],
-  col: 'orc' | 'est' | 'real'
-): string[] {
-  return lista.map((a) => {
-    const partes = a.item.split('.');
-    if (partes.length >= 2) {
-      const m = partes[0];
-      const s = partes[1];
-      if (col === 'orc') return `custo-orc-bloco-${m}-${s}`;
-      if (col === 'est') return `custo-est-bloco-${m}-${s}`;
-      return `custo-real-bloco-${m}-${s}`;
-    }
-    const safe = String(a.item).replace(/\./g, '-');
-    if (col === 'orc') return `custo-orc-bloco-${safe}`;
-    if (col === 'est') return `custo-est-bloco-${safe}`;
-    return `custo-real-bloco-${safe}`;
-  });
 }
 
 /** Exibição em planilha exportada (pt-BR). */
@@ -4001,7 +4095,8 @@ const MoedaCelula = memo(function MoedaCelula({
 
 /**
  * Input da Ficha de Demanda: estado local enquanto digita.
- * Só notifica o pai no blur — evita re-render da grade inteira a cada tecla.
+ * Por padrão só notifica o pai no blur — evita re-render da grade inteira a cada tecla.
+ * Campos de moeda passam `mask` + `commitOnChange` para formatar e recalcular na hora.
  */
 const FdCampoLocal = memo(function FdCampoLocal({
   committedValue,
@@ -4010,6 +4105,8 @@ const FdCampoLocal = memo(function FdCampoLocal({
   placeholder,
   title,
   inputMode,
+  mask,
+  commitOnChange,
 }: {
   committedValue: string;
   onCommit: (raw: string) => void;
@@ -4017,6 +4114,8 @@ const FdCampoLocal = memo(function FdCampoLocal({
   placeholder?: string;
   title?: string;
   inputMode?: React.HTMLAttributes<HTMLInputElement>['inputMode'];
+  mask?: (raw: string) => string;
+  commitOnChange?: boolean;
 }) {
   const [local, setLocal] = useState(committedValue);
   const focusedRef = useRef(false);
@@ -4025,49 +4124,32 @@ const FdCampoLocal = memo(function FdCampoLocal({
     if (!focusedRef.current) setLocal(committedValue);
   }, [committedValue]);
 
+  const applyValue = (raw: string, shouldCommit: boolean) => {
+    const next = mask ? mask(raw) : raw;
+    setLocal(next);
+    if (shouldCommit) onCommit(next);
+  };
+
   return (
     <input
       type="text"
       inputMode={inputMode}
       placeholder={placeholder}
       title={title}
+      autoComplete="off"
       className={className}
       value={local}
       onFocus={() => {
         focusedRef.current = true;
       }}
-      onChange={(e) => setLocal(e.target.value)}
+      onChange={(e) => applyValue(e.target.value, Boolean(commitOnChange))}
       onBlur={(e) => {
         focusedRef.current = false;
-        const raw = e.target.value;
-        setLocal(raw);
-        onCommit(raw);
+        applyValue(e.target.value, true);
       }}
     />
   );
 });
-
-/** Realce de células relacionadas ao passar o mouse (sem popup de tooltip). */
-function CalcHoverBridge({
-  children,
-  hoverSourceIds,
-  onHoverSourcesChange
-}: {
-  children: React.ReactNode;
-  hoverSourceIds?: string[];
-  onHoverSourcesChange?: (ids: string[]) => void;
-}) {
-  if (!hoverSourceIds?.length || !onHoverSourcesChange) return <>{children}</>;
-  return (
-    <span
-      className="block w-full min-w-0 max-w-full"
-      onMouseEnter={() => onHoverSourcesChange(hoverSourceIds)}
-      onMouseLeave={() => onHoverSourcesChange([])}
-    >
-      {children}
-    </span>
-  );
-}
 
 /** Checkbox do dropdown de serviços: caixa 20px, tema vermelho, suporta indeterminado. */
 function ServicosDropdownCheckbox({
@@ -4185,6 +4267,7 @@ export function OrcamentoPageView({
   const [novoServicoNome, setNovoServicoNome] = useState('');
   const [showAddServico, setShowAddServico] = useState(false);
   const [isImportandoOrcamento, setIsImportandoOrcamento] = useState(false);
+  const [isAtualizandoOrcafascio, setIsAtualizandoOrcafascio] = useState(false);
   const [servicosExpandidos, setServicosExpandidos] = useState<Set<string>>(new Set());
   const [loadingFromApi, setLoadingFromApi] = useState(false);
 
@@ -4192,6 +4275,11 @@ export function OrcamentoPageView({
   const [orcafascioModalOpen, setOrcafascioModalOpen] = useState(false);
   const [orcafascioModalSoloOrcamentos, setOrcafascioModalSoloOrcamentos] = useState(false);
   const [orcafascioImportSelectValue, setOrcafascioImportSelectValue] = useState('');
+  /** Checkbox do modal de importação: usar memória de cálculo (quantidades zeradas, preenche pela aba Memória de Cálculo). */
+  const [orcafascioImportUsarMemoria, setOrcafascioImportUsarMemoria] = useState(false);
+  /** Opção de arredondamento do modal de importação — Orçafascio usa 9 casas decimais internamente. */
+  const [orcafascioImportModoArredondamento, setOrcafascioImportModoArredondamento] =
+    useState<ModoArredondamento>('truncar');
   const [orcafascioImportDetalheModalOpen, setOrcafascioImportDetalheModalOpen] = useState(false);
   const [orcafascioModalTab, setOrcafascioModalTab] = useState<'composicoes' | 'orcamentos'>('composicoes');
   const [orcafascioModalOrcamentosSearch, setOrcafascioModalOrcamentosSearch] = useState('');
@@ -4280,7 +4368,6 @@ export function OrcamentoPageView({
   const [memorialItemKey, setMemorialItemKey] = useState<string | null>(null);
   // Draft para campos que aceitam cálculos (2+3, 10/2, etc) - avalia no blur
   const [draftCalc, setDraftCalc] = useState<Record<string, string>>({});
-  const [calcHoverSourceIds, setCalcHoverSourceIds] = useState<string[]>([]);
   const [insumosAnaliticoManuais, setInsumosAnaliticoManuais] = useState<Record<string, InsumoAnaliticoManual[]>>({});
   const [insumosAnaliticoOcultos, setInsumosAnaliticoOcultos] = useState<string[]>([]);
   /** Menu botão direito — composição, insumo do catálogo ou insumo manual. */
@@ -5627,14 +5714,6 @@ export function OrcamentoPageView({
       } catch {
         listComp = [];
       }
-      if (listComp.length === 0) {
-        try {
-          const det = await api.get(`/orcafascio/orcamentos/${enc}`, { timeout: 120000 });
-          listComp = colecionarListasOrcamentoDetalheResposta(det.data);
-        } catch {
-          /* só tentativa extra */
-        }
-      }
       setOrcafascioOrcamentoComposicoes(listComp);
       setOrcafascioOrcamentoComposicoesLoading(false);
 
@@ -6067,8 +6146,12 @@ export function OrcamentoPageView({
         `Novo orçamento criado com ${servicosImportados.length} serviço(s). Você já pode revisar o orçamento e as demais abas.`
       );
       return true;
-    } catch {
-      toast.error('Não foi possível criar o orçamento a partir da planilha.');
+    } catch (err) {
+      if (isOrcamentoRequestTimeout(err)) {
+        toast.error('A planilha foi lida, mas o servidor demorou para salvar. Tente novamente.');
+      } else {
+        toast.error('Não foi possível criar o orçamento a partir da planilha.');
+      }
       return false;
     } finally {
       setIsImportandoOrcamento(false);
@@ -6136,14 +6219,6 @@ export function OrcamentoPageView({
             } catch {
               linhas = [];
             }
-            if (linhas.length === 0) {
-              try {
-                const det = await api.get(`/orcafascio/orcamentos/${enc}`, { timeout: 120000 });
-                linhas = colecionarListasOrcamentoDetalheResposta(det.data);
-              } catch {
-                linhas = [];
-              }
-            }
           }
           if (precisaAnalitico) {
             try {
@@ -6200,11 +6275,16 @@ export function OrcamentoPageView({
       ).slice(0, 120);
 
       const entry = await criarOrcamentoApi(centroCustoId, nomeLista);
+      const usarMemoriaCalculo = orcafascioImportUsarMemoria;
+      const modoArredondamento = orcafascioImportModoArredondamento;
       const subtitulosNoOrcamento: string[] = [];
       const quantidadesPorItem: Record<string, number> = {};
       for (const s of servicosImportados) {
         for (const sub of s.subtitulos) {
           subtitulosNoOrcamento.push(`${s.id}|${sub.id}`);
+          // Com "usar memória de cálculo", as quantidades entram zeradas — a pessoa preenche
+          // pela aba Memória de Cálculo (dimensões p/ m³/m²/m, lista de locais p/ un).
+          if (usarMemoriaCalculo) continue;
           for (const it of sub.itens) {
             const itemKey = `${s.id}|${sub.id}|${it.chave}`;
             const q = it.quantidadePlanilha;
@@ -6226,6 +6306,9 @@ export function OrcamentoPageView({
         bdiPercentual: finApi.bdiPercentual,
         reajustes: [],
         importadoPlanilha: true,
+        usarMemoriaCalculo,
+        modoArredondamento,
+        orcafascioBudgetId: idOrcamentoOrcafascioParaApi(orcafascioOrcamentoDetalhe) || undefined,
         // Não grava totalComBdi do sintético Orçafascio aqui — esse total pode
         // divergir da montagem. O Total da lista vem do rodapé (totalComDescontoEBdi).
         ...(finApi.totalComBdi > 0
@@ -6281,8 +6364,10 @@ export function OrcamentoPageView({
       setNomeOrcamentoRascunho(nomeLista);
       setOrcamentoAtivoId(entry.id);
       navigateEmbeddedOrcamentoPath(entry.id);
-      setOrcamentoViewTab('montagem');
+      setOrcamentoViewTab(usarMemoriaCalculo ? 'memorial' : 'montagem');
 
+      setOrcafascioImportUsarMemoria(false);
+      setOrcafascioImportModoArredondamento('truncar');
       setOrcafascioModalOpen(false);
       setOrcafascioModalSoloOrcamentos(false);
       setOrcafascioImportSelectValue('');
@@ -6304,6 +6389,10 @@ export function OrcamentoPageView({
       );
       return true;
     } catch (err) {
+      if (isOrcamentoRequestTimeout(err)) {
+        toast.error('O orçamento é grande e o servidor demorou para salvar. Tente novamente.');
+        return false;
+      }
       const detail = err instanceof Error ? err.message : '';
       toast.error(
         detail
@@ -6313,6 +6402,214 @@ export function OrcamentoPageView({
       return false;
     } finally {
       setIsImportandoOrcamento(false);
+    }
+  };
+
+  const orcamentoVeioOrcafascio = Boolean(
+    meta.importadoPlanilha &&
+      (meta.orcafascioBudgetId ||
+        typeof meta.usarMemoriaCalculo === 'boolean' ||
+        /Importado do Orçafascio/i.test(meta.descricao || ''))
+  );
+
+  const resolverOrcafascioBudgetIdAtual = async (): Promise<string> => {
+    if (meta.orcafascioBudgetId) return meta.orcafascioBudgetId;
+    const codigo = (meta.osNumeroPasta || '').trim();
+    if (!codigo) return '';
+    const achar = (items: { id?: string; code?: string; [k: string]: unknown }[]) => {
+      const hit = items.find((i) => String(i.code || '').trim().toLowerCase() === codigo.toLowerCase());
+      return hit ? idOrcamentoOrcafascioParaApi(hit as OrcafascioOrcamentoItem) : '';
+    };
+    const caches = [peekOrcafascioOrcamentosCache(''), peekOrcafascioOrcamentosCache(codigo)];
+    for (const c of caches) {
+      const id = c?.items?.length ? achar(c.items) : '';
+      if (id) return id;
+    }
+    try {
+      const listed = await loadOrcafascioOrcamentosList({ search: codigo });
+      return achar(listed.items);
+    } catch {
+      return '';
+    }
+  };
+
+  const atualizarOrcamentoOrcafascio = async () => {
+    if (!centroCustoId || !orcamentoAtivoId) {
+      toast.error('Abra um orçamento importado do Orçafascio para atualizar.');
+      return;
+    }
+    if (isAtualizandoOrcafascio) return;
+    if (
+      typeof window !== 'undefined' &&
+      !window.confirm(
+        'Atualizar a partir do Orçafascio?\n\nComposições novas entram neste orçamento. As que foram removidas lá saem daqui.\nQuantidade, memória de cálculo e ficha de demanda das linhas que continuam são mantidas.\n\nPara apagar uma composição só neste orçamento, clique com o botão direito na linha.'
+      )
+    ) {
+      return;
+    }
+
+    setIsAtualizandoOrcafascio(true);
+    if (orcamentoAutosaveTimerRef.current) {
+      clearTimeout(orcamentoAutosaveTimerRef.current);
+      orcamentoAutosaveTimerRef.current = null;
+    }
+    try {
+      const budgetId = await resolverOrcafascioBudgetIdAtual();
+      if (!budgetId) {
+        toast.error('Não achei o orçamento correspondente no Orçafascio. Importe de novo ou confira o código da OS.');
+        return;
+      }
+
+      const enc = encodeURIComponent(budgetId);
+      let linhas: Record<string, unknown>[] = [];
+      let analitico: Record<string, unknown>[] = [];
+      try {
+        const sint = await api.get(`/orcafascio/orcamentos/${enc}/sintetico`, { timeout: 120000 });
+        linhas = normalizarListaApiOrcamento(sint.data);
+      } catch (err) {
+        if (isOrcamentoRequestTimeout(err)) {
+          toast.error('O Orçafascio demorou para responder o sintético. Tente novamente.');
+        } else {
+          toast.error('Não foi possível buscar o sintético no Orçafascio.');
+        }
+        return;
+      }
+      try {
+        const ana = await api.get(`/orcafascio/orcamentos/${enc}/analitico`, { timeout: 120000 });
+        analitico = normalizarListaApiOrcamento(ana.data);
+      } catch {
+        analitico = [];
+      }
+
+      if (linhas.length === 0) {
+        toast.error('Este orçamento não retornou composições no Orçafascio.');
+        return;
+      }
+
+      const { servicos: servicosNovos, composicoes: compsNovas } = montarServicosDeLinhasOrcafascio(
+        linhas,
+        analitico
+      );
+      if (servicosNovos.length === 0) {
+        toast.error('Não foi possível montar os serviços a partir do Orçafascio.');
+        return;
+      }
+
+      const chavesAntes = coletarChavesComposicao(servicos);
+      const chavesDepois = coletarChavesComposicao(servicosNovos);
+      let adicionadas = 0;
+      let removidas = 0;
+      for (const c of chavesDepois) if (!chavesAntes.has(c)) adicionadas += 1;
+      for (const c of chavesAntes) if (!chavesDepois.has(c)) removidas += 1;
+
+      const { servicos: servicosMesclados, chaveParaNovaKey } = mesclarArvoreServicosOrcafascio(
+        servicos,
+        servicosNovos
+      );
+
+      if (compsNovas.length > 0) {
+        const porChave = new Map(composicoes.map((c) => [c.chave, c]));
+        for (const c of compsNovas) {
+          if (!porChave.has(c.chave)) porChave.set(c.chave, c);
+        }
+        const mescladas = Array.from(porChave.values());
+        setComposicoes(mescladas);
+        await saveComposicoesGeralToApi(mescladas);
+      }
+
+      const subtitulosNoOrcamentoNext: string[] = [];
+      const quantidadesMescladas = remapearRegistroPorChave(quantidadesPorItem, chaveParaNovaKey);
+      const usarMemoriaCalculo = meta.usarMemoriaCalculo === true;
+      for (const s of servicosMesclados) {
+        for (const sub of s.subtitulos) {
+          subtitulosNoOrcamentoNext.push(`${s.id}|${sub.id}`);
+          if (usarMemoriaCalculo) continue;
+          for (const it of sub.itens) {
+            const itemKey = `${s.id}|${sub.id}|${it.chave}`;
+            if (quantidadesMescladas[itemKey] != null) continue;
+            const q = it.quantidadePlanilha;
+            if (q != null && q > 0 && Number.isFinite(q)) quantidadesMescladas[itemKey] = q;
+          }
+        }
+      }
+
+      const dimensoesNext = remapearRegistroPorChave(dimensoesPorItem, chaveParaNovaKey);
+      const planilhaQtdNext = remapearRegistroPorChave(planilhaQuantidadeCompra, chaveParaNovaKey);
+      const planilhaVlNext = remapearRegistroPorChave(planilhaValorUnitCompraReal, chaveParaNovaKey);
+      const planilhaTipoNext = remapearRegistroPorChave(planilhaTipoInsumo, chaveParaNovaKey);
+      const observacoesNext = remapearRegistroPorChave(fichaDemandaObservacoes, chaveParaNovaKey);
+      const ocultosNext = remapearListaChavesOrcamento(itensOcultosNoOrcamento, chaveParaNovaKey);
+      const insumosOcultosNext = remapearListaChavesOrcamento(insumosAnaliticoOcultos, chaveParaNovaKey);
+      const manuaisNext = remapearRegistroPorChave(insumosAnaliticoManuais, chaveParaNovaKey);
+
+      const finApi = extrairMetaFinanceiraOrcafascio(linhas);
+      const nextMeta: OrcamentoMeta = {
+        ...meta,
+        orcafascioBudgetId: budgetId,
+        ...(finApi.totalComBdi > 0
+          ? {
+              totaisOrcafascio: {
+                semBdi: finApi.totalSemBdi,
+                bdi: finApi.totalBdi,
+                comBdi: finApi.totalComBdi,
+              },
+            }
+          : {}),
+      };
+
+      const servicosParaApi = servicosSemQuantidadePlanilha(servicosMesclados);
+      const nextSessao: SessaoOrcamentoPersist = {
+        ...sessaoRef.current,
+        subtitulosNoOrcamento: subtitulosNoOrcamentoNext,
+        quantidadesPorItem: quantidadesMescladas,
+        dimensoesPorItem: dimensoesNext,
+        planilhaQuantidadeCompra: planilhaQtdNext,
+        planilhaValorUnitCompraReal: planilhaVlNext,
+        planilhaTipoInsumo: planilhaTipoNext,
+        itensOcultosNoOrcamento: ocultosNext,
+        insumosAnaliticoOcultos: insumosOcultosNext,
+        meta: nextMeta,
+        servicosDocumento: servicosParaApi,
+      };
+      sessaoRef.current = nextSessao;
+      servicosImportsRef.current = { servicos: servicosParaApi, imports };
+
+      await saveOrcamentoToApi(
+        centroCustoId,
+        orcamentoAtivoId,
+        montarPayloadSalvarOrcamento(servicosParaApi, imports, nextSessao)
+      );
+
+      setServicos(servicosParaApi);
+      setSubtitulosNoOrcamento(subtitulosNoOrcamentoNext);
+      setQuantidadesPorItem(quantidadesMescladas);
+      setDimensoesPorItem(dimensoesNext);
+      setPlanilhaQuantidadeCompra(planilhaQtdNext);
+      setPlanilhaValorUnitCompraReal(planilhaVlNext);
+      setPlanilhaTipoInsumo(planilhaTipoNext);
+      setFichaDemandaObservacoes(observacoesNext);
+      setItensOcultosNoOrcamento(ocultosNext);
+      setInsumosAnaliticoOcultos(insumosOcultosNext);
+      setInsumosAnaliticoManuais(manuaisNext);
+      setMeta(nextMeta);
+
+      const partes: string[] = [];
+      if (adicionadas > 0) partes.push(`${adicionadas} nova(s)`);
+      if (removidas > 0) partes.push(`${removidas} removida(s)`);
+      toast.success(
+        partes.length > 0
+          ? `Orçamento atualizado do Orçafascio: ${partes.join(', ')}.`
+          : 'Orçamento já estava igual ao Orçafascio.'
+      );
+    } catch (err) {
+      if (isOrcamentoRequestTimeout(err)) {
+        toast.error('A atualização demorou demais. Tente novamente.');
+        return;
+      }
+      const detail = err instanceof Error ? err.message : '';
+      toast.error(detail ? `Não foi possível atualizar: ${detail}` : 'Não foi possível atualizar do Orçafascio.');
+    } finally {
+      setIsAtualizandoOrcafascio(false);
     }
   };
 
@@ -6827,7 +7124,10 @@ export function OrcamentoPageView({
         const tipoUnidade: TipoUnidadeFormula = (tipoDaComp && tipoDaComp !== 'un') ? tipoDaComp : tipoAuto;
         let qtd = 0;
         if (tipoUnidade === 'un') {
-          qtd = Math.max(0, quantidadesPorItem[itemKey] ?? 0);
+          qtd =
+            meta.usarMemoriaCalculo === true
+              ? calcularQuantidadeContagem(dim?.linhasContagem)
+              : Math.max(0, quantidadesPorItem[itemKey] ?? 0);
         } else if (dim?.linhas?.length) {
           qtd = dim.linhas.reduce(
             (s, ln) => (ln.cabecalhoSecao ? s : s + calcularQuantidadeLinha(ln, tipoUnidade)),
@@ -6838,9 +7138,10 @@ export function OrcamentoPageView({
         }
         const moUnit = maoDeObraUnitario;
         const matUnit = materialUnitario;
-        const subMaoDeObra = truncarMoeda2(moUnit * qtd);
-        const subMaterial = truncarMoeda2(matUnit * qtd);
-        const subMatMaisMo = truncarMoeda2(subMaoDeObra + subMaterial);
+        const modoArred = meta.modoArredondamento;
+        const subMaoDeObra = aplicarModoArredondamento(moUnit * qtd, modoArred);
+        const subMaterial = aplicarModoArredondamento(matUnit * qtd, modoArred);
+        const subMatMaisMo = aplicarModoArredondamento(subMaoDeObra + subMaterial, modoArred);
 
         // Importado: usa total da linha do Orçafascio (não recalcula unitário×qtd).
         const qOrig = Number(i.quantidadeImportada);
@@ -6859,15 +7160,15 @@ export function OrcamentoPageView({
           const comImp = Number(i.totalComBdiImportado);
           totalItem =
             Number.isFinite(semImp) && semImp !== 0
-              ? truncarMoeda2(semImp * fatorQtd)
-              : truncarMoeda2(preco * qtd);
+              ? aplicarModoArredondamento(semImp * fatorQtd, modoArred)
+              : aplicarModoArredondamento(preco * qtd, modoArred);
           totalComBdiItem =
             Number.isFinite(comImp) && comImp !== 0
-              ? truncarMoeda2(comImp * fatorQtd)
-              : truncarMoeda2((precoComBdi > 0 ? precoComBdi : preco) * qtd);
+              ? aplicarModoArredondamento(comImp * fatorQtd, modoArred)
+              : aplicarModoArredondamento((precoComBdi > 0 ? precoComBdi : preco) * qtd, modoArred);
         } else {
-          totalItem = truncarMoeda2(preco * qtd);
-          totalComBdiItem = truncarMoeda2((precoComBdi > 0 ? precoComBdi : preco) * qtd);
+          totalItem = aplicarModoArredondamento(preco * qtd, modoArred);
+          totalComBdiItem = aplicarModoArredondamento((precoComBdi > 0 ? precoComBdi : preco) * qtd, modoArred);
         }
         const precisaDecodeDesc =
           typeof i.descricao === 'string' && i.descricao.includes('&');
@@ -6922,6 +7223,8 @@ export function OrcamentoPageView({
   }, [
     meta.bdiPercentual,
     meta.importadoPlanilha,
+    meta.usarMemoriaCalculo,
+    meta.modoArredondamento,
     subtitulosAdicionados,
     quantidadesPorItem,
     dimensoesPorItem,
@@ -7849,136 +8152,30 @@ export function OrcamentoPageView({
   ]);
 
   const resumoSecoesFicha = useMemo(() => {
-    type AccAgg = {
-      custoOrc: number;
-      custoEst: number;
-      custoReal: number;
-      insumoKeys: Set<string>;
-      composicaoKeys: Set<string>;
-    };
     const empty = {
       porTitulo: new Map<string, { custoOrc: number; custoEst: number; custoReal: number }>(),
       porSubtitulo: new Map<string, { custoOrc: number; custoEst: number; custoReal: number }>(),
-      detalheInsPorTitulo: new Map<string, DetalheInsumoOrcSecao[]>(),
-      detalheInsPorSubtitulo: new Map<string, DetalheInsumoOrcSecao[]>(),
-      aggPorTituloParaTooltip: new Map<string, DetalheAggSecao[]>(),
-      aggPorSubtituloParaTooltip: new Map<string, DetalheAggSecao[]>()
     };
     if (orcamentoViewTab !== 'planilhaAnalitica' || deferredOrcamentoViewTab !== 'planilhaAnalitica') return empty;
     const porTitulo = new Map<string, { custoOrc: number; custoEst: number; custoReal: number }>();
     const porSubtitulo = new Map<string, { custoOrc: number; custoEst: number; custoReal: number }>();
-    const detalheInsPorTitulo = new Map<string, DetalheInsumoOrcSecao[]>();
-    const detalheInsPorSubtitulo = new Map<string, DetalheInsumoOrcSecao[]>();
-    /** Título (ex. 1) → cada subtítulo (1.1, 1.2…) com totais agregados dos insumos. */
-    const aggTituloPorSubtitulo = new Map<string, Map<string, AccAgg>>();
-    /** Subtítulo (ex. 1.1) → cada composição (1.1.1, 1.1.2…) com totais agregados dos insumos. */
-    const aggSubtituloPorComp = new Map<string, Map<string, AccAgg>>();
-    const bumpAgg = (
-      outer: Map<string, Map<string, AccAgg>>,
-      outerKey: string,
-      innerKey: string,
-      custoOrc: number,
-      custoEst: number,
-      custoReal: number,
-      insumoKey: string,
-      composicaoKey: string
-    ) => {
-      let inner = outer.get(outerKey);
-      if (!inner) {
-        inner = new Map();
-        outer.set(outerKey, inner);
-      }
-      let cur = inner.get(innerKey);
-      if (!cur) {
-        cur = {
-          custoOrc: 0,
-          custoEst: 0,
-          custoReal: 0,
-          insumoKeys: new Set(),
-          composicaoKeys: new Set()
-        };
-        inner.set(innerKey, cur);
-      }
-      cur.custoOrc += custoOrc;
-      cur.custoEst += custoEst;
-      cur.custoReal += custoReal;
-      cur.insumoKeys.add(insumoKey);
-      cur.composicaoKeys.add(composicaoKey);
-    };
-    const innerAggToLista = (inner: Map<string, AccAgg>): DetalheAggSecao[] =>
-      Array.from(inner.entries())
-        .map(([item, v]) => ({
-          item,
-          custoOrc: v.custoOrc,
-          custoEst: v.custoEst,
-          custoReal: v.custoReal,
-          insumoKeys: Array.from(v.insumoKeys),
-          composicaoKeys: Array.from(v.composicaoKeys)
-        }))
-        .sort((a, b) => compararChaveItemNumero(a.item, b.item));
     for (const row of linhasAnaliticoComManuais) {
       if (row.kind !== 'insumo') continue;
       const partes = String(row.item || '').split('.');
       if (partes.length < 3) continue;
       const chaveTitulo = partes[0];
       const chaveSubtitulo = `${partes[0]}.${partes[1]}`;
-      const chaveComp = `${partes[0]}.${partes[1]}.${partes[2]}`;
       const custoOrc = Number(row.total) || 0;
       const custoEst = custoOrc * PLANILHA_FATOR_CUSTO_ESTIMADO;
-      const qtdOrc = Number(row.quantidadeReal) || 0;
-      const valorUnitOrc = Number(row.valorUnit) || 0;
       const qC = planilhaQtdDeferred[row.key];
       const vReal = planilhaVlDeferred[row.key];
-      const qtdCompraNum =
-        qC !== undefined && Number.isFinite(qC) ? qC : undefined;
-      const valorUnitRealNum =
-        vReal !== undefined && Number.isFinite(vReal) ? vReal : undefined;
       const custoReal =
-        qtdCompraNum !== undefined &&
-        valorUnitRealNum !== undefined &&
-        Number.isFinite(qtdCompraNum) &&
-        Number.isFinite(valorUnitRealNum)
-          ? qtdCompraNum * valorUnitRealNum
+        qC !== undefined &&
+        vReal !== undefined &&
+        Number.isFinite(qC) &&
+        Number.isFinite(vReal)
+          ? qC * vReal
           : 0;
-
-      const entry: DetalheInsumoOrcSecao = {
-        item: String(row.item),
-        key: row.key,
-        qtdOrc,
-        valorUnitOrc,
-        custoOrc,
-        custoEst,
-        qtdCompra: qtdCompraNum,
-        valorUnitReal: valorUnitRealNum,
-        custoReal
-      };
-      const arrT = detalheInsPorTitulo.get(chaveTitulo) ?? [];
-      arrT.push(entry);
-      detalheInsPorTitulo.set(chaveTitulo, arrT);
-      const arrS = detalheInsPorSubtitulo.get(chaveSubtitulo) ?? [];
-      arrS.push(entry);
-      detalheInsPorSubtitulo.set(chaveSubtitulo, arrS);
-
-      bumpAgg(
-        aggTituloPorSubtitulo,
-        chaveTitulo,
-        chaveSubtitulo,
-        custoOrc,
-        custoEst,
-        custoReal,
-        row.key,
-        row.parentKey
-      );
-      bumpAgg(
-        aggSubtituloPorComp,
-        chaveSubtitulo,
-        chaveComp,
-        custoOrc,
-        custoEst,
-        custoReal,
-        row.key,
-        row.parentKey
-      );
 
       const atualTit = porTitulo.get(chaveTitulo) ?? { custoOrc: 0, custoEst: 0, custoReal: 0 };
       atualTit.custoOrc += custoOrc;
@@ -7992,21 +8189,9 @@ export function OrcamentoPageView({
       atualSub.custoReal += custoReal;
       porSubtitulo.set(chaveSubtitulo, atualSub);
     }
-    const aggPorTituloParaTooltip = new Map<string, DetalheAggSecao[]>();
-    aggTituloPorSubtitulo.forEach((inner, k) => {
-      aggPorTituloParaTooltip.set(k, innerAggToLista(inner));
-    });
-    const aggPorSubtituloParaTooltip = new Map<string, DetalheAggSecao[]>();
-    aggSubtituloPorComp.forEach((inner, k) => {
-      aggPorSubtituloParaTooltip.set(k, innerAggToLista(inner));
-    });
     return {
       porTitulo,
       porSubtitulo,
-      detalheInsPorTitulo,
-      detalheInsPorSubtitulo,
-      aggPorTituloParaTooltip,
-      aggPorSubtituloParaTooltip
     };
   }, [orcamentoViewTab, deferredOrcamentoViewTab, linhasAnaliticoComManuais, planilhaQtdDeferred, planilhaVlDeferred]);
 
@@ -8362,16 +8547,18 @@ export function OrcamentoPageView({
   };
 
   const updateLinhaMedicao = (itemKey: string, idx: number, campo: keyof LinhaMedicao, valor: number | string) => {
-    const atual = dimensoesPorItem[itemKey];
-    if (!atual?.linhas?.[idx]) return;
-    const novaLinhas = [...atual.linhas];
-    const v = campo === 'descricao' ? valor : (typeof valor === 'number' ? valor : parseFloat(String(valor)) || 0);
-    const updated: LinhaMedicao = { ...novaLinhas[idx], [campo]: v } as LinhaMedicao;
-    if (campo === 'C' || campo === 'L' || campo === 'H' || campo === 'N') {
-      updated.valorManual = undefined;
-    }
-    novaLinhas[idx] = updated;
-    setDimensoesPorItem(prev => ({ ...prev, [itemKey]: { ...atual, linhas: novaLinhas } }));
+    setDimensoesPorItem(prev => {
+      const atual = prev[itemKey];
+      if (!atual?.linhas?.[idx]) return prev;
+      const novaLinhas = [...atual.linhas];
+      const v = campo === 'descricao' ? valor : (typeof valor === 'number' ? valor : parseFloat(String(valor)) || 0);
+      const updated: LinhaMedicao = { ...novaLinhas[idx], [campo]: v } as LinhaMedicao;
+      if (campo === 'C' || campo === 'L' || campo === 'H' || campo === 'N') {
+        updated.valorManual = undefined;
+      }
+      novaLinhas[idx] = updated;
+      return { ...prev, [itemKey]: { ...atual, linhas: novaLinhas } };
+    });
   };
 
   const updateRotuloColunaMedicao = (
@@ -8401,11 +8588,13 @@ export function OrcamentoPageView({
     setDraftCalc(p => { const n = { ...p }; delete n[draftKey]; return n; });
   };
 
-  const handleCalcChange = (draftKey: string, raw: string, _onCommit: (n: number) => void) => {
-    // Só atualiza o rascunho local enquanto digita — commitar a cada tecla recalculava o
-    // orçamento inteiro (useMemo de itensCalculados) a cada caractere, travando a página em
-    // orçamentos grandes. O valor só é aplicado de fato no onBlur (handleCalcBlur).
+  const handleCalcChange = (draftKey: string, raw: string, onCommit: (n: number) => void) => {
     setDraftCalc(p => ({ ...p, [draftKey]: raw }));
+    const n = parseMedicaoBlurNumber(raw);
+    if (n === null && String(raw ?? '').trim() !== '') return;
+    startTransition(() => {
+      onCommit(n ?? 0);
+    });
   };
 
   const commitPlanilhaQtdCompra = useCallback((lineKey: string, raw: string) => {
@@ -8424,10 +8613,16 @@ export function OrcamentoPageView({
     const n = parsePlanilhaCalcOrPtBr(raw);
     startTransition(() => {
       setPlanilhaValorUnitCompraReal((prev) => {
-        const next = { ...prev };
-        if (n === null) delete next[lineKey];
-        else next[lineKey] = Math.max(0, n);
-        return next;
+        const current = prev[lineKey];
+        if (n === null) {
+          if (current === undefined) return prev;
+          const next = { ...prev };
+          delete next[lineKey];
+          return next;
+        }
+        const clamped = Math.max(0, n);
+        if (current === clamped) return prev;
+        return { ...prev, [lineKey]: clamped };
       });
     });
   }, []);
@@ -8526,148 +8721,43 @@ export function OrcamentoPageView({
     }
   };
 
-  const exportarMemoriaCalculo = () => {
-    if (itensCalculados.length === 0) {
-      toast.error('Não há itens no orçamento para exportar.');
-      return;
-    }
-    const nomeContrato = costCenters?.find((cc: { id?: string }) => cc.id === centroCustoId)?.name || costCenters?.find((cc: { id?: string }) => cc.id === centroCustoId)?.code || centroCustoId || 'Contrato';
-    const dataEmissao = new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  /**
+   * Memória de cálculo pra itens "un" quando o orçamento usa `usarMemoriaCalculo`: lista de
+   * quantidades por local (sem fórmula C×L×H) — mesmo padrão de estado de addLinhaMedicao/
+   * updateLinhaMedicao/removeLinhaMedicao, só que sobre `linhasContagem`.
+   */
+  const addLinhaContagem = (itemKey: string, inserirAposIdx?: number) => {
+    const atual = dimensoesPorItem[itemKey] || { tipoUnidade: 'un' as TipoUnidadeFormula, linhas: [] };
+    const prev = atual.linhasContagem ?? [];
+    const nova = { descricao: '', quantidade: 0 };
+    const linhasContagem =
+      inserirAposIdx == null || inserirAposIdx < 0 || inserirAposIdx >= prev.length - 1
+        ? [...prev, nova]
+        : [...prev.slice(0, inserirAposIdx + 1), nova, ...prev.slice(inserirAposIdx + 1)];
+    setDimensoesPorItem(prevDim => ({ ...prevDim, [itemKey]: { ...atual, linhasContagem } }));
+  };
 
-    const rows: (string | number)[][] = [
-      ['GENNESIS ENGENHARIA E CONSULTORIA'],
-      ['Gennesis Engenharia e Consultoria LTDA | CNPJ 17.851.596/0001-36 | gennesis.sedes@gmail.com | SHIS QI 15, Sobreloja 55, Lago Sul - Brasília/DF'],
-      [''],
-      ['PROJETO/SETOR:', nomeContrato, '', '', 'STATUS:', 'ORÇADO'],
-      ['DESCRIÇÃO:', '', '', '', 'DS/Nº da Pasta:', ''],
-      ['DATA DE ENVIO:', dataEmissao],
-      [''],
-      ['MEMÓRIA DE CÁLCULO DOS QUANTITATIVOS'],
-      [''],
-      [
-        'LEGENDA: C= Comprimento | L= Largura | H= Altura | A= Área | V= Volume | % Empolamento= fator 1,10/1,20/1,30 | M= Metro | UN= quantidade nas colunas N e Subtotal'
-      ],
-      [''],
-      ['DISCRIMINAÇÃO DOS SERVIÇOS'],
-      ['CÓDIGO', 'DESCRIÇÃO', 'UN', 'C', 'L', 'H', '%', 'N', 'A', 'V', 'SUBTOTAL']
-    ];
-
-    const unidadeLabel = (t: TipoUnidadeFormula) => ({ m3: 'M³', m2: 'M²', m: 'M', un: 'UN' }[t] || 'UN');
-    const totalMemoriaExport = itensCalculados.reduce((acc, r) => acc + r.total, 0);
-    let idxServico = 0;
-    const formulaCells: { cell: string; formula: string }[] = [];
-
-    for (const row of itensCalculados) {
-      const codigo = `${Math.floor(idxServico / 10) + 1}.${(idxServico % 10) + 1}`;
-      const descricaoBase = `${row.item.codigo} ${row.item.banco} - ${row.item.descricao || ''}`;
-      const tipoAuto = row.tipoUnidade ?? inferirTipoUnidadePorDimensao(row.dimensoes?.linhas);
-      const un = row.unidadeComposicao?.trim() || unidadeLabel(tipoAuto);
-      /** Itens em unidade (peça/UN): mesma ordem do orçamento; quantidade em N e Subtotal. */
-      if (row.tipoUnidade === 'un') {
-        rows.push([
-          codigo,
-          descricaoBase,
-          un,
-          '',
-          '',
-          '',
-          '',
-          row.quantidade,
-          '',
-          '',
-          row.quantidade
-        ]);
-        idxServico++;
-        continue;
-      }
-
-      if (row.dimensoes?.linhas?.length) {
-        /** Linha só do nome da composição: medidas (C…Subtotal) em branco. */
-        rows.push([codigo, descricaoBase, un, '', '', '', '', '', '', '', '']);
-        for (let i = 0; i < row.dimensoes.linhas.length; i++) {
-          const ln = row.dimensoes.linhas[i];
-          const descBase = ln.descricao?.trim() || `Medição ${i + 1}`;
-          const descLinha = ln.origemComposicaoRotulo?.trim()
-            ? `${ln.origemComposicaoRotulo.trim()} ${descBase}`.trim()
-            : descBase;
-          const unLinha =
-            ln.linhaAgregadaCarga && ln.tipoOrigemMedicao
-              ? unidadeLabel(ln.tipoOrigemMedicao)
-              : un;
-          if (ln.cabecalhoSecao) {
-            rows.push(['', descLinha, unLinha, '', '', '', '', '', '', '', '']);
-            continue;
-          }
-          const empolRaw = ln.empolamento ?? ((ln as unknown as { percPerda?: number }).percPerda != null ? 1 + (ln as unknown as { percPerda: number }).percPerda / 100 : 0);
-          const empol = (empolRaw != null && empolRaw > 0) ? empolRaw : 1;
-          rows.push([
-            '',
-            descLinha,
-            unLinha,
-            ln.C ?? '',
-            ln.L ?? '',
-            ln.H ?? '',
-            empol,
-            ln.N ?? 1,
-            '',
-            '',
-            ''
-          ]);
-          const r = rows.length;
-          const col = (c: number) => String.fromCharCode(64 + c);
-          const D = col(4); const E = col(5); const F = col(6); const G = col(7); const H = col(8); const I = col(9); const J = col(10); const K = col(11);
-          const tipo = tipoAuto;
-          if (ln.linhaAgregadaCarga) {
-            const vol = calcV(ln, tipo);
-            const sub = calcularQuantidadeLinha(ln, tipo);
-            rows[r - 1][8] = ln.tipoOrigemMedicao === 'm2' ? (ln.volumeM3BrutoSomado ?? 0) : '';
-            rows[r - 1][9] = vol;
-            rows[r - 1][10] = sub;
-            continue;
-          }
-          if (tipo === 'm3') {
-            formulaCells.push({ cell: `${I}${r}`, formula: `=${D}${r}*${E}${r}*${H}${r}` });
-            formulaCells.push({ cell: `${J}${r}`, formula: `=${I}${r}*${F}${r}` });
-            formulaCells.push({ cell: `${K}${r}`, formula: `=${J}${r}*${G}${r}` });
-          } else if (tipo === 'm2') {
-            formulaCells.push({ cell: `${I}${r}`, formula: `=${D}${r}*${E}${r}*${H}${r}` });
-            formulaCells.push({ cell: `${J}${r}`, formula: `=${I}${r}` });
-            formulaCells.push({ cell: `${K}${r}`, formula: `=${I}${r}*${G}${r}` });
-          } else if (tipo === 'm') {
-            formulaCells.push({ cell: `${I}${r}`, formula: '' });
-            formulaCells.push({ cell: `${J}${r}`, formula: `=${D}${r}*${H}${r}` });
-            formulaCells.push({ cell: `${K}${r}`, formula: `=${J}${r}*${G}${r}` });
-          } else {
-            const qtd = calcularQuantidadeLinha(ln, tipo);
-            rows[rows.length - 1][8] = qtd; rows[rows.length - 1][9] = qtd; rows[rows.length - 1][10] = qtd;
-          }
-        }
-      } else {
-        rows.push([codigo, descricaoBase, un, '', '', '', '', '', row.quantidade, row.quantidade, row.quantidade]);
-      }
-      idxServico++;
-    }
-
-    rows.push(['']);
-    rows.push(['', '', '', '', '', '', '', '', '', 'TOTAL GERAL', totalMemoriaExport]);
-
-    const ws = XLSX.utils.aoa_to_sheet(rows);
-    formulaCells.forEach(({ cell, formula }) => {
-      if (formula) {
-        if (!ws[cell]) ws[cell] = {};
-        ws[cell].f = formula;
-        ws[cell].t = 'n';
-      }
+  const updateLinhaContagem = (
+    itemKey: string,
+    idx: number,
+    campo: 'descricao' | 'quantidade',
+    valor: string | number
+  ) => {
+    setDimensoesPorItem(prev => {
+      const atual = prev[itemKey];
+      if (!atual?.linhasContagem?.[idx]) return prev;
+      const novaLinhas = [...atual.linhasContagem];
+      const v = campo === 'descricao' ? String(valor) : Math.max(0, Number(valor) || 0);
+      novaLinhas[idx] = { ...novaLinhas[idx], [campo]: v } as LinhaContagem;
+      return { ...prev, [itemKey]: { ...atual, linhasContagem: novaLinhas } };
     });
-    ws['!cols'] = [
-      { wch: 8 }, { wch: 50 }, { wch: 6 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 6 },
-      { wch: 10 }, { wch: 10 }, { wch: 12 }
-    ];
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Memória de Cálculo');
-    const nomeArquivo = `Memoria_Calculo_Quantitativos_${nomeContrato.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().slice(0, 10)}.xlsx`;
-    XLSX.writeFile(wb, nomeArquivo);
-    toast.success('Memória de cálculo exportada com sucesso.');
+  };
+
+  const removeLinhaContagem = (itemKey: string, idx: number) => {
+    const atual = dimensoesPorItem[itemKey];
+    if (!atual?.linhasContagem?.length) return;
+    const novaLinhas = atual.linhasContagem.filter((_, i) => i !== idx);
+    setDimensoesPorItem(prev => ({ ...prev, [itemKey]: { ...atual, linhasContagem: novaLinhas } }));
   };
 
   const montarSheetOrcamentoDetalhado = (): XLSX.WorkSheet | null => {
@@ -8869,8 +8959,20 @@ export function OrcamentoPageView({
     [mapaComposicoes]
   );
 
+  /**
+   * Memória de cálculo só existe quando o checkbox foi marcado na importação
+   * (ou em orçamento criado no sistema, que não é importado).
+   */
+  const memorialDisponivel = meta.usarMemoriaCalculo === true || meta?.importadoPlanilha !== true;
+
   useEffect(() => {
-    if (orcamentoViewTab !== 'memorial' || meta?.importadoPlanilha) return;
+    if (!memorialDisponivel && orcamentoViewTab === 'memorial') {
+      setOrcamentoViewTab('montagem');
+    }
+  }, [memorialDisponivel, orcamentoViewTab]);
+
+  useEffect(() => {
+    if (orcamentoViewTab !== 'memorial' || !memorialDisponivel) return;
     if (itensMemoriaCalculoLista.length === 0) {
       setMemorialItemKey(null);
       return;
@@ -8879,13 +8981,13 @@ export function OrcamentoPageView({
     if (!existe) {
       setMemorialItemKey(itensMemoriaCalculoLista[0].key);
     }
-  }, [orcamentoViewTab, itensMemoriaCalculoLista, memorialItemKey, meta?.importadoPlanilha]);
+  }, [orcamentoViewTab, itensMemoriaCalculoLista, memorialItemKey, memorialDisponivel]);
 
   useEffect(() => {
-    if (orcamentoViewTab !== 'memorial' || !memorialItemKey || meta?.importadoPlanilha) return;
+    if (orcamentoViewTab !== 'memorial' || !memorialItemKey || !memorialDisponivel) return;
     const el = document.getElementById(`memorial-medicoes-${memorialItemKey}`);
     el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }, [orcamentoViewTab, memorialItemKey, meta?.importadoPlanilha]);
+  }, [orcamentoViewTab, memorialItemKey, memorialDisponivel]);
 
   const exportarAnalitico = () => {
     if (itensCalculados.length === 0) {
@@ -9220,23 +9322,187 @@ export function OrcamentoPageView({
     toast.success('Planilha analítica exportada com sucesso.');
   };
 
-  /** Pacote: Orçamento + Analítico + Ficha de demanda no mesmo .xlsx. */
+  const montarSheetMemoriaCalculo = (): XLSX.WorkSheet | null => {
+    if (itensCalculados.length === 0) return null;
+
+    const nomeContrato = nomeContratoExport();
+    const dataEmissao = new Date().toLocaleDateString('pt-BR', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+    });
+
+    const rows: (string | number)[][] = [
+      ['GENNESIS ENGENHARIA E CONSULTORIA'],
+      ['Gennesis Engenharia e Consultoria LTDA | CNPJ 17.851.596/0001-36 | gennesis.sedes@gmail.com | SHIS QI 15, Sobreloja 55, Lago Sul - Brasília/DF'],
+      [''],
+      ['PROJETO/SETOR:', nomeContrato, '', '', 'STATUS:', 'ORÇADO'],
+      ['DESCRIÇÃO:', '', '', '', 'DS/Nº da Pasta:', ''],
+      ['DATA DE ENVIO:', dataEmissao],
+      [''],
+      ['MEMÓRIA DE CÁLCULO DOS QUANTITATIVOS'],
+      [''],
+      [
+        'LEGENDA: C= Comprimento | L= Largura | H= Altura | A= Área | V= Volume | % Empolamento= fator 1,10/1,20/1,30 | M= Metro | UN= quantidade nas colunas N e Subtotal',
+      ],
+      [''],
+      ['DISCRIMINAÇÃO DOS SERVIÇOS'],
+      ['CÓDIGO', 'DESCRIÇÃO', 'UN', 'C', 'L', 'H', '%', 'N', 'A', 'V', 'SUBTOTAL'],
+    ];
+
+    const unidadeLabel = (t: TipoUnidadeFormula) => ({ m3: 'M³', m2: 'M²', m: 'M', un: 'UN' }[t] || 'UN');
+    const totalMemoriaExport = itensCalculados.reduce((acc, r) => acc + r.total, 0);
+    let idxServico = 0;
+    const formulaCells: { cell: string; formula: string }[] = [];
+
+    for (const row of itensCalculados) {
+      const codigo = `${Math.floor(idxServico / 10) + 1}.${(idxServico % 10) + 1}`;
+      const descricaoBase = `${row.item.codigo} ${row.item.banco} - ${row.item.descricao || ''}`;
+      const tipoAuto = row.tipoUnidade ?? inferirTipoUnidadePorDimensao(row.dimensoes?.linhas);
+      const un = row.unidadeComposicao?.trim() || unidadeLabel(tipoAuto);
+      if (row.tipoUnidade === 'un') {
+        rows.push([
+          codigo,
+          descricaoBase,
+          un,
+          '',
+          '',
+          '',
+          '',
+          row.quantidade,
+          '',
+          '',
+          row.quantidade,
+        ]);
+        idxServico++;
+        continue;
+      }
+
+      if (row.dimensoes?.linhas?.length) {
+        rows.push([codigo, descricaoBase, un, '', '', '', '', '', '', '', '']);
+        for (let i = 0; i < row.dimensoes.linhas.length; i++) {
+          const ln = row.dimensoes.linhas[i];
+          const descBase = ln.descricao?.trim() || `Medição ${i + 1}`;
+          const descLinha = ln.origemComposicaoRotulo?.trim()
+            ? `${ln.origemComposicaoRotulo.trim()} ${descBase}`.trim()
+            : descBase;
+          const unLinha =
+            ln.linhaAgregadaCarga && ln.tipoOrigemMedicao
+              ? unidadeLabel(ln.tipoOrigemMedicao)
+              : un;
+          if (ln.cabecalhoSecao) {
+            rows.push(['', descLinha, unLinha, '', '', '', '', '', '', '', '']);
+            continue;
+          }
+          const empolRaw =
+            ln.empolamento ??
+            ((ln as unknown as { percPerda?: number }).percPerda != null
+              ? 1 + (ln as unknown as { percPerda: number }).percPerda / 100
+              : 0);
+          const empol = empolRaw != null && empolRaw > 0 ? empolRaw : 1;
+          rows.push([
+            '',
+            descLinha,
+            unLinha,
+            ln.C ?? '',
+            ln.L ?? '',
+            ln.H ?? '',
+            empol,
+            ln.N ?? 1,
+            '',
+            '',
+            '',
+          ]);
+          const r = rows.length;
+          const col = (c: number) => String.fromCharCode(64 + c);
+          const D = col(4);
+          const E = col(5);
+          const F = col(6);
+          const G = col(7);
+          const H = col(8);
+          const I = col(9);
+          const J = col(10);
+          const K = col(11);
+          const tipo = tipoAuto;
+          if (ln.linhaAgregadaCarga) {
+            const vol = calcV(ln, tipo);
+            const sub = calcularQuantidadeLinha(ln, tipo);
+            rows[r - 1][8] = ln.tipoOrigemMedicao === 'm2' ? (ln.volumeM3BrutoSomado ?? 0) : '';
+            rows[r - 1][9] = vol;
+            rows[r - 1][10] = sub;
+            continue;
+          }
+          if (tipo === 'm3') {
+            formulaCells.push({ cell: `${I}${r}`, formula: `=${D}${r}*${E}${r}*${H}${r}` });
+            formulaCells.push({ cell: `${J}${r}`, formula: `=${I}${r}*${F}${r}` });
+            formulaCells.push({ cell: `${K}${r}`, formula: `=${J}${r}*${G}${r}` });
+          } else if (tipo === 'm2') {
+            formulaCells.push({ cell: `${I}${r}`, formula: `=${D}${r}*${E}${r}*${H}${r}` });
+            formulaCells.push({ cell: `${J}${r}`, formula: `=${I}${r}` });
+            formulaCells.push({ cell: `${K}${r}`, formula: `=${I}${r}*${G}${r}` });
+          } else if (tipo === 'm') {
+            formulaCells.push({ cell: `${I}${r}`, formula: '' });
+            formulaCells.push({ cell: `${J}${r}`, formula: `=${D}${r}*${H}${r}` });
+            formulaCells.push({ cell: `${K}${r}`, formula: `=${J}${r}*${G}${r}` });
+          } else {
+            const qtd = calcularQuantidadeLinha(ln, tipo);
+            rows[rows.length - 1][8] = qtd;
+            rows[rows.length - 1][9] = qtd;
+            rows[rows.length - 1][10] = qtd;
+          }
+        }
+      } else {
+        rows.push([codigo, descricaoBase, un, '', '', '', '', '', row.quantidade, row.quantidade, row.quantidade]);
+      }
+      idxServico++;
+    }
+
+    rows.push(['']);
+    rows.push(['', '', '', '', '', '', '', '', '', 'TOTAL GERAL', totalMemoriaExport]);
+
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    formulaCells.forEach(({ cell, formula }) => {
+      if (formula) {
+        if (!ws[cell]) ws[cell] = {};
+        ws[cell].f = formula;
+        ws[cell].t = 'n';
+      }
+    });
+    ws['!cols'] = [
+      { wch: 8 },
+      { wch: 50 },
+      { wch: 6 },
+      { wch: 8 },
+      { wch: 8 },
+      { wch: 8 },
+      { wch: 8 },
+      { wch: 6 },
+      { wch: 10 },
+      { wch: 10 },
+      { wch: 12 },
+    ];
+    return ws;
+  };
+
+  /** Pacote: Orçamento + Memória de cálculo + Analítico + Ficha de demanda no mesmo .xlsx. */
   const exportarOrcamentoCompleto = () => {
     const wsOrc = montarSheetOrcamentoDetalhado();
+    const wsMem = montarSheetMemoriaCalculo();
     const wsAna = montarSheetOrcamentoAnalitico();
     const wsFicha = montarSheetFichaDemanda();
-    if (!wsOrc && !wsAna && !wsFicha) {
+    if (!wsOrc && !wsMem && !wsAna && !wsFicha) {
       toast.error('Não há dados para exportar.');
       return;
     }
     const nomeContrato = nomeContratoExport();
     const wb = XLSX.utils.book_new();
     if (wsOrc) XLSX.utils.book_append_sheet(wb, wsOrc, 'Orçamento');
+    if (wsMem) XLSX.utils.book_append_sheet(wb, wsMem, 'Memória de cálculo');
     if (wsAna) XLSX.utils.book_append_sheet(wb, wsAna, 'Analítico');
     if (wsFicha) XLSX.utils.book_append_sheet(wb, wsFicha, 'Ficha de demanda');
     const nomeArquivo = `Orcamento_${nomeContrato.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().slice(0, 10)}.xlsx`;
     XLSX.writeFile(wb, nomeArquivo);
-    toast.success('Orçamento exportado (Orçamento, Analítico e Ficha de demanda).');
+    toast.success('Orçamento exportado (Orçamento, Memória de cálculo, Analítico e Ficha de demanda).');
   };
 
   const exportarCronogramaExcel = () => {
@@ -9328,16 +9594,13 @@ export function OrcamentoPageView({
 
     setFdAprovacaoPreparando(true);
     try {
-      const wsFicha = montarSheetFichaDemanda();
       const anexos: FichaDemandaApprovalFormState['anexos'] = [];
-      if (wsFicha) {
-        const wbFd = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wbFd, wsFicha, 'Ficha de demanda');
-        const out = XLSX.write(wbFd, { bookType: 'xlsx', type: 'array' });
-        const nomeContratoSafe = (embeddedContractName || nomeContratoBreadcrumb || 'Contrato')
-          .replace(/[^a-zA-Z0-9]/g, '_')
-          .slice(0, 40);
-        const fileName = `Ficha_Demanda_${nomeContratoSafe}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      const nomeContratoSafe = (embeddedContractName || nomeContratoBreadcrumb || 'Contrato')
+        .replace(/[^a-zA-Z0-9]/g, '_')
+        .slice(0, 40);
+      const dataIso = new Date().toISOString().slice(0, 10);
+      const uploadXlsx = async (wb: XLSX.WorkBook, fileName: string, kind: 'orcamento' | 'fd') => {
+        const out = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
         const file = new File([new Uint8Array(out as ArrayLike<number>)], fileName, {
           type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         });
@@ -9348,13 +9611,31 @@ export function OrcamentoPageView({
         });
         const uploaded = uploadRes.data?.data as { url?: string; originalName?: string } | undefined;
         const url = String(uploaded?.url || '').trim();
-        if (url) {
-          anexos.push({
-            id: crypto.randomUUID(),
-            name: uploaded?.originalName || fileName,
-            url,
-          });
-        }
+        if (!url) return;
+        anexos.push({
+          id: crypto.randomUUID(),
+          name: uploaded?.originalName || fileName,
+          url,
+          kind,
+        });
+      };
+
+      const wsOrc = montarSheetOrcamentoDetalhado();
+      const wsMem = montarSheetMemoriaCalculo();
+      const wsAna = montarSheetOrcamentoAnalitico();
+      if (wsOrc || wsMem || wsAna) {
+        const wbOrc = XLSX.utils.book_new();
+        if (wsOrc) XLSX.utils.book_append_sheet(wbOrc, wsOrc, 'Orçamento');
+        if (wsMem) XLSX.utils.book_append_sheet(wbOrc, wsMem, 'Memória de cálculo');
+        if (wsAna) XLSX.utils.book_append_sheet(wbOrc, wsAna, 'Analítico');
+        await uploadXlsx(wbOrc, `Orcamento_${nomeContratoSafe}_${dataIso}.xlsx`, 'orcamento');
+      }
+
+      const wsFicha = montarSheetFichaDemanda();
+      if (wsFicha) {
+        const wbFd = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wbFd, wsFicha, 'Ficha de demanda');
+        await uploadXlsx(wbFd, `Ficha_Demanda_${nomeContratoSafe}_${dataIso}.xlsx`, 'fd');
       }
 
       const codigoFdBase = (codigoOrcamentoAtivo || orcamentoAtivoId.slice(0, 8)).replace(/\s+/g, '');
@@ -10132,7 +10413,9 @@ export function OrcamentoPageView({
                     options={[
                       { value: 'dados', label: 'Dados' },
                       { value: 'montagem', label: 'Orçamento' },
-                      { value: 'memorial', label: 'Memória de cálculo' },
+                      ...(memorialDisponivel
+                        ? [{ value: 'memorial' as const, label: 'Memória de cálculo' }]
+                        : []),
                       { value: 'analitico', label: 'Analítico' },
                       { value: 'planilhaAnalitica', label: 'Ficha de demanda' },
                     ]}
@@ -10696,109 +10979,109 @@ export function OrcamentoPageView({
                               <tr className={gradeTableRowTrCls}>
                                 <th
                                   title={PLANILHA_ANALITICA_TOOLTIP.item}
-                                  className="cursor-help w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-2 py-2.5 text-center text-[11px] font-semibold leading-tight text-gray-600 dark:text-gray-300 uppercase tracking-wide"
+                                  className="w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-2 py-2.5 text-center text-[11px] font-semibold leading-tight text-gray-600 dark:text-gray-300 uppercase tracking-wide"
                                 >
                                   Item
                                 </th>
                                 <th
                                   title={PLANILHA_ANALITICA_TOOLTIP.codigo}
-                                  className="cursor-help min-w-[5.5rem] px-2 py-2.5 text-center text-[11px] font-semibold leading-tight text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600"
+                                  className="min-w-[5.5rem] px-2 py-2.5 text-center text-[11px] font-semibold leading-tight text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600"
                                 >
                                   Código
                                 </th>
                                 <th
                                   title={PLANILHA_ANALITICA_TOOLTIP.banco}
-                                  className="cursor-help min-w-[5.5rem] px-2 py-2.5 text-center text-[11px] font-semibold leading-tight text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600"
+                                  className="min-w-[5.5rem] px-2 py-2.5 text-center text-[11px] font-semibold leading-tight text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600"
                                 >
                                   Banco
                                 </th>
                                 <th
                                   title={PLANILHA_ANALITICA_TOOLTIP.servico}
-                                  className="cursor-help min-w-[220px] max-w-[min(520px,55vw)] px-3 py-2.5 text-left text-[11px] font-semibold leading-tight text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600"
+                                  className="min-w-[220px] max-w-[min(520px,55vw)] px-3 py-2.5 text-left text-[11px] font-semibold leading-tight text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600"
                                 >
                                   Descrição
                                 </th>
                                 <th
                                   title={PLANILHA_ANALITICA_TOOLTIP.tipo}
-                                  className="cursor-help w-14 min-w-[3.5rem] px-2 py-2.5 text-center text-[11px] font-semibold leading-tight text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600"
+                                  className="w-14 min-w-[3.5rem] px-2 py-2.5 text-center text-[11px] font-semibold leading-tight text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600"
                                 >
                                   Tipo
                                 </th>
                                 <th
                                   title={PLANILHA_ANALITICA_TOOLTIP.un}
-                                  className="cursor-help min-w-[5.5rem] px-2 py-2.5 text-center text-[11px] font-semibold leading-tight text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600"
+                                  className="min-w-[5.5rem] px-2 py-2.5 text-center text-[11px] font-semibold leading-tight text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600"
                                 >
                                   Unidade
                                 </th>
                                 <th
                                   title={PLANILHA_ANALITICA_TOOLTIP.theadQuantidade}
-                                  className="cursor-help min-w-[6.5rem] px-2 py-2.5 text-center text-[11px] font-semibold leading-tight text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600"
+                                  className="min-w-[6.5rem] px-2 py-2.5 text-center text-[11px] font-semibold leading-tight text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600"
                                 >
                                   Quantidade
                                 </th>
                                 <th
                                   title={PLANILHA_ANALITICA_TOOLTIP.theadValorUnitOrc}
-                                  className="cursor-help min-w-[7.5rem] max-w-[9rem] px-2 py-2.5 text-center text-[11px] font-semibold leading-tight text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600"
+                                  className="min-w-[7.5rem] max-w-[9rem] px-2 py-2.5 text-center text-[11px] font-semibold leading-tight text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600"
                                 >
                                   Valor unitário orçamento
                                 </th>
                                 <th
                                   title={PLANILHA_ANALITICA_TOOLTIP.theadTotalOrc}
-                                  className="cursor-help min-w-[7.5rem] max-w-[9rem] px-2 py-2.5 text-center text-[11px] font-semibold leading-tight text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600"
+                                  className="min-w-[7.5rem] max-w-[9rem] px-2 py-2.5 text-center text-[11px] font-semibold leading-tight text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600"
                                 >
                                   Custo orçamento
                                 </th>
                                 <th
                                   title={PLANILHA_ANALITICA_TOOLTIP.theadValorUnitEst}
-                                  className="cursor-help min-w-[7.5rem] max-w-[9rem] px-2 py-2.5 text-center text-[11px] font-semibold leading-tight text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600"
+                                  className="min-w-[7.5rem] max-w-[9rem] px-2 py-2.5 text-center text-[11px] font-semibold leading-tight text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600"
                                 >
                                   Valor unitário estimado (40%)
                                 </th>
                                 <th
                                   title={PLANILHA_ANALITICA_TOOLTIP.theadCustoEst}
-                                  className="cursor-help min-w-[7.5rem] max-w-[9rem] px-2 py-2.5 text-center text-[11px] font-semibold leading-tight text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600"
+                                  className="min-w-[7.5rem] max-w-[9rem] px-2 py-2.5 text-center text-[11px] font-semibold leading-tight text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600"
                                 >
                                   Custo estimado (40%)
                                 </th>
                                 <th
                                   title={PLANILHA_ANALITICA_TOOLTIP.theadQtdCompra}
-                                  className="cursor-help min-w-[6.5rem] max-w-[8rem] px-2 py-2.5 text-center text-[11px] font-semibold leading-tight text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600"
+                                  className="min-w-[6.5rem] max-w-[8rem] px-2 py-2.5 text-center text-[11px] font-semibold leading-tight text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600"
                                 >
                                   Quantidade compra
                                 </th>
                                 <th
                                   title={PLANILHA_ANALITICA_TOOLTIP.theadSobra}
-                                  className="cursor-help min-w-[5rem] max-w-[6.5rem] px-2 py-2.5 text-center text-[11px] font-semibold leading-tight text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600"
+                                  className="min-w-[5rem] max-w-[6.5rem] px-2 py-2.5 text-center text-[11px] font-semibold leading-tight text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600"
                                 >
                                   Sobra
                                 </th>
                                 <th
                                   title={PLANILHA_ANALITICA_TOOLTIP.theadVlCompraReal}
-                                  className="cursor-help min-w-[7.5rem] max-w-[9rem] px-2 py-2.5 text-center text-[11px] font-semibold leading-tight text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600"
+                                  className="min-w-[7.5rem] max-w-[9rem] px-2 py-2.5 text-center text-[11px] font-semibold leading-tight text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600"
                                 >
                                   Valor unitário real
                                 </th>
                                 <th
                                   title={PLANILHA_ANALITICA_TOOLTIP.theadCustoCompraReal}
-                                  className="cursor-help min-w-[6.5rem] max-w-[8rem] px-2 py-2.5 text-center text-[11px] font-semibold leading-tight text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600"
+                                  className="min-w-[6.5rem] max-w-[8rem] px-2 py-2.5 text-center text-[11px] font-semibold leading-tight text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600"
                                 >
                                   Custo real
                                 </th>
                                 <th
                                   title={PLANILHA_ANALITICA_TOOLTIP.theadPctLev}
-                                  className="cursor-help min-w-[6.5rem] max-w-[8rem] px-2 py-2.5 text-center text-[11px] font-semibold leading-tight text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600"
+                                  className="min-w-[6.5rem] max-w-[8rem] px-2 py-2.5 text-center text-[11px] font-semibold leading-tight text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600"
                                 >
                                   % Quantidade solicitada
                                 </th>
                                 <th
                                   title={PLANILHA_ANALITICA_TOOLTIP.theadPctFat}
-                                  className="cursor-help min-w-[5.5rem] max-w-[7rem] px-2 py-2.5 text-center text-[11px] font-semibold leading-tight text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600"
+                                  className="min-w-[5.5rem] max-w-[7rem] px-2 py-2.5 text-center text-[11px] font-semibold leading-tight text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600"
                                 >
                                   % Valor total
                                 </th>
                                 <th
                                   title={PLANILHA_ANALITICA_TOOLTIP.theadPctCvp}
-                                  className="cursor-help min-w-[7rem] max-w-[9rem] px-2 py-2.5 text-center text-[11px] font-semibold leading-tight text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600"
+                                  className="min-w-[7rem] max-w-[9rem] px-2 py-2.5 text-center text-[11px] font-semibold leading-tight text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600"
                                 >
                                   % Custo / valor pago
                                 </th>
@@ -10817,46 +11100,29 @@ export function OrcamentoPageView({
                                     custoEst: 0,
                                     custoReal: 0
                                   };
-                                  const listaAggTit =
-                                    resumoSecoesFicha.aggPorTituloParaTooltip.get(String(l.main)) ?? [];
                                   return (
                                     <tr key={l.key} className={`bg-red-600 dark:bg-red-950/90 ${gradeTableRowTrCls} ${gradeTituloSubtituloRowTrCls}`}>
                                       <td
                                         title={PLANILHA_ANALITICA_TOOLTIP.item}
-                                        className={`${itemW} cursor-help font-bold text-white`}
+                                        className={`${itemW} font-bold text-white`}
                                       >
                                         {l.main}
                                       </td>
-                                      <td title={PLANILHA_ANALITICA_TOOLTIP.tituloServico} colSpan={7} className="cursor-help px-3 py-2.5 text-xs font-bold uppercase tracking-wide text-left text-white align-middle">
+                                      <td title={PLANILHA_ANALITICA_TOOLTIP.tituloServico} colSpan={7} className="px-3 py-2.5 text-xs font-bold uppercase tracking-wide text-left text-white align-middle">
                                         {l.servicoNome}
                                       </td>
                                       <td className="px-3 py-2.5 text-sm tabular-nums border-l border-red-400/50 dark:border-red-800">
-                                        <CalcHoverBridge
-                                          hoverSourceIds={hoverIdsTituloServicoPorBloco(listaAggTit, 'orc')}
-                                          onHoverSourcesChange={setCalcHoverSourceIds}
-                                        >
-                                          <MoedaCelula valor={resumo.custoOrc} className="text-white font-bold" valorClassName="font-bold" />
-                                        </CalcHoverBridge>
+                                        <MoedaCelula valor={resumo.custoOrc} className="text-white font-bold" valorClassName="font-bold" />
                                       </td>
                                       <td className="px-3 py-2.5 border-l border-red-400/50 dark:border-red-800" />
                                       <td className="px-3 py-2.5 text-sm tabular-nums border-l border-red-400/50 dark:border-red-800">
-                                        <CalcHoverBridge
-                                          hoverSourceIds={hoverIdsTituloServicoPorBloco(listaAggTit, 'est')}
-                                          onHoverSourcesChange={setCalcHoverSourceIds}
-                                        >
-                                          <MoedaCelula valor={resumo.custoEst} className="text-white font-bold" valorClassName="font-bold" />
-                                        </CalcHoverBridge>
+                                        <MoedaCelula valor={resumo.custoEst} className="text-white font-bold" valorClassName="font-bold" />
                                       </td>
                                       <td className="px-3 py-2.5 border-l border-red-400/50 dark:border-red-800" />
                                       <td className="px-3 py-2.5 border-l border-red-400/50 dark:border-red-800" />
                                       <td className="px-3 py-2.5 border-l border-red-400/50 dark:border-red-800" />
                                       <td className="px-3 py-2.5 text-sm tabular-nums border-l border-red-400/50 dark:border-red-800">
-                                        <CalcHoverBridge
-                                          hoverSourceIds={hoverIdsTituloServicoPorBloco(listaAggTit, 'real')}
-                                          onHoverSourcesChange={setCalcHoverSourceIds}
-                                        >
-                                          <MoedaCelula valor={resumo.custoReal} className="text-white font-bold" valorClassName="font-bold" />
-                                        </CalcHoverBridge>
+                                        <MoedaCelula valor={resumo.custoReal} className="text-white font-bold" valorClassName="font-bold" />
                                       </td>
                                       <td className="px-3 py-2.5 border-l border-red-400/50 dark:border-red-800" />
                                       <td className="px-3 py-2.5 border-l border-red-400/50 dark:border-red-800" />
@@ -10871,8 +11137,6 @@ export function OrcamentoPageView({
                                     custoEst: 0,
                                     custoReal: 0
                                   };
-                                  const listaAggSub =
-                                    resumoSecoesFicha.aggPorSubtituloParaTooltip.get(`${l.main}.${l.subIdx}`) ?? [];
                                   return (
                                     <tr
                                       key={l.key}
@@ -10880,11 +11144,11 @@ export function OrcamentoPageView({
                                     >
                                       <td
                                         title={PLANILHA_ANALITICA_TOOLTIP.item}
-                                        className={`${itemW} cursor-help text-xs font-semibold text-gray-800 dark:text-gray-200`}
+                                        className={`${itemW} text-xs font-semibold text-gray-800 dark:text-gray-200`}
                                       >
                                         {`${l.main}.${l.subIdx}`}
                                       </td>
-                                      <td title={PLANILHA_ANALITICA_TOOLTIP.subtituloBloco} colSpan={7} className="cursor-help px-3 py-2.5 align-middle">
+                                      <td title={PLANILHA_ANALITICA_TOOLTIP.subtituloBloco} colSpan={7} className="px-3 py-2.5 align-middle">
                                         {l.texto ? (
                                           <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-800 dark:text-gray-200 sm:text-xs">
                                             {l.texto}
@@ -10892,50 +11156,23 @@ export function OrcamentoPageView({
                                         ) : null}
                                       </td>
                                       <td
-                                        className={`px-3 py-2.5 text-sm tabular-nums border-l border-gray-300 dark:border-gray-700 ${
-                                          calcHoverSourceIds.includes(`custo-orc-bloco-${l.main}-${l.subIdx}`)
-                                            ? CLASSE_CELULA_HOVER_FONTE
-                                            : ''
-                                        }`}
+                                        className={`px-3 py-2.5 text-sm tabular-nums border-l border-gray-300 dark:border-gray-700`}
                                       >
-                                        <CalcHoverBridge
-                                          hoverSourceIds={hoverIdsAggCustoOrc(listaAggSub)}
-                                          onHoverSourcesChange={setCalcHoverSourceIds}
-                                        >
-                                          <MoedaCelula valor={resumo.custoOrc} className="font-semibold text-gray-900 dark:text-gray-100" valorClassName="font-semibold" />
-                                        </CalcHoverBridge>
+                                        <MoedaCelula valor={resumo.custoOrc} className="font-semibold text-gray-900 dark:text-gray-100" valorClassName="font-semibold" />
                                       </td>
                                       <td className="px-3 py-2.5 border-l border-gray-300 dark:border-gray-700" />
                                       <td
-                                        className={`px-3 py-2.5 text-sm tabular-nums border-l border-gray-300 dark:border-gray-700 ${
-                                          calcHoverSourceIds.includes(`custo-est-bloco-${l.main}-${l.subIdx}`)
-                                            ? CLASSE_CELULA_HOVER_FONTE
-                                            : ''
-                                        }`}
+                                        className={`px-3 py-2.5 text-sm tabular-nums border-l border-gray-300 dark:border-gray-700`}
                                       >
-                                        <CalcHoverBridge
-                                          hoverSourceIds={hoverIdsAggCustoEst(listaAggSub)}
-                                          onHoverSourcesChange={setCalcHoverSourceIds}
-                                        >
-                                          <MoedaCelula valor={resumo.custoEst} className="font-semibold text-gray-900 dark:text-gray-100" valorClassName="font-semibold" />
-                                        </CalcHoverBridge>
+                                        <MoedaCelula valor={resumo.custoEst} className="font-semibold text-gray-900 dark:text-gray-100" valorClassName="font-semibold" />
                                       </td>
                                       <td className="px-3 py-2.5 border-l border-gray-300 dark:border-gray-700" />
                                       <td className="px-3 py-2.5 border-l border-gray-300 dark:border-gray-700" />
                                       <td className="px-3 py-2.5 border-l border-gray-300 dark:border-gray-700" />
                                       <td
-                                        className={`px-3 py-2.5 text-sm tabular-nums border-l border-gray-300 dark:border-gray-700 ${
-                                          calcHoverSourceIds.includes(`custo-real-bloco-${l.main}-${l.subIdx}`)
-                                            ? CLASSE_CELULA_HOVER_FONTE
-                                            : ''
-                                        }`}
+                                        className={`px-3 py-2.5 text-sm tabular-nums border-l border-gray-300 dark:border-gray-700`}
                                       >
-                                        <CalcHoverBridge
-                                          hoverSourceIds={hoverIdsAggCustoReal(listaAggSub)}
-                                          onHoverSourcesChange={setCalcHoverSourceIds}
-                                        >
-                                          <MoedaCelula valor={resumo.custoReal} className="font-semibold text-gray-900 dark:text-gray-100" valorClassName="font-semibold" />
-                                        </CalcHoverBridge>
+                                        <MoedaCelula valor={resumo.custoReal} className="font-semibold text-gray-900 dark:text-gray-100" valorClassName="font-semibold" />
                                       </td>
                                       <td className="px-3 py-2.5 border-l border-gray-300 dark:border-gray-700" />
                                       <td className="px-3 py-2.5 border-l border-gray-300 dark:border-gray-700" />
@@ -10993,25 +11230,25 @@ export function OrcamentoPageView({
                                     >
                                       <td
                                         title={PLANILHA_ANALITICA_TOOLTIP.item}
-                                        className={`${itemW} cursor-help font-semibold text-gray-900 dark:text-gray-50`}
+                                        className={`${itemW} font-semibold text-gray-900 dark:text-gray-50`}
                                       >
                                         {l.item}
                                       </td>
                                       <td
                                         title={PLANILHA_ANALITICA_TOOLTIP.codigo}
-                                        className="cursor-help px-3 py-2.5 text-sm font-medium text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700 text-center"
+                                        className="px-3 py-2.5 text-sm font-medium text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700 text-center"
                                       >
                                         {l.codigo}
                                       </td>
                                       <td
                                         title={PLANILHA_ANALITICA_TOOLTIP.banco}
-                                        className="cursor-help px-3 py-2.5 text-sm font-medium text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700 text-center"
+                                        className="px-3 py-2.5 text-sm font-medium text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700 text-center"
                                       >
                                         {nomeBancoParaExibicao(l.banco)}
                                       </td>
                                       <td
                                         title={PLANILHA_ANALITICA_TOOLTIP.servico}
-                                        className="cursor-help min-w-[220px] px-3 py-2.5 text-sm font-semibold text-gray-900 dark:text-gray-50 border-l border-gray-200 dark:border-gray-700"
+                                        className="min-w-[220px] px-3 py-2.5 text-sm font-semibold text-gray-900 dark:text-gray-50 border-l border-gray-200 dark:border-gray-700"
                                       >
                                         <div className="max-w-[min(520px,55vw)] whitespace-normal break-words">
                                           {l.descricao}
@@ -11019,7 +11256,7 @@ export function OrcamentoPageView({
                                       </td>
                                       <td
                                         title={PLANILHA_ANALITICA_TOOLTIP.tipoCompLinha}
-                                        className={`${tdPlanilhaTipoCls} cursor-help`}
+                                        className={tdPlanilhaTipoCls}
                                       >
                                         <span className={planilhaTipoVazioCls} aria-hidden>
                                           —
@@ -11027,101 +11264,61 @@ export function OrcamentoPageView({
                                       </td>
                                       <td
                                         title={PLANILHA_ANALITICA_TOOLTIP.un}
-                                        className="cursor-help px-3 py-2.5 text-center text-sm font-medium text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700"
+                                        className="px-3 py-2.5 text-center text-sm font-medium text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700"
                                       >
                                         {l.und}
                                       </td>
                                       <td
                                         title={PLANILHA_ANALITICA_TOOLTIP.quantidadeComp}
-                                        className={`cursor-help px-3 py-2.5 text-center text-sm tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700 ${
-                                          calcHoverSourceIds.includes(`qtd-orc-${l.key}`)
-                                            ? 'bg-blue-50 ring-2 ring-inset ring-blue-500 dark:bg-blue-950/35 dark:ring-blue-400'
-                                            : ''
-                                        }`}
+                                        className={`px-3 py-2.5 text-center text-sm tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700`}
                                       >
                                         {l.quantidadeReal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}
                                       </td>
                                       <td
                                         title={PLANILHA_ANALITICA_TOOLTIP.valorUnitOrcComp}
-                                        className={`cursor-help px-3 py-2.5 text-sm tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700 ${
-                                          calcHoverSourceIds.includes(`vl-orc-${l.key}`)
-                                            ? 'bg-blue-50 ring-2 ring-inset ring-blue-500 dark:bg-blue-950/35 dark:ring-blue-400'
-                                            : ''
-                                        }`}
+                                        className={`px-3 py-2.5 text-sm tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700`}
                                       >
                                         <MoedaCelula valor={l.valorUnit} />
                                       </td>
                                       <td
-                                        className={`cursor-help px-3 py-2.5 text-sm tabular-nums text-gray-900 dark:text-gray-50 border-l border-gray-200 dark:border-gray-700 ${
-                                          calcHoverSourceIds.includes(`custo-orc-${l.key}`)
-                                            ? 'bg-blue-50 ring-2 ring-inset ring-blue-500 dark:bg-blue-950/35 dark:ring-blue-400'
-                                            : ''
-                                        }`}
+                                        className={`px-3 py-2.5 text-sm tabular-nums text-gray-900 dark:text-gray-50 border-l border-gray-200 dark:border-gray-700`}
                                       >
-                                        <CalcHoverBridge
-                                          hoverSourceIds={[`qtd-orc-${l.key}`, `vl-orc-${l.key}`]}
-                                          onHoverSourcesChange={setCalcHoverSourceIds}
-                                        >
-                                          <MoedaCelula valor={l.total} className="font-semibold" valorClassName="font-semibold" />
-                                        </CalcHoverBridge>
+                                        <MoedaCelula valor={l.total} className="font-semibold" valorClassName="font-semibold" />
                                       </td>
                                       <td
                                         title={PLANILHA_ANALITICA_TOOLTIP.valorUnitEstComp}
-                                        className="cursor-help px-3 py-2.5 text-sm text-right tabular-nums text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700"
+                                        className="px-3 py-2.5 text-sm text-right tabular-nums text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700"
                                       >
-                                        <CalcHoverBridge
-                                          hoverSourceIds={[`vl-orc-${l.key}`]}
-                                          onHoverSourcesChange={setCalcHoverSourceIds}
-                                        >
-                                          <MoedaCelula valor={l.valorUnit * PLANILHA_FATOR_CUSTO_ESTIMADO} />
-                                        </CalcHoverBridge>
+                                        <MoedaCelula valor={l.valorUnit * PLANILHA_FATOR_CUSTO_ESTIMADO} />
                                       </td>
                                       <td
-                                        className={`cursor-help px-3 py-2.5 text-sm tabular-nums text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700 ${
-                                          calcHoverSourceIds.includes(`custo-est-${l.key}`)
-                                            ? 'bg-blue-50 ring-2 ring-inset ring-blue-500 dark:bg-blue-950/35 dark:ring-blue-400'
-                                            : ''
-                                        }`}
+                                        className={`px-3 py-2.5 text-sm tabular-nums text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700`}
                                       >
-                                        <CalcHoverBridge
-                                          hoverSourceIds={[`custo-est-${l.key}`]}
-                                          onHoverSourcesChange={setCalcHoverSourceIds}
-                                        >
-                                          <MoedaCelula valor={custoEstCompCalc} />
-                                        </CalcHoverBridge>
+                                        <MoedaCelula valor={custoEstCompCalc} />
                                       </td>
                                       <td
                                         title={PLANILHA_ANALITICA_TOOLTIP.qtdCompraComp}
-                                        className="cursor-help px-3 py-2.5 text-center text-sm tabular-nums text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700"
+                                        className="px-3 py-2.5 text-center text-sm tabular-nums text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700"
                                       />
                                       <td
                                         title={PLANILHA_ANALITICA_TOOLTIP.qtdSobraComp}
-                                        className="cursor-help px-3 py-2.5 text-sm text-right tabular-nums text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700"
+                                        className="px-3 py-2.5 text-sm text-right tabular-nums text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700"
                                       />
                                       <td
                                         title={PLANILHA_ANALITICA_TOOLTIP.vlCompraRealComp}
-                                        className={`cursor-help px-2 py-2.5 text-sm tabular-nums text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700 ${GRADE_COL_MOEDA_UNIT}`}
+                                        className={`px-2 py-2.5 text-sm tabular-nums text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700 ${GRADE_COL_MOEDA_UNIT}`}
                                       >
                                         {vlUnitCompraRealAgreg !== null ? <MoedaCelula valor={vlUnitCompraRealAgreg} /> : null}
                                       </td>
                                       <td
-                                        className={`cursor-help px-3 py-2.5 text-sm tabular-nums text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700 ${
-                                          calcHoverSourceIds.includes(`custo-real-${l.key}`)
-                                            ? 'bg-blue-50 ring-2 ring-inset ring-blue-500 dark:bg-blue-950/35 dark:ring-blue-400'
-                                            : ''
-                                        }`}
+                                        className={`px-3 py-2.5 text-sm tabular-nums text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700`}
                                       >
                                         {sumQtdCompraComVlReal > 0 ? (
-                                          <CalcHoverBridge
-                                            hoverSourceIds={[`custo-real-${l.key}`]}
-                                            onHoverSourcesChange={setCalcHoverSourceIds}
-                                          >
-                                            <MoedaCelula valor={sumCustoReal} />
-                                          </CalcHoverBridge>
+                                          <MoedaCelula valor={sumCustoReal} />
                                         ) : null}
                                       </td>
                                       <td
-                                        className={`cursor-help px-3 py-2.5 text-sm text-center tabular-nums border-l border-gray-200 dark:border-gray-700 ${
+                                        className={`px-3 py-2.5 text-sm text-center tabular-nums border-l border-gray-200 dark:border-gray-700 ${
                                           levantamentoCondComp || 'text-gray-800 dark:text-gray-200'
                                         }`}
                                       >
@@ -11132,7 +11329,7 @@ export function OrcamentoPageView({
                                             )}
                                       </td>
                                       <td
-                                        className={`cursor-help px-3 py-2.5 text-sm text-center tabular-nums border-l border-gray-200 dark:border-gray-700 ${
+                                        className={`px-3 py-2.5 text-sm text-center tabular-nums border-l border-gray-200 dark:border-gray-700 ${
                                           valorTotalCondComp || 'text-gray-800 dark:text-gray-200'
                                         }`}
                                       >
@@ -11143,15 +11340,10 @@ export function OrcamentoPageView({
                                             )}
                                       </td>
                                       <td
-                                        className="cursor-help px-3 py-2.5 text-sm text-center tabular-nums text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700"
+                                        className="px-3 py-2.5 text-sm text-center tabular-nums text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700"
                                       >
                                         {pctCvp !== undefined && Number.isFinite(pctCvp) ? (
-                                          <CalcHoverBridge
-                                            hoverSourceIds={[`custo-real-${l.key}`, `custo-orc-${l.key}`]}
-                                            onHoverSourcesChange={setCalcHoverSourceIds}
-                                          >
-                                            <span>{`${pctCvp.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`}</span>
-                                          </CalcHoverBridge>
+                                          <span>{`${pctCvp.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`}</span>
                                         ) : (
                                           <span className="text-gray-500 dark:text-gray-400">—</span>
                                         )}
@@ -11196,25 +11388,25 @@ export function OrcamentoPageView({
                                   <tr key={l.key} className={`bg-white dark:bg-gray-900 hover:bg-gray-50/80 dark:hover:bg-gray-800 ${gradeTableRowTrCls}`}>
                                     <td
                                       title={PLANILHA_ANALITICA_TOOLTIP.item}
-                                      className={`${itemW} cursor-help text-gray-700 dark:text-gray-300`}
+                                      className={`${itemW} text-gray-700 dark:text-gray-300`}
                                     >
                                       {l.item}
                                     </td>
                                     <td
                                       title={PLANILHA_ANALITICA_TOOLTIP.codigo}
-                                      className="cursor-help px-3 py-2.5 text-sm text-gray-500 dark:text-gray-400 border-l border-gray-200 dark:border-gray-700 text-center"
+                                      className="px-3 py-2.5 text-sm text-gray-500 dark:text-gray-400 border-l border-gray-200 dark:border-gray-700 text-center"
                                     >
                                       {l.codigo || '—'}
                                     </td>
                                     <td
                                       title={PLANILHA_ANALITICA_TOOLTIP.banco}
-                                      className="cursor-help px-3 py-2.5 text-sm text-gray-500 dark:text-gray-400 border-l border-gray-200 dark:border-gray-700 text-center"
+                                      className="px-3 py-2.5 text-sm text-gray-500 dark:text-gray-400 border-l border-gray-200 dark:border-gray-700 text-center"
                                     >
                                       {nomeBancoParaExibicao(l.banco)}
                                     </td>
                                     <td
                                       title={PLANILHA_ANALITICA_TOOLTIP.servico}
-                                      className="cursor-help min-w-[220px] px-3 py-2.5 text-sm text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700"
+                                      className="min-w-[220px] px-3 py-2.5 text-sm text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700"
                                     >
                                       <div className="max-w-[min(520px,55vw)] whitespace-normal break-words">
                                         {l.descricao}
@@ -11222,7 +11414,7 @@ export function OrcamentoPageView({
                                     </td>
                                     <td
                                       title={PLANILHA_ANALITICA_TOOLTIP.tipo}
-                                      className={`${tdPlanilhaTipoCls} cursor-help`}
+                                      className={tdPlanilhaTipoCls}
                                     >
                                       <select
                                         value={
@@ -11246,76 +11438,41 @@ export function OrcamentoPageView({
                                     </td>
                                     <td
                                       title={PLANILHA_ANALITICA_TOOLTIP.un}
-                                      className="cursor-help px-3 py-2.5 text-center text-sm text-gray-500 dark:text-gray-400 border-l border-gray-200 dark:border-gray-700"
+                                      className="px-3 py-2.5 text-center text-sm text-gray-500 dark:text-gray-400 border-l border-gray-200 dark:border-gray-700"
                                     >
                                       {l.und || '—'}
                                     </td>
                                     <td
                                       title={PLANILHA_ANALITICA_TOOLTIP.quantidadeInsumo}
-                                      className={`cursor-help px-3 py-2.5 text-center text-sm tabular-nums text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700 ${
-                                        calcHoverSourceIds.includes(`qtd-orc-${l.key}`)
-                                          ? 'bg-blue-50 ring-2 ring-inset ring-blue-500 dark:bg-blue-950/35 dark:ring-blue-400'
-                                          : ''
-                                      }`}
+                                      className={`px-3 py-2.5 text-center text-sm tabular-nums text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700`}
                                     >
                                       {l.quantidadeReal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}
                                     </td>
                                     <td
                                       title={PLANILHA_ANALITICA_TOOLTIP.valorUnitOrcInsumo}
-                                      className={`cursor-help px-3 py-2.5 text-sm tabular-nums text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700 ${
-                                        calcHoverSourceIds.includes(`vl-orc-${l.key}`)
-                                          ? 'bg-blue-50 ring-2 ring-inset ring-blue-500 dark:bg-blue-950/35 dark:ring-blue-400'
-                                          : ''
-                                      }`}
+                                      className={`px-3 py-2.5 text-sm tabular-nums text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700`}
                                     >
                                       <MoedaCelula valor={l.valorUnit} />
                                     </td>
                                     <td
-                                      className={`cursor-help px-3 py-2.5 text-sm tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700 ${
-                                        calcHoverSourceIds.includes(`custo-orc-${l.key}`)
-                                          ? 'bg-blue-50 ring-2 ring-inset ring-blue-500 dark:bg-blue-950/35 dark:ring-blue-400'
-                                          : ''
-                                      }`}
+                                      className={`px-3 py-2.5 text-sm tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700`}
                                     >
-                                      <CalcHoverBridge
-                                        hoverSourceIds={[`qtd-orc-${l.key}`, `vl-orc-${l.key}`]}
-                                        onHoverSourcesChange={setCalcHoverSourceIds}
-                                      >
-                                        <MoedaCelula valor={l.total} />
-                                      </CalcHoverBridge>
+                                      <MoedaCelula valor={l.total} />
                                     </td>
                                     <td
                                       title={PLANILHA_ANALITICA_TOOLTIP.valorUnitEstInsumo}
-                                      className="cursor-help px-3 py-2.5 text-sm tabular-nums text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700"
+                                      className="px-3 py-2.5 text-sm tabular-nums text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700"
                                     >
-                                      <CalcHoverBridge
-                                        hoverSourceIds={[`vl-orc-${l.key}`]}
-                                        onHoverSourcesChange={setCalcHoverSourceIds}
-                                      >
-                                        <MoedaCelula valor={valorUnitEstimado} />
-                                      </CalcHoverBridge>
+                                      <MoedaCelula valor={valorUnitEstimado} />
                                     </td>
                                     <td
-                                      className={`cursor-help px-3 py-2.5 text-sm tabular-nums text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700 ${
-                                        calcHoverSourceIds.includes(`custo-est-${l.key}`)
-                                          ? 'bg-blue-50 ring-2 ring-inset ring-blue-500 dark:bg-blue-950/35 dark:ring-blue-400'
-                                          : ''
-                                      }`}
+                                      className={`px-3 py-2.5 text-sm tabular-nums text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700`}
                                     >
-                                      <CalcHoverBridge
-                                        hoverSourceIds={[`custo-est-${l.key}`]}
-                                        onHoverSourcesChange={setCalcHoverSourceIds}
-                                      >
-                                        <MoedaCelula valor={custoEst} />
-                                      </CalcHoverBridge>
+                                      <MoedaCelula valor={custoEst} />
                                     </td>
                                     <td
                                       title={PLANILHA_ANALITICA_TOOLTIP.qtdCompraInsumo}
-                                      className={`cursor-help p-0 border-l border-gray-200 dark:border-gray-700 ${
-                                        calcHoverSourceIds.includes(`qtd-compra-${l.key}`)
-                                          ? 'bg-blue-50 ring-2 ring-inset ring-blue-500 dark:bg-blue-950/35 dark:ring-blue-400'
-                                          : ''
-                                      }`}
+                                      className={`p-0 border-l border-gray-200 dark:border-gray-700`}
                                     >
                                       <FdCampoLocal
                                         committedValue={
@@ -11335,28 +11492,19 @@ export function OrcamentoPageView({
                                     </td>
                                     <td
                                       title={PLANILHA_ANALITICA_TOOLTIP.qtdSobraInsumo}
-                                      className={`cursor-help px-3 py-2.5 text-center text-sm tabular-nums border-l border-gray-200 dark:border-gray-700 ${
+                                      className={`px-3 py-2.5 text-center text-sm tabular-nums border-l border-gray-200 dark:border-gray-700 ${
                                         sobraInsumo !== null && sobraInsumo < 0
                                           ? 'font-semibold bg-red-50 text-red-900 dark:bg-red-500/15 dark:text-red-200'
                                           : 'text-gray-700 dark:text-gray-300'
                                       }`}
                                     >
                                       {sobraInsumo !== null ? (
-                                        <CalcHoverBridge
-                                          hoverSourceIds={[`qtd-orc-${l.key}`, `qtd-compra-${l.key}`]}
-                                          onHoverSourcesChange={setCalcHoverSourceIds}
-                                        >
-                                          <span>{sobraInsumo.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</span>
-                                        </CalcHoverBridge>
+                                        <span>{sobraInsumo.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</span>
                                       ) : '—'}
                                     </td>
                                     <td
                                       title={PLANILHA_ANALITICA_TOOLTIP.vlCompraRealInsumo}
-                                      className={`cursor-help p-0 align-middle border-l border-gray-200 dark:border-gray-700 ${GRADE_COL_MOEDA_UNIT} ${
-                                        calcHoverSourceIds.includes(`vl-real-${l.key}`)
-                                          ? 'bg-blue-50 ring-2 ring-inset ring-blue-500 dark:bg-blue-950/35 dark:ring-blue-400'
-                                          : ''
-                                      }`}
+                                      className={`p-0 align-middle border-l border-gray-200 dark:border-gray-700 ${GRADE_COL_MOEDA_UNIT}`}
                                     >
                                       <div className={moedaGradeFieldWrapperCls}>
                                         <span className="shrink-0 text-xs tabular-nums text-gray-500 dark:text-gray-400">
@@ -11372,72 +11520,50 @@ export function OrcamentoPageView({
                                               : ''
                                           }
                                           onCommit={(raw) => commitPlanilhaVlCompraReal(l.key, raw)}
+                                          mask={currencyDigitsToFormatted}
+                                          commitOnChange
                                           placeholder="0,00"
                                           title={PLANILHA_ANALITICA_TOOLTIP.vlCompraRealInsumo}
-                                          inputMode="decimal"
+                                          inputMode="numeric"
                                           className={`${inputGradeMoedaCls} text-right`}
                                         />
                                       </div>
                                     </td>
                                     <td
-                                      className={`cursor-help px-3 py-2.5 text-sm tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700 ${
-                                        calcHoverSourceIds.includes(`custo-real-${l.key}`)
-                                          ? 'bg-blue-50 ring-2 ring-inset ring-blue-500 dark:bg-blue-950/35 dark:ring-blue-400'
-                                          : ''
-                                      }`}
+                                      className={`px-3 py-2.5 text-sm tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700`}
                                     >
                                       {custoCompraR !== null ? (
-                                        <CalcHoverBridge
-                                          hoverSourceIds={[`qtd-compra-${l.key}`, `vl-real-${l.key}`]}
-                                          onHoverSourcesChange={setCalcHoverSourceIds}
-                                        >
-                                          <MoedaCelula valor={custoCompraR} />
-                                        </CalcHoverBridge>
+                                        <MoedaCelula valor={custoCompraR} />
                                       ) : '—'}
                                     </td>
                                     <td
-                                      className={`cursor-help px-3 py-2.5 text-sm text-center tabular-nums border-l border-gray-200 dark:border-gray-700 ${
+                                      className={`px-3 py-2.5 text-sm text-center tabular-nums border-l border-gray-200 dark:border-gray-700 ${
                                         levantamentoCondIn ||
                                         'text-gray-700 dark:text-gray-300'
                                       }`}
                                     >
                                       {pctLevIn !== undefined && Number.isFinite(pctLevIn) ? (
-                                        <CalcHoverBridge
-                                          hoverSourceIds={[`qtd-compra-${l.key}`, `qtd-orc-${l.key}`]}
-                                          onHoverSourcesChange={setCalcHoverSourceIds}
-                                        >
-                                          <span>{`${pctLevIn.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`}</span>
-                                        </CalcHoverBridge>
+                                        <span>{`${pctLevIn.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`}</span>
                                       ) : (
                                         <span className="text-gray-500 dark:text-gray-400">—</span>
                                       )}
                                     </td>
                                     <td
-                                      className={`cursor-help px-3 py-2.5 text-sm text-center tabular-nums border-l border-gray-200 dark:border-gray-700 ${
+                                      className={`px-3 py-2.5 text-sm text-center tabular-nums border-l border-gray-200 dark:border-gray-700 ${
                                         valorTotalCondIn || 'text-gray-700 dark:text-gray-300'
                                       }`}
                                     >
                                       {pctFatIn !== undefined && Number.isFinite(pctFatIn) ? (
-                                        <CalcHoverBridge
-                                          hoverSourceIds={[`custo-real-${l.key}`, `custo-orc-${l.key}`]}
-                                          onHoverSourcesChange={setCalcHoverSourceIds}
-                                        >
-                                          <span>{`${pctFatIn.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`}</span>
-                                        </CalcHoverBridge>
+                                        <span>{`${pctFatIn.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`}</span>
                                       ) : (
                                         <span className="text-gray-500 dark:text-gray-400">—</span>
                                       )}
                                     </td>
                                     <td
-                                      className="cursor-help px-3 py-2.5 text-sm text-center tabular-nums text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700"
+                                      className="px-3 py-2.5 text-sm text-center tabular-nums text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700"
                                     >
                                       {pctCvpIn !== undefined && Number.isFinite(pctCvpIn) ? (
-                                        <CalcHoverBridge
-                                          hoverSourceIds={[`custo-real-${l.key}`, `custo-orc-${l.parentKey}`]}
-                                          onHoverSourcesChange={setCalcHoverSourceIds}
-                                        >
-                                          <span>{`${pctCvpIn.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`}</span>
-                                        </CalcHoverBridge>
+                                        <span>{`${pctCvpIn.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`}</span>
                                       ) : (
                                         <span className="text-gray-500 dark:text-gray-400">—</span>
                                       )}
@@ -11633,7 +11759,7 @@ export function OrcamentoPageView({
                   )
                 )}
 
-                {!loadingFromApi && !abaPesadaPendente && orcamentoViewTab === 'memorial' && meta.importadoPlanilha && (
+                {!loadingFromApi && !abaPesadaPendente && orcamentoViewTab === 'memorial' && !memorialDisponivel && (
                   <OrcamentoSecaoVazia
                     titulo="Memória de cálculo não disponível"
                     texto="Este orçamento veio de uma planilha: as quantidades já estão na importação e não há levantamento por dimensões nesta aba. Para editar a grade, use Orçamento; para custos e compras, Orçamento analítico e Ficha de demanda."
@@ -11642,7 +11768,7 @@ export function OrcamentoPageView({
                   />
                 )}
 
-                {!loadingFromApi && !abaPesadaPendente && orcamentoViewTab === 'memorial' && !meta.importadoPlanilha && (
+                {!loadingFromApi && !abaPesadaPendente && orcamentoViewTab === 'memorial' && memorialDisponivel && (
                   <div className="space-y-5">
                     {itensCalculados.length === 0 ? (
                       <OrcamentoSecaoVazia
@@ -11666,6 +11792,12 @@ export function OrcamentoPageView({
                               quantidadeUn={row.quantidade}
                               quantidadeUnReadOnly={false}
                               onQuantidadeUnChange={n => setQuantidadeItem(row.key, n)}
+                              modoContagemLista={meta.usarMemoriaCalculo === true}
+                              onAddLinhaContagem={apos => addLinhaContagem(row.key, apos)}
+                              onUpdateLinhaContagem={(idx, campo, valor) =>
+                                updateLinhaContagem(row.key, idx, campo, valor)
+                              }
+                              onRemoveLinhaContagem={idx => removeLinhaContagem(row.key, idx)}
                               dim={
                                 dimensoesPorItem[row.key] ?? {
                                   tipoUnidade: row.tipoUnidade,
@@ -11688,19 +11820,6 @@ export function OrcamentoPageView({
                           </section>
                         ))}
                       </div>
-                    )}
-                    {itensCalculados.length > 0 && (
-                    <div className="flex flex-wrap items-center gap-3 pt-1">
-                      <button
-                        type="button"
-                        onClick={exportarMemoriaCalculo}
-                        className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-red-600 text-white text-sm font-semibold hover:bg-red-700 shadow-sm transition-colors"
-                        title="Exporta medições dimensionais e itens em unidade (UN), na ordem do orçamento"
-                      >
-                        <FileSpreadsheet className="w-5 h-5 shrink-0" />
-                        Exportar memória de cálculo (.xlsx)
-                      </button>
-                    </div>
                     )}
                   </div>
                 )}
@@ -12034,8 +12153,8 @@ export function OrcamentoPageView({
                                           )}
                                         </span>
                                       </td>
-                                      <td className={`text-center align-middle tabular-nums border-l border-gray-200 dark:border-gray-700 ${row.tipoUnidade !== 'un' ? 'px-2 py-2.5' : 'p-0'}`}>
-                                        {row.tipoUnidade !== 'un' ? (
+                                      <td className={`text-center align-middle tabular-nums border-l border-gray-200 dark:border-gray-700 ${row.tipoUnidade !== 'un' || meta.usarMemoriaCalculo != null ? 'px-2 py-2.5' : 'p-0'}`}>
+                                        {row.tipoUnidade !== 'un' || meta.usarMemoriaCalculo != null ? (
                                           <span className="text-sm font-medium text-gray-900 dark:text-gray-100">{row.quantidade.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</span>
                                         ) : (
                                           <FdCampoLocal
@@ -12246,6 +12365,22 @@ export function OrcamentoPageView({
                   </div>
                 </div>
                 <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                  {orcamentoVeioOrcafascio && (
+                    <button
+                      type="button"
+                      onClick={() => void atualizarOrcamentoOrcafascio()}
+                      disabled={isAtualizandoOrcafascio || !orcamentoAtivoId}
+                      className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 shadow-sm transition-colors hover:bg-gray-50 active:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700 dark:active:bg-gray-600 dark:focus-visible:ring-offset-gray-900"
+                      title="Atualizar composições do Orçafascio (inclui novas e remove as que saíram de lá)"
+                      aria-label="Atualizar do Orçafascio"
+                    >
+                      {isAtualizandoOrcafascio ? (
+                        <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
+                      ) : (
+                        <RefreshCw className="h-4 w-4 shrink-0" aria-hidden />
+                      )}
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={exportarOrcamentoCompleto}
@@ -12459,6 +12594,36 @@ export function OrcamentoPageView({
           </div>
         ) : null}
 
+        {orcafascioOrcamentoDetalhe && !orcafascioOrcamentoComposicoesLoading ? (
+          <div className="mt-4 space-y-4">
+            <Checkbox
+              checked={orcafascioImportUsarMemoria}
+              onChange={setOrcafascioImportUsarMemoria}
+              label="Usar memória de cálculo"
+            />
+            <div>
+              <p className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Arredondamento
+              </p>
+              <SegmentedControl
+                aria-label="Arredondamento"
+                value={orcafascioImportModoArredondamento}
+                onChange={setOrcafascioImportModoArredondamento}
+                className="h-auto w-full rounded-xl border border-gray-200 bg-gray-100/80 p-1 dark:border-gray-700 dark:bg-gray-800/70"
+                pillClassName="rounded-lg bg-red-600 shadow-sm top-1 bottom-1"
+                buttonClassName="flex-1 px-2 py-1.5 text-xs sm:text-sm"
+                activeButtonClassName="font-semibold text-white"
+                inactiveButtonClassName="font-medium text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-gray-100"
+                options={[
+                  { value: 'truncar', label: 'Truncar' },
+                  { value: 'arredondar', label: 'Arredondar' },
+                  { value: 'nenhum', label: 'Não arredondar' },
+                ]}
+              />
+            </div>
+          </div>
+        ) : null}
+
         <div className="mt-5 flex items-center justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
           <button
             type="button"
@@ -12473,6 +12638,8 @@ export function OrcamentoPageView({
               setOrcafascioOrcamentoAnalitico(null);
               setOrcafascioOrcamentoLinhaCatalogo(null);
               setOrcafascioOrcamentoLinhaChave(null);
+              setOrcafascioImportUsarMemoria(false);
+              setOrcafascioImportModoArredondamento('truncar');
             }}
             disabled={isImportandoOrcamento}
             className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-800 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800"

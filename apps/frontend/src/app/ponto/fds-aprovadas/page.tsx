@@ -421,6 +421,7 @@ export default function FdsAprovadasPage() {
           record={detailRecord}
           onClose={() => setDetailRecord(null)}
           onRecordUpdated={(updated) => setDetailRecord(updated)}
+          allowAddOrdemCompra
         />
 
         <FichaDemandaPurchaseStatusModal

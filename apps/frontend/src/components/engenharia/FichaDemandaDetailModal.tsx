@@ -1,17 +1,23 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Paperclip } from 'lucide-react';
+import { Loader2, Paperclip, Plus } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Modal } from '@/components/ui/Modal';
 import { FilePreviewCard } from '@/components/ui/FilePreviewCard';
 import { FdStatusBadges } from '@/components/engenharia/FdStatusBadges';
 import api from '@/lib/api';
 import {
+  anexosDemais,
+  anexosOrdemCompra,
+  fdAnexoKindLabel,
+  findAnexoByKind,
   FD_STATUS_LABELS,
   formatCurrencyDisplay,
+  inferFdAnexoKind,
   purchaseStatusLabel,
+  type FdAnexo,
   type FichaDemandaApprovalRecord,
 } from '@/lib/fichaDemandaApproval';
 
@@ -23,6 +29,8 @@ type Props = {
   onRecordUpdated?: (record: FichaDemandaApprovalRecord) => void;
   /** Permite upload em anexos pendentes (padrão: true). */
   allowPendingUpload?: boolean;
+  /** Suprimentos: permite anexar ordens de compra na ficha aprovada. */
+  allowAddOrdemCompra?: boolean;
   /** Rodapé extra (ex.: aprovar/rejeitar). Substitui o botão Fechar padrão. */
   footer?: React.ReactNode;
 };
@@ -45,38 +53,100 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
+function AnexoObrigatorioPreview({
+  titulo,
+  anexo,
+  uploadingAnexoId,
+  allowPendingUpload,
+  onUpload,
+}: {
+  titulo: string;
+  anexo?: FdAnexo;
+  uploadingAnexoId: string | null;
+  allowPendingUpload: boolean;
+  onUpload: (anexoId: string, file: File) => void;
+}) {
+  if (!anexo) {
+    return (
+      <div className="rounded-lg border border-dashed border-gray-200 px-3 py-6 text-center dark:border-gray-700">
+        <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+          {titulo}
+        </p>
+        <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Não enviado</p>
+      </div>
+    );
+  }
+  const anexoKey = anexo.id || anexo.name;
+  const isPending = !anexo.url;
+  return (
+    <div className="space-y-2">
+      <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+        {titulo}
+      </p>
+      <FilePreviewCard
+        file={{
+          originalName: anexo.name || 'Arquivo',
+          fileUrl: anexo.url,
+        }}
+        extra={titulo}
+        uploading={uploadingAnexoId === anexoKey || uploadingAnexoId === anexo.id}
+        onUpload={
+          allowPendingUpload && isPending
+            ? (file) => onUpload(anexo.id || anexoKey, file)
+            : undefined
+        }
+      />
+    </div>
+  );
+}
+
 export function FichaDemandaDetailModal({
   isOpen,
   record,
   onClose,
   onRecordUpdated,
   allowPendingUpload = true,
+  allowAddOrdemCompra = false,
   footer,
 }: Props) {
   const queryClient = useQueryClient();
+  const ocInputRef = useRef<HTMLInputElement>(null);
   const [uploadingAnexoId, setUploadingAnexoId] = useState<string | null>(null);
 
   const anexos = useMemo(() => {
     if (!record?.anexos?.length) return [];
-    return record.anexos.filter((a) => a && (a.name || a.url));
+    return record.anexos.filter((a) => a && (a.name || a.url) && inferFdAnexoKind(a) !== 'orcamento-ref');
   }, [record]);
 
+  const anexoOrcamento = findAnexoByKind(anexos, 'orcamento');
+  const anexoFd = findAnexoByKind(anexos, 'fd');
+  const extras = anexosDemais(anexos);
+  const ordensCompra = anexosOrdemCompra(anexos);
   const linkedCount = anexos.filter((a) => a.url).length;
   const pendingCount = anexos.length - linkedCount;
 
   const uploadMutation = useMutation({
-    mutationFn: async ({ anexoId, file }: { anexoId: string; file: File }) => {
+    mutationFn: async ({
+      anexoId,
+      file,
+      kind,
+    }: {
+      anexoId?: string;
+      file: File;
+      kind?: string;
+    }) => {
       if (!record?.id) throw new Error('Ficha inválida');
       const form = new FormData();
       form.append('file', file);
-      form.append('anexoId', anexoId);
+      if (anexoId) form.append('anexoId', anexoId);
+      if (kind) form.append('kind', kind);
       const res = await api.post(`/demand-sheet-approvals/${record.id}/anexos`, form, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       return (res.data?.data ?? null) as FichaDemandaApprovalRecord | null;
     },
-    onMutate: ({ anexoId }) => {
-      setUploadingAnexoId(anexoId);
+    onMutate: ({ anexoId, kind }) => {
+      setUploadingAnexoId(anexoId || kind || 'novo');
     },
     onSuccess: async (updated) => {
       toast.success('Anexo vinculado');
@@ -148,52 +218,148 @@ export function FichaDemandaDetailModal({
           </div>
         </dl>
 
-        <div className="rounded-xl border border-gray-200 dark:border-gray-700">
-          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-200 px-4 py-3 dark:border-gray-700">
-            <div className="flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-gray-100">
-              <Paperclip className="h-4 w-4 text-gray-500" />
-              Anexos
+        <div className="space-y-4">
+          <div className="rounded-xl border border-gray-200 dark:border-gray-700">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-200 px-4 py-3 dark:border-gray-700">
+              <div className="flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-gray-100">
+                <Paperclip className="h-4 w-4 text-gray-500" />
+                Anexos obrigatórios
+              </div>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                {linkedCount === 0
+                  ? 'Nenhum arquivo'
+                  : `${linkedCount} com arquivo` +
+                    (pendingCount ? ` · ${pendingCount} pendente(s)` : '')}
+              </p>
             </div>
-            <p className="text-xs text-gray-500 dark:text-gray-400">
-              {anexos.length === 0
-                ? 'Nenhum anexo'
-                : `${linkedCount} com arquivo` +
-                  (pendingCount ? ` · ${pendingCount} pendente(s)` : '')}
-            </p>
+            <div className="grid grid-cols-1 gap-3 p-4 sm:grid-cols-2">
+              <AnexoObrigatorioPreview
+                titulo="Orçamento"
+                anexo={anexoOrcamento}
+                uploadingAnexoId={uploadingAnexoId}
+                allowPendingUpload={allowPendingUpload}
+                onUpload={(anexoId, file) => uploadMutation.mutate({ anexoId, file })}
+              />
+              <AnexoObrigatorioPreview
+                titulo="Ficha de demanda"
+                anexo={anexoFd}
+                uploadingAnexoId={uploadingAnexoId}
+                allowPendingUpload={allowPendingUpload}
+                onUpload={(anexoId, file) => uploadMutation.mutate({ anexoId, file })}
+              />
+            </div>
           </div>
 
-          {anexos.length === 0 ? (
-            <div className="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
-              Esta ficha ainda não tem anexos. Use Importar → só o ZIP para vincular, ou cadastre
-              anexos na planilha.
+          <div className="rounded-xl border border-gray-200 dark:border-gray-700">
+            <div className="border-b border-gray-200 px-4 py-3 dark:border-gray-700">
+              <div className="flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-gray-100">
+                <Paperclip className="h-4 w-4 text-gray-500" />
+                Ordens de compra
+              </div>
             </div>
-          ) : (
-            <div className="grid grid-cols-2 gap-3 p-4 sm:grid-cols-3 lg:grid-cols-4">
-              {anexos.map((anexo, index) => {
-                const anexoKey = anexo.id || `${anexo.name}-${anexo.sourcePath || index}`;
-                const isPending = !anexo.url;
-                return (
-                  <FilePreviewCard
-                    key={anexoKey}
-                    file={{
-                      originalName: anexo.name || 'Arquivo',
-                      fileUrl: anexo.url,
+            <div className="space-y-3 p-4">
+              {ordensCompra.length === 0 ? (
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  Nenhuma ordem de compra anexada.
+                </p>
+              ) : (
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+                  {ordensCompra.map((anexo, index) => {
+                    const anexoKey = anexo.id || `${anexo.name}-${anexo.sourcePath || index}`;
+                    const isPending = !anexo.url;
+                    return (
+                      <FilePreviewCard
+                        key={anexoKey}
+                        file={{
+                          originalName: anexo.name || 'Arquivo',
+                          fileUrl: anexo.url,
+                        }}
+                        extra="Ordem de compra"
+                        uploading={uploadingAnexoId === anexoKey || uploadingAnexoId === anexo.id}
+                        onUpload={
+                          allowPendingUpload && isPending
+                            ? (file) => {
+                                const idForUpload = anexo.id || anexoKey;
+                                uploadMutation.mutate({ anexoId: idForUpload, file, kind: 'oc' });
+                              }
+                            : undefined
+                        }
+                      />
+                    );
+                  })}
+                </div>
+              )}
+              {allowAddOrdemCompra ? (
+                <>
+                  <input
+                    ref={ocInputRef}
+                    type="file"
+                    className="hidden"
+                    disabled={uploadMutation.isPending}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      e.target.value = '';
+                      if (!file) return;
+                      uploadMutation.mutate({ file, kind: 'oc' });
                     }}
-                    extra={anexo.kind || undefined}
-                    uploading={uploadingAnexoId === anexoKey || uploadingAnexoId === anexo.id}
-                    onUpload={
-                      allowPendingUpload && isPending
-                        ? (file) => {
-                            const idForUpload = anexo.id || anexoKey;
-                            uploadMutation.mutate({ anexoId: idForUpload, file });
-                          }
-                        : undefined
-                    }
                   />
-                );
-              })}
+                  <button
+                    type="button"
+                    disabled={uploadMutation.isPending}
+                    onClick={() => ocInputRef.current?.click()}
+                    className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-gray-300 py-2.5 text-sm font-medium text-red-600 transition-colors hover:border-red-300 hover:bg-red-50 disabled:opacity-50 dark:border-gray-600 dark:text-red-400 dark:hover:border-red-800/60 dark:hover:bg-red-950/20"
+                  >
+                    {uploadingAnexoId === 'oc' ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Plus className="h-4 w-4 shrink-0" />
+                    )}
+                    {uploadingAnexoId === 'oc' ? 'Enviando ordem de compra...' : 'Adicionar ordem de compra'}
+                  </button>
+                </>
+              ) : null}
             </div>
-          )}
+          </div>
+
+          <div className="rounded-xl border border-gray-200 dark:border-gray-700">
+            <div className="border-b border-gray-200 px-4 py-3 dark:border-gray-700">
+              <div className="flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-gray-100">
+                <Paperclip className="h-4 w-4 text-gray-500" />
+                Demais anexos
+              </div>
+            </div>
+            {extras.length === 0 ? (
+              <div className="px-4 py-6 text-sm text-gray-500 dark:text-gray-400">
+                Nenhum anexo adicional.
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-3 p-4 sm:grid-cols-3 lg:grid-cols-4">
+                {extras.map((anexo, index) => {
+                  const anexoKey = anexo.id || `${anexo.name}-${anexo.sourcePath || index}`;
+                  const isPending = !anexo.url;
+                  return (
+                    <FilePreviewCard
+                      key={anexoKey}
+                      file={{
+                        originalName: anexo.name || 'Arquivo',
+                        fileUrl: anexo.url,
+                      }}
+                      extra={fdAnexoKindLabel(inferFdAnexoKind(anexo))}
+                      uploading={uploadingAnexoId === anexoKey || uploadingAnexoId === anexo.id}
+                      onUpload={
+                        allowPendingUpload && isPending
+                          ? (file) => {
+                              const idForUpload = anexo.id || anexoKey;
+                              uploadMutation.mutate({ anexoId: idForUpload, file });
+                            }
+                          : undefined
+                      }
+                    />
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
 
         {footer ? (

@@ -5,10 +5,11 @@ import { Info, Plus, Trash2 } from 'lucide-react';
 import {
   ROTULO_COLUNA_MEDICAO_OPCOES,
   type DimensoesItem,
+  type LinhaContagem,
   type LinhaMedicao,
   type TipoUnidadeFormula
 } from './orcamentoMedicaoTypes';
-import { calcA, calcV, calcularQuantidadeLinha } from './orcamentoMedicaoCalc';
+import { calcA, calcV, calcularQuantidadeContagem, calcularQuantidadeLinha } from './orcamentoMedicaoCalc';
 import {
   gradeTableCls,
   gradeTableRowTrCls,
@@ -33,6 +34,14 @@ type Props = {
   /** Caçamba 4 m³: quantidade vem da carga de entulho; não editar aqui. */
   quantidadeUnReadOnly?: boolean;
   onQuantidadeUnChange?: (n: number) => void;
+  /**
+   * Itens "un" no orçamento com `usarMemoriaCalculo`: em vez do campo único de quantidade,
+   * mostra uma lista de quantidades por local (soma simples, sem fórmula C×L×H).
+   */
+  modoContagemLista?: boolean;
+  onAddLinhaContagem?: (inserirAposIdx?: number) => void;
+  onUpdateLinhaContagem?: (idx: number, campo: 'descricao' | 'quantidade', valor: string | number) => void;
+  onRemoveLinhaContagem?: (idx: number) => void;
   dim: DimensoesItem;
   ehCargaEntulho: boolean;
   draftCalc: Record<string, string>;
@@ -93,6 +102,10 @@ export function OrcamentoMedicaoPainel({
   quantidadeUn = 0,
   quantidadeUnReadOnly = false,
   onQuantidadeUnChange,
+  modoContagemLista = false,
+  onAddLinhaContagem,
+  onUpdateLinhaContagem,
+  onRemoveLinhaContagem,
   dim,
   ehCargaEntulho,
   draftCalc,
@@ -108,11 +121,19 @@ export function OrcamentoMedicaoPainel({
   const tipo = tipoUnidade;
 
   const [menuCtxMedicao, setMenuCtxMedicao] = useState<{ left: number; top: number; idx: number } | null>(null);
+  const [menuCtxContagem, setMenuCtxContagem] = useState<{
+    left: number;
+    top: number;
+    idx: number | null;
+  } | null>(null);
 
   useEffect(() => {
-    if (!menuCtxMedicao) return;
+    if (!menuCtxMedicao && !menuCtxContagem) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setMenuCtxMedicao(null);
+      if (e.key === 'Escape') {
+        setMenuCtxMedicao(null);
+        setMenuCtxContagem(null);
+      }
     };
     window.addEventListener('keydown', onKey);
     const t = window.setTimeout(() => {
@@ -120,23 +141,41 @@ export function OrcamentoMedicaoPainel({
     }, 0);
     function fechar() {
       setMenuCtxMedicao(null);
+      setMenuCtxContagem(null);
     }
     return () => {
       window.removeEventListener('keydown', onKey);
       window.clearTimeout(t);
       window.removeEventListener('click', fechar);
     };
-  }, [menuCtxMedicao]);
+  }, [menuCtxMedicao, menuCtxContagem]);
 
-  const abrirMenuCtxMedicao = (e: React.MouseEvent, idx: number) => {
-    e.preventDefault();
+  const eventoSobreCampoEditavel = (target: EventTarget | null) => {
+    if (!(target instanceof Element)) return false;
+    return Boolean(target.closest('input, textarea, select, button, a, [role="combobox"]'));
+  };
+
+  const posicaoMenuLinha = (e: React.MouseEvent, altura = 156) => {
     const mw = 220;
-    const mh = 156;
     let left = e.clientX;
     let top = e.clientY;
     left = Math.min(left, window.innerWidth - mw - 8);
-    top = Math.min(top, window.innerHeight - mh - 8);
-    setMenuCtxMedicao({ left, top, idx });
+    top = Math.min(top, window.innerHeight - altura - 8);
+    return { left, top };
+  };
+
+  const abrirMenuCtxMedicao = (e: React.MouseEvent, idx: number) => {
+    if (e.type === 'click' && eventoSobreCampoEditavel(e.target)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setMenuCtxMedicao({ ...posicaoMenuLinha(e), idx });
+  };
+
+  const abrirMenuCtxContagem = (e: React.MouseEvent, idx: number | null) => {
+    if (e.type === 'click' && eventoSobreCampoEditavel(e.target)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setMenuCtxContagem({ ...posicaoMenuLinha(e, 120), idx });
   };
 
   /** Descrição + C + L + H + N + % + A + V + Subtotal. */
@@ -207,8 +246,12 @@ export function OrcamentoMedicaoPainel({
 
   const lnFallback: LinhaMedicao = { C: 0, L: 0, H: 0, N: 0, empolamento: 0 };
 
-  const renderCabecalhoServico = (colCount: number) => (
-    <tr className={`bg-red-600 dark:bg-red-950/90 ${gradeTableRowTrCls}`}>
+  const renderCabecalhoServico = (colCount: number, onAbrirMenu?: (e: React.MouseEvent) => void) => (
+    <tr
+      className={`bg-red-600 dark:bg-red-950/90 ${gradeTableRowTrCls}${onAbrirMenu ? ' cursor-pointer' : ''}`}
+      onClick={onAbrirMenu}
+      onContextMenu={onAbrirMenu}
+    >
       <th
         colSpan={colCount}
         className="border-b border-red-700/70 bg-red-600 px-3 py-2.5 text-left align-middle font-normal dark:border-red-900 dark:bg-red-950/90 sm:px-3.5"
@@ -338,13 +381,8 @@ export function OrcamentoMedicaoPainel({
       <tr
         key={idx}
         className={`transition-colors hover:[&>td]:bg-slate-50/95 dark:hover:[&>td]:bg-slate-800/35 ${gradeTableRowTrCls}`}
-        onContextMenu={
-          ehCargaEntulho
-            ? undefined
-            : e => {
-                abrirMenuCtxMedicao(e, idx);
-              }
-        }
+        onClick={ehCargaEntulho ? undefined : e => abrirMenuCtxMedicao(e, idx)}
+        onContextMenu={ehCargaEntulho ? undefined : e => abrirMenuCtxMedicao(e, idx)}
       >
         <td className={`${thFirst} !p-0 align-middle`}>
           <input
@@ -545,6 +583,7 @@ export function OrcamentoMedicaoPainel({
       <tr
         key={idx}
         className={`transition-colors hover:[&>td]:bg-slate-50/95 dark:hover:[&>td]:bg-slate-800/35 ${gradeTableRowTrCls}`}
+        onClick={ehCargaEntulho ? undefined : e => abrirMenuCtxMedicao(e, idx)}
         onContextMenu={ehCargaEntulho ? undefined : e => abrirMenuCtxMedicao(e, idx)}
       >
         <td
@@ -586,7 +625,7 @@ export function OrcamentoMedicaoPainel({
               placeholder="Ex: COBERTURA DAS CALDEIRAS"
               value={ln.descricao || ''}
               onChange={e => updateLinhaMedicao(rowKey, idx, 'descricao', e.target.value)}
-              className={`${inputCls} text-left`}
+              className={`${inputCls} !px-3 text-left sm:!px-3.5`}
             />
           )}
         </td>
@@ -669,6 +708,44 @@ export function OrcamentoMedicaoPainel({
     </ActionMenuOverlay>
   ) : null;
 
+  const renderLinhaTotalMedicao = () => {
+    const linhas = (dim.linhas ?? []).filter(ln => !ln.cabecalhoSecao);
+    const fmt = (n: number) =>
+      n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+    const totalA = linhas.reduce((s, ln) => s + calcA(ln), 0);
+    const totalV = linhas.reduce((s, ln) => s + calcV(ln, tipo), 0);
+    const totalSub = linhas.reduce((s, ln) => s + calcularQuantidadeLinha(ln, tipo), 0);
+    const mostraA = tipo === 'm2' || (ehCargaEntulho && linhas.some(ln => modoColunaA(ln) !== 'vazio'));
+    const mostraV = tipo === 'm3' || ehCargaEntulho;
+    const celulaTot = (mostrar: boolean, valor: number, title: string) =>
+      mostrar ? (
+        <td className={tdCalc} title={title}>
+          {fmt(valor)}
+        </td>
+      ) : (
+        celulaVazia()
+      );
+    return (
+      <tr className={gradeTableRowTrCls}>
+        <td className={tdFirst}>
+          <span className="text-[11px] font-bold uppercase tracking-wide text-gray-700 dark:text-gray-200">
+            Total
+          </span>
+        </td>
+        {celulaVazia()}
+        {celulaVazia()}
+        {celulaVazia()}
+        {celulaVazia()}
+        {celulaVazia()}
+        {celulaTot(mostraA, totalA, 'Área total (m²)')}
+        {celulaTot(mostraV, totalV, 'Volume total (m³)')}
+        <td className={tdCalc} title="Quantidade total">
+          {fmt(totalSub)}
+        </td>
+      </tr>
+    );
+  };
+
   /** Evita borda “dupla” grossa: o contêiner já tem borda; última linha/coluna não repetem border-b/border-r. */
   const gradeTabelaMemorialBordaCls =
     '[&_tbody_tr:last-child_td]:!border-b-0 [&_td:last-child]:!border-r-0 [&_thead_th:last-child]:!border-r-0';
@@ -688,6 +765,152 @@ export function OrcamentoMedicaoPainel({
       </table>
     </div>
   );
+
+  /**
+   * Itens "un" quando o orçamento usa memória de cálculo: lista de quantidades por local
+   * (sem fórmula — soma simples), em vez do campo único de quantidade.
+   */
+  if (tipo === 'un' && !ehCargaEntulho && modoContagemLista) {
+    const linhasContagem = dim.linhasContagem ?? [];
+    const total = calcularQuantidadeContagem(linhasContagem);
+    const portalMenuCtxContagem = menuCtxContagem ? (
+      <ActionMenuOverlay
+        open
+        onClose={() => setMenuCtxContagem(null)}
+        top={menuCtxContagem.top}
+        left={menuCtxContagem.left}
+        panelClassName="min-w-[12rem] py-1"
+      >
+        <button
+          type="button"
+          role="menuitem"
+          className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-800 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-700/80"
+          onClick={() => {
+            onAddLinhaContagem?.(menuCtxContagem.idx ?? undefined);
+            setMenuCtxContagem(null);
+          }}
+        >
+          <Plus className="h-4 w-4 shrink-0" aria-hidden />
+          {menuCtxContagem.idx == null ? 'Adicionar linha' : 'Adicionar linha abaixo'}
+        </button>
+        {menuCtxContagem.idx != null && (
+          <button
+            type="button"
+            role="menuitem"
+            className="flex w-full items-center gap-2 border-t border-gray-200 px-3 py-2.5 text-left text-sm text-red-700 hover:bg-red-50 dark:border-gray-700 dark:text-red-400 dark:hover:bg-red-950/40"
+            onClick={() => {
+              onRemoveLinhaContagem?.(menuCtxContagem.idx as number);
+              setMenuCtxContagem(null);
+            }}
+          >
+            <Trash2 className="h-4 w-4 shrink-0" aria-hidden />
+            Excluir linha
+          </button>
+        )}
+      </ActionMenuOverlay>
+    ) : null;
+    return (
+      <div className="space-y-3">
+        <div className="table-scroll rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900">
+          <table className={`w-full table-fixed border-collapse text-sm ${gradeTableCls} ${gradeTabelaMemorialBordaCls}`}>
+            <colgroup>
+              <col style={{ width: '70%' }} />
+              <col style={{ width: '30%' }} />
+            </colgroup>
+            <thead>
+              {renderCabecalhoServico(2, e => abrirMenuCtxContagem(e, null))}
+              <tr className={gradeTableRowTrCls}>
+                <th className={thFirst}>Local / descrição</th>
+                <th className={thRest}>Quantidade</th>
+              </tr>
+            </thead>
+            <tbody>
+              {linhasContagem.length === 0 ? (
+                <tr className={gradeTableRowTrCls}>
+                  <td
+                    colSpan={2}
+                    className="border-b border-gray-200 bg-slate-50/40 px-6 py-10 text-center dark:border-gray-600 dark:bg-gray-900/40"
+                  >
+                    <p className="mx-auto max-w-md text-sm leading-relaxed text-gray-600 dark:text-gray-400">
+                      Nenhuma linha de medição. Inicie o cadastro das medidas conforme o tipo de serviço.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => onAddLinhaContagem?.()}
+                      className="mt-4 inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-red-700"
+                    >
+                      <Plus className="h-4 w-4" />
+                      Iniciar medições
+                    </button>
+                  </td>
+                </tr>
+              ) : (
+                linhasContagem.map((ln, idx) => (
+                  <tr
+                    key={idx}
+                    className={`cursor-pointer transition-colors hover:[&>td]:bg-slate-50/95 dark:hover:[&>td]:bg-slate-800/35 ${gradeTableRowTrCls}`}
+                    onClick={e => abrirMenuCtxContagem(e, idx)}
+                    onContextMenu={e => abrirMenuCtxContagem(e, idx)}
+                  >
+                    <td className={tdFirstBody}>
+                      <input
+                        type="text"
+                        placeholder="Ex: Pavimento 1"
+                        value={ln.descricao ?? ''}
+                        onChange={e => onUpdateLinhaContagem?.(idx, 'descricao', e.target.value)}
+                        className={`${inputCls} !px-3 text-left sm:!px-3.5`}
+                      />
+                    </td>
+                    <td className={`${tdRestBody} text-center`}>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        placeholder="0"
+                        value={
+                          draftCalc[`${rowKey}|contagem|${idx}`] ??
+                          (ln.quantidade === 0 ? '' : String(ln.quantidade))
+                        }
+                        onChange={e =>
+                          handleCalcChange(`${rowKey}|contagem|${idx}`, e.target.value, n =>
+                            onUpdateLinhaContagem?.(idx, 'quantidade', n)
+                          )
+                        }
+                        onBlur={e =>
+                          handleCalcBlur(
+                            `${rowKey}|contagem|${idx}`,
+                            draftCalc[`${rowKey}|contagem|${idx}`] ?? e.target.value,
+                            n => onUpdateLinhaContagem?.(idx, 'quantidade', n)
+                          )
+                        }
+                        className={`${inputCls} text-center`}
+                      />
+                    </td>
+                  </tr>
+                ))
+              )}
+              {linhasContagem.length > 0 && (
+                <tr
+                  className={`${gradeTableRowTrCls} cursor-pointer`}
+                  onClick={e => abrirMenuCtxContagem(e, null)}
+                  onContextMenu={e => abrirMenuCtxContagem(e, null)}
+                >
+                  <td className={tdFirst}>
+                    <span className="text-[11px] font-bold uppercase tracking-wide text-gray-700 dark:text-gray-200">
+                      Total
+                    </span>
+                  </td>
+                  <td className={tdCalc} title="Quantidade total (UN)">
+                    {total.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 4 })}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+        {portalMenuCtxContagem}
+      </div>
+    );
+  }
 
   /** Itens em unidade (UN): quantidade na coluna N, alinhado à exportação e à aba Orçamento. */
   if (tipo === 'un' && !ehCargaEntulho) {
@@ -849,7 +1072,10 @@ export function OrcamentoMedicaoPainel({
               {renderCabecalhoServico(colCount)}
               {renderHeaderRow(lnHeaderRef)}
             </thead>
-            <tbody>{dim.linhas.map((ln, idx) => renderRow(ln, idx))}</tbody>
+            <tbody>
+              {dim.linhas.map((ln, idx) => renderRow(ln, idx))}
+              {renderLinhaTotalMedicao()}
+            </tbody>
           </>
         )}
       </div>
@@ -870,7 +1096,10 @@ export function OrcamentoMedicaoPainel({
               {renderCabecalhoServico(colCountCarga)}
               {renderHeaderRow(lnHeaderCarga)}
             </thead>
-            <tbody>{dim.linhas.map((ln, idx) => renderRow(ln, idx))}</tbody>
+            <tbody>
+              {dim.linhas.map((ln, idx) => renderRow(ln, idx))}
+              {renderLinhaTotalMedicao()}
+            </tbody>
           </>
         )}
       </div>

@@ -12,9 +12,14 @@ import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import {
   adjustCurrency,
   currencyDigitsToFormatted,
+  anexosDemais,
   emptyFichaDemandaForm,
+  findAnexoByKind,
   recordToForm,
+  upsertAnexoObrigatorio,
   validateFichaDemandaForm,
+  type FdAnexo,
+  type FdAnexoKind,
   type FichaDemandaApprovalFormState,
   type FichaDemandaApprovalRecord,
 } from '@/lib/fichaDemandaApproval';
@@ -123,6 +128,63 @@ function SubSection({
   );
 }
 
+function AnexoObrigatorioSlot({
+  label,
+  anexo,
+  disabled,
+  onAdd,
+  onRemove,
+}: {
+  label: string;
+  anexo?: FdAnexo;
+  disabled?: boolean;
+  onAdd: () => void;
+  onRemove: () => void;
+}) {
+  return (
+    <div>
+      <FieldLabel required>{label}</FieldLabel>
+      {anexo ? (
+        <div className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm dark:border-gray-700 dark:bg-gray-900/40">
+          <span className="flex min-w-0 items-center gap-2 truncate text-gray-800 dark:text-gray-200">
+            <Paperclip className="h-4 w-4 shrink-0 text-gray-400" />
+            {anexo.name}
+          </span>
+          <div className="flex shrink-0 items-center gap-1">
+            <button
+              type="button"
+              disabled={disabled}
+              onClick={onAdd}
+              className="rounded px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-100 disabled:opacity-50 dark:text-gray-300 dark:hover:bg-gray-800"
+            >
+              Trocar
+            </button>
+            <button
+              type="button"
+              disabled={disabled}
+              onClick={onRemove}
+              className="shrink-0 rounded p-1 text-red-500 hover:bg-red-50 disabled:opacity-50 dark:hover:bg-red-950/30"
+              aria-label={`Remover ${label}`}
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={onAdd}
+          className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-gray-300 py-2.5 text-sm font-medium text-red-600 transition-colors hover:border-red-300 hover:bg-red-50 disabled:opacity-50 dark:border-gray-600 dark:text-red-400 dark:hover:border-red-800/60 dark:hover:bg-red-950/20"
+        >
+          <Plus className="h-4 w-4 shrink-0" />
+          Adicionar {label.toLowerCase()}
+        </button>
+      )}
+    </div>
+  );
+}
+
 export type FichaDemandaApprovalFormModalProps = {
   isOpen: boolean;
   onClose: () => void;
@@ -149,6 +211,7 @@ export function FichaDemandaApprovalFormModal({
   const [novaObraNome, setNovaObraNome] = useState('');
   const [uploadingAnexo, setUploadingAnexo] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const anexoKindRef = useRef<FdAnexoKind>('outro');
 
   const closeForm = useCallback(() => {
     onClose();
@@ -296,7 +359,7 @@ export function FichaDemandaApprovalFormModal({
     onSave(form);
   };
 
-  const handleAnexoFile = async (file: File | null) => {
+  const handleAnexoFile = async (file: File | null, kind: FdAnexoKind = anexoKindRef.current) => {
     if (!file || uploadingAnexo || isSaving) return;
     setUploadingAnexo(true);
     try {
@@ -308,16 +371,18 @@ export function FichaDemandaApprovalFormModal({
       const uploaded = res.data?.data as { url?: string; originalName?: string } | undefined;
       const url = String(uploaded?.url || '').trim();
       if (!url) throw new Error('Upload sem URL');
+      const next: FdAnexo = {
+        id: crypto.randomUUID(),
+        name: uploaded?.originalName || file.name,
+        url,
+        kind,
+      };
       setForm((prev) => ({
         ...prev,
-        anexos: [
-          ...prev.anexos,
-          {
-            id: crypto.randomUUID(),
-            name: uploaded?.originalName || file.name,
-            url,
-          },
-        ],
+        anexos:
+          kind === 'orcamento' || kind === 'fd'
+            ? upsertAnexoObrigatorio(prev.anexos, kind, next)
+            : [...prev.anexos, { ...next, kind: 'outro' }],
       }));
     } catch (err: unknown) {
       const msg =
@@ -514,20 +579,15 @@ export function FichaDemandaApprovalFormModal({
               </div>
             </div>
 
-            <SubSection
-              title="Anexos"
-              addLabel={uploadingAnexo ? 'Enviando anexo...' : 'Adicionar anexo'}
-              onAdd={() => {
-                if (!uploadingAnexo && !isSaving) fileInputRef.current?.click();
-              }}
-            >
+            <div className="space-y-3">
+              <SectionTitle>Anexos obrigatórios</SectionTitle>
               <input
                 ref={fileInputRef}
                 type="file"
                 className="hidden"
                 disabled={uploadingAnexo || isSaving}
                 onChange={(e) => {
-                  void handleAnexoFile(e.target.files?.[0] ?? null);
+                  void handleAnexoFile(e.target.files?.[0] ?? null, anexoKindRef.current);
                   e.target.value = '';
                 }}
               />
@@ -537,11 +597,54 @@ export function FichaDemandaApprovalFormModal({
                   Enviando anexo...
                 </p>
               ) : null}
-              {form.anexos.length === 0 && !uploadingAnexo ? (
-                <p className="text-sm text-gray-500 dark:text-gray-400">Nenhum anexo adicionado.</p>
-              ) : form.anexos.length > 0 ? (
+              <AnexoObrigatorioSlot
+                label="Orçamento"
+                anexo={findAnexoByKind(form.anexos, 'orcamento')}
+                disabled={uploadingAnexo || isSaving}
+                onAdd={() => {
+                  anexoKindRef.current = 'orcamento';
+                  fileInputRef.current?.click();
+                }}
+                onRemove={() =>
+                  setForm((prev) => ({
+                    ...prev,
+                    anexos: upsertAnexoObrigatorio(prev.anexos, 'orcamento', null),
+                  }))
+                }
+              />
+              <AnexoObrigatorioSlot
+                label="Ficha de demanda"
+                anexo={findAnexoByKind(form.anexos, 'fd')}
+                disabled={uploadingAnexo || isSaving}
+                onAdd={() => {
+                  anexoKindRef.current = 'fd';
+                  fileInputRef.current?.click();
+                }}
+                onRemove={() =>
+                  setForm((prev) => ({
+                    ...prev,
+                    anexos: upsertAnexoObrigatorio(prev.anexos, 'fd', null),
+                  }))
+                }
+              />
+            </div>
+
+            <SubSection
+              title="Demais anexos"
+              addLabel={uploadingAnexo ? 'Enviando anexo...' : 'Adicionar anexo'}
+              onAdd={() => {
+                if (uploadingAnexo || isSaving) return;
+                anexoKindRef.current = 'outro';
+                fileInputRef.current?.click();
+              }}
+            >
+              {anexosDemais(form.anexos).length === 0 && !uploadingAnexo ? (
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  Opcional. Use se quiser incluir outros arquivos além do orçamento e da FD.
+                </p>
+              ) : anexosDemais(form.anexos).length > 0 ? (
                 <ul className="space-y-2">
-                  {form.anexos.map((anexo) => (
+                  {anexosDemais(form.anexos).map((anexo) => (
                     <li
                       key={anexo.id}
                       className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm dark:border-gray-700 dark:bg-gray-900/40"

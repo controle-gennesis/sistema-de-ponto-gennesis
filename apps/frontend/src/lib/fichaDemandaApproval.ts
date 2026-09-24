@@ -56,12 +56,58 @@ export function purchaseStatusLabel(value: DemandSheetPurchaseStatus | null | un
   return FD_PURCHASE_STATUS_LABELS[value] ?? value;
 }
 
+export type FdAnexoKind = 'orcamento' | 'fd' | 'oc' | 'outro';
+
 export interface FdAnexo {
   id: string;
   name: string;
   url?: string;
   kind?: string;
   sourcePath?: string;
+}
+
+export function fdAnexoKindLabel(kind?: string): string {
+  if (kind === 'orcamento') return 'Orçamento';
+  if (kind === 'fd') return 'Ficha de demanda';
+  if (kind === 'oc') return 'Ordem de compra';
+  return 'Anexo';
+}
+
+export function inferFdAnexoKind(anexo: FdAnexo | undefined): FdAnexoKind | 'orcamento-ref' | undefined {
+  if (!anexo) return undefined;
+  if (anexo.kind === 'orcamento' || anexo.kind === 'fd' || anexo.kind === 'oc' || anexo.kind === 'outro') {
+    return anexo.kind;
+  }
+  if (anexo.kind === 'orcamento-ref') return 'orcamento-ref';
+  const n = String(anexo.name || '').toUpperCase();
+  if (/ORDEM\s*DE\s*COMPRA|ANEXO[_-]?OC|(?:^|[_-])OC(?:[_-]|\d)/.test(n)) return 'oc';
+  if (/(?:^|[^A-Z])FD(?:[^A-Z]|$)|FICHA\s*DE\s*DEMANDA|ANEXO[_-]?FD/.test(n)) return 'fd';
+  if (/OR[CÇ]AMENTO|ANEXO[_-]?RM|(?:^|[_-])RM(?:[_-]|$)/.test(n)) return 'orcamento';
+  return 'outro';
+}
+
+export function findAnexoByKind(anexos: FdAnexo[] | undefined, kind: 'orcamento' | 'fd'): FdAnexo | undefined {
+  return (anexos ?? []).find((a) => inferFdAnexoKind(a) === kind);
+}
+
+export function anexosDemais(anexos: FdAnexo[] | undefined): FdAnexo[] {
+  return (anexos ?? []).filter((a) => {
+    const kind = inferFdAnexoKind(a);
+    return kind !== 'orcamento' && kind !== 'fd' && kind !== 'oc' && kind !== 'orcamento-ref';
+  });
+}
+
+export function anexosOrdemCompra(anexos: FdAnexo[] | undefined): FdAnexo[] {
+  return (anexos ?? []).filter((a) => inferFdAnexoKind(a) === 'oc');
+}
+
+export function upsertAnexoObrigatorio(
+  anexos: FdAnexo[],
+  kind: 'orcamento' | 'fd',
+  next: FdAnexo | null
+): FdAnexo[] {
+  const rest = anexos.filter((a) => a.kind !== kind);
+  return next ? [...rest, { ...next, kind }] : rest;
 }
 
 export interface FichaDemandaApprovalRecord {
@@ -226,6 +272,8 @@ export function validateFichaDemandaForm(form: FichaDemandaApprovalFormState): s
   if (!form.custoEstimado.trim()) return 'Informe o Custo Estimado.';
   if (!form.observacao.trim()) return 'Informe a observação.';
   if (!form.polo) return 'Selecione o polo.';
+  if (!findAnexoByKind(form.anexos, 'orcamento')?.url) return 'Anexe o orçamento.';
+  if (!findAnexoByKind(form.anexos, 'fd')?.url) return 'Anexe a ficha de demanda.';
   return null;
 }
 

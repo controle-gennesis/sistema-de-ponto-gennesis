@@ -1,4 +1,4 @@
-import type { LinhaMedicao, TipoUnidadeFormula } from './orcamentoMedicaoTypes';
+import type { LinhaContagem, LinhaMedicao, TipoUnidadeFormula } from './orcamentoMedicaoTypes';
 
 /** Calcula A (área) = C×L×N, V (volume) = A×H ou C×L×H×N */
 export function calcA(linha: LinhaMedicao): number {
@@ -56,6 +56,12 @@ export function calcularQuantidadeLinha(linha: LinhaMedicao, tipo: TipoUnidadeFo
     return linha.valorManual * fator;
   }
   return calcV(linha, tipo) * fator;
+}
+
+/** Soma simples das quantidades por local — memória de cálculo de itens "un". */
+export function calcularQuantidadeContagem(linhas: LinhaContagem[] | undefined): number {
+  if (!linhas?.length) return 0;
+  return linhas.reduce((s, ln) => s + (Number.isFinite(ln.quantidade) ? ln.quantidade : 0), 0);
 }
 
 export function inferirTipoUnidadePorDimensao(linhas: LinhaMedicao[] | undefined): TipoUnidadeFormula {

@@ -850,6 +850,7 @@ export class DemandSheetApprovalController {
       if (!file?.buffer?.length) throw createError('Selecione um arquivo', 400);
 
       const anexoId = String((req.body as { anexoId?: unknown })?.anexoId ?? '').trim();
+      const requestedKind = String((req.body as { kind?: unknown })?.kind ?? '').trim();
       const originalName =
         fixMulterOriginalName(file.originalname) || file.originalname || 'anexo';
 
@@ -899,7 +900,7 @@ export class DemandSheetApprovalController {
           updated = true;
         }
       }
-      if (!updated) {
+      if (!updated && !requestedKind) {
         // Preenche o primeiro pendente sem url, se houver.
         const pendingIdx = list.findIndex((a) => !a.url);
         if (pendingIdx >= 0) {
@@ -916,7 +917,7 @@ export class DemandSheetApprovalController {
           id: anexoId || saved.key || `anexo-${Date.now()}`,
           name: saved.originalName || originalName,
           url: saved.url,
-          kind: 'ANEXO',
+          kind: requestedKind || 'outro',
         });
       }
 

@@ -101,21 +101,29 @@ export class OrcamentoController {
       if (!raw) {
         return res.status(404).json({ message: 'Orçamento não encontrado' });
       }
+      const persistTasks: Promise<void>[] = [];
       // Histórico de imports no catálogo do contrato (sem sobrescrever a árvore do orçamento perfeito).
       if (imports !== undefined) {
-        const current = await orcamentoService.getServicosPadrao(centroCustoId);
-        await orcamentoService.saveServicosPadrao(centroCustoId, {
-          servicos: current.servicos,
-          imports: imports as unknown[]
-        });
+        persistTasks.push(
+          (async () => {
+            const current = await orcamentoService.getServicosPadrao(centroCustoId);
+            await orcamentoService.saveServicosPadrao(centroCustoId, {
+              servicos: current.servicos,
+              imports: imports as unknown[]
+            });
+          })()
+        );
       }
       // Árvore editada na montagem fica no arquivo do orçamento; não gravar em servicos-padrao.json.
       if (sessaoOrcamento !== undefined || servicos !== undefined) {
-        await orcamentoService.mergeOrcamentoArquivo(centroCustoId, orcamentoId, {
-          ...(sessaoOrcamento !== undefined ? { sessaoOrcamento } : {}),
-          ...(servicos !== undefined ? { servicos: servicos as unknown[] } : {})
-        });
+        persistTasks.push(
+          orcamentoService.mergeOrcamentoArquivo(centroCustoId, orcamentoId, {
+            ...(sessaoOrcamento !== undefined ? { sessaoOrcamento } : {}),
+            ...(servicos !== undefined ? { servicos: servicos as unknown[] } : {})
+          })
+        );
       }
+      await Promise.all(persistTasks);
       return res.json({ success: true });
     } catch (err) {
       return next(err);

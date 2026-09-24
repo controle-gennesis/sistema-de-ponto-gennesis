@@ -101,21 +101,6 @@ export class OrcafascioController {
     }
   }
 
-  // GET /api/orcafascio/orcamentos/:id — detalhe + itens do orçamento
-  async buscarDetalheOrcamento(req: Request, res: Response, next: NextFunction) {
-    try {
-      const { id } = req.params;
-      if (!id) return res.status(400).json({ error: 'Parâmetro "id" é obrigatório' });
-      const data = await orcafascioService.buscarDetalheOrcamento(id);
-      return res.json(data);
-    } catch (err: any) {
-      if (axios.isAxiosError(err) && err.response?.status === 404) {
-        return res.status(404).json({ error: 'Orçamento não encontrado' });
-      }
-      return next(err);
-    }
-  }
-
   // GET /api/orcafascio/orcamentos?page=1&order_type=Asc&order_name=description
   async listarOrcamentos(req: Request, res: Response, next: NextFunction) {
     try {

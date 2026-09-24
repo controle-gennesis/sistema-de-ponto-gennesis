@@ -63,9 +63,17 @@ export const ROTULO_COLUNA_MEDICAO_OPCOES = [
   '—'
 ] as const;
 
+/** Linha de contagem por local — memória de cálculo p/ itens em "un" (sem fórmula C×L×H, só soma). */
+export interface LinhaContagem {
+  descricao?: string;
+  quantidade: number;
+}
+
 export interface DimensoesItem {
   tipoUnidade: TipoUnidadeFormula;
   linhas: LinhaMedicao[];
+  /** Só para itens "un" quando o orçamento usa memória de cálculo — lista de quantidades por local. */
+  linhasContagem?: LinhaContagem[];
   /** Cabeçalhos editáveis C/L/H/N/% (ex.: Mês, Kg). */
   rotulosColunas?: RotulosColunasMedicao;
 }
