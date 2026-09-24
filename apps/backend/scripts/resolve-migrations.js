@@ -22,6 +22,9 @@ const MIGRATIONS_TRY_ROLLBACK_IF_FAILED = [
   '20260520120000_kanban_board_per_department',
   /** Falhou em prod: usuário com analise-extrato e controle-financeiro gerava duplicata no mesmo INSERT. Corrigido com DISTINCT na migration. */
   '20260608191500_controle_nfs_permission',
+  /** Falhou em prod: ADD CONSTRAINT sem guard SQL (dependia de try/catch em JS que não existe mais como migration). Corrigido com DO $$ ... EXCEPTION WHEN duplicate_object. */
+  '20260924100006_ensure_material_request_comments_table',
+  '20260924100007_ensure_purchase_order_comments_table',
 ];
 
 function tryRollbackFailedMigration(migrationName) {

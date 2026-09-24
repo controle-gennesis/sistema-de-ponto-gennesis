@@ -17,12 +17,20 @@ CREATE INDEX IF NOT EXISTS "purchase_order_comments_purchaseOrderId_idx"
 CREATE INDEX IF NOT EXISTS "purchase_order_comments_userId_idx"
       ON "purchase_order_comments"("userId");
 
-ALTER TABLE "purchase_order_comments"
-        ADD CONSTRAINT "purchase_order_comments_purchaseOrderId_fkey"
-        FOREIGN KEY ("purchaseOrderId") REFERENCES "purchase_orders"("id")
-        ON DELETE CASCADE ON UPDATE CASCADE;
+DO $$
+BEGIN
+  ALTER TABLE "purchase_order_comments"
+    ADD CONSTRAINT "purchase_order_comments_purchaseOrderId_fkey"
+    FOREIGN KEY ("purchaseOrderId") REFERENCES "purchase_orders"("id")
+    ON DELETE CASCADE ON UPDATE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
-ALTER TABLE "purchase_order_comments"
-        ADD CONSTRAINT "purchase_order_comments_userId_fkey"
-        FOREIGN KEY ("userId") REFERENCES "users"("id")
-        ON DELETE CASCADE ON UPDATE CASCADE;
+DO $$
+BEGIN
+  ALTER TABLE "purchase_order_comments"
+    ADD CONSTRAINT "purchase_order_comments_userId_fkey"
+    FOREIGN KEY ("userId") REFERENCES "users"("id")
+    ON DELETE CASCADE ON UPDATE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
