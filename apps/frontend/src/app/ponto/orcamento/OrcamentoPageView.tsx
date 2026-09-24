@@ -8514,20 +8514,22 @@ export function OrcamentoPageView({
     return m;
   }, [linhasAnaliticoOrcamento]);
 
-  const [barraTotaisSidebarLeftPx, setBarraTotaisSidebarLeftPx] = useState(80);
-
   useEffect(() => {
     if (!orcamentoAtivoId || subtitulosAdicionados.length === 0) return;
+    const root = document.documentElement;
+    let raf = 0;
     const sync = () => {
-      if (typeof window === 'undefined') return;
-      // No mobile a sidebar é off-canvas; no desktop acompanha a largura real do painel.
-      if (window.matchMedia('(min-width: 1024px)').matches) {
-        const el = document.querySelector('[data-app-sidebar]');
-        const w = el?.getBoundingClientRect().width;
-        setBarraTotaisSidebarLeftPx(w && w > 0 ? Math.round(w) : 80);
-      } else {
-        setBarraTotaisSidebarLeftPx(0);
-      }
+      if (raf) return;
+      raf = window.requestAnimationFrame(() => {
+        raf = 0;
+        if (window.matchMedia('(min-width: 1024px)').matches) {
+          const el = document.querySelector('[data-app-sidebar]');
+          const w = el?.getBoundingClientRect().width;
+          root.style.setProperty('--orc-footer-left', `${w && w > 0 ? Math.round(w) : 80}px`);
+        } else {
+          root.style.setProperty('--orc-footer-left', '0px');
+        }
+      });
     };
     sync();
     const el = document.querySelector('[data-app-sidebar]');
@@ -8537,6 +8539,8 @@ export function OrcamentoPageView({
     return () => {
       ro?.disconnect();
       window.removeEventListener('resize', sync);
+      if (raf) window.cancelAnimationFrame(raf);
+      root.style.removeProperty('--orc-footer-left');
     };
   }, [orcamentoAtivoId, subtitulosAdicionados.length]);
 
@@ -12636,11 +12640,6 @@ export function OrcamentoPageView({
             <div className="h-16 shrink-0" aria-hidden />
             <div
               className="fixed bottom-0 right-0 z-40 border-t border-gray-200 bg-white/95 shadow-[0_-4px_16px_rgba(15,23,42,0.08)] backdrop-blur-sm dark:border-gray-700 dark:bg-gray-900/95 left-0 lg:left-[var(--orc-footer-left,5rem)]"
-              style={
-                {
-                  '--orc-footer-left': `${barraTotaisSidebarLeftPx}px`
-                } as React.CSSProperties
-              }
               role="status"
               aria-label="Totais do orçamento"
             >
