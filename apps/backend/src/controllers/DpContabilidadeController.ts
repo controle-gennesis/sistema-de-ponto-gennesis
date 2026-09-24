@@ -322,7 +322,7 @@ export class DpContabilidadeController {
       }
 
       const updated = await prisma.dpContabilidadeRequest.update({
-        where: { id: existing.id },
+        where: { id: existing.id, status: existing.status },
         data,
         include: listInclude,
       });

@@ -285,7 +285,7 @@ export class OvertimeController {
       }
 
       const updatedOvertime = await prisma.overtime.update({
-        where: { id },
+        where: { id, status: overtime.status },
         data: {
           status: 'APPROVED',
           approvedBy: approverId,
@@ -334,7 +334,7 @@ export class OvertimeController {
       }
 
       const updatedOvertime = await prisma.overtime.update({
-        where: { id },
+        where: { id, status: overtime.status },
         data: {
           status: 'REJECTED',
           description: reason,

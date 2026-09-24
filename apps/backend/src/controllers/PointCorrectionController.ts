@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { z } from 'zod';
 import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
+import { isConcurrentUpdateConflict, CONCURRENT_UPDATE_CONFLICT_MESSAGE } from '../lib/prismaConflict';
 
 // Schemas de validação
 const createPointCorrectionSchema = z.object({
@@ -330,12 +331,15 @@ export class PointCorrectionController {
       }
 
       await prisma.pointCorrectionRequest.update({
-        where: { id: requestId },
+        where: { id: requestId, status: request.status },
         data: { status: 'CANCELLED' }
       });
 
       return res.json({ message: 'Solicitação cancelada com sucesso' });
     } catch (error) {
+      if (isConcurrentUpdateConflict(error)) {
+        return res.status(409).json({ error: CONCURRENT_UPDATE_CONFLICT_MESSAGE });
+      }
       console.error('Erro ao cancelar solicitação:', error);
       return res.status(500).json({ error: 'Erro interno do servidor' });
     }
@@ -462,7 +466,7 @@ export class PointCorrectionController {
       }
 
       const updatedRequest = await prisma.pointCorrectionRequest.update({
-        where: { id: requestId },
+        where: { id: requestId, status: request.status },
         data: {
           status: 'APPROVED',
           approvedBy: userId,
@@ -771,10 +775,13 @@ export class PointCorrectionController {
       return res.json({ message: 'Solicitação aprovada com sucesso', request: updatedRequest });
     } catch (error) {
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ 
-          error: 'Dados inválidos', 
-          details: error.errors 
+        return res.status(400).json({
+          error: 'Dados inválidos',
+          details: error.errors
         });
+      }
+      if (isConcurrentUpdateConflict(error)) {
+        return res.status(409).json({ error: CONCURRENT_UPDATE_CONFLICT_MESSAGE });
       }
       console.error('Erro ao aprovar solicitação:', error);
       return res.status(500).json({ error: 'Erro interno do servidor' });
@@ -819,7 +826,7 @@ export class PointCorrectionController {
       }
 
       const updatedRequest = await prisma.pointCorrectionRequest.update({
-        where: { id: requestId },
+        where: { id: requestId, status: request.status },
         data: {
           status: 'REJECTED',
           approvedBy: userId,
@@ -864,10 +871,13 @@ export class PointCorrectionController {
       return res.json({ message: 'Solicitação rejeitada com sucesso', request: updatedRequest });
     } catch (error) {
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ 
-          error: 'Dados inválidos', 
-          details: error.errors 
+        return res.status(400).json({
+          error: 'Dados inválidos',
+          details: error.errors
         });
+      }
+      if (isConcurrentUpdateConflict(error)) {
+        return res.status(409).json({ error: CONCURRENT_UPDATE_CONFLICT_MESSAGE });
       }
       console.error('Erro ao rejeitar solicitação:', error);
       return res.status(500).json({ error: 'Erro interno do servidor' });

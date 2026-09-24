@@ -411,7 +411,7 @@ export class ToolRentalRequestController {
       const comment = normalizeOptionalString(req.body?.comment ?? req.body?.suppliesApprovalComment);
       const updated = await prisma.$transaction(async (tx) => {
         await tx.toolRentalRequest.update({
-          where: { id: row.id },
+          where: { id: row.id, status: row.status },
           data: {
             status: ToolRentalRequestStatus.SUPPLIER_RELATION,
             suppliesApprovedById: req.user!.id,
@@ -457,7 +457,7 @@ export class ToolRentalRequestController {
 
       const updated = await prisma.$transaction(async (tx) => {
         await tx.toolRentalRequest.update({
-          where: { id: row.id },
+          where: { id: row.id, status: row.status },
           data: {
             status: ToolRentalRequestStatus.AWAITING_PAYMENT,
             ...(ocMirrorUrl
@@ -509,7 +509,7 @@ export class ToolRentalRequestController {
 
       const updated = await prisma.$transaction(async (tx) => {
         await tx.toolRentalRequest.update({
-          where: { id: row.id },
+          where: { id: row.id, status: row.status },
           data: {
             status: ToolRentalRequestStatus.COMPLETED,
             ...(paymentProofUrl
@@ -562,7 +562,7 @@ export class ToolRentalRequestController {
       );
       const updated = await prisma.$transaction(async (tx) => {
         await tx.toolRentalRequest.update({
-          where: { id: row.id },
+          where: { id: row.id, status: row.status },
           data: {
             status: ToolRentalRequestStatus.REJECTED,
             suppliesApprovedById: req.user!.id,
@@ -603,7 +603,7 @@ export class ToolRentalRequestController {
       }
       const updated = await prisma.$transaction(async (tx) => {
         await tx.toolRentalRequest.update({
-          where: { id: row.id },
+          where: { id: row.id, status: row.status },
           data: { status: ToolRentalRequestStatus.CANCELLED },
         });
         await appendStatusEvent(tx, {

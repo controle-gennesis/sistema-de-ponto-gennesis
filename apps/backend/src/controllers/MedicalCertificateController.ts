@@ -307,7 +307,7 @@ export class MedicalCertificateController {
       const updatedCertificate = await prisma.$transaction(async (tx: any) => {
         // Atualizar status do atestado
         const updatedCert = await tx.medicalCertificate.update({
-          where: { id },
+          where: { id, status: certificate.status },
           data: {
             status: 'APPROVED',
             approvedBy,
@@ -420,7 +420,7 @@ export class MedicalCertificateController {
       }
 
       const updatedCertificate = await prisma.medicalCertificate.update({
-        where: { id },
+        where: { id, status: certificate.status },
         data: {
           status: 'REJECTED',
           reason,
@@ -473,7 +473,7 @@ export class MedicalCertificateController {
       }
 
       const updatedCertificate = await prisma.medicalCertificate.update({
-        where: { id },
+        where: { id, status: certificate.status },
         data: {
           status: 'CANCELLED'
         },

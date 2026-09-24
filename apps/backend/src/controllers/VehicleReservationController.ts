@@ -390,7 +390,7 @@ export class VehicleReservationController {
         throw createError('Você só pode excluir suas próprias reservas', 403);
       }
 
-      await prisma.vehicleReservation.delete({ where: { id } });
+      await prisma.vehicleReservation.delete({ where: { id, status: existing.status } });
       res.json({ success: true, message: 'Reserva excluída com sucesso' });
     } catch (error) {
       next(error);
@@ -457,7 +457,7 @@ export class VehicleReservationController {
       }
 
       const reservation = await prisma.vehicleReservation.update({
-        where: { id },
+        where: { id, status: existing.status },
         data: {
           status: VehicleReservationStatus.APPROVED,
           vehicleId,
@@ -491,7 +491,7 @@ export class VehicleReservationController {
       }
 
       const reservation = await prisma.vehicleReservation.update({
-        where: { id },
+        where: { id, status: existing.status },
         data: {
           status: VehicleReservationStatus.REJECTED,
           suppliesApprovedById: req.user.id,
@@ -552,7 +552,7 @@ export class VehicleReservationController {
       );
 
       const reservation = await prisma.vehicleReservation.update({
-        where: { id },
+        where: { id, status: existing.status },
         data: {
           status: VehicleReservationStatus.COMPLETED,
           devolucaoAt,
@@ -601,7 +601,7 @@ export class VehicleReservationController {
       );
 
       const reservation = await prisma.vehicleReservation.update({
-        where: { id },
+        where: { id, status: existing.status },
         data: {
           status: VehicleReservationStatus.INSPECTED,
           vistoriaAt,

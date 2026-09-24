@@ -366,7 +366,7 @@ export class VacationController {
       }
 
       const updatedVacation = await prisma.vacation.update({
-        where: { id },
+        where: { id, status: vacation.status },
         data: {
           status: 'APPROVED',
           approvedBy: approverId,
@@ -415,7 +415,7 @@ export class VacationController {
       }
 
       const updatedVacation = await prisma.vacation.update({
-        where: { id },
+        where: { id, status: vacation.status },
         data: {
           status: 'REJECTED',
           reason: reason,
