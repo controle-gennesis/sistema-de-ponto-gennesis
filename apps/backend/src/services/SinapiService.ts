@@ -212,6 +212,17 @@ type AutoSinapiSearchItem = {
   classificacao?: string | null;
 };
 
+type AutoSinapiBomItem = {
+  item_codigo?: number;
+  tipo_item?: string;
+  nivel?: number;
+  descricao?: string;
+  unidade?: string;
+  coeficiente_total?: number;
+  custo_unitario?: number | null;
+  custo_impacto_total?: number | null;
+};
+
 type AutoSinapiSearchResponse = {
   items?: AutoSinapiSearchItem[];
   total?: number;
@@ -342,6 +353,55 @@ function mapAutoSinapiItem(
     isDesonerated: params.isDesonerated,
     unitPrice: reaisToCents(item.valor ?? item.preco_mediano)
   };
+}
+
+function autoSinapiItemType(tipo: string | undefined): 'INPUT' | 'SUB_COMPOSITION' {
+  const raw = String(tipo ?? '').toUpperCase();
+  if (/COMPOSI/.test(raw) || raw === 'SUB_COMPOSITION' || raw === 'SERVICO') {
+    return 'SUB_COMPOSITION';
+  }
+  return 'INPUT';
+}
+
+function mapAutoSinapiBomToItems(bom: AutoSinapiBomItem[]): SinapiCompositionItem[] {
+  const rows = Array.isArray(bom) ? bom : [];
+  const firstLevel = rows.filter((item) => Number(item.nivel ?? 1) === 1);
+  const source = firstLevel.length ? firstLevel : rows;
+  return source
+    .map((item) => ({
+      itemType: autoSinapiItemType(item.tipo_item),
+      code: Number(item.item_codigo ?? 0),
+      description: String(item.descricao ?? ''),
+      unit: String(item.unidade ?? ''),
+      resourceType: item.tipo_item ? String(item.tipo_item) : null,
+      coefficient: String(item.coeficiente_total ?? ''),
+      unitPrice: reaisToCents(item.custo_unitario),
+      totalPrice: reaisToCents(item.custo_impacto_total)
+    }))
+    .filter((item) => item.code > 0 || item.description);
+}
+
+function autoSinapiContextQuery(params: {
+  state: string;
+  month: string;
+  isDesonerated: boolean;
+}): string {
+  const query = new URLSearchParams();
+  query.set('uf', params.state);
+  query.set('data_referencia', params.month);
+  query.set('regime', autoSinapiRegime(params.isDesonerated));
+  return query.toString();
+}
+
+async function fetchAutoSinapiBom(
+  code: string,
+  params: { state: string; month: string; isDesonerated: boolean }
+): Promise<SinapiCompositionItem[]> {
+  const bom = await fetchAutoSinapi<AutoSinapiBomItem[]>(
+    `/api/v1/public/bi/composicao/${code}/bom?${autoSinapiContextQuery(params)}`,
+    DETAIL_CACHE_TTL_MS
+  );
+  return mapAutoSinapiBomToItems(Array.isArray(bom) ? bom : []);
 }
 
 async function searchAutoSinapi(
@@ -623,6 +683,45 @@ function parseCode(value: unknown): string {
   return raw;
 }
 
+async function getAutoSinapiComposition(
+  safeCode: string,
+  params: SinapiPriceContext
+): Promise<SinapiComposition> {
+  const month = parseMonth(params.month);
+  if (month && !(await monthHasAutoSinapiData(month))) {
+    throw createError('Código não encontrado na base SINAPI', 404);
+  }
+
+  const state = parseState(params.state) || 'SP';
+  const isDesonerated = parseBoolean(params.isDesonerated);
+  const refMonth = month || currentYearMonth();
+  const ctx = { state, month: refMonth, isDesonerated };
+  const detail = await fetchAutoSinapi<{
+    codigo?: number;
+    descricao?: string;
+    unidade?: string;
+    custo_total?: number | null;
+  }>(
+    `/api/v1/public/composicoes/${safeCode}?${autoSinapiContextQuery(ctx)}`,
+    DETAIL_CACHE_TTL_MS
+  );
+
+  const mapped = mapAutoSinapiComposition(detail, {
+    state,
+    month: refMonth,
+    isDesonerated
+  });
+
+  try {
+    const items = await fetchAutoSinapiBom(safeCode, ctx);
+    if (items.length) mapped.items = items;
+  } catch {
+    // BOM é endpoint de BI; cabeçalho sozinho ainda serve para identificar a composição.
+  }
+
+  return mapped;
+}
+
 /** Composição com o analítico de primeiro nível (insumos e subcomposições com coeficiente). */
 export async function getSinapiComposition(code: unknown, params: SinapiPriceContext) {
   const safeCode = parseCode(code);
@@ -630,29 +729,17 @@ export async function getSinapiComposition(code: unknown, params: SinapiPriceCon
   const query = buildPriceQuery(params);
 
   if (await monthHasSinpresData(month)) {
-    return fetchSinpres<SinapiComposition>(
-      `/sectors/${SECTOR_SLUG}/compositions/${safeCode}?${query}`,
-      DETAIL_CACHE_TTL_MS
-    );
+    try {
+      return await fetchSinpres<SinapiComposition>(
+        `/sectors/${SECTOR_SLUG}/compositions/${safeCode}?${query}`,
+        DETAIL_CACHE_TTL_MS
+      );
+    } catch (error) {
+      if (!(isAppError(error) && error.statusCode === 404)) throw error;
+    }
   }
 
-  if (!(await monthHasAutoSinapiData(month))) {
-    throw createError('Código não encontrado na base SINAPI', 404);
-  }
-
-  const state = parseState(params.state) || 'SP';
-  const isDesonerated = parseBoolean(params.isDesonerated);
-  const detail = await fetchAutoSinapi<{
-    codigo?: number;
-    descricao?: string;
-    unidade?: string;
-    custo_total?: number | null;
-  }>(
-    `/api/v1/public/composicoes/${safeCode}?uf=${encodeURIComponent(state)}&data_referencia=${encodeURIComponent(month || currentYearMonth())}&regime=${autoSinapiRegime(isDesonerated)}`,
-    DETAIL_CACHE_TTL_MS
-  );
-
-  return mapAutoSinapiComposition(detail, { state, month, isDesonerated });
+  return getAutoSinapiComposition(safeCode, params);
 }
 
 /** Árvore recursiva da composição (subcomposições abertas até `maxDepth`). */
@@ -670,11 +757,35 @@ export async function getSinapiCompositionTree(
       DETAIL_CACHE_TTL_MS
     );
   } catch (error) {
-    if (isAppError(error) && error.statusCode === 404) {
-      throw createError('Analítico não disponível para este mês de referência', 404);
+    if (!(isAppError(error) && (error.statusCode === 404 || error.statusCode === 502))) {
+      throw error;
     }
-    throw error;
   }
+
+  const composition = await getAutoSinapiComposition(safeCode, params);
+  if (!composition.items?.length) {
+    throw createError('Analítico não disponível para este mês de referência', 404);
+  }
+
+  return {
+    code: String(composition.code),
+    description: composition.description,
+    unit: composition.unit,
+    depth: 0,
+    coefficient: null,
+    item_type: 'COMPOSITION' as const,
+    unit_price: composition.baseUnitCost,
+    items: composition.items.map((item) => ({
+      code: String(item.code),
+      description: item.description,
+      unit: item.unit,
+      depth: 1,
+      coefficient: item.coefficient,
+      item_type: item.itemType === 'SUB_COMPOSITION' ? 'SUB_COMPOSITION' : 'INPUT',
+      unit_price: item.unitPrice,
+      items: [] as SinapiExpandedNode[]
+    }))
+  } satisfies SinapiExpandedNode;
 }
 
 export async function getSinapiItem(code: unknown, params: SinapiPriceContext) {

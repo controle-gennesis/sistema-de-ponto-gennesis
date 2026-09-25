@@ -28,16 +28,14 @@ export function isFormulaCapableFieldType(type: string): boolean {
   return FORM_FORMULA_FIELD_TYPES.has(type);
 }
 
-/** Origem permitida na fórmula: mesmo tipo do destino, exceto % (aceita número, valor ou %). */
+/** Origem permitida: qualquer campo numérico (número, valor ou %), em qualquer operação. */
 export function canUseAsFormulaSource(
   target: Pick<FormQuestion, 'type' | 'id'> | null | undefined,
   source: Pick<FormQuestion, 'type' | 'id'>,
 ): boolean {
   if (!target || target.id === source.id) return false;
-  if (!isFormulaCapableFieldType(source.type)) return false;
-  if (target.type === 'percent') return true;
   if (!isFormulaCapableFieldType(target.type)) return false;
-  return source.type === target.type;
+  return isFormulaCapableFieldType(source.type);
 }
 
 export function filterFormulaSourceQuestions(

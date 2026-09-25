@@ -1728,6 +1728,280 @@ function orcafascioToComposicaoItem(comp: OrcafascioComposicaoDetalhe): Composic
   };
 }
 
+function acharComposicaoParaItemServico(
+  item: ItemServico,
+  comps: ComposicaoItem[]
+): ComposicaoItem | undefined {
+  const mapa: Record<string, ComposicaoItem> = {};
+  for (const c of comps) {
+    for (const k of chavesParaBusca(c.codigo, c.banco, c.chave)) {
+      if (!k) continue;
+      mapa[k] = mapa[k] ? escolherComposicaoParaChaveMapa(mapa[k], c) : c;
+    }
+  }
+  for (const k of chavesParaBusca(item.codigo, item.banco, item.chave)) {
+    const hit = mapa[k];
+    if (hit?.analiticoLinhas?.length) return hit;
+  }
+  return undefined;
+}
+
+function itemEhBancoSinapi(item: Pick<ItemServico, 'banco' | 'codigo' | 'descricao'>): boolean {
+  const banco = String(item.banco || '').toUpperCase();
+  if (banco.includes('SINAPI')) return true;
+  const texto = `${item.descricao || ''}`.toUpperCase();
+  if (/\bSINAPI\b/.test(texto)) return true;
+  return false;
+}
+
+function codigoSinapiNumerico(codigo: string): string | null {
+  const digits = String(codigo || '').replace(/\D/g, '');
+  if (!/^\d{4,}$/.test(digits)) return null;
+  return digits;
+}
+
+function unwrapSinapiPayload<T>(payload: unknown): T | null {
+  if (payload == null || typeof payload !== 'object') return null;
+  const rec = payload as { data?: T; success?: boolean };
+  if (rec.data != null && typeof rec.data === 'object') return rec.data;
+  return payload as T;
+}
+
+function centsSinapiParaReais(value: unknown): number {
+  if (value == null || value === '') return 0;
+  const n = typeof value === 'number' ? value : Number(String(value).replace(',', '.'));
+  if (!Number.isFinite(n)) return 0;
+  return n / 100;
+}
+
+function categoriaSinapiItem(item: {
+  itemType?: string;
+  resourceType?: string | null;
+  item_type?: string;
+}): CategoriaAnalitico {
+  const tipo = `${item.itemType || ''} ${item.item_type || ''} ${item.resourceType || ''}`.toUpperCase();
+  if (/SUB_COMPOSITION|COMPOSI|SERVI[CÇ]O/.test(tipo)) return 'MÃO DE OBRA';
+  if (/M[AÃ]O\s*DE\s*OBRA|LABOR|MAO_DE_OBRA|HAND/.test(tipo)) return 'MÃO DE OBRA';
+  if (/\b3\b/.test(String(item.resourceType || '').trim())) return 'MÃO DE OBRA';
+  return 'MATERIAL';
+}
+
+type SinapiComposicaoApi = {
+  code?: number | string;
+  description?: string;
+  unit?: string;
+  baseUnitCost?: number | null;
+  items?: Array<{
+    itemType?: 'INPUT' | 'SUB_COMPOSITION';
+    code?: number | string;
+    description?: string;
+    unit?: string;
+    resourceType?: string | null;
+    coefficient?: string | number;
+    unitPrice?: number | null;
+    totalPrice?: number | null;
+  }>;
+};
+
+type SinapiArvoreApi = {
+  code?: string;
+  description?: string;
+  unit?: string;
+  unit_price?: number | null;
+  items?: Array<{
+    code?: string;
+    description?: string;
+    unit?: string;
+    coefficient?: string | number | null;
+    item_type?: string;
+    unit_price?: number | null;
+  }>;
+};
+
+function linhasAnaliticoDeItensSinapi(
+  items: NonNullable<SinapiComposicaoApi['items']>
+): LinhaAnaliticoComposicao[] {
+  return items.map((item) => {
+    const qtd = Number(item.coefficient ?? 0);
+    const preco = centsSinapiParaReais(item.unitPrice);
+    const total = item.totalPrice != null ? centsSinapiParaReais(item.totalPrice) : qtd * preco;
+    return {
+      categoria: categoriaSinapiItem(item),
+      descricao: decodificarEntidadesHtml(String(item.description ?? '')),
+      unidade: String(item.unit ?? ''),
+      quantidade: Number.isFinite(qtd) ? qtd : 0,
+      precoUnitario: preco,
+      total,
+      codigo: item.code != null ? String(item.code) : undefined,
+      banco: 'SINAPI',
+      tipoLabel: item.resourceType ? String(item.resourceType) : undefined
+    };
+  });
+}
+
+function sinapiToComposicaoItem(comp: SinapiComposicaoApi): ComposicaoItem | null {
+  const codigo = String(comp.code ?? '').trim();
+  if (!codigo) return null;
+  const analiticoLinhas = linhasAnaliticoDeItensSinapi(comp.items ?? []);
+  const mo = analiticoLinhas
+    .filter((l) => l.categoria === 'MÃO DE OBRA')
+    .reduce((s, l) => s + (l.total ?? 0), 0);
+  const mat = analiticoLinhas
+    .filter((l) => l.categoria === 'MATERIAL')
+    .reduce((s, l) => s + (l.total ?? 0), 0);
+  const preco = centsSinapiParaReais(comp.baseUnitCost);
+  return {
+    codigo,
+    banco: 'SINAPI',
+    chave: normalizarChave(codigo, 'SINAPI'),
+    descricao: decodificarEntidadesHtml(String(comp.description ?? '')),
+    unidade: comp.unit,
+    precoUnitario: preco,
+    maoDeObraUnitario: mo > 0 ? mo : undefined,
+    materialUnitario: mat > 0 ? mat : undefined,
+    analiticoLinhas
+  };
+}
+
+function sinapiArvoreToComposicaoItem(tree: SinapiArvoreApi, fallbackCode: string): ComposicaoItem | null {
+  const codigo = String(tree.code || fallbackCode || '').trim();
+  if (!codigo) return null;
+  const items = (tree.items ?? []).map((item) => ({
+    itemType: item.item_type === 'SUB_COMPOSITION' ? 'SUB_COMPOSITION' as const : 'INPUT' as const,
+    code: item.code,
+    description: item.description,
+    unit: item.unit,
+    resourceType: item.item_type ?? null,
+    coefficient: item.coefficient ?? 0,
+    unitPrice: item.unit_price ?? null,
+    totalPrice: null
+  }));
+  return sinapiToComposicaoItem({
+    code: codigo,
+    description: tree.description,
+    unit: tree.unit,
+    baseUnitCost: tree.unit_price,
+    items
+  });
+}
+
+async function buscarComposicaoSinapiApi(code: string, uf: string): Promise<ComposicaoItem | null> {
+  const numeric = codigoSinapiNumerico(code);
+  if (!numeric) return null;
+  try {
+    const res = await api.get(`/sinapi/compositions/${encodeURIComponent(numeric)}`, {
+      params: { state: uf },
+      timeout: 60000
+    });
+    const data = unwrapSinapiPayload<SinapiComposicaoApi>(res.data);
+    if (data) {
+      const comp = sinapiToComposicaoItem(data);
+      if (comp?.analiticoLinhas?.length) return comp;
+    }
+  } catch {
+    /* tenta árvore abaixo */
+  }
+  try {
+    const res = await api.get(`/sinapi/compositions/${encodeURIComponent(numeric)}/tree`, {
+      params: { state: uf, maxDepth: 1 },
+      timeout: 60000
+    });
+    const tree = unwrapSinapiPayload<SinapiArvoreApi>(res.data);
+    if (!tree) return null;
+    const comp = sinapiArvoreToComposicaoItem(tree, numeric);
+    return comp?.analiticoLinhas?.length ? comp : null;
+  } catch {
+    return null;
+  }
+}
+
+async function buscarComposicaoOrcafascioApi(code: string, uf: string): Promise<ComposicaoItem | null> {
+  try {
+    const res = await api.get<OrcafascioComposicaoDetalhe>('/orcafascio/composicoes/by-code', {
+      params: { code, state: uf },
+      timeout: 90000
+    });
+    if (!res.data) return null;
+    const comp = orcafascioToComposicaoItem(res.data);
+    return comp.analiticoLinhas?.length ? comp : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Sem aba analítica: SINAPI pela API oficial; demais bases pelo Orçafascio. */
+async function enriquecerServicosComAnaliticoOrcafascio(
+  servicos: ServicoPadrao[],
+  catalogoLocal: ComposicaoItem[],
+  uf: string
+): Promise<{
+  servicos: ServicoPadrao[];
+  novasComposicoes: ComposicaoItem[];
+  encontradas: number;
+  tentadas: number;
+}> {
+  const porCodigo = new Map<string, ItemServico>();
+  for (const s of servicos) {
+    for (const sub of s.subtitulos) {
+      for (const it of sub.itens) {
+        const code = String(it.codigo || '').trim();
+        if (code && !porCodigo.has(code)) porCodigo.set(code, it);
+      }
+    }
+  }
+  const tentadas = porCodigo.size;
+  const poolInicial = [...catalogoLocal];
+  const faltando: ItemServico[] = [];
+  for (const [, it] of porCodigo) {
+    if (acharComposicaoParaItemServico(it, poolInicial)?.analiticoLinhas?.length) continue;
+    faltando.push(it);
+  }
+
+  const novasComposicoes: ComposicaoItem[] = [];
+  const lote = 4;
+  for (let i = 0; i < faltando.length; i += lote) {
+    const fatia = faltando.slice(i, i + lote);
+    const parte = await Promise.all(
+      fatia.map(async (it) => {
+        const code = String(it.codigo || '').trim();
+        if (itemEhBancoSinapi(it)) {
+          const daSinapi = await buscarComposicaoSinapiApi(code, uf);
+          if (daSinapi) return daSinapi;
+        }
+        return buscarComposicaoOrcafascioApi(code, uf);
+      })
+    );
+    for (const c of parte) {
+      if (c) novasComposicoes.push(c);
+    }
+  }
+
+  const pool = [...poolInicial, ...novasComposicoes];
+  let encontradas = 0;
+  const servicosOut: ServicoPadrao[] = servicos.map(s => ({
+    ...s,
+    subtitulos: s.subtitulos.map(sub => ({
+      ...sub,
+      itens: sub.itens.map(it => {
+        if (it.analiticoLinhas?.length) {
+          encontradas += 1;
+          return it;
+        }
+        const comp = acharComposicaoParaItemServico(it, pool);
+        if (!comp?.analiticoLinhas?.length) return it;
+        encontradas += 1;
+        return {
+          ...it,
+          analiticoLinhas: comp.analiticoLinhas,
+          ...(!it.unidade && comp.unidade ? { unidade: comp.unidade } : {})
+        };
+      })
+    }))
+  }));
+
+  return { servicos: servicosOut, novasComposicoes, encontradas, tentadas };
+}
+
 type InsumoAnaliticoManual = {
   id: string;
   parentKey: string;
@@ -3694,6 +3968,17 @@ function quantidadeDasDimensoes(dim: DimensoesItem | undefined): number {
     (s, ln) => (ln.cabecalhoSecao ? s : s + calcularQuantidadeLinha(ln, tipo)),
     0
   );
+}
+
+function dimensoesComLinhasEfetivas(
+  prev: DimensoesItem | undefined,
+  fallbackTipo: TipoUnidadeFormula
+): DimensoesItem {
+  return {
+    ...(prev ?? {}),
+    tipoUnidade: prev?.tipoUnidade ?? fallbackTipo,
+    linhas: linhasMedicaoEfetivas(prev)
+  };
 }
 
 /** Quando a memória diverge do sintético, ajusta o último subtotal para a quantidade da planilha. */
@@ -6882,10 +7167,47 @@ export function OrcamentoPageView({
         toast.error(parsed.message);
         return false;
       }
-      const servicosImportados = parsed.servicos;
+      let servicosImportados = parsed.servicos;
+      let temAnaliticoImport = parsed.temAnalitico;
       if (parsed.composicoesAnaliticas.length > 0) {
         setComposicoes(parsed.composicoesAnaliticas);
         await saveComposicoesGeralToApi(parsed.composicoesAnaliticas);
+      } else {
+        toast.loading('Buscando analítico das composições (SINAPI e Orçafascio)…', { id: 'analitico-planilha' });
+        const enriq = await enriquecerServicosComAnaliticoOrcafascio(
+          servicosImportados,
+          composicoes,
+          orcafascioUfOrse
+        );
+        servicosImportados = enriq.servicos;
+        temAnaliticoImport = enriq.encontradas > 0;
+        if (enriq.novasComposicoes.length > 0) {
+          const merged = [...composicoes];
+          for (const nova of enriq.novasComposicoes) {
+            const idx = merged.findIndex(
+              c =>
+                c.codigo === nova.codigo &&
+                (!c.banco || !nova.banco || c.banco === nova.banco || c.chave === nova.chave)
+            );
+            if (idx >= 0) merged[idx] = escolherComposicaoParaChaveMapa(merged[idx], nova);
+            else merged.push(nova);
+          }
+          setComposicoes(merged);
+          await saveComposicoesGeralToApi(merged);
+        }
+        if (enriq.tentadas === 0) {
+          toast.dismiss('analitico-planilha');
+        } else if (enriq.encontradas > 0) {
+          toast.success(
+            `Analítico encontrado para ${enriq.encontradas} de ${enriq.tentadas} composição(ões).`,
+            { id: 'analitico-planilha' }
+          );
+        } else {
+          toast.error(
+            'Não achamos o analítico na SINAPI/Orçafascio para esses códigos. O orçamento foi importado mesmo assim.',
+            { id: 'analitico-planilha' }
+          );
+        }
       }
       const nomeBase = (file.name.replace(/\.[^/.]+$/, '') || 'Planilha').trim().slice(0, 100);
       const nomeLista = (
@@ -6935,7 +7257,7 @@ export function OrcamentoPageView({
         reajustes: [],
         importadoPlanilha: true,
         usarMemoriaCalculo: parsed.temMemorial,
-        temAnalitico: parsed.temAnalitico
+        temAnalitico: temAnaliticoImport
       };
 
       const servicosParaApi = servicosSemQuantidadePlanilha(servicosImportados);
@@ -6984,10 +7306,11 @@ export function OrcamentoPageView({
       toast.success(
         `Novo orçamento criado com ${servicosImportados.length} serviço(s).${
           parsed.temMemorial ? ' Memória de cálculo importada.' : ''
-        }${parsed.temAnalitico ? '' : ' Sem aba analítica neste arquivo.'}`
+        }${temAnaliticoImport ? ' Analítico preenchido pelas composições.' : ''}`
       );
       return true;
     } catch (err) {
+      toast.dismiss('analitico-planilha');
       if (isOrcamentoRequestTimeout(err)) {
         toast.error('A planilha foi lida, mas o servidor demorou para salvar. Tente novamente.');
       } else {
@@ -9525,12 +9848,10 @@ export function OrcamentoPageView({
   const addLinhaMedicao = (itemKey: string, inserirAposIdx?: number) => {
     const rowTipo = itensCalculados.find(r => r.key === itemKey)?.tipoUnidade;
     const prevDim = dimensoesPorItem[itemKey];
-    const atual = {
-      tipoUnidade: rowTipo && rowTipo !== 'un' ? rowTipo : 'm3',
-      linhas: [] as LinhaMedicao[],
-      ...prevDim,
-      linhas: linhasMedicaoEfetivas(prevDim)
-    };
+    const atual = dimensoesComLinhasEfetivas(
+      prevDim,
+      rowTipo && rowTipo !== 'un' ? rowTipo : 'm3'
+    );
     const novaLinha = { descricao: '', C: 0, L: 0, H: 0, N: 1, empolamento: 1 };
     const linhas = [...atual.linhas];
     if (
@@ -9554,12 +9875,10 @@ export function OrcamentoPageView({
   const addLinhaCabecalhoSecaoMedicao = (itemKey: string, inserirAposIdx?: number) => {
     const rowTipo = itensCalculados.find(r => r.key === itemKey)?.tipoUnidade;
     const prevDim = dimensoesPorItem[itemKey];
-    const atual = {
-      tipoUnidade: rowTipo && rowTipo !== 'un' ? rowTipo : 'm3',
-      linhas: [] as LinhaMedicao[],
-      ...prevDim,
-      linhas: linhasMedicaoEfetivas(prevDim)
-    };
+    const atual = dimensoesComLinhasEfetivas(
+      prevDim,
+      rowTipo && rowTipo !== 'un' ? rowTipo : 'm3'
+    );
     const novaLinha: LinhaMedicao = {
       cabecalhoSecao: true,
       descricao: 'DESCRIÇÃO: ',
@@ -9594,7 +9913,7 @@ export function OrcamentoPageView({
         const base = prev[itemKey];
         const linhasBase = linhasMedicaoEfetivas(base);
         if (!linhasBase[idx]) return prev;
-        const atual = { tipoUnidade: 'un' as TipoUnidadeFormula, linhas: [], ...base, linhas: linhasBase };
+        const atual = dimensoesComLinhasEfetivas(base, 'un');
         const novaLinhas = [...atual.linhas];
         const limparSubtotal =
           campo === 'subtotalManual' && (valor === '' || (typeof valor === 'number' && !Number.isFinite(valor)));
@@ -9771,7 +10090,7 @@ export function OrcamentoPageView({
     const prevDim = dimensoesPorItem[itemKey];
     const linhasBase = linhasMedicaoEfetivas(prevDim);
     if (!linhasBase.length) return;
-    const atual = { tipoUnidade: 'un' as TipoUnidadeFormula, linhas: [], ...prevDim, linhas: linhasBase };
+    const atual = dimensoesComLinhasEfetivas(prevDim, 'un');
     const novaLinhas = atual.linhas.filter((_, i) => i !== idx);
     if (novaLinhas.length === 0) {
       setDimensoesPorItem(prev => { const n = { ...prev }; delete n[itemKey]; return n; });

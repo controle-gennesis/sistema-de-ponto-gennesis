@@ -11,10 +11,11 @@ import {
   formulaResultFormat,
   questionHasFormula,
 } from '@/lib/formFormula';
-import type {
-  FormFieldFormula,
-  FormFieldFormulaOp,
-  FormQuestion,
+import {
+  FORM_FIELD_TYPE_LABELS,
+  type FormFieldFormula,
+  type FormFieldFormulaOp,
+  type FormQuestion,
 } from '@/components/forms/formStructureTypes';
 
 type Props = {
@@ -44,10 +45,14 @@ export function FormFormulaModal({
 
   const sourceOptions = useMemo(
     () =>
-      filterFormulaSourceQuestions(question, allQuestions).map((q) => ({
-        value: q.id,
-        label: q.title?.trim() || 'Campo sem título',
-      })),
+      filterFormulaSourceQuestions(question, allQuestions).map((q) => {
+        const title = q.title?.trim() || 'Campo sem título';
+        const typeLabel = FORM_FIELD_TYPE_LABELS[q.type] || q.type;
+        return {
+          value: q.id,
+          label: `${title} (${typeLabel})`,
+        };
+      }),
     [allQuestions, question],
   );
 
@@ -104,11 +109,7 @@ export function FormFormulaModal({
         : 'número';
 
   const emptySourcesMessage =
-    question?.type === 'valor'
-      ? 'Adicione outros campos de valor (R$) antes de configurar a fórmula.'
-      : question?.type === 'number'
-        ? 'Adicione outros campos de número antes de configurar a fórmula.'
-        : 'Adicione outros campos de número, valor ou porcentagem antes de configurar a fórmula.';
+    'Adicione outros campos de número, valor ou porcentagem antes de configurar a fórmula.';
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Configurar fórmula" size="md">
@@ -149,7 +150,13 @@ export function FormFormulaModal({
             sourceIds.map((sourceId, index) => (
               <div key={`src-${index}`} className="flex items-center gap-2">
                 <span className="w-16 shrink-0 text-xs font-medium uppercase tracking-wide text-gray-500">
-                  {needsTwoFields ? (index === 0 ? 'De' : 'Para') : `Campo ${index + 1}`}
+                  {needsTwoFields
+                    ? index === 0
+                      ? 'De'
+                      : op === 'divide'
+                        ? 'Por'
+                        : 'Menos'
+                    : `Campo ${index + 1}`}
                 </span>
                 <StringSingleSelectDropdown
                   value={sourceId}
