@@ -5,7 +5,7 @@ import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Loader2, Minus, Paperclip, Plus, Trash2, X } from 'lucide-react';
 import toast from 'react-hot-toast';
-import api from '@/lib/api';
+import api, { LARGE_FILE_UPLOAD_TIMEOUT_MS } from '@/lib/api';
 import { useModalCloseConfirm } from '@/hooks/useModalCloseConfirm';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
@@ -367,6 +367,7 @@ export function FichaDemandaApprovalFormModal({
       fd.append('file', file);
       const res = await api.post('/demand-sheet-approvals/upload-attachment', fd, {
         headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: LARGE_FILE_UPLOAD_TIMEOUT_MS,
       });
       const uploaded = res.data?.data as { url?: string; originalName?: string } | undefined;
       const url = String(uploaded?.url || '').trim();
@@ -638,11 +639,7 @@ export function FichaDemandaApprovalFormModal({
                 fileInputRef.current?.click();
               }}
             >
-              {anexosDemais(form.anexos).length === 0 && !uploadingAnexo ? (
-                <p className="text-sm text-gray-500 dark:text-gray-400">
-                  Opcional. Use se quiser incluir outros arquivos além do orçamento e da FD.
-                </p>
-              ) : anexosDemais(form.anexos).length > 0 ? (
+              {anexosDemais(form.anexos).length > 0 ? (
                 <ul className="space-y-2">
                   {anexosDemais(form.anexos).map((anexo) => (
                     <li

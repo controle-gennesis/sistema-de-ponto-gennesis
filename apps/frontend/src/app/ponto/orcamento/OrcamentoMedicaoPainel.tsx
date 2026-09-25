@@ -86,6 +86,14 @@ const inputThDescricaoCls =
 
 const MEMORIAL_COMMIT_MS = 180;
 
+function formatMedicaoNumero(n: number, casasMin = 0, casasMax = 4): string {
+  if (!Number.isFinite(n)) return '';
+  return n.toLocaleString('pt-BR', {
+    minimumFractionDigits: casasMin,
+    maximumFractionDigits: casasMax,
+  });
+}
+
 function parseMedicaoBlurNumber(raw: string): number | null {
   const text = String(raw ?? '').trim();
   if (text.startsWith('=')) {
@@ -462,12 +470,12 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
       const draftKey = `${rowKey}|${idx}|${campo}`;
       const raw =
         campo === 'C'
-          ? draftCalc[draftKey] ?? ((ln.C || 0) === 0 ? '' : String(ln.C))
+          ? draftCalc[draftKey] ?? ((ln.C || 0) === 0 ? '' : formatMedicaoNumero(ln.C))
           : campo === 'L'
-            ? draftCalc[draftKey] ?? ((ln.L || 0) === 0 ? '' : String(ln.L))
+            ? draftCalc[draftKey] ?? ((ln.L || 0) === 0 ? '' : formatMedicaoNumero(ln.L))
             : campo === 'H'
-              ? draftCalc[draftKey] ?? ((ln.H || 0) === 0 ? '' : String(ln.H))
-              : draftCalc[draftKey] ?? ((ln.N || 0) === 0 ? '' : String(ln.N));
+              ? draftCalc[draftKey] ?? ((ln.H || 0) === 0 ? '' : formatMedicaoNumero(ln.H))
+              : draftCalc[draftKey] ?? ((ln.N || 0) === 0 ? '' : formatMedicaoNumero(ln.N));
       const onCommit = (n: number) => {
         if (campo === 'N') updateLinhaMedicao(rowKey, idx, 'N', Math.max(0, n));
         else updateLinhaMedicao(rowKey, idx, campo, n);
@@ -495,7 +503,11 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
           ? ln.subtotalManual != null && Number.isFinite(ln.subtotalManual)
           : ln.valorManual != null && Number.isFinite(ln.valorManual);
       const valorManualExibir = campo === 'subtotal' ? ln.subtotalManual : ln.valorManual;
-      const exibir = temManual ? String(valorManualExibir) : calculado === 0 ? '' : String(calculado);
+      const exibir = temManual
+        ? formatMedicaoNumero(Number(valorManualExibir), 2, 4)
+        : calculado === 0
+          ? ''
+          : formatMedicaoNumero(calculado, 2, 4);
       const persistir = (n: number, raw: string) => {
         if (campo === 'subtotal' && String(raw ?? '').trim() === '') {
           updateLinhaMedicao(rowKey, idx, 'subtotalManual', '');
@@ -545,7 +557,10 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
             type="text"
             inputMode="decimal"
             placeholder="1"
-            value={draftCalc[`${rowKey}|${idx}|empol`] ?? (empolVal === 0 ? '0' : empolVal === 1 ? '1' : String(empolVal))}
+            value={
+              draftCalc[`${rowKey}|${idx}|empol`] ??
+              (empolVal === 0 ? '0' : empolVal === 1 ? '1' : formatMedicaoNumero(empolVal))
+            }
             onChange={e =>
               handleCalcChange(`${rowKey}|${idx}|empol`, e.target.value, n =>
                 updateLinhaMedicao(rowKey, idx, 'empolamento', Math.max(0, n))
@@ -719,7 +734,6 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
           <>
             <thead>
               {renderCabecalhoServico(colEmpty)}
-              {renderHeaderRow(lnFallback)}
             </thead>
             <tbody>
               <tr className={gradeTableRowTrCls}>

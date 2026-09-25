@@ -3,7 +3,7 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { Loader2, Minus, Plus, Search, Trash2, Wallet, X } from 'lucide-react';
+import { Loader2, Minus, Paperclip, Plus, Search, Trash2, Wallet, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
@@ -31,7 +31,7 @@ import {
   GestaoOsModalFooter,
   GestaoOsRequiredMark
 } from '@/components/gestao-os/GestaoOsModalUi';
-import api from '@/lib/api';
+import api, { LARGE_FILE_UPLOAD_TIMEOUT_MS } from '@/lib/api';
 import { FORM_FIELD_INPUT_CLS, FORM_FIELD_TEXTAREA_CLS } from '@/lib/formFieldUi';
 import {
   adjustCurrency,
@@ -80,12 +80,13 @@ type SupplierOption = {
 function supplierStoreLabel(supplier: SupplierOption) {
   const legalName = String(supplier.name || '').trim();
   const tradeName = String(supplier.tradeName || '').trim();
-  const displayName = tradeName || legalName;
-  return supplier.code ? `${supplier.code} - ${displayName}` : displayName;
+  return tradeName || legalName;
 }
 
-function supplierStoreValue(supplier: SupplierOption) {
-  return String(supplier.tradeName || supplier.name || '').trim();
+function nomeContratoSemCodigo(nome: string): string {
+  return String(nome || '')
+    .replace(/\s*\([^)]*\)\s*$/g, '')
+    .trim();
 }
 
 type FormState = {
@@ -144,7 +145,7 @@ function emptyForm(user: { id?: string; name?: string }): FormState {
     purchaseDate: '',
     storeName: '',
     invoiceNumber: '',
-    amount: '0,00',
+    amount: '',
     notes: '',
     invoicePdfUrl: '',
     invoicePdfName: ''
@@ -163,7 +164,7 @@ function recordToForm(row: CaixinhaPurchase): FormState {
     purchaseDate: row.purchaseDate || '',
     storeName: row.storeName || '',
     invoiceNumber: row.invoiceNumber || '',
-    amount: formatCurrencyInput(Number(row.amount) || 0) || '0,00',
+    amount: formatCurrencyInput(Number(row.amount) || 0),
     notes: row.notes || '',
     invoicePdfUrl: row.invoicePdfUrl || '',
     invoicePdfName: row.invoicePdfName || ''
@@ -187,7 +188,7 @@ function CurrencyStepperInput({
           type="text"
           inputMode="numeric"
           value={value}
-          onChange={(e) => onChange(currencyDigitsToFormatted(e.target.value) || '0,00')}
+          onChange={(e) => onChange(currencyDigitsToFormatted(e.target.value))}
           placeholder="0,00"
           autoComplete="off"
           className="w-full bg-transparent py-2 pl-9 pr-3 text-right text-sm tabular-nums text-gray-900 focus:outline-none dark:text-gray-100"
@@ -196,7 +197,7 @@ function CurrencyStepperInput({
       <div className="flex border-l border-gray-300 dark:border-gray-600">
         <button
           type="button"
-          onClick={() => onChange(adjustCurrency(value, -100) || '0,00')}
+          onClick={() => onChange(adjustCurrency(value, -100))}
           className="px-3 text-gray-600 transition-colors hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
           aria-label="Diminuir valor"
         >
@@ -204,7 +205,7 @@ function CurrencyStepperInput({
         </button>
         <button
           type="button"
-          onClick={() => onChange(adjustCurrency(value, 100) || '0,00')}
+          onClick={() => onChange(adjustCurrency(value, 100))}
           className="border-l border-gray-300 px-3 text-gray-600 transition-colors hover:bg-gray-100 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700"
           aria-label="Aumentar valor"
         >
@@ -292,7 +293,11 @@ export default function CaixinhaPageClient() {
   const contractOptions = useMemo(
     () =>
       labeledToSelectOptions(
-        (options?.contracts || []).map((c) => ({ value: c.id, label: c.name }))
+        (options?.contracts || []).map((c) => ({
+          value: c.id,
+          label: nomeContratoSemCodigo(c.name) || c.name,
+          searchText: c.name,
+        }))
       ),
     [options]
   );
@@ -319,15 +324,22 @@ export default function CaixinhaPageClient() {
   }, [options, extraCaixinhas, form.caixinha]);
 
   const supplierOptions = useMemo(() => {
-    const opts = suppliers
-      .filter((s) => s.isActive !== false && supplierStoreValue(s))
-      .map((s) => ({
-        value: supplierStoreValue(s),
-        label: supplierStoreLabel(s),
+    const seen = new Set<string>();
+    const opts: Array<{ value: string; label: string; searchText: string }> = [];
+    for (const s of suppliers) {
+      if (s.isActive === false) continue;
+      const label = supplierStoreLabel(s);
+      const key = label.toLocaleLowerCase('pt-BR');
+      if (!label || seen.has(key)) continue;
+      seen.add(key);
+      opts.push({
+        value: label,
+        label,
         searchText: [s.code, s.name, s.tradeName].filter(Boolean).join(' ')
-      }));
+      });
+    }
     const current = form.storeName.trim();
-    if (current && !opts.some((o) => o.value === current)) {
+    if (current && !seen.has(current.toLocaleLowerCase('pt-BR'))) {
       opts.unshift({ value: current, label: current, searchText: current });
     }
     return labeledToSelectOptions(opts);
@@ -452,14 +464,16 @@ export default function CaixinhaPageClient() {
     try {
       const data = new FormData();
       data.append('file', file);
-      const res = await api.post('/caixinha/upload-invoice', data);
+      const res = await api.post('/caixinha/upload-invoice', data, {
+        timeout: LARGE_FILE_UPLOAD_TIMEOUT_MS,
+      });
       const uploaded = res.data?.data as { url?: string; originalName?: string } | undefined;
       if (!uploaded?.url) throw new Error('Upload sem URL');
       patchForm({
         invoicePdfUrl: uploaded.url,
         invoicePdfName: uploaded.originalName || file.name
       });
-      toast.success('PDF enviado');
+      toast.success('Arquivo enviado');
     } catch (err: unknown) {
       const ax = err as { response?: { data?: { message?: string; error?: string } } };
       toast.error(ax?.response?.data?.message || ax?.response?.data?.error || 'Falha no upload');
@@ -484,7 +498,7 @@ export default function CaixinhaPageClient() {
               Caixinha
             </h1>
             <p className="mt-2 text-sm text-gray-600 dark:text-gray-400 sm:text-base">
-              Lance compras da caixinha da engenharia: loja, nota fiscal, valor e PDF.
+              Registre e acompanhe os lançamentos da caixinha.
             </p>
           </div>
 
@@ -531,7 +545,7 @@ export default function CaixinhaPageClient() {
                     className="inline-flex h-10 items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 text-sm font-semibold text-red-700 hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
                   >
                     <Plus className="h-4 w-4" />
-                    Novo
+                    Novo Lançamento
                   </button>
                 </div>
               </div>
@@ -546,7 +560,7 @@ export default function CaixinhaPageClient() {
                   hint={
                     search.trim()
                       ? 'Tente ajustar a busca'
-                      : 'Clique em Novo para abrir uma solicitação'
+                      : 'Clique em Novo Lançamento para abrir uma solicitação'
                   }
                 />
               ) : (
@@ -564,7 +578,7 @@ export default function CaixinhaPageClient() {
                         <tr>
                           <th className={cadastroListClasses.th}>Nome</th>
                           <th className={cadastroListClasses.th}>Caixinha</th>
-                          <th className={cadastroListClasses.th}>N° OS</th>
+                          <th className={cadastroListClasses.th}>Número da OS</th>
                           <th className={cadastroListClasses.th}>Contrato</th>
                           <th className={cadastroListClasses.th}>Obra</th>
                           <th className={cadastroListClasses.th}>Loja</th>
@@ -596,7 +610,9 @@ export default function CaixinhaPageClient() {
                             </td>
                             <td className={cadastroListClasses.td}>{row.caixinha || '—'}</td>
                             <td className={cadastroListClasses.tdMono}>{row.osNumber || '—'}</td>
-                            <td className={cadastroListClasses.tdMuted}>{row.contractName || '—'}</td>
+                            <td className={cadastroListClasses.tdMuted}>
+                              {row.contractName ? nomeContratoSemCodigo(row.contractName) || row.contractName : '—'}
+                            </td>
                             <td className={cadastroListClasses.tdMuted}>{row.obraName || '—'}</td>
                             <td className={cadastroListClasses.tdMuted}>{row.storeName || '—'}</td>
                             <td className={cadastroListClasses.tdCenter}>{formatDateBr(row.purchaseDate)}</td>
@@ -646,7 +662,7 @@ export default function CaixinhaPageClient() {
           <div>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
-                <label className={GESTAO_OS_FORM_LABEL_CLS}>N° OS</label>
+                <label className={GESTAO_OS_FORM_LABEL_CLS}>Número da OS</label>
                 <input
                   className={FORM_FIELD_INPUT_CLS}
                   value={form.osNumber}
@@ -740,7 +756,7 @@ export default function CaixinhaPageClient() {
                 <DatePickerField value={form.purchaseDate} onChange={(v) => patchForm({ purchaseDate: v })} />
               </div>
               <div>
-                <label className={GESTAO_OS_FORM_LABEL_CLS}>Nome loja</label>
+                <label className={GESTAO_OS_FORM_LABEL_CLS}>Fornecedor</label>
                 <StringSingleSelectDropdown
                   value={form.storeName}
                   onChange={(v) => patchForm({ storeName: v })}
@@ -778,46 +794,69 @@ export default function CaixinhaPageClient() {
                   placeholder="Ex.: material para manutenção da unidade..."
                 />
               </div>
-              <div className="sm:col-span-2">
-                <label className={GESTAO_OS_FORM_LABEL_CLS}>PDF nota fiscal</label>
+              <div className="sm:col-span-2 space-y-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                  Anexos
+                </p>
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept="application/pdf,.pdf"
                   className="hidden"
+                  disabled={uploadingPdf}
                   onChange={(e) => {
                     const file = e.target.files?.[0];
                     if (file) void uploadPdf(file);
+                    e.target.value = '';
                   }}
                 />
-                <div className="flex items-center gap-2">
+                {uploadingPdf ? (
+                  <p className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Enviando anexo...
+                  </p>
+                ) : null}
+                <div>
+                  <label className={GESTAO_OS_FORM_LABEL_CLS}>Nota fiscal</label>
                   {form.invoicePdfUrl ? (
-                    <>
+                    <div className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm dark:border-gray-700 dark:bg-gray-900/40">
                       <a
                         href={resolveApiMediaUrl(form.invoicePdfUrl)}
                         target="_blank"
                         rel="noreferrer"
-                        className="min-w-0 flex-1 truncate rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-red-700 hover:underline dark:border-gray-600 dark:bg-gray-900/60 dark:text-red-300"
+                        className="flex min-w-0 items-center gap-2 truncate text-gray-800 hover:underline dark:text-gray-200"
                       >
-                        {form.invoicePdfName || 'nota-fiscal.pdf'}
+                        <Paperclip className="h-4 w-4 shrink-0 text-gray-400" />
+                        {form.invoicePdfName || 'nota-fiscal'}
                       </a>
-                      <button
-                        type="button"
-                        onClick={() => patchForm({ invoicePdfUrl: '', invoicePdfName: '' })}
-                        className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-gray-300 text-gray-500 hover:bg-gray-50 dark:border-gray-600 dark:hover:bg-gray-700"
-                        aria-label="Remover PDF"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </>
+                      <div className="flex shrink-0 items-center gap-1">
+                        <button
+                          type="button"
+                          disabled={uploadingPdf}
+                          onClick={() => fileInputRef.current?.click()}
+                          className="rounded px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-100 disabled:opacity-50 dark:text-gray-300 dark:hover:bg-gray-800"
+                        >
+                          Trocar
+                        </button>
+                        <button
+                          type="button"
+                          disabled={uploadingPdf}
+                          onClick={() => patchForm({ invoicePdfUrl: '', invoicePdfName: '' })}
+                          className="shrink-0 rounded p-1 text-red-500 hover:bg-red-50 disabled:opacity-50 dark:hover:bg-red-950/30"
+                          aria-label="Remover nota fiscal"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
                   ) : (
                     <button
                       type="button"
                       disabled={uploadingPdf}
                       onClick={() => fileInputRef.current?.click()}
-                      className="w-full rounded-lg border border-gray-300 bg-gray-100 px-3 py-2 text-sm font-medium text-gray-600 hover:bg-gray-200 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+                      className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-gray-300 py-2.5 text-sm font-medium text-red-600 transition-colors hover:border-red-300 hover:bg-red-50 disabled:opacity-50 dark:border-gray-600 dark:text-red-400 dark:hover:border-red-800/60 dark:hover:bg-red-950/20"
                     >
-                      {uploadingPdf ? 'Enviando...' : 'Novo'}
+                      <Plus className="h-4 w-4 shrink-0" />
+                      Adicionar nota fiscal
                     </button>
                   )}
                 </div>

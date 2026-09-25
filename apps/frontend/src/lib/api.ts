@@ -4,6 +4,9 @@ import { forceAuthRedirect, notifyAuthTokenRefreshed } from './authSession';
 
 export { API_BASE_URL } from './apiBaseUrl';
 
+/** Uploads grandes (caixinha, FD) — 15 min para não estourar no teste. */
+export const LARGE_FILE_UPLOAD_TIMEOUT_MS = 15 * 60 * 1000;
+
 const api = axios.create({
   baseURL: API_BASE_URL,
   timeout: 30000,

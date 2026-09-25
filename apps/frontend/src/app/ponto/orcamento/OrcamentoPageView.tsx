@@ -50,7 +50,7 @@ import { useCostCenters } from '@/hooks/useCostCenters';
 import { useBreadcrumbEntity } from '@/hooks/useBreadcrumbEntity';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import { SegmentedControl } from '@/components/ui/SegmentedControl';
-import api from '@/lib/api';
+import api, { LARGE_FILE_UPLOAD_TIMEOUT_MS } from '@/lib/api';
 import { FichaDemandaApprovalFormModal } from '@/components/engenharia/FichaDemandaApprovalFormModal';
 import {
   currencyDigitsToFormatted,
@@ -94,6 +94,13 @@ import { OrcamentoMedicaoPainel } from './OrcamentoMedicaoPainel';
 import { OrcamentoCronogramaPainel } from './OrcamentoCronogramaPainel';
 import { TabelaJanelaSpacer, useOrcamentoTabelaJanela } from './useOrcamentoTabelaJanela';
 import {
+  buildOrcamentoBrandedWorkbook,
+  downloadOrcamentoBrandedExcel,
+  orcamentoWorkbookToFile,
+  type OrcamentoExcelRow,
+  type OrcamentoExcelSheetSpec,
+} from '@/lib/exportOrcamentoBrandedExcel';
+import {
   calcularDataFimOrcamento,
   calcularStatusCronograma,
   CRONOGRAMA_STATUS_LABEL,
@@ -118,6 +125,7 @@ import {
   planilhaTipoVazioCls
 } from './orcamentoGradeCellClasses';
 import {
+  calcA,
   calcV,
   calcularQuantidadeLinha,
   inferirTipoUnidadePorDimensao,
@@ -5256,6 +5264,28 @@ function nomeOrcamentoSemCodigoSufixo(nome: string): string {
   return descricao || String(nome ?? '').trim();
 }
 
+function sanitizarTrechoArquivo(texto: string): string {
+  return String(texto ?? '')
+    .replace(/[\\/:*?"<>|]+/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function montarNomeArquivoOrcamento(opts: {
+  tipo: string;
+  codigo?: string;
+  descricao?: string;
+  ext: string;
+}): string {
+  const codigo = sanitizarTrechoArquivo(String(opts.codigo || '').replace(/\//g, '-'));
+  const descricao = sanitizarTrechoArquivo(opts.descricao || '');
+  const partes = [opts.tipo];
+  if (codigo) partes.push(codigo);
+  if (descricao && descricao.toLowerCase() !== opts.tipo.toLowerCase()) partes.push(descricao);
+  const base = partes.join(' - ').slice(0, 120).trim() || opts.tipo;
+  return `${base}.${opts.ext}`;
+}
+
 export function OrcamentoPageView({
   lockedCostCenterId = null,
   embeddedContractId = null,
@@ -10140,162 +10170,165 @@ export function OrcamentoPageView({
     setDimensoesPorItem(prev => ({ ...prev, [itemKey]: { ...atual, linhasContagem: novaLinhas } }));
   };
 
-  const montarSheetOrcamentoDetalhado = (): XLSX.WorkSheet | null => {
-    if (itensCalculados.length === 0) {
+  const montarSheetOrcamentoDetalhado = (): OrcamentoExcelSheetSpec | null => {
+    if (subtitulosAdicionados.length === 0 && itensCalculados.length === 0) {
       return null;
     }
 
-    const nomeContrato =
-      costCenters?.find((cc: { id?: string }) => cc.id === centroCustoId)?.name ||
-      costCenters?.find((cc: { id?: string }) => cc.id === centroCustoId)?.code ||
-      centroCustoId ||
-      'Contrato';
-
-    const dataEmissao = new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
-
-    const numeracaoExport: { servicoNum: number; subNum: number }[] = [];
-    let lastServicoNome = '';
-    let servicoNumExport = 0;
-    let subNumExport = 0;
-    for (const b of subtitulosAdicionados) {
-      if (b.servicoNome !== lastServicoNome) {
-        servicoNumExport++;
-        subNumExport = 0;
-        lastServicoNome = b.servicoNome;
+    const somarLinhas = (lista: typeof itensCalculados) => {
+      let mo = 0;
+      let mat = 0;
+      let custoDir = 0;
+      let totalComBdi = 0;
+      for (const r of lista) {
+        mo += r.subMaoDeObra;
+        mat += r.subMaterial;
+        custoDir += r.total;
+        totalComBdi += r.totalComBdi;
       }
-      subNumExport++;
-      numeracaoExport.push({ servicoNum: servicoNumExport, subNum: subNumExport });
-    }
-
-    const linhaVaziaOrcExport = () =>
-      ['', '', '', '', '', '', '', '', '', '', '', '', '', ''] as (string | number)[];
-
-    const rows: (string | number)[][] = [
-      ['GENNESIS ENGENHARIA E CONSULTORIA'],
-      ['ORÇAMENTO DETALHADO'],
-      ['CONTRATO', nomeContrato],
-      ['DATA', dataEmissao],
-      [''],
-      [
-        'ITEM',
-        'CÓDIGO',
-        'BANCO',
-        'CHAVE',
-        'DESCRIÇÃO',
-        'UNIDADE',
-        'QUANTIDADE',
-        'MÃO DE OBRA',
-        'MATERIAL',
-        'MAT + M.O',
-        'SUB MÃO DE OBRA',
-        'SUB MATERIAL',
-        'SUB MAT + M.O',
-        'PESO %'
-      ]
-    ];
-
-    let prevServicoExport = '';
-    subtitulosAdicionados.forEach((bloco, blocoIdx) => {
-      const { servicoNum, subNum } = numeracaoExport[blocoIdx] ?? { servicoNum: blocoIdx + 1, subNum: 1 };
-      const mesmoTituloSubtitulo =
-        bloco.servicoNome.trim().toLowerCase() === bloco.subtituloNome.trim().toLowerCase();
-
-      if (bloco.servicoNome !== prevServicoExport) {
-        const linhaTitulo = linhaVaziaOrcExport();
-        linhaTitulo[0] = servicoNum;
-        linhaTitulo[4] = String(bloco.servicoNome || '').toUpperCase();
-        rows.push(linhaTitulo);
-        prevServicoExport = bloco.servicoNome;
-      }
-
-      if (!mesmoTituloSubtitulo) {
-        const linhaSub = linhaVaziaOrcExport();
-        linhaSub[0] = `${servicoNum}.${subNum}`;
-        linhaSub[4] = String(bloco.subtituloNome || '').toUpperCase();
-        rows.push(linhaSub);
-      }
-
-      const rowsDoBloco = itensCalculados.filter(
-        r => r.servicoNome === bloco.servicoNome && r.subtituloNome === bloco.subtituloNome
-      );
-
-      rowsDoBloco.forEach((row, rowIdx) => {
-        const itemN = mesmoTituloSubtitulo
-          ? `${servicoNum}.${rowIdx + 1}`
-          : `${servicoNum}.${subNum}.${rowIdx + 1}`;
-        const chaveItem = row.item.chave || normalizarChave(row.item.codigo, row.item.banco);
-        rows.push([
-          itemN,
-          row.item.codigo,
-          row.item.banco,
-          chaveItem,
-          row.item.descricao || '',
-          row.unidadeComposicao || '',
-          roundTo(row.quantidade, 4),
-          formatarBRLExport(row.maoDeObraUnitario),
-          formatarBRLExport(row.materialUnitario),
-          formatarBRLExport(row.precoUnitario),
-          formatarBRLExport(row.subMaoDeObra),
-          formatarBRLExport(row.subMaterial),
-          formatarBRLExport(row.totalComBdi),
-          formatarPesoPctExport(totalGeralComBdi > 0 ? (row.totalComBdi / totalGeralComBdi) * 100 : 0)
-        ]);
-      });
-    });
-
-    const rf = resumoFinanceiro;
-    const pctLabel2 = (p: number) =>
-      (p * 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    const pctLabel5 = (p: number) =>
-      (p * 100).toLocaleString('pt-BR', { minimumFractionDigits: 5, maximumFractionDigits: 5 });
-
-    const pushLinhaResumo = (rotulo: string, valor: number) => {
-      const r = linhaVaziaOrcExport();
-      r[11] = rotulo;
-      r[12] = formatarBRLExport(valor);
-      rows.push(r);
+      return {
+        mo,
+        mat,
+        custoDir,
+        totalComBdi,
+        pesoPct: totalGeralComBdi > 0 ? (totalComBdi / totalGeralComBdi) * 100 : 0,
+      };
     };
 
-    rows.push(linhaVaziaOrcExport());
-    pushLinhaResumo('TOTAL', rf.totalBase);
-    pushLinhaResumo(`DESCONTO (${pctLabel2(rf.descontoPct)}%)`, rf.valorDesconto);
-    pushLinhaResumo('TOTAL COM DESCONTO', rf.totalComDesconto);
-    pushLinhaResumo(`TOTAL GERAL COM DESCONTO E BDI (${pctLabel2(rf.bdiPct)}%)`, rf.totalComDescontoEBdi);
-    rf.reajustesAplicados.forEach((r) => {
-      pushLinhaResumo(`${r.nome.toUpperCase()} (${pctLabel5(r.percentualPct)}%)`, r.valor);
-    });
+    const empty = () => Array.from({ length: 14 }, () => '') as OrcamentoExcelRow['values'];
+    const rows: OrcamentoExcelRow[] = [];
+    const servicoNumero = new Map<string, number>();
+    let nextMain = 0;
+    for (const b of subtitulosAdicionados) {
+      if (!servicoNumero.has(b.servicoNome)) {
+        servicoNumero.set(b.servicoNome, ++nextMain);
+      }
+    }
 
-    const ws = XLSX.utils.aoa_to_sheet(rows);
-    ws['!cols'] = [
-      { wch: 10 },
-      { wch: 12 },
-      { wch: 10 },
-      { wch: 14 },
-      { wch: 48 },
-      { wch: 9 },
-      { wch: 12 },
-      { wch: 12 },
-      { wch: 12 },
-      { wch: 12 },
-      { wch: 16 },
-      { wch: 16 },
-      { wch: 16 },
-      { wch: 12 }
-    ];
-    return ws;
+    for (let blocoIndex = 0; blocoIndex < subtitulosAdicionados.length; blocoIndex++) {
+      const bloco = subtitulosAdicionados[blocoIndex];
+      const rowsDoBloco =
+        itensCalculadosPorBlocoNome.get(`${bloco.servicoNome}\0${bloco.subtituloNome}`) ?? [];
+      const rowsDoTitulo = itensCalculadosPorServicoNome.get(bloco.servicoNome) ?? [];
+      const main = servicoNumero.get(bloco.servicoNome) ?? 0;
+      const subIdx = subtitulosAdicionados
+        .slice(0, blocoIndex + 1)
+        .filter((b) => b.servicoNome === bloco.servicoNome).length;
+      const blocoAnt = blocoIndex > 0 ? subtitulosAdicionados[blocoIndex - 1] : null;
+      const mostrarTitulo =
+        !blocoAnt ||
+        normalizarNomeServicoOrcamento(blocoAnt.servicoNome) !==
+          normalizarNomeServicoOrcamento(bloco.servicoNome);
+
+      if (mostrarTitulo) {
+        const resumo = somarLinhas(rowsDoTitulo);
+        const values = empty();
+        values[3] = String(bloco.servicoNome || '').toUpperCase();
+        values[6] = truncarMoeda2(resumo.mo);
+        values[7] = truncarMoeda2(resumo.mat);
+        values[8] = truncarMoeda2(resumo.custoDir);
+        values[9] = truncarMoeda2(resumo.totalComBdi);
+        values[10] = truncarMoeda2(resumo.custoDir);
+        values[11] = truncarMoeda2(resumo.totalComBdi);
+        values[12] = resumo.pesoPct;
+        rows.push({ kind: 'titulo', values });
+      }
+
+      const resumoSub = somarLinhas(rowsDoBloco);
+      const subValues = empty();
+      subValues[0] = `${main}.${subIdx}`;
+      subValues[3] = String(bloco.subtituloNome || bloco.servicoNome || '').toUpperCase();
+      subValues[6] = truncarMoeda2(resumoSub.mo);
+      subValues[7] = truncarMoeda2(resumoSub.mat);
+      subValues[8] = truncarMoeda2(resumoSub.custoDir);
+      subValues[9] = truncarMoeda2(resumoSub.totalComBdi);
+      subValues[10] = truncarMoeda2(resumoSub.custoDir);
+      subValues[11] = truncarMoeda2(resumoSub.totalComBdi);
+      subValues[12] = resumoSub.pesoPct;
+      rows.push({ kind: 'subtitulo', values: subValues });
+
+      rowsDoBloco.forEach((row, itemIdx) => {
+        const usaDimensoes = !!row.dimensoes?.linhas?.length;
+        const tipoAuto = inferirTipoUnidadePorDimensao(row.dimensoes?.linhas || []);
+        rows.push({
+          kind: 'item',
+          values: [
+            `${main}.${subIdx}.${itemIdx + 1}`,
+            row.item.codigo,
+            nomeBancoParaExibicao(row.item.banco),
+            row.item.descricao || '',
+            unidadeComposicaoParaExibicao(
+              row.unidadeComposicao,
+              usaDimensoes ? tipoAuto : 'un'
+            ),
+            roundTo(row.quantidade, 4),
+            truncarMoeda2(row.maoDeObraUnitario),
+            truncarMoeda2(row.materialUnitario),
+            truncarMoeda2(row.precoUnitario),
+            truncarMoeda2(row.precoUnitarioComBdi),
+            truncarMoeda2(row.total),
+            truncarMoeda2(row.totalComBdi),
+            totalGeralComBdi > 0 ? (row.totalComBdi / totalGeralComBdi) * 100 : 0,
+            observacoesPorItem[row.key] ?? '',
+          ],
+        });
+      });
+    }
+
+    const rf = resumoFinanceiro;
+    const bdiLabel = `BDI (${(rf.bdiPct * 100).toLocaleString('pt-BR', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })}%)`;
+    const pushRodape = (rotulo: string, semBdi: number | '', comBdi: number | '') => {
+      const values = empty();
+      values[3] = rotulo;
+      values[10] = semBdi === '' ? '\u00A0' : truncarMoeda2(semBdi);
+      values[11] = comBdi === '' ? '\u00A0' : truncarMoeda2(comBdi);
+      rows.push({ kind: 'total', values });
+    };
+    rows.push({ kind: 'blank', values: empty() });
+    pushRodape('ORÇAMENTO', rf.totalComDesconto, '');
+    pushRodape(bdiLabel, rf.valorBdi, '');
+    pushRodape('TOTAL', '', rf.totalComDescontoEBdi);
+
+    return {
+      name: 'Orçamento',
+      title: 'Orçamento',
+      autoFilter: false,
+      columns: [
+        { header: 'ITEM', width: 10, align: 'center' },
+        { header: 'CÓDIGO', width: 12, align: 'center' },
+        { header: 'BANCO', width: 10, align: 'center' },
+        { header: 'DESCRIÇÃO', width: 52 },
+        { header: 'UNIDADE', width: 10, align: 'center' },
+        { header: 'QUANTIDADE', width: 12, format: 'qty4' },
+        { header: 'MÃO DE OBRA', width: 16, format: 'currency' },
+        { header: 'MATERIAL', width: 16, format: 'currency' },
+        { header: 'VALOR UNITÁRIO\nSEM BDI', width: 16, format: 'currency' },
+        { header: 'VALOR UNITÁRIO\nCOM BDI', width: 16, format: 'currency' },
+        { header: 'VALOR TOTAL\nSEM BDI', width: 18, format: 'currency' },
+        { header: 'VALOR TOTAL\nCOM BDI', width: 18, format: 'currency' },
+        { header: 'PESO', width: 10, format: 'percent' },
+        { header: 'OBSERVAÇÃO', width: 28 },
+      ],
+      rows,
+    };
   };
 
-  const exportarOrcamentoDetalhado = () => {
-    const ws = montarSheetOrcamentoDetalhado();
-    if (!ws) {
+  const exportarOrcamentoDetalhado = async () => {
+    const sheet = montarSheetOrcamentoDetalhado();
+    if (!sheet) {
       toast.error('Não há itens no orçamento para exportar.');
       return;
     }
     const nomeContrato = nomeContratoExport();
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Orçamento Detalhado');
-    const nomeArquivo = `Orcamento_Detalhado_${nomeContrato.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().slice(0, 10)}.xlsx`;
-    XLSX.writeFile(wb, nomeArquivo);
+    const nomeArquivo = nomeArquivoExportOrcamento('Orcamento detalhado', 'xlsx');
+    await downloadOrcamentoBrandedExcel(
+      [{ ...sheet, name: 'Orçamento Detalhado' }],
+      nomeArquivo,
+      { contrato: nomeContrato, aparencia: aparenciaOrcamento },
+    );
     toast.success('Orçamento detalhado exportado com sucesso.');
   };
 
@@ -10376,75 +10409,71 @@ export function OrcamentoPageView({
     el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, [orcamentoViewTab, memorialItemKey, memorialDisponivel]);
 
-  const exportarAnalitico = () => {
+  const exportarAnalitico = async () => {
     if (itensCalculados.length === 0) {
       toast.error('Não há itens no orçamento para gerar o analítico.');
       return;
     }
 
-    const nomeContrato =
-      costCenters?.find((cc: { id?: string }) => cc.id === centroCustoId)?.name ||
-      costCenters?.find((cc: { id?: string }) => cc.id === centroCustoId)?.code ||
-      centroCustoId ||
-      'Contrato';
-
-    const dataEmissao = new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
-
-    const rows: (string | number)[][] = [
-      ['GENNESIS ENGENHARIA E CONSULTORIA'],
-      ['Gennesis Engenharia e Consultoria LTDA | CNPJ 17.851.596/0001-36 | gennesis.sedes@gmail.com | SHIS QI 15, Sobreloja 55, Lago Sul - Brasília/DF'],
-      [''],
-      ['PROJETO/SETOR:', nomeContrato, '', '', 'STATUS:', 'ORÇADO'],
-      ['DATA DE ENVIO:', dataEmissao],
-      [''],
-      ['ANALÍTICO DO ORÇAMENTO (COMPOSIÇÕES)'],
-      [''],
-      ['SERVIÇO', 'SUBTÍTULO', 'CÓDIGO', 'BANCO', 'DESCRIÇÃO', 'CATEGORIA', 'DESCRIÇÃO INSUMO', 'UN', 'QUANTIDADE', 'Preço Unit.', 'TOTAL (R$)']
-    ];
-
+    const nomeContrato = nomeContratoExport();
+    const rows: OrcamentoExcelRow[] = [];
     let totalGeral = 0;
     for (const linha of itensCalculados) {
       totalGeral += linha.total;
       const item = linha.item;
       const quantidadeItem = Number(linha.quantidade ?? 0);
-
       const composicaoDaLinha = composicaoResolvidaDoItemServico(item, mapaComposicoes);
-
       const unitAnalitico = composicaoDaLinha?.analiticoLinhas?.length
-        ? {
-            total: composicaoDaLinha.analiticoLinhas.reduce((acc, l) => acc + (l.total || 0), 0),
-            linhas: composicaoDaLinha.analiticoLinhas
-          }
-        : { total: 0, linhas: [] };
+        ? composicaoDaLinha.analiticoLinhas
+        : [];
 
-      for (const l of unitAnalitico.linhas) {
-        rows.push([
-          linha.servicoNome,
-          linha.subtituloNome,
-          item.codigo,
-          item.banco,
-          item.descricao || '',
-          l.tipoLabel ? tipoInsumoCodigoParaDescricao(l.tipoLabel) : l.categoria,
-          l.descricao,
-          l.unidade,
-          roundTo(l.quantidade * quantidadeItem, 4),
-          l.precoUnitario,
-          roundTo(l.total * quantidadeItem, 2)
-        ]);
+      for (const l of unitAnalitico) {
+        rows.push({
+          kind: 'item',
+          values: [
+            linha.servicoNome,
+            linha.subtituloNome,
+            item.codigo,
+            item.banco,
+            item.descricao || '',
+            l.tipoLabel ? tipoInsumoCodigoParaDescricao(l.tipoLabel) : l.categoria,
+            l.descricao,
+            l.unidade,
+            roundTo(l.quantidade * quantidadeItem, 4),
+            l.precoUnitario,
+            roundTo(l.total * quantidadeItem, 2),
+          ],
+        });
       }
     }
+    rows.push({
+      kind: 'total',
+      values: ['TOTAL GERAL', '', '', '', '', '', '', '', '', '', roundTo(totalGeral, 2)],
+    });
 
-    rows.push(['TOTAL GERAL', '', '', '', '', '', '', '', '', '', roundTo(totalGeral, 2)]);
-
-    const ws = XLSX.utils.aoa_to_sheet(rows);
-    ws['!cols'] = [
-      { wch: 26 }, { wch: 24 }, { wch: 12 }, { wch: 12 }, { wch: 44 },
-      { wch: 16 }, { wch: 30 }, { wch: 8 }, { wch: 14 }, { wch: 12 }, { wch: 14 }
-    ];
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Analítico');
-    const nomeArquivo = `Analitico_Composicoes_${nomeContrato.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().slice(0, 10)}.xlsx`;
-    XLSX.writeFile(wb, nomeArquivo);
+    await downloadOrcamentoBrandedExcel(
+      [{
+        name: 'Analítico',
+        title: 'Analítico do orçamento',
+        subtitle: 'Insumos das composições com quantidade e custo',
+        columns: [
+          { header: 'SERVIÇO', width: 26 },
+          { header: 'SUBTÍTULO', width: 24 },
+          { header: 'CÓDIGO', width: 12, align: 'center' },
+          { header: 'BANCO', width: 12, align: 'center' },
+          { header: 'DESCRIÇÃO', width: 44 },
+          { header: 'CATEGORIA', width: 16 },
+          { header: 'DESCRIÇÃO INSUMO', width: 30 },
+          { header: 'UN', width: 8, align: 'center' },
+          { header: 'QUANTIDADE', width: 14, format: 'qty4' },
+          { header: 'Preço Unit.', width: 13, format: 'currency' },
+          { header: 'TOTAL (R$)', width: 14, format: 'currency' },
+        ],
+        rows,
+      }],
+      nomeArquivoExportOrcamento('Analitico', 'xlsx'),
+      { contrato: nomeContrato, aparencia: aparenciaOrcamento },
+    );
     toast.success('Analítico exportado com sucesso.');
   };
 
@@ -10454,87 +10483,90 @@ export function OrcamentoPageView({
     centroCustoId ||
     'Contrato';
 
+  const nomeArquivoExportOrcamento = (tipo: string, ext: 'xlsx' | 'pdf') =>
+    montarNomeArquivoOrcamento({
+      tipo,
+      codigo: codigoOrcamentoAtivo,
+      descricao: nomeOrcamentoSemCodigo || nomeContratoExport(),
+      ext,
+    });
+
   /** Exporta a grade da aba Orçamento analítico (mesmas colunas da tela). */
-  const montarSheetOrcamentoAnalitico = (): XLSX.WorkSheet | null => {
+  const montarSheetOrcamentoAnalitico = (): OrcamentoExcelSheetSpec | null => {
     if (linhasAnaliticoOrcamento.length === 0) {
       return null;
     }
-    const nomeContrato = nomeContratoExport();
-    const dataEmissao = new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
-    const rows: (string | number)[][] = [
-      ['GENNESIS ENGENHARIA E CONSULTORIA'],
-      ['ORÇAMENTO ANALÍTICO'],
-      ['CONTRATO', nomeContrato],
-      ['DATA', dataEmissao],
-      [''],
-      [
-        'Item',
-        'Tipo',
-        'Código',
-        'Banco',
-        'Descrição',
-        'Und',
-        'Quant.',
-        'Quantidade real',
-        'Quantidade orçada',
-        'Valor unit.',
-        'Total'
-      ]
-    ];
+    const rows: OrcamentoExcelRow[] = [];
     for (const l of linhasAnaliticoOrcamento) {
       if (l.kind === 'tituloServico') {
-        rows.push([l.main, '', '', '', l.servicoNome, '', '', '', '', '', '']);
+        rows.push({
+          kind: 'titulo',
+          values: [l.main, '', '', '', l.servicoNome, '', '', '', '', '', ''],
+        });
         continue;
       }
       if (l.kind === 'subtituloBloco') {
-        rows.push([`${l.main}.${l.subIdx}`, '', '', '', l.texto, '', '', '', '', '', '']);
+        rows.push({
+          kind: 'subtitulo',
+          values: [`${l.main}.${l.subIdx}`, '', '', '', l.texto, '', '', '', '', '', ''],
+        });
         continue;
       }
-      if (l.kind === 'composicao') {
-        rows.push([
-          l.item,
-          l.tipo,
-          l.codigo,
-          l.banco,
-          l.descricao,
-          l.und,
-          l.quantidadeReal,
-          l.quantidadeReal,
-          l.quantidadeOrcada,
-          l.valorUnit,
-          l.total
-        ]);
-        continue;
-      }
-      rows.push([
-        l.item,
-        l.tipo,
-        l.codigo || '—',
-        l.banco || '—',
-        l.descricao,
-        l.und,
-        l.quantidadeReal,
-        l.quantidadeReal,
-        l.quantidadeOrcada,
-        l.valorUnit,
-        l.total
-      ]);
+      const values: OrcamentoExcelRow['values'] = l.kind === 'composicao'
+        ? [
+            l.item,
+            l.tipo,
+            l.codigo,
+            l.banco,
+            l.descricao,
+            l.und,
+            l.quantidadeReal,
+            l.quantidadeReal,
+            l.quantidadeOrcada,
+            l.valorUnit,
+            l.total,
+          ]
+        : [
+            l.item,
+            l.tipo,
+            l.codigo || '—',
+            l.banco || '—',
+            l.descricao,
+            l.und,
+            l.quantidadeReal,
+            l.quantidadeReal,
+            l.quantidadeOrcada,
+            l.valorUnit,
+            l.total,
+          ];
+      rows.push({ kind: 'item', values });
     }
-    const ws = XLSX.utils.aoa_to_sheet(rows);
-    ws['!cols'] = [
-      { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 48 },
-      { wch: 8 }, { wch: 14 }, { wch: 16 }, { wch: 16 }, { wch: 14 }, { wch: 14 }
-    ];
-    return ws;
+    return {
+      name: 'Analítico',
+      title: 'Orçamento analítico',
+      subtitle: 'Composições e insumos com quantidade real, orçada e totais',
+      columns: [
+        { header: 'Item', width: 12, align: 'center' },
+        { header: 'Tipo', width: 12, align: 'center' },
+        { header: 'Código', width: 12, align: 'center' },
+        { header: 'Banco', width: 10, align: 'center' },
+        { header: 'Descrição', width: 48 },
+        { header: 'Und', width: 8, align: 'center' },
+        { header: 'Quant.', width: 12, format: 'qty4' },
+        { header: 'Quantidade real', width: 16, format: 'qty4' },
+        { header: 'Quantidade orçada', width: 16, format: 'qty4' },
+        { header: 'Valor unit.', width: 14, format: 'currency' },
+        { header: 'Total', width: 14, format: 'currency' },
+      ],
+      rows,
+    };
   };
 
   /** Planilha analítica (compras e custos) — alinhado à grade da aba. */
-  const montarSheetFichaDemanda = (): XLSX.WorkSheet | null => {
+  const montarSheetFichaDemanda = (): OrcamentoExcelSheetSpec | null => {
     if (linhasAnaliticoOrcamento.length === 0) {
       return null;
     }
-    const nomeContrato = nomeContratoExport();
-    const dataEmissao = new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
     const pctExportMap = new Map<
       string,
       {
@@ -10552,44 +10584,20 @@ export function OrcamentoPageView({
         pctCustoValorPago: r.pctCustoValorPago
       });
     }
-    const fmtPctPlanilhaExport = (p: number | undefined) =>
-      p !== undefined && Number.isFinite(p)
-        ? `${p.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`
-        : '';
-    const rows: (string | number)[][] = [
-      ['GENNESIS ENGENHARIA E CONSULTORIA'],
-      ['PLANILHA ANALÍTICA'],
-      ['CONTRATO', nomeContrato],
-      ['DATA', dataEmissao],
-      [''],
-      [
-        'Item',
-        'Código',
-        'Banco',
-        'Descrição',
-        'Tipo',
-        'UN',
-        'Quantidade',
-        'Valor unit. orçamento',
-        'Total orçamento',
-        'Valor unit. estimado',
-        'Custo estimado',
-        'Quantidade compra',
-        'Valor unit. compra real',
-        'Custo compra real',
-        '% Qtd. solicitada',
-        '% Valor total',
-        '% Custo / valor pago',
-        'Observação'
-      ]
-    ];
+    const rows: OrcamentoExcelRow[] = [];
     for (const l of linhasAnaliticoOrcamento) {
       if (l.kind === 'tituloServico') {
-        rows.push([l.main, '', '', l.servicoNome, '', '', '', '', '', '', '', '', '', '', '', '', '', '']);
+        rows.push({
+          kind: 'titulo',
+          values: [l.main, '', '', l.servicoNome, '', '', '', '', '', '', '', '', '', '', '', '', '', ''],
+        });
         continue;
       }
       if (l.kind === 'subtituloBloco') {
-        rows.push([`${l.main}.${l.subIdx}`, '', '', l.texto, '', '', '', '', '', '', '', '', '', '', '', '', '', '']);
+        rows.push({
+          kind: 'subtitulo',
+          values: [`${l.main}.${l.subIdx}`, '', '', l.texto, '', '', '', '', '', '', '', '', '', '', '', '', '', ''],
+        });
         continue;
       }
       if (l.kind === 'composicao') {
@@ -10604,7 +10612,6 @@ export function OrcamentoPageView({
         for (const ins of filhos) {
           const qC = planilhaQuantidadeCompra[ins.key];
           const vReal = planilhaValorUnitCompraReal[ins.key];
-          const vOrc = ins.valorUnit;
           if (vReal !== undefined && Number.isFinite(vReal)) {
             somaVlUnitCompraRealInsumos += vReal;
             temAlgumVlUnitCompraReal = true;
@@ -10620,26 +10627,29 @@ export function OrcamentoPageView({
         }
         const vlUnitCompraRealAgreg = temAlgumVlUnitCompraReal ? somaVlUnitCompraRealInsumos : null;
         const pe = pctExportMap.get(l.key);
-        rows.push([
-          l.item,
-          l.codigo,
-          l.banco,
-          l.descricao,
-          '',
-          l.und,
-          l.quantidadeReal,
-          l.valorUnit,
-          l.total,
-          '',
-          roundTo(sumCustoEst, 2),
-          temQtdCompra ? sumQtdCompra : '',
-          vlUnitCompraRealAgreg !== null ? roundTo(vlUnitCompraRealAgreg, 2) : '',
-          sumQtdCompraComVlReal > 0 ? roundTo(sumCustoReal, 2) : '',
-          fmtPctPlanilhaExport(pe?.levantamentoPct),
-          fmtPctPlanilhaExport(pe?.faturamentoPct),
-          fmtPctPlanilhaExport(pe?.pctCustoValorPago),
-          ''
-        ]);
+        rows.push({
+          kind: 'item',
+          values: [
+            l.item,
+            l.codigo,
+            l.banco,
+            l.descricao,
+            '',
+            l.und,
+            l.quantidadeReal,
+            l.valorUnit,
+            l.total,
+            '',
+            roundTo(sumCustoEst, 2),
+            temQtdCompra ? sumQtdCompra : '',
+            vlUnitCompraRealAgreg !== null ? roundTo(vlUnitCompraRealAgreg, 2) : '',
+            sumQtdCompraComVlReal > 0 ? roundTo(sumCustoReal, 2) : '',
+            pe?.levantamentoPct,
+            pe?.faturamentoPct,
+            pe?.pctCustoValorPago,
+            '',
+          ],
+        });
         continue;
       }
       const qC = planilhaQuantidadeCompra[l.key];
@@ -10651,103 +10661,135 @@ export function OrcamentoPageView({
           ? qC * vReal
           : null;
       const pi = pctExportMap.get(l.key);
-      rows.push([
-        l.item,
-        l.codigo || '—',
-        l.banco || '—',
-        l.descricao,
-        planilhaTipoInsumo[l.key] ?? tipoPlanilhaInsumo(l.categoria || ''),
-        l.und || '—',
-        l.quantidadeReal,
-        l.valorUnit,
-        l.total,
-        roundTo(vOrc * PLANILHA_FATOR_CUSTO_ESTIMADO, 2),
-        roundTo(custoEst, 2),
-        qC !== undefined && Number.isFinite(qC) ? qC : '',
-        vReal !== undefined && Number.isFinite(vReal) ? roundTo(vReal, 2) : '',
-        custoCompraR !== null ? roundTo(custoCompraR, 2) : '',
-        fmtPctPlanilhaExport(pi?.levantamentoPct),
-        fmtPctPlanilhaExport(pi?.faturamentoPct),
-        fmtPctPlanilhaExport(pi?.pctCustoValorPago),
-        fichaDemandaObservacoes[l.key] ?? ''
-      ]);
+      rows.push({
+        kind: 'item',
+        values: [
+          l.item,
+          l.codigo || '—',
+          l.banco || '—',
+          l.descricao,
+          planilhaTipoInsumo[l.key] ?? tipoPlanilhaInsumo(l.categoria || ''),
+          l.und || '—',
+          l.quantidadeReal,
+          l.valorUnit,
+          l.total,
+          roundTo(vOrc * PLANILHA_FATOR_CUSTO_ESTIMADO, 2),
+          roundTo(custoEst, 2),
+          qC !== undefined && Number.isFinite(qC) ? qC : '',
+          vReal !== undefined && Number.isFinite(vReal) ? roundTo(vReal, 2) : '',
+          custoCompraR !== null ? roundTo(custoCompraR, 2) : '',
+          pi?.levantamentoPct,
+          pi?.faturamentoPct,
+          pi?.pctCustoValorPago,
+          fichaDemandaObservacoes[l.key] ?? '',
+        ],
+      });
     }
-    const ws = XLSX.utils.aoa_to_sheet(rows);
-    ws['!cols'] = [
-      { wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 44 }, { wch: 12 }, { wch: 6 },
-      { wch: 12 }, { wch: 16 }, { wch: 16 }, { wch: 14 }, { wch: 16 }, { wch: 16 }, { wch: 18 }, { wch: 16 },
-      { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 14 }, { wch: 28 }
-    ];
-    return ws;
+    return {
+      name: 'Ficha de demanda',
+      title: 'Ficha de demanda',
+      subtitle: 'Compras, custos estimados e percentuais da planilha analítica',
+      columns: [
+        { header: 'Item', width: 12, align: 'center' },
+        { header: 'Código', width: 12, align: 'center' },
+        { header: 'Banco', width: 10, align: 'center' },
+        { header: 'Descrição', width: 44 },
+        { header: 'Tipo', width: 12, align: 'center' },
+        { header: 'UN', width: 6, align: 'center' },
+        { header: 'Quantidade', width: 12, format: 'qty4' },
+        { header: 'Valor unit. orçamento', width: 16, format: 'currency' },
+        { header: 'Total orçamento', width: 16, format: 'currency' },
+        { header: 'Valor unit. estimado', width: 16, format: 'currency' },
+        { header: 'Custo estimado', width: 16, format: 'currency' },
+        { header: 'Quantidade compra', width: 16, format: 'qty4' },
+        { header: 'Valor unit. compra real', width: 18, format: 'currency' },
+        { header: 'Custo compra real', width: 16, format: 'currency' },
+        { header: '% Qtd. solicitada', width: 14, format: 'percent' },
+        { header: '% Valor total', width: 12, format: 'percent' },
+        { header: '% Custo / valor pago', width: 16, format: 'percent' },
+        { header: 'Observação', width: 28 },
+      ],
+      rows,
+    };
   };
 
-  const exportarPlanilhaAnalitica = () => {
-    const ws = montarSheetFichaDemanda();
-    if (!ws) {
+  const exportarPlanilhaAnalitica = async () => {
+    const sheet = montarSheetFichaDemanda();
+    if (!sheet) {
       toast.error('Não há dados para exportar.');
       return;
     }
     const nomeContrato = nomeContratoExport();
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Planilha analítica');
-    const nomeArquivo = `Planilha_Analitica_${nomeContrato.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().slice(0, 10)}.xlsx`;
-    XLSX.writeFile(wb, nomeArquivo);
+    await downloadOrcamentoBrandedExcel(
+      [{ ...sheet, name: 'Planilha analítica' }],
+      nomeArquivoExportOrcamento('Ficha de demanda', 'xlsx'),
+      { contrato: nomeContrato, aparencia: aparenciaOrcamento },
+    );
     toast.success('Planilha analítica exportada com sucesso.');
   };
 
-  const montarSheetMemoriaCalculo = (): XLSX.WorkSheet | null => {
+  const montarSheetMemoriaCalculo = (): OrcamentoExcelSheetSpec | null => {
     if (itensCalculados.length === 0) return null;
 
-    const nomeContrato = nomeContratoExport();
-    const dataEmissao = new Date().toLocaleDateString('pt-BR', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-    });
-
-    const rows: (string | number)[][] = [
-      ['GENNESIS ENGENHARIA E CONSULTORIA'],
-      ['Gennesis Engenharia e Consultoria LTDA | CNPJ 17.851.596/0001-36 | gennesis.sedes@gmail.com | SHIS QI 15, Sobreloja 55, Lago Sul - Brasília/DF'],
-      [''],
-      ['PROJETO/SETOR:', nomeContrato, '', '', 'STATUS:', 'ORÇADO'],
-      ['DESCRIÇÃO:', '', '', '', 'DS/Nº da Pasta:', ''],
-      ['DATA DE ENVIO:', dataEmissao],
-      [''],
-      ['MEMÓRIA DE CÁLCULO DOS QUANTITATIVOS'],
-      [''],
-      [
-        'LEGENDA: C= Comprimento | L= Largura | H= Altura | A= Área | V= Volume | % Empolamento= fator 1,10/1,20/1,30 | M= Metro | UN= quantidade nas colunas N e Subtotal',
-      ],
-      [''],
-      ['DISCRIMINAÇÃO DOS SERVIÇOS'],
-      ['CÓDIGO', 'DESCRIÇÃO', 'UN', 'C', 'L', 'H', '%', 'N', 'A', 'V', 'SUBTOTAL'],
-    ];
-
     const unidadeLabel = (t: TipoUnidadeFormula) => ({ m3: 'M³', m2: 'M²', m: 'M', un: 'UN' }[t] || 'UN');
-    const totalMemoriaExport = itensCalculados.reduce((acc, r) => acc + r.total, 0);
-    let idxServico = 0;
-    const formulaCells: { cell: string; formula: string }[] = [];
+    const empty = () => Array.from({ length: 9 }, () => '') as OrcamentoExcelRow['values'];
+    const rows: OrcamentoExcelRow[] = [];
 
-    for (const row of itensCalculados) {
-      const codigo = `${Math.floor(idxServico / 10) + 1}.${(idxServico % 10) + 1}`;
-      const descricaoBase = `${row.item.codigo} ${row.item.banco} - ${row.item.descricao || ''}`;
+    itensCalculados.forEach((row, rowIdx) => {
+      if (rows.length) rows.push({ kind: 'blank', values: empty() });
+
       const linhasExport = linhasMedicaoEfetivas(row.dimensoes);
       const tipoAuto = row.tipoUnidade ?? inferirTipoUnidadePorDimensao(linhasExport);
-      const un = row.unidadeComposicao?.trim() || unidadeLabel(tipoAuto);
+      const un = unidadeComposicaoParaExibicao(row.unidadeComposicao, tipoAuto) || unidadeLabel(tipoAuto);
+      const rotulo = rotuloItemComposicaoPorKey.get(row.key) ?? String(rowIdx + 1);
+      const descricaoTitulo = `${rotulo} ${row.item.descricao || ''}`.trim();
+      const rotulos = row.dimensoes?.rotulosColunas;
+
+      rows.push({
+        kind: 'titulo',
+        values: [descricaoTitulo, '', '', '', '', '', '', '', un],
+        merge: [0, 7],
+      });
+      rows.push({
+        kind: 'section',
+        values: [
+          (rotulos?.descricao ?? 'DESCRIÇÃO:').trim() || 'DESCRIÇÃO:',
+          rotulos?.C || 'C',
+          rotulos?.L || 'L',
+          rotulos?.H || 'H',
+          rotulos?.pct || '%',
+          rotulos?.N || 'N',
+          'A',
+          'V',
+          'SUBTOTAL',
+        ],
+      });
+
+      let totalA = 0;
+      let totalV = 0;
+      let totalSub = 0;
       if (linhasExport.length) {
-        rows.push([codigo, descricaoBase, un, '', '', '', '', '', '', '', '']);
         for (let i = 0; i < linhasExport.length; i++) {
           const ln = linhasExport[i];
           const descBase = ln.descricao?.trim() || `Medição ${i + 1}`;
           const descLinha = ln.origemComposicaoRotulo?.trim()
             ? `${ln.origemComposicaoRotulo.trim()} ${descBase}`.trim()
             : descBase;
-          const unLinha =
-            ln.linhaAgregadaCarga && ln.tipoOrigemMedicao
-              ? unidadeLabel(ln.tipoOrigemMedicao)
-              : un;
           if (ln.cabecalhoSecao) {
-            rows.push(['', descLinha, unLinha, '', '', '', '', '', '', '', '']);
+            rows.push({
+              kind: 'subtitulo',
+              values: [
+                descLinha,
+                rotulos?.C || 'C',
+                rotulos?.L || 'L',
+                rotulos?.H || 'H',
+                rotulos?.pct || '%',
+                rotulos?.N || 'N',
+                'A',
+                'V',
+                'SUBTOTAL',
+              ],
+            });
             continue;
           }
           const empolRaw =
@@ -10756,174 +10798,131 @@ export function OrcamentoPageView({
               ? 1 + (ln as unknown as { percPerda: number }).percPerda / 100
               : 0);
           const empol = empolRaw != null && empolRaw > 0 ? empolRaw : 1;
-          rows.push([
-            '',
-            descLinha,
-            unLinha,
-            ln.C ?? '',
-            ln.L ?? '',
-            ln.H ?? '',
-            empol,
-            ln.N ?? 1,
-            '',
-            '',
-            '',
-          ]);
-          const r = rows.length;
-          const col = (c: number) => String.fromCharCode(64 + c);
-          const D = col(4);
-          const E = col(5);
-          const F = col(6);
-          const G = col(7);
-          const H = col(8);
-          const I = col(9);
-          const J = col(10);
-          const K = col(11);
           const tipo = tipoAuto;
-          if (ln.linhaAgregadaCarga) {
-            const vol = calcV(ln, tipo);
-            const sub = calcularQuantidadeLinha(ln, tipo);
-            rows[r - 1][8] = ln.tipoOrigemMedicao === 'm2' ? (ln.volumeM3BrutoSomado ?? 0) : '';
-            rows[r - 1][9] = vol;
-            rows[r - 1][10] = sub;
-            continue;
-          }
-          if (tipo === 'm3') {
-            formulaCells.push({ cell: `${I}${r}`, formula: `=${D}${r}*${E}${r}*${H}${r}` });
-            formulaCells.push({ cell: `${J}${r}`, formula: `=${I}${r}*${F}${r}` });
-            formulaCells.push({ cell: `${K}${r}`, formula: `=${J}${r}*${G}${r}` });
-          } else if (tipo === 'm2') {
-            formulaCells.push({ cell: `${I}${r}`, formula: `=${D}${r}*${E}${r}*${H}${r}` });
-            formulaCells.push({ cell: `${J}${r}`, formula: `=${I}${r}` });
-            formulaCells.push({ cell: `${K}${r}`, formula: `=${I}${r}*${G}${r}` });
-          } else if (tipo === 'm') {
-            formulaCells.push({ cell: `${I}${r}`, formula: '' });
-            formulaCells.push({ cell: `${J}${r}`, formula: `=${D}${r}*${H}${r}` });
-            formulaCells.push({ cell: `${K}${r}`, formula: `=${J}${r}*${G}${r}` });
-          } else {
-            const qtd = calcularQuantidadeLinha(ln, tipo);
-            rows[rows.length - 1][8] = qtd;
-            rows[rows.length - 1][9] = qtd;
-            rows[rows.length - 1][10] = qtd;
-          }
+          const n = ln.N && ln.N > 0 ? ln.N : 1;
+          const a = calcA(ln);
+          const v = calcV(ln, tipo);
+          const sub = calcularQuantidadeLinha(ln, tipo);
+          totalA += a;
+          totalV += v;
+          totalSub += sub;
+          rows.push({
+            kind: 'item',
+            values: [descLinha, ln.C || 0, ln.L || 0, ln.H || 0, empol, n, a, v, sub],
+          });
         }
       } else {
-        rows.push([codigo, descricaoBase, un, '', '', '', '', '', row.quantidade, row.quantidade, row.quantidade]);
+        totalSub = row.quantidade;
+        rows.push({
+          kind: 'item',
+          values: [row.item.descricao || '', 0, 0, 0, 1, 1, 0, 0, row.quantidade],
+        });
       }
-      idxServico++;
-    }
 
-    rows.push(['']);
-    rows.push(['', '', '', '', '', '', '', '', '', 'TOTAL GERAL', totalMemoriaExport]);
-
-    const ws = XLSX.utils.aoa_to_sheet(rows);
-    formulaCells.forEach(({ cell, formula }) => {
-      if (formula) {
-        if (!ws[cell]) ws[cell] = {};
-        ws[cell].f = formula;
-        ws[cell].t = 'n';
-      }
+      rows.push({
+        kind: 'total',
+        values: ['TOTAL', '—', '—', '—', '—', '—', totalA, totalV, totalSub],
+      });
+      rows.push({
+        kind: 'total',
+        values: ['VALOR TOTAL', '', '', '', '', '', '', '', truncarMoeda2(row.total)],
+        formats: { 8: 'currency' },
+      });
     });
-    ws['!cols'] = [
-      { wch: 8 },
-      { wch: 50 },
-      { wch: 6 },
-      { wch: 8 },
-      { wch: 8 },
-      { wch: 8 },
-      { wch: 8 },
-      { wch: 6 },
-      { wch: 10 },
-      { wch: 10 },
-      { wch: 12 },
-    ];
-    return ws;
+
+    return {
+      name: 'Memória de cálculo',
+      title: 'Memória de cálculo',
+      subtitle: 'Quantitativos por dimensão (C, L, H) com fórmulas de área, volume e subtotal',
+      autoFilter: false,
+      showHeader: false,
+      columns: [
+        { header: 'DESCRIÇÃO', width: 56 },
+        { header: 'C', width: 10, align: 'center', format: 'qty4' },
+        { header: 'L', width: 10, align: 'center', format: 'qty4' },
+        { header: 'H', width: 10, align: 'center', format: 'qty4' },
+        { header: '%', width: 14, align: 'center', format: 'qty' },
+        { header: 'N', width: 8, align: 'center', format: 'qty4' },
+        { header: 'A', width: 12, align: 'center', format: 'qty4' },
+        { header: 'V', width: 12, align: 'center', format: 'qty4' },
+        { header: 'SUBTOTAL', width: 14, align: 'center', format: 'qty4' },
+      ],
+      rows,
+    };
   };
 
   /** Pacote: Orçamento + Memória de cálculo + Analítico + Ficha de demanda no mesmo .xlsx. */
-  const exportarOrcamentoCompleto = () => {
-    const wsOrc = montarSheetOrcamentoDetalhado();
-    const wsMem = montarSheetMemoriaCalculo();
-    const wsAna = montarSheetOrcamentoAnalitico();
-    const wsFicha = montarSheetFichaDemanda();
-    if (!wsOrc && !wsMem && !wsAna && !wsFicha) {
+  const exportarOrcamentoCompleto = async () => {
+    const sheets = [
+      montarSheetOrcamentoDetalhado(),
+      montarSheetMemoriaCalculo(),
+      montarSheetOrcamentoAnalitico(),
+      montarSheetFichaDemanda(),
+    ].filter((sheet): sheet is OrcamentoExcelSheetSpec => !!sheet);
+    if (!sheets.length) {
       toast.error('Não há dados para exportar.');
       return;
     }
     const nomeContrato = nomeContratoExport();
-    const wb = XLSX.utils.book_new();
-    if (wsOrc) XLSX.utils.book_append_sheet(wb, wsOrc, 'Orçamento');
-    if (wsMem) XLSX.utils.book_append_sheet(wb, wsMem, 'Memória de cálculo');
-    if (wsAna) XLSX.utils.book_append_sheet(wb, wsAna, 'Analítico');
-    if (wsFicha) XLSX.utils.book_append_sheet(wb, wsFicha, 'Ficha de demanda');
-    const nomeArquivo = `Orcamento_${nomeContrato.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().slice(0, 10)}.xlsx`;
-    XLSX.writeFile(wb, nomeArquivo);
+    const nomeArquivo = nomeArquivoExportOrcamento('Orcamento', 'xlsx');
+    await downloadOrcamentoBrandedExcel(sheets, nomeArquivo, {
+      contrato: nomeContrato,
+      aparencia: aparenciaOrcamento,
+    });
     toast.success('Orçamento exportado (Orçamento, Memória de cálculo, Analítico e Ficha de demanda).');
   };
 
-  const exportarCronogramaExcel = () => {
+  const exportarCronogramaExcel = async () => {
     if (linhasCronograma.length === 0) {
       toast.error('Não há serviços no cronograma para exportar.');
       return;
     }
     const nomeContrato = nomeContratoExport();
-    const dataEmissao = new Date().toLocaleDateString('pt-BR', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric'
-    });
     const linhasTl = montarLinhasTimeline(linhasCronograma, cronograma);
-    const rows: (string | number)[][] = [
-      ['GENNESIS ENGENHARIA E CONSULTORIA'],
-      ['CRONOGRAMA DA OBRA'],
-      ['CONTRATO', nomeContrato],
-      ['DATA', dataEmissao],
-      [''],
-      [
-        'Serviço',
-        'Início Plan.',
-        'Fim Plan.',
-        'Início Real',
-        'Fim Real',
-        'Dias',
-        '% Exec.',
-        'Status'
-      ]
-    ];
+    const rows: OrcamentoExcelRow[] = [];
     for (const row of linhasTl) {
-      const indent = '  '.repeat(row.indentLevel ?? (row.isSub ? 1 : 0));
+      const indentLevel = row.indentLevel ?? (row.isSub ? 1 : 0);
+      const indent = '  '.repeat(indentLevel);
       const status = calcularStatusCronograma(row.dados);
       const dias = diasEntre(row.dados.dataInicio, row.dados.dataFim);
       const pct =
         row.dados.percentualExecutado != null && Number.isFinite(row.dados.percentualExecutado)
-          ? `${Math.round(row.dados.percentualExecutado)}%`
-          : '0%';
-      rows.push([
-        `${indent}${row.label}`,
-        formatDataBr(row.dados.dataInicio),
-        formatDataBr(row.dados.dataFim),
-        formatDataBr(row.dados.dataInicioReal),
-        formatDataBr(row.dados.dataFimReal),
-        dias ?? '—',
-        pct,
-        CRONOGRAMA_STATUS_LABEL[status]
-      ]);
+          ? Math.round(row.dados.percentualExecutado)
+          : 0;
+      rows.push({
+        kind: indentLevel === 0 ? 'subtitulo' : 'item',
+        values: [
+          `${indent}${row.label}`,
+          formatDataBr(row.dados.dataInicio),
+          formatDataBr(row.dados.dataFim),
+          formatDataBr(row.dados.dataInicioReal),
+          formatDataBr(row.dados.dataFimReal),
+          dias ?? '',
+          pct,
+          CRONOGRAMA_STATUS_LABEL[status],
+        ],
+      });
     }
-    const ws = XLSX.utils.aoa_to_sheet(rows);
-    ws['!cols'] = [
-      { wch: 48 },
-      { wch: 14 },
-      { wch: 14 },
-      { wch: 14 },
-      { wch: 14 },
-      { wch: 8 },
-      { wch: 10 },
-      { wch: 14 }
-    ];
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Cronograma');
-    const nomeArquivo = `Cronograma_${nomeContrato.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().slice(0, 10)}.xlsx`;
-    XLSX.writeFile(wb, nomeArquivo);
+    await downloadOrcamentoBrandedExcel(
+      [{
+        name: 'Cronograma',
+        title: 'Cronograma da obra',
+        subtitle: 'Datas planejadas e reais, avanço físico e status das etapas',
+        columns: [
+          { header: 'Serviço', width: 48 },
+          { header: 'Início Plan.', width: 14, align: 'center' },
+          { header: 'Fim Plan.', width: 14, align: 'center' },
+          { header: 'Início Real', width: 14, align: 'center' },
+          { header: 'Fim Real', width: 14, align: 'center' },
+          { header: 'Dias', width: 8, align: 'center', format: 'int' },
+          { header: '% Exec.', width: 10, format: 'percent' },
+          { header: 'Status', width: 16, align: 'center' },
+        ],
+        rows,
+      }],
+      nomeArquivoExportOrcamento('Cronograma', 'xlsx'),
+      { contrato: nomeContrato, aparencia: aparenciaOrcamento },
+    );
     toast.success('Cronograma exportado com sucesso.');
   };
 
@@ -10951,19 +10950,18 @@ export function OrcamentoPageView({
     setFdAprovacaoPreparando(true);
     try {
       const anexos: FichaDemandaApprovalFormState['anexos'] = [];
-      const nomeContratoSafe = (embeddedContractName || nomeContratoBreadcrumb || 'Contrato')
-        .replace(/[^a-zA-Z0-9]/g, '_')
-        .slice(0, 40);
-      const dataIso = new Date().toISOString().slice(0, 10);
-      const uploadXlsx = async (wb: XLSX.WorkBook, fileName: string, kind: 'orcamento' | 'fd') => {
-        const out = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-        const file = new File([new Uint8Array(out as ArrayLike<number>)], fileName, {
-          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      const nomeContratoSafe = embeddedContractName || nomeContratoBreadcrumb || 'Contrato';
+      const uploadXlsx = async (sheets: OrcamentoExcelSheetSpec[], fileName: string, kind: 'orcamento' | 'fd') => {
+        const buffer = await buildOrcamentoBrandedWorkbook(sheets, {
+          contrato: embeddedContractName || nomeContratoBreadcrumb || nomeContratoSafe,
+          aparencia: aparenciaOrcamento,
         });
+        const file = orcamentoWorkbookToFile(buffer, fileName);
         const formData = new FormData();
         formData.append('file', file);
         const uploadRes = await api.post('/demand-sheet-approvals/upload-attachment', formData, {
           headers: { 'Content-Type': 'multipart/form-data' },
+          timeout: LARGE_FILE_UPLOAD_TIMEOUT_MS,
         });
         const uploaded = uploadRes.data?.data as { url?: string; originalName?: string } | undefined;
         const url = String(uploaded?.url || '').trim();
@@ -10976,22 +10974,18 @@ export function OrcamentoPageView({
         });
       };
 
-      const wsOrc = montarSheetOrcamentoDetalhado();
-      const wsMem = montarSheetMemoriaCalculo();
-      const wsAna = montarSheetOrcamentoAnalitico();
-      if (wsOrc || wsMem || wsAna) {
-        const wbOrc = XLSX.utils.book_new();
-        if (wsOrc) XLSX.utils.book_append_sheet(wbOrc, wsOrc, 'Orçamento');
-        if (wsMem) XLSX.utils.book_append_sheet(wbOrc, wsMem, 'Memória de cálculo');
-        if (wsAna) XLSX.utils.book_append_sheet(wbOrc, wsAna, 'Analítico');
-        await uploadXlsx(wbOrc, `Orcamento_${nomeContratoSafe}_${dataIso}.xlsx`, 'orcamento');
+      const sheetsOrc = [
+        montarSheetOrcamentoDetalhado(),
+        montarSheetMemoriaCalculo(),
+        montarSheetOrcamentoAnalitico(),
+      ].filter((sheet): sheet is OrcamentoExcelSheetSpec => !!sheet);
+      if (sheetsOrc.length) {
+        await uploadXlsx(sheetsOrc, nomeArquivoExportOrcamento('Orcamento', 'xlsx'), 'orcamento');
       }
 
-      const wsFicha = montarSheetFichaDemanda();
-      if (wsFicha) {
-        const wbFd = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wbFd, wsFicha, 'Ficha de demanda');
-        await uploadXlsx(wbFd, `Ficha_Demanda_${nomeContratoSafe}_${dataIso}.xlsx`, 'fd');
+      const sheetFicha = montarSheetFichaDemanda();
+      if (sheetFicha) {
+        await uploadXlsx([sheetFicha], nomeArquivoExportOrcamento('Ficha de demanda', 'xlsx'), 'fd');
       }
 
       const codigoFdBase = (codigoOrcamentoAtivo || orcamentoAtivoId.slice(0, 8)).replace(/\s+/g, '');
@@ -11255,7 +11249,7 @@ export function OrcamentoPageView({
       y += 4;
     }
 
-    const nomeArquivo = `Ficha_Demanda_${nomeContrato.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().slice(0, 10)}.pdf`;
+    const nomeArquivo = nomeArquivoExportOrcamento('Ficha de demanda', 'pdf');
     pdf.save(nomeArquivo);
     toast.success('Ficha de demanda exportada (PDF).');
   };

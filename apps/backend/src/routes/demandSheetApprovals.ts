@@ -132,7 +132,7 @@ router.get('/aprovacoes', requireFdApproverAccess, controller.getManagerApproval
 
 const anexoUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 80 * 1024 * 1024, files: 1 },
+  limits: { fileSize: 200 * 1024 * 1024, files: 1 },
 });
 
 router.post(
@@ -144,7 +144,7 @@ router.post(
         if (err.code === 'LIMIT_FILE_SIZE') {
           res.status(413).json({
             success: false,
-            message: 'Arquivo grande demais (máx. 80 MB).',
+            message: 'Arquivo grande demais (máx. 200 MB).',
           });
           return;
         }
@@ -173,7 +173,7 @@ router.post(
         if (err.code === 'LIMIT_FILE_SIZE') {
           res.status(413).json({
             success: false,
-            message: 'Arquivo grande demais (máx. 80 MB).',
+            message: 'Arquivo grande demais (máx. 200 MB).',
           });
           return;
         }

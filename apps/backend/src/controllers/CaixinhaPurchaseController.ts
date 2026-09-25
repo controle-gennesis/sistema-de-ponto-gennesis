@@ -167,7 +167,7 @@ export class CaixinhaPurchaseController {
             .map((u) => ({ id: u.id, name: u.name.trim() })),
           contracts: contracts.map((c) => ({
             id: c.id,
-            name: c.number ? `${c.name} (${c.number})` : c.name,
+            name: c.name,
           })),
           caixinhas: [...caixinhaSet].sort((a, b) => a.localeCompare(b, 'pt-BR')),
         },

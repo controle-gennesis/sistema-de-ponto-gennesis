@@ -506,12 +506,12 @@ export function SingleSelectSearchDropdown({
                 {!value ? <Check className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" aria-hidden /> : null}
               </button>
             ) : null}
-            {filtered.map((opt) => {
+            {filtered.map((opt, optIdx) => {
               const active = opt.value === value;
               const isDisabled = Boolean(opt.disabled);
               return (
                 <button
-                  key={opt.value}
+                  key={`${opt.value}::${optIdx}`}
                   type="button"
                   role="option"
                   aria-selected={active}

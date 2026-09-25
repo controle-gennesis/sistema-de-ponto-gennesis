@@ -12,9 +12,11 @@ const router = Router();
 const CAIXINHA_MODULE_KEY = pathToModuleKey('/ponto/caixinha');
 const requireCaixinha = requireAnyModuleAccess([CAIXINHA_MODULE_KEY]);
 
+const CAIXINHA_ANEXO_MAX_BYTES = 200 * 1024 * 1024;
+
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 15 * 1024 * 1024 },
+  limits: { fileSize: CAIXINHA_ANEXO_MAX_BYTES },
 });
 
 router.use(authenticate);
@@ -27,6 +29,10 @@ router.post(
   '/upload-invoice',
   (req: AuthRequest, res: Response, next: NextFunction) => {
     upload.single('file')(req, res, (err: unknown) => {
+      if (err && typeof err === 'object' && 'code' in err && err.code === 'LIMIT_FILE_SIZE') {
+        res.status(413).json({ success: false, message: 'Arquivo grande demais (máx. 200 MB).' });
+        return;
+      }
       if (err) {
         const msg = err instanceof Error ? err.message : 'Erro no upload';
         res.status(400).json({ success: false, message: msg });
@@ -37,17 +43,13 @@ router.post(
   },
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
-      if (!req.file?.buffer) throw createError('Selecione um arquivo PDF', 400);
+      if (!req.file?.buffer) throw createError('Selecione um arquivo', 400);
       const originalName = fixMulterOriginalName(req.file.originalname);
-      const mime = String(req.file.mimetype || '').toLowerCase();
-      if (!mime.includes('pdf') && !originalName.toLowerCase().endsWith('.pdf')) {
-        throw createError('Envie um arquivo PDF da nota fiscal', 400);
-      }
       const saved = await savePersistentUpload({
         folder: 'caixinha-invoices',
         buffer: req.file.buffer,
         originalName,
-        mimeType: req.file.mimetype || 'application/pdf',
+        mimeType: req.file.mimetype || 'application/octet-stream',
       });
       res.json({
         success: true,

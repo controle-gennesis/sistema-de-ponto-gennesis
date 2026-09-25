@@ -7,7 +7,7 @@ import toast from 'react-hot-toast';
 import { Modal } from '@/components/ui/Modal';
 import { FilePreviewCard } from '@/components/ui/FilePreviewCard';
 import { FdStatusBadges } from '@/components/engenharia/FdStatusBadges';
-import api from '@/lib/api';
+import api, { LARGE_FILE_UPLOAD_TIMEOUT_MS } from '@/lib/api';
 import {
   anexosDemais,
   anexosOrdemCompra,
@@ -142,6 +142,7 @@ export function FichaDemandaDetailModal({
       if (kind) form.append('kind', kind);
       const res = await api.post(`/demand-sheet-approvals/${record.id}/anexos`, form, {
         headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: LARGE_FILE_UPLOAD_TIMEOUT_MS,
       });
       return (res.data?.data ?? null) as FichaDemandaApprovalRecord | null;
     },
