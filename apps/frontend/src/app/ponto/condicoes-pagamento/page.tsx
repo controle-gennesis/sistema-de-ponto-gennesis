@@ -205,7 +205,7 @@ export default function CondicoesPagamentoPage() {
   }, []);
 
   const { requestClose: requestClosePaymentForm, confirmUi: paymentFormConfirmUi } =
-    useModalCloseConfirm(closePaymentForm, { isParentOpen: showForm });
+    useModalCloseConfirm(closePaymentForm, { isParentOpen: showForm, className: '!z-[2200]' });
 
   const openEdit = (r: PaymentConditionRow) => {
     setEditing(r);

@@ -5,22 +5,20 @@ import { Info, Plus, Trash2 } from 'lucide-react';
 import {
   ROTULO_COLUNA_MEDICAO_OPCOES,
   type DimensoesItem,
-  type LinhaContagem,
   type LinhaMedicao,
   type TipoUnidadeFormula
 } from './orcamentoMedicaoTypes';
-import { calcA, calcV, calcularQuantidadeContagem, calcularQuantidadeLinha } from './orcamentoMedicaoCalc';
+import { calcA, calcV, calcularQuantidadeLinha, linhasMedicaoEfetivas } from './orcamentoMedicaoCalc';
 import {
   gradeTableCls,
   gradeTableRowTrCls,
-  inputGradeBloqueadoCls,
   inputGradeCls,
   selectGradeHeaderMemorialCls
 } from './orcamentoGradeCellClasses';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { ActionMenuOverlay } from '@/components/ui/ActionMenuOverlay';
 
-/** Painel de medições (C, L, H, N, %, A, V) — aba Memorial de cálculo (layout em tabela, padrão das demais abas). */
+/** Painel de medições (C, L, H, %, N, A, V) — aba Memorial de cálculo (layout em tabela, padrão das demais abas). */
 type Props = {
   rowKey: string;
   tipoUnidade: TipoUnidadeFormula;
@@ -52,6 +50,7 @@ type Props = {
   addLinhaMedicao: (itemKey: string, inserirAposIdx?: number) => void;
   addLinhaCabecalhoSecaoMedicao: (itemKey: string, inserirAposIdx?: number) => void;
   removeLinhaMedicao: (itemKey: string, idx: number) => void;
+  estiloTitulo?: React.CSSProperties;
 };
 
 /**
@@ -62,9 +61,6 @@ const COLS_MEDIC_PCT = { desc: 44, med: 7 } as const;
 
 const colDesc = 'min-w-[18rem] sm:min-w-[22rem]';
 const colMed = 'min-w-[2.75rem] max-w-[4.25rem]';
-
-const rotuloUnPorTipo = (t: TipoUnidadeFormula | undefined) =>
-  t === 'm3' ? 'm³' : t === 'm2' ? 'm²' : t === 'm' ? 'm' : 'UN';
 
 const thFirst =
   `px-3 sm:px-3.5 py-2.5 text-left text-[11px] font-bold text-gray-700 dark:text-gray-200 uppercase tracking-wide bg-slate-50 dark:bg-slate-800/85 border-b border-r border-gray-200 dark:border-gray-600 ${colDesc}`;
@@ -84,7 +80,6 @@ const tdCalc =
 const tdCalcBody =
   `p-0 text-center tabular-nums text-sm font-bold text-gray-900 dark:text-gray-100 border-b border-r border-gray-200 bg-white dark:border-gray-600 dark:bg-gray-900 ${colMed}`;
 const inputCls = inputGradeCls;
-const inputBloqueadoCls = inputGradeBloqueadoCls;
 /** Texto editável com a mesma leitura visual do &lt;th&gt; da coluna Descrição (memória). */
 const inputThDescricaoCls =
   'box-border min-h-[2.75rem] w-full min-w-0 border-0 rounded-none bg-transparent px-3 py-2.5 text-left text-[11px] font-bold uppercase tracking-wide text-gray-700 shadow-none outline-none ring-0 transition-[background-color,box-shadow] placeholder:text-gray-400 dark:text-gray-200 dark:placeholder:text-slate-500 sm:px-3.5 focus:z-[1] focus:bg-red-50/90 dark:focus:bg-red-950/35 focus:ring-1 focus:ring-inset focus:ring-red-500 dark:focus:ring-red-400 disabled:cursor-not-allowed disabled:opacity-60';
@@ -174,22 +169,17 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
   itemRotulo,
   itemDescricao,
   unidadeMedida,
-  quantidadeUn = 0,
-  quantidadeUnReadOnly = false,
-  onQuantidadeUnChange,
-  modoContagemLista = false,
-  onAddLinhaContagem,
-  onUpdateLinhaContagem,
-  onRemoveLinhaContagem,
   dim,
   ehCargaEntulho,
   updateLinhaMedicao,
   updateRotuloColunaMedicao,
   addLinhaMedicao,
   addLinhaCabecalhoSecaoMedicao,
-  removeLinhaMedicao
+  removeLinhaMedicao,
+  estiloTitulo
 }: Props) {
   const tipo = tipoUnidade;
+  const linhasEfetivas = linhasMedicaoEfetivas(dim);
 
   const [draftCalc, setDraftCalc] = useState<Record<string, string>>({});
   const calcCommitTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
@@ -230,18 +220,12 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
   );
 
   const [menuCtxMedicao, setMenuCtxMedicao] = useState<{ left: number; top: number; idx: number } | null>(null);
-  const [menuCtxContagem, setMenuCtxContagem] = useState<{
-    left: number;
-    top: number;
-    idx: number | null;
-  } | null>(null);
 
   useEffect(() => {
-    if (!menuCtxMedicao && !menuCtxContagem) return;
+    if (!menuCtxMedicao) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         setMenuCtxMedicao(null);
-        setMenuCtxContagem(null);
       }
     };
     window.addEventListener('keydown', onKey);
@@ -250,14 +234,13 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
     }, 0);
     function fechar() {
       setMenuCtxMedicao(null);
-      setMenuCtxContagem(null);
     }
     return () => {
       window.removeEventListener('keydown', onKey);
       window.clearTimeout(t);
       window.removeEventListener('click', fechar);
     };
-  }, [menuCtxMedicao, menuCtxContagem]);
+  }, [menuCtxMedicao]);
 
   const eventoSobreCampoEditavel = (target: EventTarget | null) => {
     if (!(target instanceof Element)) return false;
@@ -280,70 +263,8 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
     setMenuCtxMedicao({ ...posicaoMenuLinha(e), idx });
   };
 
-  const abrirMenuCtxContagem = (e: React.MouseEvent, idx: number | null) => {
-    if (e.type === 'click' && eventoSobreCampoEditavel(e.target)) return;
-    e.preventDefault();
-    e.stopPropagation();
-    setMenuCtxContagem({ ...posicaoMenuLinha(e, 120), idx });
-  };
-
   /** Descrição + C + L + H + N + % + A + V + Subtotal. */
   const contarColunasGrade = () => 9;
-
-  const temDimensoes = (ln: LinhaMedicao) =>
-    (ln.C || 0) !== 0 || (ln.L || 0) !== 0 || (ln.H || 0) !== 0;
-
-  type ModoDim = 'editar' | 'vazio' | 'fixo_um' | 'carga_bloq';
-
-  const modoDimensao = (ln: LinhaMedicao, campo: 'C' | 'L' | 'H' | 'N'): ModoDim => {
-    if (ehCargaEntulho) {
-      if (ln.linhaAgregadaCarga) {
-        if (ln.tipoOrigemMedicao === 'm2' && campo === 'H') return 'editar';
-        if (ln.tipoOrigemMedicao === 'm' && (campo === 'L' || campo === 'H')) return 'editar';
-        return 'carga_bloq';
-      }
-      if (campo === 'N') return 'carga_bloq';
-      if (campo === 'C') return ln.editavelC ? 'editar' : 'carga_bloq';
-      if (campo === 'L') return ln.editavelL ? 'editar' : 'carga_bloq';
-      if (campo === 'H') return ln.editavelH ? 'editar' : 'carga_bloq';
-      return 'vazio';
-    }
-    switch (tipo) {
-      case 'm3':
-        return 'editar';
-      case 'm2':
-        if (campo === 'H') return 'vazio';
-        return campo === 'C' || campo === 'L' || campo === 'N' ? 'editar' : 'vazio';
-      case 'm':
-        return campo === 'C' || campo === 'N' ? 'editar' : 'vazio';
-      case 'un':
-        return campo === 'N' ? 'fixo_um' : 'vazio';
-      default:
-        return 'vazio';
-    }
-  };
-
-  type ModoAV = 'vazio' | 'calc' | 'input' | 'carga_calc' | 'carga_inp';
-
-  const modoColunaA = (ln: LinhaMedicao): ModoAV => {
-    if (ehCargaEntulho && ln.linhaAgregadaCarga && ln.tipoOrigemMedicao === 'm2') return 'carga_calc';
-    if (ehCargaEntulho && ln.linhaAgregadaCarga) return 'vazio';
-    const tem = temDimensoes(ln);
-    if (ehCargaEntulho) return tem ? 'carga_calc' : 'carga_inp';
-    if (tipo === 'm2') return 'calc';
-    if (tipo === 'm3' || tipo === 'm') return 'vazio';
-    if (tipo === 'un') return !tem ? 'input' : 'vazio';
-    return 'vazio';
-  };
-
-  const modoColunaV = (ln: LinhaMedicao): ModoAV => {
-    if (ehCargaEntulho && ln.linhaAgregadaCarga) return 'carga_calc';
-    const tem = temDimensoes(ln);
-    if (ehCargaEntulho) return tem ? 'carga_calc' : 'carga_inp';
-    if (tipo === 'm3') return tem ? 'calc' : 'input';
-    if (tipo === 'm2' || tipo === 'm' || tipo === 'un') return 'vazio';
-    return 'vazio';
-  };
 
   const celulaVazia = (title?: string) => (
     <td className={`${tdRest} text-center`} title={title}>
@@ -357,29 +278,37 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
 
   const renderCabecalhoServico = (colCount: number, onAbrirMenu?: (e: React.MouseEvent) => void) => (
     <tr
-      className={`bg-red-600 dark:bg-red-950/90 ${gradeTableRowTrCls}${onAbrirMenu ? ' cursor-pointer' : ''}`}
+      className={`${estiloTitulo ? '[&_*]:!text-inherit' : 'bg-red-600 dark:bg-red-950/90'} ${gradeTableRowTrCls}${onAbrirMenu ? ' cursor-pointer' : ''}`}
+      style={estiloTitulo}
       onClick={onAbrirMenu}
       onContextMenu={onAbrirMenu}
     >
       <th
         colSpan={colCount}
-        className="border-b border-red-700/70 bg-red-600 px-3 py-2.5 text-left align-middle font-normal dark:border-red-900 dark:bg-red-950/90 sm:px-3.5"
+        className={`border-b px-3 py-2.5 text-left align-middle font-normal sm:px-3.5 ${
+          estiloTitulo
+            ? 'border-black/10 bg-transparent dark:border-white/10'
+            : 'border-red-700/70 bg-red-600 dark:border-red-900 dark:bg-red-950/90'
+        }`}
+        style={estiloTitulo}
       >
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-x-3">
-          <p className="min-w-0 flex-1 text-left text-sm font-bold leading-snug text-white">
+          <p className={`min-w-0 flex-1 text-left text-sm font-bold leading-snug ${estiloTitulo ? '' : 'text-white'}`}>
             <span
-              className="mr-2 inline font-bold tabular-nums text-white"
+              className={`mr-2 inline font-bold tabular-nums ${estiloTitulo ? '' : 'text-white'}`}
               aria-label={`Item ${itemRotulo || '—'}`}
             >
               {itemRotulo || '—'}
             </span>
-            <span className="text-white">{itemDescricao}</span>
+            <span className={estiloTitulo ? '' : 'text-white'}>{itemDescricao}</span>
           </p>
           <div
-            className={`flex shrink-0 items-center justify-center self-start border-t border-white/25 pt-2 text-center sm:self-center sm:border-t-0 sm:border-l sm:border-white/25 sm:pt-0 sm:pl-3 ${colMed}`}
+            className={`flex shrink-0 items-center justify-center self-start border-t pt-2 text-center sm:self-center sm:border-t-0 sm:border-l sm:pt-0 sm:pl-3 ${colMed} ${
+              estiloTitulo ? 'border-black/20' : 'border-white/25'
+            }`}
             title="Unidade de medida"
           >
-            <span className="text-[11px] font-bold uppercase tracking-wide text-white">
+            <span className={`text-[11px] font-bold uppercase tracking-wide ${estiloTitulo ? '' : 'text-white'}`}>
               {unidadeMedida.trim() || '—'}
             </span>
           </div>
@@ -467,12 +396,12 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
         {renderRotuloSelect('C', ehCargaEntulho && !podeEditarC0 ? 'Origem demolição' : undefined, 'th')}
         {renderRotuloSelect('L', ehCargaEntulho && !podeEditarL0 ? 'Origem demolição' : undefined, 'th')}
         {renderRotuloSelect('H', ehCargaEntulho && !podeEditarH0 ? 'Origem demolição' : undefined, 'th')}
-        {renderRotuloSelect('N', bloquearN0 ? 'Origem demolição' : undefined, 'th')}
         {renderRotuloSelect(
           'pct',
           ehCargaEntulho ? 'Fator de empolamento — editável nesta linha' : 'Fator de empolamento / perdas',
           'th'
         )}
+        {renderRotuloSelect('N', bloquearN0 ? 'Origem demolição' : undefined, 'th')}
         <th className={thRest}>A</th>
         <th className={thRest}>V</th>
         <th className={thRest}>Subtotal</th>
@@ -503,12 +432,12 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
         {renderRotuloSelect('C', ehCargaEntulho && !podeEditarC0 ? 'Origem demolição' : undefined, 'td')}
         {renderRotuloSelect('L', ehCargaEntulho && !podeEditarL0 ? 'Origem demolição' : undefined, 'td')}
         {renderRotuloSelect('H', ehCargaEntulho && !podeEditarH0 ? 'Origem demolição' : undefined, 'td')}
-        {renderRotuloSelect('N', bloquearN0 ? 'Origem demolição' : undefined, 'td')}
         {renderRotuloSelect(
           'pct',
           ehCargaEntulho ? 'Fator de empolamento — editável nesta linha' : 'Fator de empolamento / perdas',
           'td'
         )}
+        {renderRotuloSelect('N', bloquearN0 ? 'Origem demolição' : undefined, 'td')}
         <td className={thRest}>A</td>
         <td className={thRest}>V</td>
         <td className={thRest}>Subtotal</td>
@@ -517,7 +446,7 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
   };
 
   const renderRow = (ln: LinhaMedicao, idx: number) => {
-    const ln0Ref = dim.linhas.find(l => !l.cabecalhoSecao) ?? dim.linhas[0];
+    const ln0Ref = linhasEfetivas.find(l => !l.cabecalhoSecao) ?? linhasEfetivas[0];
     if (ln.cabecalhoSecao) {
       return renderLinhaCabecalhoSecao(ln, idx, ln0Ref);
     }
@@ -529,29 +458,7 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
       ((ln as unknown as { percPerda?: number }).percPerda != null
         ? 1 + (ln as unknown as { percPerda: number }).percPerda / 100
         : 0);
-    const podeEditarCNaCarga = ehCargaEntulho && !!ln.editavelC;
-    const podeEditarLNaCarga = ehCargaEntulho && !!ln.editavelL;
-    const podeEditarHNaCarga = ehCargaEntulho && !!ln.editavelH;
-    const bloquearDescricao = ehCargaEntulho;
-    const bloquearN = ehCargaEntulho;
-
     const renderDim = (campo: 'C' | 'L' | 'H' | 'N') => {
-      const modo = modoDimensao(ln, campo);
-      if (modo === 'vazio') {
-        return celulaVazia('Não aplicável para esta unidade de medida');
-      }
-      if (modo === 'fixo_um') {
-        return (
-          <td className={`${tdRestBody} text-center`} title="Quantidade (UN)">
-            <input
-              readOnly
-              tabIndex={-1}
-              className={`${inputBloqueadoCls} opacity-80`}
-              value={String(ln.N ?? 1)}
-            />
-          </td>
-        );
-      }
       const draftKey = `${rowKey}|${idx}|${campo}`;
       const raw =
         campo === 'C'
@@ -560,17 +467,9 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
             ? draftCalc[draftKey] ?? ((ln.L || 0) === 0 ? '' : String(ln.L))
             : campo === 'H'
               ? draftCalc[draftKey] ?? ((ln.H || 0) === 0 ? '' : String(ln.H))
-              : draftCalc[draftKey] ?? String(ln.N ?? 1);
-      const podeEditar =
-        campo === 'C'
-          ? !ehCargaEntulho || podeEditarCNaCarga
-          : campo === 'L'
-            ? !ehCargaEntulho || podeEditarLNaCarga
-            : campo === 'H'
-              ? !ehCargaEntulho || podeEditarHNaCarga
-              : !bloquearN;
+              : draftCalc[draftKey] ?? ((ln.N || 0) === 0 ? '' : String(ln.N));
       const onCommit = (n: number) => {
-        if (campo === 'N') updateLinhaMedicao(rowKey, idx, 'N', Math.max(1, n));
+        if (campo === 'N') updateLinhaMedicao(rowKey, idx, 'N', Math.max(0, n));
         else updateLinhaMedicao(rowKey, idx, campo, n);
       };
       return (
@@ -580,165 +479,67 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
             inputMode="decimal"
             placeholder={campo === 'N' ? '1' : '0'}
             value={raw}
-            onChange={e => podeEditar && handleCalcChange(draftKey, e.target.value, onCommit)}
-            onBlur={e => podeEditar && handleCalcBlur(draftKey, draftCalc[draftKey] ?? e.target.value, onCommit)}
-            readOnly={!podeEditar}
-            className={!podeEditar ? inputBloqueadoCls : `${inputCls} text-center`}
+            onChange={e => handleCalcChange(draftKey, e.target.value, onCommit)}
+            onBlur={e => handleCalcBlur(draftKey, draftCalc[draftKey] ?? e.target.value, onCommit)}
+            className={`${inputCls} text-center`}
           />
         </td>
       );
     };
 
-    const mA = modoColunaA(ln);
-    const mV = modoColunaV(ln);
-
-    const renderCelulaA = () => {
-      if (mA === 'vazio') return celulaVazia('Não aplicável para esta unidade');
-      if (mA === 'calc' || mA === 'carga_calc') {
-        return (
-          <td className={tdCalc} title="Área (m²)">
-            {valorA.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}
-          </td>
-        );
-      }
+    const renderCelulaAV = (campo: 'A' | 'V' | 'subtotal', calculado: number, title: string) => {
+      const draftKey = `${rowKey}|${idx}|${campo}`;
+      const persistCampo = campo === 'subtotal' ? 'subtotalManual' : 'valorManual';
+      const temManual =
+        campo === 'subtotal'
+          ? ln.subtotalManual != null && Number.isFinite(ln.subtotalManual)
+          : ln.valorManual != null && Number.isFinite(ln.valorManual);
+      const valorManualExibir = campo === 'subtotal' ? ln.subtotalManual : ln.valorManual;
+      const exibir = temManual ? String(valorManualExibir) : calculado === 0 ? '' : String(calculado);
+      const persistir = (n: number, raw: string) => {
+        if (campo === 'subtotal' && String(raw ?? '').trim() === '') {
+          updateLinhaMedicao(rowKey, idx, 'subtotalManual', '');
+          return;
+        }
+        updateLinhaMedicao(rowKey, idx, persistCampo, n);
+      };
       return (
-        <td className={tdCalcBody} title="Área (m²) / quantidade manual">
+        <td className={tdCalcBody} title={title}>
           <input
             type="text"
             inputMode="decimal"
             placeholder="0"
-            value={
-              draftCalc[`${rowKey}|${idx}|A`] ??
-              (ln.valorManual == null || ln.valorManual === 0 ? '' : String(ln.valorManual))
-            }
-            onChange={e =>
-              !ehCargaEntulho &&
-              handleCalcChange(`${rowKey}|${idx}|A`, e.target.value, n => updateLinhaMedicao(rowKey, idx, 'valorManual', n))
-            }
+            value={draftCalc[draftKey] ?? exibir}
+            onChange={e => handleCalcChange(draftKey, e.target.value, n => persistir(n, e.target.value))}
             onBlur={e =>
-              !ehCargaEntulho &&
-              handleCalcBlur(`${rowKey}|${idx}|A`, draftCalc[`${rowKey}|${idx}|A`] ?? e.target.value, n =>
-                updateLinhaMedicao(rowKey, idx, 'valorManual', n)
+              handleCalcBlur(draftKey, draftCalc[draftKey] ?? e.target.value, n =>
+                persistir(n, draftCalc[draftKey] ?? e.target.value)
               )
             }
-            readOnly={ehCargaEntulho}
-            className={ehCargaEntulho ? inputBloqueadoCls : `${inputCls} text-center`}
+            className={`${inputCls} text-center`}
           />
         </td>
       );
     };
-
-    const renderCelulaV = () => {
-      if (mV === 'vazio') return celulaVazia('Não aplicável para esta unidade');
-      if (mV === 'calc' || mV === 'carga_calc') {
-        return (
-          <td className={tdCalc} title="Volume (m³)">
-            {valorV.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}
-          </td>
-        );
-      }
-      return (
-        <td className={tdCalcBody} title="Volume (m³) / quantidade manual">
-          <input
-            type="text"
-            inputMode="decimal"
-            placeholder="0"
-            value={
-              draftCalc[`${rowKey}|${idx}|V`] ??
-              (ln.valorManual == null || ln.valorManual === 0 ? '' : String(ln.valorManual))
-            }
-            onChange={e =>
-              !ehCargaEntulho &&
-              handleCalcChange(`${rowKey}|${idx}|V`, e.target.value, n => updateLinhaMedicao(rowKey, idx, 'valorManual', n))
-            }
-            onBlur={e =>
-              !ehCargaEntulho &&
-              handleCalcBlur(`${rowKey}|${idx}|V`, draftCalc[`${rowKey}|${idx}|V`] ?? e.target.value, n =>
-                updateLinhaMedicao(rowKey, idx, 'valorManual', n)
-              )
-            }
-            readOnly={ehCargaEntulho}
-            className={ehCargaEntulho ? inputBloqueadoCls : `${inputCls} text-center`}
-          />
-        </td>
-      );
-    };
-
-    const unNoFimCarga = ln.linhaAgregadaCarga
-      ? rotuloUnPorTipo(ln.tipoOrigemMedicao)
-      : rotuloUnPorTipo('m3');
-    const rotuloCargaVis = ln.origemComposicaoRotulo?.trim() ?? '';
-    const descMeioCarga = ln.descricao?.trim() ?? '';
-    const origemKeyNavegacao =
-      ln.linhaAgregadaCarga && ln.origemLinhaId ? ln.origemLinhaId.replace(/\|agg$/, '') : null;
-
-    /** Grid esticado + conteúdo centralizado em cada célula (evita descrição “subindo” como no 2.2.2). */
-    const rowCargaDescCls = 'grid min-h-[2.75rem] w-full min-w-0 max-w-full items-stretch gap-x-2';
-    const rowCargaDescGridStyle: React.CSSProperties = {
-      gridTemplateColumns: rotuloCargaVis
-        ? 'max-content minmax(0, 1fr) 3.25rem'
-        : 'minmax(0, 1fr) 3.25rem'
-    };
-    /** Sem rolagem: uma linha, texto cortado na borda da coluna. */
-    const descCargaMeioCls =
-      'block min-w-0 w-full overflow-hidden whitespace-nowrap text-left leading-snug';
-    const descCargaMeioWrapCls = 'flex min-h-0 min-w-0 w-full items-center overflow-hidden';
-    const rotuloCargaCls = 'flex items-center whitespace-nowrap font-medium tabular-nums leading-snug';
-    const unCargaCls = 'flex items-center justify-end font-medium tabular-nums leading-snug';
 
     return (
       <tr
         key={idx}
         className={`transition-colors hover:[&>td]:bg-slate-50/95 dark:hover:[&>td]:bg-slate-800/35 ${gradeTableRowTrCls}`}
-        onClick={ehCargaEntulho ? undefined : e => abrirMenuCtxMedicao(e, idx)}
-        onContextMenu={ehCargaEntulho ? undefined : e => abrirMenuCtxMedicao(e, idx)}
+        onClick={e => abrirMenuCtxMedicao(e, idx)}
+        onContextMenu={e => abrirMenuCtxMedicao(e, idx)}
       >
-        <td
-          className={`${tdFirstBody} ${ehCargaEntulho && bloquearDescricao ? 'max-w-0' : ''}`}
-        >
-          {bloquearDescricao && origemKeyNavegacao ? (
-            <button
-              type="button"
-              title="Ir à memória de cálculo deste item"
-              className={`box-border cursor-pointer border-0 bg-transparent px-3 py-2.5 text-sm font-normal text-gray-900 dark:text-gray-100 sm:px-3.5 ${rowCargaDescCls}`}
-              style={rowCargaDescGridStyle}
-              onClick={() => {
-                document
-                  .getElementById(`memorial-medicoes-${origemKeyNavegacao}`)
-                  ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-              }}
-            >
-              {rotuloCargaVis ? <span className={rotuloCargaCls}>{rotuloCargaVis}</span> : null}
-              <div className={descCargaMeioWrapCls}>
-                <span className={descCargaMeioCls}>{descMeioCarga || '—'}</span>
-              </div>
-              <span className={unCargaCls}>{unNoFimCarga}</span>
-            </button>
-          ) : bloquearDescricao ? (
-            <div
-              className={`px-3 py-2.5 text-gray-900 dark:text-gray-100 sm:px-3.5 ${rowCargaDescCls} ${inputBloqueadoCls}`}
-              style={rowCargaDescGridStyle}
-              aria-readonly
-            >
-              {rotuloCargaVis ? <span className={rotuloCargaCls}>{rotuloCargaVis}</span> : null}
-              <div className={descCargaMeioWrapCls}>
-                <span className={descCargaMeioCls}>{descMeioCarga || '—'}</span>
-              </div>
-              <span className={unCargaCls}>{unNoFimCarga}</span>
-            </div>
-          ) : (
-            <MemorialCampoLocal
-              committedValue={ln.descricao || ''}
-              onCommit={(raw) => updateLinhaMedicao(rowKey, idx, 'descricao', raw)}
-              placeholder="Ex: COBERTURA DAS CALDEIRAS"
-              className={`${inputCls} !px-3 text-left sm:!px-3.5`}
-            />
-          )}
+        <td className={tdFirstBody}>
+          <MemorialCampoLocal
+            committedValue={ln.descricao || ''}
+            onCommit={(raw) => updateLinhaMedicao(rowKey, idx, 'descricao', raw)}
+            placeholder="Ex: COBERTURA DAS CALDEIRAS"
+            className={`${inputCls} !px-3 text-left sm:!px-3.5`}
+          />
         </td>
         {renderDim('C')}
         {renderDim('L')}
         {renderDim('H')}
-        {renderDim('N')}
         <td className={`${tdRestBody} text-center`}>
           <input
             type="text"
@@ -758,11 +559,10 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
             className={`${inputCls} text-center`}
           />
         </td>
-        {renderCelulaA()}
-        {renderCelulaV()}
-        <td className={tdCalc} title="Quantidade da linha">
-          {valorSubtotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}
-        </td>
+        {renderDim('N')}
+        {renderCelulaAV('A', valorA, 'Área (m²)')}
+        {renderCelulaAV('V', valorV, 'Volume (m³)')}
+        {renderCelulaAV('subtotal', valorSubtotal, 'Quantidade da linha')}
       </tr>
     );
   };
@@ -815,14 +615,14 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
   ) : null;
 
   const renderLinhaTotalMedicao = () => {
-    const linhas = (dim.linhas ?? []).filter(ln => !ln.cabecalhoSecao);
+    const linhas = (linhasEfetivas ?? []).filter(ln => !ln.cabecalhoSecao);
     const fmt = (n: number) =>
       n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
     const totalA = linhas.reduce((s, ln) => s + calcA(ln), 0);
     const totalV = linhas.reduce((s, ln) => s + calcV(ln, tipo), 0);
     const totalSub = linhas.reduce((s, ln) => s + calcularQuantidadeLinha(ln, tipo), 0);
-    const mostraA = tipo === 'm2' || (ehCargaEntulho && linhas.some(ln => modoColunaA(ln) !== 'vazio'));
-    const mostraV = tipo === 'm3' || ehCargaEntulho;
+    const mostraA = true;
+    const mostraV = true;
     const celulaTot = (mostrar: boolean, valor: number, title: string) =>
       mostrar ? (
         <td className={tdCalc} title={title}>
@@ -872,224 +672,8 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
     </div>
   );
 
-  /**
-   * Itens "un" quando o orçamento usa memória de cálculo: lista de quantidades por local
-   * (sem fórmula — soma simples), em vez do campo único de quantidade.
-   */
-  if (tipo === 'un' && !ehCargaEntulho && modoContagemLista) {
-    const linhasContagem = dim.linhasContagem ?? [];
-    const total = calcularQuantidadeContagem(linhasContagem);
-    const portalMenuCtxContagem = menuCtxContagem ? (
-      <ActionMenuOverlay
-        open
-        onClose={() => setMenuCtxContagem(null)}
-        top={menuCtxContagem.top}
-        left={menuCtxContagem.left}
-        panelClassName="min-w-[12rem] py-1"
-      >
-        <button
-          type="button"
-          role="menuitem"
-          className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-800 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-700/80"
-          onClick={() => {
-            onAddLinhaContagem?.(menuCtxContagem.idx ?? undefined);
-            setMenuCtxContagem(null);
-          }}
-        >
-          <Plus className="h-4 w-4 shrink-0" aria-hidden />
-          {menuCtxContagem.idx == null ? 'Adicionar linha' : 'Adicionar linha abaixo'}
-        </button>
-        {menuCtxContagem.idx != null && (
-          <button
-            type="button"
-            role="menuitem"
-            className="flex w-full items-center gap-2 border-t border-gray-200 px-3 py-2.5 text-left text-sm text-red-700 hover:bg-red-50 dark:border-gray-700 dark:text-red-400 dark:hover:bg-red-950/40"
-            onClick={() => {
-              onRemoveLinhaContagem?.(menuCtxContagem.idx as number);
-              setMenuCtxContagem(null);
-            }}
-          >
-            <Trash2 className="h-4 w-4 shrink-0" aria-hidden />
-            Excluir linha
-          </button>
-        )}
-      </ActionMenuOverlay>
-    ) : null;
-    return (
-      <div className="space-y-3">
-        <div className="table-scroll rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900">
-          <table className={`w-full table-fixed border-collapse text-sm ${gradeTableCls} ${gradeTabelaMemorialBordaCls}`}>
-            <colgroup>
-              <col style={{ width: '70%' }} />
-              <col style={{ width: '30%' }} />
-            </colgroup>
-            <thead>
-              {renderCabecalhoServico(2, e => abrirMenuCtxContagem(e, null))}
-              <tr className={gradeTableRowTrCls}>
-                <th className={thFirst}>Local / descrição</th>
-                <th className={thRest}>Quantidade</th>
-              </tr>
-            </thead>
-            <tbody>
-              {linhasContagem.length === 0 ? (
-                <tr className={gradeTableRowTrCls}>
-                  <td
-                    colSpan={2}
-                    className="border-b border-gray-200 bg-slate-50/40 px-6 py-10 text-center dark:border-gray-600 dark:bg-gray-900/40"
-                  >
-                    <p className="mx-auto max-w-md text-sm leading-relaxed text-gray-600 dark:text-gray-400">
-                      Nenhuma linha de medição. Inicie o cadastro das medidas conforme o tipo de serviço.
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => onAddLinhaContagem?.()}
-                      className="mt-4 inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-red-700"
-                    >
-                      <Plus className="h-4 w-4" />
-                      Iniciar medições
-                    </button>
-                  </td>
-                </tr>
-              ) : (
-                linhasContagem.map((ln, idx) => (
-                  <tr
-                    key={idx}
-                    className={`cursor-pointer transition-colors hover:[&>td]:bg-slate-50/95 dark:hover:[&>td]:bg-slate-800/35 ${gradeTableRowTrCls}`}
-                    onClick={e => abrirMenuCtxContagem(e, idx)}
-                    onContextMenu={e => abrirMenuCtxContagem(e, idx)}
-                  >
-                    <td className={tdFirstBody}>
-                      <MemorialCampoLocal
-                        committedValue={ln.descricao ?? ''}
-                        onCommit={(raw) => onUpdateLinhaContagem?.(idx, 'descricao', raw)}
-                        placeholder="Ex: Pavimento 1"
-                        className={`${inputCls} !px-3 text-left sm:!px-3.5`}
-                      />
-                    </td>
-                    <td className={`${tdRestBody} text-center`}>
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        placeholder="0"
-                        value={
-                          draftCalc[`${rowKey}|contagem|${idx}`] ??
-                          (ln.quantidade === 0 ? '' : String(ln.quantidade))
-                        }
-                        onChange={e =>
-                          handleCalcChange(`${rowKey}|contagem|${idx}`, e.target.value, n =>
-                            onUpdateLinhaContagem?.(idx, 'quantidade', n)
-                          )
-                        }
-                        onBlur={e =>
-                          handleCalcBlur(
-                            `${rowKey}|contagem|${idx}`,
-                            draftCalc[`${rowKey}|contagem|${idx}`] ?? e.target.value,
-                            n => onUpdateLinhaContagem?.(idx, 'quantidade', n)
-                          )
-                        }
-                        className={`${inputCls} text-center`}
-                      />
-                    </td>
-                  </tr>
-                ))
-              )}
-              {linhasContagem.length > 0 && (
-                <tr
-                  className={`${gradeTableRowTrCls} cursor-pointer`}
-                  onClick={e => abrirMenuCtxContagem(e, null)}
-                  onContextMenu={e => abrirMenuCtxContagem(e, null)}
-                >
-                  <td className={tdFirst}>
-                    <span className="text-[11px] font-bold uppercase tracking-wide text-gray-700 dark:text-gray-200">
-                      Total
-                    </span>
-                  </td>
-                  <td className={tdCalc} title="Quantidade total (UN)">
-                    {total.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 4 })}
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-        {portalMenuCtxContagem}
-      </div>
-    );
-  }
 
-  /** Itens em unidade (UN): quantidade na coluna N, alinhado à exportação e à aba Orçamento. */
-  if (tipo === 'un' && !ehCargaEntulho) {
-    const colUn = contarColunasGrade();
-    const draftKeyUn = `${rowKey}|un|qtd`;
-    const aplicarQtd = (n: number) => {
-      onQuantidadeUnChange?.(Math.max(0, n));
-    };
-    const fmtUn = quantidadeUn.toLocaleString('pt-BR', {
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 4
-    });
-    return (
-      <div className="space-y-3">
-        {tabelaEnvoltorio(
-          <>
-            <thead>
-              {renderCabecalhoServico(colUn)}
-              {renderHeaderRow(lnFallback)}
-            </thead>
-            <tbody>
-              <tr className={`transition-colors hover:[&>td]:bg-slate-50/95 dark:hover:[&>td]:bg-slate-800/35 ${gradeTableRowTrCls}`}>
-                <td className={`${tdFirstBody} text-left`}>
-                  <span className="block px-3 py-2.5 text-sm text-gray-700 dark:text-gray-300">
-                    {quantidadeUnReadOnly
-                      ? 'Quantidade (calculada: carga de entulho no bloco, 1 caçamba = 4 m³)'
-                      : 'Quantidade do item (unidades)'}
-                  </span>
-                </td>
-                {celulaVazia()}
-                {celulaVazia()}
-                {celulaVazia()}
-                <td className={`${tdRestBody} text-center`}>
-                  {quantidadeUnReadOnly ? (
-                    <span
-                      className="block px-2 py-2.5 text-sm font-medium tabular-nums text-gray-900 dark:text-gray-100"
-                      title="Ajuste as medições da carga manual de entulho e das demolições no mesmo bloco"
-                    >
-                      {fmtUn}
-                    </span>
-                  ) : (
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      placeholder="0"
-                      value={
-                        draftCalc[draftKeyUn] ??
-                        (quantidadeUn === 0 ? '' : String(quantidadeUn))
-                      }
-                      onChange={e =>
-                        handleCalcChange(draftKeyUn, e.target.value, aplicarQtd)
-                      }
-                      onBlur={e =>
-                        handleCalcBlur(draftKeyUn, draftCalc[draftKeyUn] ?? e.target.value, aplicarQtd)
-                      }
-                      className={`${inputCls} text-center`}
-                    />
-                  )}
-                </td>
-                {celulaVazia()}
-                {celulaVazia()}
-                {celulaVazia()}
-                <td className={tdCalc} title="Quantidade total (UN)">
-                  {fmtUn}
-                </td>
-              </tr>
-            </tbody>
-          </>
-        )}
-      </div>
-    );
-  }
-
-  if (!dim.linhas?.length) {
+  if (!linhasEfetivas?.length) {
     const colEmpty = contarColunasGrade();
     if (ehCargaEntulho) {
       return (
@@ -1166,7 +750,7 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
   }
 
   if (!ehCargaEntulho) {
-    const lnHeaderRef = dim.linhas.find(l => !l.cabecalhoSecao) ?? dim.linhas[0];
+    const lnHeaderRef = linhasEfetivas.find(l => !l.cabecalhoSecao) ?? linhasEfetivas[0];
     const colCount = contarColunasGrade();
     return (
       <>
@@ -1178,7 +762,7 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
               {renderHeaderRow(lnHeaderRef)}
             </thead>
             <tbody>
-              {dim.linhas.map((ln, idx) => renderRow(ln, idx))}
+              {linhasEfetivas.map((ln, idx) => renderRow(ln, idx))}
               {renderLinhaTotalMedicao()}
             </tbody>
           </>
@@ -1190,7 +774,7 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
   }
 
   /** Carga de entulho: uma tabela contínua (sem sub-blocos nem faixa duplicada por composição). */
-  const lnHeaderCarga = dim.linhas.find(l => !l.cabecalhoSecao) ?? dim.linhas[0];
+  const lnHeaderCarga = linhasEfetivas.find(l => !l.cabecalhoSecao) ?? linhasEfetivas[0];
   const colCountCarga = contarColunasGrade();
   return (
     <>
@@ -1202,7 +786,7 @@ export const OrcamentoMedicaoPainel = memo(function OrcamentoMedicaoPainel({
               {renderHeaderRow(lnHeaderCarga)}
             </thead>
             <tbody>
-              {dim.linhas.map((ln, idx) => renderRow(ln, idx))}
+              {linhasEfetivas.map((ln, idx) => renderRow(ln, idx))}
               {renderLinhaTotalMedicao()}
             </tbody>
           </>

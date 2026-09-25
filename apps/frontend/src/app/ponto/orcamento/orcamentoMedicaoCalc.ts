@@ -32,6 +32,12 @@ export function calcV(linha: LinhaMedicao, tipo: TipoUnidadeFormula): number {
       return A;
     case 'm':
       return (C || 0) * n;
+    case 'un': {
+      if ((linha.H || 0) > 0) return A * (linha.H || 0);
+      if ((linha.L || 0) > 0) return A;
+      if ((linha.C || 0) > 0) return (C || 0) * n;
+      return Number(linha.N) || 0;
+    }
     default:
       return 1;
   }
@@ -40,6 +46,9 @@ export function calcV(linha: LinhaMedicao, tipo: TipoUnidadeFormula): number {
 /** Calcula SUBTOTAL = V × empolamento. Se C,L,H vazios e valorManual preenchido, usa valorManual. */
 export function calcularQuantidadeLinha(linha: LinhaMedicao, tipo: TipoUnidadeFormula): number {
   if (linha.cabecalhoSecao) return 0;
+  if (linha.subtotalManual != null && Number.isFinite(linha.subtotalManual)) {
+    return linha.subtotalManual;
+  }
   const tipoOrigQ = linha.tipoOrigemMedicao ?? 'm3';
   const fator =
     linha.empolamento != null && linha.empolamento > 0
@@ -52,10 +61,30 @@ export function calcularQuantidadeLinha(linha: LinhaMedicao, tipo: TipoUnidadeFo
     return linha.valorManual * fator;
   }
   const temDimensoes = (linha.C || 0) !== 0 || (linha.L || 0) !== 0 || (linha.H || 0) !== 0;
-  if (!temDimensoes && linha.valorManual != null && linha.valorManual >= 0) {
-    return linha.valorManual * fator;
+  if (linha.valorManual != null && Number.isFinite(linha.valorManual)) {
+    if (!temDimensoes || linha.valorManual > 0) {
+      return linha.valorManual * fator;
+    }
   }
   return calcV(linha, tipo) * fator;
+}
+
+/** Converte a lista antiga de UN (local + quantidade) para o mesmo formato das outras unidades. */
+export function linhasContagemParaMedicao(linhas: LinhaContagem[] | undefined): LinhaMedicao[] {
+  if (!linhas?.length) return [];
+  return linhas.map((ln) => ({
+    descricao: ln.descricao || '',
+    C: 0,
+    L: 0,
+    H: 0,
+    N: Number.isFinite(ln.quantidade) ? ln.quantidade : 0,
+    empolamento: 1
+  }));
+}
+
+export function linhasMedicaoEfetivas(dim: { linhas?: LinhaMedicao[]; linhasContagem?: LinhaContagem[] } | undefined): LinhaMedicao[] {
+  if (dim?.linhas?.length) return dim.linhas;
+  return linhasContagemParaMedicao(dim?.linhasContagem);
 }
 
 /** Soma simples das quantidades por local — memória de cálculo de itens "un". */

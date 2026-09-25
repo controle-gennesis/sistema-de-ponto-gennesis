@@ -35,7 +35,7 @@ export function ModalCloseConfirm({
   return (
     <AppModalOverlay
       className={clsx(
-        'app-modal-overlay fixed inset-0 z-[2010] flex items-center justify-center',
+        'app-modal-overlay fixed inset-0 z-[2200] flex items-center justify-center',
         className,
       )}
     >

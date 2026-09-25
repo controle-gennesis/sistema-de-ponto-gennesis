@@ -15,6 +15,8 @@ export interface LinhaMedicao {
   N: number;
   empolamento: number;
   valorManual?: number;
+  /** Quantidade final da linha, quando o subtotal é digitado no lugar do cálculo automático. */
+  subtotalManual?: number;
   /**
    * Carga agregada: soma na origem — para m³ soma de volumes; para m² soma de áreas (base para A e para V = A×H na carga).
    */

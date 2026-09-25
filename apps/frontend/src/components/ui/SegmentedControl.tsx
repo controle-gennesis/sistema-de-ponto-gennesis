@@ -52,12 +52,18 @@ export function SegmentedControl<T extends string>({
     const idx = optionsRef.current.findIndex((o) => o.value === valueRef.current);
     const btn = btnRefs.current[idx];
     if (!root || !btn) return;
-    const rootRect = root.getBoundingClientRect();
-    const btnRect = btn.getBoundingClientRect();
-    // Inteiros evitam jitter de subpixel reentrando no ResizeObserver.
+    // offset* é relativo à padding edge (igual ao left absoluto) — evita a pílula
+    // invadir a borda direita no último item e parecer com margem menor.
+    const padRight = parseFloat(getComputedStyle(root).paddingRight) || 0;
+    let left = btn.offsetLeft;
+    let width = btn.offsetWidth;
+    const maxRight = root.clientWidth - padRight;
+    if (left + width > maxRight) {
+      width = Math.max(0, maxRight - left);
+    }
     const next: PillState = {
-      left: Math.round(btnRect.left - rootRect.left + root.scrollLeft),
-      width: Math.round(btnRect.width),
+      left: Math.round(left),
+      width: Math.round(width),
       ready: true,
     };
     setPill((prev) => (pillsEqual(prev, next) ? prev : next));
@@ -85,7 +91,9 @@ export function SegmentedControl<T extends string>({
   return (
     <div
       ref={rootRef}
-      className={`relative inline-flex h-9 shrink-0 items-stretch rounded-lg bg-gray-100 p-1 dark:bg-gray-800 ${className}`}
+      className={`relative inline-flex h-9 shrink-0 items-stretch rounded-lg bg-gray-100 dark:bg-gray-800 ${
+        /\bp-\S/.test(className) ? '' : 'p-1 '
+      }${className}`}
       role="group"
       aria-label={ariaLabel}
     >

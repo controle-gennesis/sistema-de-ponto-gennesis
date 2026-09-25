@@ -36,7 +36,8 @@ import {
   CalendarCheck,
   ArrowRight,
   TrendingUp,
-  RefreshCw
+  RefreshCw,
+  Palette
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { FilterStatCard } from '@/components/ui/FilterStatCard';
@@ -74,10 +75,12 @@ import {
 import { FORM_FIELD_INPUT_CLS } from '@/lib/formFieldUi';
 import { toPersonSelectOptions } from '@/lib/personSelectOptions';
 import { Modal } from '@/components/ui/Modal';
+import { expandShortLabelHex, KanbanLabelColorPicker } from '@/components/kanban/KanbanLabelColorPicker';
 import { AppModalTabButton } from '@/components/ui/AppTabButton';
 import { ActionMenuOverlay } from '@/components/ui/ActionMenuOverlay';
 import { DatePickerField } from '@/components/ui/DatePickerField';
 import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
+import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { formatCadastroListId } from '@/components/ui/CadastroListSummary';
 import { Checkbox, TableCheckbox } from '@/components/ui/Checkbox';
 import {
@@ -117,10 +120,10 @@ import {
 import {
   calcV,
   calcularQuantidadeLinha,
-  calcularQuantidadeContagem,
-  inferirTipoUnidadePorDimensao
+  inferirTipoUnidadePorDimensao,
+  linhasMedicaoEfetivas
 } from './orcamentoMedicaoCalc';
-import type { LinhaMedicao, LinhaContagem, DimensoesItem, TipoUnidadeFormula } from './orcamentoMedicaoTypes';
+import type { LinhaMedicao, LinhaContagem, DimensoesItem, TipoUnidadeFormula, RotulosColunasMedicao } from './orcamentoMedicaoTypes';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
 export type { LinhaMedicao, TipoUnidadeFormula, DimensoesItem } from './orcamentoMedicaoTypes';
 
@@ -1385,6 +1388,44 @@ function mesclarArvoreServicosOrcafascio(
   return { servicos, chaveParaNovaKey, chavesNovas };
 }
 
+type NomeOrcafascioEditado = { tipo: 'Título' | 'Subtítulo'; de: string; para: string };
+
+function snapshotNomesServicosOrcamento(svcs: ServicoPadrao[]): {
+  titulos: Record<string, string>;
+  subtitulos: Record<string, string>;
+} {
+  const titulos: Record<string, string> = {};
+  const subtitulos: Record<string, string> = {};
+  for (const s of svcs) {
+    titulos[s.id] = s.nome;
+    for (const sub of s.subtitulos) {
+      subtitulos[`${s.id}|${sub.id}`] = sub.nome;
+    }
+  }
+  return { titulos, subtitulos };
+}
+
+function listarNomesServicosEditados(
+  svcs: ServicoPadrao[],
+  snap: { titulos: Record<string, string>; subtitulos: Record<string, string> } | null
+): NomeOrcafascioEditado[] {
+  if (!snap) return [];
+  const out: NomeOrcafascioEditado[] = [];
+  for (const s of svcs) {
+    const origTitulo = snap.titulos[s.id];
+    if (origTitulo != null && origTitulo.trim() !== s.nome.trim()) {
+      out.push({ tipo: 'Título', de: origTitulo, para: s.nome });
+    }
+    for (const sub of s.subtitulos) {
+      const origSub = snap.subtitulos[`${s.id}|${sub.id}`];
+      if (origSub != null && origSub.trim() !== sub.nome.trim()) {
+        out.push({ tipo: 'Subtítulo', de: origSub, para: sub.nome });
+      }
+    }
+  }
+  return out;
+}
+
 function parseOrcafascioBudgetIdMeta(metaRaw: Record<string, unknown> | undefined): string | undefined {
   const v = metaRaw?.orcafascioBudgetId;
   return typeof v === 'string' && v.trim() ? v.trim() : undefined;
@@ -1717,6 +1758,10 @@ export interface ItemServico {
   analiticoLinhas?: LinhaAnaliticoComposicao[];
   /** Só leitura na importação da planilha; removido antes de persistir. */
   quantidadePlanilha?: number;
+  /** Nº do item na planilha (ex.: 3.1.2) — só na importação, para casar memória/observação. */
+  itemRotuloPlanilha?: string;
+  /** Observação da coluna OBSERVAÇÕES — só na importação. */
+  observacaoPlanilha?: string;
   /** Quantidade original do Orçafascio (persistida — para escalar totais se a qtd mudar). */
   quantidadeImportada?: number;
   /** Total sem BDI da linha no Orçafascio (`total_price`) — fonte da coluna/custo direto. */
@@ -1743,7 +1788,7 @@ function servicosSemQuantidadePlanilha(servicos: ServicoPadrao[]): ServicoPadrao
     ...svc,
     subtitulos: svc.subtitulos.map(sub => ({
       ...sub,
-      itens: sub.itens.map(({ quantidadePlanilha: _qp, ...rest }) => rest)
+      itens: sub.itens.map(({ quantidadePlanilha: _qp, itemRotuloPlanilha: _ir, observacaoPlanilha: _ob, ...rest }) => rest)
     }))
   }));
 }
@@ -1966,6 +2011,8 @@ type OrcamentoMeta = {
    * `undefined` = orçamento antigo/de outra origem — mantém o comportamento anterior (coluna "un" editável direto).
    */
   usarMemoriaCalculo?: boolean;
+  /** `false` = planilha sem aba/dados analíticos — esconde Analítico e Ficha de demanda. */
+  temAnalitico?: boolean;
   /**
    * Escolha feita na importação do Orçafascio: como calcular os subtotais por item.
    * `undefined` = orçamento antigo/de outra origem — mantém o comportamento anterior (truncar, igual sempre foi).
@@ -1996,7 +2043,146 @@ type OrcamentoMeta = {
   };
   /** Id da ficha de demanda enviada para aprovação (quando houver). */
   fichaDemandaApprovalId?: string;
+  /** Cores de título/subtítulo e fonte das tabelas do orçamento. */
+  aparencia?: AparenciaOrcamento;
 };
+
+export type AparenciaOrcamento = {
+  tituloFundo: string;
+  tituloTexto: string;
+  subtituloFundo: string;
+  subtituloTexto: string;
+  /** CSS font-family; vazio = fonte padrão do sistema. */
+  fonte: string;
+};
+
+const APARENCIA_ORCAMENTO_PADRAO: AparenciaOrcamento = {
+  tituloFundo: '#dc2626',
+  tituloTexto: '#ffffff',
+  subtituloFundo: '#e2e8f0',
+  subtituloTexto: '#1f2937',
+  fonte: ''
+};
+
+const FONTES_ORCAMENTO: Array<{ value: string; label: string }> = [
+  { value: '', label: 'Padrão do sistema' },
+  { value: 'Inter, system-ui, sans-serif', label: 'Inter' },
+  { value: 'Arial, Helvetica, sans-serif', label: 'Arial' },
+  { value: 'Calibri, Candara, Segoe UI, sans-serif', label: 'Calibri' },
+  { value: '"Times New Roman", Times, serif', label: 'Times New Roman' },
+  { value: 'Georgia, serif', label: 'Georgia' },
+  { value: '"Courier New", Courier, monospace', label: 'Courier New' },
+  { value: 'Roboto, system-ui, sans-serif', label: 'Roboto' },
+  { value: '"Open Sans", sans-serif', label: 'Open Sans' }
+];
+
+function corHexOrcamento(v: unknown): string | undefined {
+  if (typeof v !== 'string') return undefined;
+  const s = v.trim();
+  if (/^#([0-9a-fA-F]{3})$/.test(s)) {
+    const [, a, b, c] = s.match(/^#([0-9a-fA-F])([0-9a-fA-F])([0-9a-fA-F])$/) ?? [];
+    if (a && b && c) return `#${a}${a}${b}${b}${c}${c}`.toLowerCase();
+  }
+  if (/^#([0-9a-fA-F]{6})$/.test(s)) return s.toLowerCase();
+  return undefined;
+}
+
+function parseAparenciaOrcamento(raw: unknown): AparenciaOrcamento | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const o = raw as Record<string, unknown>;
+  const tituloFundo = corHexOrcamento(o.tituloFundo);
+  const tituloTexto = corHexOrcamento(o.tituloTexto);
+  const subtituloFundo = corHexOrcamento(o.subtituloFundo);
+  const subtituloTexto = corHexOrcamento(o.subtituloTexto);
+  const fonte = typeof o.fonte === 'string' ? o.fonte : '';
+  if (!tituloFundo && !tituloTexto && !subtituloFundo && !subtituloTexto && !fonte.trim()) {
+    return undefined;
+  }
+  return {
+    tituloFundo: tituloFundo ?? APARENCIA_ORCAMENTO_PADRAO.tituloFundo,
+    tituloTexto: tituloTexto ?? APARENCIA_ORCAMENTO_PADRAO.tituloTexto,
+    subtituloFundo: subtituloFundo ?? APARENCIA_ORCAMENTO_PADRAO.subtituloFundo,
+    subtituloTexto: subtituloTexto ?? APARENCIA_ORCAMENTO_PADRAO.subtituloTexto,
+    fonte
+  };
+}
+
+function aparenciaOrcamentoEhPadrao(a: AparenciaOrcamento): boolean {
+  const eq = (x: string, y: string) => x.trim().toLowerCase() === y.trim().toLowerCase();
+  return (
+    eq(a.tituloFundo, APARENCIA_ORCAMENTO_PADRAO.tituloFundo) &&
+    eq(a.tituloTexto, APARENCIA_ORCAMENTO_PADRAO.tituloTexto) &&
+    eq(a.subtituloFundo, APARENCIA_ORCAMENTO_PADRAO.subtituloFundo) &&
+    eq(a.subtituloTexto, APARENCIA_ORCAMENTO_PADRAO.subtituloTexto) &&
+    !a.fonte.trim()
+  );
+}
+
+const ORC_LINHA_COR_CUSTOM_CLS = '[&_*]:!text-inherit [&>td]:bg-inherit [&>th]:bg-inherit';
+
+function estiloLinhaTituloOrc(ap?: AparenciaOrcamento): React.CSSProperties | undefined {
+  if (!ap) return undefined;
+  return { backgroundColor: ap.tituloFundo, color: ap.tituloTexto };
+}
+
+function estiloLinhaSubtituloOrc(ap?: AparenciaOrcamento): React.CSSProperties | undefined {
+  if (!ap) return undefined;
+  return { backgroundColor: ap.subtituloFundo, color: ap.subtituloTexto };
+}
+
+function clsTituloOrc(ap?: AparenciaOrcamento): string {
+  return ap
+    ? `${ORC_LINHA_COR_CUSTOM_CLS} [&>td]:!border-b-0`
+    : 'bg-red-600 dark:bg-red-950/90';
+}
+
+function clsSubtituloOrc(ap?: AparenciaOrcamento, coladoNoTitulo = false): string {
+  const colado = coladoNoTitulo ? '!border-t-0 [&>td]:!border-t-0' : '';
+  if (ap) {
+    return `${ORC_LINHA_COR_CUSTOM_CLS} ${colado}`.trim();
+  }
+  return `${colado} border-b border-gray-200/90 bg-slate-200/90 dark:border-gray-800 dark:bg-gray-900`.trim();
+}
+
+function CampoCorOrcamento({
+  label,
+  value,
+  onChange
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const hex = (corHexOrcamento(value) ?? '#000000').toUpperCase();
+  return (
+    <div className="block">
+      <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+        {label}
+      </span>
+      <div className="flex items-center gap-2">
+        <KanbanLabelColorPicker className="[&_button]:shadow-none" color={hex} onChange={onChange} />
+        <input
+          type="text"
+          value={hex}
+          onChange={(e) => {
+            let v = e.target.value.toUpperCase().replace(/[^#0-9A-F]/g, '');
+            if (!v.startsWith('#')) v = `#${v.replace(/^#/, '')}`;
+            if (v.length <= 7) onChange(v);
+          }}
+          onBlur={() => {
+            if (/^#([0-9A-F]{3}|[0-9A-F]{6})$/i.test(value)) {
+              onChange(expandShortLabelHex(value));
+            }
+          }}
+          className="w-[4.75rem] rounded-lg border border-gray-200 bg-white px-2 py-2.5 text-center text-xs font-mono text-gray-700 focus:outline-none focus:ring-2 focus:ring-red-500/40 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200"
+          maxLength={7}
+          spellCheck={false}
+          aria-label={label}
+        />
+      </div>
+    </div>
+  );
+}
 
 const ORCAMENTO_REAJUSTES_PADRAO: Array<{ nome: string; percentual: string }> = [
   { nome: '1º reajuste IPCA', percentual: '3,93583' },
@@ -2295,6 +2481,15 @@ type EmployeeOption = {
 };
 
 /** Estado da montagem do orçamento (persistido por contrato). */
+function parseObservacoesPorItem(raw: unknown): Record<string, string> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof v === 'string') out[k] = v;
+  }
+  return out;
+}
+
 interface SessaoOrcamentoPersist {
   subtitulosNoOrcamento: string[];
   quantidadesPorItem: Record<string, number>;
@@ -2303,6 +2498,8 @@ interface SessaoOrcamentoPersist {
   planilhaQuantidadeCompra: Record<string, number>;
   planilhaValorUnitCompraReal: Record<string, number>;
   planilhaTipoInsumo: Record<string, 'MO' | 'MA' | 'LO'>;
+  /** Observação por composição na aba Orçamento (chave da linha). */
+  observacoesPorItem?: Record<string, string>;
   meta?: OrcamentoMeta;
   /**
    * Chaves `servicoId|subtituloId|chave` ocultas na montagem (removidas pelo usuário).
@@ -2335,6 +2532,7 @@ function sessaoVazia(): SessaoOrcamentoPersist {
     planilhaQuantidadeCompra: {},
     planilhaValorUnitCompraReal: {},
     planilhaTipoInsumo: {},
+    observacoesPorItem: {},
     itensOcultosNoOrcamento: [],
     insumosAnaliticoOcultos: [],
     cronograma: cronogramaVazio(),
@@ -2389,6 +2587,7 @@ function loadSessaoOrcamento(centroCustoId: string | null, orcamentoId: string |
           importadoPlanilha: metaRaw.importadoPlanilha === true,
           usarMemoriaCalculo:
             typeof metaRaw.usarMemoriaCalculo === 'boolean' ? metaRaw.usarMemoriaCalculo : undefined,
+          temAnalitico: typeof metaRaw.temAnalitico === 'boolean' ? metaRaw.temAnalitico : undefined,
           modoArredondamento:
             metaRaw.modoArredondamento === 'truncar' ||
             metaRaw.modoArredondamento === 'arredondar' ||
@@ -2419,6 +2618,7 @@ function loadSessaoOrcamento(centroCustoId: string | null, orcamentoId: string |
             typeof metaRaw.fichaDemandaApprovalId === 'string' && metaRaw.fichaDemandaApprovalId.trim()
               ? metaRaw.fichaDemandaApprovalId.trim()
               : undefined,
+          aparencia: parseAparenciaOrcamento(metaRaw.aparencia),
         totaisOrcafascio: (() => {
           const t = metaRaw.totaisOrcafascio;
           if (!t || typeof t !== 'object') return undefined;
@@ -2444,6 +2644,7 @@ function loadSessaoOrcamento(centroCustoId: string | null, orcamentoId: string |
         p.planilhaTipoInsumo && typeof p.planilhaTipoInsumo === 'object'
           ? normalizarPlanilhaTipoInsumo(p.planilhaTipoInsumo as Record<string, unknown>)
           : {},
+      observacoesPorItem: parseObservacoesPorItem(p.observacoesPorItem),
       itensOcultosNoOrcamento: Array.isArray(p.itensOcultosNoOrcamento) ? p.itensOcultosNoOrcamento : [],
       insumosAnaliticoOcultos: Array.isArray(p.insumosAnaliticoOcultos) ? p.insumosAnaliticoOcultos : [],
       cronograma: normalizarCronograma((p as { cronograma?: unknown }).cronograma),
@@ -2464,7 +2665,8 @@ function sessaoTemDados(s: SessaoOrcamentoPersist | null | undefined): boolean {
     Object.keys(s.dimensoesPorItem).length > 0 ||
     Object.keys(s.planilhaQuantidadeCompra ?? {}).length > 0 ||
     Object.keys(s.planilhaValorUnitCompraReal ?? {}).length > 0 ||
-    Object.keys(s.planilhaTipoInsumo ?? {}).length > 0
+    Object.keys(s.planilhaTipoInsumo ?? {}).length > 0 ||
+    Object.keys(s.observacoesPorItem ?? {}).length > 0
   );
 }
 
@@ -2736,6 +2938,7 @@ function parseOrcamentoDetailRaw(d: {
         importadoPlanilha: metaRaw.importadoPlanilha === true,
         usarMemoriaCalculo:
           typeof metaRaw.usarMemoriaCalculo === 'boolean' ? metaRaw.usarMemoriaCalculo : undefined,
+        temAnalitico: typeof metaRaw.temAnalitico === 'boolean' ? metaRaw.temAnalitico : undefined,
         modoArredondamento:
           metaRaw.modoArredondamento === 'truncar' ||
           metaRaw.modoArredondamento === 'arredondar' ||
@@ -2765,6 +2968,7 @@ function parseOrcamentoDetailRaw(d: {
           typeof metaRaw.fichaDemandaApprovalId === 'string' && metaRaw.fichaDemandaApprovalId.trim()
             ? metaRaw.fichaDemandaApprovalId.trim()
             : undefined,
+        aparencia: parseAparenciaOrcamento(metaRaw.aparencia),
         totaisOrcafascio: (() => {
           const t = metaRaw.totaisOrcafascio;
           if (!t || typeof t !== 'object') return undefined;
@@ -2796,6 +3000,7 @@ function parseOrcamentoDetailRaw(d: {
             so.planilhaTipoInsumo && typeof so.planilhaTipoInsumo === 'object'
               ? normalizarPlanilhaTipoInsumo(so.planilhaTipoInsumo as Record<string, unknown>)
               : {},
+          observacoesPorItem: parseObservacoesPorItem(so.observacoesPorItem),
           itensOcultosNoOrcamento: Array.isArray(so.itensOcultosNoOrcamento) ? so.itensOcultosNoOrcamento : [],
           cronograma: normalizarCronograma(so.cronograma),
           meta,
@@ -2821,6 +3026,14 @@ async function fetchOrcamentoDetail(centroCustoId: string, orcamentoId: string):
   } catch {
     return null;
   }
+}
+
+/** Evita reaplicar o mesmo detalhe (cache + GET) e remontar título/subtítulo. */
+function assinaturaArvoreOrcamento(servicos: ServicoPadrao[], subtitulos: string[]): string {
+  const arvore = (servicos ?? [])
+    .map(s => `${s.id}:${s.nome}:${(s.subtitulos ?? []).map(sub => `${sub.id}:${sub.nome}`).join('/')}`)
+    .join(';');
+  return `${(subtitulos ?? []).join(',')}|${arvore}`;
 }
 
 /** Pinta na hora com o que já está no aparelho (RAM / sessão / backup). O GET só confirma. */
@@ -3201,7 +3414,16 @@ function normalizarChave(codigo: string, banco: string): string {
 }
 
 type ParsePlanilhaOrcamentoPerfeitoResult =
-  | { ok: true; servicos: ServicoPadrao[]; composicoesAnaliticas: ComposicaoItem[] }
+  | {
+      ok: true;
+      servicos: ServicoPadrao[];
+      composicoesAnaliticas: ComposicaoItem[];
+      temAnalitico: boolean;
+      temMemorial: boolean;
+      metaPlanilha: MetaPlanilhaImportada;
+      observacoesPorRotulo: Record<string, string>;
+      memorialPorRotulo: Record<string, DimensoesItem>;
+    }
   | { ok: false; message: string };
 
 /** Índices de coluna após normalizar cabeçalhos (NFD, minúsculas). */
@@ -3217,7 +3439,9 @@ function indicesColunasOrcamentoPerfeito(header: string[]) {
     return true;
   });
   const matMoIdx = header.findIndex(h => {
-    if (h.includes('sub mat') || /^sub\s/.test(h)) return false;
+    if (h.includes('sub mat') || /^sub\s/.test(h) || h.includes('total')) return false;
+    if (h.includes('valor unit') && h.includes('sem') && h.includes('bdi')) return true;
+    if (h.includes('custo direto') || h.includes('unitario sem bdi')) return true;
     return (
       (h.includes('mat') && (h.includes('m.o') || h.includes('m. o') || h.includes('mo'))) ||
       h === 'mat + m.o' ||
@@ -3226,17 +3450,20 @@ function indicesColunasOrcamentoPerfeito(header: string[]) {
     );
   });
   const maoIdx = header.findIndex(h => {
-    if (h.includes('sub mao') || /^sub\s/.test(h)) return false;
+    if (h.includes('sub mao') || /^sub\s/.test(h) || h.includes('total')) return false;
+    const compacto = h.replace(/[\s.]/g, '');
     return (
       (h.includes('mao') && h.includes('obra')) ||
       h === 'mo' ||
       h === 'm.o' ||
-      h.startsWith('m.o')
+      h.startsWith('m.o') ||
+      compacto === 'mo'
     );
   });
   const materialIdx = header.findIndex(h => {
-    if (h.includes('sub material') || /^sub\s/.test(h)) return false;
-    return h === 'material' || h === 'mat' || h.includes(' material');
+    if (h.includes('sub material') || /^sub\s/.test(h) || h.includes('total')) return false;
+    const compacto = h.replace(/[\s.]/g, '');
+    return h === 'material' || h === 'mat' || compacto === 'mat' || h.includes(' material');
   });
   const quantidadeIdx = header.findIndex(h => {
     if (/^sub\s/.test(h)) return false;
@@ -3246,6 +3473,17 @@ function indicesColunasOrcamentoPerfeito(header: string[]) {
     if (semPonto === 'quant' || semPonto.startsWith('quant ')) return true;
     return h.startsWith('quant') && !h.includes('real');
   });
+  const unidadeIdx = header.findIndex(h => {
+    const compacto = h.replace(/[\s.]/g, '');
+    return compacto === 'und' || compacto === 'un' || compacto === 'unidade' || h === 'und' || h.startsWith('und ');
+  });
+  const valorComBdiIdx = header.findIndex(h => {
+    if (h.includes('total')) return false;
+    return (h.includes('valor unit') && h.includes('com') && h.includes('bdi')) || h.includes('unitario com bdi');
+  });
+  const totalSemBdiIdx = header.findIndex(h => h.includes('total') && h.includes('s') && h.includes('bdi') && !h.includes('c/'));
+  const totalComBdiIdx = header.findIndex(h => h.includes('total') && (h.includes('c/') || (h.includes('com') && h.includes('bdi'))));
+  const observacaoIdx = header.findIndex(h => h.includes('observa'));
   return {
     itemIdx,
     codigoIdx,
@@ -3254,8 +3492,246 @@ function indicesColunasOrcamentoPerfeito(header: string[]) {
     matMoIdx,
     maoIdx,
     materialIdx,
-    quantidadeIdx
+    quantidadeIdx,
+    unidadeIdx,
+    valorComBdiIdx,
+    totalSemBdiIdx,
+    totalComBdiIdx,
+    observacaoIdx
   };
+}
+
+function nomeAbaPlanilhaNormalizado(nome: string): string {
+  return normalizarTextoBusca(nome).replace(/[^a-z0-9]+/g, '');
+}
+
+function abaPareceMemorial(nome: string): boolean {
+  const n = nomeAbaPlanilhaNormalizado(nome);
+  return n.includes('memor') || n.includes('quantitativ');
+}
+
+function abaPareceAnalitico(nome: string): boolean {
+  const n = nomeAbaPlanilhaNormalizado(nome);
+  return n.includes('analit');
+}
+
+function abaPareceOrcamentoSintetico(nome: string): boolean {
+  const n = nomeAbaPlanilhaNormalizado(nome);
+  return n.includes('orcamento') || n.includes('sintetic');
+}
+
+function linhaPareceSubcabecalhoOrcamento(row: any[]): boolean {
+  const cells = (row || []).map((h: any) => normalizarTextoBusca(String(h || '')));
+  const compactos = cells.map(h => h.replace(/[\s.]/g, ''));
+  const temMo = compactos.some(h => h === 'mo' || h === 'maodeobra');
+  const temMat = compactos.some(h => h === 'mat' || h === 'material');
+  const temItemCodigo = cells.some(h => h === 'item' || h.includes('codigo') || h.includes('descri'));
+  return (temMo || temMat) && !temItemCodigo;
+}
+
+function mesclarCabecalhoDuasLinhas(topo: any[], baixo: any[]): string[] {
+  const n = Math.max(topo.length, baixo.length);
+  const out: string[] = [];
+  for (let i = 0; i < n; i++) {
+    const a = String(topo[i] ?? '').trim();
+    const b = String(baixo[i] ?? '').trim();
+    out.push(b || a);
+  }
+  return out;
+}
+
+function valorAoLadoDoRotuloPlanilha(rows: any[][], rotulos: string[], maxRow: number): string {
+  const alvos = rotulos.map(r => normalizarTextoBusca(r));
+  for (let r = 0; r < Math.min(rows.length, maxRow); r++) {
+    const row = rows[r] || [];
+    for (let c = 0; c < row.length; c++) {
+      const cell = normalizarTextoBusca(String(row[c] ?? ''));
+      if (!cell) continue;
+      if (!alvos.some(alvo => cell === alvo || cell.startsWith(`${alvo}:`) || cell.startsWith(`${alvo}.`))) {
+        continue;
+      }
+      const raw = String(row[c] ?? '');
+      const depoisDoDoisPontos = raw.includes(':') ? raw.split(':').slice(1).join(':').trim() : '';
+      if (depoisDoDoisPontos) return depoisDoDoisPontos;
+      for (let k = c + 1; k < Math.min(row.length, c + 4); k++) {
+        const v = String(row[k] ?? '').trim();
+        if (v) return v;
+      }
+    }
+  }
+  return '';
+}
+
+function percentualParaMetaPlanilha(raw: string): string {
+  const n = parsePreco(raw);
+  if (!(n > 0) || !Number.isFinite(n)) return '';
+  return String(n).replace('.', ',');
+}
+
+function prazoDiasDeTextoPlanilha(raw: string): string {
+  const m = String(raw || '').match(/(\d+(?:[.,]\d+)?)/);
+  return m?.[1] ? m[1].replace('.', ',') : '';
+}
+
+type MetaPlanilhaImportada = {
+  osNumeroPasta?: string;
+  descricao?: string;
+  prazoExecucaoDias?: string;
+  responsavelOrcamento?: string;
+  orcamentoRealizadoPor?: string;
+  bdiPercentual?: string;
+};
+
+function extrairMetaCabecalhoPlanilha(rows: any[][], headerRow: number): MetaPlanilhaImportada {
+  const maxRow = Math.min(rows.length, headerRow);
+  const osNumeroPasta = valorAoLadoDoRotuloPlanilha(rows, ['nº da os', 'n da os', 'os'], maxRow);
+  const descricao = valorAoLadoDoRotuloPlanilha(rows, ['descrição', 'descricao'], maxRow);
+  const prazoRaw = valorAoLadoDoRotuloPlanilha(rows, ['prazo de execução', 'prazo de execucao', 'prazo'], maxRow);
+  const responsavelOrcamento = valorAoLadoDoRotuloPlanilha(
+    rows,
+    ['responsável pela execução', 'responsavel pela execucao', 'responsável pelo orçamento', 'responsavel pelo orcamento'],
+    maxRow
+  );
+  const orcamentoRealizadoPor = valorAoLadoDoRotuloPlanilha(
+    rows,
+    ['orçamento realizado por', 'orcamento realizado por'],
+    maxRow
+  );
+  const bdiRaw = valorAoLadoDoRotuloPlanilha(rows, ['b.d.i', 'bdi'], maxRow);
+  return {
+    ...(osNumeroPasta ? { osNumeroPasta: osNumeroPasta.slice(0, 60) } : {}),
+    ...(descricao ? { descricao: descricao.slice(0, 240) } : {}),
+    ...(prazoDiasDeTextoPlanilha(prazoRaw) ? { prazoExecucaoDias: prazoDiasDeTextoPlanilha(prazoRaw) } : {}),
+    ...(responsavelOrcamento ? { responsavelOrcamento: responsavelOrcamento.slice(0, 120) } : {}),
+    ...(orcamentoRealizadoPor ? { orcamentoRealizadoPor: orcamentoRealizadoPor.slice(0, 120) } : {}),
+    ...(percentualParaMetaPlanilha(bdiRaw) ? { bdiPercentual: percentualParaMetaPlanilha(bdiRaw) } : {})
+  };
+}
+
+function ehRotuloItemPlanilha(val: string): boolean {
+  return /^\d+(?:\.\d+)+$/.test(String(val || '').trim());
+}
+
+function parseMemorialDaAba(rows: any[][]): Record<string, DimensoesItem> {
+  const out: Record<string, DimensoesItem> = {};
+  let i = 0;
+  while (i < rows.length) {
+    const rotulo = String(rows[i]?.[0] ?? '').trim();
+    if (!ehRotuloItemPlanilha(rotulo)) {
+      i += 1;
+      continue;
+    }
+    const und = String(rows[i]?.[2] ?? rows[i]?.[10] ?? '').trim();
+    const tipoUnidade = parseUnidadeComposicao(und) || 'un';
+    i += 1;
+    if (i >= rows.length) break;
+    const header = (rows[i] || []).map((h: any) => normalizarTextoBusca(String(h || '')));
+    const descIdx = header.findIndex(h => h.includes('descri'));
+    const pareceCabecalho =
+      descIdx >= 0 || header.some(h => h === 'c' || h === 'l' || h === 'h' || h.includes('subtotal'));
+    if (!pareceCabecalho) continue;
+
+    const idxC = header.findIndex(h => h === 'c' || h === 'p');
+    const idxL = header.findIndex(h => h === 'l');
+    const idxH = header.findIndex(h => h === 'h');
+    const idxPct = header.findIndex(h => h === '%' || h.includes('empol') || h === 'e');
+    const idxN = header.findIndex(h => h === 'n' || h === 'torres' || h === 'faces' || h === 'dias');
+    const idxSub = header.findIndex(h => h.includes('subtotal'));
+    const rotulosColunas: RotulosColunasMedicao = {};
+    if (idxC >= 0 && header[idxC] && header[idxC] !== 'c') rotulosColunas.C = String(rows[i][idxC] ?? '').trim();
+    if (idxN >= 0 && header[idxN] && header[idxN] !== 'n') rotulosColunas.N = String(rows[i][idxN] ?? '').trim();
+    if (idxPct >= 0 && header[idxPct]) rotulosColunas.pct = String(rows[i][idxPct] ?? '').trim();
+
+    i += 1;
+    const linhas: LinhaMedicao[] = [];
+    while (i < rows.length) {
+      const row = rows[i] || [];
+      const c0 = String(row[0] ?? '').trim();
+      const marcaFim = [8, 9, 10].some(idx => normalizarTextoBusca(String(row[idx] ?? '')) === 'fim');
+      if (marcaFim || ehRotuloItemPlanilha(c0)) break;
+      const desc = String(row[descIdx >= 0 ? descIdx : 1] ?? '').trim();
+      const C = idxC >= 0 ? parsePreco(row[idxC]) : 0;
+      const L = idxL >= 0 ? parsePreco(row[idxL]) : 0;
+      const H = idxH >= 0 ? parsePreco(row[idxH]) : 0;
+      const N = idxN >= 0 ? parsePreco(row[idxN]) : 0;
+      const empRaw = idxPct >= 0 ? parsePreco(row[idxPct]) : 0;
+      const sub = idxSub >= 0 ? parsePreco(row[idxSub]) : 0;
+      const descNorm = normalizarTextoBusca(desc);
+      if (descNorm === 'conferido' || descNorm === 'fim') {
+        i += 1;
+        continue;
+      }
+      if (!desc && !C && !L && !H && !N && !sub) {
+        i += 1;
+        continue;
+      }
+      linhas.push({
+        descricao: desc,
+        C,
+        L,
+        H,
+        N,
+        empolamento: empRaw > 0 ? empRaw : 1,
+        ...(sub > 0 ? { subtotalManual: sub } : {})
+      });
+      i += 1;
+    }
+    if (linhas.length > 0) {
+      out[rotulo] = {
+        tipoUnidade,
+        linhas,
+        ...(Object.keys(rotulosColunas).length > 0 ? { rotulosColunas } : {})
+      };
+    }
+  }
+  return out;
+}
+
+function quantidadeDasDimensoes(dim: DimensoesItem | undefined): number {
+  if (!dim?.linhas?.length) return 0;
+  const tipo = dim.tipoUnidade || 'un';
+  return dim.linhas.reduce(
+    (s, ln) => (ln.cabecalhoSecao ? s : s + calcularQuantidadeLinha(ln, tipo)),
+    0
+  );
+}
+
+/** Quando a memória diverge do sintético, ajusta o último subtotal para a quantidade da planilha. */
+function alinharMemorialAoSintetico(dim: DimensoesItem, qSintetico: number): DimensoesItem {
+  if (!(qSintetico > 0) || !Number.isFinite(qSintetico)) return dim;
+  const qMem = quantidadeDasDimensoes(dim);
+  const delta = qSintetico - qMem;
+  if (!Number.isFinite(delta) || Math.abs(delta) < 1e-6) return dim;
+  const linhas = [...(dim.linhas || [])];
+  let idx = -1;
+  for (let i = linhas.length - 1; i >= 0; i--) {
+    if (!linhas[i].cabecalhoSecao) {
+      idx = i;
+      break;
+    }
+  }
+  if (idx < 0) return dim;
+  const last = linhas[idx];
+  const atual = calcularQuantidadeLinha(last, dim.tipoUnidade || 'un');
+  linhas[idx] = { ...last, subtotalManual: atual + delta };
+  return { ...dim, linhas };
+}
+
+function encontrarAbaMemorialNoArquivo(workbook: {
+  SheetNames: string[];
+  Sheets: Record<string, unknown>;
+}): any[][] | null {
+  for (const name of workbook.SheetNames) {
+    const sheet = workbook.Sheets[name];
+    if (!sheet) continue;
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false }) as any[][];
+    if (abaPareceMemorial(name)) return rows;
+    const cabecalho = rows.slice(0, 16).some(row =>
+      normalizarTextoBusca((row || []).join(' ')).includes('memoria de calculo')
+    );
+    if (cabecalho) return rows;
+  }
+  return null;
 }
 
 /** Localiza a linha do cabeçalho: planilhas exportadas (linha 1), títulos acima, ou modelo (linha 11). ITEM e BANCO são opcionais. */
@@ -3282,14 +3758,21 @@ function encontrarLinhaCabecalhoOrcamentoPerfeito(rows: any[][]): number | null 
 function encontrarPrimeiraPlanilhaOrcamentoNoArquivo(workbook: {
   SheetNames: string[];
   Sheets: Record<string, unknown>;
-}): { rows: any[][]; headerRow: number } | null {
-  for (let si = 0; si < workbook.SheetNames.length; si++) {
-    const sheet = workbook.Sheets[workbook.SheetNames[si]];
+}): { rows: any[][]; headerRow: number; sheetName: string } | null {
+  const preferidas: string[] = [];
+  const demais: string[] = [];
+  for (const name of workbook.SheetNames) {
+    if (abaPareceMemorial(name) || abaPareceAnalitico(name)) continue;
+    if (abaPareceOrcamentoSintetico(name)) preferidas.push(name);
+    else demais.push(name);
+  }
+  for (const name of [...preferidas, ...demais]) {
+    const sheet = workbook.Sheets[name];
     if (!sheet) continue;
-    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' }) as any[][];
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false }) as any[][];
     if (rows.length < 2) continue;
     const headerRow = encontrarLinhaCabecalhoOrcamentoPerfeito(rows);
-    if (headerRow !== null) return { rows, headerRow };
+    if (headerRow !== null) return { rows, headerRow, sheetName: name };
   }
   return null;
 }
@@ -3313,12 +3796,22 @@ function parseComposicoesAnaliticasDaSegundaAba(workbook: {
   SheetNames: string[];
   Sheets: Record<string, unknown>;
 }, servicosImportados: ServicoPadrao[]): ComposicaoItem[] {
-  if (workbook.SheetNames.length < 2) return [];
-  const secondSheet = workbook.Sheets[workbook.SheetNames[1]];
-  if (!secondSheet) return [];
-  // raw:false preserva o valor formatado (evita Excel converter códigos em número e "comer" pontos/zeros).
-  const rows = XLSX.utils.sheet_to_json(secondSheet, { header: 1, defval: '', raw: false }) as any[][];
-  if (rows.length < 2) return [];
+  let rows: any[][] | null = null;
+  const nomes = [
+    ...workbook.SheetNames.filter(abaPareceAnalitico),
+    ...workbook.SheetNames.filter(name => !abaPareceAnalitico(name) && !abaPareceMemorial(name) && !abaPareceOrcamentoSintetico(name))
+  ];
+  for (const name of nomes) {
+    const sheet = workbook.Sheets[name];
+    if (!sheet) continue;
+    const candidatas = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false }) as any[][];
+    if (candidatas.length < 2) continue;
+    if (encontrarLinhaCabecalhoAnalitico(candidatas) !== null) {
+      rows = candidatas;
+      break;
+    }
+  }
+  if (!rows) return [];
 
   const headerRow = encontrarLinhaCabecalhoAnalitico(rows);
   if (headerRow === null) return [];
@@ -3637,9 +4130,28 @@ async function parsePlanilhaOrcamentoPerfeito(file: File): Promise<ParsePlanilha
       };
     }
     const { rows, headerRow: HEADER_ROW } = aba;
-    const header = (rows[HEADER_ROW] || []).map((h: any) => normalizarTextoBusca(String(h || '')));
-    const { itemIdx, codigoIdx, bancoIdx, descIdx, matMoIdx, maoIdx, materialIdx, quantidadeIdx } =
-      indicesColunasOrcamentoPerfeito(header);
+    const subcabecalho = linhaPareceSubcabecalhoOrcamento(rows[HEADER_ROW + 1] || []);
+    const headerBruto = subcabecalho
+      ? mesclarCabecalhoDuasLinhas(rows[HEADER_ROW] || [], rows[HEADER_ROW + 1] || [])
+      : (rows[HEADER_ROW] || []);
+    const primeiraLinhaDados = HEADER_ROW + (subcabecalho ? 2 : 1);
+    const header = headerBruto.map((h: any) => normalizarTextoBusca(String(h || '')));
+    const {
+      itemIdx,
+      codigoIdx,
+      bancoIdx,
+      descIdx,
+      matMoIdx,
+      maoIdx,
+      materialIdx,
+      quantidadeIdx,
+      unidadeIdx,
+      valorComBdiIdx,
+      totalSemBdiIdx,
+      totalComBdiIdx,
+      observacaoIdx
+    } = indicesColunasOrcamentoPerfeito(header);
+    const metaPlanilha = extrairMetaCabecalhoPlanilha(rows, HEADER_ROW);
     if (codigoIdx < 0 || descIdx < 0) {
       return {
         ok: false,
@@ -3655,7 +4167,8 @@ async function parsePlanilhaOrcamentoPerfeito(file: File): Promise<ParsePlanilha
     let subdivisaoAtual = '';
     let lastRowWasItem = false;
 
-    for (let i = HEADER_ROW + 1; i < rows.length; i++) {
+    const observacoesPorRotulo: Record<string, string> = {};
+    for (let i = primeiraLinhaDados; i < rows.length; i++) {
       const row = rows[i] || [];
       const itemVal = itemIdx >= 0 ? String(row[itemIdx] ?? '').trim() : '';
       const codigo = String(row[codigoIdx] ?? '').trim();
@@ -3665,6 +4178,11 @@ async function parsePlanilhaOrcamentoPerfeito(file: File): Promise<ParsePlanilha
       const precoUnitario = matMoIdx >= 0 ? parsePreco(row[matMoIdx]) : 0;
       const maoDeObraUnitario = maoIdx >= 0 ? parsePreco(row[maoIdx]) : 0;
       const materialUnitario = materialIdx >= 0 ? parsePreco(row[materialIdx]) : 0;
+      const precoUnitarioComBdi = valorComBdiIdx >= 0 ? parsePreco(row[valorComBdiIdx]) : 0;
+      const unidade = unidadeIdx >= 0 ? String(row[unidadeIdx] ?? '').trim() : '';
+      const totalSemBdi = totalSemBdiIdx >= 0 ? parsePreco(row[totalSemBdiIdx]) : 0;
+      const totalComBdi = totalComBdiIdx >= 0 ? parsePreco(row[totalComBdiIdx]) : 0;
+      const observacao = observacaoIdx >= 0 ? String(row[observacaoIdx] ?? '').trim() : '';
 
       const semItemOuVazio = itemIdx < 0 || !itemVal;
       const partes = itemVal ? String(itemVal).split('.').filter(Boolean) : [];
@@ -3719,15 +4237,22 @@ async function parsePlanilhaOrcamentoPerfeito(file: File): Promise<ParsePlanilha
           const qv = parsePreco(row[quantidadeIdx]);
           if (qv > 0 && Number.isFinite(qv)) quantidadePlanilha = qv;
         }
+        if (observacao && itemVal) observacoesPorRotulo[itemVal] = observacao;
         const item: ItemServico = {
           chave,
           codigo,
           banco,
           descricao,
           precoUnitario,
+          ...(precoUnitarioComBdi > 0 ? { precoUnitarioComBdi } : {}),
           maoDeObraUnitario,
           materialUnitario,
-          ...(quantidadePlanilha != null ? { quantidadePlanilha } : {})
+          ...(unidade ? { unidade } : {}),
+          ...(quantidadePlanilha != null ? { quantidadePlanilha, quantidadeImportada: quantidadePlanilha } : {}),
+          ...(totalSemBdi > 0 ? { totalSemBdiImportado: totalSemBdi } : {}),
+          ...(totalComBdi > 0 ? { totalComBdiImportado: totalComBdi } : {}),
+          ...(itemVal ? { itemRotuloPlanilha: itemVal } : {}),
+          ...(observacao ? { observacaoPlanilha: observacao } : {})
         };
         let servico = servicosMap.get(topicoAtual);
         if (!servico) {
@@ -3766,7 +4291,18 @@ async function parsePlanilhaOrcamentoPerfeito(file: File): Promise<ParsePlanilha
       };
     }
     const composicoesAnaliticas = parseComposicoesAnaliticasDaSegundaAba(workbook, servicosImportados);
-    return { ok: true, servicos: servicosImportados, composicoesAnaliticas };
+    const rowsMemorial = encontrarAbaMemorialNoArquivo(workbook);
+    const memorialPorRotulo = rowsMemorial ? parseMemorialDaAba(rowsMemorial) : {};
+    return {
+      ok: true,
+      servicos: servicosImportados,
+      composicoesAnaliticas,
+      temAnalitico: composicoesAnaliticas.length > 0,
+      temMemorial: Object.keys(memorialPorRotulo).length > 0,
+      metaPlanilha,
+      observacoesPorRotulo,
+      memorialPorRotulo
+    };
   } catch (err) {
     const detalhe = err instanceof Error ? err.message.trim() : '';
     if (detalhe) {
@@ -4249,15 +4785,19 @@ const MoedaCelula = memo(function MoedaCelula({
   );
 });
 
-const FD_COMMIT_DEBOUNCE_MS = 180;
+/**
+ * Rascunho por campo: se a janela virtual desmontar a linha no meio da digitação,
+ * o valor digitado volta ao remontar em vez de cair no último valor gravado.
+ */
+const fdCampoDrafts = new Map<string, string>();
 
 /**
  * Input da Ficha de Demanda: estado local enquanto digita.
- * Por padrão só notifica o pai no blur — evita re-render da grade inteira a cada tecla.
- * Campos de moeda passam `mask` + `commitOnChange` para formatar na hora e
- * só recalcular totais depois de uma pausa curta (sem travar a digitação).
+ * Só notifica o pai no blur (e se a linha sumir da janela) — evita re-render
+ * da grade a cada tecla, que fazia o valor piscar (2 dígitos e depois 3).
  */
 const FdCampoLocal = memo(function FdCampoLocal({
+  draftKey,
   committedValue,
   onCommit,
   className,
@@ -4265,8 +4805,8 @@ const FdCampoLocal = memo(function FdCampoLocal({
   title,
   inputMode,
   mask,
-  commitOnChange,
 }: {
+  draftKey?: string;
   committedValue: string;
   onCommit: (raw: string) => void;
   className?: string;
@@ -4274,46 +4814,45 @@ const FdCampoLocal = memo(function FdCampoLocal({
   title?: string;
   inputMode?: React.HTMLAttributes<HTMLInputElement>['inputMode'];
   mask?: (raw: string) => string;
-  commitOnChange?: boolean;
 }) {
-  const [local, setLocal] = useState(committedValue);
+  const [local, setLocal] = useState(
+    () => (draftKey ? fdCampoDrafts.get(draftKey) : undefined) ?? committedValue
+  );
   const focusedRef = useRef(false);
-  const commitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const localRef = useRef(local);
+  localRef.current = local;
   const onCommitRef = useRef(onCommit);
   onCommitRef.current = onCommit;
+  const draftKeyRef = useRef(draftKey);
+  draftKeyRef.current = draftKey;
 
   useEffect(() => {
-    if (!focusedRef.current) setLocal(committedValue);
-  }, [committedValue]);
+    if (focusedRef.current) return;
+    if (draftKey && fdCampoDrafts.has(draftKey)) {
+      setLocal(fdCampoDrafts.get(draftKey) ?? committedValue);
+      return;
+    }
+    setLocal(committedValue);
+  }, [committedValue, draftKey]);
 
   useEffect(
     () => () => {
-      if (commitTimerRef.current) clearTimeout(commitTimerRef.current);
+      const key = draftKeyRef.current;
+      if (!key || !fdCampoDrafts.has(key)) return;
+      onCommitRef.current(localRef.current);
     },
     []
   );
 
-  const flushCommit = (value: string) => {
-    if (commitTimerRef.current) {
-      clearTimeout(commitTimerRef.current);
-      commitTimerRef.current = null;
-    }
-    onCommitRef.current(value);
-  };
-
-  const applyValue = (raw: string, shouldCommit: boolean, immediate?: boolean) => {
+  const applyValue = (raw: string, shouldCommit: boolean) => {
     const next = mask ? mask(raw) : raw;
+    localRef.current = next;
     setLocal(next);
-    if (!shouldCommit) return;
-    if (immediate || !commitOnChange) {
-      flushCommit(next);
-      return;
+    if (draftKey) {
+      if (shouldCommit) fdCampoDrafts.delete(draftKey);
+      else fdCampoDrafts.set(draftKey, next);
     }
-    if (commitTimerRef.current) clearTimeout(commitTimerRef.current);
-    commitTimerRef.current = setTimeout(() => {
-      commitTimerRef.current = null;
-      onCommitRef.current(next);
-    }, FD_COMMIT_DEBOUNCE_MS);
+    if (shouldCommit) onCommitRef.current(next);
   };
 
   return (
@@ -4328,10 +4867,10 @@ const FdCampoLocal = memo(function FdCampoLocal({
       onFocus={() => {
         focusedRef.current = true;
       }}
-      onChange={(e) => applyValue(e.target.value, Boolean(commitOnChange))}
+      onChange={(e) => applyValue(e.target.value, false)}
       onBlur={(e) => {
         focusedRef.current = false;
-        applyValue(e.target.value, true, true);
+        applyValue(e.target.value, true);
       }}
     />
   );
@@ -4406,16 +4945,30 @@ function ServicosDropdownCheckbox({
 
 const ORCAMENTO_LISTA_MENU_WIDTH_PX = 224;
 
-/** Sufixo « (código) » no nome da lista — ex.: ORÇAMENTO X (26/7736). */
+/** Separa código e descrição do nome da lista: `DESC (26/7736)` ou `2026/XX — DESC`. */
+function partesNomeOrcamentoLista(nome: string): { codigo: string; descricao: string } {
+  const raw = String(nome ?? '').trim();
+  if (!raw) return { codigo: '', descricao: '' };
+  const sufixo = raw.match(/^(.*)\s*\(([^)]+)\)\s*$/);
+  if (sufixo) {
+    const descricao = sufixo[1].trim();
+    const codigo = sufixo[2].trim();
+    if (descricao && codigo) return { codigo, descricao };
+  }
+  const prefixo = raw.match(/^(\d{2,4}\s*\/\s*[A-Za-z0-9._-]+)\s*[—–-]\s+(.+)$/);
+  if (prefixo) {
+    return { codigo: prefixo[1].replace(/\s+/g, ''), descricao: prefixo[2].trim() };
+  }
+  return { codigo: '', descricao: raw };
+}
+
 function codigoFromNomeOrcamento(nome: string): string {
-  const m = String(nome ?? '').trim().match(/\(([^)]+)\)\s*$/);
-  return m?.[1]?.trim() || '';
+  return partesNomeOrcamentoLista(nome).codigo;
 }
 
 function nomeOrcamentoSemCodigoSufixo(nome: string): string {
-  const raw = String(nome ?? '').trim();
-  if (!raw) return '';
-  return raw.replace(/\s*\([^)]+\)\s*$/, '').trim() || raw;
+  const { descricao } = partesNomeOrcamentoLista(nome);
+  return descricao || String(nome ?? '').trim();
 }
 
 export function OrcamentoPageView({
@@ -4455,6 +5008,19 @@ export function OrcamentoPageView({
   const [showAddServico, setShowAddServico] = useState(false);
   const [isImportandoOrcamento, setIsImportandoOrcamento] = useState(false);
   const [isAtualizandoOrcafascio, setIsAtualizandoOrcafascio] = useState(false);
+  const [modalNomesOrcafascioEditados, setModalNomesOrcafascioEditados] = useState<NomeOrcafascioEditado[] | null>(
+    null
+  );
+  const [modalAparenciaAberto, setModalAparenciaAberto] = useState(false);
+  const [aparenciaDraft, setAparenciaDraft] = useState<AparenciaOrcamento>(APARENCIA_ORCAMENTO_PADRAO);
+  const [observacoesPorItem, setObservacoesPorItem] = useState<Record<string, string>>({});
+  const nomesOrcafascioSnapRef = useRef<{
+    orcamentoId: string;
+    titulos: Record<string, string>;
+    subtitulos: Record<string, string>;
+  } | null>(null);
+  const servicosNomesRef = useRef(servicos);
+  servicosNomesRef.current = servicos;
   const [servicosExpandidos, setServicosExpandidos] = useState<Set<string>>(new Set());
   const [loadingFromApi, setLoadingFromApi] = useState(false);
 
@@ -4521,6 +5087,7 @@ export function OrcamentoPageView({
   const [importOrcamentoModalOpen, setImportOrcamentoModalOpen] = useState(false);
   const [importOrcamentoModalFile, setImportOrcamentoModalFile] = useState<File | null>(null);
   const [importOrcamentoModalDragging, setImportOrcamentoModalDragging] = useState(false);
+  const [importOrigemModalOpen, setImportOrigemModalOpen] = useState(false);
 
   const filteredCostCenters = useMemo(() => {
     const q = contratoSearch.trim().toLowerCase();
@@ -4690,7 +5257,16 @@ export function OrcamentoPageView({
     setImportOrcamentoModalOpen(true);
   };
 
+  const abrirModalEscolherOrigemImport = () => {
+    if (!centroCustoId) {
+      toast.error('Selecione um contrato antes de importar.');
+      return;
+    }
+    setImportOrigemModalOpen(true);
+  };
+
   const [meta, setMeta] = useState<OrcamentoMeta>(sessaoVazia().meta!);
+  const aparenciaOrcamento = meta.aparencia;
   const [cronograma, setCronograma] = useState<CronogramaPersist>(() => cronogramaVazio());
 
   const dataFimOrcamento = useMemo(
@@ -4955,6 +5531,7 @@ export function OrcamentoPageView({
       setPlanilhaValorUnitCompraReal({});
       setPlanilhaTipoInsumo({});
       setFichaDemandaObservacoes({});
+      setObservacoesPorItem({});
       setCronograma(cronogramaVazio());
       setServicosPadraoContrato([]);
       setInsumosAnaliticoManuais({});
@@ -4977,6 +5554,7 @@ export function OrcamentoPageView({
       setPlanilhaQuantidadeCompra(s.planilhaQuantidadeCompra ?? {});
       setPlanilhaValorUnitCompraReal(s.planilhaValorUnitCompraReal ?? {});
       setPlanilhaTipoInsumo(normalizarPlanilhaTipoInsumo(s.planilhaTipoInsumo as Record<string, unknown>));
+      setObservacoesPorItem(parseObservacoesPorItem(s.observacoesPorItem));
       setCronograma(normalizarCronograma(s.cronograma));
       setMeta(s.meta ? s.meta : sessaoVazia().meta!);
     };
@@ -5037,6 +5615,24 @@ export function OrcamentoPageView({
       const importsDoOrcamento = Array.isArray(apiData.imports) ? apiData.imports : [];
       const sessaoApi = apiData.sessaoOrcamento ?? loadSessaoOrcamento(centroCustoId, oid);
       const importado = sessaoApi?.meta?.importadoPlanilha === true;
+      const docJa = Array.isArray(sessaoApi?.servicosDocumento) ? sessaoApi!.servicosDocumento! : [];
+      const nextServicos = importado
+        ? docJa.length > 0
+          ? docJa
+          : servicosDoOrcamento
+        : servicosDoOrcamento;
+      const nextSubs = Array.isArray(sessaoApi?.subtitulosNoOrcamento) ? sessaoApi!.subtitulosNoOrcamento : [];
+      const jaPintado =
+        servicosRef.current.length > 0 &&
+        sessaoRef.current.subtitulosNoOrcamento.length > 0 &&
+        assinaturaArvoreOrcamento(servicosRef.current, sessaoRef.current.subtitulosNoOrcamento) ===
+          assinaturaArvoreOrcamento(nextServicos, nextSubs);
+      if (jaPintado) {
+        setImports(importsDoOrcamento);
+        autosaveBaselineRef.current = { orcamentoId: oid, hadData: true };
+        carregarCatalogoContratoEmBackground(servicosDoOrcamento, sessaoApi, importado);
+        return;
+      }
 
       if (importado) {
         const doc = sessaoApi?.servicosDocumento;
@@ -5171,6 +5767,7 @@ export function OrcamentoPageView({
       planilhaQuantidadeCompra,
       planilhaValorUnitCompraReal,
       planilhaTipoInsumo,
+      observacoesPorItem,
       meta,
       itensOcultosNoOrcamento,
       insumosAnaliticoOcultos,
@@ -5201,6 +5798,7 @@ export function OrcamentoPageView({
     planilhaQuantidadeCompra,
     planilhaValorUnitCompraReal,
     planilhaTipoInsumo,
+    observacoesPorItem,
     meta,
     itensOcultosNoOrcamento,
     insumosAnaliticoOcultos,
@@ -5506,6 +6104,7 @@ export function OrcamentoPageView({
   const abrirEdicaoDados = () => {
     setEditarDadosDraft({
       ...meta,
+      modoArredondamento: meta.modoArredondamento ?? 'truncar',
       nomeOrcamento: nomeOrcamentoRascunho || ''
     });
     setEditarDadosOpen(true);
@@ -5530,6 +6129,7 @@ export function OrcamentoPageView({
       orcamentoRealizadoPor: editarDadosDraft.orcamentoRealizadoPor.trim(),
       descontoPercentual: editarDadosDraft.descontoPercentual.trim(),
       bdiPercentual: editarDadosDraft.bdiPercentual.trim(),
+      modoArredondamento: editarDadosDraft.modoArredondamento ?? 'truncar',
       reajustes: (editarDadosDraft.reajustes ?? []).map((r, idx) => ({
         nome: (r.nome || '').trim() || `${idx + 1}º reajuste`,
         percentual: (r.percentual || '').trim()
@@ -6288,11 +6888,17 @@ export function OrcamentoPageView({
         await saveComposicoesGeralToApi(parsed.composicoesAnaliticas);
       }
       const nomeBase = (file.name.replace(/\.[^/.]+$/, '') || 'Planilha').trim().slice(0, 100);
-      const nomeLista = (`Importado — ${nomeBase}`).slice(0, 120);
+      const nomeLista = (
+        parsed.metaPlanilha.osNumeroPasta && parsed.metaPlanilha.descricao
+          ? `${parsed.metaPlanilha.descricao} (${parsed.metaPlanilha.osNumeroPasta})`
+          : parsed.metaPlanilha.descricao || parsed.metaPlanilha.osNumeroPasta || `Importado — ${nomeBase}`
+      ).slice(0, 120);
 
       const entry = await criarOrcamentoApi(centroCustoId);
       const subtitulosNoOrcamento: string[] = [];
       const quantidadesPorItem: Record<string, number> = {};
+      const dimensoesPorItemImport: Record<string, DimensoesItem> = {};
+      const observacoesPorItemImport: Record<string, string> = {};
       for (const s of servicosImportados) {
         for (const sub of s.subtitulos) {
           subtitulosNoOrcamento.push(`${s.id}|${sub.id}`);
@@ -6300,6 +6906,15 @@ export function OrcamentoPageView({
             const itemKey = `${s.id}|${sub.id}|${it.chave}`;
             const q = it.quantidadePlanilha;
             if (q != null && q > 0 && Number.isFinite(q)) quantidadesPorItem[itemKey] = q;
+            const rotulo = String(it.itemRotuloPlanilha || '').trim();
+            const memorial = rotulo ? parsed.memorialPorRotulo[rotulo] : undefined;
+            if (memorial) {
+              // Se a memória divergir do sintético, alinha o subtotal para o orçamento ficar igual à planilha.
+              dimensoesPorItemImport[itemKey] =
+                q != null && q > 0 ? alinharMemorialAoSintetico(memorial, q) : memorial;
+            }
+            const obs = String(it.observacaoPlanilha || (rotulo ? parsed.observacoesPorRotulo[rotulo] : '') || '').trim();
+            if (obs) observacoesPorItemImport[itemKey] = obs;
           }
         }
       }
@@ -6308,13 +6923,19 @@ export function OrcamentoPageView({
       const meta: OrcamentoMeta = {
         ...(base.meta as OrcamentoMeta),
         dataAbertura: todayInputDate(),
-        descricao: `Orçamento importado da planilha ${file.name}. Revise OS, valores e as abas de orçamento.`,
-        osNumeroPasta: nomeBase.slice(0, 60) || 'Importação',
-        orcamentoRealizadoPor: currentUserName || '',
+        descricao:
+          parsed.metaPlanilha.descricao ||
+          `Orçamento importado da planilha ${file.name}. Revise OS, valores e as abas de orçamento.`,
+        osNumeroPasta: parsed.metaPlanilha.osNumeroPasta || nomeBase.slice(0, 60) || 'Importação',
+        prazoExecucaoDias: parsed.metaPlanilha.prazoExecucaoDias || '',
+        responsavelOrcamento: parsed.metaPlanilha.responsavelOrcamento || '',
+        orcamentoRealizadoPor: parsed.metaPlanilha.orcamentoRealizadoPor || currentUserName || '',
         descontoPercentual: '0',
-        bdiPercentual: '0',
+        bdiPercentual: parsed.metaPlanilha.bdiPercentual || '0',
         reajustes: [],
-        importadoPlanilha: true
+        importadoPlanilha: true,
+        usarMemoriaCalculo: parsed.temMemorial,
+        temAnalitico: parsed.temAnalitico
       };
 
       const servicosParaApi = servicosSemQuantidadePlanilha(servicosImportados);
@@ -6328,6 +6949,8 @@ export function OrcamentoPageView({
           ...base,
           subtitulosNoOrcamento,
           quantidadesPorItem,
+          dimensoesPorItem: dimensoesPorItemImport,
+          observacoesPorItem: observacoesPorItemImport,
           meta,
           servicosDocumento: servicosParaApi
         }
@@ -6337,11 +6960,31 @@ export function OrcamentoPageView({
       const entryAtualizado = { ...entry, nome: nomeLista };
       setListaOrcamentos(prev => [entryAtualizado, ...prev.filter(o => o.id !== entry.id)]);
       setNomeOrcamentoRascunho(nomeLista);
+      setServicos(servicosParaApi);
+      setServicosExpandidos(servicosParaApi[0] ? new Set([servicosParaApi[0].id]) : new Set());
+      setImports(importsMesclados);
+      setSubtitulosNoOrcamento(subtitulosNoOrcamento);
+      setQuantidadesPorItem(quantidadesPorItem);
+      setDimensoesPorItem(dimensoesPorItemImport);
+      setObservacoesPorItem(observacoesPorItemImport);
+      setMeta(meta);
+      sessaoRef.current = {
+        ...base,
+        subtitulosNoOrcamento,
+        quantidadesPorItem,
+        dimensoesPorItem: dimensoesPorItemImport,
+        observacoesPorItem: observacoesPorItemImport,
+        meta,
+        servicosDocumento: servicosParaApi
+      };
+      servicosRef.current = servicosParaApi;
       setOrcamentoAtivoId(entry.id);
       navigateEmbeddedOrcamentoPath(entry.id);
       setOrcamentoViewTab('montagem');
       toast.success(
-        `Novo orçamento criado com ${servicosImportados.length} serviço(s). Você já pode revisar o orçamento e as demais abas.`
+        `Novo orçamento criado com ${servicosImportados.length} serviço(s).${
+          parsed.temMemorial ? ' Memória de cálculo importada.' : ''
+        }${parsed.temAnalitico ? '' : ' Sem aba analítica neste arquivo.'}`
       );
       return true;
     } catch (err) {
@@ -6678,21 +7321,52 @@ export function OrcamentoPageView({
     }
   };
 
-  const atualizarOrcamentoOrcafascio = async () => {
+  useEffect(() => {
+    if (!orcamentoAtivoId) {
+      nomesOrcafascioSnapRef.current = null;
+      return;
+    }
+    if (nomesOrcafascioSnapRef.current?.orcamentoId === orcamentoAtivoId) return;
+    if (servicos.length === 0) return;
+    nomesOrcafascioSnapRef.current = {
+      orcamentoId: orcamentoAtivoId,
+      ...snapshotNomesServicosOrcamento(servicos)
+    };
+  }, [orcamentoAtivoId, servicos]);
+
+  const renomearTituloOrcamento = (servicoId: string, novoNomeRaw: string) => {
+    const nome = novoNomeRaw.trim();
+    if (!nome) return;
+    setServicos((prev) => {
+      const next = prev.map((s) => (s.id === servicoId ? { ...s, nome } : s));
+      servicosNomesRef.current = next;
+      return next;
+    });
+  };
+
+  const renomearSubtituloOrcamento = (servicoId: string, subtituloId: string, novoNomeRaw: string) => {
+    const nome = novoNomeRaw.trim();
+    if (!nome) return;
+    setServicos((prev) => {
+      const next = prev.map((s) =>
+        s.id !== servicoId
+          ? s
+          : {
+              ...s,
+              subtitulos: s.subtitulos.map((sub) => (sub.id === subtituloId ? { ...sub, nome } : sub))
+            }
+      );
+      servicosNomesRef.current = next;
+      return next;
+    });
+  };
+
+  const executarAtualizarOrcamentoOrcafascio = async () => {
     if (!centroCustoId || !orcamentoAtivoId) {
       toast.error('Abra um orçamento importado do Orçafascio para atualizar.');
       return;
     }
     if (isAtualizandoOrcafascio) return;
-    if (
-      typeof window !== 'undefined' &&
-      !window.confirm(
-        'Atualizar a partir do Orçafascio?\n\nComposições novas entram neste orçamento. As que foram removidas lá saem daqui.\nQuantidade, memória de cálculo e ficha de demanda das linhas que continuam são mantidas.\n\nPara apagar uma composição só neste orçamento, clique com o botão direito na linha.'
-      )
-    ) {
-      return;
-    }
-
     setIsAtualizandoOrcafascio(true);
     if (orcamentoAutosaveTimerRef.current) {
       clearTimeout(orcamentoAutosaveTimerRef.current);
@@ -6783,6 +7457,7 @@ export function OrcamentoPageView({
       const planilhaVlNext = remapearRegistroPorChave(planilhaValorUnitCompraReal, chaveParaNovaKey);
       const planilhaTipoNext = remapearRegistroPorChave(planilhaTipoInsumo, chaveParaNovaKey);
       const observacoesNext = remapearRegistroPorChave(fichaDemandaObservacoes, chaveParaNovaKey);
+      const observacoesOrcNext = remapearRegistroPorChave(observacoesPorItem, chaveParaNovaKey);
       const ocultosNext = remapearListaChavesOrcamento(itensOcultosNoOrcamento, chaveParaNovaKey);
       const insumosOcultosNext = remapearListaChavesOrcamento(insumosAnaliticoOcultos, chaveParaNovaKey);
       const manuaisNext = remapearRegistroPorChave(insumosAnaliticoManuais, chaveParaNovaKey);
@@ -6814,6 +7489,7 @@ export function OrcamentoPageView({
         planilhaQuantidadeCompra: planilhaQtdNext,
         planilhaValorUnitCompraReal: planilhaVlNext,
         planilhaTipoInsumo: planilhaTipoNext,
+        observacoesPorItem: observacoesOrcNext,
         itensOcultosNoOrcamento: ocultosNext,
         insumosAnaliticoOcultos: insumosOcultosNext,
         meta: nextMeta,
@@ -6836,6 +7512,7 @@ export function OrcamentoPageView({
       setPlanilhaValorUnitCompraReal(planilhaVlNext);
       setPlanilhaTipoInsumo(planilhaTipoNext);
       setFichaDemandaObservacoes(observacoesNext);
+      setObservacoesPorItem(observacoesOrcNext);
       setItensOcultosNoOrcamento(ocultosNext);
       setInsumosAnaliticoOcultos(insumosOcultosNext);
       setInsumosAnaliticoManuais(manuaisNext);
@@ -6849,6 +7526,12 @@ export function OrcamentoPageView({
           ? `Orçamento atualizado do Orçafascio: ${partes.join(', ')}.`
           : 'Orçamento já estava igual ao Orçafascio.'
       );
+      if (orcamentoAtivoId) {
+        nomesOrcafascioSnapRef.current = {
+          orcamentoId: orcamentoAtivoId,
+          ...snapshotNomesServicosOrcamento(servicosParaApi)
+        };
+      }
     } catch (err) {
       if (isOrcamentoRequestTimeout(err)) {
         toast.error('A atualização demorou demais. Tente novamente.');
@@ -6859,6 +7542,33 @@ export function OrcamentoPageView({
     } finally {
       setIsAtualizandoOrcafascio(false);
     }
+  };
+
+  const atualizarOrcamentoOrcafascio = async () => {
+    if (!centroCustoId || !orcamentoAtivoId) {
+      toast.error('Abra um orçamento importado do Orçafascio para atualizar.');
+      return;
+    }
+    if (isAtualizandoOrcafascio) return;
+    const editados = listarNomesServicosEditados(
+      servicosNomesRef.current,
+      nomesOrcafascioSnapRef.current?.orcamentoId === orcamentoAtivoId
+        ? nomesOrcafascioSnapRef.current
+        : null
+    );
+    if (editados.length > 0) {
+      setModalNomesOrcafascioEditados(editados);
+      return;
+    }
+    if (
+      typeof window !== 'undefined' &&
+      !window.confirm(
+        'Atualizar a partir do Orçafascio?\n\nComposições novas entram neste orçamento. As que foram removidas lá saem daqui.\nQuantidade, memória de cálculo e ficha de demanda das linhas que continuam são mantidas.\n\nPara apagar uma composição só neste orçamento, clique com o botão direito na linha.'
+      )
+    ) {
+      return;
+    }
+    await executarAtualizarOrcamentoOrcafascio();
   };
 
   function removeSubtituloDoOrcamento(key: string) {
@@ -7371,18 +8081,24 @@ export function OrcamentoPageView({
         const tipoDaComp = parseUnidadeComposicao(composicao?.unidade ?? i.unidade);
         const tipoUnidade: TipoUnidadeFormula = (tipoDaComp && tipoDaComp !== 'un') ? tipoDaComp : tipoAuto;
         let qtd = 0;
-        if (tipoUnidade === 'un') {
-          qtd =
-            meta.usarMemoriaCalculo === true
-              ? calcularQuantidadeContagem(dim?.linhasContagem)
-              : Math.max(0, quantidadesPorItem[itemKey] ?? 0);
-        } else if (dim?.linhas?.length) {
-          qtd = dim.linhas.reduce(
-            (s, ln) => (ln.cabecalhoSecao ? s : s + calcularQuantidadeLinha(ln, tipoUnidade)),
-            0
-          );
+        const linhasQtd = linhasMedicaoEfetivas(dim);
+        const qtdDasLinhas = linhasQtd.length
+          ? linhasQtd.reduce(
+              (s, ln) => (ln.cabecalhoSecao ? s : s + calcularQuantidadeLinha(ln, tipoUnidade)),
+              0
+            )
+          : 0;
+        const temQtdSintetico = Object.prototype.hasOwnProperty.call(quantidadesPorItem, itemKey);
+        const qtdSintetico = temQtdSintetico ? Math.max(0, quantidadesPorItem[itemKey] ?? 0) : null;
+        // Planilha: quantidade/total do sintético prevalecem se a memória divergir.
+        if (meta.importadoPlanilha === true && temQtdSintetico) {
+          qtd = qtdSintetico ?? 0;
+        } else if (tipoUnidade === 'un') {
+          qtd = temQtdSintetico ? (qtdSintetico ?? 0) : qtdDasLinhas;
+        } else if (linhasQtd.length) {
+          qtd = qtdDasLinhas;
         } else {
-          qtd = Math.max(0, quantidadesPorItem[itemKey] ?? 0);
+          qtd = qtdSintetico ?? 0;
         }
         const moUnit = maoDeObraUnitario;
         const matUnit = materialUnitario;
@@ -8542,6 +9258,36 @@ export function OrcamentoPageView({
     };
   }, [orcamentoAtivoId, subtitulosAdicionados.length]);
 
+  const irParaTopoDasAbas = useCallback(() => {
+    const scroller = document.querySelector('.app-page-scroll');
+    const anchor = document.getElementById('orcamento-abas-anchor');
+    if (!(scroller instanceof HTMLElement) || !anchor) return;
+    const nextTop =
+      scroller.scrollTop +
+      anchor.getBoundingClientRect().top -
+      scroller.getBoundingClientRect().top;
+    if (scroller.scrollTop > nextTop + 8) {
+      scroller.scrollTo({ top: Math.max(0, nextTop), behavior: 'auto' });
+    }
+  }, []);
+
+  const [orcamentoAbasFixas, setOrcamentoAbasFixas] = useState(false);
+  useEffect(() => {
+    if (!orcamentoAtivoId || cronogramaOnly) {
+      setOrcamentoAbasFixas(false);
+      return;
+    }
+    const anchor = document.getElementById('orcamento-abas-anchor');
+    const scroller = document.querySelector('.app-page-scroll');
+    if (!anchor || !(scroller instanceof HTMLElement)) return;
+    const io = new IntersectionObserver(
+      ([entry]) => setOrcamentoAbasFixas(!entry.isIntersecting),
+      { root: scroller, threshold: 0 }
+    );
+    io.observe(anchor);
+    return () => io.disconnect();
+  }, [orcamentoAtivoId, cronogramaOnly]);
+
   const resumoFinanceiro = useMemo(() => {
     const descontoPct = parsePercentualMeta(meta.descontoPercentual);
     const bdiPctMeta = parsePercentualMeta(meta.bdiPercentual);
@@ -8778,8 +9524,13 @@ export function OrcamentoPageView({
 
   const addLinhaMedicao = (itemKey: string, inserirAposIdx?: number) => {
     const rowTipo = itensCalculados.find(r => r.key === itemKey)?.tipoUnidade;
-    const atual =
-      dimensoesPorItem[itemKey] || { tipoUnidade: rowTipo && rowTipo !== 'un' ? rowTipo : 'm3', linhas: [] };
+    const prevDim = dimensoesPorItem[itemKey];
+    const atual = {
+      tipoUnidade: rowTipo && rowTipo !== 'un' ? rowTipo : 'm3',
+      linhas: [] as LinhaMedicao[],
+      ...prevDim,
+      linhas: linhasMedicaoEfetivas(prevDim)
+    };
     const novaLinha = { descricao: '', C: 0, L: 0, H: 0, N: 1, empolamento: 1 };
     const linhas = [...atual.linhas];
     if (
@@ -8802,8 +9553,13 @@ export function OrcamentoPageView({
 
   const addLinhaCabecalhoSecaoMedicao = (itemKey: string, inserirAposIdx?: number) => {
     const rowTipo = itensCalculados.find(r => r.key === itemKey)?.tipoUnidade;
-    const atual =
-      dimensoesPorItem[itemKey] || { tipoUnidade: rowTipo && rowTipo !== 'un' ? rowTipo : 'm3', linhas: [] };
+    const prevDim = dimensoesPorItem[itemKey];
+    const atual = {
+      tipoUnidade: rowTipo && rowTipo !== 'un' ? rowTipo : 'm3',
+      linhas: [] as LinhaMedicao[],
+      ...prevDim,
+      linhas: linhasMedicaoEfetivas(prevDim)
+    };
     const novaLinha: LinhaMedicao = {
       cabecalhoSecao: true,
       descricao: 'DESCRIÇÃO: ',
@@ -8835,13 +9591,32 @@ export function OrcamentoPageView({
   const updateLinhaMedicao = useCallback((itemKey: string, idx: number, campo: keyof LinhaMedicao, valor: number | string) => {
     startTransition(() => {
       setDimensoesPorItem(prev => {
-        const atual = prev[itemKey];
-        if (!atual?.linhas?.[idx]) return prev;
+        const base = prev[itemKey];
+        const linhasBase = linhasMedicaoEfetivas(base);
+        if (!linhasBase[idx]) return prev;
+        const atual = { tipoUnidade: 'un' as TipoUnidadeFormula, linhas: [], ...base, linhas: linhasBase };
         const novaLinhas = [...atual.linhas];
+        const limparSubtotal =
+          campo === 'subtotalManual' && (valor === '' || (typeof valor === 'number' && !Number.isFinite(valor)));
         const v = campo === 'descricao' ? valor : (typeof valor === 'number' ? valor : parseFloat(String(valor)) || 0);
-        const updated: LinhaMedicao = { ...novaLinhas[idx], [campo]: v } as LinhaMedicao;
+        const updated: LinhaMedicao = limparSubtotal
+          ? { ...novaLinhas[idx] }
+          : ({ ...novaLinhas[idx], [campo]: v } as LinhaMedicao);
+        if (limparSubtotal) {
+          delete updated.subtotalManual;
+        }
         if (campo === 'C' || campo === 'L' || campo === 'H' || campo === 'N') {
           updated.valorManual = undefined;
+        }
+        if (
+          campo === 'C' ||
+          campo === 'L' ||
+          campo === 'H' ||
+          campo === 'N' ||
+          campo === 'empolamento' ||
+          campo === 'valorManual'
+        ) {
+          updated.subtotalManual = undefined;
         }
         novaLinhas[idx] = updated;
         return { ...prev, [itemKey]: { ...atual, linhas: novaLinhas } };
@@ -8903,6 +9678,15 @@ export function OrcamentoPageView({
   const commitFichaDemandaObservacao = useCallback((lineKey: string, raw: string) => {
     startTransition(() => {
       setFichaDemandaObservacoes((prev) => {
+        if ((prev[lineKey] ?? '') === raw) return prev;
+        return { ...prev, [lineKey]: raw };
+      });
+    });
+  }, []);
+
+  const commitObservacaoOrcamento = useCallback((lineKey: string, raw: string) => {
+    startTransition(() => {
+      setObservacoesPorItem((prev) => {
         if ((prev[lineKey] ?? '') === raw) return prev;
         return { ...prev, [lineKey]: raw };
       });
@@ -8984,8 +9768,10 @@ export function OrcamentoPageView({
   };
 
   const removeLinhaMedicao = (itemKey: string, idx: number) => {
-    const atual = dimensoesPorItem[itemKey];
-    if (!atual?.linhas?.length) return;
+    const prevDim = dimensoesPorItem[itemKey];
+    const linhasBase = linhasMedicaoEfetivas(prevDim);
+    if (!linhasBase.length) return;
+    const atual = { tipoUnidade: 'un' as TipoUnidadeFormula, linhas: [], ...prevDim, linhas: linhasBase };
     const novaLinhas = atual.linhas.filter((_, i) => i !== idx);
     if (novaLinhas.length === 0) {
       setDimensoesPorItem(prev => { const n = { ...prev }; delete n[itemKey]; return n; });
@@ -9239,12 +10025,19 @@ export function OrcamentoPageView({
    * (ou em orçamento criado no sistema, que não é importado).
    */
   const memorialDisponivel = meta.usarMemoriaCalculo === true || meta?.importadoPlanilha !== true;
+  const analiticoDisponivel = meta.temAnalitico !== false;
 
   useEffect(() => {
     if (!memorialDisponivel && orcamentoViewTab === 'memorial') {
       setOrcamentoViewTab('montagem');
     }
   }, [memorialDisponivel, orcamentoViewTab]);
+
+  useEffect(() => {
+    if (!analiticoDisponivel && (orcamentoViewTab === 'analitico' || orcamentoViewTab === 'planilhaAnalitica')) {
+      setOrcamentoViewTab('montagem');
+    }
+  }, [analiticoDisponivel, orcamentoViewTab]);
 
   useEffect(() => {
     if (orcamentoViewTab !== 'memorial' || !memorialDisponivel) return;
@@ -9633,30 +10426,13 @@ export function OrcamentoPageView({
     for (const row of itensCalculados) {
       const codigo = `${Math.floor(idxServico / 10) + 1}.${(idxServico % 10) + 1}`;
       const descricaoBase = `${row.item.codigo} ${row.item.banco} - ${row.item.descricao || ''}`;
-      const tipoAuto = row.tipoUnidade ?? inferirTipoUnidadePorDimensao(row.dimensoes?.linhas);
+      const linhasExport = linhasMedicaoEfetivas(row.dimensoes);
+      const tipoAuto = row.tipoUnidade ?? inferirTipoUnidadePorDimensao(linhasExport);
       const un = row.unidadeComposicao?.trim() || unidadeLabel(tipoAuto);
-      if (row.tipoUnidade === 'un') {
-        rows.push([
-          codigo,
-          descricaoBase,
-          un,
-          '',
-          '',
-          '',
-          '',
-          row.quantidade,
-          '',
-          '',
-          row.quantidade,
-        ]);
-        idxServico++;
-        continue;
-      }
-
-      if (row.dimensoes?.linhas?.length) {
+      if (linhasExport.length) {
         rows.push([codigo, descricaoBase, un, '', '', '', '', '', '', '', '']);
-        for (let i = 0; i < row.dimensoes.linhas.length; i++) {
-          const ln = row.dimensoes.linhas[i];
+        for (let i = 0; i < linhasExport.length; i++) {
+          const ln = linhasExport[i];
           const descBase = ln.descricao?.trim() || `Medição ${i + 1}`;
           const descLinha = ln.origemComposicaoRotulo?.trim()
             ? `${ln.origemComposicaoRotulo.trim()} ${descBase}`.trim()
@@ -10404,35 +11180,19 @@ export function OrcamentoPageView({
                       )}
                       <button
                         type="button"
-                        onClick={abrirModalImportarOrcafascioOrcamentos}
+                        onClick={abrirModalEscolherOrigemImport}
                         onMouseEnter={() => prefetchOrcafascioOrcamentosList('')}
                         onFocus={() => prefetchOrcafascioOrcamentosList('')}
                         disabled={carregandoListaOrcamentos || !centroCustoId}
                         className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 transition-colors hover:bg-gray-50 active:bg-gray-100 disabled:pointer-events-none disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700 dark:active:bg-gray-600"
-                        title="Importar do Orçafascio"
-                        aria-label="Importar do Orçafascio"
+                        title="Importar orçamento"
+                        aria-label="Importar orçamento"
                       >
                         {isImportandoOrcamento ? (
                           <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
                         ) : (
                           <Upload className="h-4 w-4" aria-hidden />
                         )}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (listaOrcamentos.length === 0) {
-                            toast.error('Não há orçamento para exportar.');
-                            return;
-                          }
-                          toast.error('Abra o orçamento na lista para exportar a planilha.');
-                        }}
-                        disabled={carregandoListaOrcamentos || listaOrcamentos.length === 0}
-                        className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 transition-colors hover:bg-gray-50 active:bg-gray-100 disabled:pointer-events-none disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700 dark:active:bg-gray-600"
-                        title="Exportar Excel"
-                        aria-label="Exportar Excel"
-                      >
-                        <Download className="h-4 w-4" aria-hidden />
                       </button>
                       <button
                         type="button"
@@ -10669,36 +11429,49 @@ export function OrcamentoPageView({
                 </CardContent>
               </Card>
             ) : (
-            <Card className="shadow-none">
-              {!cronogramaOnly && (
-              <CardHeader className="!border-b-0">
-                <div className="flex justify-center">
-                  <SegmentedControl
-                    aria-label="Abas do orçamento"
-                    value={orcamentoViewTab}
-                    onChange={(next) => {
-                      // Troca imediata do pill; conteúdo pesado segue no deferred.
-                      setOrcamentoViewTab(next);
-                    }}
-                    className="h-auto max-w-full flex-nowrap overflow-x-auto rounded-xl border border-gray-200 bg-gray-100/80 p-1.5 dark:border-gray-700 dark:bg-gray-800/70"
-                    pillClassName="rounded-lg bg-red-600 shadow-sm top-1.5 bottom-1.5"
-                    buttonClassName="px-3 py-2 text-xs sm:px-4 sm:text-sm"
-                    activeButtonClassName="font-semibold text-white"
-                    inactiveButtonClassName="font-semibold text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-gray-100"
-                    options={[
-                      { value: 'dados', label: 'Dados' },
-                      { value: 'montagem', label: 'Orçamento' },
-                      ...(memorialDisponivel
-                        ? [{ value: 'memorial' as const, label: 'Memória de cálculo' }]
-                        : []),
-                      { value: 'analitico', label: 'Analítico' },
-                      { value: 'planilhaAnalitica', label: 'Ficha de demanda' },
-                    ]}
-                  />
+            <div className="!animate-none [transform:none]">
+            {!cronogramaOnly && (
+              <>
+                <div id="orcamento-abas-anchor" className="h-0" aria-hidden />
+                <div className="sticky z-20 mb-6 flex justify-center pointer-events-none -top-1 py-2 sm:-top-2 lg:-top-4">
+                    <SegmentedControl
+                      aria-label="Abas do orçamento"
+                      value={orcamentoViewTab}
+                      onChange={(next) => {
+                        setOrcamentoViewTab(next);
+                        irParaTopoDasAbas();
+                      }}
+                      className={`pointer-events-auto h-auto max-w-full flex-nowrap overflow-x-auto rounded-xl border border-gray-200 bg-white p-1.5 dark:border-gray-700 dark:bg-gray-800${
+                        orcamentoAbasFixas
+                          ? ' shadow-[0_2px_8px_rgba(15,23,42,0.06),0_10px_28px_rgba(15,23,42,0.10)] dark:shadow-[0_2px_8px_rgba(0,0,0,0.25),0_10px_28px_rgba(0,0,0,0.35)]'
+                          : ''
+                      }`}
+                      pillClassName="rounded-lg bg-red-600 shadow-sm top-1.5 bottom-1.5"
+                      buttonClassName="px-3 py-2 text-xs sm:px-4 sm:text-sm"
+                      activeButtonClassName="font-semibold text-white"
+                      inactiveButtonClassName="font-semibold text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-gray-100"
+                      options={[
+                        { value: 'dados', label: 'Dados' },
+                        { value: 'montagem', label: 'Orçamento' },
+                        ...(memorialDisponivel
+                          ? [{ value: 'memorial' as const, label: 'Memória de cálculo' }]
+                          : []),
+                        ...(analiticoDisponivel
+                          ? [
+                              { value: 'analitico' as const, label: 'Analítico' },
+                              { value: 'planilhaAnalitica' as const, label: 'Ficha de demanda' },
+                            ]
+                          : []),
+                      ]}
+                    />
                 </div>
-              </CardHeader>
-              )}
-              <CardContent className="space-y-4">
+              </>
+            )}
+            <Card
+              className="shadow-none"
+              style={aparenciaOrcamento?.fonte ? { fontFamily: aparenciaOrcamento.fonte } : undefined}
+            >
+              <CardContent className="space-y-4 !pt-6">
                 {loadingFromApi && (
                   <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 px-4 py-8 sm:py-10">
                     <div className="flex flex-col items-center justify-center text-center gap-3">
@@ -10793,12 +11566,10 @@ export function OrcamentoPageView({
                               {rotuloSimNaoOrcafascio(meta.usarMemoriaCalculo)}
                             </DadosCampo>
                           ) : null}
-                          {meta.modoArredondamento ? (
-                            <DadosCampo label="Arredondamento">
-                              {rotuloModoArredondamentoDados(meta.modoArredondamento)}
-                            </DadosCampo>
-                          ) : null}
-                          {typeof meta.fichaDemandaPct === 'number' ? (
+                          <DadosCampo label="Arredondamento">
+                            {rotuloModoArredondamentoDados(meta.modoArredondamento ?? 'truncar')}
+                          </DadosCampo>
+                          {analiticoDisponivel && typeof meta.fichaDemandaPct === 'number' ? (
                             <DadosCampo label="Ficha de demanda">{`${meta.fichaDemandaPct}%`}</DadosCampo>
                           ) : null}
                         </dl>
@@ -10908,7 +11679,8 @@ export function OrcamentoPageView({
                             const idxLinha = janelaAnalitico.start + i;
                             if (l.kind === 'tituloServico') {
                               return (
-                                <tr key={l.key} className={`bg-red-600 dark:bg-red-950/90 ${gradeTableRowTrCls} ${gradeTituloSubtituloRowTrCls}`}>
+                                <tr key={l.key} className={`${clsTituloOrc(aparenciaOrcamento)} ${gradeTableRowTrCls} ${gradeTituloSubtituloRowTrCls}`}
+                                  style={estiloLinhaTituloOrc(aparenciaOrcamento)}>
                                   <td className="w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2.5 align-middle text-center text-sm font-bold tabular-nums text-white">
                                     {l.main}
                                   </td>
@@ -10925,7 +11697,11 @@ export function OrcamentoPageView({
                               return (
                                 <tr
                                   key={l.key}
-                                  className={`border-b border-gray-200/90 bg-slate-200/90 dark:border-gray-800 dark:bg-gray-900 ${gradeTableRowTrCls} ${gradeTituloSubtituloRowTrCls}`}
+                                  className={`${clsSubtituloOrc(
+                                    aparenciaOrcamento,
+                                    linhasAnaliticoOrcamento[idxLinha - 1]?.kind === 'tituloServico'
+                                  )} ${gradeTableRowTrCls} ${gradeTituloSubtituloRowTrCls}`}
+                                  style={estiloLinhaSubtituloOrc(aparenciaOrcamento)}
                                 >
                                   <td className="w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2.5 align-middle text-center text-xs font-semibold tabular-nums text-gray-800 dark:text-gray-200">
                                     {`${l.main}.${l.subIdx}`}
@@ -11402,14 +12178,15 @@ export function OrcamentoPageView({
                                 >
                                   % Custo / valor pago
                                 </th>
-                                <th className="min-w-[12rem] px-2 py-2.5 text-center text-[11px] font-semibold leading-tight text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600">
+                                <th className="min-w-[24rem] w-[24rem] px-2 py-2.5 text-center text-[11px] font-semibold leading-tight text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600">
                                   Observação
                                 </th>
                               </tr>
                             </thead>
                             <tbody ref={janelaFd.tbodyRef} className="divide-y divide-gray-200/80 dark:divide-gray-700">
                               <TabelaJanelaSpacer height={janelaFd.topPad} colSpan={19} />
-                              {linhasAnaliticoComManuais.slice(janelaFd.start, janelaFd.end).map((l) => {
+                              {linhasAnaliticoComManuais.slice(janelaFd.start, janelaFd.end).map((l, i) => {
+                                const idxLinhaFd = janelaFd.start + i;
                                 const itemW =
                                   'w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2.5 align-middle text-center text-sm tabular-nums';
                                 if (l.kind === 'tituloServico') {
@@ -11419,7 +12196,8 @@ export function OrcamentoPageView({
                                     custoReal: 0
                                   };
                                   return (
-                                    <tr key={l.key} className={`bg-red-600 dark:bg-red-950/90 ${gradeTableRowTrCls} ${gradeTituloSubtituloRowTrCls}`}>
+                                    <tr key={l.key} className={`${clsTituloOrc(aparenciaOrcamento)} ${gradeTableRowTrCls} ${gradeTituloSubtituloRowTrCls}`}
+                                  style={estiloLinhaTituloOrc(aparenciaOrcamento)}>
                                       <td
                                         title={PLANILHA_ANALITICA_TOOLTIP.item}
                                         className={`${itemW} font-bold text-white`}
@@ -11458,7 +12236,11 @@ export function OrcamentoPageView({
                                   return (
                                     <tr
                                       key={l.key}
-                                      className={`border-b border-gray-200/90 bg-slate-200/90 dark:border-gray-800 dark:bg-gray-900 ${gradeTableRowTrCls} ${gradeTituloSubtituloRowTrCls}`}
+                                      className={`${clsSubtituloOrc(
+                                        aparenciaOrcamento,
+                                        linhasAnaliticoComManuais[idxLinhaFd - 1]?.kind === 'tituloServico'
+                                      )} ${gradeTableRowTrCls} ${gradeTituloSubtituloRowTrCls}`}
+                                  style={estiloLinhaSubtituloOrc(aparenciaOrcamento)}
                                     >
                                       <td
                                         title={PLANILHA_ANALITICA_TOOLTIP.item}
@@ -11666,7 +12448,7 @@ export function OrcamentoPageView({
                                           <span className="text-gray-500 dark:text-gray-400">—</span>
                                         )}
                                       </td>
-                                      <td className="border-l border-gray-200 dark:border-gray-700 p-0">
+                                      <td className="min-w-[24rem] w-[24rem] border-l border-gray-200 dark:border-gray-700 p-0">
                                         <span className="block px-3 py-2.5 text-sm text-gray-400 dark:text-gray-600">—</span>
                                       </td>
                                     </tr>
@@ -11795,6 +12577,7 @@ export function OrcamentoPageView({
                                       className={`p-0 border-l border-gray-200 dark:border-gray-700`}
                                     >
                                       <FdCampoLocal
+                                        draftKey={`fd-qtd:${l.key}`}
                                         committedValue={
                                           qCLive !== undefined
                                             ? qCLive.toLocaleString('pt-BR', {
@@ -11831,6 +12614,7 @@ export function OrcamentoPageView({
                                           R$
                                         </span>
                                         <FdCampoLocal
+                                          draftKey={`fd-vl:${l.key}`}
                                           committedValue={
                                             vRealLive !== undefined
                                               ? vRealLive.toLocaleString('pt-BR', {
@@ -11841,7 +12625,6 @@ export function OrcamentoPageView({
                                           }
                                           onCommit={(raw) => commitPlanilhaVlCompraReal(l.key, raw)}
                                           mask={currencyDigitsToFormatted}
-                                          commitOnChange
                                           placeholder="0,00"
                                           title={PLANILHA_ANALITICA_TOOLTIP.vlCompraRealInsumo}
                                           inputMode="numeric"
@@ -11850,11 +12633,13 @@ export function OrcamentoPageView({
                                       </div>
                                     </td>
                                     <td
-                                      className={`px-3 py-2.5 text-sm tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700`}
+                                      className={`px-3 py-2.5 text-sm text-center tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700`}
                                     >
                                       {custoCompraR !== null ? (
                                         <MoedaCelula valor={custoCompraR} />
-                                      ) : '—'}
+                                      ) : (
+                                        <span className="text-gray-500 dark:text-gray-400">—</span>
+                                      )}
                                     </td>
                                     <td
                                       className={`px-3 py-2.5 text-sm text-center tabular-nums border-l border-gray-200 dark:border-gray-700 ${
@@ -11888,8 +12673,9 @@ export function OrcamentoPageView({
                                         <span className="text-gray-500 dark:text-gray-400">—</span>
                                       )}
                                     </td>
-                                    <td className="border-l border-gray-200 dark:border-gray-700 p-0">
+                                    <td className="min-w-[24rem] w-[24rem] border-l border-gray-200 dark:border-gray-700 p-0">
                                       <FdCampoLocal
+                                        draftKey={`fd-obs:${l.key}`}
                                         committedValue={fichaDemandaObservacoes[l.key] ?? ''}
                                         onCommit={(raw) => commitFichaDemandaObservacao(l.key, raw)}
                                         placeholder="Adicionar observação..."
@@ -11903,8 +12689,7 @@ export function OrcamentoPageView({
                             </tbody>
                           </table>
                         </div>
-                        <div className="mt-6 flex flex-col gap-4">
-                          <div className="space-y-4">
+                        <div className="mt-6 flex flex-col gap-6">
                             <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50/40 dark:bg-gray-900/30 px-4 py-4 sm:px-5">
                               <h4 className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-3">
                                 Preço de compra por grupo
@@ -11966,7 +12751,6 @@ export function OrcamentoPageView({
                                 </div>
                               </dl>
                             </div>
-                          </div>
 
                           <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50/40 dark:bg-gray-900/30 px-4 py-4 sm:px-5">
                             <dl className="divide-y divide-gray-200/90 dark:divide-gray-700/90">
@@ -12020,26 +12804,6 @@ export function OrcamentoPageView({
                               </span>
                             </div>
                           </div>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-3 pt-1">
-                          <button
-                            type="button"
-                            onClick={exportarPlanilhaAnalitica}
-                            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-red-600 text-white text-sm font-semibold hover:bg-red-700 shadow-sm transition-colors"
-                            title={PLANILHA_ANALITICA_TOOLTIP.exportPlanilha}
-                          >
-                            <FileSpreadsheet className="w-5 h-5 shrink-0" />
-                            Exportar ficha de demanda (.xlsx)
-                          </button>
-                          <button
-                            type="button"
-                            onClick={exportarFichaDemandaPdf}
-                            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-red-600 text-white text-sm font-semibold hover:bg-red-700 shadow-sm transition-colors"
-                            title="Exporta a ficha de demanda em PDF"
-                          >
-                            <FileDown className="w-5 h-5 shrink-0" />
-                            Exportar ficha de demanda (.pdf)
-                          </button>
                         </div>
                         </>
                     )}
@@ -12119,12 +12883,17 @@ export function OrcamentoPageView({
                                 updateLinhaContagem(row.key, idx, campo, valor)
                               }
                               onRemoveLinhaContagem={idx => removeLinhaContagem(row.key, idx)}
-                              dim={
-                                dimensoesPorItem[row.key] ?? {
-                                  tipoUnidade: row.tipoUnidade,
-                                  linhas: []
-                                }
-                              }
+                              dim={(() => {
+                                const raw =
+                                  dimensoesPorItem[row.key] ?? {
+                                    tipoUnidade: row.tipoUnidade,
+                                    linhas: [] as LinhaMedicao[]
+                                  };
+                                return {
+                                  ...raw,
+                                  linhas: linhasMedicaoEfetivas(raw)
+                                };
+                              })()}
                               ehCargaEntulho={ehComposicaoCargaEntulho(row.item.descricao)}
                               updateLinhaMedicao={updateLinhaMedicao}
                               updateRotuloColunaMedicao={(campo, rotulo) =>
@@ -12133,6 +12902,7 @@ export function OrcamentoPageView({
                               addLinhaMedicao={addLinhaMedicao}
                               addLinhaCabecalhoSecaoMedicao={addLinhaCabecalhoSecaoMedicao}
                               removeLinhaMedicao={removeLinhaMedicao}
+                              estiloTitulo={estiloLinhaTituloOrc(aparenciaOrcamento)}
                             />
                           </section>
                         ))}
@@ -12183,7 +12953,7 @@ export function OrcamentoPageView({
                       ref={montagemOrcamentoTableRef}
                       className="table-scroll rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900"
                     >
-                      <table className={`min-w-[1580px] w-full border-collapse text-sm ${gradeTableCls}`}>
+                      <table className={`min-w-[1840px] w-full border-collapse text-sm ${gradeTableCls}`}>
                         <thead className="bg-gray-50 dark:bg-gray-800 sticky top-0 z-10 border-b border-gray-200 dark:border-gray-700">
                           <tr className={gradeTableRowTrCls}>
                             <th className="w-12 min-w-[3rem] px-2 py-2.5 text-center">
@@ -12213,10 +12983,12 @@ export function OrcamentoPageView({
                             <th className="min-w-[6.5rem] px-2 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600">Quantidade</th>
                             <th className="min-w-[9.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600">MÃO DE OBRA</th>
                             <th className="min-w-[9.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600">MATERIAL</th>
-                            <th className="min-w-[9.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600">Custo direto</th>
-                            <th className="min-w-[10.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600">Valor com BDI</th>
-                            <th className="min-w-[9.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600">Total</th>
+                            <th className="min-w-[13.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600">Valor unitário sem BDI</th>
+                            <th className="min-w-[13.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600">Valor unitário com BDI</th>
+                            <th className="min-w-[13.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600">Valor total sem BDI</th>
+                            <th className="min-w-[13.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600">Valor total com BDI</th>
                             <th className="w-[72px] px-2 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600">Peso</th>
+                            <th className="min-w-[16rem] w-[16rem] px-2 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600">Observação</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-200/80 dark:divide-gray-700">
@@ -12289,10 +13061,11 @@ export function OrcamentoPageView({
                         const tituloRecolhido = linhasListaRecolhidas.has(chaveTituloLista);
                         const subRecolhido = linhasListaRecolhidas.has(chaveSubLista);
                         return (
-                          <React.Fragment key={bloco.key}>
+                          <React.Fragment key={`${main}.${subIdx}:${bloco.servicoNome}\0${bloco.subtituloNome}`}>
                             {mostrarTituloServico && (
                             <tr
-                              className={`bg-red-600 dark:bg-red-950/90 ${gradeTableRowTrCls} ${gradeTituloSubtituloRowTrCls}`}
+                              className={`${clsTituloOrc(aparenciaOrcamento)} ${gradeTableRowTrCls} ${gradeTituloSubtituloRowTrCls}`}
+                                  style={estiloLinhaTituloOrc(aparenciaOrcamento)}
                               data-orc-ctx-montagem="tituloServico"
                               data-servico-id={bloco.key.split('|')[0] ?? ''}
                               title="Clique com o botão direito para apagar este serviço do orçamento"
@@ -12308,9 +13081,7 @@ export function OrcamentoPageView({
                                   />
                                 </div>
                               </td>
-                              <td className={`w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2.5 align-middle text-center text-sm font-bold tabular-nums text-white ${borderTitulo}`}>
-                                {main}
-                              </td>
+                              <td className={`w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2.5 align-middle text-center text-sm font-bold tabular-nums text-white ${borderTitulo}`} />
                               <td className={`px-3 py-2.5 align-middle text-center ${borderTitulo}`} />
                               <td className={`px-3 py-2.5 align-middle text-center ${borderTitulo}`} />
                               <td className={`min-w-[260px] max-w-[min(520px,55vw)] px-3 py-2.5 align-middle ${borderTitulo}`}>
@@ -12331,9 +13102,21 @@ export function OrcamentoPageView({
                                       aria-hidden
                                     />
                                   </button>
-                                  <span className="block min-w-0 flex-1 leading-5 whitespace-normal break-words text-xs font-bold uppercase tracking-wide text-left text-white">
-                                    {bloco.servicoNome}
-                                  </span>
+                                  <div
+                                    className="min-w-0 flex-1"
+                                    onClick={(e) => e.stopPropagation()}
+                                    onMouseDown={(e) => e.stopPropagation()}
+                                  >
+                                    <FdCampoLocal
+                                      draftKey={`orc-titulo:${servicoIdLista}`}
+                                      committedValue={bloco.servicoNome}
+                                      onCommit={(raw) =>
+                                        renomearTituloOrcamento(servicoIdLista, raw)
+                                      }
+                                      title="Clique para editar o título"
+                                      className="w-full min-w-0 cursor-text border-0 bg-transparent p-0 text-left text-xs font-bold uppercase tracking-wide text-white caret-white outline-none ring-0 placeholder:text-white/50 focus:ring-0"
+                                    />
+                                  </div>
                                 </div>
                               </td>
                               <td className={`px-2 py-2.5 text-center align-middle ${borderTitulo}`} />
@@ -12351,16 +13134,21 @@ export function OrcamentoPageView({
                                 <MoedaCelula valor={resumoTitulo.totalComBdi} className="text-sm text-white font-semibold" valorClassName="font-semibold" />
                               </td>
                               <td className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderTitulo}`}>
+                                <MoedaCelula valor={resumoTitulo.custoDir} className="text-sm text-white font-semibold" valorClassName="font-semibold" />
+                              </td>
+                              <td className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderTitulo}`}>
                                 <MoedaCelula valor={resumoTitulo.totalComBdi} className="text-sm text-white font-semibold" valorClassName="font-semibold" />
                               </td>
                               <td className={`px-2 py-2.5 text-sm text-center align-middle text-white tabular-nums whitespace-nowrap font-semibold ${borderTitulo}`}>
                                 {resumoTitulo.pesoPct.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%
                               </td>
+                              <td className={`min-w-[16rem] w-[16rem] px-2 py-2.5 align-middle ${borderTitulo}`} />
                             </tr>
                             )}
                             <OrcListaAnimacaoGrupo aberto={!tituloRecolhido}>
                             <tr
-                              className={`border-b border-gray-200/90 bg-slate-200/90 dark:border-gray-800 dark:bg-gray-900 ${gradeTableRowTrCls} ${gradeTituloSubtituloRowTrCls}`}
+                              className={`${clsSubtituloOrc(aparenciaOrcamento, mostrarTituloServico)} ${gradeTableRowTrCls} ${gradeTituloSubtituloRowTrCls}`}
+                                  style={estiloLinhaSubtituloOrc(aparenciaOrcamento)}
                               data-orc-ctx-montagem="subtitulo"
                               data-bloco-key={bloco.key}
                             >
@@ -12398,9 +13186,22 @@ export function OrcamentoPageView({
                                       aria-hidden
                                     />
                                   </button>
-                                  <span className="block min-w-0 flex-1 leading-5 whitespace-normal break-words text-[11px] font-semibold uppercase tracking-wide text-gray-800 dark:text-gray-200 sm:text-xs">
-                                    {mesmoTituloSubtitulo ? bloco.servicoNome : bloco.subtituloNome}
-                                  </span>
+                                  <div
+                                    className="min-w-0 flex-1"
+                                    onClick={(e) => e.stopPropagation()}
+                                    onMouseDown={(e) => e.stopPropagation()}
+                                  >
+                                    <FdCampoLocal
+                                      draftKey={`orc-sub:${bloco.key}`}
+                                      committedValue={bloco.subtituloNome}
+                                      onCommit={(raw) => {
+                                        const subId = bloco.key.split('|')[1] ?? '';
+                                        if (subId) renomearSubtituloOrcamento(servicoIdLista, subId, raw);
+                                      }}
+                                      title="Clique para editar o subtítulo"
+                                      className="w-full min-w-0 cursor-text border-0 bg-transparent p-0 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-800 outline-none ring-0 placeholder:text-gray-400 focus:ring-0 dark:text-gray-200 dark:placeholder:text-gray-500 sm:text-xs"
+                                    />
+                                  </div>
                                 </div>
                               </td>
                               <td className={`px-2 py-2.5 text-center align-middle ${borderSub}`} />
@@ -12418,11 +13219,15 @@ export function OrcamentoPageView({
                                 <MoedaCelula valor={resumoSubtitulo.totalComBdi} className="text-sm font-semibold text-gray-900 dark:text-gray-100" valorClassName="font-semibold" />
                               </td>
                               <td className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderSub}`}>
+                                <MoedaCelula valor={resumoSubtitulo.custoDir} className="text-sm font-semibold text-gray-900 dark:text-gray-100" valorClassName="font-semibold" />
+                              </td>
+                              <td className={`px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums ${borderSub}`}>
                                 <MoedaCelula valor={resumoSubtitulo.totalComBdi} className="text-sm font-semibold text-gray-900 dark:text-gray-100" valorClassName="font-semibold" />
                               </td>
                               <td className={`px-2 py-2.5 text-sm text-center align-middle text-gray-800 dark:text-gray-200 tabular-nums whitespace-nowrap font-semibold ${borderSub}`}>
                                 {resumoSubtitulo.pesoPct.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%
                               </td>
+                              <td className={`min-w-[16rem] w-[16rem] px-2 py-2.5 align-middle ${borderSub}`} />
                             </tr>
                                   <OrcListaAnimacaoGrupo aberto={!tituloRecolhido && !subRecolhido}>
                                   {rowsDoBloco.map((row, itemIdx) => {
@@ -12471,11 +13276,12 @@ export function OrcamentoPageView({
                                           )}
                                         </span>
                                       </td>
-                                      <td className={`text-center align-middle tabular-nums border-l border-gray-200 dark:border-gray-700 ${row.tipoUnidade !== 'un' || meta.usarMemoriaCalculo != null ? 'px-2 py-2.5' : 'p-0'}`}>
-                                        {row.tipoUnidade !== 'un' || meta.usarMemoriaCalculo != null ? (
+                                      <td className={`text-center align-middle tabular-nums border-l border-gray-200 dark:border-gray-700 ${row.tipoUnidade === 'un' || meta.importadoPlanilha === true ? 'p-0' : 'px-2 py-2.5'}`}>
+                                        {row.tipoUnidade !== 'un' && meta.importadoPlanilha !== true ? (
                                           <span className="text-sm font-medium text-gray-900 dark:text-gray-100">{row.quantidade.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</span>
                                         ) : (
                                           <FdCampoLocal
+                                            draftKey={`orc-qtd:${row.key}`}
                                             committedValue={
                                               row.quantidade === 0
                                                 ? ''
@@ -12506,10 +13312,26 @@ export function OrcamentoPageView({
                                         <MoedaCelula valor={row.precoUnitarioComBdi} className="text-sm" />
                                       </td>
                                       <td className="px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums font-semibold text-gray-900 dark:text-gray-50 border-l border-gray-200 dark:border-gray-700">
+                                        <MoedaCelula valor={row.total} className="text-sm font-semibold" valorClassName="font-semibold" />
+                                      </td>
+                                      <td className="px-3 py-2.5 text-sm align-middle whitespace-nowrap tabular-nums font-semibold text-gray-900 dark:text-gray-50 border-l border-gray-200 dark:border-gray-700">
                                         <MoedaCelula valor={row.totalComBdi} className="text-sm font-semibold" valorClassName="font-semibold" />
                                       </td>
                                       <td className="px-2 py-2.5 text-sm text-center align-middle text-gray-700 dark:text-gray-300 tabular-nums whitespace-nowrap border-l border-gray-200 dark:border-gray-700">
                                         {pesoPctOrcamento.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%
+                                      </td>
+                                      <td
+                                        className="min-w-[16rem] w-[16rem] border-l border-gray-200 p-0 dark:border-gray-700"
+                                        onClick={(e) => e.stopPropagation()}
+                                        onMouseDown={(e) => e.stopPropagation()}
+                                      >
+                                        <FdCampoLocal
+                                          draftKey={`orc-obs:${row.key}`}
+                                          committedValue={observacoesPorItem[row.key] ?? ''}
+                                          onCommit={(raw) => commitObservacaoOrcamento(row.key, raw)}
+                                          placeholder="Adicionar observação..."
+                                          className={`${inputGradeCls} text-left`}
+                                        />
                                       </td>
                                     </tr>
                                     </React.Fragment>
@@ -12604,6 +13426,7 @@ export function OrcamentoPageView({
                 )}
               </CardContent>
             </Card>
+            </div>
           )}
 
         </div>
@@ -12678,6 +13501,18 @@ export function OrcamentoPageView({
                   </div>
                 </div>
                 <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAparenciaDraft(meta.aparencia ?? { ...APARENCIA_ORCAMENTO_PADRAO });
+                      setModalAparenciaAberto(true);
+                    }}
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 shadow-sm transition-colors hover:bg-gray-50 active:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700 dark:active:bg-gray-600 dark:focus-visible:ring-offset-gray-900"
+                    title="Editar características do orçamento"
+                    aria-label="Editar características do orçamento"
+                  >
+                    <Palette className="h-4 w-4 shrink-0" aria-hidden />
+                  </button>
                   {orcamentoVeioOrcafascio && (
                     <button
                       type="button"
@@ -12703,15 +13538,7 @@ export function OrcamentoPageView({
                   >
                     <Download className="h-4 w-4 shrink-0" aria-hidden />
                   </button>
-                  <button
-                    type="button"
-                    onClick={exportarCronogramaExcel}
-                    className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 shadow-sm transition-colors hover:bg-gray-50 active:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700 dark:active:bg-gray-600 dark:focus-visible:ring-offset-gray-900"
-                    title="Exportar Cronograma"
-                    aria-label="Exportar Cronograma"
-                  >
-                    <Calendar className="h-4 w-4 shrink-0" aria-hidden />
-                  </button>
+                  {analiticoDisponivel && (
                   <button
                     type="button"
                     onClick={() => void abrirEnvioFichaDemandaAprovacao()}
@@ -12735,6 +13562,7 @@ export function OrcamentoPageView({
                       <ArrowRight className="h-4 w-4 shrink-0" aria-hidden />
                     )}
                   </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -12797,6 +13625,171 @@ export function OrcamentoPageView({
               >
                 {excluindoOrcamento ? 'Excluindo...' : 'Excluir'}
               </button>
+            </div>
+          </div>
+        </AppModalOverlay>
+      )}
+
+      {modalNomesOrcafascioEditados && (
+        <AppModalOverlay className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/50"
+            onClick={() => {
+              if (isAtualizandoOrcafascio) return;
+              setModalNomesOrcafascioEditados(null);
+            }}
+          />
+          <div className="relative mx-4 w-full max-w-lg rounded-lg bg-white p-6 shadow-xl dark:bg-gray-800">
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900/30">
+              <AlertTriangle className="h-6 w-6 text-amber-600 dark:text-amber-400" aria-hidden />
+            </div>
+            <h3 className="mb-2 text-center text-lg font-semibold text-gray-900 dark:text-gray-100">
+              Nomes editados neste orçamento
+            </h3>
+            <p className="mb-4 text-center text-sm text-gray-600 dark:text-gray-400">
+              Título ou subtítulo foram alterados aqui. Altere os mesmos nomes no Orçafascio
+              antes de atualizar, senão as composições podem não casar e a quantidade ou a
+              memória de cálculo podem se perder.
+            </p>
+            <ul className="mb-6 max-h-48 space-y-2 overflow-y-auto rounded-md border border-gray-200 bg-gray-50 p-3 text-sm dark:border-gray-700 dark:bg-gray-900/50">
+              {modalNomesOrcafascioEditados.map((item, idx) => (
+                <li key={`${item.tipo}-${idx}`} className="text-gray-700 dark:text-gray-300">
+                  <span className="font-semibold text-gray-900 dark:text-gray-100">{item.tipo}:</span>{' '}
+                  <span className="break-words">{item.de}</span>
+                  <span className="mx-1.5 text-gray-400">→</span>
+                  <span className="break-words font-medium text-gray-900 dark:text-gray-100">{item.para}</span>
+                </li>
+              ))}
+            </ul>
+            <div className="flex items-center justify-center space-x-3">
+              <button
+                type="button"
+                onClick={() => setModalNomesOrcafascioEditados(null)}
+                disabled={isAtualizandoOrcafascio}
+                className="rounded-lg bg-gray-100 px-4 py-2 text-sm text-gray-700 transition-colors hover:bg-gray-200 disabled:opacity-50 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setModalNomesOrcafascioEditados(null);
+                  void executarAtualizarOrcamentoOrcafascio();
+                }}
+                disabled={isAtualizandoOrcafascio}
+                className="rounded-lg bg-amber-600 px-4 py-2 text-sm text-white transition-colors hover:bg-amber-700 disabled:opacity-50"
+              >
+                {isAtualizandoOrcafascio ? 'Atualizando...' : 'Atualizar mesmo assim'}
+              </button>
+            </div>
+          </div>
+        </AppModalOverlay>
+      )}
+
+      {modalAparenciaAberto && (
+        <AppModalOverlay className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setModalAparenciaAberto(false)} />
+          <div className="relative mx-4 w-full max-w-lg rounded-lg bg-white p-6 shadow-xl dark:bg-gray-800">
+            <h3 className="mb-1 text-lg font-semibold text-gray-900 dark:text-gray-100">
+              Características do orçamento
+            </h3>
+            <p className="mb-5 text-sm text-gray-600 dark:text-gray-400">
+              Cores do título e do subtítulo, e a fonte das tabelas. A alteração vale para este orçamento.
+            </p>
+            <div className="mb-5 overflow-hidden rounded-md border border-gray-200 text-xs dark:border-gray-700">
+              <div
+                className="px-3 py-2 font-bold uppercase tracking-wide"
+                style={{
+                  backgroundColor: aparenciaDraft.tituloFundo,
+                  color: aparenciaDraft.tituloTexto,
+                  fontFamily: aparenciaDraft.fonte || undefined
+                }}
+              >
+                Título
+              </div>
+              <div
+                className="px-3 py-2 font-semibold uppercase tracking-wide"
+                style={{
+                  backgroundColor: aparenciaDraft.subtituloFundo,
+                  color: aparenciaDraft.subtituloTexto,
+                  fontFamily: aparenciaDraft.fonte || undefined
+                }}
+              >
+                Subtítulo
+              </div>
+            </div>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <CampoCorOrcamento
+                label="Fundo do título"
+                value={aparenciaDraft.tituloFundo}
+                onChange={(tituloFundo) => setAparenciaDraft((p) => ({ ...p, tituloFundo }))}
+              />
+              <CampoCorOrcamento
+                label="Letra do título"
+                value={aparenciaDraft.tituloTexto}
+                onChange={(tituloTexto) => setAparenciaDraft((p) => ({ ...p, tituloTexto }))}
+              />
+              <CampoCorOrcamento
+                label="Fundo do subtítulo"
+                value={aparenciaDraft.subtituloFundo}
+                onChange={(subtituloFundo) => setAparenciaDraft((p) => ({ ...p, subtituloFundo }))}
+              />
+              <CampoCorOrcamento
+                label="Letra do subtítulo"
+                value={aparenciaDraft.subtituloTexto}
+                onChange={(subtituloTexto) => setAparenciaDraft((p) => ({ ...p, subtituloTexto }))}
+              />
+            </div>
+            <div className="mt-4">
+              <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                Fonte do orçamento
+              </span>
+              <StringSingleSelectDropdown
+                value={aparenciaDraft.fonte || 'sistema'}
+                onChange={(fonte) =>
+                  setAparenciaDraft((p) => ({ ...p, fonte: fonte === 'sistema' ? '' : fonte }))
+                }
+                options={FONTES_ORCAMENTO.map((f) => ({
+                  value: f.value || 'sistema',
+                  label: f.label
+                }))}
+                allowEmpty={false}
+                disableSearch
+                matchTriggerWidth
+                placeholder="Padrão do sistema"
+              />
+            </div>
+            <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={() => setAparenciaDraft({ ...APARENCIA_ORCAMENTO_PADRAO })}
+                className="rounded-lg px-3 py-2 text-sm text-gray-600 transition-colors hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
+              >
+                Restaurar padrão
+              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setModalAparenciaAberto(false)}
+                  className="rounded-lg bg-gray-100 px-4 py-2 text-sm text-gray-700 transition-colors hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = parseAparenciaOrcamento(aparenciaDraft);
+                    setMeta((m) => ({
+                      ...m,
+                      aparencia: next && !aparenciaOrcamentoEhPadrao(next) ? next : undefined
+                    }));
+                    setModalAparenciaAberto(false);
+                  }}
+                  className="rounded-lg bg-red-600 px-4 py-2 text-sm text-white transition-colors hover:bg-red-700"
+                >
+                  Salvar
+                </button>
+              </div>
             </div>
           </div>
         </AppModalOverlay>
@@ -13167,6 +14160,51 @@ export function OrcamentoPageView({
         ) : null}
       </Modal>
 
+      <Modal
+        isOpen={importOrigemModalOpen}
+        onClose={() => setImportOrigemModalOpen(false)}
+        title="Importar orçamento"
+        size="md"
+      >
+        <p className="mb-4 text-sm text-gray-600 dark:text-gray-400">
+          Escolha de onde vem o orçamento.
+        </p>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <button
+            type="button"
+            onClick={() => {
+              setImportOrigemModalOpen(false);
+              abrirModalImportarOrcamentoExcel();
+            }}
+            className="flex flex-col items-start gap-2 rounded-xl border border-gray-200 bg-white p-4 text-left transition-colors hover:border-red-300 hover:bg-red-50/60 dark:border-gray-700 dark:bg-gray-800 dark:hover:border-red-800 dark:hover:bg-red-950/30"
+          >
+            <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200">
+              <FileSpreadsheet className="h-5 w-5" aria-hidden />
+            </span>
+            <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">Planilha</span>
+            <span className="text-xs text-gray-500 dark:text-gray-400">
+              Excel no padrão Gênnesis (sintético e, se houver, memória).
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setImportOrigemModalOpen(false);
+              abrirModalImportarOrcafascioOrcamentos();
+            }}
+            className="flex flex-col items-start gap-2 rounded-xl border border-gray-200 bg-white p-4 text-left transition-colors hover:border-red-300 hover:bg-red-50/60 dark:border-gray-700 dark:bg-gray-800 dark:hover:border-red-800 dark:hover:bg-red-950/30"
+          >
+            <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200">
+              <Upload className="h-5 w-5" aria-hidden />
+            </span>
+            <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">Orçafascio</span>
+            <span className="text-xs text-gray-500 dark:text-gray-400">
+              Busca o orçamento direto no Orçafascio.
+            </span>
+          </button>
+        </div>
+      </Modal>
+
       {importOrcamentoModalOpen && (
         <AppModalOverlay className="app-modal-overlay fixed inset-0 z-[2000] flex items-center justify-center bg-black bg-opacity-50">
           <div
@@ -13202,7 +14240,7 @@ export function OrcamentoPageView({
               <div className="flex items-center justify-between gap-4 border-b border-gray-200 pb-4 dark:border-gray-700">
                 <div className="min-w-0 flex-1">
                   <p className="text-sm text-gray-600 dark:text-gray-400">
-                    Baixe o modelo, preencha serviço, subtítulo e composições (ITEM, CÓDIGO, BANCO, DESCRIÇÃO e preços) e envie o Excel. Isso cria um orçamento novo neste contrato.
+                    Envie um Excel no padrão Gênnesis (sintético com ITEM, CÓDIGO, BANCO e DESCRIÇÃO). Se houver aba de memória, ela entra no orçamento; se não houver analítico, essa aba não aparece. Isso cria um orçamento novo neste contrato.
                   </p>
                 </div>
                 <button
@@ -13508,6 +14546,28 @@ export function OrcamentoPageView({
                 onChange={(e) => setEditarDadosDraft((p) => ({ ...p, bdiPercentual: e.target.value }))}
                 className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100"
                 placeholder="Ex: 28,35"
+              />
+            </div>
+            <div className="sm:col-span-2">
+              <p className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Arredondamento
+              </p>
+              <SegmentedControl
+                aria-label="Arredondamento"
+                value={editarDadosDraft.modoArredondamento ?? 'truncar'}
+                onChange={(modoArredondamento) =>
+                  setEditarDadosDraft((p) => ({ ...p, modoArredondamento }))
+                }
+                className="h-auto w-full rounded-xl border border-gray-200 bg-gray-100/80 p-1 dark:border-gray-700 dark:bg-gray-800/70"
+                pillClassName="rounded-lg bg-red-600 shadow-sm top-1 bottom-1"
+                buttonClassName="flex-1 px-2 py-1.5 text-xs sm:text-sm"
+                activeButtonClassName="font-semibold text-white"
+                inactiveButtonClassName="font-medium text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-gray-100"
+                options={[
+                  { value: 'truncar', label: 'Truncar' },
+                  { value: 'arredondar', label: 'Arredondar' },
+                  { value: 'nenhum', label: 'Não arredondar' },
+                ]}
               />
             </div>
             <div className="sm:col-span-2">
