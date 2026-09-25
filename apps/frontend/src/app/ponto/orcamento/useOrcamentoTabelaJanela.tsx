@@ -3,6 +3,7 @@
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 
 const LIMITE_JANELA = 80;
+const RANGE_FOLGA = 8;
 
 function acharScrollParent(el: HTMLElement | null): HTMLElement | Window {
   const page = el?.closest?.('.app-page-scroll');
@@ -10,7 +11,6 @@ function acharScrollParent(el: HTMLElement | null): HTMLElement | Window {
 
   let node = el?.parentElement ?? null;
   while (node) {
-    // overflow-x:auto vira overflow-y:auto no CSS — não é o scroll da página.
     if (node.classList.contains('table-scroll')) {
       node = node.parentElement;
       continue;
@@ -61,13 +61,13 @@ export function useOrcamentoTabelaJanela(
   count: number,
   opts: { rowHeight?: number; overscan?: number; enabled?: boolean } = {}
 ) {
-  const rowHeightHint = opts.rowHeight ?? 44;
+  const rowHeight = Math.max(28, opts.rowHeight ?? 44);
   const overscan = opts.overscan ?? 24;
   const enabled = (opts.enabled ?? true) && count > LIMITE_JANELA;
   const tbodyNodeRef = useRef<HTMLTableSectionElement | null>(null);
   const rangeRef = useRef({ start: 0, end: Math.min(count, LIMITE_JANELA + overscan) });
-  const rowHRef = useRef(rowHeightHint);
   const [range, setRange] = useState(rangeRef.current);
+  const [semPadFim, setSemPadFim] = useState(false);
 
   const applyRange = useCallback((next: { start: number; end: number }) => {
     const prev = rangeRef.current;
@@ -78,67 +78,64 @@ export function useOrcamentoTabelaJanela(
 
   const measure = useCallback(() => {
     if (!enabled) {
+      setSemPadFim((prev) => (prev ? false : prev));
       applyRange({ start: 0, end: count });
       return;
     }
     const el = tbodyNodeRef.current;
-    if (!el) return;
+    if (!el || count <= 0) return;
 
     const scroller = acharScrollParent(el);
     const { top: viewTop, height: viewH } = viewMetrics(scroller);
-    const rowH = Math.max(28, rowHRef.current);
-    const visible = Math.ceil(viewH / rowH) + overscan * 2;
+    const viewBottom = viewTop + viewH;
     const thead = el.previousElementSibling;
     const stickyH =
       thead instanceof HTMLElement ? thead.getBoundingClientRect().height : 0;
     const anchorTop = viewTop + stickyH;
-    const viewBottom = viewTop + viewH;
+    const visible = Math.max(LIMITE_JANELA, Math.ceil(viewH / rowHeight) + overscan * 2);
 
-    const nearScrollerEnd = (() => {
-      if (scroller === window) {
-        const top = window.scrollY || document.documentElement.scrollTop;
-        return top + window.innerHeight >= document.documentElement.scrollHeight - 160;
-      }
-      const box = scroller as HTMLElement;
-      return box.scrollTop + box.clientHeight >= box.scrollHeight - 160;
-    })();
-    if (nearScrollerEnd) {
-      applyRange({ start: Math.max(0, count - visible), end: count });
-      return;
-    }
-
-    const tbodyTop = el.getBoundingClientRect().top;
-    if (tbodyTop >= anchorTop - 4) {
-      applyRange({ start: 0, end: Math.min(count, Math.max(visible, LIMITE_JANELA)) });
-      return;
-    }
+    const offset = anchorTop - el.getBoundingClientRect().top;
+    let start = offset <= 0 ? 0 : Math.max(0, Math.floor(offset / rowHeight) - overscan);
+    let end = Math.min(count, start + visible);
 
     const dataRows = el.querySelectorAll('tr:not([aria-hidden])');
     const firstRow = dataRows[0] as HTMLElement | undefined;
     const lastRow = dataRows[dataRows.length - 1] as HTMLElement | undefined;
-    if (lastRow && lastRow.getBoundingClientRect().bottom < viewBottom - 32) {
-      applyRange({ start: Math.max(0, count - visible), end: count });
+
+    if (firstRow) {
+      const gapAbove = firstRow.getBoundingClientRect().top - anchorTop;
+      if (gapAbove > 72) {
+        start = Math.max(0, start - Math.ceil(gapAbove / rowHeight));
+        end = Math.min(count, start + visible);
+      }
+    }
+
+    let lastInView = false;
+    if (lastRow) {
+      const gapBelow = viewBottom - lastRow.getBoundingClientRect().bottom;
+      lastInView = gapBelow > 8;
+      if (gapBelow > 40 && end < count) {
+        end = Math.min(count, end + Math.ceil(gapBelow / rowHeight) + overscan);
+      }
+    }
+    setSemPadFim((prev) => (prev === lastInView ? prev : lastInView));
+
+    start = Math.max(0, Math.min(start, Math.max(0, count - 1)));
+    end = Math.min(count, Math.max(end, start + 1));
+
+    const prev = rangeRef.current;
+    if (
+      Math.abs(start - prev.start) < RANGE_FOLGA &&
+      Math.abs(end - prev.end) < RANGE_FOLGA &&
+      start !== 0 &&
+      end !== count &&
+      prev.end !== count
+    ) {
       return;
     }
 
-    let rawStart: number;
-    if (firstRow) {
-      const measured = firstRow.getBoundingClientRect().height;
-      if (measured > 16 && measured < 120) {
-        rowHRef.current = rowHRef.current * 0.7 + measured * 0.3;
-      }
-      const idx = rangeRef.current.start;
-      const rowTop = firstRow.getBoundingClientRect().top;
-      const shift = Math.round((anchorTop - rowTop) / Math.max(28, rowHRef.current));
-      rawStart = idx + shift;
-    } else {
-      rawStart = Math.floor((anchorTop - tbodyTop) / rowH);
-    }
-
-    const start = Math.max(0, Math.min(count - 1, rawStart - overscan));
-    const end = Math.min(count, Math.max(start + 1, start + visible));
     applyRange({ start, end });
-  }, [applyRange, count, enabled, overscan]);
+  }, [applyRange, count, enabled, overscan, rowHeight]);
 
   const tbodyRef = useCallback(
     (node: HTMLTableSectionElement | null) => {
@@ -170,15 +167,15 @@ export function useOrcamentoTabelaJanela(
     };
   }, [enabled, measure]);
 
-  const start = enabled ? range.start : 0;
-  const end = enabled ? Math.max(range.end, start + 1) : count;
-  const rowH = Math.max(28, rowHRef.current);
+  const start = enabled ? Math.min(range.start, Math.max(0, count - 1)) : 0;
+  const end = enabled ? Math.min(count, Math.max(range.end, start + 1)) : count;
+  const noFim = !enabled || end >= count;
 
   return {
     tbodyRef,
     start,
     end,
-    topPad: enabled ? start * rowH : 0,
-    bottomPad: enabled ? Math.max(0, (count - end) * rowH) : 0,
+    topPad: enabled ? start * rowHeight : 0,
+    bottomPad: enabled && !noFim && !semPadFim ? (count - end) * rowHeight : 0,
   };
 }

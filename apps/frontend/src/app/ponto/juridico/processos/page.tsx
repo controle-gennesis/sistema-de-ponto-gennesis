@@ -66,6 +66,7 @@ type ListFilters = {
   empresa: string;
   contrato: string;
   polo: string;
+  advogado: string;
   arquivos: '' | 'pendentes' | 'vinculados';
   dataAberturaDe: string;
   dataAberturaAte: string;
@@ -77,6 +78,7 @@ const EMPTY_LIST_FILTERS: ListFilters = {
   empresa: '',
   contrato: '',
   polo: '',
+  advogado: '',
   arquivos: '',
   dataAberturaDe: '',
   dataAberturaAte: '',
@@ -143,6 +145,7 @@ function matchesSearch(row: JuridicoProcesso, term: string): boolean {
     row.status,
     row.statusProcesso,
     row.representanteAutor,
+    row.advogado,
     row.contrato,
     resolveContratoNome(row.contrato),
   ]
@@ -206,6 +209,9 @@ function applyListAndSearchFilters(
   }
   if (listFilters.polo) {
     next = next.filter((row) => (row.polo || '').trim() === listFilters.polo);
+  }
+  if (listFilters.advogado) {
+    next = next.filter((row) => (row.advogado || '').trim() === listFilters.advogado);
   }
   if (listFilters.arquivos === 'pendentes') {
     next = next.filter((row) => arquivosPendentesCount(row) > 0);
@@ -277,12 +283,15 @@ export default function ProcessosAtivosPage() {
   const filterOptions = useMemo(() => {
     const empresas = new Set<string>();
     const polos = new Set<string>();
+    const advogados = new Set<string>();
     const contratos = new Map<string, string>();
     for (const row of allRows) {
       const empresa = (row.empresa || '').trim();
       if (empresa) empresas.add(empresa);
       const polo = (row.polo || '').trim();
       if (polo) polos.add(polo);
+      const advogado = (row.advogado || '').trim();
+      if (advogado) advogados.add(advogado);
       const contrato = (row.contrato || '').trim();
       if (contrato && !contratos.has(contrato)) {
         contratos.set(contrato, resolveContratoNome(contrato) || contrato);
@@ -291,6 +300,7 @@ export default function ProcessosAtivosPage() {
     return {
       empresas: [...empresas].sort((a, b) => a.localeCompare(b, 'pt-BR')),
       polos: [...polos].sort((a, b) => a.localeCompare(b, 'pt-BR')),
+      advogados: [...advogados].sort((a, b) => a.localeCompare(b, 'pt-BR')),
       contratos: [...contratos.entries()]
         .map(([value, label]) => ({ value, label }))
         .sort((a, b) => a.label.localeCompare(b.label, 'pt-BR')),
@@ -660,6 +670,16 @@ export default function ProcessosAtivosPage() {
                 value={listFilters.polo}
                 onChange={setListFilter('polo')}
                 options={filterOptions.polos}
+                placeholder="Todos"
+                emptyOptionLabel="Todos"
+                matchTriggerWidth
+              />
+            </FilterField>
+            <FilterField label="Advogado">
+              <StringSingleSelectDropdown
+                value={listFilters.advogado}
+                onChange={setListFilter('advogado')}
+                options={filterOptions.advogados}
                 placeholder="Todos"
                 emptyOptionLabel="Todos"
                 matchTriggerWidth

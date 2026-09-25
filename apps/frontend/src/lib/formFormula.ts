@@ -64,10 +64,25 @@ export function formulaResultFormat(
   return 'number';
 }
 
-export function getNumericFieldValue(value: unknown): number | null {
+export function getNumericFieldValue(value: unknown, type?: string): number | null {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (value === null || value === undefined || value === '') return null;
-  const raw = String(value);
+  const raw = String(value).trim();
+  if (!raw) return null;
+
+  if (type === 'valor' || /R\$/i.test(raw)) {
+    return parseCurrencyInputBr(raw);
+  }
+  if (type === 'percent' || raw.includes('%')) {
+    return parsePercentInput(raw);
+  }
+
+  // Campo número guarda a string do <input> ("2", "2.5"). Não usar máscara de centavos.
+  if (type === 'number' || /^-?\d+([.,]\d+)?$/.test(raw)) {
+    const n = Number(raw.replace(',', '.'));
+    return Number.isFinite(n) ? n : null;
+  }
+
   const fromCurrency = parseCurrencyInputBr(raw);
   if (fromCurrency !== null) return fromCurrency;
   const fromPercent = parsePercentInput(raw);
@@ -81,8 +96,11 @@ export function getNumericFieldValue(value: unknown): number | null {
 export function evaluateFormula(
   formula: FormFieldFormula,
   answers: Record<string, { value?: string | number | null } | undefined>,
+  sourceTypeById?: Readonly<Record<string, string>>,
 ): number | null {
-  const values = formula.sourceIds.map((id) => getNumericFieldValue(answers[id]?.value));
+  const values = formula.sourceIds.map((id) =>
+    getNumericFieldValue(answers[id]?.value, sourceTypeById?.[id]),
+  );
   if (values.some((v) => v === null)) return null;
   const nums = values as number[];
 

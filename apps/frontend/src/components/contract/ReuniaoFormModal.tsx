@@ -359,6 +359,7 @@ function QuestionField({
   onChange,
   profileOptions,
   formReadOnly = false,
+  sourceTypeById,
 }: {
   question: Question;
   answer: ReuniaoAnswer | undefined;
@@ -366,6 +367,7 @@ function QuestionField({
   onChange: (next: ReuniaoAnswer) => void;
   profileOptions: MultiSelectSearchOption[];
   formReadOnly?: boolean;
+  sourceTypeById?: Readonly<Record<string, string>>;
 }) {
   const normalizedQuestion = normalizeFormQuestion(question as Parameters<typeof normalizeFormQuestion>[0]);
   const value = answer?.value ?? (normalizedQuestion.type === 'rating' ? null : '');
@@ -373,7 +375,7 @@ function QuestionField({
   const hasFormula = questionHasFormula(normalizedQuestion);
   const computedValue =
     hasFormula && normalizedQuestion.formula
-      ? evaluateFormula(normalizedQuestion.formula, allAnswers)
+      ? evaluateFormula(normalizedQuestion.formula, allAnswers, sourceTypeById)
       : null;
   const options =
     normalizedQuestion.options?.length
@@ -1109,6 +1111,14 @@ export function ReuniaoFormModal({
     }) as Question[];
   }, [form.formTemplate, templateSections, formSteps]);
 
+  const sourceTypeById = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const q of allTemplateQuestions) {
+      if (q.id) map[q.id] = q.type;
+    }
+    return map;
+  }, [allTemplateQuestions]);
+
   useEffect(() => {
     if (!form.formTemplate) return;
     const formulaQuestions = allTemplateQuestions.filter((q) => questionHasFormula(q));
@@ -1119,7 +1129,7 @@ export function ReuniaoFormModal({
       const nextAnswers = { ...prev.answers };
       for (const q of formulaQuestions) {
         if (!q.formula) continue;
-        const computed = evaluateFormula(q.formula, nextAnswers);
+        const computed = evaluateFormula(q.formula, nextAnswers, sourceTypeById);
         const current = nextAnswers[q.id]?.value;
         if (!formulaValuesEqual(current, computed)) {
           nextAnswers[q.id] = { ...nextAnswers[q.id], value: computed };
@@ -1129,7 +1139,7 @@ export function ReuniaoFormModal({
       if (!changed) return prev;
       return { ...prev, answers: nextAnswers };
     });
-  }, [form.answers, form.formTemplate, allTemplateQuestions]);
+  }, [form.answers, form.formTemplate, allTemplateQuestions, sourceTypeById]);
 
   const validateSections = (
     sections: Section[],
@@ -1228,6 +1238,7 @@ export function ReuniaoFormModal({
                 allAnswers={form.answers}
                 profileOptions={profileSelectOptions}
                 formReadOnly={readOnly}
+                sourceTypeById={sourceTypeById}
             onChange={(ans) =>
               updateForm((prev) => ({
                 ...prev,
