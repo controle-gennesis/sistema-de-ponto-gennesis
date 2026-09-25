@@ -244,3 +244,10 @@ export async function reserveFuelGasStationDisplayNumbers(count: number): Promis
 export async function assertValidSatelliteCityCode(cityCode: string) {
   return assertValidFuelCityCode(cityCode);
 }
+
+export async function listContractsForFuelStationForm() {
+  return prisma.contract.findMany({
+    orderBy: [{ name: 'asc' }, { number: 'asc' }],
+    select: { id: true, name: true, number: true },
+  });
+}

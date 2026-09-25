@@ -9,7 +9,10 @@ import {
   findActiveVehicleByPlate,
   mapVehicleUsageToFuelType,
 } from '../lib/fuelAdministrativeRegions';
-import { buildFuelSubmissionSlaLine } from '../lib/fuelRefuelChatNotify';
+import {
+  buildFuelSubmissionSlaLine,
+  formatOpenFuelRequestBlockMessage,
+} from '../lib/fuelRefuelChatNotify';
 import {
   buildFuelFlowStartMessage,
   formatFuelAttendanceHoursShort,
@@ -554,6 +557,34 @@ export async function processWhatsAppFuelFlow(params: {
         };
       }
 
+      const openRequests = await fuelRefuelRequestService.findOpenRequestsForDriver({
+        driverUserId: employee.userId,
+        driverName: employee.name,
+      });
+      if (openRequests.length) {
+        const awaiting = openRequests.find((row) => row.status === FuelRefuelRequestStatus.AWAITING_REFUEL);
+        return {
+          sendAction: waButtons(
+            formatOpenFuelRequestBlockMessage({
+              driverName: employee.name,
+              requests: openRequests,
+              reportHint: awaiting
+                ? 'Toque em «Informar abastecimento» para registrar agora.'
+                : null,
+            }),
+            awaiting
+              ? [
+                  { id: 'informar_abastecimento', title: 'Informar abastec.' },
+                  { id: 'MENU', title: 'Menu' },
+                ]
+              : undefined,
+          ),
+          newStatus: 'MENU',
+          newPayload: awaiting ? { blockedAwaitingRequestId: awaiting.id } : {},
+          clearPayload: !awaiting,
+        };
+      }
+
       const contracts = await listContractsByRefuelFrequency();
       if (!contracts.length) {
         return {
@@ -891,6 +922,7 @@ export async function processWhatsAppFuelFlow(params: {
         contractId: String(newPayload.contractId),
         costCenter: String(newPayload.costCenterLabel || newPayload.costCenter || ''),
         driverName: String(newPayload.driverName),
+        driverUserId: requesterUserId,
         vehiclePlate: String(newPayload.vehiclePlate),
         vehicleDescription: (newPayload.vehicleDescription as string | undefined) || null,
         vehicleType: newPayload.vehicleType as FuelVehicleType,

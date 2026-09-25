@@ -16,6 +16,10 @@ import { prisma } from '../lib/prisma';
 import { FUEL_LITERS_MAX } from '../lib/parseFlexibleDecimal';
 import { findUserIdsMatchingSearch, findIdsByUnaccentSearch } from '../lib/normalizeSearchText';
 import { assertWeeklyQuotaAvailable } from '../lib/fuelWeeklyQuota';
+import {
+  FUEL_OPEN_REQUEST_STATUSES,
+  formatOpenFuelRequestBlockMessage,
+} from '../lib/fuelRefuelChatNotify';
 import { createError } from '../middleware/errorHandler';
 import {
   notifyFuelRequesterApprovedBySupplies,
@@ -52,6 +56,7 @@ export type CreateFuelRefuelRequestInput = {
   observations?: string | null;
   sourceChatId?: string | null;
   sourceWhatsAppPhone?: string | null;
+  driverUserId?: string | null;
 };
 
 export type SuppliesApproveFuelRefuelInput = {
@@ -155,12 +160,56 @@ async function presentFuelRowsPhotos<T extends FuelPhotoFields & { id: string }>
 }
 
 export class FuelRefuelRequestService {
+  async findOpenRequestsForDriver(opts: {
+    driverUserId?: string | null;
+    driverName: string;
+  }) {
+    const driverName = opts.driverName.trim();
+    const driverUserId = opts.driverUserId?.trim() || '';
+    const or: Prisma.FuelRefuelRequestWhereInput[] = [];
+    if (driverUserId) or.push({ requesterId: driverUserId });
+    if (driverName) {
+      or.push({ driverName: { equals: driverName, mode: 'insensitive' } });
+    }
+    if (!or.length) return [];
+
+    return prisma.fuelRefuelRequest.findMany({
+      where: {
+        status: { in: FUEL_OPEN_REQUEST_STATUSES },
+        OR: or,
+      },
+      orderBy: { requestedAt: 'desc' },
+      select: {
+        id: true,
+        displayNumber: true,
+        status: true,
+        vehiclePlate: true,
+        driverName: true,
+        requesterId: true,
+      },
+    });
+  }
+
   async create(input: CreateFuelRefuelRequestInput) {
     const costCenter = input.costCenter?.trim() || null;
     const contractId = input.contractId?.trim() || null;
 
     if (!contractId) {
       throw createError('Contrato é obrigatório', 400);
+    }
+
+    const openRequests = await this.findOpenRequestsForDriver({
+      driverUserId: input.driverUserId,
+      driverName: input.driverName,
+    });
+    if (openRequests.length) {
+      throw createError(
+        formatOpenFuelRequestBlockMessage({
+          driverName: input.driverName.trim(),
+          requests: openRequests,
+        }),
+        400,
+      );
     }
 
     const contract = await prisma.contract.findUnique({
@@ -563,10 +612,20 @@ export class FuelRefuelRequestService {
   }
 
   async listAwaitingRefuelForRequester(requesterId: string) {
+    const user = await prisma.user.findUnique({
+      where: { id: requesterId },
+      select: { name: true },
+    });
+    const driverName = user?.name?.trim() || '';
     return prisma.fuelRefuelRequest.findMany({
       where: {
-        requesterId,
         status: FuelRefuelRequestStatus.AWAITING_REFUEL,
+        OR: [
+          { requesterId },
+          ...(driverName
+            ? [{ driverName: { equals: driverName, mode: 'insensitive' as const } }]
+            : []),
+        ],
       },
       orderBy: { createdAt: 'desc' },
       select: {
@@ -580,11 +639,15 @@ export class FuelRefuelRequestService {
     });
   }
 
-  async listAwaitingRefuelForWhatsAppPhone(phone: string) {
+  async listAwaitingRefuelForWhatsAppPhone(phone: string, extra?: { requestId?: string | null }) {
+    const requestId = extra?.requestId?.trim() || '';
     return prisma.fuelRefuelRequest.findMany({
       where: {
-        sourceWhatsAppPhone: phone,
         status: FuelRefuelRequestStatus.AWAITING_REFUEL,
+        OR: [
+          { sourceWhatsAppPhone: phone },
+          ...(requestId ? [{ id: requestId }] : []),
+        ],
       },
       orderBy: { createdAt: 'desc' },
       select: {

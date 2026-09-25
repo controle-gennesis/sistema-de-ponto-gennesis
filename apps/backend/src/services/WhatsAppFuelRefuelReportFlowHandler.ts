@@ -154,7 +154,7 @@ export async function processWhatsAppFuelRefuelReportFlow(params: {
   } = params;
 
   const startingFromMenu =
-    flowStatus === 'MENU' && isWhatsAppFuelReportMenuSelection(content);
+    isWhatsAppFuelReportMenuSelection(content) && !isWhatsAppFuelReportFlowStatus(flowStatus);
   if (!isWhatsAppFuelReportFlowStatus(flowStatus) && !startingFromMenu) {
     return null;
   }
@@ -172,7 +172,9 @@ export async function processWhatsAppFuelRefuelReportFlow(params: {
   }
 
   if (startingFromMenu) {
-    const rows = await fuelRefuelRequestService.listAwaitingRefuelForWhatsAppPhone(phone);
+    const rows = await fuelRefuelRequestService.listAwaitingRefuelForWhatsAppPhone(phone, {
+      requestId: String(payload.blockedAwaitingRequestId || ''),
+    });
     const requestOptions = rows.map((r) => ({
       id: r.id,
       displayNumber: r.displayNumber,

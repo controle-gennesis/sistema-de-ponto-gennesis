@@ -11,6 +11,9 @@ router.use(requireFuelSuppliesAccess);
 router.get('/satellite-cities', (req, res, next) =>
   fuelGasStationController.listSatelliteCities(req, res, next),
 );
+router.get('/contracts', (req, res, next) =>
+  fuelGasStationController.listContracts(req, res, next),
+);
 router.get('/', (req, res, next) => fuelGasStationController.list(req, res, next));
 router.post('/import', (req, res, next) => fuelGasStationController.importStations(req, res, next));
 router.post('/', (req, res, next) => fuelGasStationController.create(req, res, next));

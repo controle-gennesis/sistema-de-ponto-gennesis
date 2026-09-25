@@ -8,6 +8,7 @@ import {
   assertValidSatelliteCityCode,
   cityCodesForLookup,
   listActiveFuelGasStationsByContract,
+  listContractsForFuelStationForm,
   listFuelSatelliteCities,
   reserveFuelGasStationDisplayNumbers,
 } from '../lib/fuelAdministrativeRegions';
@@ -85,6 +86,24 @@ export class FuelGasStationController {
     await assertUserHasFuelSuppliesAccess(req.user.id, req.user.isAdmin);
   }
 
+  async listContracts(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      await this.assertAccess(req);
+      if (!req.user) throw createError('Usuário não autenticado', 401);
+      const rows = await listContractsForFuelStationForm();
+      res.json({
+        success: true,
+        data: rows.map((row) => ({
+          id: row.id,
+          name: row.name.trim() || row.number,
+          number: row.number,
+        })),
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
   async listSatelliteCities(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       await this.assertAccess(req);
@@ -147,6 +166,7 @@ export class FuelGasStationController {
   async create(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       await this.assertAccess(req);
+      if (!req.user) throw createError('Usuário não autenticado', 401);
       const body = stationBodySchema.parse(req.body);
       await assertValidSatelliteCityCode(body.cityCode);
       const contractIds = await assertContractIdsExist(body.contractIds ?? []);
@@ -258,6 +278,7 @@ export class FuelGasStationController {
   async update(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       await this.assertAccess(req);
+      if (!req.user) throw createError('Usuário não autenticado', 401);
       const body = stationUpdateSchema.parse(req.body);
       const existing = await prisma.fuelGasStation.findUnique({ where: { id: req.params.id } });
       if (!existing) throw createError('Posto não encontrado', 404);

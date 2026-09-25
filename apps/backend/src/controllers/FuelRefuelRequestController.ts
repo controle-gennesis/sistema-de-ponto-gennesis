@@ -373,6 +373,39 @@ export class FuelRefuelRequestController {
     }
   }
 
+  async listOpenForDriver(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.user) throw createError('Usuário não autenticado', 401);
+      const driverUserId = String(req.query.driverUserId ?? '').trim();
+      if (!driverUserId) throw createError('Condutor é obrigatório', 400);
+
+      const user = await prisma.user.findUnique({
+        where: { id: driverUserId },
+        select: { name: true },
+      });
+      if (!user) throw createError('Condutor não encontrado', 404);
+
+      const requests = await fuelRefuelRequestService.findOpenRequestsForDriver({
+        driverUserId,
+        driverName: user.name,
+      });
+
+      res.json({
+        success: true,
+        data: {
+          driverName: user.name,
+          requests: requests.map((row) => ({
+            id: row.id,
+            displayNumber: row.displayNumber,
+            status: row.status,
+          })),
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
   async listMine(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const user = req.user;
@@ -445,6 +478,7 @@ export class FuelRefuelRequestController {
         contractId: body.contractId || driverContractId || undefined,
         costCenter: costCenterForRow,
         driverName,
+        driverUserId: body.driverUserId || undefined,
         vehiclePlate: body.vehiclePlate,
         vehicleDescription: body.vehicleDescription,
         vehicleType: body.vehicleType as FuelVehicleType,

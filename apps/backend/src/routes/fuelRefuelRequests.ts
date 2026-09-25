@@ -19,6 +19,9 @@ router.get('/driver-lookup', (req, res, next) =>
 router.get('/driver-options', (req, res, next) =>
   fuelRefuelRequestController.listDriverOptions(req, res, next),
 );
+router.get('/open-for-driver', (req, res, next) =>
+  fuelRefuelRequestController.listOpenForDriver(req, res, next),
+);
 router.get('/mine', (req, res, next) =>
   fuelRefuelRequestController.listMine(req, res, next),
 );

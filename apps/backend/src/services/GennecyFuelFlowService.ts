@@ -6,6 +6,7 @@ import {
   onlyDigits,
 } from '../lib/employeeCpfLookup';
 import {
+  formatOpenFuelRequestBlockMessage,
   notifyFuelRequesterWaitingManager,
   notifyFuelRequesterWaitingSupplies,
 } from '../lib/fuelRefuelChatNotify';
@@ -46,6 +47,7 @@ type FuelFlowPayload = {
   driverName?: string;
   driverCpfMasked?: string;
   driverEmployeeId?: string;
+  driverUserId?: string;
   vehiclePlate?: string;
   vehicleDescription?: string;
   vehicleType?: FuelVehicleType;
@@ -362,6 +364,27 @@ export class GennecyFuelFlowService {
           };
         }
 
+        const openRequests = await fuelRefuelRequestService.findOpenRequestsForDriver({
+          driverUserId: employee.userId,
+          driverName: employee.name,
+        });
+        if (openRequests.length) {
+          const awaiting = openRequests.find(
+            (row) => row.status === FuelRefuelRequestStatus.AWAITING_REFUEL,
+          );
+          await cancelSession(params.chatId, params.userId);
+          return {
+            handled: true,
+            reply: formatOpenFuelRequestBlockMessage({
+              driverName: employee.name,
+              requests: openRequests,
+              reportHint: awaiting
+                ? 'Para registrar o abastecimento agora, digite **4** ou **informar abastecimento**.'
+                : null,
+            }),
+          };
+        }
+
         const contracts = await listRegisteredContracts();
         if (!contracts.length) {
           return {
@@ -376,6 +399,7 @@ export class GennecyFuelFlowService {
           driverName: employee.name,
           driverCpfMasked: employee.cpfMasked,
           driverEmployeeId: employee.employeeId,
+          driverUserId: employee.userId,
           costCenter: employee.costCenter,
           contractOptions: contracts,
           contractId: undefined,
@@ -578,6 +602,7 @@ export class GennecyFuelFlowService {
           contractId: payload.contractId,
           costCenter: payload.costCenterLabel || payload.costCenter || null,
           driverName: payload.driverName,
+          driverUserId: payload.driverUserId,
           vehiclePlate: payload.vehiclePlate,
           vehicleDescription: payload.vehicleDescription,
           vehicleType: payload.vehicleType,

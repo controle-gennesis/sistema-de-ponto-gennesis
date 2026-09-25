@@ -157,8 +157,7 @@ export default function RegioesPostosCombustivelPage() {
 
   const { data: contractsRes } = useQuery({
     queryKey: ['contracts-for-fuel-stations'],
-    queryFn: async () =>
-      (await api.get('/contracts', { params: { limit: 500, page: 1 } })).data,
+    queryFn: async () => (await api.get('/fuel-gas-stations/contracts')).data,
     enabled: showStationForm && !loadingUser,
   });
 
@@ -168,14 +167,26 @@ export default function RegioesPostosCombustivelPage() {
       name: string;
       number?: string;
     }>;
-    return list
-      .map((c) => ({
+    const byId = new Map<string, MultiSelectSearchOption>();
+    for (const c of list) {
+      byId.set(c.id, {
         value: c.id,
         label: c.name,
         searchText: `${c.name} ${c.number ?? ''}`,
-      }))
-      .sort((a, b) => a.label.localeCompare(b.label, 'pt-BR'));
-  }, [contractsRes]);
+      });
+    }
+    for (const c of editingStation?.contracts ?? []) {
+      if (byId.has(c.id)) continue;
+      byId.set(c.id, {
+        value: c.id,
+        label: c.name,
+        searchText: `${c.name} ${c.number ?? ''}`,
+      });
+    }
+    return Array.from(byId.values()).sort((a, b) =>
+      a.label.localeCompare(b.label, 'pt-BR'),
+    );
+  }, [contractsRes, editingStation]);
 
   const cityFilterOptions = useMemo((): MultiSelectSearchOption[] => {
     return cities.map((city) => ({

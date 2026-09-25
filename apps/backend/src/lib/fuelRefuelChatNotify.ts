@@ -52,11 +52,52 @@ async function notifyFuelRequester(
   await postFuelWhatsAppMessage(sourceWhatsAppPhone, text);
 }
 
+export const FUEL_OPEN_REQUEST_STATUSES: FuelRefuelRequestStatus[] = [
+  FuelRefuelRequestStatus.PENDING_MANAGER,
+  FuelRefuelRequestStatus.PENDING_SUPPLIES,
+  FuelRefuelRequestStatus.AWAITING_REFUEL,
+];
+
 const STATUS_WAITING_LABEL: Partial<Record<FuelRefuelRequestStatus, string>> = {
   PENDING_MANAGER: 'aguardando aprovação do gestor',
   PENDING_SUPPLIES: 'aguardando aprovação do Suprimentos',
   AWAITING_REFUEL: 'aprovada — pode abastecer',
 };
+
+export function fuelOpenRequestPhaseLabel(status: FuelRefuelRequestStatus): string {
+  switch (status) {
+    case FuelRefuelRequestStatus.PENDING_MANAGER:
+      return 'Aguardando aprovação do gestor';
+    case FuelRefuelRequestStatus.PENDING_SUPPLIES:
+      return 'Aguardando aprovação do Suprimentos';
+    case FuelRefuelRequestStatus.AWAITING_REFUEL:
+      return 'Aguardando informar o abastecimento';
+    default:
+      return STATUS_WAITING_LABEL[status] ?? status;
+  }
+}
+
+export function formatOpenFuelRequestBlockMessage(params: {
+  driverName: string;
+  requests: Array<{ displayNumber: number; status: FuelRefuelRequestStatus }>;
+  reportHint?: string | null;
+}): string {
+  const lines = [
+    `Identifiquei ${params.driverName}.`,
+    '',
+    'Este CPF já tem abastecimento em andamento. Aguarde a conclusão para solicitar novamente.',
+    '',
+  ];
+  for (const row of params.requests) {
+    lines.push(`Solicitação #${row.displayNumber}`);
+    lines.push(`Fase atual: ${fuelOpenRequestPhaseLabel(row.status)}`);
+    lines.push('');
+  }
+  if (params.reportHint) {
+    lines.push(params.reportHint);
+  }
+  return lines.filter((line, i, arr) => line !== '' || arr[i - 1] !== '').join('\n').trim();
+}
 
 export function formatFuelWaitingLine(displayNumber: number, status: FuelRefuelRequestStatus): string {
   const label = STATUS_WAITING_LABEL[status] ?? status;

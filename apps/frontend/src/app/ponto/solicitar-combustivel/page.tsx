@@ -564,6 +564,26 @@ export default function SolicitarCombustivelPage() {
     staleTime: 10 * 60 * 1000,
   });
 
+  const { data: openDriverRequests } = useQuery({
+    queryKey: ['fuel-open-for-driver', formData.driverUserId],
+    queryFn: async () => {
+      const res = await api.get('/fuel-refuel-requests/open-for-driver', {
+        params: { driverUserId: formData.driverUserId },
+      });
+      return res.data?.data as {
+        driverName: string;
+        requests: Array<{ id: string; displayNumber: number; status: FuelRefuelStatus }>;
+      };
+    },
+    enabled: showForm && Boolean(formData.driverUserId),
+    staleTime: 15_000,
+  });
+
+  const driverHasOpenRequest = Boolean(openDriverRequests?.requests?.length);
+  const awaitingOpenRequests = (openDriverRequests?.requests ?? []).filter(
+    (row) => row.status === 'AWAITING_REFUEL',
+  );
+
   const { data: selectedQuota, isFetching: loadingSelectedQuota } = useQuery({
     queryKey: ['fuel-quota-balance', formData.contractId],
     queryFn: async () => {
@@ -768,6 +788,27 @@ export default function SolicitarCombustivelPage() {
     setReportTarget(row);
   };
 
+  const openReportFromPending = async (requestId: string) => {
+    const existing = allRows.find((row) => row.id === requestId);
+    if (existing) {
+      setShowForm(false);
+      openReportForm(existing);
+      return;
+    }
+    try {
+      const res = await api.get(`/fuel-refuel-requests/${requestId}`);
+      const row = res.data?.data as FuelRequestRow | undefined;
+      if (!row?.id) {
+        toast.error('Não foi possível abrir o informe desta solicitação');
+        return;
+      }
+      setShowForm(false);
+      openReportForm(row);
+    } catch {
+      toast.error('Não foi possível abrir o informe desta solicitação');
+    }
+  };
+
   const openDetail = (row: FuelRequestRow) => {
     closeRowActionMenu();
     setDetailRequest(row);
@@ -851,6 +892,12 @@ export default function SolicitarCombustivelPage() {
       (selectedQuota.remainingReais ?? 0) <= 0
     ) {
       toast.error(WEEKLY_QUOTA_EXCEEDED_MESSAGE);
+      return;
+    }
+    if (driverHasOpenRequest) {
+      toast.error(
+        'Este CPF já tem abastecimento em andamento. Aguarde a conclusão para solicitar novamente.',
+      );
       return;
     }
 
@@ -1418,6 +1465,40 @@ export default function SolicitarCombustivelPage() {
                   searchPlaceholder="Nome ou CPF…"
                   disabled={loadingDrivers}
                 />
+                {driverHasOpenRequest ? (
+                  <div className="mt-1.5 space-y-1 text-xs font-medium text-red-600 dark:text-red-400">
+                    <p>
+                      Este CPF já tem abastecimento em andamento. Aguarde a conclusão para
+                      solicitar novamente.
+                    </p>
+                    {openDriverRequests?.requests.map((row) => (
+                      <p key={row.id}>
+                        Solicitação #{row.displayNumber} —{' '}
+                        {row.status === 'PENDING_MANAGER'
+                          ? 'Aguardando aprovação do gestor'
+                          : row.status === 'PENDING_SUPPLIES'
+                            ? 'Aguardando aprovação do Suprimentos'
+                            : row.status === 'AWAITING_REFUEL'
+                              ? 'Aguardando informar o abastecimento'
+                              : row.status}
+                      </p>
+                    ))}
+                    {awaitingOpenRequests.length ? (
+                      <div className="flex flex-col gap-2 pt-1">
+                        {awaitingOpenRequests.map((row) => (
+                          <button
+                            key={`report-${row.id}`}
+                            type="button"
+                            onClick={() => void openReportFromPending(row.id)}
+                            className="inline-flex items-center justify-center rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700"
+                          >
+                            Informar abastecimento #{row.displayNumber}
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
             </FormSection>
 
@@ -1491,9 +1572,10 @@ export default function SolicitarCombustivelPage() {
           <FuelCreateFormFooter
             isPending={createMutation.isPending}
             submitDisabled={Boolean(
-              selectedQuota &&
-                !selectedQuota.unlimited &&
-                (selectedQuota.remainingReais ?? 0) <= 0
+              driverHasOpenRequest ||
+                (selectedQuota &&
+                  !selectedQuota.unlimited &&
+                  (selectedQuota.remainingReais ?? 0) <= 0)
             )}
             onSubmit={submitForm}
           />
