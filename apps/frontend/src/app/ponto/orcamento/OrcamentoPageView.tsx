@@ -10528,20 +10528,6 @@ export function OrcamentoPageView({
     return ws;
   };
 
-  const exportarOrcamentoAnaliticoTabela = () => {
-    const ws = montarSheetOrcamentoAnalitico();
-    if (!ws) {
-      toast.error('Não há dados para exportar.');
-      return;
-    }
-    const nomeContrato = nomeContratoExport();
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Analítico');
-    const nomeArquivo = `Orcamento_Analitico_${nomeContrato.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().slice(0, 10)}.xlsx`;
-    XLSX.writeFile(wb, nomeArquivo);
-    toast.success('Orçamento analítico exportado com sucesso.');
-  };
-
   /** Planilha analítica (compras e custos) — alinhado à grade da aba. */
   const montarSheetFichaDemanda = (): XLSX.WorkSheet | null => {
     if (linhasAnaliticoOrcamento.length === 0) {
@@ -11976,20 +11962,20 @@ export function OrcamentoPageView({
                     ) : (
                     <>
                     <div className="table-scroll rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
-                      <table className={`min-w-full border-collapse ${gradeTableCls}`}>
+                      <table className={`w-full min-w-full table-fixed border-collapse ${gradeTableCls}`}>
                         <thead className="bg-gray-50 dark:bg-gray-800 sticky top-0 z-10 border-b border-gray-200 dark:border-gray-700">
                           <tr className={gradeTableRowTrCls}>
-                            <th className="w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide">Item</th>
-                            <th className="px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600">Tipo</th>
-                            <th className="px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600">Código</th>
-                            <th className="px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600">Banco</th>
-                            <th className="min-w-[260px] max-w-[min(520px,55vw)] px-3 py-2.5 text-left text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600">Descrição</th>
-                            <th className="px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600">Unidade</th>
-                            <th className="px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600">Quantidade</th>
-                            <th className="whitespace-nowrap px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600">Quantidade real</th>
-                            <th className="whitespace-nowrap px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600">Quantidade orçada</th>
-                            <th className={`${GRADE_COL_MOEDA_UNIT} px-2 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600`}>Valor unitário</th>
-                            <th className="px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600">Total</th>
+                            <th className="w-[6.5rem] min-w-[6.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide">Item</th>
+                            <th className="w-[8.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600">Tipo</th>
+                            <th className="w-[6.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600">Código</th>
+                            <th className="w-[6.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600">Banco</th>
+                            <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600">Descrição</th>
+                            <th className="w-[5.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600">Unidade</th>
+                            <th className="w-[7.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600">Quantidade</th>
+                            <th className="w-[8.5rem] whitespace-nowrap px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600">Quantidade real</th>
+                            <th className="w-[9rem] whitespace-nowrap px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600">Quantidade orçada</th>
+                            <th className={`${GRADE_COL_MOEDA_UNIT} w-[8.5rem] px-2 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600`}>Valor unitário</th>
+                            <th className="w-[7.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600">Total</th>
                           </tr>
                         </thead>
                         <tbody ref={janelaAnalitico.tbodyRef} className="divide-y divide-gray-200/80 dark:divide-gray-700">
@@ -12061,7 +12047,7 @@ export function OrcamentoPageView({
                                     <td className="px-3 py-2.5 text-center text-sm font-semibold text-gray-900 dark:text-gray-50 border-l border-gray-200 dark:border-gray-700">{tipoInsumoCodigoParaDescricao(l.tipo)}</td>
                                     <td className="px-3 py-2.5 text-sm font-medium text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700 text-center">{l.codigo}</td>
                                     <td className="px-3 py-2.5 text-sm font-medium text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700 text-center">{nomeBancoParaExibicao(l.banco)}</td>
-                                    <td className="min-w-[260px] max-w-[min(520px,55vw)] px-3 py-2.5 text-sm font-semibold text-gray-900 dark:text-gray-50 border-l border-gray-200 dark:border-gray-700">
+                                    <td className="px-3 py-2.5 text-sm font-semibold text-gray-900 dark:text-gray-50 border-l border-gray-200 dark:border-gray-700">
                                       <div className="whitespace-normal break-words">{l.descricao}</div>
                                     </td>
                                     <td className="px-3 py-2.5 text-center text-sm font-medium text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700">{l.und}</td>
@@ -12122,7 +12108,7 @@ export function OrcamentoPageView({
                                 <td className="px-3 py-2.5 text-center text-sm text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700">{tipoInsumoCodigoParaDescricao(l.tipo)}</td>
                                 <td className="px-3 py-2.5 text-sm text-gray-500 dark:text-gray-400 border-l border-gray-200 dark:border-gray-700 text-center">{l.codigo || '---'}</td>
                                 <td className="px-3 py-2.5 text-sm text-gray-500 dark:text-gray-400 border-l border-gray-200 dark:border-gray-700 text-center">{l.banco || '---'}</td>
-                                <td className="min-w-[260px] max-w-[min(520px,55vw)] px-3 py-2.5 text-sm text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700">
+                                <td className="px-3 py-2.5 text-sm text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700">
                                   <div className="whitespace-normal break-words">{l.descricao}</div>
                                 </td>
                                 <td className="px-3 py-2.5 text-center text-sm text-gray-500 dark:text-gray-400 border-l border-gray-200 dark:border-gray-700">{l.und || '---'}</td>
@@ -12249,17 +12235,6 @@ export function OrcamentoPageView({
                           <TabelaJanelaSpacer height={janelaAnalitico.bottomPad} colSpan={11} />
                         </tbody>
                       </table>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-3 pt-1">
-                      <button
-                        type="button"
-                        onClick={exportarOrcamentoAnaliticoTabela}
-                        className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-red-600 text-white text-sm font-semibold hover:bg-red-700 shadow-sm transition-colors"
-                        title="Exporta a grade do orçamento analítico em Excel"
-                      >
-                        <FileSpreadsheet className="w-5 h-5 shrink-0" />
-                        Exportar orçamento analítico (.xlsx)
-                      </button>
                     </div>
                     {menuCtxAnalitico && (
                       <ActionMenuOverlay

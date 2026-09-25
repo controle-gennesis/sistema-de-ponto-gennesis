@@ -87,23 +87,44 @@ export function useOrcamentoTabelaJanela(
     const scroller = acharScrollParent(el);
     const { top: viewTop, height: viewH } = viewMetrics(scroller);
     const rowH = Math.max(28, rowHRef.current);
+    const visible = Math.ceil(viewH / rowH) + overscan * 2;
     const thead = el.previousElementSibling;
     const stickyH =
       thead instanceof HTMLElement ? thead.getBoundingClientRect().height : 0;
     const anchorTop = viewTop + stickyH;
+    const viewBottom = viewTop + viewH;
+
+    const nearScrollerEnd = (() => {
+      if (scroller === window) {
+        const top = window.scrollY || document.documentElement.scrollTop;
+        return top + window.innerHeight >= document.documentElement.scrollHeight - 160;
+      }
+      const box = scroller as HTMLElement;
+      return box.scrollTop + box.clientHeight >= box.scrollHeight - 160;
+    })();
+    if (nearScrollerEnd) {
+      applyRange({ start: Math.max(0, count - visible), end: count });
+      return;
+    }
 
     const tbodyTop = el.getBoundingClientRect().top;
     if (tbodyTop >= anchorTop - 4) {
-      const visible = Math.ceil(viewH / rowH) + overscan * 2;
       applyRange({ start: 0, end: Math.min(count, Math.max(visible, LIMITE_JANELA)) });
       return;
     }
 
-    const firstRow = el.querySelector('tr:not([aria-hidden])') as HTMLElement | null;
+    const dataRows = el.querySelectorAll('tr:not([aria-hidden])');
+    const firstRow = dataRows[0] as HTMLElement | undefined;
+    const lastRow = dataRows[dataRows.length - 1] as HTMLElement | undefined;
+    if (lastRow && lastRow.getBoundingClientRect().bottom < viewBottom - 32) {
+      applyRange({ start: Math.max(0, count - visible), end: count });
+      return;
+    }
+
     let rawStart: number;
     if (firstRow) {
       const measured = firstRow.getBoundingClientRect().height;
-      if (measured > 16) {
+      if (measured > 16 && measured < 120) {
         rowHRef.current = rowHRef.current * 0.7 + measured * 0.3;
       }
       const idx = rangeRef.current.start;
@@ -115,7 +136,6 @@ export function useOrcamentoTabelaJanela(
     }
 
     const start = Math.max(0, Math.min(count - 1, rawStart - overscan));
-    const visible = Math.ceil(viewH / Math.max(28, rowHRef.current)) + overscan * 2;
     const end = Math.min(count, Math.max(start + 1, start + visible));
     applyRange({ start, end });
   }, [applyRange, count, enabled, overscan]);
