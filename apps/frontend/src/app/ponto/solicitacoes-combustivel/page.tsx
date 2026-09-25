@@ -1134,8 +1134,10 @@ export default function SolicitacoesCombustivelPage() {
                                 {row.displayNumber}
                               </ListRowNavigableLabel>
                             </td>
-                            <td className={`${cadastroListClasses.tdTruncate} whitespace-nowrap`}>
-                              {row.requester.name}
+                            <td className={`${cadastroListClasses.tdTruncate} overflow-hidden`}>
+                              <p className="truncate" title={row.requester.name}>
+                                {row.requester.name}
+                              </p>
                             </td>
                             <td className={cadastroListClasses.tdCenter}>
                               <div className="leading-snug">

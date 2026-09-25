@@ -523,7 +523,7 @@ export default function CaixinhaPageClient() {
                     <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
                     <input
                       type="text"
-                      placeholder="Pesquisar compra, OS, loja..."
+                      placeholder="Pesquisar solicitante, OS, fornecedor..."
                       value={search}
                       onChange={(e) => setSearch(e.target.value)}
                       className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
@@ -576,12 +576,12 @@ export default function CaixinhaPageClient() {
                     <table className={`${cadastroListClasses.table} min-w-[72rem]`}>
                       <thead className="border-b border-gray-200 dark:border-gray-700">
                         <tr>
-                          <th className={cadastroListClasses.th}>Nome</th>
                           <th className={cadastroListClasses.th}>Caixinha</th>
-                          <th className={cadastroListClasses.th}>Número da OS</th>
-                          <th className={cadastroListClasses.th}>Contrato</th>
-                          <th className={cadastroListClasses.th}>Obra</th>
-                          <th className={cadastroListClasses.th}>Loja</th>
+                          <th className={cadastroListClasses.th}>Fornecedor</th>
+                          <th className={cadastroListClasses.thCenter}>Número da OS</th>
+                          <th className={cadastroListClasses.thCenter}>Contrato</th>
+                          <th className={cadastroListClasses.thCenter}>Obra</th>
+                          <th className={cadastroListClasses.thCenter}>Solicitante</th>
                           <th className={cadastroListClasses.thCenter}>Data compra</th>
                           <th className={cadastroListClasses.thNumeric}>Valor</th>
                           <th className={cadastroListClasses.thRight}>Ação</th>
@@ -602,19 +602,21 @@ export default function CaixinhaPageClient() {
                               }
                             }}
                           >
+                            <td className={cadastroListClasses.td}>{row.caixinha || '—'}</td>
                             <td className={cadastroListClasses.td}>
-                              <ListRowNavigableLabel>{row.personName}</ListRowNavigableLabel>
+                              <ListRowNavigableLabel>{row.storeName || '—'}</ListRowNavigableLabel>
+                            </td>
+                            <td className={`${cadastroListClasses.tdMono} text-center`}>{row.osNumber || '—'}</td>
+                            <td className={`${cadastroListClasses.tdMuted} text-center`}>
+                              {row.contractName ? nomeContratoSemCodigo(row.contractName) || row.contractName : '—'}
+                            </td>
+                            <td className={`${cadastroListClasses.tdMuted} text-center`}>{row.obraName || '—'}</td>
+                            <td className={`${cadastroListClasses.tdMuted} text-center`}>
+                              {row.personName || '—'}
                               <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
                                 {formatDateTime(row.filledAt)}
                               </p>
                             </td>
-                            <td className={cadastroListClasses.td}>{row.caixinha || '—'}</td>
-                            <td className={cadastroListClasses.tdMono}>{row.osNumber || '—'}</td>
-                            <td className={cadastroListClasses.tdMuted}>
-                              {row.contractName ? nomeContratoSemCodigo(row.contractName) || row.contractName : '—'}
-                            </td>
-                            <td className={cadastroListClasses.tdMuted}>{row.obraName || '—'}</td>
-                            <td className={cadastroListClasses.tdMuted}>{row.storeName || '—'}</td>
                             <td className={cadastroListClasses.tdCenter}>{formatDateBr(row.purchaseDate)}</td>
                             <td className={`${cadastroListClasses.td} text-right tabular-nums`}>
                               {formatBRL(Number(row.amount) || 0)}
@@ -655,7 +657,7 @@ export default function CaixinhaPageClient() {
             setFormOpen(false);
             setEditing(null);
           }}
-          title={editing ? 'Editar compra' : 'Nova compra'}
+          title={editing ? 'Editar compra' : 'Novo Lançamento'}
           size="lg"
           confirmBeforeClose
         >

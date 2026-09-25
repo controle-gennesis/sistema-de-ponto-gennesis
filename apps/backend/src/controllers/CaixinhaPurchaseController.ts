@@ -4,6 +4,7 @@ import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { listCaixinhaAccountNames, upsertCaixinhaAccountName } from '../lib/ensureCaixinhaAccounts';
+import { assertContractAccess, getContractAccessForUser } from '../lib/contractAccess';
 
 function trimOrNull(value: unknown): string | null {
   const s = String(value ?? '').trim();
@@ -102,12 +103,48 @@ async function resolvePerson(personUserId: string | null, personNameRaw: unknown
   return { personUserId: null as string | null, personName: typedName };
 }
 
+/** Próprios lançamentos + os dos contratos liberados na página de Contratos. */
+async function listWhereForUser(
+  userId: string,
+  isAdmin: boolean,
+): Promise<Prisma.CaixinhaPurchaseWhereInput> {
+  const access = await getContractAccessForUser(userId, isAdmin);
+  if (access.filter === 'all') return {};
+
+  const or: Prisma.CaixinhaPurchaseWhereInput[] = [
+    { createdById: userId },
+    { personUserId: userId },
+  ];
+  if (access.filter === 'ids' && access.ids.length > 0) {
+    or.push({ contractId: { in: access.ids } });
+  }
+  return { OR: or };
+}
+
+async function assertCanSeePurchase(req: AuthRequest, row: CaixinhaPurchase): Promise<void> {
+  if (!req.user) throw createError('Não autenticado', 401);
+  if (req.user.isAdmin) return;
+  if (row.createdById === req.user.id || row.personUserId === req.user.id) return;
+  if (row.contractId) {
+    const access = await getContractAccessForUser(req.user.id, false);
+    if (access.filter === 'all' || (access.filter === 'ids' && access.ids.includes(row.contractId))) {
+      return;
+    }
+  }
+  throw createError('Lançamento não encontrado', 404);
+}
+
 export class CaixinhaPurchaseController {
   async list(req: AuthRequest, res: Response, next: NextFunction) {
     try {
+      if (!req.user) throw createError('Não autenticado', 401);
+
       const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
-      const where: Prisma.CaixinhaPurchaseWhereInput = search
-        ? {
+      const scope = await listWhereForUser(req.user.id, req.user.isAdmin);
+      const where: Prisma.CaixinhaPurchaseWhereInput = { ...scope };
+      if (search) {
+        where.AND = [
+          {
             OR: [
               { personName: { contains: search, mode: 'insensitive' } },
               { osNumber: { contains: search, mode: 'insensitive' } },
@@ -118,8 +155,9 @@ export class CaixinhaPurchaseController {
               { invoiceNumber: { contains: search, mode: 'insensitive' } },
               { notes: { contains: search, mode: 'insensitive' } },
             ],
-          }
-        : {};
+          },
+        ];
+      }
 
       const rows = await prisma.caixinhaPurchase.findMany({
         where,
@@ -135,6 +173,15 @@ export class CaixinhaPurchaseController {
 
   async options(req: AuthRequest, res: Response, next: NextFunction) {
     try {
+      if (!req.user) throw createError('Não autenticado', 401);
+      const access = await getContractAccessForUser(req.user.id, req.user.isAdmin);
+      const contractWhere: Prisma.ContractWhereInput =
+        access.filter === 'all'
+          ? {}
+          : access.filter === 'ids'
+            ? { id: { in: access.ids } }
+            : { id: { in: [] } };
+
       const [users, contracts, caixinhas, purchaseNames] = await Promise.all([
         prisma.user.findMany({
           where: { isActive: true },
@@ -143,6 +190,7 @@ export class CaixinhaPurchaseController {
           take: 2000,
         }),
         prisma.contract.findMany({
+          where: contractWhere,
           select: { id: true, name: true, number: true },
           orderBy: { name: 'asc' },
           take: 1000,
@@ -181,6 +229,7 @@ export class CaixinhaPurchaseController {
     try {
       const row = await prisma.caixinhaPurchase.findUnique({ where: { id: req.params.id } });
       if (!row) throw createError('Lançamento não encontrado', 404);
+      await assertCanSeePurchase(req, row);
       return res.json({ success: true, data: serialize(row) });
     } catch (error) {
       return next(error);
@@ -198,6 +247,9 @@ export class CaixinhaPurchaseController {
 
       const person = await resolvePerson(trimOrNull(body.personUserId), body.personName);
       const contract = await resolveContract(trimOrNull(body.contractId));
+      if (contract.contractId) {
+        await assertContractAccess(req, contract.contractId);
+      }
       const obra = await resolveObra(trimOrNull(body.obraId), contract.contractId);
       const filledAtRaw = body.filledAt ? new Date(body.filledAt) : new Date();
       if (Number.isNaN(filledAtRaw.getTime())) throw createError('Data de preenchimento inválida', 400);
@@ -239,6 +291,7 @@ export class CaixinhaPurchaseController {
     try {
       const existing = await prisma.caixinhaPurchase.findUnique({ where: { id: req.params.id } });
       if (!existing) throw createError('Lançamento não encontrado', 404);
+      await assertCanSeePurchase(req, existing);
 
       const body = req.body || {};
       const caixinha = String(body.caixinha ?? existing.caixinha).trim();
@@ -251,6 +304,9 @@ export class CaixinhaPurchaseController {
       const contract = await resolveContract(
         body.contractId !== undefined ? trimOrNull(body.contractId) : existing.contractId
       );
+      if (contract.contractId && contract.contractId !== existing.contractId) {
+        await assertContractAccess(req, contract.contractId);
+      }
       const obra = await resolveObra(
         body.obraId !== undefined ? trimOrNull(body.obraId) : existing.obraId,
         contract.contractId
@@ -309,6 +365,7 @@ export class CaixinhaPurchaseController {
     try {
       const existing = await prisma.caixinhaPurchase.findUnique({ where: { id: req.params.id } });
       if (!existing) throw createError('Lançamento não encontrado', 404);
+      await assertCanSeePurchase(req, existing);
       await prisma.caixinhaPurchase.delete({ where: { id: existing.id } });
       return res.json({ success: true, message: 'Lançamento excluído' });
     } catch (error) {
