@@ -615,6 +615,7 @@ export function JuridicoProcessoEditModal({
                 onChange={setField('horario')}
                 placeholder="Selecionar horário"
                 className="w-full"
+                stepMinutes={5}
                 allowEmpty
                 aria-label="Horário da audiência"
               />
