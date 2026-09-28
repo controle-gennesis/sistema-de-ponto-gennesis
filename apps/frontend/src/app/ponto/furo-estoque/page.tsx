@@ -17,6 +17,10 @@ import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import { formatRmListDisplayId } from '@/app/ponto/gerenciar-materiais/_lib/rmListDisplay';
 import { formatOcListDisplayId } from '@/components/oc/ocListDisplay';
 import { usePermissions } from '@/hooks/usePermissions';
+import {
+  filterCostCentersByStockAccess,
+  useStockAllowedCostCenterIds,
+} from '@/hooks/useStockAllowedCostCenters';
 import { resolveLockedUnbCostCenterId } from '@/lib/unbBranding';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
 
@@ -105,7 +109,8 @@ function shortfallCostCenterName(row: ShortfallRow): string {
 export default function FuroEstoquePage() {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const { isUnbUser, unbCostCenterIds } = usePermissions();
+  const { isUnbUser, unbCostCenterIds, isAdministrator } = usePermissions();
+  const { allowedStockCostCenterIds } = useStockAllowedCostCenterIds();
   const [filtersCostCenterId, setFiltersCostCenterId] = useState('');
   const [filtersCategory, setFiltersCategory] = useState('');
   const [filtersMonth, setFiltersMonth] = useState('');
@@ -151,10 +156,24 @@ export default function FuroEstoquePage() {
       ? costCentersData
       : [];
 
+  const visibleCostCenters = useMemo(
+    () =>
+      filterCostCentersByStockAccess(
+        costCenters as Array<{ id: string; name: string }>,
+        allowedStockCostCenterIds,
+      ),
+    [costCenters, allowedStockCostCenterIds],
+  );
+
   const lockedUnbCostCenterId = useMemo(() => {
-    if (!isUnbUser) return null;
-    return resolveLockedUnbCostCenterId(costCenters, unbCostCenterIds);
-  }, [isUnbUser, costCenters, unbCostCenterIds]);
+    if (isAdministrator || !isUnbUser) return null;
+    if (allowedStockCostCenterIds && allowedStockCostCenterIds.size !== 1) return null;
+    const locked = resolveLockedUnbCostCenterId(visibleCostCenters, unbCostCenterIds);
+    if (allowedStockCostCenterIds && locked && !allowedStockCostCenterIds.has(locked)) {
+      return null;
+    }
+    return locked;
+  }, [isAdministrator, isUnbUser, visibleCostCenters, unbCostCenterIds, allowedStockCostCenterIds]);
 
   useEffect(() => {
     if (!lockedUnbCostCenterId) return;
@@ -205,7 +224,7 @@ export default function FuroEstoquePage() {
   const user = userData?.data || { name: 'Usuário', role: 'EMPLOYEE' };
 
   const costCenterFilterOptions = useMemo(() => {
-    const mapped = costCenters.map((cc: { id: string; name: string }) => ({
+    const mapped = visibleCostCenters.map((cc: { id: string; name: string }) => ({
       value: cc.id,
       label: cc.name,
       searchText: cc.name,
@@ -214,7 +233,7 @@ export default function FuroEstoquePage() {
       return mapped.filter((opt: { value: string }) => opt.value === lockedUnbCostCenterId);
     }
     return [{ value: '', label: 'Todos', searchText: 'Todos' }, ...mapped];
-  }, [costCenters, lockedUnbCostCenterId]);
+  }, [visibleCostCenters, lockedUnbCostCenterId]);
 
   const categoryFilterOptions = useMemo(
     () => [

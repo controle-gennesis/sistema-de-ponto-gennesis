@@ -40,6 +40,10 @@ import {
 } from '@/lib/stockAdjustmentImport';
 import toast from 'react-hot-toast';
 import { usePermissions } from '@/hooks/usePermissions';
+import {
+  filterCostCentersByStockAccess,
+  useStockAllowedCostCenterIds,
+} from '@/hooks/useStockAllowedCostCenters';
 import { useModalCloseConfirm } from '@/hooks/useModalCloseConfirm';
 import { resolveLockedUnbCostCenterId } from '@/lib/unbBranding';
 import { textMatchesSearch } from '@/lib/normalizeSearchText';
@@ -219,7 +223,8 @@ const emptyForm = (lockedCostCenterId = ''): MovementFormData => ({
 export default function AjusteEstoquePage() {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const { isUnbUser, unbCostCenterIds } = usePermissions();
+  const { isUnbUser, unbCostCenterIds, isAdministrator } = usePermissions();
+  const { allowedStockCostCenterIds } = useStockAllowedCostCenterIds();
   const [isAdjustmentModalOpen, setIsAdjustmentModalOpen] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [templateMaterialMode, setTemplateMaterialMode] = useState<'all' | 'selected'>('all');
@@ -268,10 +273,24 @@ export default function AjusteEstoquePage() {
       ? costCentersData
       : [];
 
+  const visibleCostCenters = useMemo(
+    () =>
+      filterCostCentersByStockAccess(
+        costCenters as Array<{ id: string; name: string }>,
+        allowedStockCostCenterIds,
+      ),
+    [costCenters, allowedStockCostCenterIds],
+  );
+
   const lockedUnbCostCenterId = useMemo(() => {
-    if (!isUnbUser) return null;
-    return resolveLockedUnbCostCenterId(costCenters, unbCostCenterIds);
-  }, [isUnbUser, costCenters, unbCostCenterIds]);
+    if (isAdministrator || !isUnbUser) return null;
+    if (allowedStockCostCenterIds && allowedStockCostCenterIds.size !== 1) return null;
+    const locked = resolveLockedUnbCostCenterId(visibleCostCenters, unbCostCenterIds);
+    if (allowedStockCostCenterIds && locked && !allowedStockCostCenterIds.has(locked)) {
+      return null;
+    }
+    return locked;
+  }, [isAdministrator, isUnbUser, visibleCostCenters, unbCostCenterIds, allowedStockCostCenterIds]);
 
   useEffect(() => {
     if (!lockedUnbCostCenterId) return;
@@ -295,9 +314,12 @@ export default function AjusteEstoquePage() {
 
   const closeAdjustmentModal = useCallback(() => {
     setIsAdjustmentModalOpen(false);
-    setFormData(emptyForm(lockedUnbCostCenterId || ''));
+    const onlyId =
+      lockedUnbCostCenterId ||
+      (visibleCostCenters.length === 1 ? visibleCostCenters[0].id : '');
+    setFormData(emptyForm(onlyId));
     setSelectedMaterial(null);
-  }, [lockedUnbCostCenterId]);
+  }, [lockedUnbCostCenterId, visibleCostCenters]);
 
   const { requestClose: requestCloseAdjustmentModal, confirmUi: adjustmentModalConfirmUi } =
     useModalCloseConfirm(closeAdjustmentModal, { isParentOpen: isAdjustmentModalOpen });
@@ -334,6 +356,7 @@ export default function AjusteEstoquePage() {
     if (
       !formData.type ||
       !formData.materialId ||
+      !formData.costCenterId ||
       Number.isNaN(parsedQuantity) ||
       parsedQuantity <= 0
     ) {
@@ -351,13 +374,13 @@ export default function AjusteEstoquePage() {
   };
 
   const costCenterOptions = useMemo(() => {
-    const mapped = costCenters.map((cc: { id: string; name: string }) => ({
+    const mapped = visibleCostCenters.map((cc) => ({
       value: cc.id,
       label: cc.name,
     }));
     if (!lockedUnbCostCenterId) return mapped;
-    return mapped.filter((opt: { value: string }) => opt.value === lockedUnbCostCenterId);
-  }, [costCenters, lockedUnbCostCenterId]);
+    return mapped.filter((opt) => opt.value === lockedUnbCostCenterId);
+  }, [visibleCostCenters, lockedUnbCostCenterId]);
 
   const costCenterFilterOptions = useMemo(() => {
     if (lockedUnbCostCenterId) {
@@ -386,6 +409,12 @@ export default function AjusteEstoquePage() {
     return movements
       .filter((mov) => mov.notes?.includes(ADJUSTMENT_MARKER))
       .filter((mov) => {
+        if (
+          allowedStockCostCenterIds &&
+          (!mov.costCenter?.id || !allowedStockCostCenterIds.has(mov.costCenter.id))
+        ) {
+          return false;
+        }
         if (typeFilter !== 'ALL' && mov.type !== typeFilter) return false;
         if (filtersCostCenterId && mov.costCenter?.id !== filtersCostCenterId) return false;
         if (filtersMonth) {
@@ -405,7 +434,7 @@ export default function AjusteEstoquePage() {
         );
       })
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  }, [movements, historySearch, typeFilter, filtersCostCenterId, filtersMonth, filtersYear]);
+  }, [movements, historySearch, typeFilter, filtersCostCenterId, filtersMonth, filtersYear, allowedStockCostCenterIds]);
 
   const historyTotal = adjustmentMovements.length;
   const historyTotalPages = Math.max(1, Math.ceil(historyTotal / HISTORY_ITEMS_PER_PAGE));
@@ -533,7 +562,10 @@ export default function AjusteEstoquePage() {
                     <button
                       type="button"
                       onClick={() => {
-                        setFormData(emptyForm(lockedUnbCostCenterId || ''));
+                        const onlyId =
+                          lockedUnbCostCenterId ||
+                          (costCenterOptions.length === 1 ? costCenterOptions[0].value : '');
+                        setFormData(emptyForm(onlyId));
                         setIsAdjustmentModalOpen(true);
                       }}
                       className="flex h-10 items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
@@ -835,14 +867,13 @@ export default function AjusteEstoquePage() {
                         }
                         options={costCenterOptions}
                         disabled={Boolean(lockedUnbCostCenterId) || loadingCostCenters}
-                        allowEmpty={!lockedUnbCostCenterId}
-                        emptyOptionLabel="Não especificado"
+                        allowEmpty={false}
                         placeholder={
                           loadingCostCenters
                             ? 'Carregando centros de custo...'
                             : 'Selecionar centro de custo...'
                         }
-                        emptyOptionsMessage="Nenhum centro de custo cadastrado."
+                        emptyOptionsMessage="Nenhum contrato liberado para este usuário."
                         noFocusRing
                       />
                     </div>

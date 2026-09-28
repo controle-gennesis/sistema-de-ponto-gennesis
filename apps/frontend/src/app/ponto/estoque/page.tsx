@@ -62,7 +62,10 @@ import {
 import { maskCurrencyInputBrOrEmpty } from '@/lib/maskCurrencyBr';
 import { ocMatchesLockedUnbConsorcioCostCenter, resolveLockedUnbCostCenterId } from '@/lib/unbBranding';
 import { usePermissions } from '@/hooks/usePermissions';
-import { pathToModuleKey } from '@sistema-ponto/permission-modules';
+import {
+  filterCostCentersByStockAccess,
+  useStockAllowedCostCenterIds,
+} from '@/hooks/useStockAllowedCostCenters';
 import { useModalCloseConfirm } from '@/hooks/useModalCloseConfirm';
 import toast from 'react-hot-toast';
 import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
@@ -784,8 +787,8 @@ function MovementSegButton({
 export default function EstoquePage() {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const { isUnbUser, unbCostCenterIds, isAdministrator, can } = usePermissions();
-  const canAccessContratos = isAdministrator || can(pathToModuleKey('/ponto/contratos'));
+  const { isUnbUser, unbCostCenterIds, isAdministrator } = usePermissions();
+  const { allowedStockCostCenterIds } = useStockAllowedCostCenterIds();
   const [activeTab, setActiveTab] = useState<'balance' | 'movements'>('balance');
   const [isMovementModalOpen, setIsMovementModalOpen] = useState(false);
   const [filtersCostCenterId, setFiltersCostCenterId] = useState('');
@@ -886,38 +889,10 @@ export default function EstoquePage() {
     name: string;
   }>;
 
-  const { data: stockContractRows = [], isFetched: stockContractsFetched } = useQuery({
-    queryKey: ['contracts-for-stock-scope'],
-    queryFn: async () => {
-      try {
-        const res = await api.get('/contracts', { params: { page: 1, limit: 1000 } });
-        return (res.data?.data || []) as Array<{
-          costCenterId?: string | null;
-          costCenter?: { id?: string | null } | null;
-        }>;
-      } catch {
-        return [];
-      }
-    },
-    enabled: !isAdministrator && canAccessContratos,
-    retry: false,
-  });
-
-  const allowedStockCostCenterIds = useMemo(() => {
-    if (isAdministrator) return null;
-    if (!canAccessContratos || !stockContractsFetched) return new Set<string>();
-    const ids = new Set<string>();
-    for (const row of stockContractRows) {
-      const id = row.costCenterId || row.costCenter?.id;
-      if (id) ids.add(id);
-    }
-    return ids;
-  }, [isAdministrator, canAccessContratos, stockContractsFetched, stockContractRows]);
-
-  const visibleCostCenters = useMemo(() => {
-    if (!allowedStockCostCenterIds) return costCenters;
-    return costCenters.filter((cc) => allowedStockCostCenterIds.has(cc.id));
-  }, [costCenters, allowedStockCostCenterIds]);
+  const visibleCostCenters = useMemo(
+    () => filterCostCentersByStockAccess(costCenters, allowedStockCostCenterIds),
+    [costCenters, allowedStockCostCenterIds],
+  );
 
   const lockedUnbCostCenterId = useMemo(() => {
     if (isAdministrator || !isUnbUser) return null;
