@@ -1,4 +1,5 @@
 export const CARGOS_LIST = [
+  'Advogado',
   'Ajudante',
   'Almoxarife',
   'Analista',

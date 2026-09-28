@@ -3,6 +3,7 @@ export type EmployeeSelectOption = {
   name: string;
   cpf?: string | null;
   profilePhotoUrl?: string | null;
+  position?: string | null;
 };
 
 export function mapUsersToEmployeeOptions(users: any[]): EmployeeSelectOption[] {
@@ -21,14 +22,23 @@ export function mapUsersToEmployeeOptions(users: any[]): EmployeeSelectOption[] 
       name: String(user.name || '').trim(),
       cpf: user.cpf ? String(user.cpf) : null,
       profilePhotoUrl: user.profilePhotoUrl ? String(user.profilePhotoUrl) : null,
+      position: user.employee?.position ? String(user.employee.position) : null,
     }))
     .filter((employee) => employee.id && employee.name)
     .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
 }
 
-export async function fetchEmployeeSelectOptions(): Promise<EmployeeSelectOption[]> {
+export function isCargoAdvogado(position?: string | null): boolean {
+  return String(position || '').trim().toLowerCase() === 'advogado';
+}
+
+export async function fetchEmployeeSelectOptions(params?: {
+  position?: string;
+}): Promise<EmployeeSelectOption[]> {
   const { default: api } = await import('@/lib/api');
-  const res = await api.get('/users', { params: { page: 1, limit: 1000 } });
+  const res = await api.get('/users', {
+    params: { page: 1, limit: 1000, ...(params?.position ? { position: params.position } : {}) },
+  });
   const users = res.data?.data || [];
   return mapUsersToEmployeeOptions(users);
 }

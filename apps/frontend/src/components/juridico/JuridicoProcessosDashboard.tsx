@@ -863,7 +863,7 @@ export function JuridicoProcessosDashboard() {
               <SectionTitle
                 icon={ListFilter}
                 title="Filtros"
-                subtitle="Recorte os indicadores por empresa, contrato, polo, objeto e período de abertura"
+                subtitle="Recorte os indicadores por empresa, contrato, polo, advogado, objeto e período de abertura"
               />
               {filtersActive ? (
                 <button
@@ -878,7 +878,7 @@ export function JuridicoProcessosDashboard() {
             </div>
           </CardHeader>
           <CardContent className={cadastroListClasses.cardContent}>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               <FilterField label="Empresa">
                 <StringSingleSelectDropdown
                   value={filters.empresa}
@@ -904,6 +904,16 @@ export function JuridicoProcessosDashboard() {
                   value={filters.polo}
                   onChange={setFilter('polo')}
                   options={options.polos}
+                  placeholder="Todos"
+                  emptyOptionLabel="Todos"
+                  matchTriggerWidth
+                />
+              </FilterField>
+              <FilterField label="Advogado">
+                <StringSingleSelectDropdown
+                  value={filters.advogado}
+                  onChange={setFilter('advogado')}
+                  options={options.advogados}
                   placeholder="Todos"
                   emptyOptionLabel="Todos"
                   matchTriggerWidth

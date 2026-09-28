@@ -10,7 +10,10 @@ import { TimePickerField } from '@/components/ui/TimePickerField';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
 import { toPersonSelectOptions } from '@/lib/personSelectOptions';
-import { fetchEmployeeSelectOptions } from '@/lib/employeeSelectOptions';
+import {
+  fetchEmployeeSelectOptions,
+  isCargoAdvogado,
+} from '@/lib/employeeSelectOptions';
 import {
   formatCurrencyInputBrFromNumber,
   maskCurrencyInputBrOrEmpty,
@@ -305,15 +308,20 @@ export function JuridicoProcessoEditModal({
   });
 
   const { data: employees = [] } = useQuery({
-    queryKey: ['employees-for-juridico-processo'],
-    queryFn: fetchEmployeeSelectOptions,
+    queryKey: ['employees-for-juridico-processo', 'Advogado'],
+    queryFn: () => fetchEmployeeSelectOptions({ position: 'Advogado' }),
     enabled: isOpen,
     staleTime: 10 * 60 * 1000,
   });
 
+  const advogados = useMemo(
+    () => employees.filter((employee) => isCargoAdvogado(employee.position)),
+    [employees],
+  );
+
   const advogadoOptions = useMemo(() => {
     const options = toPersonSelectOptions(
-      employees.map((employee) => ({
+      advogados.map((employee) => ({
         value: employee.id,
         name: employee.name,
         cpf: employee.cpf,
@@ -330,7 +338,7 @@ export function JuridicoProcessoEditModal({
       });
     }
     return options;
-  }, [employees, form.advogado, form.advogadoId]);
+  }, [advogados, form.advogado, form.advogadoId]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -520,7 +528,7 @@ export function JuridicoProcessoEditModal({
               <SingleSelectSearchDropdown
                 value={form.advogadoId}
                 onChange={(id) => {
-                  const employee = employees.find((e) => e.id === id);
+                  const employee = advogados.find((e) => e.id === id) || employees.find((e) => e.id === id);
                   setForm((prev) => ({
                     ...prev,
                     advogadoId: id,
@@ -529,11 +537,11 @@ export function JuridicoProcessoEditModal({
                   setDirty(true);
                 }}
                 options={advogadoOptions}
-                placeholder="Selecionar funcionário"
-                searchPlaceholder="Pesquisar funcionário..."
+                placeholder="Selecionar advogado"
+                searchPlaceholder="Pesquisar advogado..."
                 emptyOptionLabel="Sem advogado"
-                emptyOptionsMessage="Nenhum funcionário encontrado"
-                emptySearchMessage="Nenhum funcionário corresponde à busca"
+                emptyOptionsMessage="Nenhum funcionário com cargo Advogado"
+                emptySearchMessage="Nenhum advogado corresponde à busca"
                 matchTriggerWidth
               />
             </Field>

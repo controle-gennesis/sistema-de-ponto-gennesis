@@ -35,6 +35,7 @@ export type JuridicoDashboardFilters = {
   empresa: string;
   contrato: string;
   polo: string;
+  advogado: string;
   objeto: string;
   ano: string;
   mes: string;
@@ -44,6 +45,7 @@ export const EMPTY_JURIDICO_DASHBOARD_FILTERS: JuridicoDashboardFilters = {
   empresa: '',
   contrato: '',
   polo: '',
+  advogado: '',
   objeto: '',
   ano: '',
   mes: '',
@@ -189,6 +191,7 @@ export function contratoLabel(row: JuridicoProcesso): string {
 export type JuridicoDashboardOptions = {
   empresas: string[];
   polos: string[];
+  advogados: string[];
   anos: string[];
   objetos: Array<{ value: string; label: string }>;
   contratos: Array<{ value: string; label: string }>;
@@ -197,6 +200,7 @@ export type JuridicoDashboardOptions = {
 export function buildDashboardOptions(rows: JuridicoProcesso[]): JuridicoDashboardOptions {
   const empresas = new Set<string>();
   const polos = new Set<string>();
+  const advogados = new Set<string>();
   const anos = new Set<string>();
   const objetos = new Map<string, string>();
   const contratos = new Map<string, string>();
@@ -206,6 +210,8 @@ export function buildDashboardOptions(rows: JuridicoProcesso[]): JuridicoDashboa
     if (empresa) empresas.add(empresa);
     const polo = (row.polo || '').trim();
     if (polo) polos.add(polo);
+    const advogado = (row.advogado || '').trim();
+    if (advogado) advogados.add(advogado);
     const abertura = parseBrDate(row.dataAbertura);
     if (abertura) anos.add(String(abertura.getFullYear()));
     for (const objeto of splitObjetos(row)) {
@@ -218,6 +224,7 @@ export function buildDashboardOptions(rows: JuridicoProcesso[]): JuridicoDashboa
   return {
     empresas: [...empresas].sort((a, b) => a.localeCompare(b, 'pt-BR')),
     polos: [...polos].sort((a, b) => a.localeCompare(b, 'pt-BR')),
+    advogados: [...advogados].sort((a, b) => a.localeCompare(b, 'pt-BR')),
     anos: [...anos].sort((a, b) => b.localeCompare(a)),
     objetos: [...objetos.entries()]
       .map(([value, label]) => ({ value, label }))
@@ -237,6 +244,7 @@ export function applyDashboardFilters(
     if (filters.empresa && (row.empresa || '').trim() !== filters.empresa) return false;
     if (filters.contrato && (row.contrato || '').trim() !== filters.contrato) return false;
     if (filters.polo && (row.polo || '').trim() !== filters.polo) return false;
+    if (filters.advogado && (row.advogado || '').trim() !== filters.advogado) return false;
     if (filters.objeto && !splitObjetos(row).some((o) => o.key === filters.objeto)) return false;
     if (filters.ano || mesIndex) {
       const abertura = parseBrDate(row.dataAbertura);
