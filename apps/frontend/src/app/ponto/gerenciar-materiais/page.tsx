@@ -15,6 +15,10 @@ import { absoluteUploadUrl } from '@/lib/apiOrigin';
 import { fixMojibakeFileName } from '@/lib/fixMojibakeFileName';
 import toast from 'react-hot-toast';
 import { usePermissions } from '@/hooks/usePermissions';
+import {
+  filterRowsByAllowedCostCenterIds,
+  useAssignedContractCostCenterIds,
+} from '@/hooks/useStockAllowedCostCenters';
 import { OcStyledCheckbox, type PurchaseOrder } from '@/components/oc/OcPurchaseOrdersPanel';
 import { OcAttachmentActions } from '@/components/oc/OcAttachmentActions';
 import {
@@ -416,6 +420,7 @@ export default function GerenciarMateriaisPage() {
   const [rmCardFilter, setRmCardFilter] = useState<RmCardFilter>(DEFAULT_RM_CARD_FILTER);
   const [searchTerm, setSearchTerm] = useState('');
   const { isUnbUser, unbCostCenterIds, isAdministrator, isElevatedUser, canApproveMaterialRequests } = usePermissions();
+  const { allowedContractCostCenterIds } = useAssignedContractCostCenterIds();
   const [adminAttachmentBusy, setAdminAttachmentBusy] = useState(false);
   const [cancelItemTarget, setCancelItemTarget] = useState<{
     requestId: string;
@@ -709,6 +714,9 @@ export default function GerenciarMateriaisPage() {
   const allRequests = useMemo(() => {
     const raw = requestsData?.data?.requests || requestsData?.data || [];
     const list = Array.isArray(raw) ? (raw as MaterialRequest[]) : [];
+    if (allowedContractCostCenterIds) {
+      return filterRowsByAllowedCostCenterIds(list, allowedContractCostCenterIds, (r) => r.costCenter?.id);
+    }
     if (!isUnbUser) return list;
     if (unbCostCenterIds.length === 0) return [];
     const allowed = new Set(unbCostCenterIds);
@@ -716,14 +724,22 @@ export default function GerenciarMateriaisPage() {
       const id = r.costCenter?.id;
       return !!id && allowed.has(id);
     });
-  }, [requestsData, isUnbUser, unbCostCenterIds]);
+  }, [requestsData, isUnbUser, unbCostCenterIds, allowedContractCostCenterIds]);
 
   // Calcular estatísticas
   const normalizedRequests = allRequests.map((r: MaterialRequest) =>
     r.status === 'REJECTED' ? ({ ...r, status: 'CANCELLED' as const }) : r
   );
 
-  const allOrders: PurchaseOrder[] = ordersData?.data || [];
+  const allOrders: PurchaseOrder[] = useMemo(
+    () =>
+      filterRowsByAllowedCostCenterIds(
+        (ordersData?.data || []) as PurchaseOrder[],
+        allowedContractCostCenterIds,
+        (order) => order.materialRequest?.costCenter?.id,
+      ),
+    [ordersData, allowedContractCostCenterIds],
+  );
 
   /** Requisições que já têm pelo menos uma OC — saem da fila "RMs aprovadas" e seguem só no fluxo OC */
   const materialRequestIdsWithOc = useMemo(() => {

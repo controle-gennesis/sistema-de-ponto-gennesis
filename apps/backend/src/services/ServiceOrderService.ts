@@ -1,4 +1,5 @@
 import { prisma } from '../lib/prisma';
+import { getAssignedContractIds } from '../lib/contractAccess';
 import { getUserUnbCostCenterScope } from '../lib/unbCostCenterScope';
 import { buildServiceOrderDisplayLabel, pickPleitoLabelSource } from '../utils/serviceOrderLabel';
 
@@ -196,11 +197,17 @@ export class ServiceOrderService {
     userId: string,
     isAdmin: boolean,
   ): Promise<ServiceOrderContractOption[]> {
-    const unbScope = await getUserUnbCostCenterScope(userId, isAdmin);
+    const assignedIds = await getAssignedContractIds(userId, isAdmin);
+    if (assignedIds && assignedIds.length === 0) return [];
+
+    const unbScope = assignedIds ? null : await getUserUnbCostCenterScope(userId, isAdmin);
     if (unbScope !== null && unbScope.length === 0) return [];
 
     const rows = await prisma.contract.findMany({
-      where: unbScope === null ? undefined : { costCenterId: { in: unbScope } },
+      where: {
+        ...(assignedIds ? { id: { in: assignedIds } } : {}),
+        ...(unbScope !== null ? { costCenterId: { in: unbScope } } : {}),
+      },
       select: {
         id: true,
         number: true,

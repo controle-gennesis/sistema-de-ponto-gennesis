@@ -9,12 +9,8 @@ type ContractCostCenterRow = {
   costCenter?: { id?: string | null } | null;
 };
 
-/** `null` = admin (sem restrição). `Set` vazio = nenhum contrato liberado. */
-export function useStockAllowedCostCenterIds() {
-  const { isAdministrator, can } = usePermissions();
-  const canAccessContratos = isAdministrator || can(pathToModuleKey('/ponto/contratos'));
-
-  const { data: stockContractRows = [], isFetched: stockContractsFetched } = useQuery({
+function useContractCostCenterRows(enabled: boolean) {
+  return useQuery({
     queryKey: ['contracts-for-stock-scope'],
     queryFn: async () => {
       try {
@@ -24,21 +20,53 @@ export function useStockAllowedCostCenterIds() {
         return [] as ContractCostCenterRow[];
       }
     },
-    enabled: !isAdministrator && canAccessContratos,
+    enabled,
     retry: false,
     staleTime: 5 * 60 * 1000,
   });
+}
+
+function costCenterIdsFromContractRows(rows: ContractCostCenterRow[]) {
+  const ids = new Set<string>();
+  for (const row of rows) {
+    const id = row.costCenterId || row.costCenter?.id;
+    if (id) ids.add(id);
+  }
+  return ids;
+}
+
+/**
+ * Contratos explicitamente liberados.
+ * `null` = sem restrição por contrato (admin ou sem módulo Contratos).
+ * `Set` vazio = módulo Contratos sem nenhum contrato cadastrado (ou ainda carregando).
+ */
+export function useAssignedContractCostCenterIds() {
+  const { isAdministrator, can } = usePermissions();
+  const canAccessContratos = isAdministrator || can(pathToModuleKey('/ponto/contratos'));
+  const { data: contractRows = [], isFetched } = useContractCostCenterRows(
+    !isAdministrator && canAccessContratos,
+  );
+
+  const allowedContractCostCenterIds = useMemo(() => {
+    if (isAdministrator) return null;
+    if (!canAccessContratos) return null;
+    if (!isFetched) return new Set<string>();
+    return costCenterIdsFromContractRows(contractRows);
+  }, [isAdministrator, canAccessContratos, isFetched, contractRows]);
+
+  return { allowedContractCostCenterIds, canAccessContratos };
+}
+
+/** `null` = admin (sem restrição). `Set` vazio = nenhum contrato liberado. */
+export function useStockAllowedCostCenterIds() {
+  const { allowedContractCostCenterIds, canAccessContratos } = useAssignedContractCostCenterIds();
 
   const allowedStockCostCenterIds = useMemo(() => {
-    if (isAdministrator) return null;
-    if (!canAccessContratos || !stockContractsFetched) return new Set<string>();
-    const ids = new Set<string>();
-    for (const row of stockContractRows) {
-      const id = row.costCenterId || row.costCenter?.id;
-      if (id) ids.add(id);
+    if (!canAccessContratos && allowedContractCostCenterIds === null) {
+      return new Set<string>();
     }
-    return ids;
-  }, [isAdministrator, canAccessContratos, stockContractsFetched, stockContractRows]);
+    return allowedContractCostCenterIds;
+  }, [allowedContractCostCenterIds, canAccessContratos]);
 
   return { allowedStockCostCenterIds, canAccessContratos };
 }
@@ -49,4 +77,16 @@ export function filterCostCentersByStockAccess<T extends { id: string }>(
 ): T[] {
   if (!allowedIds) return costCenters;
   return costCenters.filter((cc) => allowedIds.has(cc.id));
+}
+
+export function filterRowsByAllowedCostCenterIds<T>(
+  rows: T[],
+  allowedIds: Set<string> | null,
+  getCostCenterId: (row: T) => string | null | undefined,
+): T[] {
+  if (!allowedIds) return rows;
+  return rows.filter((row) => {
+    const id = getCostCenterId(row);
+    return Boolean(id && allowedIds.has(id));
+  });
 }

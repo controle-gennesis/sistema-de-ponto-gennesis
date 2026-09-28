@@ -16,9 +16,8 @@ import {
 } from '../lib/rmApprovalAccess';
 import {
   applyUnbCostCenterScopeToIdFilter,
-  assertCostCenterAllowedForUnbUser,
-  getUserUnbCostCenterScope,
-  mergeGestorScopeWithUnbRestriction,
+  assertCostCenterAllowedForOcRmUser,
+  getUserOcRmListCostCenterScope,
 } from '../lib/unbCostCenterScope';
 
 const router = Router();
@@ -155,19 +154,17 @@ router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
         ? false
         : true;
 
-    // Escopo do aprovador (quando não filtra "minhas RMs"); escopo UNB sempre.
-    let scopeCostCenterIds: string[] | null = null;
-    let unbScope: string[] | null = null;
+    // Escopo do aprovador (quando não filtra "minhas RMs"); contratos cadastrados limitam a fila.
+    let gestorScope: string[] | null = null;
     if (req.user?.id && !requestedBy) {
-      scopeCostCenterIds = await getRmApproverListScopeCostCenterIds(
+      gestorScope = await getRmApproverListScopeCostCenterIds(
         req.user.id,
         !!req.user.isAdmin,
       );
     }
-    if (req.user?.id) {
-      unbScope = await getUserUnbCostCenterScope(req.user.id, !!req.user.isAdmin);
-      scopeCostCenterIds = mergeGestorScopeWithUnbRestriction(scopeCostCenterIds, unbScope);
-    }
+    const { scopeCostCenterIds, expandUnbLabels } = req.user?.id
+      ? await getUserOcRmListCostCenterScope(req.user.id, !!req.user.isAdmin, gestorScope)
+      : { scopeCostCenterIds: null as string[] | null, expandUnbLabels: false };
 
     const listFilters: Parameters<MaterialRequestService['listMaterialRequests']>[0] = {
       status: status as string,
@@ -186,7 +183,7 @@ router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
         scopeCostCenterIds,
         typeof costCenterId === 'string' ? costCenterId : undefined,
       );
-      if (scoped.denyAll && unbScope === null) {
+      if (scoped.denyAll) {
         res.json({
           success: true,
           data: [],
@@ -194,20 +191,14 @@ router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
         });
         return;
       }
-      if (scoped.denyAll && unbScope !== null) {
-        listFilters.alsoMatchUnbLabeledCostCenters = true;
-        delete listFilters.costCenterId;
+      if (scoped.costCenterId) {
+        listFilters.costCenterId = scoped.costCenterId;
         delete listFilters.costCenterIds;
-      } else {
-        if (scoped.costCenterId) {
-          listFilters.costCenterId = scoped.costCenterId;
-          delete listFilters.costCenterIds;
-        } else if (scoped.costCenterIds?.length) {
-          listFilters.costCenterIds = scoped.costCenterIds;
-          delete listFilters.costCenterId;
-        }
-        listFilters.alsoMatchUnbLabeledCostCenters = unbScope !== null;
+      } else if (scoped.costCenterIds?.length) {
+        listFilters.costCenterIds = scoped.costCenterIds;
+        delete listFilters.costCenterId;
       }
+      listFilters.alsoMatchUnbLabeledCostCenters = expandUnbLabels;
     }
 
     const result = await materialRequestService.listMaterialRequests(listFilters);
@@ -236,7 +227,7 @@ router.post('/', async (req: AuthRequest, res: Response, next: NextFunction) => 
       throw createError('Centro de custo e itens são obrigatórios', 400);
     }
 
-    await assertCostCenterAllowedForUnbUser(req.user.id, !!req.user.isAdmin, costCenterId);
+    await assertCostCenterAllowedForOcRmUser(req.user.id, !!req.user.isAdmin, costCenterId);
 
     const request = await materialRequestService.createMaterialRequest({
       requestedBy: req.user.id,
@@ -290,7 +281,7 @@ router.patch('/:id/status', async (req: AuthRequest, res: Response, next: NextFu
     const existing = await prisma.materialRequest.findUnique({ where: { id } });
     if (!existing) throw createError('Requisição não encontrada', 404);
 
-    await assertCostCenterAllowedForUnbUser(
+    await assertCostCenterAllowedForOcRmUser(
       req.user.id,
       !!req.user.isAdmin,
       existing.costCenterId,
@@ -361,7 +352,7 @@ router.patch('/:id', async (req: AuthRequest, res: Response, next: NextFunction)
       throw createError('Centro de custo e itens são obrigatórios', 400);
     }
 
-    await assertCostCenterAllowedForUnbUser(req.user.id, !!req.user.isAdmin, costCenterId);
+    await assertCostCenterAllowedForOcRmUser(req.user.id, !!req.user.isAdmin, costCenterId);
 
     const request = await materialRequestService.updateMaterialRequestInCorrection(id, req.user.id, {
       costCenterId,
@@ -410,7 +401,7 @@ router.get('/:id/comments', async (req: AuthRequest, res: Response, next: NextFu
     const { id } = req.params;
     const request = await materialRequestService.getMaterialRequestById(id);
     if (!request) throw createError('Requisição não encontrada', 404);
-    await assertCostCenterAllowedForUnbUser(req.user.id, !!req.user.isAdmin, request.costCenterId);
+    await assertCostCenterAllowedForOcRmUser(req.user.id, !!req.user.isAdmin, request.costCenterId);
     const comments = await materialRequestService.listComments(id);
     res.json({ success: true, data: comments });
   } catch (error) {
@@ -429,7 +420,7 @@ router.post('/:id/comments', async (req: AuthRequest, res: Response, next: NextF
     const content = typeof req.body?.content === 'string' ? req.body.content : '';
     const request = await materialRequestService.getMaterialRequestById(id);
     if (!request) throw createError('Requisição não encontrada', 404);
-    await assertCostCenterAllowedForUnbUser(req.user.id, !!req.user.isAdmin, request.costCenterId);
+    await assertCostCenterAllowedForOcRmUser(req.user.id, !!req.user.isAdmin, request.costCenterId);
     const comment = await materialRequestService.createComment(id, req.user.id, content);
     res.status(201).json({ success: true, data: comment });
   } catch (error) {
@@ -475,7 +466,7 @@ router.get('/:id', async (req: AuthRequest, res: Response, next: NextFunction) =
     }
 
     if (req.user?.id) {
-      await assertCostCenterAllowedForUnbUser(
+      await assertCostCenterAllowedForOcRmUser(
         req.user.id,
         !!req.user.isAdmin,
         request.costCenterId,
@@ -509,7 +500,7 @@ router.patch(
         throw createError('Sem permissão para alterar anexos da ficha de demanda', 403);
       }
 
-      await assertCostCenterAllowedForUnbUser(
+      await assertCostCenterAllowedForOcRmUser(
         req.user.id,
         !!req.user.isAdmin,
         existing.costCenterId
@@ -575,7 +566,7 @@ router.patch('/:id/items/:itemId/cancel', async (req: AuthRequest, res: Response
     const existing = await prisma.materialRequest.findUnique({ where: { id } });
     if (!existing) throw createError('Requisição não encontrada', 404);
 
-    await assertCostCenterAllowedForUnbUser(
+    await assertCostCenterAllowedForOcRmUser(
       req.user.id,
       !!req.user.isAdmin,
       existing.costCenterId,

@@ -1,7 +1,10 @@
 import { prisma } from './prisma';
 import { createError } from '../middleware/errorHandler';
 import { isUnbRelatedLabel } from './unbBranding';
-import { getCostCenterIdsForContractAccess } from './contractAccess';
+import {
+  getCostCenterIdsForContractAccess,
+  getExplicitContractCostCenterScope,
+} from './contractAccess';
 
 /** Funcionário cujo centro de custo cadastrado é UNB (string livre no Employee). */
 export function isEmployeeUnbUser(employeeCostCenter: string | null | undefined): boolean {
@@ -130,6 +133,51 @@ export async function assertCostCenterAllowedForStockUser(
   if (!costCenterId || scope.length === 0 || !scope.includes(costCenterId)) {
     throw createError('Sem permissão para este contrato no estoque', 403);
   }
+}
+
+/**
+ * Listagem de OC/RM: quem tem contratos cadastrados vê só esses CCs
+ * (não todos os centros UNB). Sem módulo Contratos, mantém gestor + UNB.
+ */
+export async function getUserOcRmListCostCenterScope(
+  userId: string,
+  isAdmin: boolean,
+  gestorScope: string[] | null,
+): Promise<{
+  scopeCostCenterIds: string[] | null;
+  expandUnbLabels: boolean;
+}> {
+  const [unbScope, contractScope] = await Promise.all([
+    getUserUnbCostCenterScope(userId, isAdmin),
+    getExplicitContractCostCenterScope(userId, isAdmin),
+  ]);
+
+  if (contractScope !== null) {
+    return {
+      scopeCostCenterIds: intersectCostCenterScopes(gestorScope, contractScope),
+      expandUnbLabels: false,
+    };
+  }
+
+  return {
+    scopeCostCenterIds: mergeGestorScopeWithUnbRestriction(gestorScope, unbScope),
+    expandUnbLabels: unbScope !== null,
+  };
+}
+
+export async function assertCostCenterAllowedForOcRmUser(
+  userId: string,
+  isAdmin: boolean,
+  costCenterId: string | null | undefined,
+): Promise<void> {
+  const contractScope = await getExplicitContractCostCenterScope(userId, isAdmin);
+  if (contractScope !== null) {
+    if (!costCenterId || contractScope.length === 0 || !contractScope.includes(costCenterId)) {
+      throw createError('Sem permissão para este contrato', 403);
+    }
+    return;
+  }
+  await assertCostCenterAllowedForUnbUser(userId, isAdmin, costCenterId);
 }
 
 export async function assertCostCenterAllowedForUnbUser(

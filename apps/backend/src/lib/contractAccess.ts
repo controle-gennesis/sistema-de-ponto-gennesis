@@ -56,6 +56,43 @@ export async function getCostCenterIdsForContractAccess(
 }
 
 /**
+ * IDs de contrato explicitamente liberados.
+ * `null` = não restringir (admin ou nenhum cadastro de contrato).
+ * `[]` = tem o módulo Contratos, mas nenhum contrato liberado.
+ */
+export async function getAssignedContractIds(
+  userId: string,
+  isAdmin: boolean
+): Promise<string[] | null> {
+  if (isAdmin) return null;
+  const rows = await prisma.userContractPermission.findMany({
+    where: { userId },
+    select: { contractId: true },
+  });
+  if (rows.length > 0) return rows.map((r) => r.contractId);
+  const hasModule = await userHasContractsModuleAccess(userId, false);
+  return hasModule ? [] : null;
+}
+
+/**
+ * CCs dos contratos explicitamente liberados.
+ * `null` = não restringir (admin ou sem contratos cadastrados).
+ */
+export async function getExplicitContractCostCenterScope(
+  userId: string,
+  isAdmin: boolean
+): Promise<string[] | null> {
+  const ids = await getAssignedContractIds(userId, isAdmin);
+  if (ids === null) return null;
+  if (ids.length === 0) return [];
+  const contracts = await prisma.contract.findMany({
+    where: { id: { in: ids } },
+    select: { costCenterId: true },
+  });
+  return [...new Set(contracts.map((row) => row.costCenterId).filter(Boolean))];
+}
+
+/**
  * Gastos operacionais (TOTVS) na tela Sócios: libera quem tem Contratos
  * ou só o módulo Contratos Sócios (sem precisar do Contratos geral).
  */

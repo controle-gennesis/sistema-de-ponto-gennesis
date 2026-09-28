@@ -48,6 +48,10 @@ import {
 import { useCostCenters } from '@/hooks/useCostCenters';
 import { usePermissions } from '@/hooks/usePermissions';
 import {
+  filterRowsByAllowedCostCenterIds,
+  useAssignedContractCostCenterIds,
+} from '@/hooks/useStockAllowedCostCenters';
+import {
   useServiceOrdersByContract,
 } from '@/hooks/useServiceOrdersByCostCenter';
 import { ServiceOrderSearchSelect } from '@/components/suprimentos/ServiceOrderSearchSelect';
@@ -965,14 +969,20 @@ function SolicitarMateriaisPage() {
 
   const { costCenters, isLoading: loadingCostCenters } = useCostCenters();
   const { isUnbUser, unbCostCenterIds, isElevatedUser, isAdministrator, canApproveMaterialRequests } = usePermissions();
+  const { allowedContractCostCenterIds } = useAssignedContractCostCenterIds();
 
   const lockedUnbCostCenterId = useMemo(() => {
-    if (!isUnbUser) return null;
+    if (isAdministrator || !isUnbUser) return null;
+    if (allowedContractCostCenterIds && allowedContractCostCenterIds.size !== 1) return null;
     const centersWithId = costCenters.filter(
       (cc): cc is typeof cc & { id: string } => Boolean(cc.id)
     );
-    return resolveLockedUnbCostCenterId(centersWithId, unbCostCenterIds);
-  }, [isUnbUser, costCenters, unbCostCenterIds]);
+    const locked = resolveLockedUnbCostCenterId(centersWithId, unbCostCenterIds);
+    if (allowedContractCostCenterIds && locked && !allowedContractCostCenterIds.has(locked)) {
+      return null;
+    }
+    return locked;
+  }, [isAdministrator, isUnbUser, costCenters, unbCostCenterIds, allowedContractCostCenterIds]);
 
   const { data: contractOptionsData, isLoading: loadingContracts } = useQuery({
     queryKey: ['service-order-contract-options'],
@@ -1287,7 +1297,14 @@ function SolicitarMateriaisPage() {
   const requests = useMemo(() => {
     const raw = requestsData?.data?.requests ?? requestsData?.data ?? EMPTY_REQUEST_LIST;
     const list = Array.isArray(raw) ? raw : EMPTY_REQUEST_LIST;
-    // Usuário UNB: só RMs de centros de custo UNB (reforço do filtro do backend).
+    if (allowedContractCostCenterIds) {
+      return filterRowsByAllowedCostCenterIds(
+        list as Array<{ costCenterId?: string; costCenter?: { id?: string } | null }>,
+        allowedContractCostCenterIds,
+        (r) => r.costCenterId || r.costCenter?.id,
+      );
+    }
+    // Usuário UNB sem contratos cadastrados: só RMs de centros de custo UNB.
     if (!isUnbUser) return list;
     if (unbCostCenterIds.length === 0) return EMPTY_REQUEST_LIST;
     const allowed = new Set(unbCostCenterIds);
@@ -1295,7 +1312,7 @@ function SolicitarMateriaisPage() {
       const id = r.costCenterId || r.costCenter?.id;
       return !!id && allowed.has(id);
     });
-  }, [requestsData, isUnbUser, unbCostCenterIds]);
+  }, [requestsData, isUnbUser, unbCostCenterIds, allowedContractCostCenterIds]);
 
   const correctionNoteFromCompras = useMemo(() => {
     if (!correctionEditId) return '';
@@ -1367,6 +1384,7 @@ function SolicitarMateriaisPage() {
     () =>
       costCenters
         .filter((cc): cc is RmCostCenterOption & { id: string } => Boolean(cc.id))
+        .filter((cc) => !allowedContractCostCenterIds || allowedContractCostCenterIds.has(cc.id))
         .map((cc) => ({
           value: cc.id,
           label: getCostCenterLabel(cc),
@@ -1375,12 +1393,17 @@ function SolicitarMateriaisPage() {
             .filter(Boolean)
             .join(' '),
         })),
-    [costCenters]
+    [costCenters, allowedContractCostCenterIds]
   );
 
   const contractSelectOptions = useMemo(() => {
     let list = contractOptions;
-    if (isUnbUser) {
+    if (allowedContractCostCenterIds) {
+      list = list.filter((contract) => {
+        const ccId = contract.costCenter?.id;
+        return Boolean(ccId && allowedContractCostCenterIds.has(ccId));
+      });
+    } else if (isUnbUser) {
       list = lockedUnbContractId
         ? list.filter((contract) => contract.id === lockedUnbContractId)
         : list.filter(
@@ -1401,7 +1424,7 @@ function SolicitarMateriaisPage() {
           .join(' '),
       };
     });
-  }, [contractOptions, isUnbUser, lockedUnbContractId]);
+  }, [contractOptions, isUnbUser, lockedUnbContractId, allowedContractCostCenterIds]);
 
   const rmListFaseOptions = useMemo(() => {
     const options: { value: string; label: string; searchText?: string }[] = [{ value: '', label: 'Todas' }];

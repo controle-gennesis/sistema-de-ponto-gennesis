@@ -17,8 +17,8 @@ import {
 } from '../lib/ocApprovalAccess';
 import {
   applyUnbCostCenterScopeToIdFilter,
-  getUserUnbCostCenterScope,
-  mergeGestorScopeWithUnbRestriction,
+  assertCostCenterAllowedForOcRmUser,
+  getUserOcRmListCostCenterScope,
 } from '../lib/unbCostCenterScope';
 
 const router = Router();
@@ -66,18 +66,21 @@ router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
         ? false
         : true;
 
-    const unbScope = await getUserUnbCostCenterScope(req.user.id, !!req.user.isAdmin);
     const gestorScope = await getOcGestorApproverListScopeCostCenterIds(
       req.user.id,
       !!req.user.isAdmin,
     );
-    const scopeCostCenterIds = mergeGestorScopeWithUnbRestriction(gestorScope, unbScope);
+    const { scopeCostCenterIds, expandUnbLabels } = await getUserOcRmListCostCenterScope(
+      req.user.id,
+      !!req.user.isAdmin,
+      gestorScope,
+    );
 
     const scoped = applyUnbCostCenterScopeToIdFilter(
       scopeCostCenterIds,
       typeof costCenterId === 'string' ? costCenterId : undefined,
     );
-    if (scoped.denyAll && unbScope === null) {
+    if (scoped.denyAll) {
       res.json({
         success: true,
         data: [],
@@ -90,9 +93,9 @@ router.get('/', async (req: AuthRequest, res: Response, next: NextFunction) => {
       status: status as string,
       supplierId: supplierId as string,
       materialRequestId: materialRequestId as string,
-      costCenterId: scoped.denyAll ? undefined : scoped.costCenterId,
-      costCenterIds: scoped.denyAll ? undefined : scoped.costCenterIds,
-      alsoMatchUnbLabeledCostCenters: unbScope !== null,
+      costCenterId: scoped.costCenterId,
+      costCenterIds: scoped.costCenterIds,
+      alsoMatchUnbLabeledCostCenters: expandUnbLabels,
       serviceOrderId: typeof serviceOrderId === 'string' ? serviceOrderId : undefined,
       serviceOrderText: typeof serviceOrderText === 'string' ? serviceOrderText : undefined,
       orderDateFrom: typeof orderDateFrom === 'string' ? orderDateFrom : undefined,
@@ -112,12 +115,15 @@ router.get('/export-finalized-csv', async (req: AuthRequest, res: Response, next
   try {
     if (!req.user?.id) throw createError('Usuário não autenticado', 401);
     const { supplierId, costCenterId, orderDateFrom, orderDateTo, q } = req.query;
-    const unbScope = await getUserUnbCostCenterScope(req.user.id, !!req.user.isAdmin);
     const gestorScope = await getOcGestorApproverListScopeCostCenterIds(
       req.user.id,
       !!req.user.isAdmin,
     );
-    const scopeCostCenterIds = mergeGestorScopeWithUnbRestriction(gestorScope, unbScope);
+    const { scopeCostCenterIds, expandUnbLabels } = await getUserOcRmListCostCenterScope(
+      req.user.id,
+      !!req.user.isAdmin,
+      gestorScope,
+    );
     const scoped = applyUnbCostCenterScopeToIdFilter(
       scopeCostCenterIds,
       typeof costCenterId === 'string' ? costCenterId : undefined,
@@ -133,7 +139,7 @@ router.get('/export-finalized-csv', async (req: AuthRequest, res: Response, next
       supplierId: typeof supplierId === 'string' ? supplierId : undefined,
       costCenterId: scoped.costCenterId,
       costCenterIds: scoped.costCenterIds,
-      alsoMatchUnbLabeledCostCenters: unbScope !== null,
+      alsoMatchUnbLabeledCostCenters: expandUnbLabels,
       orderDateFrom: typeof orderDateFrom === 'string' ? orderDateFrom : undefined,
       orderDateTo: typeof orderDateTo === 'string' ? orderDateTo : undefined,
       q: typeof q === 'string' ? q : undefined
@@ -419,8 +425,13 @@ router.delete('/comments/:commentId', async (req: AuthRequest, res: Response, ne
 
 router.get('/:id', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
+    if (!req.user?.id) throw createError('Usuário não autenticado', 401);
     const order = await service.getById(req.params.id);
     if (!order) throw createError('Ordem de compra não encontrada', 404);
+    const costCenterId =
+      (order as { materialRequest?: { costCenter?: { id?: string } | null } }).materialRequest
+        ?.costCenter?.id;
+    await assertCostCenterAllowedForOcRmUser(req.user.id, !!req.user.isAdmin, costCenterId);
     res.json({ success: true, data: order });
   } catch (error) {
     next(error);

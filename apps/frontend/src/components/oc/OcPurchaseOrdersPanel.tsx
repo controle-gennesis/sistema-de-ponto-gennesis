@@ -81,6 +81,10 @@ import { canActOnOcApprovalStatus } from '@/lib/ocApprovalPermissions';
 import { canReturnOcItemToRm } from '@/lib/rmProcurementCoverage';
 import { isUnbRelatedLabel } from '@/lib/unbBranding';
 import { usePermissions } from '@/hooks/usePermissions';
+import {
+  filterRowsByAllowedCostCenterIds,
+  useAssignedContractCostCenterIds,
+} from '@/hooks/useStockAllowedCostCenters';
 import { useModalCloseConfirm } from '@/hooks/useModalCloseConfirm';
 import {
   orderNeedsPaymentBoleto,
@@ -2492,6 +2496,7 @@ export function OcPurchaseOrdersPanel({
     gestorCostCenterIds: permissionGestorCostCenterIds,
     ocGestorScopedCostCenterIds,
   } = usePermissions();
+  const { allowedContractCostCenterIds } = useAssignedContractCostCenterIds();
   /** Ações de aprovação só quando a tela pede explicitamente (ex.: página Aprovações). */
   const approvalActionsEnabled = allowApprovalActions;
   const canActOnOcApproval = (status: string) =>
@@ -3680,7 +3685,15 @@ export function OcPurchaseOrdersPanel({
     }
   });
 
-  const allOrders: PurchaseOrder[] = ordersData?.data || [];
+  const allOrders: PurchaseOrder[] = useMemo(
+    () =>
+      filterRowsByAllowedCostCenterIds(
+        (ordersData?.data || []) as PurchaseOrder[],
+        allowedContractCostCenterIds,
+        (order) => order.materialRequest?.costCenter?.id,
+      ),
+    [ordersData, allowedContractCostCenterIds],
+  );
   const stockMovementsForOcTag: StockMovementForOcTag[] = stockMovementsData?.data || [];
 
   const latestOcMovementByOrderNumber = useMemo(() => {
