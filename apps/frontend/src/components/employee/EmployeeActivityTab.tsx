@@ -451,7 +451,7 @@ export function EmployeeActivityTab({ userId }: { userId: string }) {
         }
         belowCharts={
           <div className="grid grid-cols-1 items-start gap-4 sm:gap-6 lg:grid-cols-2">
-            <Card className={cadastroListClasses.card}>
+            <Card className={`${cadastroListClasses.card} lg:col-span-2`}>
               <CardHeader className={cadastroListClasses.cardHeader}>
                 <SectionHeader
                   icon={History}
@@ -480,23 +480,25 @@ export function EmployeeActivityTab({ userId }: { userId: string }) {
                     <div className="w-full max-w-full overflow-x-auto">
                       <table className="w-full table-fixed text-sm">
                         <colgroup>
-                          <col className="w-[22%]" />
-                          <col className="w-[14%]" />
-                          <col className="w-[16%]" />
                           <col className="w-[18%]" />
-                          <col className="w-[30%]" />
+                          <col className="w-[12%]" />
+                          <col className="w-[38%]" />
+                          <col className="w-[12%]" />
+                          <col className="w-[20%]" />
                         </colgroup>
                         <thead className="border-b border-gray-200 dark:border-gray-700">
                           <tr>
                             <th className={cadastroListClasses.th}>Data</th>
                             <th className={cadastroListClasses.thCenter}>Hora</th>
-                            <th className={cadastroListClasses.thCenter}>Evento</th>
+                            <th className={cadastroListClasses.th}>Evento</th>
                             <th className={cadastroListClasses.thCenter}>Origem</th>
                             <th className={cadastroListClasses.thCenter}>IP</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
-                          {logins.items.map((login) => (
+                          {logins.items.map((login) => {
+                            const eventLabel = eventTypeLabel(login.type, login.source);
+                            return (
                             <tr key={login.id}>
                               <td className={`${cadastroListClasses.td} whitespace-nowrap`}>
                                 {formatDateOnly(login.createdAt)}
@@ -504,8 +506,11 @@ export function EmployeeActivityTab({ userId }: { userId: string }) {
                               <td className={`${cadastroListClasses.tdCenter} whitespace-nowrap`}>
                                 {formatTimeOnly(login.createdAt)}
                               </td>
-                              <td className={cadastroListClasses.tdCenter}>
-                                {eventTypeLabel(login.type, login.source)}
+                              <td
+                                className={`${cadastroListClasses.td} min-w-0 break-words leading-snug`}
+                                title={eventLabel}
+                              >
+                                {eventLabel}
                               </td>
                               <td className={cadastroListClasses.tdCenter}>
                                 {sourceLabel(login.source)}
@@ -514,7 +519,8 @@ export function EmployeeActivityTab({ userId }: { userId: string }) {
                                 {login.ipAddress || '—'}
                               </td>
                             </tr>
-                          ))}
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>
