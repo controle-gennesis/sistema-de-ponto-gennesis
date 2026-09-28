@@ -2295,8 +2295,8 @@ type OrcamentoMeta = {
   /** Orçamento criado pela importação da planilha: quantidades vêm da planilha; memória de cálculo oculta. */
   importadoPlanilha?: boolean;
   /**
-   * Escolha feita na importação do Orçafascio: usar memória de cálculo pra preencher as quantidades.
-   * `true` = quantidades zeradas na importação, coluna travada, preenchimento pela aba Memória de Cálculo.
+   * Escolha feita na importação do Orçafascio: usar memória de cálculo pra detalhar as quantidades.
+   * `true` = quantidades vêm da origem e a aba Memória de Cálculo fica disponível.
    * `false` = quantidades vêm do Orçafascio e ficam travadas (sem edição).
    * `undefined` = orçamento antigo/de outra origem — mantém o comportamento anterior (coluna "un" editável direto).
    */
@@ -5352,7 +5352,7 @@ export function OrcamentoPageView({
   const [orcafascioModalOpen, setOrcafascioModalOpen] = useState(false);
   const [orcafascioModalSoloOrcamentos, setOrcafascioModalSoloOrcamentos] = useState(false);
   const [orcafascioImportSelectValue, setOrcafascioImportSelectValue] = useState('');
-  /** Checkbox do modal de importação: usar memória de cálculo (quantidades zeradas, preenche pela aba Memória de Cálculo). */
+  /** Checkbox do modal de importação: usar memória de cálculo. */
   const [orcafascioImportUsarMemoria, setOrcafascioImportUsarMemoria] = useState(false);
   /** Opção de arredondamento do modal de importação — Orçafascio usa 9 casas decimais internamente. */
   const [orcafascioImportModoArredondamento, setOrcafascioImportModoArredondamento] =
@@ -7488,9 +7488,6 @@ export function OrcamentoPageView({
       for (const s of servicosImportados) {
         for (const sub of s.subtitulos) {
           subtitulosNoOrcamento.push(`${s.id}|${sub.id}`);
-          // Com "usar memória de cálculo", as quantidades entram zeradas — a pessoa preenche
-          // pela aba Memória de Cálculo (dimensões p/ m³/m²/m, lista de locais p/ un).
-          if (usarMemoriaCalculo) continue;
           for (const it of sub.itens) {
             const itemKey = `${s.id}|${sub.id}|${it.chave}`;
             const q = it.quantidadePlanilha;
@@ -7803,11 +7800,9 @@ export function OrcamentoPageView({
 
       const subtitulosNoOrcamentoNext: string[] = [];
       const quantidadesMescladas = remapearRegistroPorChave(quantidadesPorItem, chaveParaNovaKey);
-      const usarMemoriaCalculo = meta.usarMemoriaCalculo === true;
       for (const s of servicosMesclados) {
         for (const sub of s.subtitulos) {
           subtitulosNoOrcamentoNext.push(`${s.id}|${sub.id}`);
-          if (usarMemoriaCalculo) continue;
           for (const it of sub.itens) {
             const itemKey = `${s.id}|${sub.id}|${it.chave}`;
             if (quantidadesMescladas[itemKey] != null) continue;
