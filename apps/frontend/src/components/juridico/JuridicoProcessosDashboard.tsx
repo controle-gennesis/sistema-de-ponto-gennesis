@@ -651,13 +651,15 @@ function RankingList({
 
 function FilterField({
   label,
+  className = '',
   children,
 }: {
   label: string;
+  className?: string;
   children: React.ReactNode;
 }) {
   return (
-    <div className="min-w-0 space-y-1.5">
+    <div className={`min-w-0 space-y-1.5 ${className}`.trim()}>
       <span className="block text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
         {label}
       </span>
@@ -878,7 +880,7 @@ export function JuridicoProcessosDashboard() {
             </div>
           </CardHeader>
           <CardContent className={cadastroListClasses.cardContent}>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
               <FilterField label="Empresa">
                 <StringSingleSelectDropdown
                   value={filters.empresa}
@@ -919,7 +921,7 @@ export function JuridicoProcessosDashboard() {
                   matchTriggerWidth
                 />
               </FilterField>
-              <FilterField label="Objeto">
+              <FilterField label="Objeto" className="sm:col-span-2">
                 <StringSingleSelectDropdown
                   value={filters.objeto}
                   onChange={setFilter('objeto')}
