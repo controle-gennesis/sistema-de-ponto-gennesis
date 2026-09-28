@@ -152,6 +152,7 @@ export function usePermissions() {
   const gestorCostCenterIds: string[] = permissionData?.gestorCostCenterIds ?? [];
   const isUnbUser = !!permissionData?.isUnbUser;
   const unbCostCenterIds: string[] = permissionData?.unbCostCenterIds ?? [];
+  const hideContractOrcamento = !!permissionData?.hideContractOrcamento;
 
   type ContractModuleFlagRow = {
     orcamento: boolean;
@@ -503,6 +504,7 @@ export function usePermissions() {
   };
 
   const canAccessContractOrcamentoTab = (contractId: string) => {
+    if (hideContractOrcamento) return false;
     if (isElevatedUser) return true;
     return (
       canAccessContract(contractId) && contractModuleFlags[contractId]?.orcamento === true

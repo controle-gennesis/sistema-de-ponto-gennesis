@@ -66,6 +66,14 @@ export function resolveOcDestinationFromCostCenter(
   return staysOnConecta ? 'CONECTA' : 'TOTVS';
 }
 
+/** Cadastro UNB Predial Brasília ou HUB Predial — sem card de orçamentos no contrato. */
+export function isPredialConsorcioCostCenter(
+  name?: string | null,
+  code?: string | null
+): boolean {
+  return resolveOcDestinationFromCostCenter(name, code) === 'CONECTA';
+}
+
 export function isTotvsFreightType(code: string | null | undefined): code is TotvsFreightTypeCode {
   return TOTVS_FREIGHT_TYPES.some((row) => row.code === code);
 }

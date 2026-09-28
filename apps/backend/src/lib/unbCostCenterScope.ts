@@ -1,6 +1,20 @@
 import { prisma } from './prisma';
 import { createError } from '../middleware/errorHandler';
 import { isUnbRelatedLabel } from './unbBranding';
+import { isPredialConsorcioCostCenter } from './ocTotvsRm';
+
+async function getEmployeeCostCenterLabel(userId: string): Promise<string | null> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { employee: { select: { costCenter: true } } },
+  });
+  return user?.employee?.costCenter?.trim() || null;
+}
+
+/** UNB Predial Brasília ou HUB Predial no cadastro do funcionário: sem orçamentos no contrato. */
+export async function userHidesContractOrcamento(userId: string): Promise<boolean> {
+  return isPredialConsorcioCostCenter(await getEmployeeCostCenterLabel(userId));
+}
 
 /** Funcionário cujo centro de custo cadastrado é UNB (string livre no Employee). */
 export function isEmployeeUnbUser(employeeCostCenter: string | null | undefined): boolean {
@@ -36,11 +50,8 @@ export async function getUserUnbCostCenterScope(
 ): Promise<string[] | null> {
   if (isAdmin) return null;
 
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { employee: { select: { costCenter: true } } },
-  });
-  if (!isEmployeeUnbUser(user?.employee?.costCenter)) return null;
+  const costCenter = await getEmployeeCostCenterLabel(userId);
+  if (!isEmployeeUnbUser(costCenter)) return null;
 
   return getUnbCostCenterIds();
 }
