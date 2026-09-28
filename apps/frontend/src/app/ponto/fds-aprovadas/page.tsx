@@ -24,7 +24,9 @@ import {
 } from '@/components/ui/listTableUi';
 import {
   fdPurchaseStatusBadgeClass,
+  fdOrcamentoVinculo,
   formatCurrencyDisplay,
+  formatFichaDemandaPct,
   purchaseStatusLabel,
   type DemandSheetPurchaseStatus,
   type FichaDemandaApprovalRecord,
@@ -128,6 +130,10 @@ export default function FdsAprovadasPage() {
 
   const openDetail = (row: FichaDemandaApprovalRecord) => {
     setRowActionMenu(null);
+    if (fdOrcamentoVinculo(row)) {
+      router.push(`/ponto/fds-aprovadas/${row.id}`);
+      return;
+    }
     setDetailRecord(row);
   };
 
@@ -265,7 +271,7 @@ export default function FdsAprovadasPage() {
                       <thead className="border-b border-gray-200 dark:border-gray-700">
                         <tr>
                           <th className="px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
-                            Código da FD
+                            Código
                           </th>
                           <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
                             Contrato
@@ -278,6 +284,9 @@ export default function FdsAprovadasPage() {
                           </th>
                           <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
                             Faturamento
+                          </th>
+                          <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                            FD
                           </th>
                           <th className="px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
                             Status compras
@@ -318,6 +327,9 @@ export default function FdsAprovadasPage() {
                             </td>
                             <td className="px-3 py-4 text-center tabular-nums text-gray-900 dark:text-gray-100 sm:px-6">
                               {formatCurrencyDisplay(row.faturamentoEstimado)}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-4 text-center text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100 sm:px-6">
+                              {formatFichaDemandaPct(row.fichaDemandaPct)}
                             </td>
                             <td className="px-3 py-4 text-center sm:px-6">
                               <span

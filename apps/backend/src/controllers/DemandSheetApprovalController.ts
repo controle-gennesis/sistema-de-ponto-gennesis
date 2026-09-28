@@ -44,18 +44,42 @@ function isOrcamentoRefAnexo(a: unknown): boolean {
   return row.kind === ORCAMENTO_REF_KIND || row.name === ORCAMENTO_REF_NAME;
 }
 
+function clampFichaDemandaPct(value: unknown): number | null {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  return Math.max(0, Math.min(100, Math.round(n)));
+}
+
 function extractOrcamentoRefFromAnexos(
   anexos: unknown
-): { centroCustoId: string; orcamentoId: string } | null {
+): { centroCustoId: string; orcamentoId: string; fichaDemandaPct: number | null } | null {
   if (!Array.isArray(anexos)) return null;
   for (const a of anexos) {
     if (!isOrcamentoRefAnexo(a)) continue;
-    const row = a as { centroCustoId?: unknown; orcamentoId?: unknown };
+    const row = a as { centroCustoId?: unknown; orcamentoId?: unknown; fichaDemandaPct?: unknown };
     const centroCustoId = String(row.centroCustoId || '').trim();
     const orcamentoId = String(row.orcamentoId || '').trim();
-    if (centroCustoId && orcamentoId) return { centroCustoId, orcamentoId };
+    if (centroCustoId && orcamentoId) {
+      return {
+        centroCustoId,
+        orcamentoId,
+        fichaDemandaPct: clampFichaDemandaPct(row.fichaDemandaPct),
+      };
+    }
   }
   return null;
+}
+
+function anexosComFichaDemandaPct(anexos: unknown, pct: number): Prisma.InputJsonValue {
+  const list = Array.isArray(anexos) ? anexos : [];
+  let found = false;
+  const next = list.map((a) => {
+    if (!isOrcamentoRefAnexo(a) || !a || typeof a !== 'object') return a;
+    found = true;
+    return { ...(a as Record<string, unknown>), fichaDemandaPct: pct };
+  });
+  if (!found) return list as Prisma.InputJsonValue;
+  return next as Prisma.InputJsonValue;
 }
 
 function publicAnexos(anexos: unknown): unknown[] {
@@ -125,6 +149,10 @@ const purchaseStatusSchema = z.object({
   purchaseStatus: z.enum(PURCHASE_STATUS_VALUES),
 });
 
+const fichaDemandaPctSchema = z.object({
+  fichaDemandaPct: z.number().finite(),
+});
+
 function parseMoney(value: string | number): Prisma.Decimal {
   if (typeof value === 'number') {
     return new Prisma.Decimal(value);
@@ -185,11 +213,12 @@ function serializeRow(row: {
   createdAt: Date;
   updatedAt: Date;
   solicitante?: { id: string; name: string } | null;
-  contrato?: { id: string; name: string; number: string } | null;
+  contrato?: { id: string; name: string; number: string; costCenterId?: string } | null;
   creator?: { id: string; name: string } | null;
   managerApprover?: { id: string; name: string } | null;
   purchaseStatusUpdater?: { id: string; name: string } | null;
 }) {
+  const orcRef = extractOrcamentoRefFromAnexos(row.anexos);
   return {
     ...row,
     faturamentoEstimado: Number(row.faturamentoEstimado),
@@ -204,12 +233,16 @@ function serializeRow(row: {
       ? row.purchaseStatusUpdatedAt.toLocaleString('pt-BR')
       : null,
     anexos: publicAnexos(row.anexos),
+    orcamentoId: orcRef?.orcamentoId ?? null,
+    orcamentoCentroCustoId: orcRef?.centroCustoId ?? null,
+    contratoCostCenterId: row.contrato?.costCenterId ?? null,
+    fichaDemandaPct: orcRef?.fichaDemandaPct ?? null,
   };
 }
 
 const includeDefault = {
   solicitante: { select: { id: true, name: true } },
-  contrato: { select: { id: true, name: true, number: true } },
+  contrato: { select: { id: true, name: true, number: true, costCenterId: true } },
   creator: { select: { id: true, name: true } },
   managerApprover: { select: { id: true, name: true } },
   purchaseStatusUpdater: { select: { id: true, name: true } },
@@ -326,6 +359,7 @@ export class DemandSheetApprovalController {
           kind: ORCAMENTO_REF_KIND,
           centroCustoId: centroRef,
           orcamentoId: orcRef,
+          fichaDemandaPct: 0,
         });
       }
 
@@ -633,6 +667,40 @@ export class DemandSheetApprovalController {
     }
   }
 
+  async getById(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user) throw createError('Usuário não autenticado', 401);
+      const id = String(req.params.id || '').trim();
+      if (!id) throw createError('ID inválido', 400);
+
+      const row = await prisma.demandSheetApproval.findUnique({
+        where: { id },
+        include: includeDefault,
+      });
+      if (!row) throw createError('Ficha de demanda não encontrada', 404);
+
+      const canFdsAprovadas = await userCanAccessFdsAprovadasModule(req.user.id, req.user.isAdmin);
+      if (canFdsAprovadas && row.status === 'APPROVED') {
+        return res.json({ success: true, data: serializeRow(row) });
+      }
+
+      const scope = await listWhereForUser(req.user.id, req.user.isAdmin);
+      const allowed = await prisma.demandSheetApproval.findFirst({
+        where: { id, ...scope },
+        select: { id: true },
+      });
+      if (!allowed) throw createError('Sem permissão para ver esta ficha de demanda', 403);
+
+      return res.json({ success: true, data: serializeRow(row) });
+    } catch (e: unknown) {
+      const err = e as { statusCode?: number; message?: string };
+      if (err?.statusCode) {
+        return res.status(err.statusCode).json({ error: err.message || 'Erro' });
+      }
+      return res.status(500).json({ error: 'Erro ao buscar ficha de demanda' });
+    }
+  }
+
   async listApprovedForPurchasing(req: AuthRequest, res: Response) {
     try {
       if (!req.user) throw createError('Usuário não autenticado', 401);
@@ -726,6 +794,55 @@ export class DemandSheetApprovalController {
         return res.status(err.statusCode).json({ error: err.message || 'Erro' });
       }
       return res.status(500).json({ error: 'Erro ao atualizar status de compras' });
+    }
+  }
+
+  async updateFichaDemandaPct(req: AuthRequest, res: Response) {
+    try {
+      if (!req.user) throw createError('Usuário não autenticado', 401);
+
+      const canAccess = await userCanAccessFdsAprovadasModule(req.user.id, req.user.isAdmin);
+      if (!canAccess) {
+        throw createError('Sem permissão para atualizar o progresso da ficha', 403);
+      }
+
+      const id = String(req.params.id || '').trim();
+      if (!id) throw createError('ID inválido', 400);
+
+      const row = await prisma.demandSheetApproval.findUnique({
+        where: { id },
+        include: includeDefault,
+      });
+      if (!row) throw createError('Ficha de demanda não encontrada', 404);
+      if (row.status !== 'APPROVED') {
+        throw createError('Somente fichas aprovadas podem atualizar o progresso da FD', 400);
+      }
+
+      const body = fichaDemandaPctSchema.parse(req.body);
+      const pct = clampFichaDemandaPct(body.fichaDemandaPct);
+      if (pct == null) throw createError('Percentual inválido', 400);
+
+      const current = extractOrcamentoRefFromAnexos(row.anexos);
+      if (!current) {
+        return res.json({ success: true, data: serializeRow(row) });
+      }
+      if (current.fichaDemandaPct === pct) {
+        return res.json({ success: true, data: serializeRow(row) });
+      }
+
+      const updated = await prisma.demandSheetApproval.update({
+        where: { id },
+        data: { anexos: anexosComFichaDemandaPct(row.anexos, pct) },
+        include: includeDefault,
+      });
+
+      return res.json({ success: true, data: serializeRow(updated) });
+    } catch (e: unknown) {
+      const err = e as { statusCode?: number; message?: string };
+      if (err?.statusCode) {
+        return res.status(err.statusCode).json({ error: err.message || 'Erro' });
+      }
+      return res.status(500).json({ error: 'Erro ao atualizar progresso da ficha' });
     }
   }
 

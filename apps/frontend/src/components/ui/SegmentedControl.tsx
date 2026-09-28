@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useLayoutEffect, useRef, useState } from 'react';
+import React, { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 export type SegmentedOption<T extends string> = {
   value: T;
@@ -46,24 +46,16 @@ export function SegmentedControl<T extends string>({
   const optionsRef = useRef(options);
   valueRef.current = value;
   optionsRef.current = options;
+  const optionsKey = useMemo(() => options.map((o) => o.value).join('\0'), [options]);
 
   const measure = useCallback(() => {
     const root = rootRef.current;
     const idx = optionsRef.current.findIndex((o) => o.value === valueRef.current);
     const btn = btnRefs.current[idx];
     if (!root || !btn) return;
-    // offset* é relativo à padding edge (igual ao left absoluto) — evita a pílula
-    // invadir a borda direita no último item e parecer com margem menor.
-    const padRight = parseFloat(getComputedStyle(root).paddingRight) || 0;
-    let left = btn.offsetLeft;
-    let width = btn.offsetWidth;
-    const maxRight = root.clientWidth - padRight;
-    if (left + width > maxRight) {
-      width = Math.max(0, maxRight - left);
-    }
     const next: PillState = {
-      left: Math.round(left),
-      width: Math.round(width),
+      left: Math.round(btn.offsetLeft),
+      width: Math.round(btn.offsetWidth),
       ready: true,
     };
     setPill((prev) => (pillsEqual(prev, next) ? prev : next));
@@ -71,27 +63,35 @@ export function SegmentedControl<T extends string>({
 
   useLayoutEffect(() => {
     measure();
-  }, [measure, value, options]);
+  }, [measure, value, optionsKey]);
 
   useLayoutEffect(() => {
     const root = rootRef.current;
     if (!root || typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(() => measure());
-    ro.observe(root);
-    btnRefs.current.forEach((b) => b && ro.observe(b));
-    window.addEventListener('resize', measure);
-    root.addEventListener('scroll', measure, { passive: true });
-    return () => {
-      ro.disconnect();
-      window.removeEventListener('resize', measure);
-      root.removeEventListener('scroll', measure);
+    let raf = 0;
+    const schedule = () => {
+      if (raf) return;
+      raf = window.requestAnimationFrame(() => {
+        raf = 0;
+        measure();
+      });
     };
-  }, [measure, options.length]);
+    const ro = new ResizeObserver(schedule);
+    ro.observe(root);
+    window.addEventListener('resize', schedule);
+    root.addEventListener('scroll', schedule, { passive: true });
+    return () => {
+      if (raf) window.cancelAnimationFrame(raf);
+      ro.disconnect();
+      window.removeEventListener('resize', schedule);
+      root.removeEventListener('scroll', schedule);
+    };
+  }, [measure, optionsKey]);
 
   return (
     <div
       ref={rootRef}
-      className={`relative inline-flex h-9 shrink-0 items-stretch rounded-lg bg-gray-100 dark:bg-gray-800 ${
+      className={`relative inline-flex h-9 shrink-0 items-stretch overflow-x-auto overflow-y-hidden rounded-lg bg-gray-100 dark:bg-gray-800 ${
         /\bp-\S/.test(className) ? '' : 'p-1 '
       }${className}`}
       role="group"

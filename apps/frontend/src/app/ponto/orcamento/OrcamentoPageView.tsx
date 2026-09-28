@@ -52,11 +52,16 @@ import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import api, { LARGE_FILE_UPLOAD_TIMEOUT_MS } from '@/lib/api';
 import { FichaDemandaApprovalFormModal } from '@/components/engenharia/FichaDemandaApprovalFormModal';
+import { FdStatusBadges } from '@/components/engenharia/FdStatusBadges';
 import {
   currencyDigitsToFormatted,
   formatCurrencyInput,
   formToApiPayload,
+  formatCurrencyDisplay,
+  FD_STATUS_LABELS,
+  purchaseStatusLabel,
   type FichaDemandaApprovalFormState,
+  type FichaDemandaApprovalRecord,
   type PoloFd,
 } from '@/lib/fichaDemandaApproval';
 import {
@@ -146,6 +151,9 @@ export type OrcamentoPageProps = {
   embeddedOrcamentoIdFromRoute?: string | null;
   /** Só a aba Cronograma (página dedicada `/ponto/cronogramas/...`). */
   cronogramaOnly?: boolean;
+  /** Só a Ficha de demanda, com colunas de compra (página `/ponto/fds-aprovadas/[id]`). */
+  fichaDemandaOnly?: boolean;
+  fichaDemandaRecord?: FichaDemandaApprovalRecord | null;
 };
 
 // Tipos
@@ -4768,9 +4776,6 @@ function appendComposicaoItemAoSubtitulo(
 
 /** Fator (40%) aplicado ao valor unit. estimado e ao custo estimado na planilha analítica. */
 const PLANILHA_FATOR_CUSTO_ESTIMADO = 0.4;
-/** Colunas de compra/real/%/observação na Ficha de demanda (da qtd. compra até observação). */
-const MOSTRAR_COLUNAS_COMPRA_FICHA_DEMANDA = false;
-const COLSPAN_FICHA_DEMANDA = MOSTRAR_COLUNAS_COMPRA_FICHA_DEMANDA ? 19 : 11;
 
 /** Largura estável para colunas «R$ + valor» (planilha «Valor unit. real», analítico insumo manual). */
 const GRADE_COL_MOEDA_UNIT =
@@ -5089,8 +5094,8 @@ const fdCampoDrafts = new Map<string, string>();
 
 /**
  * Input da Ficha de Demanda: estado local enquanto digita.
- * Só notifica o pai no blur (e se a linha sumir da janela) — evita re-render
- * da grade a cada tecla, que fazia o valor piscar (2 dígitos e depois 3).
+ * O valor formatado do pai não sobrescreve o campo focado (evita o pisca).
+ * Com `commitOnChange`, totais e % atualizam a cada tecla.
  */
 const FdCampoLocal = memo(function FdCampoLocal({
   draftKey,
@@ -5101,6 +5106,7 @@ const FdCampoLocal = memo(function FdCampoLocal({
   title,
   inputMode,
   mask,
+  commitOnChange = false,
 }: {
   draftKey?: string;
   committedValue: string;
@@ -5110,6 +5116,7 @@ const FdCampoLocal = memo(function FdCampoLocal({
   title?: string;
   inputMode?: React.HTMLAttributes<HTMLInputElement>['inputMode'];
   mask?: (raw: string) => string;
+  commitOnChange?: boolean;
 }) {
   const [local, setLocal] = useState(
     () => (draftKey ? fdCampoDrafts.get(draftKey) : undefined) ?? committedValue
@@ -5145,8 +5152,8 @@ const FdCampoLocal = memo(function FdCampoLocal({
     localRef.current = next;
     setLocal(next);
     if (draftKey) {
-      if (shouldCommit) fdCampoDrafts.delete(draftKey);
-      else fdCampoDrafts.set(draftKey, next);
+      if (focusedRef.current) fdCampoDrafts.set(draftKey, next);
+      else fdCampoDrafts.delete(draftKey);
     }
     if (shouldCommit) onCommitRef.current(next);
   };
@@ -5163,7 +5170,7 @@ const FdCampoLocal = memo(function FdCampoLocal({
       onFocus={() => {
         focusedRef.current = true;
       }}
-      onChange={(e) => applyValue(e.target.value, false)}
+      onChange={(e) => applyValue(e.target.value, commitOnChange)}
       onBlur={(e) => {
         focusedRef.current = false;
         applyValue(e.target.value, true);
@@ -5295,6 +5302,8 @@ export function OrcamentoPageView({
   embeddedContractName = null,
   embeddedOrcamentoIdFromRoute = null,
   cronogramaOnly = false,
+  fichaDemandaOnly = false,
+  fichaDemandaRecord = null,
 }: OrcamentoPageProps = {}) {
   const router = useRouter();
   const { costCenters, isLoading: loadingCentros } = useCostCenters();
@@ -5318,9 +5327,6 @@ export function OrcamentoPageView({
   const [planilhaValorUnitCompraReal, setPlanilhaValorUnitCompraReal] = useState<Record<string, number>>({});
   const [planilhaTipoInsumo, setPlanilhaTipoInsumo] = useState<Record<string, 'MO' | 'MA' | 'LO'>>({});
   const [fichaDemandaObservacoes, setFichaDemandaObservacoes] = useState<Record<string, string>>({});
-  /** Atrasa recálculos pesados da FD após commit — a digitação não espera a grade. */
-  const planilhaQtdDeferred = useDeferredValue(planilhaQuantidadeCompra);
-  const planilhaVlDeferred = useDeferredValue(planilhaValorUnitCompraReal);
   const dimensoesPorItemDeferred = useDeferredValue(dimensoesPorItem);
   const [novoServicoNome, setNovoServicoNome] = useState('');
   const [showAddServico, setShowAddServico] = useState(false);
@@ -5421,11 +5427,14 @@ export function OrcamentoPageView({
   // Analítico (detalhamento) da composição para visualização/exportação.
   const [orcamentoViewTab, setOrcamentoViewTab] = useState<
     'dados' | 'montagem' | 'analitico' | 'memorial' | 'planilhaAnalitica' | 'cronograma'
-  >(cronogramaOnly ? 'cronograma' : 'montagem');
+  >(cronogramaOnly ? 'cronograma' : fichaDemandaOnly ? 'planilhaAnalitica' : 'montagem');
 
   useEffect(() => {
     if (cronogramaOnly) setOrcamentoViewTab('cronograma');
-  }, [cronogramaOnly]);
+    if (fichaDemandaOnly) setOrcamentoViewTab('planilhaAnalitica');
+  }, [cronogramaOnly, fichaDemandaOnly]);
+  const mostrarColunasCompraFichaDemanda = fichaDemandaOnly;
+  const colSpanFichaDemanda = mostrarColunasCompraFichaDemanda ? 19 : 11;
   /** Aba “atrasada”: pill/UI muda na hora; grades pesadas montam depois (evita travar a animação). */
   const deferredOrcamentoViewTab = useDeferredValue(orcamentoViewTab);
   const abaOrcamentoPesada =
@@ -5509,7 +5518,7 @@ export function OrcamentoPageView({
 
   const navigateEmbeddedOrcamentoPath = useCallback(
     (orcamentoId: string | null) => {
-      if (!embeddedOrcamentoBasePath) return;
+      if (fichaDemandaOnly || !embeddedOrcamentoBasePath) return;
       const target = orcamentoId ? `${embeddedOrcamentoBasePath}/${orcamentoId}` : embeddedOrcamentoBasePath;
       // Abrir: push para a seta do navegador voltar à lista de orçamentos.
       // Fechar/excluir: replace para não deixar o detalhe excluído no histórico.
@@ -5519,7 +5528,7 @@ export function OrcamentoPageView({
         router.replace(target, { scroll: false });
       }
     },
-    [embeddedOrcamentoBasePath, router]
+    [embeddedOrcamentoBasePath, router, fichaDemandaOnly]
   );
 
   // useLayoutEffect: evita 1 frame com URL na lista e UI/breadcrumb ainda no orçamento aberto.
@@ -8968,6 +8977,9 @@ export function OrcamentoPageView({
   }, [meta.osNumeroPasta, nomeOrcamentoAtivo, nomeOrcamentoRascunho]);
 
   const tituloPaginaOrcamento = useMemo(() => {
+    if (fichaDemandaOnly) {
+      return fichaDemandaRecord?.codFichaDemanda?.trim() || 'Ficha de demanda';
+    }
     if (cronogramaOnly && orcamentoAtivoId) {
       return nomeOrcamentoSemCodigo || 'Orçamento';
     }
@@ -8975,9 +8987,24 @@ export function OrcamentoPageView({
       return nomeOrcamentoSemCodigo || 'Orçamento';
     }
     return nomeContratoBreadcrumb || 'Orçamento';
-  }, [cronogramaOnly, orcamentoAtivoId, nomeOrcamentoSemCodigo, nomeContratoBreadcrumb]);
+  }, [
+    fichaDemandaOnly,
+    fichaDemandaRecord?.codFichaDemanda,
+    cronogramaOnly,
+    orcamentoAtivoId,
+    nomeOrcamentoSemCodigo,
+    nomeContratoBreadcrumb,
+  ]);
 
   const subtituloPaginaOrcamento = useMemo(() => {
+    if (fichaDemandaOnly) {
+      const pedido = fichaDemandaRecord?.codigoPedido?.trim();
+      const contrato = fichaDemandaRecord?.contratoNome?.trim();
+      const obra = fichaDemandaRecord?.obra?.trim();
+      return [pedido ? `Pedido ${pedido}` : null, contrato, obra ? `Obra ${obra}` : null]
+        .filter(Boolean)
+        .join(' · ') || 'Dados e planilha da ficha de demanda';
+    }
     if (cronogramaOnly && orcamentoAtivoId) {
       return codigoOrcamentoAtivo || 'Prazos e andamento da obra';
     }
@@ -8985,7 +9012,15 @@ export function OrcamentoPageView({
       return codigoOrcamentoAtivo || 'Orçamento';
     }
     return 'Gerencie os orçamentos do contrato';
-  }, [cronogramaOnly, orcamentoAtivoId, codigoOrcamentoAtivo]);
+  }, [
+    fichaDemandaOnly,
+    fichaDemandaRecord?.codigoPedido,
+    fichaDemandaRecord?.contratoNome,
+    fichaDemandaRecord?.obra,
+    cronogramaOnly,
+    orcamentoAtivoId,
+    codigoOrcamentoAtivo,
+  ]);
 
   const statusAprovacaoAtivo = useMemo(
     () => normalizarStatusAprovacaoOrcamento(meta.statusAprovacao),
@@ -9013,6 +9048,10 @@ export function OrcamentoPageView({
     : orcamentoAtivoId;
 
   const breadcrumbOrcamentoTrail = useMemo(() => {
+    if (fichaDemandaOnly) {
+      const codigo = fichaDemandaRecord?.codFichaDemanda?.trim();
+      return codigo ? [{ label: codigo }] : null;
+    }
     if (!embeddedContractId) return null;
     const listHref = cronogramaOnly
       ? '/ponto/cronogramas'
@@ -9045,6 +9084,8 @@ export function OrcamentoPageView({
     nomeContratoBreadcrumb,
     nomeOrcamentoSemCodigo,
     cronogramaOnly,
+    fichaDemandaOnly,
+    fichaDemandaRecord?.codFichaDemanda,
   ]);
 
   useBreadcrumbEntity(breadcrumbOrcamentoTrail, { priority: 1 });
@@ -9189,7 +9230,7 @@ export function OrcamentoPageView({
       let sum = 0;
       let temAlgum = false;
       for (const ins of filhos) {
-        const qC = planilhaQtdDeferred[ins.key];
+        const qC = planilhaQuantidadeCompra[ins.key];
         if (qC !== undefined && Number.isFinite(qC)) {
           temAlgum = true;
           sum += qC * ins.valorUnit;
@@ -9204,8 +9245,8 @@ export function OrcamentoPageView({
       let sumCustoReal = 0;
       let sumQtdCompraComVlReal = 0;
       for (const ins of filhos) {
-        const qC = planilhaQtdDeferred[ins.key];
-        const vReal = planilhaVlDeferred[ins.key];
+        const qC = planilhaQuantidadeCompra[ins.key];
+        const vReal = planilhaValorUnitCompraReal[ins.key];
         if (qC !== undefined && Number.isFinite(qC) && vReal !== undefined && Number.isFinite(vReal)) {
           sumCustoReal += qC * vReal;
           sumQtdCompraComVlReal += qC;
@@ -9224,7 +9265,7 @@ export function OrcamentoPageView({
         const qO = ins.quantOrc;
         if (!Number.isFinite(qO)) continue;
         sumQO += qO;
-        const qC = planilhaQtdDeferred[ins.key];
+        const qC = planilhaQuantidadeCompra[ins.key];
         if (qC !== undefined && Number.isFinite(qC)) {
           sumQC += qC;
           if (qC > 0) temQtdCompraInformadaMaiorZero = true;
@@ -9240,8 +9281,8 @@ export function OrcamentoPageView({
       let sumQcvR = 0;
       let sumQcvO = 0;
       for (const ins of filhos) {
-        const qC = planilhaQtdDeferred[ins.key];
-        const vR = planilhaVlDeferred[ins.key];
+        const qC = planilhaQuantidadeCompra[ins.key];
+        const vR = planilhaValorUnitCompraReal[ins.key];
         if (
           qC !== undefined &&
           Number.isFinite(qC) &&
@@ -9292,9 +9333,9 @@ export function OrcamentoPageView({
     }[] = [];
     for (const l of linhasAnaliticoFicha) {
       if (l.kind !== 'composicao' && l.kind !== 'insumo') continue;
-      const qCompra = planilhaQtdDeferred[l.key];
+      const qCompra = planilhaQuantidadeCompra[l.key];
       const vReal =
-        l.kind === 'insumo' ? planilhaVlDeferred[l.key] : undefined;
+        l.kind === 'insumo' ? planilhaValorUnitCompraReal[l.key] : undefined;
       const custoCompraReal =
         l.kind === 'composicao'
           ? undefined
@@ -9393,8 +9434,8 @@ export function OrcamentoPageView({
     orcamentoViewTab,
     deferredOrcamentoViewTab,
     linhasAnaliticoFichaBase,
-    planilhaQtdDeferred,
-    planilhaVlDeferred,
+    planilhaQuantidadeCompra,
+    planilhaValorUnitCompraReal,
     planilhaTipoInsumo,
   ]);
 
@@ -9521,8 +9562,8 @@ export function OrcamentoPageView({
       const chaveSubtitulo = `${partes[0]}.${partes[1]}`;
       const custoOrc = Number(row.total) || 0;
       const custoEst = custoOrc * PLANILHA_FATOR_CUSTO_ESTIMADO;
-      const qC = planilhaQtdDeferred[row.key];
-      const vReal = planilhaVlDeferred[row.key];
+      const qC = planilhaQuantidadeCompra[row.key];
+      const vReal = planilhaValorUnitCompraReal[row.key];
       const custoReal =
         qC !== undefined &&
         vReal !== undefined &&
@@ -9547,7 +9588,7 @@ export function OrcamentoPageView({
       porTitulo,
       porSubtitulo,
     };
-  }, [orcamentoViewTab, deferredOrcamentoViewTab, linhasAnaliticoComManuais, planilhaQtdDeferred, planilhaVlDeferred]);
+  }, [orcamentoViewTab, deferredOrcamentoViewTab, linhasAnaliticoComManuais, planilhaQuantidadeCompra, planilhaValorUnitCompraReal]);
 
   /** Indicadores % iguais à Ficha de demanda (levantamento, preço unit. rel., faturamento) por chave de linha. */
   const pctFichaDemandaPorKey = useMemo(() => {
@@ -9704,8 +9745,8 @@ export function OrcamentoPageView({
     for (const l of linhasAnaliticoOrcamento) {
       if (l.kind !== 'insumo') continue;
       if (insumoExcluirCaixinhaRodape(l.descricao)) continue;
-      const qC = planilhaQtdDeferred[l.key];
-      const vReal = planilhaVlDeferred[l.key];
+      const qC = planilhaQuantidadeCompra[l.key];
+      const vReal = planilhaValorUnitCompraReal[l.key];
       if (qC === undefined || !Number.isFinite(qC) || vReal === undefined || !Number.isFinite(vReal)) continue;
       const val = qC * vReal;
       const g = grupoPrecoCompraInsumoPlanilha(l.key, l.categoria || '', l.descricao || '', planilhaTipoInsumo);
@@ -9758,8 +9799,8 @@ export function OrcamentoPageView({
     };
   }, [
     linhasAnaliticoOrcamento,
-    planilhaQtdDeferred,
-    planilhaVlDeferred,
+    planilhaQuantidadeCompra,
+    planilhaValorUnitCompraReal,
     planilhaTipoInsumo,
     linhasFichaDemanda,
     resumoFinanceiro.valorFinal
@@ -9774,8 +9815,8 @@ export function OrcamentoPageView({
     }
     let filled = 0;
     for (const l of insumos) {
-      const q = planilhaQtdDeferred[l.key];
-      const v = planilhaVlDeferred[l.key];
+      const q = planilhaQuantidadeCompra[l.key];
+      const v = planilhaValorUnitCompraReal[l.key];
       if (
         q !== undefined &&
         Number.isFinite(q) &&
@@ -9792,7 +9833,7 @@ export function OrcamentoPageView({
       pct,
       completa: filled === total,
     };
-  }, [linhasAnaliticoOrcamento, planilhaQtdDeferred, planilhaVlDeferred]);
+  }, [linhasAnaliticoOrcamento, planilhaQuantidadeCompra, planilhaValorUnitCompraReal]);
 
   const podeEnviarFdAprovacao =
     statusAprovacaoAtivo === 'rascunho' ||
@@ -9863,6 +9904,30 @@ export function OrcamentoPageView({
     fichaDemandaProgresso.pct,
     resumoFinanceiro.bdiPct,
     resumoFinanceiro.totalComDescontoEBdi,
+  ]);
+
+  useEffect(() => {
+    if (!fichaDemandaOnly) return;
+    const id = fichaDemandaRecord?.id?.trim();
+    if (!id) return;
+    const pct = fichaDemandaProgresso.pct;
+    if (
+      typeof fichaDemandaRecord.fichaDemandaPct === 'number' &&
+      fichaDemandaRecord.fichaDemandaPct === pct
+    ) {
+      return;
+    }
+    const t = window.setTimeout(() => {
+      void api
+        .patch(`/demand-sheet-approvals/${id}/ficha-demanda-pct`, { fichaDemandaPct: pct })
+        .catch(() => undefined);
+    }, 600);
+    return () => window.clearTimeout(t);
+  }, [
+    fichaDemandaOnly,
+    fichaDemandaRecord?.id,
+    fichaDemandaRecord?.fichaDemandaPct,
+    fichaDemandaProgresso.pct,
   ]);
 
   const setQuantidadeItem = (itemKey: string, valor: number) => {
@@ -9998,31 +10063,33 @@ export function OrcamentoPageView({
 
   const commitPlanilhaQtdCompra = useCallback((lineKey: string, raw: string) => {
     const n = parsePlanilhaCalcOrPtBr(raw);
-    startTransition(() => {
-      setPlanilhaQuantidadeCompra((prev) => {
-        const next = { ...prev };
-        if (n === null) delete next[lineKey];
-        else next[lineKey] = Math.max(0, n);
+    setPlanilhaQuantidadeCompra((prev) => {
+      const next = { ...prev };
+      if (n === null) {
+        if (prev[lineKey] === undefined) return prev;
+        delete next[lineKey];
         return next;
-      });
+      }
+      const clamped = Math.max(0, n);
+      if (prev[lineKey] === clamped) return prev;
+      next[lineKey] = clamped;
+      return next;
     });
   }, []);
 
   const commitPlanilhaVlCompraReal = useCallback((lineKey: string, raw: string) => {
     const n = parsePlanilhaCalcOrPtBr(raw);
-    startTransition(() => {
-      setPlanilhaValorUnitCompraReal((prev) => {
-        const current = prev[lineKey];
-        if (n === null) {
-          if (current === undefined) return prev;
-          const next = { ...prev };
-          delete next[lineKey];
-          return next;
-        }
-        const clamped = Math.max(0, n);
-        if (current === clamped) return prev;
-        return { ...prev, [lineKey]: clamped };
-      });
+    setPlanilhaValorUnitCompraReal((prev) => {
+      const current = prev[lineKey];
+      if (n === null) {
+        if (current === undefined) return prev;
+        const next = { ...prev };
+        delete next[lineKey];
+        return next;
+      }
+      const clamped = Math.max(0, n);
+      if (current === clamped) return prev;
+      return { ...prev, [lineKey]: clamped };
     });
   }, []);
 
@@ -11246,7 +11313,12 @@ export function OrcamentoPageView({
     toast.success('Ficha de demanda exportada (PDF).');
   };
 
-  const protectedRoute = cronogramaOnly
+  const protectedRoute = fichaDemandaOnly
+    ? ({
+        route: '/ponto/fds-aprovadas' as const,
+        contractId: undefined as string | undefined,
+      })
+    : cronogramaOnly
     ? ({
         route: '/ponto/cronogramas' as const,
         contractId: embeddedContractId || undefined,
@@ -11710,7 +11782,7 @@ export function OrcamentoPageView({
                 <div id="orcamento-abas-anchor" className="h-0" aria-hidden />
                 <div className="sticky z-20 mb-6 flex justify-center pointer-events-none -top-1 py-2 sm:-top-2 lg:-top-4">
                     <SegmentedControl
-                      aria-label="Abas do orçamento"
+                      aria-label={fichaDemandaOnly ? 'Abas da ficha de demanda' : 'Abas do orçamento'}
                       value={orcamentoViewTab}
                       onChange={(next) => {
                         setOrcamentoViewTab(next);
@@ -11725,19 +11797,26 @@ export function OrcamentoPageView({
                       buttonClassName="px-3 py-2 text-xs sm:px-4 sm:text-sm"
                       activeButtonClassName="font-semibold text-white"
                       inactiveButtonClassName="font-semibold text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-gray-100"
-                      options={[
-                        { value: 'dados', label: 'Dados' },
-                        { value: 'montagem', label: 'Orçamento' },
-                        ...(memorialDisponivel
-                          ? [{ value: 'memorial' as const, label: 'Memória de cálculo' }]
-                          : []),
-                        ...(analiticoDisponivel
+                      options={
+                        fichaDemandaOnly
                           ? [
-                              { value: 'analitico' as const, label: 'Analítico' },
+                              { value: 'dados' as const, label: 'Dados' },
                               { value: 'planilhaAnalitica' as const, label: 'Ficha de demanda' },
                             ]
-                          : []),
-                      ]}
+                          : [
+                              { value: 'dados', label: 'Dados' },
+                              { value: 'montagem', label: 'Orçamento' },
+                              ...(memorialDisponivel
+                                ? [{ value: 'memorial' as const, label: 'Memória de cálculo' }]
+                                : []),
+                              ...(analiticoDisponivel
+                                ? [
+                                    { value: 'analitico' as const, label: 'Analítico' },
+                                    { value: 'planilhaAnalitica' as const, label: 'Ficha de demanda' },
+                                  ]
+                                : []),
+                            ]
+                      }
                     />
                 </div>
               </>
@@ -11767,7 +11846,64 @@ export function OrcamentoPageView({
                   </div>
                 )}
 
-                {!loadingFromApi && orcamentoViewTab === 'dados' && (
+                {!loadingFromApi && orcamentoViewTab === 'dados' && fichaDemandaOnly && (
+                  fichaDemandaRecord ? (
+                    <div className="rounded-lg border border-gray-200 bg-white px-4 py-4 dark:border-gray-700 dark:bg-gray-900 sm:px-5">
+                      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+                        <p className="text-sm text-gray-600 dark:text-gray-400">
+                          Pedido {fichaDemandaRecord.codigoPedido || '—'} · {fichaDemandaRecord.polo || '—'}
+                        </p>
+                        <FdStatusBadges record={fichaDemandaRecord} />
+                      </div>
+                      <dl className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                        <div className="min-w-0">
+                          <dt className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">Contrato</dt>
+                          <dd className="mt-1 text-sm uppercase text-gray-900 dark:text-gray-100">{fichaDemandaRecord.contratoNome || '—'}</dd>
+                        </div>
+                        <div className="min-w-0">
+                          <dt className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">Obra</dt>
+                          <dd className="mt-1 text-sm uppercase text-gray-900 dark:text-gray-100">{fichaDemandaRecord.obra || '—'}</dd>
+                        </div>
+                        <div className="min-w-0">
+                          <dt className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">Solicitante</dt>
+                          <dd className="mt-1 text-sm text-gray-900 dark:text-gray-100">{fichaDemandaRecord.solicitanteNome || '—'}</dd>
+                        </div>
+                        <div className="min-w-0">
+                          <dt className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">Nº Mov RM</dt>
+                          <dd className="mt-1 text-sm text-gray-900 dark:text-gray-100">{fichaDemandaRecord.numMovRm || '—'}</dd>
+                        </div>
+                        <div className="min-w-0">
+                          <dt className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">ID Mov RM</dt>
+                          <dd className="mt-1 text-sm text-gray-900 dark:text-gray-100">{fichaDemandaRecord.idMovRm || '—'}</dd>
+                        </div>
+                        <div className="min-w-0">
+                          <dt className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">Faturamento estimado</dt>
+                          <dd className="mt-1 text-sm tabular-nums text-gray-900 dark:text-gray-100">{formatCurrencyDisplay(fichaDemandaRecord.faturamentoEstimado)}</dd>
+                        </div>
+                        <div className="min-w-0">
+                          <dt className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">Custo estimado</dt>
+                          <dd className="mt-1 text-sm tabular-nums text-gray-900 dark:text-gray-100">{formatCurrencyDisplay(fichaDemandaRecord.custoEstimado)}</dd>
+                        </div>
+                        <div className="min-w-0">
+                          <dt className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">Status</dt>
+                          <dd className="mt-1 text-sm text-gray-900 dark:text-gray-100">{FD_STATUS_LABELS[fichaDemandaRecord.status] || fichaDemandaRecord.status}</dd>
+                        </div>
+                        <div className="min-w-0">
+                          <dt className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">Status compras</dt>
+                          <dd className="mt-1 text-sm text-gray-900 dark:text-gray-100">{purchaseStatusLabel(fichaDemandaRecord.purchaseStatus)}</dd>
+                        </div>
+                        <div className="min-w-0 sm:col-span-2 lg:col-span-3">
+                          <dt className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">Observação</dt>
+                          <dd className="mt-1 text-sm text-gray-900 dark:text-gray-100">{fichaDemandaRecord.observacao || '—'}</dd>
+                        </div>
+                      </dl>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-600 dark:text-gray-400">Dados da ficha de demanda indisponíveis.</p>
+                  )
+                )}
+
+                {!loadingFromApi && orcamentoViewTab === 'dados' && !fichaDemandaOnly && (
                   <section className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 overflow-hidden">
                     <div className="px-4 sm:px-5 py-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50/70 dark:bg-gray-800/40">
                       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -12405,7 +12541,7 @@ export function OrcamentoPageView({
                                 >
                                   Custo estimado (40%)
                                 </th>
-                                {MOSTRAR_COLUNAS_COMPRA_FICHA_DEMANDA ? (
+                                {mostrarColunasCompraFichaDemanda ? (
                                   <>
                                 <th
                                   title={PLANILHA_ANALITICA_TOOLTIP.theadQtdCompra}
@@ -12457,7 +12593,7 @@ export function OrcamentoPageView({
                               </tr>
                             </thead>
                             <tbody ref={janelaFd.tbodyRef} className="divide-y divide-gray-200/80 dark:divide-gray-700">
-                              <TabelaJanelaSpacer height={janelaFd.topPad} colSpan={COLSPAN_FICHA_DEMANDA} />
+                              <TabelaJanelaSpacer height={janelaFd.topPad} colSpan={colSpanFichaDemanda} />
                               {linhasAnaliticoComManuais.slice(janelaFd.start, janelaFd.end).map((l, i) => {
                                 const idxLinhaFd = janelaFd.start + i;
                                 const itemW =
@@ -12487,7 +12623,7 @@ export function OrcamentoPageView({
                                       <td className="px-3 py-2.5 text-sm tabular-nums border-l border-red-400/50 dark:border-red-800">
                                         <MoedaCelula valor={resumo.custoEst} className="text-white font-bold" valorClassName="font-bold" />
                                       </td>
-                                      {MOSTRAR_COLUNAS_COMPRA_FICHA_DEMANDA ? (
+                                      {mostrarColunasCompraFichaDemanda ? (
                                         <>
                                       <td className="px-3 py-2.5 border-l border-red-400/50 dark:border-red-800" />
                                       <td className="px-3 py-2.5 border-l border-red-400/50 dark:border-red-800" />
@@ -12543,7 +12679,7 @@ export function OrcamentoPageView({
                                       >
                                         <MoedaCelula valor={resumo.custoEst} className="font-semibold text-gray-900 dark:text-gray-100" valorClassName="font-semibold" />
                                       </td>
-                                      {MOSTRAR_COLUNAS_COMPRA_FICHA_DEMANDA ? (
+                                      {mostrarColunasCompraFichaDemanda ? (
                                         <>
                                       <td className="px-3 py-2.5 border-l border-gray-300 dark:border-gray-700" />
                                       <td className="px-3 py-2.5 border-l border-gray-300 dark:border-gray-700" />
@@ -12573,8 +12709,8 @@ export function OrcamentoPageView({
                                   let somaVlUnitCompraRealInsumos = 0;
                                   let temAlgumVlUnitCompraReal = false;
                                   for (const ins of filhos) {
-                                    const qC = planilhaQtdDeferred[ins.key];
-                                    const vReal = planilhaVlDeferred[ins.key];
+                                    const qC = planilhaQuantidadeCompra[ins.key];
+                                    const vReal = planilhaValorUnitCompraReal[ins.key];
                                     const vOrc = ins.valorUnit;
                                     if (vReal !== undefined && Number.isFinite(vReal)) {
                                       somaVlUnitCompraRealInsumos += vReal;
@@ -12677,7 +12813,7 @@ export function OrcamentoPageView({
                                       >
                                         <MoedaCelula valor={custoEstCompCalc} />
                                       </td>
-                                      {MOSTRAR_COLUNAS_COMPRA_FICHA_DEMANDA ? (
+                                      {mostrarColunasCompraFichaDemanda ? (
                                         <>
                                       <td
                                         title={PLANILHA_ANALITICA_TOOLTIP.qtdCompraComp}
@@ -12741,8 +12877,8 @@ export function OrcamentoPageView({
                                 }
                                 const qCLive = planilhaQuantidadeCompra[l.key];
                                 const vRealLive = planilhaValorUnitCompraReal[l.key];
-                                const qC = planilhaQtdDeferred[l.key];
-                                const vReal = planilhaVlDeferred[l.key];
+                                const qC = planilhaQuantidadeCompra[l.key];
+                                const vReal = planilhaValorUnitCompraReal[l.key];
                                 const vOrc = l.valorUnit;
                                 const valorUnitEstimado = vOrc * PLANILHA_FATOR_CUSTO_ESTIMADO;
                                 const custoEst = l.total * PLANILHA_FATOR_CUSTO_ESTIMADO;
@@ -12857,7 +12993,7 @@ export function OrcamentoPageView({
                                     >
                                       <MoedaCelula valor={custoEst} />
                                     </td>
-                                    {MOSTRAR_COLUNAS_COMPRA_FICHA_DEMANDA ? (
+                                    {mostrarColunasCompraFichaDemanda ? (
                                       <>
                                     <td
                                       title={PLANILHA_ANALITICA_TOOLTIP.qtdCompraInsumo}
@@ -12874,6 +13010,7 @@ export function OrcamentoPageView({
                                             : ''
                                         }
                                         onCommit={(raw) => commitPlanilhaQtdCompra(l.key, raw)}
+                                        commitOnChange
                                         placeholder="0"
                                         title={PLANILHA_ANALITICA_TOOLTIP.qtdCompraInsumo}
                                         inputMode="decimal"
@@ -12911,6 +13048,7 @@ export function OrcamentoPageView({
                                               : ''
                                           }
                                           onCommit={(raw) => commitPlanilhaVlCompraReal(l.key, raw)}
+                                          commitOnChange
                                           mask={currencyDigitsToFormatted}
                                           placeholder="0,00"
                                           title={PLANILHA_ANALITICA_TOOLTIP.vlCompraRealInsumo}
@@ -12974,7 +13112,7 @@ export function OrcamentoPageView({
                                   </tr>
                                 );
                               })}
-                              <TabelaJanelaSpacer height={janelaFd.bottomPad} colSpan={COLSPAN_FICHA_DEMANDA} />
+                              <TabelaJanelaSpacer height={janelaFd.bottomPad} colSpan={colSpanFichaDemanda} />
                             </tbody>
                           </table>
                         </div>
@@ -13757,9 +13895,45 @@ export function OrcamentoPageView({
                       {formatarBRLExport(resumoFinanceiro.totalComDescontoEBdi)}
                     </p>
                   </div>
+                  {fichaDemandaOnly ? (
+                    <>
+                      <div
+                        className="hidden h-8 w-px shrink-0 self-center bg-gray-200 dark:bg-gray-600 sm:block"
+                        aria-hidden
+                      />
+                      <div
+                        className="min-w-0"
+                        title={
+                          fichaDemandaProgresso.total === 0
+                            ? 'Sem insumos na ficha de demanda'
+                            : `Ficha de demanda: ${fichaDemandaProgresso.filled} de ${fichaDemandaProgresso.total} insumos preenchidos (qtd. compra + valor unit. real)`
+                        }
+                      >
+                        <p
+                          className={`text-[10px] font-semibold uppercase tracking-wide ${
+                            fichaDemandaProgresso.completa
+                              ? 'text-green-600 dark:text-green-400'
+                              : 'text-gray-500 dark:text-gray-400'
+                          }`}
+                        >
+                          FD
+                        </p>
+                        <p
+                          className={`mt-0.5 text-sm font-bold tabular-nums tracking-tight sm:text-base whitespace-nowrap ${
+                            fichaDemandaProgresso.completa
+                              ? 'text-green-700 dark:text-green-300'
+                              : 'text-gray-900 dark:text-gray-100'
+                          }`}
+                        >
+                          {fichaDemandaProgresso.pct}%
+                        </p>
+                      </div>
+                    </>
+                  ) : null}
                 </div>
                 <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
-                  <button
+                  {!fichaDemandaOnly && (
+                    <button
                     type="button"
                     onClick={() => {
                       setAparenciaDraft(meta.aparencia ?? { ...APARENCIA_ORCAMENTO_PADRAO });
@@ -13771,7 +13945,8 @@ export function OrcamentoPageView({
                   >
                     <Palette className="h-4 w-4 shrink-0" aria-hidden />
                   </button>
-                  {orcamentoVeioOrcafascio && (
+                  )}
+                  {!fichaDemandaOnly && orcamentoVeioOrcafascio && (
                     <button
                       type="button"
                       onClick={() => void atualizarOrcamentoOrcafascio()}
@@ -13796,7 +13971,7 @@ export function OrcamentoPageView({
                   >
                     <Download className="h-4 w-4 shrink-0" aria-hidden />
                   </button>
-                  {analiticoDisponivel && (
+                  {analiticoDisponivel && !fichaDemandaOnly && (
                   <button
                     type="button"
                     onClick={() => void abrirEnvioFichaDemandaAprovacao()}

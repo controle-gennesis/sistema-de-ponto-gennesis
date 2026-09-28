@@ -97,6 +97,22 @@ export function anexosDemais(anexos: FdAnexo[] | undefined): FdAnexo[] {
   });
 }
 
+export function formatFichaDemandaPct(value: number | null | undefined): string {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '—';
+  return `${Math.max(0, Math.min(100, Math.round(value)))}%`;
+}
+
+export function fdOrcamentoVinculo(
+  record: Pick<FichaDemandaApprovalRecord, 'orcamentoId' | 'orcamentoCentroCustoId' | 'contratoCostCenterId'>
+): { orcamentoId: string; centroCustoId: string } | null {
+  const orcamentoId = String(record.orcamentoId || '').trim();
+  const centroCustoId = String(
+    record.orcamentoCentroCustoId || record.contratoCostCenterId || ''
+  ).trim();
+  if (!orcamentoId || !centroCustoId) return null;
+  return { orcamentoId, centroCustoId };
+}
+
 export function anexosOrdemCompra(anexos: FdAnexo[] | undefined): FdAnexo[] {
   return (anexos ?? []).filter((a) => inferFdAnexoKind(a) === 'oc');
 }
@@ -136,6 +152,10 @@ export interface FichaDemandaApprovalRecord {
   managerApproverNome?: string | null;
   createdAt: string;
   updatedAt: string;
+  orcamentoId?: string | null;
+  orcamentoCentroCustoId?: string | null;
+  contratoCostCenterId?: string | null;
+  fichaDemandaPct?: number | null;
 }
 
 export interface FichaDemandaApprovalFormState {

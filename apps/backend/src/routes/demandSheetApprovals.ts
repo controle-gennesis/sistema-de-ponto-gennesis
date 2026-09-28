@@ -163,6 +163,17 @@ router.patch(
   requireModuleAccess(fdsAprovadasModule),
   controller.updatePurchaseStatus.bind(controller)
 );
+router.patch(
+  '/:id/ficha-demanda-pct',
+  requireModuleAccess(fdsAprovadasModule),
+  controller.updateFichaDemandaPct.bind(controller)
+);
+
+router.get(
+  '/:id',
+  requireAnyModuleAccess([fdModule, fdsAprovadasModule]),
+  controller.getById.bind(controller)
+);
 
 router.post(
   '/:id/anexos',
