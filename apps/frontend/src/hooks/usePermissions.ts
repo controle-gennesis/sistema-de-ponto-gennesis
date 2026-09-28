@@ -153,6 +153,7 @@ export function usePermissions() {
   const gestorCostCenterIds: string[] = permissionData?.gestorCostCenterIds ?? [];
   const isUnbUser = !!permissionData?.isUnbUser;
   const unbCostCenterIds: string[] = permissionData?.unbCostCenterIds ?? [];
+  const hideContractOrcamento = !!permissionData?.hideContractOrcamento;
 
   type ContractModuleFlagRow = {
     orcamento: boolean;
@@ -522,6 +523,7 @@ export function usePermissions() {
   };
 
   const canAccessContractOrcamentoTab = (contractId: string) => {
+    if (hideContractOrcamento) return false;
     if (isElevatedUser) return true;
     return (
       canAccessContract(contractId) && contractModuleFlags[contractId]?.orcamento === true
@@ -766,6 +768,7 @@ export function useRoutePermission(route: string) {
     '/ponto/folha-pagamento': isAdministrator || permissions.canAccessPayroll,
     '/relatorios/alocacao': isAdministrator || permissions.canAccessPayroll,
     '/ponto/centros-custo': isAdministrator || can(pk('/ponto/centros-custo')),
+    '/ponto/locais-estoque': isAdministrator || can(pk('/ponto/locais-estoque')),
     '/ponto/materiais-construcao': isAdministrator || can(pk('/ponto/materiais-construcao')),
     '/ponto/andamento-da-os': canAccessOsRoutePage,
     '/ponto/meus-chamados': isAdministrator || can(pk('/ponto/meus-chamados')),

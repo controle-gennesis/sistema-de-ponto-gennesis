@@ -1476,6 +1476,14 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             section: 'Financeiro'
           },
           {
+            name: 'Locais de Estoque',
+            href: '/ponto/locais-estoque',
+            icon: Warehouse,
+            description: 'Cadastro de locais de estoque (TOTVS)',
+            permission: isAdministrator || can(pk('/ponto/locais-estoque')),
+            section: 'Financeiro'
+          },
+          {
             name: 'Natureza Orçamentária',
             href: '/ponto/natureza-orcamentaria',
             icon: BookPlus,

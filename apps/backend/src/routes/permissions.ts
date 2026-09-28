@@ -10,7 +10,7 @@ import {
 import { prisma } from '../lib/prisma';
 import { createError } from '../middleware/errorHandler';
 import { getContractGestorCostCenterIds } from '../lib/contractGestorApprovalAccess';
-import { getUserUnbCostCenterScope } from '../lib/unbCostCenterScope';
+import { getUserUnbCostCenterScope, userHidesContractOrcamento } from '../lib/unbCostCenterScope';
 import { getFluigApproverAccessForUser, userCanManageFluigApproverViewers } from '../lib/fluigApproverAccess';
 import { filterValidPermissionPayload, removeOrphanUserPermissions } from '../lib/permissionRegistrySync';
 import { CONTRACTS_MODULE_KEY } from '../lib/contractAccess';
@@ -202,6 +202,7 @@ router.get('/me', async (req: AuthRequest, res, next) => {
     }
 
     if (req.user.isAdmin) {
+      const hideContractOrcamento = await userHidesContractOrcamento(req.user.id);
       return res.json({
         success: true,
         data: {
@@ -218,6 +219,7 @@ router.get('/me', async (req: AuthRequest, res, next) => {
           gestorCostCenterIds: [],
           isUnbUser: false,
           unbCostCenterIds: [],
+          hideContractOrcamento,
           contractModuleFlags: {},
           fluigApproverFullAccess: true,
           fluigApproverNameKeys: [],
@@ -335,6 +337,7 @@ router.get('/me', async (req: AuthRequest, res, next) => {
     const unbCostCenterScope = await getUserUnbCostCenterScope(meUserId, false);
     const isUnbUser = unbCostCenterScope !== null;
     const unbCostCenterIds = unbCostCenterScope ?? [];
+    const hideContractOrcamento = await userHidesContractOrcamento(meUserId);
     const fluigApproverAccess = await getFluigApproverAccessForUser(meUserId, false);
     const canManageFluigApproverViewers = await userCanManageFluigApproverViewers(meUserId, false);
 
@@ -374,6 +377,7 @@ router.get('/me', async (req: AuthRequest, res, next) => {
         gestorCostCenterIds,
         isUnbUser,
         unbCostCenterIds,
+        hideContractOrcamento,
         contractModuleFlags,
         fluigApproverFullAccess: fluigApproverAccess.fullAccess,
         fluigApproverNameKeys: fluigApproverAccess.nameKeys,

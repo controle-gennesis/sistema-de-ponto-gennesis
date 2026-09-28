@@ -61,7 +61,14 @@ import { MaterialRequestsRmList } from './_components/MaterialRequestsRmList';
 import { AsyncSearchSelectDropdown } from '@/components/ui/AsyncSearchSelectDropdown';
 import { searchOcSuppliers } from '@/components/oc/searchOcSuppliers';
 import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
-import { OC_PIX_KEY_TYPE_OPTIONS } from '@/components/oc/OcPurchaseOrderFormFields';
+import {
+  OC_PIX_KEY_TYPE_OPTIONS,
+  OcCostCenterField,
+  OcFilialField,
+  OcStockLocationField,
+  formatOcCostCenterLabel,
+} from '@/components/oc/OcPurchaseOrderFormFields';
+import { TOTVS_FREIGHT_TYPES, resolveTotvsFilialFromCostCenter } from '@/lib/ocTotvsDestination';
 import { buildSupplierPaymentPrefill } from '@/lib/supplierPaymentPrefill';
 import {
   getMaterialRequestCancellationReason,
@@ -277,6 +284,10 @@ export default function GerenciarMateriaisPage() {
   const [ocObservations, setOcObservations] = useState('');
   const [ocBoletoSlots, setOcBoletoSlots] = useState<OcBoletoCreationSlot[]>([{ url: '', name: '' }]);
   const [ocFreteStr, setOcFreteStr] = useState('');
+  const [ocFreightType, setOcFreightType] = useState('S');
+  const [ocFilial, setOcFilial] = useState('1');
+  const [ocStockLocationId, setOcStockLocationId] = useState('');
+  const [ocTotvsCodLoc, setOcTotvsCodLoc] = useState('');
   const [ocSelectedItemIds, setOcSelectedItemIds] = useState<Set<string>>(new Set());
   /** Quantidade na OC por item (texto livre: pode ficar vazio enquanto digita). */
   const [ocQuantityStrByItemId, setOcQuantityStrByItemId] = useState<Record<string, string>>({});
@@ -330,6 +341,10 @@ export default function GerenciarMateriaisPage() {
     setOcObservations('');
     setOcBoletoSlots([{ url: '', name: '' }]);
     setOcFreteStr('');
+    setOcFreightType('S');
+    setOcFilial('1');
+    setOcStockLocationId('');
+    setOcTotvsCodLoc('');
     setOcSelectedItemIds(new Set());
     setOcQuantityStrByItemId({});
     setOcUnitPriceStrByItemId({});
@@ -347,6 +362,7 @@ export default function GerenciarMateriaisPage() {
       Object.fromEntries(openItems.map((i) => [i.id, String(i.quantity)]))
     );
     setOcUnitPriceStrByItemId({});
+    setOcFilial(String(resolveTotvsFilialFromCostCenter(selectedRequest.costCenter)));
   }, [showCreateOCModal, selectedRequest]);
 
   const ocFormItems = useMemo(() => {
@@ -603,6 +619,10 @@ export default function GerenciarMateriaisPage() {
       pixKey,
       observations,
       freightAmount,
+      freightType,
+      totvsCodFilial,
+      stockLocationId,
+      totvsCodLoc,
       selectedItemIds,
       quantityByItemId,
       unitPriceByItemId,
@@ -619,6 +639,10 @@ export default function GerenciarMateriaisPage() {
       pixKey: string;
       observations: string;
       freightAmount: number;
+      freightType?: string;
+      totvsCodFilial?: string;
+      stockLocationId?: string;
+      totvsCodLoc?: string;
       selectedItemIds: string[];
       quantityByItemId: Record<string, number>;
       unitPriceByItemId: Record<string, number>;
@@ -665,11 +689,15 @@ export default function GerenciarMateriaisPage() {
         creationBoletoInstallments:
           paymentType === OC_TYPE_BOLETO ? creationBoletoInstallments : undefined,
         notes: observations.trim() || undefined,
-        freightAmount
+        freightAmount,
+        freightType,
+        totvsCodFilial,
+        stockLocationId,
+        totvsCodLoc
       });
       return res.data;
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['material-requests-manage'], refetchType: 'all' });
       queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
       queryClient.invalidateQueries({ queryKey: ['material-deliveries'] });
@@ -677,7 +705,12 @@ export default function GerenciarMateriaisPage() {
       setShowCreateOCModal(false);
       setSelectedRequest(null);
       resetOcForm();
-      toast.success('Ordem de compra criada com sucesso!');
+      const idMov = data?.data?.totvsIdMov;
+      toast.success(
+        idMov
+          ? `Ordem de compra criada e enviada ao TOTVS. IdMov ${idMov}`
+          : 'Ordem de compra criada com sucesso!'
+      );
     },
     onError: (error: any) => {
       toast.error(
@@ -1616,6 +1649,45 @@ export default function GerenciarMateriaisPage() {
                 <input type="hidden" value={ocSupplierId} readOnly />
               </div>
 
+              <OcFilialField
+                value={ocFilial}
+                onChange={(code) => {
+                  setOcFilial(code);
+                  setOcStockLocationId('');
+                  setOcTotvsCodLoc('');
+                }}
+              />
+
+              <OcCostCenterField label={formatOcCostCenterLabel(selectedRequest.costCenter)} />
+
+              <OcStockLocationField
+                value={ocStockLocationId}
+                filial={ocFilial}
+                onChange={(loc) => {
+                  setOcStockLocationId(loc?.id || '');
+                  setOcTotvsCodLoc(loc?.code || '');
+                }}
+              />
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Tipo de Frete *
+                </label>
+                <SingleSelectSearchDropdown
+                  value={ocFreightType}
+                  onChange={setOcFreightType}
+                  options={TOTVS_FREIGHT_TYPES.map((row) => ({
+                    value: row.code,
+                    label: row.label,
+                    searchText: `${row.code} ${row.label}`,
+                  }))}
+                  allowEmpty={false}
+                  placeholder="Selecione..."
+                  searchPlaceholder="Pesquisar..."
+                  noFocusRing
+                />
+              </div>
+
               <div>
                 <span className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                   Tipo de pagamento *
@@ -1855,6 +1927,10 @@ export default function GerenciarMateriaisPage() {
                       }
                       quantityByItemId[id] = q;
                     }
+                    if (!ocStockLocationId && !ocTotvsCodLoc) {
+                      toast.error('Informe o local de estoque.');
+                      return;
+                    }
                     createOCMutation.mutate({
                       request: selectedRequest,
                       supplierId: ocSupplierId,
@@ -1865,6 +1941,10 @@ export default function GerenciarMateriaisPage() {
                       pixKey: ocPixKey,
                       observations: ocObservations,
                       freightAmount: ocFreteParsed ?? 0,
+                      freightType: ocFreightType,
+                      totvsCodFilial: ocFilial,
+                      stockLocationId: ocStockLocationId,
+                      totvsCodLoc: ocTotvsCodLoc,
                       selectedItemIds: Array.from(ocSelectedItemIds),
                       quantityByItemId,
                       unitPriceByItemId,
@@ -1883,6 +1963,7 @@ export default function GerenciarMateriaisPage() {
                   }}
                   disabled={
                     !ocSupplierId ||
+                    (!ocStockLocationId && !ocTotvsCodLoc) ||
                     createOCMutation.isPending ||
                     ocSelectedItems.length === 0 ||
                     ocAmountToPayComputed === null ||

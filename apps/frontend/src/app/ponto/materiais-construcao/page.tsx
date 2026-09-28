@@ -54,7 +54,9 @@ const MATERIAL_ACTIVE_FILTER_OPTIONS = labeledToSelectOptions([
 type ProductTypeKind = 'Produto' | 'Serviço' | '';
 
 type MaterialFormState = {
+  code: string;
   name: string;
+  totvsIdPrd: string;
   productType: ProductTypeKind;
   description: string;
   unit: string;
@@ -321,6 +323,7 @@ interface BudgetNatureOption {
 interface ConstructionMaterial {
   id: string;
   code?: string | null;
+  totvsIdPrd?: number | null;
   name: string;
   sinapiCode?: string;
   productType?: string | null;
@@ -434,7 +437,9 @@ export default function MateriaisConstrucaoPage() {
   const [showForm, setShowForm] = useState(false);
   const [editingMaterial, setEditingMaterial] = useState<ConstructionMaterial | null>(null);
   const [formData, setFormData] = useState<MaterialFormState>({
+    code: '',
     name: '',
+    totvsIdPrd: '',
     productType: '',
     description: '',
     unit: '',
@@ -521,6 +526,19 @@ export default function MateriaisConstrucaoPage() {
     }
   });
 
+  const { data: nextCodeData } = useQuery({
+    queryKey: ['construction-materials-next-code'],
+    queryFn: async () => {
+      const res = await api.get('/construction-materials/next-code');
+      const code = res.data?.data?.code ?? res.data?.code ?? res.data?.nextCode;
+      return String(code ?? '').trim();
+    }
+  });
+
+  const suggestedNextCode = String(
+    nextCodeData || materialsData?.nextCode || ''
+  ).trim();
+
   const { data: purchaseHistoryData, isLoading: loadingPurchaseHistory } = useQuery({
     queryKey: ['construction-material-purchase-history', detailMaterial?.id],
     queryFn: async () => {
@@ -580,6 +598,7 @@ export default function MateriaisConstrucaoPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['construction-materials'] });
+      queryClient.invalidateQueries({ queryKey: ['construction-materials-next-code'] });
       queryClient.invalidateQueries({ queryKey: ['materials-rm-dropdown'] });
       setShowForm(false);
       resetForm();
@@ -747,9 +766,16 @@ export default function MateriaisConstrucaoPage() {
     }
   };
 
+  useEffect(() => {
+    if (!showForm || editingMaterial || !suggestedNextCode) return;
+    setFormData((prev) => (prev.code.trim() ? prev : { ...prev, code: suggestedNextCode }));
+  }, [showForm, editingMaterial, suggestedNextCode]);
+
   const resetForm = () => {
     setFormData({
+      code: '',
       name: '',
+      totvsIdPrd: '',
       productType: '',
       description: '',
       unit: '',
@@ -757,6 +783,21 @@ export default function MateriaisConstrucaoPage() {
       isActive: true
     });
     setEditingMaterial(null);
+  };
+
+  const openCreateForm = () => {
+    setEditingMaterial(null);
+    setFormData({
+      code: suggestedNextCode,
+      name: '',
+      totvsIdPrd: '',
+      productType: '',
+      description: '',
+      unit: '',
+      budgetNatureId: '',
+      isActive: true
+    });
+    setShowForm(true);
   };
 
   const openMaterialDetail = (material: ConstructionMaterial) => {
@@ -767,7 +808,9 @@ export default function MateriaisConstrucaoPage() {
   const handleEdit = (material: ConstructionMaterial) => {
     setEditingMaterial(material);
     setFormData({
+      code: material.code ? String(material.code) : '',
       name: material.name || '',
+      totvsIdPrd: material.totvsIdPrd != null ? String(material.totvsIdPrd) : '',
       productType: normalizeProductType(material.productType || material.category),
       description: material.description || '',
       unit: material.unit,
@@ -803,7 +846,15 @@ export default function MateriaisConstrucaoPage() {
       return;
     }
 
+    const code = formData.code.trim();
+    const totvsIdPrdRaw = formData.totvsIdPrd.trim();
+    if (totvsIdPrdRaw && !/^\d+$/.test(totvsIdPrdRaw)) {
+      toast.error('Identificador deve ser um número inteiro (IDPRD do TOTVS)');
+      return;
+    }
     const dataToSend: Record<string, unknown> = {
+      ...(code ? { code } : {}),
+      totvsIdPrd: totvsIdPrdRaw ? Number(totvsIdPrdRaw) : null,
       name,
       productType: formData.productType,
       description: formData.description.trim() || undefined,
@@ -1335,8 +1386,7 @@ export default function MateriaisConstrucaoPage() {
                   <button
                     type="button"
                     onClick={() => {
-                      resetForm();
-                      setShowForm(true);
+                      void openCreateForm();
                     }}
                     className="flex h-10 items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
                   >
@@ -1577,6 +1627,12 @@ export default function MateriaisConstrucaoPage() {
               {detailTab === 'detalhes' ? (
                 <div className="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700">
                   <dl className="divide-y divide-gray-100 text-sm dark:divide-gray-700">
+                    <div className="grid gap-1 px-3 py-2.5 sm:grid-cols-[minmax(0,11rem)_1fr] sm:gap-4">
+                      <dt className="font-medium text-gray-700 dark:text-gray-300">Identificador</dt>
+                      <dd className="break-words text-gray-600 dark:text-gray-400">
+                        {detailMaterial.totvsIdPrd != null ? detailMaterial.totvsIdPrd : '—'}
+                      </dd>
+                    </div>
                     <div className="grid gap-1 px-3 py-2.5 sm:grid-cols-[minmax(0,11rem)_1fr] sm:gap-4">
                       <dt className="font-medium text-gray-700 dark:text-gray-300">Tipo</dt>
                       <dd className="break-words text-gray-600 dark:text-gray-400">
@@ -2200,14 +2256,40 @@ function MaterialFormModal({
       size="lg"
     >
       <form onSubmit={onSubmit} className="space-y-4">
-        {editingMaterial ? (
-          <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 dark:border-gray-600 dark:bg-gray-900/40">
-            <p className="text-xs text-gray-500 dark:text-gray-400">ID</p>
-            <p className="font-mono text-sm font-medium text-gray-900 dark:text-gray-100">
-              {formatCadastroListId(editingMaterial.code)}
-            </p>
-          </div>
-        ) : null}
+        <div>
+          <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+            Identificador
+          </label>
+          <input
+            type="text"
+            inputMode="numeric"
+            value={formData.totvsIdPrd}
+            onChange={(e) => setFormData({ ...formData, totvsIdPrd: e.target.value.replace(/\D/g, '') })}
+            className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 font-mono text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+            placeholder="Ex: 25967"
+          />
+          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            IDPRD do TOTVS RM. Use o identificador interno do produto, não o código.
+          </p>
+        </div>
+
+        <div>
+          <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+            ID
+          </label>
+          <input
+            type="text"
+            value={formData.code}
+            onChange={(e) => setFormData({ ...formData, code: e.target.value })}
+            className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 font-mono text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+            placeholder="Próximo ID sugerido"
+          />
+          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            {editingMaterial
+              ? 'ID do cadastro. Altere somente se precisar alinhar com o TOTVS.'
+              : 'ID sugerido automaticamente. Pode alterar se precisar.'}
+          </p>
+        </div>
 
         <div>
           <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">

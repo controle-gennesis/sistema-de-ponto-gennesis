@@ -1549,6 +1549,10 @@ export class QuoteMapService {
         boletoAttachmentName?: string;
         creationBoletoInstallments?: Array<{ boletoUrl: string; boletoName?: string | null }>;
         attachments?: Array<{ url: string; name: string }>;
+        freightType?: string;
+        totvsCodFilial?: number | string;
+        stockLocationId?: string;
+        totvsCodLoc?: string;
       }>;
     }
   ) {
@@ -1724,6 +1728,10 @@ export class QuoteMapService {
         boletoAttachmentName: pay.boletoAttachmentName,
         creationBoletoInstallments: pay.creationBoletoInstallments,
         freightAmount: Number(freight),
+        freightType: pay.freightType ?? null,
+        totvsCodFilial: pay.totvsCodFilial ?? null,
+        stockLocationId: pay.stockLocationId ?? null,
+        totvsCodLoc: pay.totvsCodLoc ?? null,
         notes: pay.observations ?? null,
         attachments: pay.attachments,
       });

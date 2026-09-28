@@ -172,9 +172,10 @@ export class SupplierController {
       const parsed = buildSupplierData(req.body);
       if (!parsed.name) throw createError('Nome é obrigatório', 400);
 
-      const finalCode = await generateSupplierCode();
+      const requestedCode = normalizeOptionalString(req.body.code);
+      const finalCode = requestedCode || (await generateSupplierCode());
       const existingCode = await prisma.supplier.findUnique({ where: { code: finalCode } });
-      if (existingCode) throw createError('Código já existe', 400);
+      if (existingCode) throw createError('Código Cliente/Fornecedor já existe', 400);
 
       if (parsed.cnpj) {
         const existingCnpj = await prisma.supplier.findUnique({ where: { cnpj: parsed.cnpj } });
@@ -206,7 +207,7 @@ export class SupplierController {
         const newCode = normalizeOptionalString(req.body.code);
         if (newCode && newCode !== supplier.code) {
           const existingCode = await prisma.supplier.findUnique({ where: { code: newCode } });
-          if (existingCode) throw createError('Código já existe', 400);
+          if (existingCode) throw createError('Código Cliente/Fornecedor já existe', 400);
         }
       }
 
@@ -263,6 +264,19 @@ export class SupplierController {
             continue;
           }
 
+          const requestedCode = normalizeOptionalString(row.code);
+          const finalCode = requestedCode || reservedCodes[i];
+          if (!finalCode) {
+            errors.push({ index: i, message: 'Código Cliente/Fornecedor é obrigatório' });
+            continue;
+          }
+
+          const existingCode = await prisma.supplier.findUnique({ where: { code: finalCode } });
+          if (existingCode) {
+            errors.push({ index: i, message: `Código Cliente/Fornecedor já cadastrado: ${finalCode}` });
+            continue;
+          }
+
           if (parsed.cnpj) {
             const existingCnpj = await prisma.supplier.findUnique({ where: { cnpj: parsed.cnpj } });
             if (existingCnpj) {
@@ -273,7 +287,7 @@ export class SupplierController {
 
           await prisma.supplier.create({
             data: {
-              code: reservedCodes[i],
+              code: finalCode,
               ...parsed
             }
           });

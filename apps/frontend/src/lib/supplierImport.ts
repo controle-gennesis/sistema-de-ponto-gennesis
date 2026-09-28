@@ -17,6 +17,7 @@ export function normalizeSupplierCategory(value?: string | null): SupplierCatego
 }
 
 export const SUPPLIER_IMPORT_COLUMNS = [
+  { name: 'Código Cliente/Fornecedor', required: false, hint: 'Código TOTVS (CODCFO)' },
   { name: 'Cliente/Fornecedor', required: false },
   { name: 'Nome Fantasia/Social', required: false },
   { name: 'Nome', required: true },
@@ -47,6 +48,7 @@ export const SUPPLIER_IMPORT_COLUMNS = [
 ] as const;
 
 export const SUPPLIER_IMPORT_TEMPLATE_HEADERS = [
+  'Código Cliente/Fornecedor',
   'Cliente/Fornecedor',
   'Nome Fantasia/Social',
   'Nome',
@@ -77,6 +79,7 @@ export const SUPPLIER_IMPORT_TEMPLATE_HEADERS = [
 ];
 
 export const SUPPLIER_IMPORT_TEMPLATE_EXAMPLE = [
+  '000019582',
   'Fornecedor',
   'ABC Materiais',
   'ABC Materiais Ltda',
@@ -148,6 +151,13 @@ type ImportRowResult = {
 };
 
 function analyzeImportRow(row: Record<string, unknown>, lineNumber: number): ImportRowResult {
+  const code = pickRowValue(
+    row,
+    'Código Cliente/Fornecedor',
+    'Codigo Cliente/Fornecedor',
+    'CODCFO',
+    'code'
+  );
   const partyType = pickRowValue(row, 'Cliente/Fornecedor', 'Cliente Fornecedor', 'partyType');
   const tradeName = pickRowValue(
     row,
@@ -219,6 +229,7 @@ function analyzeImportRow(row: Record<string, unknown>, lineNumber: number): Imp
   }
 
   const supplier: Record<string, unknown> = {
+    code: code || undefined,
     partyType: partyType || undefined,
     tradeName: tradeName || undefined,
     name,

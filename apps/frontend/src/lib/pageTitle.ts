@@ -19,6 +19,7 @@ const EXTRA_PAGE_TITLES: Record<string, { title: string; category?: string; href
     title: 'Postos de Combustível',
     category: 'Cadastros',
   },
+  '/ponto/locais-estoque': { title: 'Locais de Estoque', category: 'Cadastros' },
   '/ponto/veiculos': { title: 'Veículos', category: 'Cadastros' },
   '/ponto/formularios': { title: 'Formulários', category: 'Cadastros' },
   '/ponto/metricas/relatorios-contrato': { title: 'Relatórios de Contrato', category: 'Métricas' },

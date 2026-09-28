@@ -1206,6 +1206,26 @@ model CostCenter {
   @@map("cost_centers")
 }
 
+/// Local de estoque TOTVS (TLOC): chave CODCOLIGADA + CODFILIAL + CODLOC.
+model StockLocation {
+  id        String   @id @default(cuid())
+  code      String // CODLOC (ex.: 01.007)
+  name      String
+  polo      String?
+  filial    Int // 1 DF, 5 GO
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  purchaseOrders PurchaseOrder[]
+
+  @@unique([filial, code])
+  @@index([code])
+  @@index([filial])
+  @@index([isActive])
+  @@map("stock_locations")
+}
+
 // Espelho NF â Prestador de ServiÃ§o
 model EspelhoNfServiceProvider {
   id                    String   @id @default(cuid())
@@ -2059,6 +2079,20 @@ model PurchaseOrder {
   nfAttachments              Json?
   /// Frete informado na criaÃ§Ã£o (ou ediÃ§Ã£o em correÃ§Ã£o). Total a pagar = soma dos itens + frete.
   freightAmount              Decimal             @default(0) @db.Decimal(15, 2)
+  /// Tipo de frete TOTVS RM (TMOV.TIPOFRETE): C CIF, F FOB, T Terceiros, S Sem Frete, R Remetente, D DestinatÃ¡rio
+  freightType                String?
+  /// Destino da OC: CONECTA | TOTVS (derivado do CC na criaÃ§Ã£o)
+  totvsDestination           String?
+  /// Filial TOTVS do movimento: 1 DF, 5 GO
+  totvsCodFilial             Int?
+  /// Local de estoque TOTVS (TITMMOV.CODLOC)
+  totvsCodLoc                String?
+  stockLocationId            String?
+  totvsIdMov                 Int?
+  totvsCodColigada           Int?
+  totvsNumMovimento          String?
+  totvsSentAt                DateTime?
+  totvsSentBy                String?
   amountToPay                Decimal?            @db.Decimal(15, 2) // Itens + frete (recalculado ao salvar itens/frete)
   notes                      String?
   /// [{ url, name }] â anexos gerais na criaÃ§Ã£o da OC
@@ -2075,6 +2109,7 @@ model PurchaseOrder {
 
   materialRequest           MaterialRequest?             @relation(fields: [materialRequestId], references: [id], onDelete: SetNull)
   quoteMap                  QuoteMap?                    @relation(fields: [quoteMapId], references: [id], onDelete: SetNull)
+  stockLocation             StockLocation?               @relation(fields: [stockLocationId], references: [id], onDelete: SetNull)
   supplier                  Supplier                     @relation(fields: [supplierId], references: [id], onDelete: Restrict)
   creator                   User                         @relation("PurchaseOrderCreator", fields: [createdBy], references: [id], onDelete: Restrict)
   approver                  User?                        @relation("PurchaseOrderApprover", fields: [approvedBy], references: [id], onDelete: SetNull)
@@ -2091,6 +2126,7 @@ model PurchaseOrder {
   @@index([materialRequestId])
   @@index([quoteMapId])
   @@index([supplierId])
+  @@index([stockLocationId])
   @@index([status])
   @@index([orderDate])
   @@map("purchase_orders")
@@ -2555,6 +2591,8 @@ model ConstructionMaterial {
   productImageUrl  String? // URL da imagem do produto
   productImageName String? // Nome original do arquivo da imagem
   unit             String // Unidade de medida (kg, m, mÂ², un, etc.)
+  /// Identificador do produto no TOTVS RM (EstPrdDataBR.IDPRD)
+  totvsIdPrd       Int?
   budgetNatureId   String?
   budgetNature     BudgetNature? @relation(fields: [budgetNatureId], references: [id], onDelete: SetNull)
   isActive         Boolean       @default(true) // Se estÃ¡ ativo

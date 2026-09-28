@@ -4,6 +4,7 @@ import { createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { getTotvsRmRelatorioFinService } from '../services/TotvsRmRelatorioFinService';
+import { ensureConstructionMaterialTotvsIdPrd } from '../lib/ensureProductionSchema';
 import {
   ensureUnaccentExtension,
   unaccentIlikeOr,
@@ -33,6 +34,23 @@ export class ConstructionMaterialController {
       ...material,
       sinapiCode: material.code || material.name
     };
+  }
+
+  private async attachTotvsIdPrd<T extends { id: string }>(materials: T[]): Promise<T[]> {
+    const ids = materials.map((m) => m.id).filter(Boolean);
+    if (!ids.length) return materials;
+    try {
+      const rows = await prisma.$queryRaw<Array<{ id: string; totvsIdPrd: number | null }>>`
+        SELECT id, "totvsIdPrd" FROM construction_materials WHERE id IN (${Prisma.join(ids)})
+      `;
+      const byId = new Map(rows.map((row) => [row.id, row.totvsIdPrd]));
+      return materials.map((material) => ({
+        ...material,
+        totvsIdPrd: byId.has(material.id) ? byId.get(material.id) ?? null : (material as any).totvsIdPrd ?? null,
+      }));
+    } catch {
+      return materials;
+    }
   }
 
   private normalizeText(value: unknown): string | null {
@@ -156,8 +174,21 @@ export class ConstructionMaterialController {
       isActive: body.isActive !== undefined ? Boolean(body.isActive) : true,
       dimensions: this.normalizeText(body.dimensions),
       productImageUrl: this.normalizeText(body.productImageUrl),
-      productImageName: this.normalizeText(body.productImageName)
+      productImageName: this.normalizeText(body.productImageName),
+      totvsIdPrd: this.parseTotvsIdPrd(
+        body.totvsIdPrd ?? body.idPrd ?? body.identificadorProduto ?? body.identificadorDoProduto
+      )
     };
+  }
+
+  private parseTotvsIdPrd(value: unknown): number | null | undefined {
+    if (value === undefined) return undefined;
+    if (value === null || value === '') return null;
+    const n = Number(String(value).trim());
+    if (!Number.isFinite(n) || n <= 0 || !Number.isInteger(n)) {
+      throw createError('Identificador deve ser um número inteiro positivo (IDPRD do TOTVS)', 400);
+    }
+    return n;
   }
 
   private isUnknownFieldPrismaError(error: any) {
@@ -208,9 +239,45 @@ export class ConstructionMaterialController {
 
   /** Gera código sequencial numérico: 1, 2, 3, ... */
   private async generateNextMaterialCode(): Promise<string> {
-    const [code] = await this.reserveMaterialCodes(1);
-    if (!code) throw createError('Não foi possível gerar o código do material', 500);
-    return code;
+    try {
+      const [code] = await this.reserveMaterialCodes(1);
+      if (code) return code;
+    } catch (err) {
+      console.warn('Falha ao sugerir ID de material via SQL:', err);
+    }
+
+    const rows = await prisma.constructionMaterial.findMany({
+      where: { code: { not: null } },
+      select: { code: true },
+    });
+    let max = 0;
+    for (const row of rows) {
+      const n = this.parseNumericCodeValue(row.code || '');
+      if (n != null && n > max) max = n;
+    }
+    return String(max + 1);
+  }
+
+  private async assertCodeAvailable(code: string, exceptId?: string) {
+    const existing = await prisma.constructionMaterial.findFirst({
+      where: {
+        code,
+        ...(exceptId ? { id: { not: exceptId } } : {}),
+      },
+      select: { id: true },
+    });
+    if (existing) {
+      throw createError('Já existe um material com este ID', 409);
+    }
+  }
+
+  async getNextMaterialCode(_req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const code = await this.generateNextMaterialCode();
+      res.json({ success: true, data: { code } });
+    } catch (error) {
+      next(error);
+    }
   }
 
   private async buildMaterialsWhereSql(search?: string, isActive?: string): Promise<Prisma.Sql> {
@@ -466,7 +533,14 @@ export class ConstructionMaterialController {
           .filter((material): material is NonNullable<typeof material> => !!material);
       }
 
+      materials = await this.attachTotvsIdPrd(materials);
       const avgById = await this.avgPaidByConstructionMaterialIds(ids);
+      let nextCode = '1';
+      try {
+        nextCode = await this.generateNextMaterialCode();
+      } catch (err) {
+        console.warn('Falha ao calcular próximo ID de material:', err);
+      }
 
       res.json({
         success: true,
@@ -474,6 +548,7 @@ export class ConstructionMaterialController {
           ...this.mapMaterial(m),
           avgPaidUnitPrice: avgById.get(m.id) ?? null
         })),
+        nextCode,
         pagination: {
           page: Number(page),
           limit: limitNum,
@@ -534,11 +609,12 @@ export class ConstructionMaterialController {
       }
 
       const { avgPaidUnitPrice, history } = await this.purchaseHistoryForConstructionMaterial(id);
+      const [withIdPrd] = await this.attachTotvsIdPrd([material]);
 
       res.json({
         success: true,
         data: {
-          ...this.mapMaterial(material),
+          ...this.mapMaterial(withIdPrd),
           avgPaidUnitPrice,
           purchaseHistory: history
         }
@@ -571,6 +647,7 @@ export class ConstructionMaterialController {
 
   async createMaterial(req: AuthRequest, res: Response, next: NextFunction) {
     try {
+      await ensureConstructionMaterialTotvsIdPrd(prisma);
       const parsed = this.buildMaterialData(req.body);
 
       if (!parsed.name) {
@@ -586,7 +663,8 @@ export class ConstructionMaterialController {
       }
 
       const displayName = parsed.name;
-      const productCode = await this.generateNextMaterialCode();
+      const productCode = parsed.code || (await this.generateNextMaterialCode());
+      await this.assertCodeAvailable(productCode);
 
       const budgetNatureId = await this.resolveBudgetNatureId(parsed);
       if (!budgetNatureId) {
@@ -604,7 +682,8 @@ export class ConstructionMaterialController {
         dimensions: parsed.dimensions,
         productImageUrl: parsed.productImageUrl,
         productImageName: parsed.productImageName,
-        isActive: parsed.isActive
+        isActive: parsed.isActive,
+        ...(parsed.totvsIdPrd !== undefined ? { totvsIdPrd: parsed.totvsIdPrd } : {})
       };
 
       let material: any;
@@ -625,6 +704,17 @@ export class ConstructionMaterialController {
             isActive: fullData.isActive
           }
         });
+      }
+
+      if (parsed.totvsIdPrd !== undefined) {
+        try {
+          await prisma.$executeRaw`
+            UPDATE construction_materials SET "totvsIdPrd" = ${parsed.totvsIdPrd} WHERE id = ${material.id}
+          `;
+          material.totvsIdPrd = parsed.totvsIdPrd;
+        } catch {
+          /* coluna pode ainda não existir no client antigo */
+        }
       }
 
       try {
@@ -649,6 +739,7 @@ export class ConstructionMaterialController {
 
   async updateMaterial(req: AuthRequest, res: Response, next: NextFunction) {
     try {
+      await ensureConstructionMaterialTotvsIdPrd(prisma);
       const { id } = req.params;
       const parsed = this.buildMaterialData(req.body);
 
@@ -674,7 +765,12 @@ export class ConstructionMaterialController {
         }
       }
 
+      if (parsed.code && parsed.code !== existing.code) {
+        await this.assertCodeAvailable(parsed.code, id);
+      }
+
       const updateData: any = {
+        ...(parsed.code && { code: parsed.code }),
         ...(parsed.name && { name: parsed.name }),
         ...(parsed.productType !== null && {
           productType: parsed.productType,
@@ -686,7 +782,8 @@ export class ConstructionMaterialController {
         ...(parsed.dimensions !== null && { dimensions: parsed.dimensions }),
         ...(parsed.productImageUrl !== null && { productImageUrl: parsed.productImageUrl }),
         ...(parsed.productImageName !== null && { productImageName: parsed.productImageName }),
-        ...(req.body.isActive !== undefined && { isActive: Boolean(req.body.isActive) })
+        ...(req.body.isActive !== undefined && { isActive: Boolean(req.body.isActive) }),
+        ...(parsed.totvsIdPrd !== undefined && { totvsIdPrd: parsed.totvsIdPrd })
       };
 
       let material: any;
@@ -711,6 +808,17 @@ export class ConstructionMaterialController {
           where: { id },
           data: fallbackData
         });
+      }
+
+      if (parsed.totvsIdPrd !== undefined) {
+        try {
+          await prisma.$executeRaw`
+            UPDATE construction_materials SET "totvsIdPrd" = ${parsed.totvsIdPrd} WHERE id = ${material.id}
+          `;
+          material.totvsIdPrd = parsed.totvsIdPrd;
+        } catch {
+          /* coluna pode ainda não existir no client antigo */
+        }
       }
 
       try {
