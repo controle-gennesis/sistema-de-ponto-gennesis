@@ -4,6 +4,7 @@ import React, { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import {
+  BarChart3,
   Briefcase,
   Filter,
   Paperclip,
@@ -11,6 +12,8 @@ import {
   Search,
   X,
 } from 'lucide-react';
+import { pathToModuleKey } from '@sistema-ponto/permission-modules';
+import { usePermissions } from '@/hooks/usePermissions';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
@@ -242,6 +245,9 @@ function applyListAndSearchFilters(
 
 export default function ProcessosAtivosPage() {
   const router = useRouter();
+  const { isAdministrator, can } = usePermissions();
+  const canSeeDashboard =
+    isAdministrator || can(pathToModuleKey('/ponto/juridico/processos-ativos/dashboard'));
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [listFilters, setListFilters] = useState<ListFilters>(EMPTY_LIST_FILTERS);
@@ -382,13 +388,28 @@ export default function ProcessosAtivosPage() {
     <ProtectedRoute route="/ponto/juridico/processos">
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
         <div className="space-y-6">
-          <div className="text-center">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
-              Processos
-            </h1>
-            <p className="mx-auto mt-2 max-w-2xl text-sm text-gray-600 dark:text-gray-400 sm:text-base">
-              Acompanhe os processos jurídicos
-            </p>
+          <div className="relative flex flex-col items-center gap-3 sm:block">
+            <div className="text-center">
+              <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
+                Processos
+              </h1>
+              <p className="mx-auto mt-2 max-w-2xl text-sm text-gray-600 dark:text-gray-400 sm:text-base">
+                Acompanhe os processos jurídicos
+              </p>
+            </div>
+            {canSeeDashboard ? (
+              <div className="flex items-center gap-1 sm:absolute sm:right-0 sm:top-1/2 sm:-translate-y-1/2">
+                <button
+                  type="button"
+                  onClick={() => router.push('/ponto/juridico/processos/dashboard')}
+                  aria-label="Dashboards dos Processos"
+                  title="Dashboards dos Processos"
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-lg text-gray-500 transition-colors hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-100"
+                >
+                  <BarChart3 className="h-5 w-5" />
+                </button>
+              </div>
+            ) : null}
           </div>
 
           <Card className={cadastroListClasses.card}>

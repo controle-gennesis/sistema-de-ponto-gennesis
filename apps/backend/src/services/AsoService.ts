@@ -194,6 +194,7 @@ export class AsoService {
    */
   async listCargosDisponiveis() {
     const CARGOS_CADASTRO = [
+      'Advogado',
       'Ajudante',
       'Almoxarife',
       'Analista',
@@ -278,6 +279,7 @@ export class AsoService {
 
     const CARGOS_CADASTRO = new Set(
       [
+        'Advogado',
         'Ajudante',
         'Almoxarife',
         'Analista',
