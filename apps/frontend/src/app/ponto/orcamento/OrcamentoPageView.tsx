@@ -9908,12 +9908,13 @@ export function OrcamentoPageView({
 
   useEffect(() => {
     if (!fichaDemandaOnly) return;
-    const id = fichaDemandaRecord?.id?.trim();
-    if (!id) return;
+    const record = fichaDemandaRecord;
+    const id = record?.id?.trim();
+    if (!record || !id) return;
     const pct = fichaDemandaProgresso.pct;
     if (
-      typeof fichaDemandaRecord.fichaDemandaPct === 'number' &&
-      fichaDemandaRecord.fichaDemandaPct === pct
+      typeof record.fichaDemandaPct === 'number' &&
+      record.fichaDemandaPct === pct
     ) {
       return;
     }
