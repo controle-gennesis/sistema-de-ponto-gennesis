@@ -4,22 +4,22 @@ import { stockShortfallService } from '../services/StockShortfallService';
 import { createError } from '../middleware/errorHandler';
 import {
   applyUnbCostCenterScopeToIdFilter,
-  getUserUnbCostCenterScope,
+  getUserStockCostCenterScope,
 } from '../lib/unbCostCenterScope';
 
 export class StockShortfallController {
   async countPending(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       if (!req.user?.id) throw createError('Não autenticado', 401);
-      const unbScope = await getUserUnbCostCenterScope(req.user.id, !!req.user.isAdmin);
-      if (unbScope !== null) {
-        if (unbScope.length === 0) {
+      const stockScope = await getUserStockCostCenterScope(req.user.id, !!req.user.isAdmin);
+      if (stockScope !== null) {
+        if (stockScope.length === 0) {
           res.json({ success: true, count: 0 });
           return;
         }
         const data = await stockShortfallService.list({
           status: 'ABERTO',
-          costCenterIds: unbScope,
+          costCenterIds: stockScope,
           limit: 500,
         });
         res.json({ success: true, count: data.length });
@@ -40,9 +40,9 @@ export class StockShortfallController {
       const statusFilter =
         st === 'ABERTO' || st === 'RESOLVIDO' ? (st as 'ABERTO' | 'RESOLVIDO') : 'ALL';
 
-      const unbScope = await getUserUnbCostCenterScope(req.user.id, !!req.user.isAdmin);
+      const stockScope = await getUserStockCostCenterScope(req.user.id, !!req.user.isAdmin);
       const scoped = applyUnbCostCenterScopeToIdFilter(
-        unbScope,
+        stockScope,
         costCenterId ? String(costCenterId) : undefined,
       );
       if (scoped.denyAll) {

@@ -62,6 +62,7 @@ import {
 import { maskCurrencyInputBrOrEmpty } from '@/lib/maskCurrencyBr';
 import { ocMatchesLockedUnbConsorcioCostCenter, resolveLockedUnbCostCenterId } from '@/lib/unbBranding';
 import { usePermissions } from '@/hooks/usePermissions';
+import { pathToModuleKey } from '@sistema-ponto/permission-modules';
 import { useModalCloseConfirm } from '@/hooks/useModalCloseConfirm';
 import toast from 'react-hot-toast';
 import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
@@ -783,7 +784,8 @@ function MovementSegButton({
 export default function EstoquePage() {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const { isUnbUser, unbCostCenterIds, isAdministrator } = usePermissions();
+  const { isUnbUser, unbCostCenterIds, isAdministrator, can } = usePermissions();
+  const canAccessContratos = isAdministrator || can(pathToModuleKey('/ponto/contratos'));
   const [activeTab, setActiveTab] = useState<'balance' | 'movements'>('balance');
   const [isMovementModalOpen, setIsMovementModalOpen] = useState(false);
   const [filtersCostCenterId, setFiltersCostCenterId] = useState('');
@@ -884,10 +886,48 @@ export default function EstoquePage() {
     name: string;
   }>;
 
+  const { data: stockContractRows = [], isFetched: stockContractsFetched } = useQuery({
+    queryKey: ['contracts-for-stock-scope'],
+    queryFn: async () => {
+      try {
+        const res = await api.get('/contracts', { params: { page: 1, limit: 1000 } });
+        return (res.data?.data || []) as Array<{
+          costCenterId?: string | null;
+          costCenter?: { id?: string | null } | null;
+        }>;
+      } catch {
+        return [];
+      }
+    },
+    enabled: !isAdministrator && canAccessContratos,
+    retry: false,
+  });
+
+  const allowedStockCostCenterIds = useMemo(() => {
+    if (isAdministrator) return null;
+    if (!canAccessContratos || !stockContractsFetched) return new Set<string>();
+    const ids = new Set<string>();
+    for (const row of stockContractRows) {
+      const id = row.costCenterId || row.costCenter?.id;
+      if (id) ids.add(id);
+    }
+    return ids;
+  }, [isAdministrator, canAccessContratos, stockContractsFetched, stockContractRows]);
+
+  const visibleCostCenters = useMemo(() => {
+    if (!allowedStockCostCenterIds) return costCenters;
+    return costCenters.filter((cc) => allowedStockCostCenterIds.has(cc.id));
+  }, [costCenters, allowedStockCostCenterIds]);
+
   const lockedUnbCostCenterId = useMemo(() => {
-    if (!isUnbUser) return null;
-    return resolveLockedUnbCostCenterId(costCenters, unbCostCenterIds);
-  }, [isUnbUser, costCenters, unbCostCenterIds]);
+    if (isAdministrator || !isUnbUser) return null;
+    if (allowedStockCostCenterIds && allowedStockCostCenterIds.size !== 1) return null;
+    const locked = resolveLockedUnbCostCenterId(visibleCostCenters, unbCostCenterIds);
+    if (allowedStockCostCenterIds && locked && !allowedStockCostCenterIds.has(locked)) {
+      return null;
+    }
+    return locked;
+  }, [isAdministrator, isUnbUser, visibleCostCenters, unbCostCenterIds, allowedStockCostCenterIds]);
 
   useEffect(() => {
     if (!lockedUnbCostCenterId) return;
@@ -1282,7 +1322,7 @@ export default function EstoquePage() {
 
   const costCenterFilterOptions = useMemo(() => {
     const lockedOptions = lockedUnbCostCenterId
-      ? costCenters
+      ? visibleCostCenters
           .filter((cc) => cc.id === lockedUnbCostCenterId)
           .map((cc) => ({
             value: cc.id,
@@ -1294,13 +1334,13 @@ export default function EstoquePage() {
 
     return [
       { value: '', label: 'Todos', searchText: 'Todos' },
-      ...costCenters.map((cc) => ({
+      ...visibleCostCenters.map((cc) => ({
         value: cc.id,
         label: cc.name,
         searchText: cc.name,
       })),
     ];
-  }, [costCenters, lockedUnbCostCenterId]);
+  }, [visibleCostCenters, lockedUnbCostCenterId]);
 
   const categoryFilterOptions = useMemo(
     () => [
@@ -1334,7 +1374,13 @@ export default function EstoquePage() {
     []
   );
 
-  const balances: StockBalance[] = balanceData?.data || [];
+  const balances: StockBalance[] = useMemo(() => {
+    const rows = (balanceData?.data || []) as StockBalance[];
+    if (!allowedStockCostCenterIds) return rows;
+    return rows.filter(
+      (row) => row.costCenter?.id && allowedStockCostCenterIds.has(row.costCenter.id),
+    );
+  }, [balanceData, allowedStockCostCenterIds]);
   const groupedBalances = useMemo(() => {
     const byMaterial = new Map<string, GroupedStockBalance>();
     for (const row of balances) {
@@ -1709,13 +1755,19 @@ export default function EstoquePage() {
         // Entrada + saída totais → some da lista do estoque
         return !(inboundComplete && outboundComplete);
       })
+      .filter((order) => {
+        if (!allowedStockCostCenterIds) return true;
+        const ccId = order.materialRequest?.costCenter?.id;
+        return Boolean(ccId && allowedStockCostCenterIds.has(ccId));
+      })
       .sort((a, b) => b.orderNumber.localeCompare(a.orderNumber, 'pt-BR'));
-  }, [movementsForOc, purchaseOrders]);
+  }, [movementsForOc, purchaseOrders, allowedStockCostCenterIds]);
   const contractDropdownOptions = useMemo(() => {
     const byId = new Map<string, { value: string; label: string }>();
     for (const order of availableOcOptions) {
       const cc = order.materialRequest?.costCenter;
       if (!cc?.id) continue;
+      if (allowedStockCostCenterIds && !allowedStockCostCenterIds.has(cc.id)) continue;
       if (!byId.has(cc.id)) {
         const fromCatalog = costCenters.find((item) => item.id === cc.id);
         byId.set(cc.id, {
@@ -1731,15 +1783,19 @@ export default function EstoquePage() {
 
     const locked = options.find((opt) => opt.value === lockedUnbCostCenterId);
     if (locked) return [locked];
+    if (allowedStockCostCenterIds && !allowedStockCostCenterIds.has(lockedUnbCostCenterId)) {
+      return options;
+    }
 
-    const fromCatalog = costCenters.find((item) => item.id === lockedUnbCostCenterId);
+    const fromCatalog = visibleCostCenters.find((item) => item.id === lockedUnbCostCenterId);
+    if (!fromCatalog) return options;
     return [
       {
         value: lockedUnbCostCenterId,
-        label: fromCatalog?.name || fromCatalog?.code || 'UNB - CONSÓRCIO PREDIAL BRASILIA',
+        label: fromCatalog.name || fromCatalog.code || lockedUnbCostCenterId,
       },
     ];
-  }, [availableOcOptions, costCenters, lockedUnbCostCenterId]);
+  }, [availableOcOptions, costCenters, visibleCostCenters, lockedUnbCostCenterId, allowedStockCostCenterIds]);
 
   const lockedUnbCostCenter = useMemo(
     () => costCenters.find((item) => item.id === lockedUnbCostCenterId) ?? null,

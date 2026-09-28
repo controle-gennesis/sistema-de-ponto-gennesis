@@ -9,8 +9,8 @@ import { stockShortfallService } from '../services/StockShortfallService';
 import { PurchaseOrderService } from '../services/PurchaseOrderService';
 import {
   applyUnbCostCenterScopeToIdFilter,
-  assertCostCenterAllowedForUnbUser,
-  getUserUnbCostCenterScope,
+  assertCostCenterAllowedForStockUser,
+  getUserStockCostCenterScope,
 } from '../lib/unbCostCenterScope';
 import { findIdsByUnaccentSearch } from '../lib/normalizeSearchText';
 
@@ -27,9 +27,9 @@ export class StockController {
 
       const where: any = {};
 
-      const unbScope = await getUserUnbCostCenterScope(req.user.id, !!req.user.isAdmin);
+      const stockScope = await getUserStockCostCenterScope(req.user.id, !!req.user.isAdmin);
       const scoped = applyUnbCostCenterScopeToIdFilter(
-        unbScope,
+        stockScope,
         costCenterId ? String(costCenterId) : undefined,
       );
       if (scoped.denyAll) {
@@ -133,9 +133,9 @@ export class StockController {
         }
       };
 
-      const unbScope = await getUserUnbCostCenterScope(req.user.id, !!req.user.isAdmin);
+      const stockScope = await getUserStockCostCenterScope(req.user.id, !!req.user.isAdmin);
       const scoped = applyUnbCostCenterScopeToIdFilter(
-        unbScope,
+        stockScope,
         costCenterId ? String(costCenterId) : undefined,
       );
       if (scoped.denyAll) {
@@ -316,12 +316,11 @@ export class StockController {
         if (!costCenter) {
           throw createError('Centro de custo não encontrado', 404);
         }
-        await assertCostCenterAllowedForUnbUser(req.user.id, !!req.user.isAdmin, String(costCenterId));
+        await assertCostCenterAllowedForStockUser(req.user.id, !!req.user.isAdmin, String(costCenterId));
       } else {
-        // Usuário UNB não pode lançar movimento sem centro de custo (escaparia o escopo).
-        const unbScope = await getUserUnbCostCenterScope(req.user.id, !!req.user.isAdmin);
-        if (unbScope !== null) {
-          throw createError('Informe um centro de custo UNB para a movimentação', 400);
+        const stockScope = await getUserStockCostCenterScope(req.user.id, !!req.user.isAdmin);
+        if (stockScope !== null) {
+          throw createError('Informe um contrato para a movimentação', 400);
         }
       }
 
@@ -438,6 +437,13 @@ export class StockController {
         throw createError('Movimentação não encontrada', 404);
       }
 
+      if (!req.user?.id) throw createError('Usuário não autenticado', 401);
+      await assertCostCenterAllowedForStockUser(
+        req.user.id,
+        !!req.user.isAdmin,
+        movement.costCenterId,
+      );
+
       res.json({
         success: true,
         data: movement
@@ -538,7 +544,7 @@ export class StockController {
         costCenters.filter((c) => c.code).map((c) => [norm(c.code), c]),
       );
 
-      const unbScope = await getUserUnbCostCenterScope(req.user.id, !!req.user.isAdmin);
+      const stockScope = await getUserStockCostCenterScope(req.user.id, !!req.user.isAdmin);
       let created = 0;
       const errors: { index: number; message: string }[] = [];
 
@@ -580,9 +586,9 @@ export class StockController {
               continue;
             }
             costCenterId = cc.id;
-            await assertCostCenterAllowedForUnbUser(req.user.id, !!req.user.isAdmin, costCenterId);
-          } else if (unbScope !== null) {
-            errors.push({ index: i, message: 'Informe o contrato (centro de custo UNB)' });
+            await assertCostCenterAllowedForStockUser(req.user.id, !!req.user.isAdmin, costCenterId);
+          } else if (stockScope !== null) {
+            errors.push({ index: i, message: 'Informe o contrato' });
             continue;
           }
 

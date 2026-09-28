@@ -1,6 +1,7 @@
 import { prisma } from './prisma';
 import { createError } from '../middleware/errorHandler';
 import { isUnbRelatedLabel } from './unbBranding';
+import { getCostCenterIdsForContractAccess } from './contractAccess';
 
 /** Funcionário cujo centro de custo cadastrado é UNB (string livre no Employee). */
 export function isEmployeeUnbUser(employeeCostCenter: string | null | undefined): boolean {
@@ -90,6 +91,45 @@ export async function getUserUnbCostCenterScope(
   if (!(await employeeRecordIsUnb(user?.employee?.costCenter))) return null;
 
   return getUnbCostCenterIds();
+}
+
+/** Intersecta dois escopos de CC. `null` = sem restrição. */
+export function intersectCostCenterScopes(
+  a: string[] | null,
+  b: string[] | null,
+): string[] | null {
+  if (a === null) return b;
+  if (b === null) return a;
+  if (a.length === 0 || b.length === 0) return [];
+  const other = new Set(b);
+  return a.filter((id) => other.has(id));
+}
+
+/**
+ * Estoque: contratos liberados na página de Contratos, intersectados com o escopo UNB
+ * quando o funcionário é UNB.
+ */
+export async function getUserStockCostCenterScope(
+  userId: string,
+  isAdmin: boolean,
+): Promise<string[] | null> {
+  const [unbScope, contractScope] = await Promise.all([
+    getUserUnbCostCenterScope(userId, isAdmin),
+    getCostCenterIdsForContractAccess(userId, isAdmin),
+  ]);
+  return intersectCostCenterScopes(unbScope, contractScope);
+}
+
+export async function assertCostCenterAllowedForStockUser(
+  userId: string,
+  isAdmin: boolean,
+  costCenterId: string | null | undefined,
+): Promise<void> {
+  const scope = await getUserStockCostCenterScope(userId, isAdmin);
+  if (scope === null) return;
+  if (!costCenterId || scope.length === 0 || !scope.includes(costCenterId)) {
+    throw createError('Sem permissão para este contrato no estoque', 403);
+  }
 }
 
 export async function assertCostCenterAllowedForUnbUser(
