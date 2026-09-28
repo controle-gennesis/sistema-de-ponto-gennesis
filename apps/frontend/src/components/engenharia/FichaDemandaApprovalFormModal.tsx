@@ -194,6 +194,8 @@ export type FichaDemandaApprovalFormModalProps = {
   onSave: (form: FichaDemandaApprovalFormState) => void;
   isSaving?: boolean;
   title?: string;
+  /** Esconde o seletor de contrato (já vem preenchido, ex.: envio de dentro do contrato). */
+  hideContractField?: boolean;
 };
 
 export function FichaDemandaApprovalFormModal({
@@ -204,6 +206,7 @@ export function FichaDemandaApprovalFormModal({
   onSave,
   isSaving = false,
   title,
+  hideContractField = false,
 }: FichaDemandaApprovalFormModalProps) {
   const queryClient = useQueryClient();
   const [form, setForm] = useState<FichaDemandaApprovalFormState>(() => emptyFichaDemandaForm());
@@ -273,7 +276,7 @@ export function FichaDemandaApprovalFormModal({
       const res = await api.get('/demand-sheet-approvals/options/contratos');
       return res.data;
     },
-    enabled: isOpen,
+    enabled: isOpen && !hideContractField,
   });
 
   const { data: obrasData, isLoading: loadingObras } = useQuery({
@@ -466,6 +469,7 @@ export function FichaDemandaApprovalFormModal({
             <div className="space-y-4">
               <SectionTitle>Vínculos</SectionTitle>
               <div className="grid grid-cols-1 gap-4">
+                {hideContractField ? null : (
                 <div>
                   <FieldLabel required>Contrato</FieldLabel>
                   <StringSingleSelectDropdown
@@ -481,6 +485,7 @@ export function FichaDemandaApprovalFormModal({
                     matchTriggerWidth
                   />
                 </div>
+                )}
                 <div>
                   <FieldLabel required>Obra</FieldLabel>
                   <StringSingleSelectDropdown

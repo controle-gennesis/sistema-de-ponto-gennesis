@@ -4768,6 +4768,9 @@ function appendComposicaoItemAoSubtitulo(
 
 /** Fator (40%) aplicado ao valor unit. estimado e ao custo estimado na planilha analítica. */
 const PLANILHA_FATOR_CUSTO_ESTIMADO = 0.4;
+/** Colunas de compra/real/%/observação na Ficha de demanda (da qtd. compra até observação). */
+const MOSTRAR_COLUNAS_COMPRA_FICHA_DEMANDA = false;
+const COLSPAN_FICHA_DEMANDA = MOSTRAR_COLUNAS_COMPRA_FICHA_DEMANDA ? 19 : 11;
 
 /** Largura estável para colunas «R$ + valor» (planilha «Valor unit. real», analítico insumo manual). */
 const GRADE_COL_MOEDA_UNIT =
@@ -9792,10 +9795,9 @@ export function OrcamentoPageView({
   }, [linhasAnaliticoOrcamento, planilhaQtdDeferred, planilhaVlDeferred]);
 
   const podeEnviarFdAprovacao =
-    fichaDemandaProgresso.completa &&
-    (statusAprovacaoAtivo === 'rascunho' ||
-      statusAprovacaoAtivo === 'pronta' ||
-      statusAprovacaoAtivo === 'em_correcao');
+    statusAprovacaoAtivo === 'rascunho' ||
+    statusAprovacaoAtivo === 'pronta' ||
+    statusAprovacaoAtivo === 'em_correcao';
 
   // Espelha FD %, BDI % e Total do rodapé na meta/lista (autosave persiste — sem POST a cada tecla).
   useEffect(() => {
@@ -10928,12 +10930,6 @@ export function OrcamentoPageView({
 
   const abrirEnvioFichaDemandaAprovacao = async () => {
     if (!orcamentoAtivoId) return;
-    if (!fichaDemandaProgresso.completa) {
-      toast.error(
-        `Preencha a ficha de demanda por completo antes de enviar (${fichaDemandaProgresso.pct}% — faltam ${fichaDemandaProgresso.total - fichaDemandaProgresso.filled} de ${fichaDemandaProgresso.total} insumos).`
-      );
-      return;
-    }
     if (
       statusAprovacaoAtivo !== 'rascunho' &&
       statusAprovacaoAtivo !== 'pronta' &&
@@ -11024,10 +11020,6 @@ export function OrcamentoPageView({
 
   const confirmarEnvioFichaDemandaAprovacao = async (form: FichaDemandaApprovalFormState) => {
     if (!centroCustoId || !orcamentoAtivoId) return;
-    if (!fichaDemandaProgresso.completa) {
-      toast.error('Preencha a ficha de demanda por completo antes de enviar para aprovação.');
-      return;
-    }
     setFdAprovacaoEnviando(true);
     try {
       const res = await api.post('/demand-sheet-approvals', {
@@ -11545,9 +11537,6 @@ export function OrcamentoPageView({
                               <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[12%]">
                                 Status
                               </th>
-                              <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[7%]">
-                                FD
-                              </th>
                               <th className="px-3 sm:px-6 py-4 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[12%]">
                                 BDI
                               </th>
@@ -11563,7 +11552,7 @@ export function OrcamentoPageView({
                           <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
                             {filteredListaOrcamentos.length === 0 ? (
                               <tr>
-                                <td colSpan={8} className="px-6 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
+                                <td colSpan={7} className="px-6 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
                                   Nenhum orçamento encontrado para essa busca.
                                 </td>
                               </tr>
@@ -11572,10 +11561,6 @@ export function OrcamentoPageView({
                                 const codigoLista = codigoFromNomeOrcamento(o.nome);
                                 const nomeLista = nomeOrcamentoSemCodigoSufixo(o.nome) || o.nome;
                                 const statusLista = normalizarStatusAprovacaoOrcamento(o.statusAprovacao);
-                                const fdPctLista =
-                                  typeof o.fichaDemandaPct === 'number' && Number.isFinite(o.fichaDemandaPct)
-                                    ? Math.max(0, Math.min(100, Math.round(o.fichaDemandaPct)))
-                                    : 0;
                                 const bdiPctLista =
                                   typeof o.bdiPercentual === 'number' && Number.isFinite(o.bdiPercentual)
                                     ? o.bdiPercentual
@@ -11609,15 +11594,6 @@ export function OrcamentoPageView({
                                     <span className={orcamentoStatusBadgeClass(statusLista)}>
                                       {ORCAMENTO_STATUS_LABELS[statusLista]}
                                     </span>
-                                  </td>
-                                  <td
-                                    className={`whitespace-nowrap px-3 py-3 text-center text-sm font-semibold tabular-nums sm:px-6 ${
-                                      fdPctLista === 100
-                                        ? 'text-green-700 dark:text-green-300'
-                                        : 'text-gray-700 dark:text-gray-300'
-                                    }`}
-                                  >
-                                    {fdPctLista}%
                                   </td>
                                   <td className="whitespace-nowrap px-3 py-3 text-center text-sm text-gray-700 dark:text-gray-300 tabular-nums sm:px-6">
                                     {bdiPctLista.toLocaleString('pt-BR', {
@@ -11868,9 +11844,6 @@ export function OrcamentoPageView({
                           <DadosCampo label="Arredondamento">
                             {rotuloModoArredondamentoDados(meta.modoArredondamento ?? 'truncar')}
                           </DadosCampo>
-                          {analiticoDisponivel && typeof meta.fichaDemandaPct === 'number' ? (
-                            <DadosCampo label="Ficha de demanda">{`${meta.fichaDemandaPct}%`}</DadosCampo>
-                          ) : null}
                         </dl>
                       </div>
 
@@ -11967,7 +11940,7 @@ export function OrcamentoPageView({
                             <th className="w-[5.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600">Unidade</th>
                             <th className="w-[7.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600">Quantidade</th>
                             <th className="w-[8.5rem] whitespace-nowrap px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600">Quantidade real</th>
-                            <th className="w-[9rem] whitespace-nowrap px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600">Quantidade orçada</th>
+                            <th className="w-[9rem] px-2 py-2.5 text-center text-[11px] font-semibold leading-tight text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600">Quantidade orçada</th>
                             <th className={`${GRADE_COL_MOEDA_UNIT} w-[8.5rem] px-2 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600`}>Valor unitário</th>
                             <th className="w-[7.5rem] px-3 py-2.5 text-center text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide whitespace-nowrap border-l border-gray-300 dark:border-gray-600">Total</th>
                           </tr>
@@ -12047,7 +12020,9 @@ export function OrcamentoPageView({
                                     <td className="px-3 py-2.5 text-center text-sm font-medium text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700">{l.und}</td>
                                     <td className="px-3 py-2.5 text-sm text-center font-medium text-gray-900 dark:text-gray-100 tabular-nums border-l border-gray-200 dark:border-gray-700">{l.quantidadeReal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
                                     <td className="px-3 py-2.5 text-sm text-center font-medium text-gray-900 dark:text-gray-100 tabular-nums border-l border-gray-200 dark:border-gray-700">{l.quantidadeReal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
-                                    <td className="px-3 py-2.5 text-sm text-center font-medium text-gray-900 dark:text-gray-100 tabular-nums border-l border-gray-200 dark:border-gray-700">{l.quantidadeOrcada.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
+                                    <td className="px-2 py-2.5 text-center text-sm font-medium tabular-nums text-gray-900 dark:text-gray-100 border-l border-gray-200 dark:border-gray-700">
+                                      <span className="block w-full text-center">{l.quantidadeOrcada.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</span>
+                                    </td>
                                     <td className="px-3 py-2.5 text-sm tabular-nums border-l border-gray-200 dark:border-gray-700">
                                       <MoedaCelula
                                         valor={l.valorUnit}
@@ -12108,7 +12083,9 @@ export function OrcamentoPageView({
                                 <td className="px-3 py-2.5 text-center text-sm text-gray-500 dark:text-gray-400 border-l border-gray-200 dark:border-gray-700">{l.und || '---'}</td>
                                 <td className="px-3 py-2.5 text-sm text-center text-gray-700 dark:text-gray-300 tabular-nums border-l border-gray-200 dark:border-gray-700">{l.quant.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
                                 <td className="px-3 py-2.5 text-sm text-center text-gray-700 dark:text-gray-300 tabular-nums border-l border-gray-200 dark:border-gray-700">{l.quantidadeReal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
-                                <td className="px-3 py-2.5 text-sm text-center text-gray-700 dark:text-gray-300 tabular-nums border-l border-gray-200 dark:border-gray-700">{l.quantidadeOrcada.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</td>
+                                <td className="px-2 py-2.5 text-center text-sm tabular-nums text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700">
+                                  <span className="block w-full text-center">{l.quantidadeOrcada.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</span>
+                                </td>
                                 <td className="px-3 py-2.5 text-sm tabular-nums border-l border-gray-200 dark:border-gray-700">
                                   <MoedaCelula valor={l.valorUnit} className="text-gray-700 dark:text-gray-300" />
                                 </td>
@@ -12200,10 +12177,14 @@ export function OrcamentoPageView({
                                         ? qtdRealNum.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
                                         : '—'}
                                     </td>
-                                    <td className="px-3 py-2.5 text-sm text-center text-gray-700 dark:text-gray-300 tabular-nums border-l border-gray-200 dark:border-gray-700">
-                                      {qtdRealNum !== null
-                                        ? qtdRealNum.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-                                        : '—'}
+                                    <td className="px-2 py-2.5 text-center text-sm tabular-nums text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700">
+                                      {qtdRealNum !== null ? (
+                                        <span className="block w-full text-center">
+                                          {qtdRealNum.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        </span>
+                                      ) : (
+                                        <span className="block w-full text-center">—</span>
+                                      )}
                                     </td>
                                     <td className={`p-0 border-l border-gray-200 dark:border-gray-700 ${GRADE_COL_MOEDA_UNIT}`}>
                                       <div className={moedaGradeFieldWrapperCls}>
@@ -12424,6 +12405,8 @@ export function OrcamentoPageView({
                                 >
                                   Custo estimado (40%)
                                 </th>
+                                {MOSTRAR_COLUNAS_COMPRA_FICHA_DEMANDA ? (
+                                  <>
                                 <th
                                   title={PLANILHA_ANALITICA_TOOLTIP.theadQtdCompra}
                                   className="min-w-[6.5rem] max-w-[8rem] px-2 py-2.5 text-center text-[11px] font-semibold leading-tight text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600"
@@ -12469,10 +12452,12 @@ export function OrcamentoPageView({
                                 <th className="min-w-[24rem] w-[24rem] px-2 py-2.5 text-center text-[11px] font-semibold leading-tight text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600">
                                   Observação
                                 </th>
+                                  </>
+                                ) : null}
                               </tr>
                             </thead>
                             <tbody ref={janelaFd.tbodyRef} className="divide-y divide-gray-200/80 dark:divide-gray-700">
-                              <TabelaJanelaSpacer height={janelaFd.topPad} colSpan={19} />
+                              <TabelaJanelaSpacer height={janelaFd.topPad} colSpan={COLSPAN_FICHA_DEMANDA} />
                               {linhasAnaliticoComManuais.slice(janelaFd.start, janelaFd.end).map((l, i) => {
                                 const idxLinhaFd = janelaFd.start + i;
                                 const itemW =
@@ -12502,6 +12487,8 @@ export function OrcamentoPageView({
                                       <td className="px-3 py-2.5 text-sm tabular-nums border-l border-red-400/50 dark:border-red-800">
                                         <MoedaCelula valor={resumo.custoEst} className="text-white font-bold" valorClassName="font-bold" />
                                       </td>
+                                      {MOSTRAR_COLUNAS_COMPRA_FICHA_DEMANDA ? (
+                                        <>
                                       <td className="px-3 py-2.5 border-l border-red-400/50 dark:border-red-800" />
                                       <td className="px-3 py-2.5 border-l border-red-400/50 dark:border-red-800" />
                                       <td className="px-3 py-2.5 border-l border-red-400/50 dark:border-red-800" />
@@ -12512,6 +12499,8 @@ export function OrcamentoPageView({
                                       <td className="px-3 py-2.5 border-l border-red-400/50 dark:border-red-800" />
                                       <td className="px-3 py-2.5 border-l border-red-400/50 dark:border-red-800" />
                                       <td className="px-3 py-2.5 border-l border-red-400/50 dark:border-red-800" />
+                                        </>
+                                      ) : null}
                                     </tr>
                                   );
                                 }
@@ -12554,6 +12543,8 @@ export function OrcamentoPageView({
                                       >
                                         <MoedaCelula valor={resumo.custoEst} className="font-semibold text-gray-900 dark:text-gray-100" valorClassName="font-semibold" />
                                       </td>
+                                      {MOSTRAR_COLUNAS_COMPRA_FICHA_DEMANDA ? (
+                                        <>
                                       <td className="px-3 py-2.5 border-l border-gray-300 dark:border-gray-700" />
                                       <td className="px-3 py-2.5 border-l border-gray-300 dark:border-gray-700" />
                                       <td className="px-3 py-2.5 border-l border-gray-300 dark:border-gray-700" />
@@ -12566,6 +12557,8 @@ export function OrcamentoPageView({
                                       <td className="px-3 py-2.5 border-l border-gray-300 dark:border-gray-700" />
                                       <td className="px-3 py-2.5 border-l border-gray-300 dark:border-gray-700" />
                                       <td className="px-3 py-2.5 border-l border-gray-300 dark:border-gray-700" />
+                                        </>
+                                      ) : null}
                                     </tr>
                                   );
                                 }
@@ -12684,6 +12677,8 @@ export function OrcamentoPageView({
                                       >
                                         <MoedaCelula valor={custoEstCompCalc} />
                                       </td>
+                                      {MOSTRAR_COLUNAS_COMPRA_FICHA_DEMANDA ? (
+                                        <>
                                       <td
                                         title={PLANILHA_ANALITICA_TOOLTIP.qtdCompraComp}
                                         className="px-3 py-2.5 text-center text-sm tabular-nums text-gray-800 dark:text-gray-200 border-l border-gray-200 dark:border-gray-700"
@@ -12739,6 +12734,8 @@ export function OrcamentoPageView({
                                       <td className="min-w-[24rem] w-[24rem] border-l border-gray-200 dark:border-gray-700 p-0">
                                         <span className="block px-3 py-2.5 text-sm text-gray-400 dark:text-gray-600">—</span>
                                       </td>
+                                        </>
+                                      ) : null}
                                     </tr>
                                   );
                                 }
@@ -12860,6 +12857,8 @@ export function OrcamentoPageView({
                                     >
                                       <MoedaCelula valor={custoEst} />
                                     </td>
+                                    {MOSTRAR_COLUNAS_COMPRA_FICHA_DEMANDA ? (
+                                      <>
                                     <td
                                       title={PLANILHA_ANALITICA_TOOLTIP.qtdCompraInsumo}
                                       className={`p-0 border-l border-gray-200 dark:border-gray-700`}
@@ -12970,10 +12969,12 @@ export function OrcamentoPageView({
                                         className={`${inputGradeCls} text-left`}
                                       />
                                     </td>
+                                      </>
+                                    ) : null}
                                   </tr>
                                 );
                               })}
-                              <TabelaJanelaSpacer height={janelaFd.bottomPad} colSpan={19} />
+                              <TabelaJanelaSpacer height={janelaFd.bottomPad} colSpan={COLSPAN_FICHA_DEMANDA} />
                             </tbody>
                           </table>
                         </div>
@@ -13756,37 +13757,6 @@ export function OrcamentoPageView({
                       {formatarBRLExport(resumoFinanceiro.totalComDescontoEBdi)}
                     </p>
                   </div>
-                  <div
-                    className="hidden h-8 w-px shrink-0 self-center bg-gray-200 dark:bg-gray-600 sm:block"
-                    aria-hidden
-                  />
-                  <div
-                    className="min-w-0"
-                    title={
-                      fichaDemandaProgresso.total === 0
-                        ? 'Sem insumos na ficha de demanda'
-                        : `Ficha de demanda: ${fichaDemandaProgresso.filled} de ${fichaDemandaProgresso.total} insumos preenchidos (qtd. compra + valor unit. real)`
-                    }
-                  >
-                    <p
-                      className={`text-[10px] font-semibold uppercase tracking-wide ${
-                        fichaDemandaProgresso.completa
-                          ? 'text-green-600 dark:text-green-400'
-                          : 'text-gray-500 dark:text-gray-400'
-                      }`}
-                    >
-                      FD
-                    </p>
-                    <p
-                      className={`mt-0.5 text-sm font-bold tabular-nums tracking-tight sm:text-base whitespace-nowrap ${
-                        fichaDemandaProgresso.completa
-                          ? 'text-green-700 dark:text-green-300'
-                          : 'text-gray-900 dark:text-gray-100'
-                      }`}
-                    >
-                      {fichaDemandaProgresso.pct}%
-                    </p>
-                  </div>
                 </div>
                 <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
                   <button
@@ -13835,12 +13805,10 @@ export function OrcamentoPageView({
                     }
                     className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-red-600 bg-red-600 text-white shadow-sm transition-colors hover:bg-red-700 hover:border-red-700 active:bg-red-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 dark:border-red-500 dark:bg-red-600 dark:text-white dark:hover:bg-red-500 dark:hover:border-red-500 dark:active:bg-red-700 dark:focus-visible:ring-offset-gray-900"
                     title={
-                      !fichaDemandaProgresso.completa
-                        ? `Preencha a ficha de demanda (${fichaDemandaProgresso.pct}%)`
-                        : statusAprovacaoAtivo === 'aguardando_aprovacao' ||
-                            statusAprovacaoAtivo === 'aprovado'
-                          ? 'Orçamento já enviado ou aprovado'
-                          : 'Enviar para aprovação'
+                      statusAprovacaoAtivo === 'aguardando_aprovacao' ||
+                      statusAprovacaoAtivo === 'aprovado'
+                        ? 'Orçamento já enviado ou aprovado'
+                        : 'Enviar para aprovação'
                     }
                     aria-label="Enviar para aprovação"
                   >
@@ -13866,6 +13834,7 @@ export function OrcamentoPageView({
           setFdAprovacaoInitialForm(null);
         }}
         initialForm={fdAprovacaoInitialForm}
+        hideContractField={Boolean(embeddedContractId)}
         onSave={(form) => {
           void confirmarEnvioFichaDemandaAprovacao(form);
         }}
