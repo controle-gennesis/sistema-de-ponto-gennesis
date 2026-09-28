@@ -16,6 +16,18 @@ import {
   OC_STATUSES_COVERING_RM_ITEMS,
 } from '../lib/rmProcurementCoverage';
 import { assertUserCanReturnOcItemToRm } from '../lib/ocApprovalAccess';
+import {
+  isTotvsFreightType,
+  parseTotvsFilial,
+  resolveOcDestinationFromCostCenter,
+  resolveTotvsFilialFromCostCenter,
+  toTotvsCodCfo,
+  toTotvsPaymentCondition,
+  toTotvsUnit,
+  TOTVS_OC_PAYMENT_AVISTA,
+} from '../lib/ocTotvsRm';
+import { totvsRmMovimentoService } from './TotvsRmMovimentoService';
+import { ensurePurchaseOrderTotvsFields } from '../lib/ensureProductionSchema';
 
 /** Lock distinto do requestNumber de RM (91827365) — serializa só a sequência de OC. */
 const PURCHASE_ORDER_NUMBER_ADVISORY_LOCK = 91827366;
@@ -80,22 +92,97 @@ async function withPurchaseOrderCatalogCodes<T extends { items?: PoItemWithMater
     where: { id: { in: Array.from(cmIds) } },
     select: { id: true, code: true },
   });
-  const codeByCmId = new Map(
-    rows.map((r) => [r.id, (r.code || '').trim() || null] as const)
+  const totvsIdByCm = new Map<string, number>();
+  try {
+    const prds = await prisma.$queryRaw<Array<{ id: string; totvsIdPrd: number | null }>>`
+      SELECT id, "totvsIdPrd" FROM construction_materials
+      WHERE id IN (${Prisma.join(Array.from(cmIds))})
+    `;
+    for (const row of prds) {
+      if (row.totvsIdPrd != null && row.totvsIdPrd > 0) totvsIdByCm.set(row.id, row.totvsIdPrd);
+    }
+  } catch {
+    /* coluna totvsIdPrd pode ainda não existir */
+  }
+  const byCmId = new Map(
+    rows.map((r) => [
+      r.id,
+      { code: (r.code || '').trim() || null, totvsIdPrd: totvsIdByCm.get(r.id) ?? null },
+    ] as const)
   );
 
   return orders.map((order) => ({
     ...order,
     items: (order.items ?? []).map((item) => {
       const cmId = constructionMaterialIdFromSinapi(item.material?.sinapiCode);
-      const catalogCode = cmId ? codeByCmId.get(cmId) : null;
-      if (!item.material || !catalogCode) return item;
+      const catalog = cmId ? byCmId.get(cmId) : null;
+      if (!item.material || !catalog) return item;
       return {
         ...item,
-        material: { ...item.material, code: catalogCode },
+        material: {
+          ...item.material,
+          ...(catalog.code ? { code: catalog.code } : {}),
+          ...(catalog.totvsIdPrd != null ? { totvsIdPrd: catalog.totvsIdPrd } : {}),
+        },
       };
     }),
   }));
+}
+
+async function resolveStockLocationFields(input: {
+  stockLocationId?: string | null;
+  totvsCodLoc?: string | null;
+  totvsCodFilial?: number | null;
+}): Promise<{ stockLocationId: string | null; totvsCodLoc: string | null }> {
+  const id = String(input.stockLocationId || '').trim();
+  const code = String(input.totvsCodLoc || '').trim();
+  const filial = input.totvsCodFilial;
+
+  if (id) {
+    const rows = await prisma.$queryRaw<Array<{ id: string; code: string; filial: number; isActive: boolean }>>`
+      SELECT id, code, filial, "isActive" FROM stock_locations WHERE id = ${id} LIMIT 1
+    `.catch(() => [] as Array<{ id: string; code: string; filial: number; isActive: boolean }>);
+    const loc = rows[0];
+    if (!loc) throw new Error('Local de estoque não encontrado');
+    if (!loc.isActive) throw new Error('Local de estoque inativo');
+    if (filial != null && Number(loc.filial) !== Number(filial)) {
+      throw new Error('O local de estoque não pertence à filial selecionada');
+    }
+    return { stockLocationId: loc.id, totvsCodLoc: String(loc.code || '').trim() };
+  }
+
+  if (code) {
+    const rows = filial != null
+      ? await prisma.$queryRaw<Array<{ id: string }>>`
+          SELECT id FROM stock_locations
+          WHERE code = ${code} AND "isActive" = true AND filial = ${filial}
+          LIMIT 1
+        `.catch(() => [] as Array<{ id: string }>)
+      : await prisma.$queryRaw<Array<{ id: string }>>`
+          SELECT id FROM stock_locations
+          WHERE code = ${code} AND "isActive" = true
+          LIMIT 1
+        `.catch(() => [] as Array<{ id: string }>);
+    return { stockLocationId: rows[0]?.id || null, totvsCodLoc: code };
+  }
+
+  return { stockLocationId: id || null, totvsCodLoc: code || null };
+}
+
+async function persistPurchaseOrderStockLocation(
+  orderId: string,
+  fields: { stockLocationId: string | null; totvsCodLoc: string | null }
+): Promise<void> {
+  try {
+    await prisma.$executeRaw`
+      UPDATE purchase_orders
+      SET "totvsCodLoc" = ${fields.totvsCodLoc},
+          "stockLocationId" = ${fields.stockLocationId}
+      WHERE id = ${orderId}
+    `;
+  } catch (err) {
+    console.warn('[OC] não gravou local de estoque (coluna ausente ou client antigo):', err);
+  }
 }
 
 async function resolveUserDisplayName(userId?: string): Promise<string | null> {
@@ -622,6 +709,14 @@ export interface CreatePurchaseOrderData {
   creationBoletoInstallments?: Array<{ boletoUrl: string; boletoName?: string | null }>;
   /** Frete (R$). Total a pagar gravado = soma dos itens + frete. */
   freightAmount?: number;
+  /** Tipo de frete TOTVS (C/F/T/S/R/D). */
+  freightType?: string | null;
+  /** Filial TOTVS: 1 DF, 5 GO. */
+  totvsCodFilial?: number | string | null;
+  /** Local de estoque cadastrado no Conecta (TLOC). */
+  stockLocationId?: string | null;
+  /** CODLOC TOTVS informado na OC. */
+  totvsCodLoc?: string | null;
   /** @deprecated Ignorado: o total é sempre calculado como itens + frete. */
   amountToPay?: number;
   notes?: string;
@@ -646,6 +741,10 @@ export interface UpdatePurchaseOrderDetailsData {
   pixKeyType?: string | null;
   pixKey?: string | null;
   freightAmount?: number | string | null;
+  freightType?: string | null;
+  totvsCodFilial?: number | string | null;
+  stockLocationId?: string | null;
+  totvsCodLoc?: string | null;
   notes?: string | null;
   items?: {
     materialRequestItemId?: string | null;
@@ -721,6 +820,11 @@ type PreparedOcCreateData = {
   boletoAttachmentName: string | null;
   paymentBoletoInstallments?: Prisma.InputJsonValue;
   freightAmount: Decimal;
+  freightType: string | null;
+  totvsDestination: string | null;
+  totvsCodFilial: number | null;
+  stockLocationId: string | null;
+  totvsCodLoc: string | null;
   amountToPay: Decimal;
   notes: string | null;
   attachments?: Prisma.InputJsonValue;
@@ -758,7 +862,7 @@ const purchaseOrderIncludeList = {
       requestNumber: true,
       serviceOrder: true,
       description: true,
-      costCenter: { select: { id: true, code: true, name: true } }
+      costCenter: { select: { id: true, code: true, name: true, polo: true, state: true } }
     }
   },
   creator: { select: { id: true, name: true, email: true } },
@@ -785,7 +889,7 @@ const purchaseOrderIncludeListSummary = {
       id: true,
       requestNumber: true,
       serviceOrder: true,
-      costCenter: { select: { id: true, code: true, name: true } }
+      costCenter: { select: { id: true, code: true, name: true, polo: true, state: true } }
     }
   },
   creator: { select: { id: true, name: true } },
@@ -804,7 +908,7 @@ const purchaseOrderIncludeCreate = {
       id: true,
       requestNumber: true,
       serviceOrder: true,
-      costCenter: { select: { id: true, code: true, name: true } }
+      costCenter: { select: { id: true, code: true, name: true, polo: true, state: true } }
     }
   },
   creator: { select: { id: true, name: true, email: true } },
@@ -957,6 +1061,43 @@ export class PurchaseOrderService {
       throw new Error('Frete não pode ser negativo');
     }
     const itemsSum = items.reduce((s, row) => s.plus(row.totalPrice), new Decimal(0));
+
+    let totvsDestination: string | null = null;
+    let totvsCodFilial: number | null = parseTotvsFilial(data.totvsCodFilial);
+    if (data.materialRequestId) {
+      const rmCc = await prisma.materialRequest.findUnique({
+        where: { id: data.materialRequestId },
+        select: { costCenter: { select: { name: true, code: true, polo: true, state: true } } },
+      });
+      totvsDestination = resolveOcDestinationFromCostCenter(rmCc?.costCenter?.name, rmCc?.costCenter?.code);
+      if (totvsCodFilial == null) {
+        totvsCodFilial = resolveTotvsFilialFromCostCenter(rmCc?.costCenter);
+      }
+    }
+    if (totvsCodFilial == null) totvsCodFilial = 1;
+    const stockLocation = await resolveStockLocationFields({
+      stockLocationId: data.stockLocationId,
+      totvsCodLoc: data.totvsCodLoc,
+      totvsCodFilial,
+    });
+    if (totvsDestination === 'TOTVS' && !stockLocation.totvsCodLoc) {
+      throw new Error('Informe o local de estoque da OC.');
+    }
+    const freightTypeRaw = (data.freightType || '').trim().toUpperCase();
+    const freightType =
+      totvsDestination === 'TOTVS'
+        ? isTotvsFreightType(freightTypeRaw)
+          ? freightTypeRaw
+          : 'S'
+        : freightTypeRaw
+          ? freightTypeRaw
+          : null;
+    const paymentCondition =
+      data.paymentType === 'AVISTA'
+        ? TOTVS_OC_PAYMENT_AVISTA
+        : totvsDestination === 'TOTVS'
+          ? toTotvsPaymentCondition(data.paymentCondition, data.paymentType)
+          : data.paymentCondition || null;
     const amountToPay = itemsSum.plus(freight);
 
     let paymentBoletoInstallments: Prisma.InputJsonValue | undefined;
@@ -1024,7 +1165,7 @@ export class PurchaseOrderService {
       expectedDelivery: data.expectedDelivery || null,
       deliveryAddress: data.deliveryAddress || null,
       paymentType: data.paymentType || null,
-      paymentCondition: data.paymentCondition || null,
+      paymentCondition,
       paymentDetails: data.paymentDetails || null,
       pixKeyType: data.pixKeyType?.trim() || null,
       pixKey: data.pixKey?.trim() || null,
@@ -1032,6 +1173,11 @@ export class PurchaseOrderService {
       boletoAttachmentName,
       ...(paymentBoletoInstallments ? { paymentBoletoInstallments } : {}),
       freightAmount: freight,
+      freightType,
+      totvsDestination,
+      totvsCodFilial,
+      stockLocationId: stockLocation.stockLocationId,
+      totvsCodLoc: stockLocation.totvsCodLoc,
       amountToPay,
       notes: data.notes || null,
       attachments: (() => {
@@ -1102,20 +1248,48 @@ export class PurchaseOrderService {
           include: purchaseOrderIncludeCreate,
         });
       }
+      if (
+        isPrismaValidation &&
+        (msg.includes('freightType') ||
+          msg.includes('totvsDestination') ||
+          msg.includes('totvsIdMov') ||
+          msg.includes('totvsCodFilial') ||
+          msg.includes('totvsCodLoc') ||
+          msg.includes('stockLocationId'))
+      ) {
+        const {
+          freightType: _ft,
+          totvsDestination: _td,
+          totvsCodFilial: _tf,
+          totvsCodLoc: _tl,
+          stockLocationId: _sl,
+          ...withoutTotvs
+        } = createDataBase;
+        return await tx.purchaseOrder.create({
+          data: toUnchecked(withoutTotvs as PreparedOcCreateData & { orderNumber: string }, initialStatus),
+          include: purchaseOrderIncludeCreate,
+        });
+      }
       throw error;
     }
   }
 
   async create(data: CreatePurchaseOrderData, userId: string, options?: CreatePurchaseOrderOptions) {
+    await ensurePurchaseOrderTotvsFields(prisma);
     const createDataBase = await this.prepareCreatePayload(data, userId, options);
 
-    return prisma.$transaction(async (tx) => {
+    const order = await prisma.$transaction(async (tx) => {
       await tx.$executeRawUnsafe(
         `SELECT pg_advisory_xact_lock(${PURCHASE_ORDER_NUMBER_ADVISORY_LOCK})`,
       );
       const orderNumber = await generateOrderNumber(tx);
       return this.createRowInTx(tx, { ...createDataBase, orderNumber });
     }, PURCHASE_ORDER_CREATE_TX_OPTIONS);
+    await persistPurchaseOrderStockLocation(order.id, {
+      stockLocationId: createDataBase.stockLocationId,
+      totvsCodLoc: createDataBase.totvsCodLoc,
+    });
+    return this.sendCreatedOrderToTotvsIfNeeded(order, userId);
   }
 
   /**
@@ -1124,6 +1298,7 @@ export class PurchaseOrderService {
    */
   async createMany(entries: CreatePurchaseOrderData[], userId: string, options?: CreatePurchaseOrderOptions) {
     if (entries.length === 0) return [];
+    await ensurePurchaseOrderTotvsFields(prisma);
     if (entries.length === 1) {
       return [await this.create(entries[0], userId, options)];
     }
@@ -1133,17 +1308,30 @@ export class PurchaseOrderService {
       prepared.push(await this.prepareCreatePayload(data, userId, options));
     }
 
-    return prisma.$transaction(async (tx) => {
+    const created = await prisma.$transaction(async (tx) => {
       await tx.$executeRawUnsafe(
         `SELECT pg_advisory_xact_lock(${PURCHASE_ORDER_NUMBER_ADVISORY_LOCK})`,
       );
       const orderNumbers = await generateOrderNumbers(tx, prepared.length);
-      const created: Awaited<ReturnType<PurchaseOrderService['createRowInTx']>>[] = [];
+      const rows: Awaited<ReturnType<PurchaseOrderService['createRowInTx']>>[] = [];
       for (let i = 0; i < prepared.length; i++) {
-        created.push(await this.createRowInTx(tx, { ...prepared[i], orderNumber: orderNumbers[i] }));
+        rows.push(await this.createRowInTx(tx, { ...prepared[i], orderNumber: orderNumbers[i] }));
       }
-      return created;
+      return rows;
     }, PURCHASE_ORDER_CREATE_TX_OPTIONS);
+
+    for (let i = 0; i < created.length; i++) {
+      await persistPurchaseOrderStockLocation(created[i].id, {
+        stockLocationId: prepared[i].stockLocationId,
+        totvsCodLoc: prepared[i].totvsCodLoc,
+      });
+    }
+
+    const out: Awaited<ReturnType<PurchaseOrderService['sendCreatedOrderToTotvsIfNeeded']>>[] = [];
+    for (const order of created) {
+      out.push(await this.sendCreatedOrderToTotvsIfNeeded(order, userId));
+    }
+    return out;
   }
 
   private buildPurchaseOrderListWhere(filters: {
@@ -1252,6 +1440,7 @@ export class PurchaseOrderService {
     /** false = listagem leve (sem itens) — mapa/gerenciar só precisam do vínculo RM. */
     includeItems?: boolean;
   }) {
+    await ensurePurchaseOrderTotvsFields(prisma);
     const where = this.buildPurchaseOrderListWhere(filters);
     const page = filters.page || 1;
     const limit = Math.min(Math.max(filters.limit || 20, 1), 500);
@@ -1367,6 +1556,23 @@ export class PurchaseOrderService {
     /** GET de detalhe deve ser só leitura e rápido — syncs pesados ficam na listagem / mutações / estoque. */
     const [withPlan] = await enrichOrdersParcelPlans([order]);
     const [withCodes] = await withPurchaseOrderCatalogCodes([withPlan]);
+    try {
+      const extra = await prisma.$queryRaw<Array<{ totvsCodLoc: string | null; stockLocationId: string | null }>>`
+        SELECT "totvsCodLoc", "stockLocationId" FROM purchase_orders WHERE id = ${id}
+      `;
+      if (extra[0]) {
+        (withCodes as { totvsCodLoc?: string | null }).totvsCodLoc = extra[0].totvsCodLoc;
+        (withCodes as { stockLocationId?: string | null }).stockLocationId = extra[0].stockLocationId;
+        if (extra[0].stockLocationId) {
+          const loc = await prisma.$queryRaw<Array<{ id: string; code: string; name: string }>>`
+            SELECT id, code, name FROM stock_locations WHERE id = ${extra[0].stockLocationId} LIMIT 1
+          `;
+          if (loc[0]) (withCodes as { stockLocation?: unknown }).stockLocation = loc[0];
+        }
+      }
+    } catch {
+      /* colunas novas podem não existir no client antigo */
+    }
     return withCodes;
   }
 
@@ -1792,7 +1998,7 @@ export class PurchaseOrderService {
   async updateDetails(id: string, data: UpdatePurchaseOrderDetailsData, userId?: string) {
     const order = await prisma.purchaseOrder.findUnique({
       where: { id },
-      select: { id: true, status: true, createdBy: true, freightAmount: true }
+      select: { id: true, status: true, createdBy: true, freightAmount: true, totvsCodFilial: true }
     });
 
     if (!order) {
@@ -1879,7 +2085,12 @@ export class PurchaseOrderService {
           expectedDelivery,
           deliveryAddress: data.deliveryAddress !== undefined ? data.deliveryAddress : undefined,
           paymentType: data.paymentType !== undefined ? data.paymentType : undefined,
-          paymentCondition: data.paymentCondition !== undefined ? data.paymentCondition : undefined,
+          paymentCondition:
+            nextPaymentType === 'AVISTA'
+              ? TOTVS_OC_PAYMENT_AVISTA
+              : data.paymentCondition !== undefined
+                ? data.paymentCondition
+                : undefined,
           paymentDetails: data.paymentDetails !== undefined ? data.paymentDetails : undefined,
           pixKeyType:
             nextPaymentType === 'BOLETO'
@@ -1894,6 +2105,24 @@ export class PurchaseOrderService {
                 ? data.pixKey?.trim() || null
                 : undefined,
           freightAmount: freightToStore,
+          freightType:
+            data.freightType !== undefined
+              ? (data.freightType || '').trim().toUpperCase() || null
+              : undefined,
+          totvsCodFilial:
+            data.totvsCodFilial !== undefined
+              ? parseTotvsFilial(data.totvsCodFilial)
+              : undefined,
+          ...(data.stockLocationId !== undefined || data.totvsCodLoc !== undefined
+            ? await resolveStockLocationFields({
+                stockLocationId: data.stockLocationId,
+                totvsCodLoc: data.totvsCodLoc,
+                totvsCodFilial:
+                  data.totvsCodFilial !== undefined
+                    ? parseTotvsFilial(data.totvsCodFilial)
+                    : parseTotvsFilial((order as { totvsCodFilial?: number | null }).totvsCodFilial),
+              })
+            : {}),
           amountToPay,
           notes: data.notes !== undefined ? data.notes : undefined,
           updatedAt: new Date()
@@ -1901,8 +2130,224 @@ export class PurchaseOrderService {
       });
     });
 
+    if (data.stockLocationId !== undefined || data.totvsCodLoc !== undefined) {
+      const stock = await resolveStockLocationFields({
+        stockLocationId: data.stockLocationId,
+        totvsCodLoc: data.totvsCodLoc,
+        totvsCodFilial:
+          data.totvsCodFilial !== undefined
+            ? parseTotvsFilial(data.totvsCodFilial)
+            : parseTotvsFilial((order as { totvsCodFilial?: number | null }).totvsCodFilial),
+      });
+      await persistPurchaseOrderStockLocation(id, stock);
+    }
+
     const refreshed = await this.getById(id);
     return refreshed;
+  }
+
+  private resolveCreatedOcDestination(order: {
+    totvsDestination?: string | null;
+    materialRequest?: { costCenter?: { name?: string | null; code?: string | null } | null } | null;
+  }) {
+    if (order.totvsDestination === 'CONECTA' || order.totvsDestination === 'TOTVS') {
+      return order.totvsDestination;
+    }
+    return resolveOcDestinationFromCostCenter(
+      order.materialRequest?.costCenter?.name,
+      order.materialRequest?.costCenter?.code
+    );
+  }
+
+  /** Destino TOTVS: POST 1.1.26 na geração. Destino Conecta: só o fluxo interno. */
+  private async sendCreatedOrderToTotvsIfNeeded<T extends { id: string; orderNumber?: string | null }>(
+    order: T & {
+      totvsDestination?: string | null;
+      materialRequest?: { costCenter?: { name?: string | null; code?: string | null } | null } | null;
+    },
+    userId: string
+  ) {
+    if (this.resolveCreatedOcDestination(order) !== 'TOTVS') return order;
+    try {
+      return await this.sendToTotvs(order.id, userId);
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      console.warn(`[TOTVS OC] OC ${order.orderNumber || order.id} criada no Conecta; POST RM falhou: ${detail}`);
+      return Object.assign(order, { totvsSendError: detail });
+    }
+  }
+
+  async sendToTotvs(id: string, userId: string) {
+    const order: any = await prisma.purchaseOrder.findUnique({
+      where: { id },
+      include: {
+        supplier: true,
+        items: {
+          include: {
+            material: { select: { name: true, description: true, sinapiCode: true } },
+          },
+          orderBy: { createdAt: 'asc' },
+        },
+        materialRequest: {
+          select: { costCenter: { select: { name: true, code: true, polo: true, state: true } } },
+        },
+      },
+    });
+    if (!order) throw new Error('Ordem de compra não encontrada');
+    try {
+      const extra = await prisma.$queryRaw<Array<{ totvsCodLoc: string | null; stockLocationId: string | null }>>`
+        SELECT "totvsCodLoc", "stockLocationId" FROM purchase_orders WHERE id = ${id}
+      `;
+      if (extra[0]) {
+        (order as { totvsCodLoc?: string | null }).totvsCodLoc = extra[0].totvsCodLoc;
+        (order as { stockLocationId?: string | null }).stockLocationId = extra[0].stockLocationId;
+      }
+    } catch {
+      /* coluna pode ainda não existir no client antigo */
+    }
+    try {
+      const cmIds = (order.items || [])
+        .map((item: { material?: { sinapiCode?: string | null } | null }) =>
+          constructionMaterialIdFromSinapi(item.material?.sinapiCode)
+        )
+        .filter((mid: string | null): mid is string => Boolean(mid));
+      if (cmIds.length) {
+        const prds = await prisma.$queryRaw<Array<{ id: string; totvsIdPrd: number | null }>>`
+          SELECT id, "totvsIdPrd" FROM construction_materials WHERE id IN (${Prisma.join(cmIds)})
+        `;
+        const byId = new Map(prds.map((row) => [row.id, row.totvsIdPrd]));
+        for (const item of order.items || []) {
+          const cmId = constructionMaterialIdFromSinapi(item.material?.sinapiCode);
+          const idPrd = cmId ? byId.get(cmId) : null;
+          if (idPrd != null && item.material) {
+            item.material.totvsIdPrd = idPrd;
+          }
+        }
+      }
+    } catch {
+      /* coluna totvsIdPrd pode ainda não existir */
+    }
+    if (order.totvsIdMov) {
+      throw new Error(
+        `Esta OC já foi enviada ao TOTVS (IdMov ${order.totvsIdMov}). O Conecta não altera movimento existente no RM.`
+      );
+    }
+
+    const destination =
+      order.totvsDestination ||
+      resolveOcDestinationFromCostCenter(
+        order.materialRequest?.costCenter?.name,
+        order.materialRequest?.costCenter?.code
+      );
+    if (destination !== 'TOTVS') {
+      throw new Error('Esta OC segue o fluxo no Conecta e não é enviada ao TOTVS');
+    }
+
+    const centroCusto = (order.materialRequest?.costCenter?.code || '').trim();
+    if (!centroCusto) {
+      throw new Error('Centro de custo da RM sem código TOTVS. Cadastre o código do CC no Conecta.');
+    }
+    const fornecedorCodigo = toTotvsCodCfo(order.supplier?.code);
+    if (!fornecedorCodigo) {
+      throw new Error('Fornecedor sem código TOTVS. Cadastre o código do fornecedor no Conecta.');
+    }
+    const tipoFrete = (order.freightType || '').trim().toUpperCase();
+    if (!isTotvsFreightType(tipoFrete)) {
+      throw new Error('Tipo de frete é obrigatório para enviar ao TOTVS');
+    }
+    const condicaoPagamento = toTotvsPaymentCondition(order.paymentCondition, order.paymentType);
+    if (!condicaoPagamento) {
+      throw new Error('Condição de pagamento é obrigatória para enviar ao TOTVS');
+    }
+    if (order.paymentType === 'AVISTA' && condicaoPagamento !== TOTVS_OC_PAYMENT_AVISTA) {
+      throw new Error('Para teste à vista no TOTVS use a condição 001 — A VISTA SEM PRAZO');
+    }
+
+    const [hydrated] = await withPurchaseOrderCatalogCodes([order]);
+    const items = [];
+    for (const [index, item] of (hydrated.items || []).entries()) {
+      const catalogCode = (item.material?.code || '').trim();
+      const sinapi = (item.material?.sinapiCode || '').trim();
+      const produtoCodigo = catalogCode || (!sinapi.startsWith('CM-') ? sinapi : '');
+      const descricao = (item.material?.description || item.material?.name || '').trim();
+      if (!produtoCodigo) {
+        throw new Error(
+          `Item ${index + 1}: cadastre o código do produto TOTVS no material. O código interno CM-* não existe no RM.`
+        );
+      }
+      if (!descricao) {
+        throw new Error(`Item ${index + 1}: descrição completa do item é obrigatória`);
+      }
+      const totvsIdPrd = Number((item.material as { totvsIdPrd?: number | null } | undefined)?.totvsIdPrd);
+      items.push({
+        sequencial: index + 1,
+        produtoCodigo,
+        produtoId: Number.isFinite(totvsIdPrd) && totvsIdPrd > 0 ? totvsIdPrd : undefined,
+        descricao,
+        unidade: toTotvsUnit(item.unit),
+        quantidade: Number(item.quantity),
+        precoUnitario: Number(item.unitPrice),
+        centroCusto,
+      });
+    }
+
+    const bancoAgPix = [
+      order.supplier?.bank,
+      order.supplier?.agency,
+      order.supplier?.account,
+      order.pixKeyType && order.pixKey ? `PIX(${order.pixKeyType}): ${order.pixKey}` : null,
+    ]
+      .filter((v) => v && String(v).trim())
+      .join(' | ');
+
+    const filial =
+      parseTotvsFilial((order as { totvsCodFilial?: number | null }).totvsCodFilial) ??
+      resolveTotvsFilialFromCostCenter(order.materialRequest?.costCenter);
+
+    const codLoc =
+      String((order as { totvsCodLoc?: string | null }).totvsCodLoc || '').trim() ||
+      String((order as { stockLocation?: { code?: string | null } | null }).stockLocation?.code || '').trim();
+    if (!codLoc) {
+      throw new Error('Informe o local de estoque da OC.');
+    }
+
+    const saved = await totvsRmMovimentoService.saveOc1126({
+      fornecedorCodigo,
+      fornecedorCnpj: order.supplier?.cnpj,
+      filial,
+      centroCusto,
+      centroCustoNome: order.materialRequest?.costCenter?.name || null,
+      codLoc,
+      condicaoPagamento,
+      tipoFrete,
+      dataEmissao: order.orderDate,
+      dataEntrega: order.expectedDelivery,
+      observacao: order.notes,
+      bancoAgPix: bancoAgPix || null,
+      items,
+    });
+
+    const sentData = {
+      totvsIdMov: saved.idMov,
+      totvsCodColigada: 1,
+      totvsNumMovimento: saved.numMovimento,
+      totvsSentAt: new Date(),
+      totvsSentBy: userId,
+      totvsDestination: 'TOTVS',
+    };
+    try {
+      await prisma.purchaseOrder.update({
+        where: { id },
+        data: { ...sentData, totvsCodFilial: filial },
+      });
+    } catch {
+      await prisma.purchaseOrder.update({
+        where: { id },
+        data: sentData,
+      });
+    }
+
+    return this.getById(id);
   }
 
   /**

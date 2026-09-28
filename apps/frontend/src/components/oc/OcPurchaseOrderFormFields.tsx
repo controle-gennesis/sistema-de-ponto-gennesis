@@ -1,6 +1,7 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect, useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { PaymentConditionSelect } from '@/components/oc/PaymentConditionSelect';
 import { AsyncSearchSelectDropdown } from '@/components/ui/AsyncSearchSelectDropdown';
 import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
@@ -10,12 +11,189 @@ import {
   formatCurrencyInputBrFromNumber,
   maskCurrencyInputBrOrEmpty
 } from '@/lib/maskCurrencyBr';
+import api from '@/lib/api';
+import {
+  parseTotvsFilial,
+  resolveTotvsFilialFromCostCenter,
+  TOTVS_FREIGHT_TYPES,
+  TOTVS_OC_FILIAL_OPTIONS,
+  TOTVS_OC_PAYMENT_AVISTA,
+  TOTVS_OC_PAYMENT_AVISTA_LABEL,
+  totvsFilialLabel,
+  totvsFreightTypeLabel,
+} from '@/lib/ocTotvsDestination';
 import { formatCurrencyBR } from '@/app/ponto/gerenciar-materiais/_lib/ocAmounts';
 import { catalogMaterialLabel, materialProductCode } from '@/app/ponto/gerenciar-materiais/_lib/display';
 import {
   formatOcCorrectionAuthor,
   type OcCorrectionInfo,
 } from '@/lib/ocCorrectionNotes';
+
+export const TOTVS_OC_FILIAL_CODE = '1';
+
+export function OcFilialField({
+  value,
+  onChange,
+  readOnly,
+  labelClassName,
+}: {
+  value?: string | number | null;
+  onChange?: (code: string) => void;
+  readOnly?: boolean;
+  labelClassName?: string;
+}) {
+  const selected = String(value === 5 || value === '5' ? 5 : 1);
+  return (
+    <div>
+      <label className={labelClassName || 'block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'}>
+        Filial {readOnly ? '' : '*'}
+      </label>
+      {readOnly || !onChange ? (
+        <div className={ocFieldReadonlyCls} aria-readonly="true">
+          {totvsFilialLabel(selected)}
+        </div>
+      ) : (
+        <SingleSelectSearchDropdown
+          value={selected}
+          onChange={onChange}
+          options={TOTVS_OC_FILIAL_OPTIONS.map((row) => ({
+            value: row.value,
+            label: row.label,
+            searchText: row.label,
+          }))}
+          allowEmpty={false}
+          placeholder="Selecione..."
+          searchPlaceholder="Pesquisar..."
+          noFocusRing
+        />
+      )}
+    </div>
+  );
+}
+
+/** @deprecated Use OcFilialField */
+export function OcFilialReadonlyField() {
+  return <OcFilialField value={TOTVS_OC_FILIAL_CODE} readOnly />;
+}
+
+export type StockLocationOption = {
+  id: string;
+  code: string;
+  name: string;
+  filial?: number;
+  polo?: string | null;
+};
+
+export function formatOcCostCenterLabel(
+  cc?: { code?: string | null; name?: string | null } | null
+): string {
+  if (!cc) return '—';
+  const code = (cc.code || '').trim();
+  const name = (cc.name || '').trim();
+  if (code && name) return `${code} — ${name}`;
+  return name || code || '—';
+}
+
+export function formatOcStockLocationLabel(
+  loc?: { code?: string | null; name?: string | null } | null
+): string {
+  if (!loc) return '';
+  const code = (loc.code || '').trim();
+  const name = (loc.name || '').trim();
+  if (code && name) return `${code} — ${name}`;
+  return name || code || '';
+}
+
+export function OcCostCenterField({
+  label,
+  labelClassName,
+}: {
+  label?: string | null;
+  labelClassName?: string;
+}) {
+  return (
+    <div>
+      <label className={labelClassName || 'block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'}>
+        Centro de custo
+      </label>
+      <div className={ocFieldReadonlyCls} aria-readonly="true">
+        {label?.trim() || '—'}
+      </div>
+    </div>
+  );
+}
+
+export function OcStockLocationField({
+  value,
+  filial,
+  onChange,
+  readOnly,
+  selectedLabel,
+  labelClassName,
+  required = true,
+}: {
+  value?: string | null;
+  filial?: string | number | null;
+  onChange?: (location: StockLocationOption | null) => void;
+  readOnly?: boolean;
+  selectedLabel?: string | null;
+  labelClassName?: string;
+  required?: boolean;
+}) {
+  const filialCode = String(parseTotvsFilial(filial));
+  const { data: locations = [] } = useQuery({
+    queryKey: ['stock-locations', 'oc', filialCode],
+    queryFn: async () => {
+      const res = await api.get('/stock-locations', {
+        params: { isActive: 'true', filial: filialCode, page: 1, limit: 2000 },
+      });
+      return (res.data?.data || []) as StockLocationOption[];
+    },
+    staleTime: 30_000,
+  });
+
+  const selected = locations.find((row) => row.id === value) || null;
+
+  useEffect(() => {
+    if (!value || !locations.length || !onChange) return;
+    if (!selected) onChange(null);
+    // onChange é callback do pai; só reagimos à filial/lista.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filialCode, locations, selected, value]);
+
+  const options = useMemo(
+    () =>
+      locations.map((row) => ({
+        value: row.id,
+        label: formatOcStockLocationLabel(row) || row.code,
+        searchText: `${row.code} ${row.name}`,
+      })),
+    [locations]
+  );
+
+  return (
+    <div>
+      <label className={labelClassName || 'block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'}>
+        Local de estoque {readOnly || !required ? '' : '*'}
+      </label>
+      {readOnly || !onChange ? (
+        <div className={ocFieldReadonlyCls} aria-readonly="true">
+          {selectedLabel || formatOcStockLocationLabel(selected) || '—'}
+        </div>
+      ) : (
+        <SingleSelectSearchDropdown
+          value={value || ''}
+          onChange={(id) => onChange(locations.find((row) => row.id === id) || null)}
+          options={options}
+          allowEmpty
+          placeholder="Selecione o local de estoque..."
+          searchPlaceholder="Pesquisar local..."
+          noFocusRing
+        />
+      )}
+    </div>
+  );
+}
 
 export const OC_PIX_KEY_TYPES = ['ALEATÓRIA', 'CELULAR', 'CNPJ', 'CPF', 'E-MAIL'] as const;
 
@@ -81,6 +259,10 @@ export type OcPurchaseOrderFormValues = {
   paymentDetails: string;
   pixKeyType: string;
   pixKey: string;
+  freightType: string;
+  totvsCodFilial: string;
+  stockLocationId: string;
+  totvsCodLoc: string;
   freightAmount: string;
   notes: string;
   items: OcFormLineItem[];
@@ -97,6 +279,8 @@ type OcPurchaseOrderFormFieldsProps = {
   values: OcPurchaseOrderFormValues;
   paymentConditionLabel?: string;
   correctionInfo?: OcCorrectionInfo | null;
+  costCenterLabel?: string | null;
+  stockLocationLabel?: string | null;
   onChange?: (patch: Partial<OcPurchaseOrderFormValues>) => void;
   onItemChange?: (index: number, patch: Partial<OcFormLineItem>) => void;
   supplierField?: SupplierFieldProps;
@@ -117,6 +301,8 @@ export function OcPurchaseOrderFormFields({
   values,
   paymentConditionLabel,
   correctionInfo,
+  costCenterLabel,
+  stockLocationLabel,
   onChange,
   onItemChange,
   supplierField,
@@ -258,6 +444,61 @@ export function OcPurchaseOrderFormFields({
         )}
       </div>
 
+      <OcFilialField
+        value={values.totvsCodFilial}
+        onChange={(code) =>
+          onChange?.({
+            totvsCodFilial: code,
+            stockLocationId: '',
+            totvsCodLoc: '',
+          })
+        }
+        readOnly={!isEdit}
+      />
+
+      <OcCostCenterField label={costCenterLabel} />
+
+      <OcStockLocationField
+        value={values.stockLocationId}
+        filial={values.totvsCodFilial}
+        selectedLabel={stockLocationLabel || formatOcStockLocationLabel({
+          code: values.totvsCodLoc,
+          name: stockLocationLabel,
+        })}
+        readOnly={!isEdit}
+        onChange={(loc) =>
+          onChange?.({
+            stockLocationId: loc?.id || '',
+            totvsCodLoc: loc?.code || '',
+          })
+        }
+      />
+
+      <div>
+        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+          Tipo de Frete {isEdit ? '*' : ''}
+        </label>
+        {isEdit ? (
+          <SingleSelectSearchDropdown
+            value={values.freightType}
+            onChange={(v) => onChange?.({ freightType: v })}
+            options={TOTVS_FREIGHT_TYPES.map((row) => ({
+              value: row.code,
+              label: row.label,
+              searchText: `${row.code} ${row.label}`,
+            }))}
+            allowEmpty
+            placeholder="Selecione..."
+            searchPlaceholder="Pesquisar..."
+            noFocusRing
+          />
+        ) : (
+          <div className={ocFieldReadonlyCls}>
+            {totvsFreightTypeLabel(values.freightType) || values.freightType || '—'}
+          </div>
+        )}
+      </div>
+
       <div>
         <span className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
           Tipo de pagamento {isEdit ? '*' : ''}
@@ -271,7 +512,7 @@ export function OcPurchaseOrderFormFields({
               onClick={() =>
                 onChange?.({
                   paymentType: 'AVISTA',
-                  paymentCondition: 'AVISTA'
+                  paymentCondition: TOTVS_OC_PAYMENT_AVISTA
                 })
               }
               className={ocPaymentSegmentCls(isAvista)}
@@ -285,7 +526,10 @@ export function OcPurchaseOrderFormFields({
               onClick={() =>
                 onChange?.({
                   paymentType: 'BOLETO',
-                  paymentCondition: values.paymentCondition === 'AVISTA' ? 'BOLETO_30' : values.paymentCondition,
+                  paymentCondition:
+                    values.paymentCondition === 'AVISTA' || values.paymentCondition === TOTVS_OC_PAYMENT_AVISTA
+                      ? 'BOLETO_30'
+                      : values.paymentCondition,
                   pixKeyType: '',
                   pixKey: ''
                 })
@@ -302,6 +546,17 @@ export function OcPurchaseOrderFormFields({
           </div>
         )}
       </div>
+
+      {isAvista ? (
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            Condição de pagamento
+          </label>
+          <div className={ocFieldReadonlyCls} aria-readonly="true">
+            {TOTVS_OC_PAYMENT_AVISTA_LABEL}
+          </div>
+        </div>
+      ) : null}
 
       {!isAvista ? (
         <div>
@@ -457,7 +712,15 @@ export type OcFormOrderSource = {
   paymentDetails?: string | null;
   pixKeyType?: string | null;
   pixKey?: string | null;
+  freightType?: string | null;
+  totvsCodFilial?: number | string | null;
+  stockLocationId?: string | null;
+  totvsCodLoc?: string | null;
+  stockLocation?: { id?: string | null; code?: string | null; name?: string | null } | null;
   freightAmount?: number | string | null;
+  materialRequest?: {
+    costCenter?: { polo?: string | null; state?: string | null; name?: string | null; code?: string | null } | null;
+  } | null;
   amountToPay?: number | string | null;
   notes?: string | null;
   items?: Array<{
@@ -520,6 +783,17 @@ export function buildOcFormValuesFromOrder(
     paymentDetails: order.paymentDetails || '',
     pixKeyType: order.pixKeyType || '',
     pixKey: order.pixKey || '',
+    freightType: order.freightType || '',
+    totvsCodFilial: String(
+      order.totvsCodFilial === 1 ||
+        order.totvsCodFilial === '1' ||
+        order.totvsCodFilial === 5 ||
+        order.totvsCodFilial === '5'
+        ? parseTotvsFilial(order.totvsCodFilial)
+        : resolveTotvsFilialFromCostCenter(order.materialRequest?.costCenter)
+    ),
+    stockLocationId: order.stockLocationId || order.stockLocation?.id || '',
+    totvsCodLoc: order.totvsCodLoc || order.stockLocation?.code || '',
     freightAmount: freightStored,
     notes: options?.stripCorrectionNotes ? options.stripCorrectionNotes(order.notes) : order.notes || '',
     items

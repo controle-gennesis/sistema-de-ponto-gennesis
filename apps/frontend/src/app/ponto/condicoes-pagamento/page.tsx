@@ -43,6 +43,7 @@ export default function CondicoesPagamentoPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<PaymentConditionRow | null>(null);
+  const [formCode, setFormCode] = useState('');
   const [formLabel, setFormLabel] = useState('');
   const [formPaymentType, setFormPaymentType] = useState<'AVISTA' | 'BOLETO'>('BOLETO');
   const [formSortOrder, setFormSortOrder] = useState(100);
@@ -127,6 +128,7 @@ export default function CondicoesPagamentoPage() {
 
   const createMutation = useMutation({
     mutationFn: async (body: {
+      code?: string;
       label: string;
       paymentType: string;
       parcelCount: number;
@@ -151,6 +153,7 @@ export default function CondicoesPagamentoPage() {
     }: {
       id: string;
       data: Partial<{
+        code: string;
         label: string;
         sortOrder: number;
         isActive: boolean;
@@ -161,11 +164,13 @@ export default function CondicoesPagamentoPage() {
       const res = await api.patch(`/payment-conditions/${id}`, data);
       return res.data;
     },
-    onSuccess: () => {
+    onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ['payment-conditions'] });
+      setShowForm(false);
       setEditing(null);
       resetForm();
-      toast.success('Condição atualizada');
+      const savedCode = res?.data?.code;
+      toast.success(savedCode ? `Condição atualizada. ID ${savedCode}` : 'Condição atualizada');
     },
     onError: (err: any) => toast.error(err.response?.data?.message || 'Erro ao atualizar')
   });
@@ -189,7 +194,17 @@ export default function CondicoesPagamentoPage() {
     deleteMutation.mutate(id);
   };
 
+  const suggestedNextCode = useMemo(() => {
+    let max = 0;
+    for (const row of listData || []) {
+      const raw = String(row.code || '').trim();
+      if (/^\d+$/.test(raw)) max = Math.max(max, parseInt(raw, 10));
+    }
+    return String(max + 1);
+  }, [listData]);
+
   const resetForm = () => {
+    setFormCode('');
     setFormLabel('');
     setFormPaymentType('BOLETO');
     setFormSortOrder(100);
@@ -205,10 +220,23 @@ export default function CondicoesPagamentoPage() {
   }, []);
 
   const { requestClose: requestClosePaymentForm, confirmUi: paymentFormConfirmUi } =
-    useModalCloseConfirm(closePaymentForm, { isParentOpen: showForm });
+    useModalCloseConfirm(closePaymentForm, {
+      isParentOpen: showForm,
+      className: 'z-[2300]',
+    });
+
+  const openCreateForm = () => {
+    closeRowActionMenu();
+    setEditing(null);
+    resetForm();
+    setFormCode(suggestedNextCode);
+    setShowForm(true);
+  };
 
   const openEdit = (r: PaymentConditionRow) => {
+    closeRowActionMenu();
     setEditing(r);
+    setFormCode(r.code || '');
     setFormLabel(r.label);
     setFormPaymentType(r.paymentType as 'AVISTA' | 'BOLETO');
     setFormSortOrder(r.sortOrder);
@@ -297,11 +325,7 @@ export default function CondicoesPagamentoPage() {
                   {canCreate && (
                   <button
                     type="button"
-                    onClick={() => {
-                      setEditing(null);
-                      resetForm();
-                      setShowForm(true);
-                    }}
+                    onClick={openCreateForm}
                     className="flex h-10 items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
                   >
                     <Plus className="h-4 w-4 shrink-0" />
@@ -402,14 +426,9 @@ export default function CondicoesPagamentoPage() {
                     onClose={closeRowActionMenu}
                     onEdit={canEdit ? () => openEdit(rowForActionMenu) : undefined}
                     onDelete={canDelete ? () => {
-                      if (rowForActionMenu.isSystem) {
-                        toast.error('Condição padrão do sistema não pode ser excluída.');
-                        return;
-                      }
+                      closeRowActionMenu();
                       setDeleteId(rowForActionMenu.id);
                     } : undefined}
-                    deleteDisabled={rowForActionMenu.isSystem}
-                    deleteDisabledTitle="Condição do sistema não pode ser excluída"
                   />
                 )}
               </>
@@ -424,10 +443,28 @@ export default function CondicoesPagamentoPage() {
                 aria-hidden
                 onClick={requestClosePaymentForm}
               />
-              <div className="relative z-[1101] max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-lg bg-white p-6 shadow-xl dark:bg-gray-800">
+              <div
+                className="relative z-[1101] max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-lg bg-white p-6 shadow-xl dark:bg-gray-800"
+                onClick={(e) => e.stopPropagation()}
+              >
                 <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">
                   {editing ? 'Editar condição' : 'Nova condição'}
                 </h3>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">ID</label>
+                <input
+                  type="text"
+                  name="payment-condition-code"
+                  autoComplete="off"
+                  value={formCode}
+                  onChange={(e) => setFormCode(e.target.value)}
+                  className="relative z-10 mb-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 font-mono text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                  placeholder="Ex: 001"
+                />
+                <p className="mb-4 text-xs text-gray-500 dark:text-gray-400">
+                  {editing
+                    ? 'ID da condição. Altere somente se precisar alinhar com o TOTVS.'
+                    : 'ID sugerido automaticamente. Pode alterar se precisar.'}
+                </p>
                 {!editing && (
                   <>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Tipo de pagamento</label>
@@ -528,7 +565,7 @@ export default function CondicoesPagamentoPage() {
                 <div className="flex justify-end gap-2 mt-4">
                   <button
                     type="button"
-                    onClick={requestClosePaymentForm}
+                    onClick={closePaymentForm}
                     className="px-4 py-2 bg-gray-100 dark:bg-gray-700 rounded-lg"
                   >
                     Cancelar
@@ -542,6 +579,11 @@ export default function CondicoesPagamentoPage() {
                           toast.error('Você não tem permissão para editar.');
                           return;
                         }
+                        const code = formCode.trim();
+                        if (!code) {
+                          toast.error('Informe o ID da condição');
+                          return;
+                        }
                         const days = parseDaysFromForm();
                         if (formPaymentType === 'BOLETO') {
                           if (!days || days.length !== formParcelCount) {
@@ -551,6 +593,7 @@ export default function CondicoesPagamentoPage() {
                           updateMutation.mutate({
                             id: editing.id,
                             data: {
+                              code,
                               label: formLabel.trim(),
                               sortOrder: formSortOrder,
                               isActive: formActive,
@@ -562,6 +605,7 @@ export default function CondicoesPagamentoPage() {
                           updateMutation.mutate({
                             id: editing.id,
                             data: {
+                              code,
                               label: formLabel.trim(),
                               sortOrder: formSortOrder,
                               isActive: formActive,
@@ -584,8 +628,10 @@ export default function CondicoesPagamentoPage() {
                           toast.error('Você não tem permissão para criar.');
                           return;
                         }
+                        const code = formCode.trim();
                         if (formPaymentType === 'AVISTA') {
                           createMutation.mutate({
+                            ...(code ? { code } : {}),
                             label: formLabel.trim(),
                             paymentType: 'AVISTA',
                             parcelCount: 1,
@@ -599,6 +645,7 @@ export default function CondicoesPagamentoPage() {
                           return;
                         }
                         createMutation.mutate({
+                          ...(code ? { code } : {}),
                           label: formLabel.trim(),
                           paymentType: 'BOLETO',
                           parcelCount: formParcelCount,

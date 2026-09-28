@@ -111,6 +111,7 @@ interface Supplier {
 }
 
 type SupplierFormState = {
+  code: string;
   partyType: string;
   tradeName: string;
   name: string;
@@ -142,6 +143,7 @@ type SupplierFormState = {
 };
 
 const EMPTY_FORM: SupplierFormState = {
+  code: '',
   partyType: 'Fornecedor',
   tradeName: '',
   name: '',
@@ -196,8 +198,8 @@ function getSupplierDetailSections(s: Supplier): DetailSection[] {
     {
       title: 'Identificação',
       rows: [
-        { label: 'ID', value: cell(s.code) },
-        { label: 'Cliente/Fornecedor', value: cell(s.partyType) },
+        { label: 'Cliente/Fornecedor', value: cell(s.code) },
+        { label: 'Tipo', value: cell(s.partyType) },
         { label: 'Nome Fantasia', value: cell(s.tradeName) },
         { label: 'Nome', value: cell(s.name) },
         { label: 'CPF/CNPJ', value: cell(s.cnpj) },
@@ -255,6 +257,7 @@ function getSupplierDetailSections(s: Supplier): DetailSection[] {
 
 function supplierToForm(s: Supplier): SupplierFormState {
   return {
+    code: s.code || '',
     partyType: s.partyType || 'Fornecedor',
     tradeName: s.tradeName || '',
     name: s.name || '',
@@ -430,6 +433,10 @@ export default function FornecedoresPage() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!formData.code.trim()) {
+      toast.error('Código Cliente/Fornecedor é obrigatório');
+      return;
+    }
     if (!formData.name.trim()) {
       toast.error('Nome é obrigatório');
       return;
@@ -824,7 +831,7 @@ export default function FornecedoresPage() {
                       </colgroup>
                       <thead className="border-b border-gray-200 dark:border-gray-700">
                         <tr>
-                          <th scope="col" className={cadastroListClasses.th}>ID</th>
+                          <th scope="col" className={cadastroListClasses.th}>Cliente/Fornecedor</th>
                           <th scope="col" className={`${cadastroListClasses.th} min-w-[12rem]`}>
                             Nome Fantasia
                           </th>
@@ -928,7 +935,19 @@ export default function FornecedoresPage() {
                   </h3>
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <div>
-                      <label className={labelClass}>Cliente/Fornecedor</label>
+                      <label className={labelClass}>Cliente/Fornecedor *</label>
+                      <input
+                        type="text"
+                        value={formData.code}
+                        onChange={(e) => setFormData({ ...formData, code: e.target.value })}
+                        placeholder="Ex.: 000019582"
+                        className={inputClass}
+                        inputMode="numeric"
+                        autoComplete="off"
+                      />
+                    </div>
+                    <div>
+                      <label className={labelClass}>Tipo</label>
                       <StringSingleSelectDropdown
                         value={formData.partyType}
                         onChange={(v) => setFormData({ ...formData, partyType: v })}

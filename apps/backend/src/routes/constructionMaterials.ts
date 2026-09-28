@@ -71,6 +71,10 @@ router.get('/totvs/produtos-ativos', (req, res, next) =>
   constructionMaterialController.getTotvsProdutosAtivos(req, res, next)
 );
 
+router.get('/next-code', (req, res, next) =>
+  constructionMaterialController.getNextMaterialCode(req, res, next)
+);
+
 // Listar todos os materiais
 router.get('/', (req, res, next) => 
   constructionMaterialController.getAllMaterials(req, res, next)

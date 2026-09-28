@@ -446,6 +446,7 @@ function inferCategoryFromHref(href: string): string {
   if (
     [
       '/ponto/centros-custo',
+      '/ponto/locais-estoque',
       '/ponto/materiais-construcao',
       '/ponto/fornecedores',
       '/ponto/veiculos',
@@ -511,7 +512,12 @@ function moduleIcon(href: string): LucideIcon {
     href.includes('fornecedores')
   )
     return Package;
-  if (href.includes('centros-custo') || href.includes('natureza') || href.includes('condicoes'))
+  if (
+    href.includes('centros-custo') ||
+    href.includes('locais-estoque') ||
+    href.includes('natureza') ||
+    href.includes('condicoes')
+  )
     return FolderOpen;
   if (href === '/ponto') return Clock;
   if (href.startsWith('/relatorios')) return Layers;

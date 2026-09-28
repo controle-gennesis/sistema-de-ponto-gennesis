@@ -67,6 +67,8 @@ import { PaymentConditionSelect, buildPaymentConditionLabelMap } from '@/compone
 import {
   OcPurchaseOrderFormFields,
   buildOcFormValuesFromOrder,
+  formatOcCostCenterLabel,
+  formatOcStockLocationLabel,
   getOcSupplierLabel,
   type OcFormOrderSource,
   type OcPurchaseOrderFormValues,
@@ -78,6 +80,7 @@ import { ymdAddDays } from '@/components/oc/boletoParcelasUtils';
 import { canActOnOcApprovalStatus } from '@/lib/ocApprovalPermissions';
 import { canReturnOcItemToRm } from '@/lib/rmProcurementCoverage';
 import { isUnbRelatedLabel } from '@/lib/unbBranding';
+import { resolveOcDestinationFromCostCenter, TOTVS_OC_PAYMENT_AVISTA } from '@/lib/ocTotvsDestination';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useModalCloseConfirm } from '@/hooks/useModalCloseConfirm';
 import {
@@ -205,6 +208,15 @@ export interface PurchaseOrder {
   nfAttachments?: unknown;
   /** Frete (R$). Total a pagar = soma dos itens + frete. */
   freightAmount?: number | string | null;
+  freightType?: string | null;
+  totvsCodFilial?: number | string | null;
+  stockLocationId?: string | null;
+  totvsCodLoc?: string | null;
+  stockLocation?: { id?: string | null; code?: string | null; name?: string | null } | null;
+  totvsDestination?: string | null;
+  totvsIdMov?: number | null;
+  totvsNumMovimento?: string | null;
+  totvsSentAt?: string | null;
   amountToPay?: number | string | null;
   supplier: {
     id: string;
@@ -234,7 +246,13 @@ export interface PurchaseOrder {
     demandSheetAttachmentUrl?: string | null;
     demandSheetAttachmentName?: string | null;
     demandSheetAttachments?: Array<{ url?: string; name?: string }> | null;
-    costCenter?: { id: string; code?: string | null; name?: string | null };
+    costCenter?: {
+      id: string;
+      code?: string | null;
+      name?: string | null;
+      polo?: string | null;
+      state?: string | null;
+    };
     quoteMaps?: Array<{ id: string; createdAt: string }>;
   };
   quoteMap?: {
@@ -392,6 +410,17 @@ function isOcUnbCostCenter(order: {
 }): boolean {
   const cc = order.materialRequest?.costCenter;
   return isUnbRelatedLabel(cc?.name) || isUnbRelatedLabel(cc?.code);
+}
+
+function ocTotvsDestinationOf(order: {
+  totvsDestination?: string | null;
+  materialRequest?: { costCenter?: { code?: string | null; name?: string | null } | null } | null;
+}): 'CONECTA' | 'TOTVS' {
+  if (order.totvsDestination === 'CONECTA' || order.totvsDestination === 'TOTVS') {
+    return order.totvsDestination;
+  }
+  const cc = order.materialRequest?.costCenter;
+  return resolveOcDestinationFromCostCenter(cc?.name, cc?.code);
 }
 
 /** UNB: só gestor (PENDING → APPROVED). Demais: compras → gestor → diretoria. */
@@ -2872,6 +2901,29 @@ export function OcPurchaseOrdersPanel({
     !financialEntriesLoading &&
     canSubmitProofValidation;
 
+  const sendToTotvsMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await api.post(`/purchase-orders/${id}/send-to-totvs`);
+      return res.data;
+    },
+    onSuccess: (res) => {
+      const updated = (res?.data ?? res) as PurchaseOrder;
+      queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
+      setSelectedOrder((prev) => (prev && prev.id === updated.id ? { ...prev, ...updated } : prev));
+      toast.success(
+        updated.totvsIdMov
+          ? `OC enviada ao TOTVS. IdMov ${updated.totvsIdMov}`
+          : 'OC enviada ao TOTVS.'
+      );
+    },
+    onError: (error: unknown) => {
+      const msg =
+        (error as { response?: { data?: { message?: string } } })?.response?.data?.message ||
+        (error instanceof Error ? error.message : 'Erro ao enviar a OC ao TOTVS');
+      toast.error(msg, { duration: 8000 });
+    },
+  });
+
   const approveMutation = useMutation({
     mutationFn: async ({
       id,
@@ -4176,6 +4228,10 @@ export function OcPurchaseOrdersPanel({
       toast.error('Selecione o fornecedor.');
       return;
     }
+    if (!editOcForm.stockLocationId && !editOcForm.totvsCodLoc) {
+      toast.error('Informe o local de estoque.');
+      return;
+    }
     if (
       isEditOcAvistaPaymentIncomplete(
         editOcForm.paymentType,
@@ -4196,11 +4252,15 @@ export function OcPurchaseOrdersPanel({
     const payload = {
       supplierId: editOcForm.supplierId,
       paymentType: editOcForm.paymentType,
-      paymentCondition: editOcForm.paymentType === 'AVISTA' ? 'AVISTA' : editOcForm.paymentCondition,
+      paymentCondition: editOcForm.paymentType === 'AVISTA' ? TOTVS_OC_PAYMENT_AVISTA : editOcForm.paymentCondition,
       paymentDetails: editOcForm.paymentDetails.trim() || null,
       pixKeyType: editOcForm.paymentType === 'AVISTA' ? editOcForm.pixKeyType.trim() : null,
       pixKey: editOcForm.paymentType === 'AVISTA' ? editOcForm.pixKey.trim() : null,
       freightAmount,
+      freightType: editOcForm.freightType || null,
+      totvsCodFilial: editOcForm.totvsCodFilial || null,
+      stockLocationId: editOcForm.stockLocationId || null,
+      totvsCodLoc: editOcForm.totvsCodLoc || null,
       notes: mergedNotes,
       items: editOcForm.items.map((it) => ({
         materialId: it.materialId,
@@ -5223,6 +5283,10 @@ export function OcPurchaseOrdersPanel({
             <OcPurchaseOrderFormFields
               mode="edit"
               values={editOcForm}
+              costCenterLabel={formatOcCostCenterLabel(selectedOrder.materialRequest?.costCenter)}
+              stockLocationLabel={formatOcStockLocationLabel(
+                selectedOrder.stockLocation || { code: selectedOrder.totvsCodLoc }
+              )}
               correctionInfo={parseLastOcCorrectionInfo(selectedOrder.notes)}
               parseMoneyInput={parseMoneyInput}
               onChange={(patch) => setEditOcForm((prev) => (prev ? { ...prev, ...patch } : prev))}
@@ -5360,6 +5424,10 @@ export function OcPurchaseOrdersPanel({
                     materialLineLabel: catalogMaterialLabel,
                     parseFreight: resolveOcFreightAmountStr
                   })}
+                  costCenterLabel={formatOcCostCenterLabel(selectedOrder.materialRequest?.costCenter)}
+                  stockLocationLabel={formatOcStockLocationLabel(
+                    selectedOrder.stockLocation || { code: selectedOrder.totvsCodLoc }
+                  )}
                   paymentConditionLabel={
                     selectedOrder.paymentCondition
                       ? paymentConditionLabelMap[selectedOrder.paymentCondition] ||
@@ -6486,9 +6554,31 @@ export function OcPurchaseOrdersPanel({
             )}
             </div>
             {(showListApprovalActions(selectedOrder.status) ||
-              (selectedOrder.status === 'IN_REVIEW' && canEditOcInReview)) && (
+              (selectedOrder.status === 'IN_REVIEW' && canEditOcInReview) ||
+              ((canApproveOcCompras || isAdministrator) &&
+                ocTotvsDestinationOf(selectedOrder) === 'TOTVS')) && (
             <div className="shrink-0 border-t border-gray-200 dark:border-gray-700 px-5 py-3 rounded-b-xl">
             <div className="flex flex-wrap gap-2">
+              {(canApproveOcCompras || isAdministrator) &&
+              ocTotvsDestinationOf(selectedOrder) === 'TOTVS' ? (
+                selectedOrder.totvsIdMov ? (
+                  <div className="flex-1 min-w-[160px] rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800 dark:border-emerald-800/60 dark:bg-emerald-950/30 dark:text-emerald-200">
+                    Enviada ao TOTVS · IdMov {selectedOrder.totvsIdMov}
+                    {selectedOrder.totvsNumMovimento
+                      ? ` · ${selectedOrder.totvsNumMovimento}`
+                      : ''}
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => sendToTotvsMutation.mutate(selectedOrder.id)}
+                    disabled={sendToTotvsMutation.isPending}
+                    className="flex-1 min-w-[160px] px-3 py-2 text-sm bg-slate-800 text-white rounded-lg hover:bg-slate-900 disabled:opacity-50 inline-flex items-center justify-center gap-1.5 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-white"
+                  >
+                    {sendToTotvsMutation.isPending ? 'Enviando…' : 'Enviar para o TOTVS'}
+                  </button>
+                )
+              ) : null}
               {showListApprovalActions(selectedOrder.status) && (
                 <button
                   type="button"

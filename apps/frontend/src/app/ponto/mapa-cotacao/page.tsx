@@ -13,7 +13,19 @@ import api from '@/lib/api';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { PaymentConditionSelect, type PaymentConditionRow } from '@/components/oc/PaymentConditionSelect';
-import { OC_PIX_KEY_TYPE_OPTIONS } from '@/components/oc/OcPurchaseOrderFormFields';
+import {
+  OC_PIX_KEY_TYPE_OPTIONS,
+  OcCostCenterField,
+  OcFilialField,
+  OcStockLocationField,
+  formatOcCostCenterLabel,
+} from '@/components/oc/OcPurchaseOrderFormFields';
+import {
+  TOTVS_FREIGHT_TYPES,
+  TOTVS_OC_PAYMENT_AVISTA,
+  TOTVS_OC_PAYMENT_AVISTA_LABEL,
+  resolveTotvsFilialFromCostCenter,
+} from '@/lib/ocTotvsDestination';
 import { SingleSelectSearchDropdown } from '@/components/ui/SingleSelectSearchDropdown';
 import {
   FinancialControlAttachmentsField,
@@ -43,6 +55,11 @@ import {
   rmHasOpenItemsForProcurement,
 } from '@/lib/rmProcurementCoverage';
 import { buildSupplierPaymentPrefill } from '@/lib/supplierPaymentPrefill';
+import {
+  ocDestinationLabel,
+  resolveOcDestinationFromCostCenter,
+  type OcDestination,
+} from '@/lib/ocTotvsDestination';
 
 type MaterialRequestItem = {
   id: string;
@@ -448,12 +465,20 @@ const mapPaymentSegmentCls = (active: boolean) =>
 
 const mapLabelCls = 'mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300';
 
+const mapDestinationSegmentCls = (active: boolean) =>
+  `w-full cursor-default rounded-lg border px-3 py-2.5 text-center text-sm font-medium ${
+    active
+      ? 'border-red-600 bg-red-50 text-red-800 dark:border-red-500 dark:bg-red-950/40 dark:text-red-200'
+      : 'border-gray-300 bg-gray-50 text-gray-500 dark:border-gray-600 dark:bg-gray-900/40 dark:text-gray-400'
+  }`;
+
 const OC_TYPE_AVISTA = 'AVISTA';
 const OC_TYPE_BOLETO = 'BOLETO';
 const OC_TYPE_CARTAO = 'CARTAO';
 
 function paymentConditionDefault(paymentType: string): string {
-  if (paymentType === OC_TYPE_AVISTA || paymentType === OC_TYPE_CARTAO) return 'AVISTA';
+  if (paymentType === OC_TYPE_AVISTA) return TOTVS_OC_PAYMENT_AVISTA;
+  if (paymentType === OC_TYPE_CARTAO) return 'AVISTA';
   return 'BOLETO_30';
 }
 
@@ -508,7 +533,7 @@ function pixKeyInputMaxLength(pixKeyType: string): number | undefined {
   return undefined;
 }
 
-function emptyPaymentDraft() {
+function emptyPaymentDraft(filial = '1') {
   return {
     paymentType: OC_TYPE_AVISTA,
     paymentCondition: paymentConditionDefault(OC_TYPE_AVISTA),
@@ -518,6 +543,10 @@ function emptyPaymentDraft() {
     observations: '',
     amountToPayStr: '',
     attachments: [] as Array<{ url: string; name: string }>,
+    freightType: 'S',
+    totvsCodFilial: filial,
+    stockLocationId: '',
+    totvsCodLoc: '',
   };
 }
 
@@ -565,6 +594,10 @@ export default function MapaCotacaoPage() {
         observations: string;
         amountToPayStr: string;
         attachments: Array<{ url: string; name: string }>;
+        freightType?: string;
+        totvsCodFilial?: string;
+        stockLocationId?: string;
+        totvsCodLoc?: string;
       }
     >
   >({});
@@ -1007,6 +1040,20 @@ export default function MapaCotacaoPage() {
     setOcItemQtyByItemId({});
   };
 
+  const selectedCostCenterName =
+    selectedRequestRaw?.costCenter?.name?.trim() ||
+    approvedRequests.find((r) => r.id === selectedRequestId)?.costCenter?.name?.trim() ||
+    '';
+  const suggestedTotvsFilial = String(
+    resolveTotvsFilialFromCostCenter(
+      selectedRequestRaw?.costCenter ||
+        approvedRequests.find((r) => r.id === selectedRequestId)?.costCenter
+    )
+  );
+  const ocDestination: OcDestination | null = selectedRequestId
+    ? resolveOcDestinationFromCostCenter(selectedCostCenterName)
+    : null;
+
   const selectedRequestLabel = useMemo(() => {
     if (!selectedRequestId) return '';
     const r = approvedRequests.find((x) => x.id === selectedRequestId);
@@ -1125,11 +1172,18 @@ export default function MapaCotacaoPage() {
           observations: '',
           amountToPayStr: totals ? String(totals.amountToPay) : '',
           attachments: [],
+          freightType: 'S',
+          totvsCodFilial: suggestedTotvsFilial,
+          stockLocationId: '',
+          totvsCodLoc: '',
         };
 
         const draft = paymentDraftBySupplier[supplierId] ?? fallbackDraft;
         const paymentType = draft.paymentType ?? OC_TYPE_AVISTA;
-        const paymentCondition = draft.paymentCondition ?? paymentConditionDefault(paymentType);
+        const paymentCondition =
+          paymentType === OC_TYPE_AVISTA
+            ? TOTVS_OC_PAYMENT_AVISTA
+            : draft.paymentCondition ?? paymentConditionDefault(paymentType);
 
         if (paymentType === OC_TYPE_AVISTA) {
           if (!draft.paymentDetails?.trim()) {
@@ -1160,6 +1214,9 @@ export default function MapaCotacaoPage() {
             throw new Error(`Informe os dados do pagamento para "${supplierName}".`);
           }
         }
+        if (!draft.stockLocationId?.trim() && !draft.totvsCodLoc?.trim()) {
+          throw new Error(`Informe o local de estoque para "${supplierName}".`);
+        }
 
         const paymentBySupplierPayload = [
           {
@@ -1172,6 +1229,10 @@ export default function MapaCotacaoPage() {
             observations: draft.observations?.trim() || undefined,
             amountToPay: totals?.amountToPay,
             attachments: draft.attachments?.length ? draft.attachments : undefined,
+            freightType: draft.freightType || 'S',
+            totvsCodFilial: draft.totvsCodFilial || suggestedTotvsFilial,
+            stockLocationId: draft.stockLocationId || undefined,
+            totvsCodLoc: draft.totvsCodLoc || undefined,
           },
         ];
 
@@ -1184,12 +1245,16 @@ export default function MapaCotacaoPage() {
           if (detail) itemNotesBySupplierItem[key] = detail;
         }
 
-        const result = await api.post(`/quote-maps/${mapId}/generate`, {
-          generateSupplierIds: suppliersToGenerate,
-          paymentBySupplier: paymentBySupplierPayload,
-          itemQuantities: itemQuantitiesForSave,
-          itemNotesBySupplierItem,
-        });
+        const result = await api.post(
+          `/quote-maps/${mapId}/generate`,
+          {
+            generateSupplierIds: suppliersToGenerate,
+            paymentBySupplier: paymentBySupplierPayload,
+            itemQuantities: itemQuantitiesForSave,
+            itemNotesBySupplierItem,
+          },
+          { timeout: 60_000 }
+        );
 
         return result.data;
       } finally {
@@ -1208,9 +1273,28 @@ export default function MapaCotacaoPage() {
       queryClient.invalidateQueries({ queryKey: ['material-requests-manage'], refetchType: 'all' });
       queryClient.invalidateQueries({ queryKey: ['material-requests-approved-map'], refetchType: 'all' });
       queryClient.invalidateQueries({ queryKey: ['material-request-detail'], refetchType: 'all' });
-      toast.success('OC gerada com sucesso!');
+      const orders = (_data?.data?.orders || _data?.orders || []) as Array<{
+        totvsIdMov?: number | null;
+        totvsSendError?: string | null;
+      }>;
+      const idMovs = orders.map((o) => o.totvsIdMov).filter((n): n is number => Number(n) > 0);
+      const totvsErrors = orders.map((o) => o.totvsSendError).filter((msg): msg is string => Boolean(msg?.trim()));
+      if (totvsErrors.length) {
+        toast.success('OC gerada no Conecta.');
+        toast.error(
+          `O TOTVS não concluiu o POST. Use Enviar para o TOTVS na OC. ${totvsErrors[0]}`,
+          { duration: 8000 }
+        );
+        return;
+      }
+      toast.success(
+        idMovs.length
+          ? `OC gerada e enviada ao TOTVS. IdMov ${idMovs.join(', ')}`
+          : 'OC gerada com sucesso!'
+      );
     },
     onError: (error: any) => {
+      queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
       const apiMsg =
         error?.response?.data?.message ||
         error?.response?.data?.error ||
@@ -1634,7 +1718,7 @@ export default function MapaCotacaoPage() {
                                                 return {
                                                   ...prev,
                                                   [supplierId]: {
-                                                    ...emptyPaymentDraft(),
+                                                    ...emptyPaymentDraft(suggestedTotvsFilial),
                                                     amountToPayStr: suggested,
                                                     paymentDetails: bankPrefill.paymentDetails,
                                                     pixKeyType: bankPrefill.pixKeyType,
@@ -1664,6 +1748,62 @@ export default function MapaCotacaoPage() {
                   )}
                 </CardContent>
               </Card>
+
+              <Card>
+                <CardHeader className="border-b-0 pb-1">
+                  <div className="min-w-0">
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                      Destino da OC
+                    </h3>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                      Definido pelo centro de custo da RM. Não editável por enquanto.
+                    </p>
+                  </div>
+                </CardHeader>
+                <CardContent className="pt-4">
+                  <div
+                    role="radiogroup"
+                    aria-label="Destino da OC"
+                    aria-disabled="true"
+                    className="grid max-w-xl grid-cols-1 gap-2 sm:grid-cols-2"
+                  >
+                    {(['CONECTA', 'TOTVS'] as const).map((option) => {
+                      const active = ocDestination === option;
+                      return (
+                        <div
+                          key={option}
+                          role="radio"
+                          aria-checked={active}
+                          aria-disabled="true"
+                          className={mapDestinationSegmentCls(active)}
+                        >
+                          {ocDestinationLabel(option)}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {selectedRequestId ? (
+                    <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">
+                      Centro de custo:{' '}
+                      <span className="font-medium text-gray-700 dark:text-gray-300">
+                        {selectedCostCenterName || '—'}
+                      </span>
+                      {ocDestination ? (
+                        <>
+                          {' '}
+                          · {ocDestination === 'CONECTA'
+                            ? 'segue o fluxo no Conecta'
+                            : 'segue via POST para o TOTVS'}
+                        </>
+                      ) : null}
+                    </p>
+                  ) : (
+                    <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">
+                      Selecione uma RM para ver o destino da OC.
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
         </div>
 
         {(() => {
@@ -1672,9 +1812,10 @@ export default function MapaCotacaoPage() {
           const sup = suppliers.find((s) => s.id === sid);
           const totals = computedSupplierTotals[sid];
           const itemsWon = wonItemsBySupplier[sid] ?? [];
-          const payType = paymentDraftBySupplier[sid]?.paymentType ?? OC_TYPE_AVISTA;
+          const draft = paymentDraftBySupplier[sid] ?? emptyPaymentDraft(suggestedTotvsFilial);
+          const payType = draft.paymentType ?? OC_TYPE_AVISTA;
           const paymentConditionValue =
-            paymentDraftBySupplier[sid]?.paymentCondition ?? paymentConditionDefault(payType);
+            draft.paymentCondition ?? paymentConditionDefault(payType);
           const closeOcModal = () => {
             if (isGenerating) return;
             setOcModalSupplierId(null);
@@ -1795,6 +1936,71 @@ export default function MapaCotacaoPage() {
                   </div>
                 </div>
 
+                <OcFilialField
+                  value={draft.totvsCodFilial || suggestedTotvsFilial}
+                  onChange={(code) => {
+                    setPaymentDraftBySupplier((prev) => ({
+                      ...prev,
+                      [sid]: {
+                        ...(prev[sid] ?? emptyPaymentDraft(suggestedTotvsFilial)),
+                        totvsCodFilial: code,
+                        stockLocationId: '',
+                        totvsCodLoc: '',
+                      },
+                    }));
+                  }}
+                  labelClassName={mapLabelCls}
+                />
+
+                <OcCostCenterField
+                  label={formatOcCostCenterLabel(
+                    selectedRequestRaw?.costCenter ||
+                      approvedRequests.find((r) => r.id === selectedRequestId)?.costCenter
+                  )}
+                  labelClassName={mapLabelCls}
+                />
+
+                <OcStockLocationField
+                  value={draft.stockLocationId}
+                  filial={draft.totvsCodFilial || suggestedTotvsFilial}
+                  labelClassName={mapLabelCls}
+                  onChange={(loc) => {
+                    setPaymentDraftBySupplier((prev) => ({
+                      ...prev,
+                      [sid]: {
+                        ...(prev[sid] ?? emptyPaymentDraft(suggestedTotvsFilial)),
+                        stockLocationId: loc?.id || '',
+                        totvsCodLoc: loc?.code || '',
+                      },
+                    }));
+                  }}
+                />
+
+                <div>
+                  <span className={mapLabelCls}>Tipo de Frete *</span>
+                  <SingleSelectSearchDropdown
+                    value={draft.freightType || 'S'}
+                    onChange={(v) => {
+                      setPaymentDraftBySupplier((prev) => ({
+                        ...prev,
+                        [sid]: {
+                          ...(prev[sid] ?? emptyPaymentDraft(suggestedTotvsFilial)),
+                          freightType: v,
+                        },
+                      }));
+                    }}
+                    options={TOTVS_FREIGHT_TYPES.map((row) => ({
+                      value: row.code,
+                      label: row.label,
+                      searchText: `${row.code} ${row.label}`,
+                    }))}
+                    allowEmpty={false}
+                    placeholder="Selecione..."
+                    searchPlaceholder="Pesquisar..."
+                    noFocusRing
+                  />
+                </div>
+
                 <div>
                   <h4 className="mb-3 text-sm font-semibold text-gray-900 dark:text-gray-100">
                     Pagamento
@@ -1815,7 +2021,7 @@ export default function MapaCotacaoPage() {
                         setPaymentDraftBySupplier((prev) => ({
                           ...prev,
                           [sid]: {
-                            ...(prev[sid] ?? emptyPaymentDraft()),
+                            ...(prev[sid] ?? emptyPaymentDraft(suggestedTotvsFilial)),
                             paymentType: OC_TYPE_AVISTA,
                             paymentCondition: paymentConditionDefault(OC_TYPE_AVISTA),
                           },
@@ -1833,7 +2039,7 @@ export default function MapaCotacaoPage() {
                         setPaymentDraftBySupplier((prev) => ({
                           ...prev,
                           [sid]: {
-                            ...(prev[sid] ?? emptyPaymentDraft()),
+                            ...(prev[sid] ?? emptyPaymentDraft(suggestedTotvsFilial)),
                             paymentType: OC_TYPE_CARTAO,
                             paymentCondition: paymentConditionDefault(OC_TYPE_CARTAO),
                             pixKeyType: '',
@@ -1853,7 +2059,7 @@ export default function MapaCotacaoPage() {
                         setPaymentDraftBySupplier((prev) => ({
                           ...prev,
                           [sid]: {
-                            ...(prev[sid] ?? emptyPaymentDraft()),
+                            ...(prev[sid] ?? emptyPaymentDraft(suggestedTotvsFilial)),
                             paymentType: OC_TYPE_BOLETO,
                             paymentCondition: paymentConditionDefault(OC_TYPE_BOLETO),
                             pixKeyType: '',
@@ -1867,6 +2073,18 @@ export default function MapaCotacaoPage() {
                     </button>
                   </div>
                 </div>
+
+                {payType === OC_TYPE_AVISTA ? (
+                  <div>
+                    <span className={mapLabelCls}>Condição de pagamento *</span>
+                    <div
+                      className="w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-900/40 dark:text-gray-100"
+                      aria-readonly="true"
+                    >
+                      {TOTVS_OC_PAYMENT_AVISTA_LABEL}
+                    </div>
+                  </div>
+                ) : null}
 
                 {payType === OC_TYPE_BOLETO ? (
                   <div>
@@ -1882,7 +2100,7 @@ export default function MapaCotacaoPage() {
                         setPaymentDraftBySupplier((prev) => ({
                           ...prev,
                           [sid]: {
-                            ...(prev[sid] ?? emptyPaymentDraft()),
+                            ...(prev[sid] ?? emptyPaymentDraft(suggestedTotvsFilial)),
                             paymentCondition: v,
                           },
                         }));
@@ -1909,7 +2127,7 @@ export default function MapaCotacaoPage() {
                       setPaymentDraftBySupplier((prev) => ({
                         ...prev,
                         [sid]: {
-                          ...(prev[sid] ?? emptyPaymentDraft()),
+                          ...(prev[sid] ?? emptyPaymentDraft(suggestedTotvsFilial)),
                           amountToPayStr: e.target.value,
                         },
                       }));
@@ -1922,7 +2140,7 @@ export default function MapaCotacaoPage() {
                       setPaymentDraftBySupplier((prev) => ({
                         ...prev,
                         [sid]: {
-                          ...(prev[sid] ?? emptyPaymentDraft()),
+                          ...(prev[sid] ?? emptyPaymentDraft(suggestedTotvsFilial)),
                           amountToPayStr: formatted,
                         },
                       }));
@@ -1945,7 +2163,7 @@ export default function MapaCotacaoPage() {
                       setPaymentDraftBySupplier((prev) => ({
                         ...prev,
                         [sid]: {
-                          ...(prev[sid] ?? emptyPaymentDraft()),
+                          ...(prev[sid] ?? emptyPaymentDraft(suggestedTotvsFilial)),
                           paymentDetails: e.target.value,
                         },
                       }));
@@ -1970,7 +2188,7 @@ export default function MapaCotacaoPage() {
                         value={paymentDraftBySupplier[sid]?.pixKeyType ?? ''}
                         onChange={(v) => {
                           setPaymentDraftBySupplier((prev) => {
-                            const current = prev[sid] ?? emptyPaymentDraft();
+                            const current = prev[sid] ?? emptyPaymentDraft(suggestedTotvsFilial);
                             return {
                               ...prev,
                               [sid]: {
@@ -2003,7 +2221,7 @@ export default function MapaCotacaoPage() {
                           setPaymentDraftBySupplier((prev) => ({
                             ...prev,
                             [sid]: {
-                              ...(prev[sid] ?? emptyPaymentDraft()),
+                              ...(prev[sid] ?? emptyPaymentDraft(suggestedTotvsFilial)),
                               pixKey: next,
                             },
                           }));
@@ -2031,7 +2249,7 @@ export default function MapaCotacaoPage() {
                       setPaymentDraftBySupplier((prev) => ({
                         ...prev,
                         [sid]: {
-                          ...(prev[sid] ?? emptyPaymentDraft()),
+                          ...(prev[sid] ?? emptyPaymentDraft(suggestedTotvsFilial)),
                           observations: e.target.value,
                         },
                       }));
@@ -2057,7 +2275,7 @@ export default function MapaCotacaoPage() {
                           files
                         );
                         setPaymentDraftBySupplier((prev) => {
-                          const current = prev[sid] ?? emptyPaymentDraft();
+                          const current = prev[sid] ?? emptyPaymentDraft(suggestedTotvsFilial);
                           return {
                             ...prev,
                             [sid]: {
@@ -2082,7 +2300,7 @@ export default function MapaCotacaoPage() {
                     }}
                     onRemove={(index) => {
                       setPaymentDraftBySupplier((prev) => {
-                        const current = prev[sid] ?? emptyPaymentDraft();
+                        const current = prev[sid] ?? emptyPaymentDraft(suggestedTotvsFilial);
                         return {
                           ...prev,
                           [sid]: {

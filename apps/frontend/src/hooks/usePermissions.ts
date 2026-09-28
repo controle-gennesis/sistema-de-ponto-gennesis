@@ -734,6 +734,7 @@ export function useRoutePermission(route: string) {
     '/ponto/folha-pagamento': isAdministrator || permissions.canAccessPayroll,
     '/relatorios/alocacao': isAdministrator || permissions.canAccessPayroll,
     '/ponto/centros-custo': isAdministrator || can(pk('/ponto/centros-custo')),
+    '/ponto/locais-estoque': isAdministrator || can(pk('/ponto/locais-estoque')),
     '/ponto/materiais-construcao': isAdministrator || can(pk('/ponto/materiais-construcao')),
     '/ponto/andamento-da-os': canAccessOsRoutePage,
     '/ponto/meus-chamados': isAdministrator || can(pk('/ponto/meus-chamados')),

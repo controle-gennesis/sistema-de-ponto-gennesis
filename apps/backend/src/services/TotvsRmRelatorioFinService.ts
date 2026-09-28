@@ -1032,6 +1032,48 @@ export class TotvsRmRelatorioFinService {
     throw lastError ?? new Error('Falha ao buscar PRODUTOSATIVOS no TOTVS RM');
   }
 
+  async findProdutoAtivoByCodigo(codigo: string): Promise<{
+    idPrd: number | null;
+    codigo: string;
+    unidade: string | null;
+  } | null> {
+    const wanted = (codigo || '').trim();
+    if (!wanted) return null;
+    const rows = await this.fetchProdutosAtivosRows();
+    const wantedUpper = wanted.toUpperCase();
+    const wantedDigits = /^\d+$/.test(wanted) ? wanted.replace(/^0+/, '') || '0' : '';
+
+    for (const row of rows) {
+      const keys = Object.keys(row);
+      const pick = (...aliases: string[]) => {
+        for (const alias of aliases) {
+          const hit = keys.find(
+            (k) => k.toUpperCase().replace(/[\s_./-]/g, '') === alias.toUpperCase().replace(/[\s_./-]/g, '')
+          );
+          if (hit != null && row[hit] != null && String(row[hit]).trim()) return String(row[hit]).trim();
+        }
+        return '';
+      };
+      const codigoPrd = pick('CODIGOPRD', 'CODIGO', 'CODPRD', 'CODPRODUTO', 'CODE');
+      const idPrd = pick('IDPRD', 'IDPRDUTO', 'IDPRODUTO', 'IDPROD');
+      const unidade = pick('CODUND', 'UNIDADE', 'CODUM', 'UN');
+      const candidates = [codigoPrd, idPrd].filter(Boolean);
+      const matched = candidates.some((c) => {
+        if (c.toUpperCase() === wantedUpper) return true;
+        if (wantedDigits && /^\d+$/.test(c) && (c.replace(/^0+/, '') || '0') === wantedDigits) return true;
+        return false;
+      });
+      if (!matched) continue;
+      const idNum = Number(idPrd);
+      return {
+        idPrd: Number.isFinite(idNum) && idNum > 0 ? Math.trunc(idNum) : null,
+        codigo: codigoPrd || wanted,
+        unidade: unidade || null,
+      };
+    }
+    return null;
+  }
+
   defaultOcsBoletoPixPath(): string {
     return (
       (process.env.TOTVS_RM_OCSBOLETOPIX_PATH || '').trim() ||

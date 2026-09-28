@@ -554,6 +554,62 @@ async function ensurePurchaseOrderPixFields(prisma: PrismaClient): Promise<void>
   }
 }
 
+let purchaseOrderTotvsFieldsPromise: Promise<void> | null = null;
+
+export async function ensurePurchaseOrderTotvsFields(prisma: PrismaClient): Promise<void> {
+  if (!purchaseOrderTotvsFieldsPromise) {
+    purchaseOrderTotvsFieldsPromise = (async () => {
+      if (!(await tableExists(prisma, 'purchase_orders'))) return;
+      const missing =
+        !(await columnExists(prisma, 'purchase_orders', 'freightType')) ||
+        !(await columnExists(prisma, 'purchase_orders', 'totvsDestination')) ||
+        !(await columnExists(prisma, 'purchase_orders', 'totvsIdMov'));
+      if (missing) {
+        console.warn('[Schema] Colunas TOTVS 1.1.26 em purchase_orders ausentes — adicionando.');
+        await prisma.$executeRawUnsafe(`
+          ALTER TABLE "purchase_orders"
+            ADD COLUMN IF NOT EXISTS "freightType" TEXT,
+            ADD COLUMN IF NOT EXISTS "totvsDestination" TEXT,
+            ADD COLUMN IF NOT EXISTS "totvsIdMov" INTEGER,
+            ADD COLUMN IF NOT EXISTS "totvsCodColigada" INTEGER,
+            ADD COLUMN IF NOT EXISTS "totvsNumMovimento" TEXT,
+            ADD COLUMN IF NOT EXISTS "totvsSentAt" TIMESTAMP(3),
+            ADD COLUMN IF NOT EXISTS "totvsSentBy" TEXT;
+        `);
+      }
+      if (!(await columnExists(prisma, 'purchase_orders', 'totvsCodFilial'))) {
+        console.warn('[Schema] Coluna totvsCodFilial em purchase_orders ausente — adicionando.');
+        await prisma.$executeRawUnsafe(`
+          ALTER TABLE "purchase_orders"
+            ADD COLUMN IF NOT EXISTS "totvsCodFilial" INTEGER;
+        `);
+      }
+      if (!(await columnExists(prisma, 'purchase_orders', 'totvsCodLoc'))) {
+        console.warn('[Schema] Coluna totvsCodLoc em purchase_orders ausente — adicionando.');
+        await prisma.$executeRawUnsafe(`
+          ALTER TABLE "purchase_orders"
+            ADD COLUMN IF NOT EXISTS "totvsCodLoc" TEXT;
+        `);
+      }
+      if (!(await columnExists(prisma, 'purchase_orders', 'stockLocationId'))) {
+        console.warn('[Schema] Coluna stockLocationId em purchase_orders ausente — adicionando.');
+        await prisma.$executeRawUnsafe(`
+          ALTER TABLE "purchase_orders"
+            ADD COLUMN IF NOT EXISTS "stockLocationId" TEXT;
+        `);
+        await prisma.$executeRawUnsafe(`
+          CREATE INDEX IF NOT EXISTS "purchase_orders_stockLocationId_idx"
+          ON "purchase_orders"("stockLocationId");
+        `);
+      }
+    })().catch((err) => {
+      purchaseOrderTotvsFieldsPromise = null;
+      throw err;
+    });
+  }
+  return purchaseOrderTotvsFieldsPromise;
+}
+
 async function ensureLicitacoesTables(prisma: PrismaClient): Promise<void> {
   if (await tableExists(prisma, 'licitacoes')) return;
 
@@ -1859,6 +1915,47 @@ async function ensureCaixinhaPurchasesTable(prisma: PrismaClient): Promise<void>
   `);
 }
 
+export async function ensureConstructionMaterialTotvsIdPrd(prisma: PrismaClient): Promise<void> {
+  if (!(await tableExists(prisma, 'construction_materials'))) return;
+  if (await columnExists(prisma, 'construction_materials', 'totvsIdPrd')) return;
+  console.warn('[Schema] Coluna totvsIdPrd em construction_materials ausente — adicionando.');
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "construction_materials"
+      ADD COLUMN IF NOT EXISTS "totvsIdPrd" INTEGER;
+  `);
+}
+
+export async function ensureStockLocationsTable(prisma: PrismaClient): Promise<void> {
+  if (await tableExists(prisma, 'stock_locations')) return;
+  console.warn('[Schema] Tabela stock_locations ausente — criando automaticamente.');
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "stock_locations" (
+      "id" TEXT NOT NULL,
+      "code" TEXT NOT NULL,
+      "name" TEXT NOT NULL,
+      "polo" TEXT,
+      "filial" INTEGER NOT NULL,
+      "isActive" BOOLEAN NOT NULL DEFAULT true,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" TIMESTAMP(3) NOT NULL,
+      CONSTRAINT "stock_locations_pkey" PRIMARY KEY ("id")
+    );
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE UNIQUE INDEX IF NOT EXISTS "stock_locations_filial_code_key"
+    ON "stock_locations"("filial", "code");
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "stock_locations_code_idx" ON "stock_locations"("code");
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "stock_locations_filial_idx" ON "stock_locations"("filial");
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "stock_locations_isActive_idx" ON "stock_locations"("isActive");
+  `);
+}
+
 export async function ensureProductionSchema(prisma: PrismaClient): Promise<void> {
   try {
     await ensureUnaccentExtension(prisma);
@@ -1870,6 +1967,9 @@ export async function ensureProductionSchema(prisma: PrismaClient): Promise<void
     await ensureDemandSheetApprovals(prisma);
     await ensurePurchaseOrderStageApprovals(prisma);
     await ensurePurchaseOrderAttachmentsColumn(prisma);
+    await ensurePurchaseOrderTotvsFields(prisma);
+    await ensureConstructionMaterialTotvsIdPrd(prisma);
+    await ensureStockLocationsTable(prisma);
     await ensureFinancialControlAguardarPagamentoStatus(prisma);
     await ensureFinancialControlLancadoStatus(prisma);
     await ensureFinancialControlNfNumberColumn(prisma);

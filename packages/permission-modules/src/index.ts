@@ -260,6 +260,7 @@ export const PERMISSION_MODULES: readonly PermissionModuleDef[] = [
   },
   // Cadastros
   { key: pathToModuleKey('/ponto/centros-custo'), name: 'Centros de Custo', href: '/ponto/centros-custo', category: 'Cadastros' },
+  { key: pathToModuleKey('/ponto/locais-estoque'), name: 'Locais de Estoque', href: '/ponto/locais-estoque', category: 'Cadastros' },
   { key: pathToModuleKey('/ponto/materiais-construcao'), name: 'Materiais e Serviços', href: '/ponto/materiais-construcao', category: 'Cadastros' },
   { key: pathToModuleKey('/ponto/fornecedores'), name: 'Fornecedores', href: '/ponto/fornecedores', category: 'Cadastros' },
   { key: pathToModuleKey('/ponto/veiculos'), name: 'Veículos', href: '/ponto/veiculos', category: 'Cadastros' },

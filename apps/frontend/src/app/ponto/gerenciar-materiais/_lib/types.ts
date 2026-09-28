@@ -62,6 +62,9 @@ export interface MaterialRequest {
   costCenter: {
     id: string;
     name: string;
+    code?: string | null;
+    polo?: string | null;
+    state?: string | null;
   };
   project?: {
     id: string;
