@@ -938,7 +938,7 @@ export function ReuniaoFormModal({
 
   const { data: employees = [] } = useQuery({
     queryKey: ['employees-for-reuniao-form'],
-    queryFn: fetchEmployeeSelectOptions,
+    queryFn: () => fetchEmployeeSelectOptions(),
     enabled: isOpen,
   });
 

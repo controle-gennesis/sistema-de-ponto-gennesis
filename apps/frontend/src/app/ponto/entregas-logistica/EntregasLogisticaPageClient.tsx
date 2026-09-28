@@ -325,7 +325,7 @@ export default function EntregasLogisticaPageClient() {
 
   const { data: driversRes } = useQuery({
     queryKey: ['drivers-for-logistics'],
-    queryFn: fetchEmployeeSelectOptions,
+    queryFn: () => fetchEmployeeSelectOptions(),
     enabled: modalOpen,
   });
 

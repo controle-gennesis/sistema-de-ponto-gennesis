@@ -352,7 +352,7 @@ export default function EntregaLogisticaPageClient() {
 
   const { data: employeesRes } = useQuery({
     queryKey: ['employees-for-entrega-logistica'],
-    queryFn: fetchEmployeeSelectOptions,
+    queryFn: () => fetchEmployeeSelectOptions(),
     enabled: Boolean(finalizeRow),
   });
 
