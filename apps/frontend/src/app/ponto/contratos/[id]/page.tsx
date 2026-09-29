@@ -3124,9 +3124,8 @@ export default function ContractDetailPage() {
     }
     if (!isAllYears) {
       const gastos = gastosOperacionaisPorMes.reduce((a, v) => a + (v || 0), 0);
-      const teto =
-        tetoOrcamentarioPorAno[safeSelectedYear] ??
-        tetoOrcamentarioPorMes.reduce((a, v) => a + (v || 0), 0);
+      const tetoMes = tetoOrcamentarioPorMes.reduce<number>((sum, v) => sum + (v ?? 0), 0);
+      const teto = tetoOrcamentarioPorAno[safeSelectedYear] ?? tetoMes;
       return {
         periodLabel: resumoPeriodLabel,
         gastos,
