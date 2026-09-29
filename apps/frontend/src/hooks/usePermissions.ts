@@ -153,6 +153,17 @@ export function usePermissions() {
   const gestorCostCenterIds: string[] = permissionData?.gestorCostCenterIds ?? [];
   const isUnbUser = !!permissionData?.isUnbUser;
   const unbCostCenterIds: string[] = permissionData?.unbCostCenterIds ?? [];
+  /**
+   * Escopo de estoque do /permissions/me.
+   * `undefined` = ainda não veio da API; `null` = sem restrição; `string[]` = CCs liberados.
+   */
+  const stockAllowedCostCenterIds =
+    isAdministrator || permissionData?.isAdmin
+      ? null
+      : permissionData && Object.prototype.hasOwnProperty.call(permissionData, 'stockAllowedCostCenterIds')
+        ? ((permissionData as { stockAllowedCostCenterIds?: string[] | null }).stockAllowedCostCenterIds ??
+          [])
+        : undefined;
   const hideContractOrcamento = !!permissionData?.hideContractOrcamento;
 
   type ContractModuleFlagRow = {
@@ -600,6 +611,7 @@ export function usePermissions() {
     gestorCostCenterIds,
     isUnbUser,
     unbCostCenterIds,
+    stockAllowedCostCenterIds,
     gestorScopedCostCenterIds,
     ocGestorScopedCostCenterIds,
     canCreateSensitiveDpRequestType,

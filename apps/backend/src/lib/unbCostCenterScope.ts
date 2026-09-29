@@ -1,11 +1,14 @@
 import { prisma } from './prisma';
 import { createError } from '../middleware/errorHandler';
-import { isUnbRelatedLabel } from './unbBranding';
+import {
+  isUnbConsorcioPredialLabel,
+  isUnbRelatedLabel,
+} from './unbBranding';
 import {
   getCostCenterIdsForContractAccess,
   getExplicitContractCostCenterScope,
 } from './contractAccess';
-import { isPredialConsorcioCostCenter } from './ocTotvsRm';
+import { isPredialConsorcioCostCenter, OC_DESTINATION_CONECTA_COST_CENTERS } from './ocTotvsRm';
 
 async function getEmployeeCostCenterLabel(userId: string): Promise<string | null> {
   const user = await prisma.user.findUnique({
@@ -121,17 +124,131 @@ export function intersectCostCenterScopes(
 
 /**
  * Estoque: contratos liberados na página de Contratos, intersectados com o escopo UNB
- * quando o funcionário é UNB.
+ * quando o funcionário é UNB — e, para UNB/HUB Predial, inclui o CC do consórcio
+ * automaticamente (sem precisar liberar contrato na permissão).
  */
 export async function getUserStockCostCenterScope(
   userId: string,
   isAdmin: boolean,
 ): Promise<string[] | null> {
-  const [unbScope, contractScope] = await Promise.all([
+  if (isAdmin) return null;
+
+  const [unbScope, contractScope, predialIds] = await Promise.all([
     getUserUnbCostCenterScope(userId, isAdmin),
     getCostCenterIdsForContractAccess(userId, isAdmin),
+    getEmployeePredialConsorcioStockCostCenterIds(userId),
   ]);
-  return intersectCostCenterScopes(unbScope, contractScope);
+
+  const base = intersectCostCenterScopes(unbScope, contractScope);
+  if (predialIds.length === 0) return base;
+  if (base === null) return predialIds;
+  return [...new Set([...base, ...predialIds])];
+}
+
+function normalizePredialLabel(value: string): string {
+  return value
+    .trim()
+    .toUpperCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ');
+}
+
+/** UNB ou HUB Predial no cadastro do funcionário (texto livre). */
+export function employeePredialConsorcioKind(
+  employeeCostCenter: string | null | undefined,
+): 'UNB' | 'HUB' | null {
+  const raw = employeeCostCenter?.trim();
+  if (!raw) return null;
+  const n = normalizePredialLabel(raw);
+  if (
+    n === 'HUB' ||
+    n.startsWith('HUB ') ||
+    n.startsWith('HUB-') ||
+    (n.includes('HUB') && n.includes('CONSORCIO'))
+  ) {
+    return 'HUB';
+  }
+  if (
+    n === 'UNB' ||
+    isUnbConsorcioPredialLabel(raw) ||
+    (n.startsWith('UNB') && n.includes('CONSORCIO PREDIAL'))
+  ) {
+    return 'UNB';
+  }
+  if (isPredialConsorcioCostCenter(raw)) {
+    return n.includes('HUB') ? 'HUB' : 'UNB';
+  }
+  return null;
+}
+
+function costCenterMatchesPredialKind(
+  cc: { name?: string | null; code?: string | null },
+  kind: 'UNB' | 'HUB',
+): boolean {
+  const name = cc.name || '';
+  const code = cc.code || '';
+  if (kind === 'HUB') {
+    const n = normalizePredialLabel(name);
+    return (
+      (isPredialConsorcioCostCenter(name, code) && n.includes('HUB')) ||
+      OC_DESTINATION_CONECTA_COST_CENTERS.some((label) => {
+        const L = normalizePredialLabel(label);
+        return L.includes('HUB') && (n === L || n.includes(L) || L.includes(n));
+      })
+    );
+  }
+  return (
+    isUnbConsorcioPredialLabel(name, code) ||
+    (isPredialConsorcioCostCenter(name, code) && !normalizePredialLabel(name).includes('HUB'))
+  );
+}
+
+/**
+ * CCs do Consórcio Predial UNB ou HUB conforme o centro de custo do funcionário.
+ * Usado no estoque para liberar o contrato sem cadastro explícito em Permissões.
+ */
+export async function getEmployeePredialConsorcioStockCostCenterIds(
+  userId: string,
+): Promise<string[]> {
+  const label = await getEmployeeCostCenterLabel(userId);
+  let kind = employeePredialConsorcioKind(label);
+
+  // Employee.costCenter pode ser id/código do CC cadastrado
+  if (!kind && label?.trim()) {
+    const raw = label.trim();
+    const linked = await prisma.costCenter.findFirst({
+      where: { OR: [{ id: raw }, { code: raw }, { name: raw }] },
+      select: { name: true, code: true },
+    });
+    if (linked) kind = employeePredialConsorcioKind(linked.name) || employeePredialConsorcioKind(linked.code);
+  }
+  if (!kind) return [];
+
+  const [centers, contracts] = await Promise.all([
+    prisma.costCenter.findMany({
+      select: { id: true, name: true, code: true },
+    }),
+    prisma.contract.findMany({
+      select: {
+        costCenterId: true,
+        name: true,
+        costCenter: { select: { name: true, code: true } },
+      },
+    }),
+  ]);
+
+  const ids = new Set<string>();
+  for (const cc of centers) {
+    if (costCenterMatchesPredialKind(cc, kind)) ids.add(cc.id);
+  }
+  for (const row of contracts) {
+    const hit =
+      costCenterMatchesPredialKind({ name: row.name }, kind) ||
+      costCenterMatchesPredialKind(row.costCenter || {}, kind);
+    if (hit && row.costCenterId) ids.add(row.costCenterId);
+  }
+  return Array.from(ids);
 }
 
 export async function assertCostCenterAllowedForStockUser(
@@ -158,20 +275,29 @@ export async function getUserOcRmListCostCenterScope(
   scopeCostCenterIds: string[] | null;
   expandUnbLabels: boolean;
 }> {
-  const [unbScope, contractScope] = await Promise.all([
+  const [unbScope, contractScope, predialIds] = await Promise.all([
     getUserUnbCostCenterScope(userId, isAdmin),
     getExplicitContractCostCenterScope(userId, isAdmin),
+    getEmployeePredialConsorcioStockCostCenterIds(userId),
   ]);
 
   if (contractScope !== null) {
+    let ids = intersectCostCenterScopes(gestorScope, contractScope) ?? [];
+    if (predialIds.length > 0) {
+      ids = [...new Set([...ids, ...predialIds])];
+    }
     return {
-      scopeCostCenterIds: intersectCostCenterScopes(gestorScope, contractScope),
+      scopeCostCenterIds: ids,
       expandUnbLabels: false,
     };
   }
 
+  let ids = mergeGestorScopeWithUnbRestriction(gestorScope, unbScope);
+  if (predialIds.length > 0) {
+    ids = ids === null ? predialIds : [...new Set([...ids, ...predialIds])];
+  }
   return {
-    scopeCostCenterIds: mergeGestorScopeWithUnbRestriction(gestorScope, unbScope),
+    scopeCostCenterIds: ids,
     expandUnbLabels: unbScope !== null,
   };
 }

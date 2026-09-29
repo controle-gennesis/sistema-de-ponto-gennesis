@@ -57,16 +57,31 @@ export function useAssignedContractCostCenterIds() {
   return { allowedContractCostCenterIds, canAccessContratos };
 }
 
-/** `null` = admin (sem restrição). `Set` vazio = nenhum contrato liberado. */
+/**
+ * Escopo de CC no estoque.
+ * Usa `stockAllowedCostCenterIds` do /permissions/me (contratos + UNB/HUB Predial
+ * automático pelo CC do funcionário). Fallback: contratos liberados.
+ *
+ * `null` = admin (sem restrição). `Set` vazio = nenhum CC liberado.
+ */
 export function useStockAllowedCostCenterIds() {
+  const { isAdministrator, stockAllowedCostCenterIds: fromMe } = usePermissions();
   const { allowedContractCostCenterIds, canAccessContratos } = useAssignedContractCostCenterIds();
 
   const allowedStockCostCenterIds = useMemo(() => {
+    if (isAdministrator) return null;
+
+    // Backend já une contratos liberados + CC UNB/HUB Predial do funcionário
+    if (fromMe !== undefined) {
+      if (fromMe === null) return null;
+      return new Set(fromMe);
+    }
+
     if (!canAccessContratos && allowedContractCostCenterIds === null) {
       return new Set<string>();
     }
     return allowedContractCostCenterIds;
-  }, [allowedContractCostCenterIds, canAccessContratos]);
+  }, [isAdministrator, fromMe, allowedContractCostCenterIds, canAccessContratos]);
 
   return { allowedStockCostCenterIds, canAccessContratos };
 }
