@@ -488,6 +488,42 @@ export class FuelRefuelRequestService {
     return updated;
   }
 
+  /** Cancelamento automático (lembrete 19h / Gennecy) enquanto aguarda informe do abastecimento. */
+  async cancelAwaitingRefuelBySystem(
+    id: string,
+    reason: string,
+    opts?: { silentNotify?: boolean },
+  ) {
+    const row = await this.getById(id);
+    if (row.status !== FuelRefuelRequestStatus.AWAITING_REFUEL) {
+      throw createError('Esta solicitação não está aguardando abastecimento', 400);
+    }
+
+    const reasonText = reason.trim() || 'Cancelada automaticamente.';
+    const updated = await prisma.fuelRefuelRequest.update({
+      where: { id, status: row.status },
+      data: {
+        status: FuelRefuelRequestStatus.CANCELLED,
+        suppliesApprovalComment: row.suppliesApprovalComment?.trim()
+          ? `${row.suppliesApprovalComment.trim()}\n\n[Cancelamento automático] ${reasonText}`
+          : `[Cancelamento automático] ${reasonText}`,
+      },
+      include: fuelRefuelInclude,
+    });
+
+    if (!opts?.silentNotify) {
+      const { postFuelChatMessage, postFuelWhatsAppMessage } = await import('../lib/fuelRefuelChatNotify');
+      const msg = [
+        `❌ Solicitação #${updated.displayNumber} cancelada.`,
+        reasonText,
+      ].join('\n');
+      await postFuelChatMessage(updated.sourceChatId, msg);
+      await postFuelWhatsAppMessage(updated.sourceWhatsAppPhone, msg);
+    }
+
+    return updated;
+  }
+
   async countPendingManager(
     contractScope?: Prisma.FuelRefuelRequestWhereInput,
   ): Promise<number> {

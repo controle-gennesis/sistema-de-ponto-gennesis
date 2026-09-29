@@ -1,6 +1,12 @@
 import { FuelTankLevelAfter } from '@prisma/client';
 import { hasStoredPhoto, isWhatsAppSavedMediaReady } from '../lib/flowMedia';
 import { FUEL_LITERS_MAX, parseFlexibleDecimal } from '../lib/parseFlexibleDecimal';
+import {
+  cancelFuelRequestFromEveningCheck,
+  parseFuelEveningCheckPlainYesNo,
+  parseFuelEveningCheckReply,
+  resolveFuelEveningCheckRequestId,
+} from '../lib/fuelRefuelEveningCheck';
 import { fuelRefuelRequestService } from './FuelRefuelRequestService';
 import type { SendAction } from './WhatsAppBotService';
 
@@ -152,6 +158,91 @@ export async function processWhatsAppFuelRefuelReportFlow(params: {
     resetToMenu,
     endConversation,
   } = params;
+
+  let checkParsed =
+    parseFuelEveningCheckReply(content) || parseFuelEveningCheckReply(textRaw);
+
+  if (!checkParsed && !isWhatsAppFuelReportFlowStatus(flowStatus)) {
+    const plain =
+      parseFuelEveningCheckPlainYesNo(content) || parseFuelEveningCheckPlainYesNo(textRaw);
+    if (plain) {
+      const fromPayload = String(payload.fuelEveningCheckRequestId || '').trim();
+      if (fromPayload) {
+        checkParsed = { kind: plain, requestId: fromPayload };
+      } else {
+        // Template Meta costuma devolver o título do botão ("Sim"/"Não"); resolve pelo telefone.
+        const resolved = await resolveFuelEveningCheckRequestId({ phone, payload });
+        if (resolved) checkParsed = { kind: plain, requestId: resolved };
+      }
+    }
+  }
+
+  if (checkParsed) {
+    const requestId = await resolveFuelEveningCheckRequestId({
+      phone,
+      requestIdFromButton: checkParsed.requestId,
+      payload,
+    });
+    if (!requestId) {
+      return {
+        sendAction: waButtons(
+          'Não encontrei a solicitação deste lembrete. Use o menu «Informar abastecimento» se ainda precisar.',
+        ),
+        newStatus: 'MENU',
+        newPayload: {},
+        clearPayload: true,
+      };
+    }
+
+    const row = await fuelRefuelRequestService.getById(requestId).catch(() => null);
+    if (!row || row.status !== 'AWAITING_REFUEL') {
+      return {
+        sendAction: waButtons(
+          'Essa solicitação não está mais aguardando abastecimento. Use o menu se precisar de outra opção.',
+        ),
+        newStatus: 'MENU',
+        newPayload: {},
+        clearPayload: true,
+      };
+    }
+
+    if (checkParsed.kind === 'no') {
+      try {
+        await cancelFuelRequestFromEveningCheck(requestId);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Não foi possível cancelar.';
+        return {
+          sendAction: waButtons(msg),
+          newStatus: 'MENU',
+          newPayload: {},
+          clearPayload: true,
+        };
+      }
+      return {
+        sendAction: waButtons(
+          `Solicitação #${row.displayNumber} cancelada. Se precisar abastecer, faça uma nova solicitação pelo menu.`,
+        ),
+        newStatus: 'MENU',
+        newPayload: {},
+        clearPayload: true,
+      };
+    }
+
+    // Sim → inicia informe do abastecimento direto no hodômetro
+    return {
+      sendAction: waButtons(
+        `Ótimo! Vamos registrar o abastecimento da solicitação #${row.displayNumber}.\n\nQual o hodômetro atual (km)?`,
+      ),
+      newStatus: 'FUEL_REPORT_ASK_ODOMETER',
+      newPayload: {
+        flow: 'FUEL_REPORT',
+        requestId: row.id,
+        requesterId: row.requesterId,
+        displayNumber: row.displayNumber,
+        vehiclePlate: row.vehiclePlate,
+      },
+    };
+  }
 
   const startingFromMenu =
     isWhatsAppFuelReportMenuSelection(content) && !isWhatsAppFuelReportFlowStatus(flowStatus);

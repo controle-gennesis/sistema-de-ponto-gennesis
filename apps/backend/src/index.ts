@@ -134,6 +134,7 @@ import { startPncpSyncScheduler } from './services/PncpIngestService';
 import { startNfeAutoFetchScheduler } from './services/NfeRecebidaAutoFetch';
 import { startGoogleCalendarAutoSyncScheduler } from './services/googleCalendarSync';
 import { startBirthdayGreetingScheduler } from './services/BirthdayGreetingScheduler';
+import { startFuelRefuelEveningCheckScheduler } from './services/FuelRefuelEveningCheckScheduler';
 import { ensureNfeSecretsFromEnv } from './lib/ensureNfeSecretsFromEnv';
 import { ensureNfeJavaRuntime } from './lib/ensureNfeJavaRuntime';
 import { logNfeRuntimeStatus } from './services/NfeRecebidaService';
@@ -678,6 +679,12 @@ try {
         startBirthdayGreetingScheduler();
       } catch (e) {
         console.error('[birthday-greeting] falha ao agendar:', e);
+      }
+
+      try {
+        startFuelRefuelEveningCheckScheduler();
+      } catch (e) {
+        console.error('[fuel-evening-check] falha ao agendar:', e);
       }
     })();
 

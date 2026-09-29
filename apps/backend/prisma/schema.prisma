@@ -3715,6 +3715,8 @@ model FuelRefuelRequest {
   refuelDeadlineAt        DateTime?
   refuelDeadlineAmount    Int?
   refuelDeadlineUnit      FuelRefuelDeadlineUnit?
+  /// Lembrete Gennecy das 19h (perguntou se abasteceu) jÃ¡ enviado.
+  refuelCheckRemindedAt   DateTime?
 
   refuelReportedAt         DateTime?
   odometerKm               Int?
