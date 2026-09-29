@@ -39,6 +39,9 @@ function costCenterIdsFromContractRows(rows: ContractCostCenterRow[]) {
  * Contratos explicitamente liberados.
  * `null` = sem restrição por contrato (admin ou sem módulo Contratos).
  * `Set` vazio = módulo Contratos sem nenhum contrato cadastrado (ou ainda carregando).
+ *
+ * Obs.: a tela de RM também filtra por `allowedContractIds` do /permissions/me
+ * (mesmo sem módulo Contratos), para bater com o assert de criação.
  */
 export function useAssignedContractCostCenterIds() {
   const { isAdministrator, can } = usePermissions();
@@ -57,16 +60,31 @@ export function useAssignedContractCostCenterIds() {
   return { allowedContractCostCenterIds, canAccessContratos };
 }
 
-/** `null` = admin (sem restrição). `Set` vazio = nenhum contrato liberado. */
+/**
+ * Escopo de CC no estoque.
+ * Usa `stockAllowedCostCenterIds` do /permissions/me (contratos + UNB/HUB Predial
+ * automático pelo CC do funcionário). Fallback: contratos liberados.
+ *
+ * `null` = admin (sem restrição). `Set` vazio = nenhum CC liberado.
+ */
 export function useStockAllowedCostCenterIds() {
+  const { isAdministrator, stockAllowedCostCenterIds: fromMe } = usePermissions();
   const { allowedContractCostCenterIds, canAccessContratos } = useAssignedContractCostCenterIds();
 
   const allowedStockCostCenterIds = useMemo(() => {
+    if (isAdministrator) return null;
+
+    // Backend já une contratos liberados + CC UNB/HUB Predial do funcionário
+    if (fromMe !== undefined) {
+      if (fromMe === null) return null;
+      return new Set(fromMe);
+    }
+
     if (!canAccessContratos && allowedContractCostCenterIds === null) {
       return new Set<string>();
     }
     return allowedContractCostCenterIds;
-  }, [allowedContractCostCenterIds, canAccessContratos]);
+  }, [isAdministrator, fromMe, allowedContractCostCenterIds, canAccessContratos]);
 
   return { allowedStockCostCenterIds, canAccessContratos };
 }

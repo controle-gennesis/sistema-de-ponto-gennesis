@@ -10,7 +10,11 @@ import {
 import { prisma } from '../lib/prisma';
 import { createError } from '../middleware/errorHandler';
 import { getContractGestorCostCenterIds } from '../lib/contractGestorApprovalAccess';
-import { getUserUnbCostCenterScope, userHidesContractOrcamento } from '../lib/unbCostCenterScope';
+import {
+  getUserUnbCostCenterScope,
+  getUserStockCostCenterScope,
+  userHidesContractOrcamento,
+} from '../lib/unbCostCenterScope';
 import { getFluigApproverAccessForUser, userCanManageFluigApproverViewers } from '../lib/fluigApproverAccess';
 import { filterValidPermissionPayload, removeOrphanUserPermissions } from '../lib/permissionRegistrySync';
 import { CONTRACTS_MODULE_KEY } from '../lib/contractAccess';
@@ -219,6 +223,7 @@ router.get('/me', async (req: AuthRequest, res, next) => {
           gestorCostCenterIds: [],
           isUnbUser: false,
           unbCostCenterIds: [],
+          stockAllowedCostCenterIds: null,
           hideContractOrcamento,
           contractModuleFlags: {},
           fluigApproverFullAccess: true,
@@ -337,6 +342,7 @@ router.get('/me', async (req: AuthRequest, res, next) => {
     const unbCostCenterScope = await getUserUnbCostCenterScope(meUserId, false);
     const isUnbUser = unbCostCenterScope !== null;
     const unbCostCenterIds = unbCostCenterScope ?? [];
+    const stockAllowedCostCenterIds = await getUserStockCostCenterScope(meUserId, false);
     const hideContractOrcamento = await userHidesContractOrcamento(meUserId);
     const fluigApproverAccess = await getFluigApproverAccessForUser(meUserId, false);
     const canManageFluigApproverViewers = await userCanManageFluigApproverViewers(meUserId, false);
@@ -377,6 +383,7 @@ router.get('/me', async (req: AuthRequest, res, next) => {
         gestorCostCenterIds,
         isUnbUser,
         unbCostCenterIds,
+        stockAllowedCostCenterIds,
         hideContractOrcamento,
         contractModuleFlags,
         fluigApproverFullAccess: fluigApproverAccess.fullAccess,

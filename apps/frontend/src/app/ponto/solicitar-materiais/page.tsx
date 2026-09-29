@@ -968,8 +968,16 @@ function SolicitarMateriaisPage() {
   });
 
   const { costCenters, isLoading: loadingCostCenters } = useCostCenters();
-  const { isUnbUser, unbCostCenterIds, isElevatedUser, isAdministrator, canApproveMaterialRequests } = usePermissions();
+  const {
+    isUnbUser,
+    unbCostCenterIds,
+    isElevatedUser,
+    isAdministrator,
+    canApproveMaterialRequests,
+    allowedContractIds,
+  } = usePermissions();
   const { allowedContractCostCenterIds } = useAssignedContractCostCenterIds();
+  const allowedContractIdSet = useMemo(() => new Set(allowedContractIds), [allowedContractIds]);
 
   const lockedUnbCostCenterId = useMemo(() => {
     if (isAdministrator || !isUnbUser) return null;
@@ -1060,7 +1068,7 @@ function SolicitarMateriaisPage() {
       ...prev,
       serviceOrderId,
       serviceOrder,
-      costCenterId: os?.costCenterId || prev.costCenterId,
+      // Mantém o CC do contrato: a OS pode ter outro id UNB e barrar a criação.
       ...(osDescription
         ? {
             obra: osDescription,
@@ -1081,7 +1089,6 @@ function SolicitarMateriaisPage() {
       ...prev,
       serviceOrderId,
       serviceOrder,
-      costCenterId: os?.costCenterId || prev.costCenterId,
       ...(osDescription
         ? {
             obra: osDescription,
@@ -1398,9 +1405,13 @@ function SolicitarMateriaisPage() {
 
   const contractSelectOptions = useMemo(() => {
     let list = contractOptions;
-    if (allowedContractCostCenterIds) {
+    // Mesma regra do backend: contratos liberados na permissão têm prioridade
+    // (evita mostrar Predial/UNB pelo escopo UNB e falhar no create).
+    if (allowedContractIdSet.size > 0) {
+      list = list.filter((contract) => allowedContractIdSet.has(contract.id));
+    } else if (allowedContractCostCenterIds) {
       list = list.filter((contract) => {
-        const ccId = contract.costCenter?.id;
+        const ccId = contract.costCenterId || contract.costCenter?.id;
         return Boolean(ccId && allowedContractCostCenterIds.has(ccId));
       });
     } else if (isUnbUser) {
@@ -1424,7 +1435,13 @@ function SolicitarMateriaisPage() {
           .join(' '),
       };
     });
-  }, [contractOptions, isUnbUser, lockedUnbContractId, allowedContractCostCenterIds]);
+  }, [
+    contractOptions,
+    isUnbUser,
+    lockedUnbContractId,
+    allowedContractCostCenterIds,
+    allowedContractIdSet,
+  ]);
 
   const rmListFaseOptions = useMemo(() => {
     const options: { value: string; label: string; searchText?: string }[] = [{ value: '', label: 'Todas' }];
