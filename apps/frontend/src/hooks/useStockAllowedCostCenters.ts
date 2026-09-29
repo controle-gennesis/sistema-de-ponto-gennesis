@@ -39,6 +39,9 @@ function costCenterIdsFromContractRows(rows: ContractCostCenterRow[]) {
  * Contratos explicitamente liberados.
  * `null` = sem restrição por contrato (admin ou sem módulo Contratos).
  * `Set` vazio = módulo Contratos sem nenhum contrato cadastrado (ou ainda carregando).
+ *
+ * Obs.: a tela de RM também filtra por `allowedContractIds` do /permissions/me
+ * (mesmo sem módulo Contratos), para bater com o assert de criação.
  */
 export function useAssignedContractCostCenterIds() {
   const { isAdministrator, can } = usePermissions();

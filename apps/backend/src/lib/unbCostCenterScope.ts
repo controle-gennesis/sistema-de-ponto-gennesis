@@ -5,6 +5,7 @@ import {
   isUnbRelatedLabel,
 } from './unbBranding';
 import {
+  getAssignedContractIds,
   getCostCenterIdsForContractAccess,
   getExplicitContractCostCenterScope,
 } from './contractAccess';
@@ -275,29 +276,20 @@ export async function getUserOcRmListCostCenterScope(
   scopeCostCenterIds: string[] | null;
   expandUnbLabels: boolean;
 }> {
-  const [unbScope, contractScope, predialIds] = await Promise.all([
+  const [unbScope, contractScope] = await Promise.all([
     getUserUnbCostCenterScope(userId, isAdmin),
     getExplicitContractCostCenterScope(userId, isAdmin),
-    getEmployeePredialConsorcioStockCostCenterIds(userId),
   ]);
 
   if (contractScope !== null) {
-    let ids = intersectCostCenterScopes(gestorScope, contractScope) ?? [];
-    if (predialIds.length > 0) {
-      ids = [...new Set([...ids, ...predialIds])];
-    }
     return {
-      scopeCostCenterIds: ids,
+      scopeCostCenterIds: intersectCostCenterScopes(gestorScope, contractScope),
       expandUnbLabels: false,
     };
   }
 
-  let ids = mergeGestorScopeWithUnbRestriction(gestorScope, unbScope);
-  if (predialIds.length > 0) {
-    ids = ids === null ? predialIds : [...new Set([...ids, ...predialIds])];
-  }
   return {
-    scopeCostCenterIds: ids,
+    scopeCostCenterIds: mergeGestorScopeWithUnbRestriction(gestorScope, unbScope),
     expandUnbLabels: unbScope !== null,
   };
 }
@@ -309,10 +301,36 @@ export async function assertCostCenterAllowedForOcRmUser(
 ): Promise<void> {
   const contractScope = await getExplicitContractCostCenterScope(userId, isAdmin);
   if (contractScope !== null) {
-    if (!costCenterId || contractScope.length === 0 || !contractScope.includes(costCenterId)) {
+    if (!costCenterId || contractScope.length === 0) {
       throw createError('Sem permissão para este contrato', 403);
     }
-    return;
+    if (contractScope.includes(costCenterId)) return;
+
+    // Deploy UNB: contrato Predial e OS/RM podem usar CC "UNB" (outro id).
+    // Quem tem contrato UNB liberado age no catálogo UNB inteiro.
+    const assignedIds = await getAssignedContractIds(userId, isAdmin);
+    if (assignedIds && assignedIds.length > 0) {
+      const contracts = await prisma.contract.findMany({
+        where: { id: { in: assignedIds } },
+        select: {
+          name: true,
+          number: true,
+          costCenter: { select: { name: true, code: true, company: true, polo: true } },
+        },
+      });
+      const hasUnbContract = contracts.some(
+        (row) =>
+          isUnbRelatedLabel(row.name) ||
+          isUnbRelatedLabel(row.number) ||
+          isUnbCostCenterRecord(row.costCenter),
+      );
+      if (hasUnbContract) {
+        const unbIds = await getUnbCostCenterIds();
+        if (unbIds.includes(costCenterId)) return;
+      }
+    }
+
+    throw createError('Sem permissão para este contrato', 403);
   }
   await assertCostCenterAllowedForUnbUser(userId, isAdmin, costCenterId);
 }
