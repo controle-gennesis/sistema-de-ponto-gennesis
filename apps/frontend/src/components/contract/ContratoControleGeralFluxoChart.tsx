@@ -11,11 +11,10 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { Loader2, TrendingUp } from 'lucide-react';
+import { BarChart3, Loader2 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { CadastroListEmpty } from '@/components/ui/CadastroListSummary';
 import { cadastroListClasses } from '@/components/ui/RowActionMenu';
-import { CONTRACT_PAGE_ACCENTS, CONTRACT_PAGE_SURFACE } from '@/lib/contractPageSurface';
 import { useTheme } from '@/context/ThemeContext';
 import {
   formatExtratoFluxoAxisValue,
@@ -65,7 +64,7 @@ function useChartTheme() {
 
 export function ContratoControleGeralFluxoChart({
   series,
-  periodLabel,
+  periodLabel: _periodLabel,
   loading = false,
 }: {
   series: ContratoControleGeralFluxoPoint[];
@@ -82,21 +81,18 @@ export function ContratoControleGeralFluxoChart({
   );
 
   return (
-    <Card className={`${cadastroListClasses.card} ${CONTRACT_PAGE_SURFACE}`}>
-      <div
-        className={`pointer-events-none absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${CONTRACT_PAGE_ACCENTS.teal}`}
-      />
+    <Card className={cadastroListClasses.card}>
       <CardHeader className={`${cadastroListClasses.cardHeader} !pt-5`}>
         <div className={cadastroListClasses.cardHeaderIconRow}>
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-teal-100 text-teal-700 dark:bg-teal-500/15 dark:text-teal-300">
-            <TrendingUp className="h-5 w-5" aria-hidden />
+          <div className="rounded-lg bg-indigo-100 p-2 dark:bg-indigo-900/30 sm:p-3">
+            <BarChart3 className="h-5 w-5 text-indigo-600 dark:text-indigo-400 sm:h-6 sm:w-6" />
           </div>
           <div className="min-w-0">
             <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-              Gasto, faturamento, produção e diferença
+              Evolução mensal
             </h3>
-            <p className="text-sm text-gray-500 dark:text-gray-400">
-              Evolução mensal · {periodLabel} · valores do Controle Geral
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              Indicadores mensais do contrato
             </p>
           </div>
         </div>
@@ -105,15 +101,15 @@ export function ContratoControleGeralFluxoChart({
         {loading ? (
           <div className="flex items-center justify-center py-16">
             <Loader2
-              className="h-6 w-6 animate-spin text-teal-600 dark:text-teal-400"
+              className="h-6 w-6 animate-spin text-indigo-600 dark:text-indigo-400"
               aria-label="Carregando gráfico de evolução"
             />
           </div>
         ) : !hasValue ? (
           <CadastroListEmpty
-            icon={TrendingUp}
+            icon={BarChart3}
             title="Sem movimento no período"
-            hint="A linha usa o gasto, o faturamento e a produção mensais do Controle Geral."
+            hint="Os indicadores mensais do contrato aparecem aqui quando houver valores."
           />
         ) : (
           <div className="h-[280px] w-full">
