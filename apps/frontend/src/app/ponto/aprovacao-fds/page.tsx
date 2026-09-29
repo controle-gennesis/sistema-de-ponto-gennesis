@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { ClipboardCheck, Edit, Eye, MoreVertical, Plus, Search, Trash2, Upload, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
@@ -36,6 +36,8 @@ const ITEMS_PER_PAGE = 20;
 
 export default function AprovacaoFdsPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const contratoFiltro = (searchParams.get('contrato') || '').trim();
   const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
@@ -65,10 +67,13 @@ export default function AprovacaoFdsPage() {
   });
 
   const { data: listData, isLoading: loadingList } = useQuery({
-    queryKey: ['demand-sheet-approvals', searchTerm],
+    queryKey: ['demand-sheet-approvals', searchTerm, contratoFiltro],
     queryFn: async () => {
       const res = await api.get('/demand-sheet-approvals', {
-        params: { search: searchTerm || undefined },
+        params: {
+          search: searchTerm || undefined,
+          contratoId: contratoFiltro || undefined,
+        },
       });
       return (res.data?.data || []) as FichaDemandaApprovalRecord[];
     },

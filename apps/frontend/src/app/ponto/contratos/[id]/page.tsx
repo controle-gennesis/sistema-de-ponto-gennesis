@@ -21,20 +21,25 @@ import {
   Trash2,
   CheckCircle2,
   CalendarDays,
-  Calculator,
-  FileImage,
+  Fuel,
   Loader2,
   Eye,
   ChevronDown,
   Search,
   Filter,
   MoreVertical,
-  Clock,
-  Video,
   Upload,
+  Wallet,
+  AlertTriangle,
+  TrendingDown,
+  ChevronLeft,
+  ChevronRight,
+  Scale,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
+import { FilterStatCard } from '@/components/ui/FilterStatCard';
 import { Modal } from '@/components/ui/Modal';
+import { AppUnderlineTabButton, AppUnderlineTabList } from '@/components/ui/AppTabButton';
 import { useModalCloseConfirm } from '@/hooks/useModalCloseConfirm';
 import { Button } from '@/components/ui/Button';
 import { DatePickerField } from '@/components/ui/DatePickerField';
@@ -54,6 +59,7 @@ import {
 import { PleitoFormModal } from '@/components/pleito/PleitoFormModal';
 import { ContractCronogramaMensalPanel } from '@/components/contract/ContractCronogramaMensalPanel';
 import { ContractHistoricoPleitosPanel } from '@/components/contract/ContractHistoricoPleitosPanel';
+import { ContratoControleGeralFluxoChart } from '@/components/contract/ContratoControleGeralFluxoChart';
 import { ContractOsDetailModal } from '@/components/contract/ContractOsDetailModal';
 import { ContractOsPleitoListPanel } from '@/components/contract/ContractOsPleitoListPanel';
 import { OsPleitoBillingImportModal } from '@/components/contract/OsPleitoBillingImportModal';
@@ -71,7 +77,6 @@ import {
 import { useContractTableColumnCustomizer } from '@/components/useContractTableColumnCustomizer';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
-import { pathToModuleKey } from '@sistema-ponto/permission-modules';
 import {
   formatOsSePasta,
   formatOsSePastaOrDash,
@@ -86,7 +91,7 @@ import { isUnbRelatedLabel } from '@/lib/unbBranding';
 import { exportHistoricoOsPdf, exportPleitosOsToXlsx, getOsFaturamentoAcumulado, getOsPleiteadoPct, getOsRestantePleitear, getOsStatus, getOsStatusFaturamento, isOsConcluida, isOsPleiteada100, osStatusBadgeClass, sumOsPleiteadoTotal, type BillingForOsCheck, type PleitoOsExportRow } from '@/lib/pleitoOsExport';
 import { exportContractBillingsToXlsx } from '@/lib/contractBillingExport';
 import { productionWeekDate, formatProductionWeekRange } from '@/lib/contractWeeklyProduction';
-import { CONTRACT_PAGE_ACCENTS, CONTRACT_PAGE_SECTION_LABEL, CONTRACT_PAGE_SURFACE } from '@/lib/contractPageSurface';
+import { CONTRACT_PAGE_ACCENTS } from '@/lib/contractPageSurface';
 import {
   billingAndamentoBadgeClass,
   buildDisplayIdMap,
@@ -119,8 +124,25 @@ import {
   tetoLabelsForSystemContract,
   type ControleGeralTetoOrcamentarioEntry
 } from '@/app/ponto/contratos/controle-geral/tetoOrcamentario';
+import { pathToModuleKey } from '@sistema-ponto/permission-modules';
 import { ContractGastosResumoModal } from '@/components/contract/ContractGastosResumoModal';
-import { ContratoFaturamentoCharts } from '@/components/contract/ContratoFaturamentoCharts';
+import {
+  ContratoPeriodoFilterControl,
+  createDefaultContratoPeriod,
+  deriveMonthYearFromPeriod,
+  formatContratoPeriodRangeLabel,
+} from '@/components/contract/ContratoPeriodoFilterControl';
+import {
+  ContratoFaturamentoCharts,
+  type ContratoResumoKpi,
+  type ContratoFaturamentoInsight,
+  type ContratoResumoPeriodoFatPendente,
+  type ContratoResumoMetaVsReal,
+  type ContratoResumoProdFat,
+  type ContratoResumoGastoTeto,
+  type ContratoResumoAlerta,
+  type ContratoResumoPessoa,
+} from '@/components/contract/ContratoFaturamentoCharts';
 import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
 
 interface ContractBilling {
@@ -212,31 +234,30 @@ const MESES = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'O
 
 const LIST_DISPLAY_LIMIT = 10;
 const LIST_SEARCH_INPUT_CLASS =
-  'h-10 w-full rounded-xl border border-gray-200 bg-white/80 py-2 pl-9 pr-9 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-white/10 dark:bg-gray-950/40 dark:text-gray-100';
+  'h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100';
 
 const OS_TOOLBAR_BTN_ICON = 'h-4 w-4 shrink-0 text-gray-500 dark:text-gray-400';
 
 const OS_TOOLBAR_BTN =
-  'inline-flex h-10 shrink-0 items-center gap-1.5 rounded-xl border border-gray-200 bg-white/80 px-3.5 text-sm font-semibold text-gray-700 shadow-sm transition-colors hover:border-gray-300 hover:bg-white disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/10 dark:bg-gray-950/40 dark:text-gray-200 dark:hover:border-white/20 dark:hover:bg-gray-900';
+  'inline-flex h-10 shrink-0 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3.5 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700';
 
 const OS_TOOLBAR_BTN_DANGER =
-  'inline-flex h-10 shrink-0 items-center gap-1.5 rounded-xl border border-gray-200 bg-white/80 px-3.5 text-sm font-semibold text-red-600 shadow-sm transition-colors hover:border-red-200 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/10 dark:bg-gray-950/40 dark:text-red-400 dark:hover:border-red-900/50 dark:hover:bg-red-950/25';
+  'inline-flex h-10 shrink-0 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3.5 text-sm font-semibold text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-red-400 dark:hover:bg-red-950/25';
 
 const OS_TOOLBAR_BTN_PRIMARY =
-  'inline-flex h-10 shrink-0 items-center gap-2 rounded-xl bg-red-600 px-4 text-sm font-semibold text-white shadow-sm shadow-red-600/25 transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50';
+  'inline-flex h-10 shrink-0 items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40';
+
+const OS_TOOLBAR_BTN_ICON_ONLY =
+  'inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700';
 
 function ContractSurfaceCard({
   className,
-  accent,
+  accent: _accent,
   children,
   ...rest
 }: React.ComponentProps<typeof Card> & { accent?: string }) {
   return (
-    <Card
-      className={[CONTRACT_PAGE_SURFACE, className].filter(Boolean).join(' ')}
-      {...rest}
-      accent={accent}
-    >
+    <Card className={className} {...rest}>
       {children}
     </Card>
   );
@@ -375,10 +396,6 @@ const MESES_FILTRO = [
   { value: 12, label: 'Dezembro' }
 ];
 
-const MESES_FILTRO_SELECT_OPTIONS = labeledToSelectOptions(
-  MESES_FILTRO.map((m) => ({ value: String(m.value), label: m.label }))
-);
-
 const FILTER_OS_STATUS_OPTIONS = labeledToSelectOptions([
   { value: '', label: 'Todos' },
   { value: 'Pendente', label: 'Pendente' },
@@ -397,7 +414,6 @@ const FILTER_OS_STATUS_FATURAMENTO_OPTIONS = labeledToSelectOptions([
 const EXIBIR_GASTOS_CONTRATO_NA_UI = false;
 
 const TIMEZONE_BRASILIA = 'America/Sao_Paulo';
-const pk = pathToModuleKey;
 
 /** Apenas calendário (YYYY-MM-DD) sem hora — evita deslocar o dia. */
 function parseDateOnlyLocal(dateStr: string): Date | null {
@@ -428,6 +444,22 @@ function parseDateSafe(dateStr: string | Date | null | undefined): Date | null {
   }
   const d = new Date(raw);
   return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function toPeriodYmd(date: Date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function isDateInContratoPeriod(date: Date | null, from: string, to: string) {
+  if (!from && !to) return true;
+  if (!date) return false;
+  const ymd = toPeriodYmd(date);
+  if (from && ymd < from) return false;
+  if (to && ymd > to) return false;
+  return true;
 }
 
 function getCalendarPartsBrasilia(d: Date) {
@@ -967,7 +999,6 @@ export default function ContractDetailPage() {
     isAdministrator,
     isElevatedUser,
     can,
-    canAction,
     permissions,
     canAccessContract,
     canAccessContractOrcamentoTab,
@@ -981,6 +1012,10 @@ export default function ContractDetailPage() {
     typeof idParam === 'string' ? idParam : Array.isArray(idParam) ? idParam[0] ?? '' : '';
   const canAccessOrcamento = canAccessContractOrcamentoTab(contractId);
   const canAccessRelatorios = canAccessContractRelatoriosTab(contractId);
+  const canAccessCronogramasModulo = isAdministrator || can(pathToModuleKey('/ponto/cronogramas'));
+  const canAccessCaixinhaModulo = isAdministrator || can(pathToModuleKey('/ponto/caixinha'));
+  const canAccessCombustivelModulo =
+    isAdministrator || can(pathToModuleKey('/ponto/solicitacoes-combustivel'));
   const canAccessReunioesDeContrato = isElevatedUser || canAccessContract(contractId);
   const canAccessReunioesAba = canAccessContractReunioesTab(contractId);
   const canAccessOrdemServicoModulo = canAccessContractOrdemServicoTab(contractId);
@@ -999,9 +1034,22 @@ export default function ContractDetailPage() {
   const containerRef = useRef<HTMLDivElement | null>(null);
 
   const currentYear = new Date().getFullYear();
-  const currentMonth = new Date().getMonth() + 1;
-  const [selectedYear, setSelectedYear] = useState(currentYear);
-  const [selectedMonth, setSelectedMonth] = useState(currentMonth);
+  const defaultPeriod = useMemo(() => createDefaultContratoPeriod(), []);
+  const [periodFrom, setPeriodFrom] = useState(defaultPeriod.from);
+  const [periodTo, setPeriodTo] = useState(defaultPeriod.to);
+  const derivedPeriod = useMemo(
+    () => deriveMonthYearFromPeriod(periodFrom, periodTo),
+    [periodFrom, periodTo]
+  );
+  const selectedYear = derivedPeriod.year;
+  const selectedMonth = derivedPeriod.month;
+  const handlePeriodChange = useCallback((from: string, to: string) => {
+    setPeriodFrom(from);
+    setPeriodTo(to);
+  }, []);
+  const [mainTab, setMainTab] = useState<
+    'resumo' | 'controle' | 'producao' | 'os' | 'pleitos' | 'faturamento' | 'dados'
+  >('resumo');
   const [showBillingModal, setShowBillingModal] = useState(false);
   const [showPleitoModal, setShowPleitoModal] = useState(false);
   const [showProductionModal, setShowProductionModal] = useState(false);
@@ -1522,7 +1570,7 @@ export default function ContractDetailPage() {
       const res = await api.get(`/orcamento/${contract!.costCenterId}`);
       return res.data as { orcamentos?: { id: string }[] };
     },
-    enabled: !!contract?.costCenterId && canAccessOrcamento,
+    enabled: !!contract?.costCenterId && (canAccessOrcamento || canAccessCronogramasModulo),
   });
 
   const { data: relatoriosListaData, isLoading: loadingRelatoriosCount } = useQuery({
@@ -1543,9 +1591,59 @@ export default function ContractDetailPage() {
     enabled: !!contractId && canAccessReunioesDeContrato,
   });
 
+  const { data: caixinhaListaData, isLoading: loadingCaixinhaTotal } = useQuery({
+    queryKey: ['caixinha-purchases', 'contract-resumo', contractId],
+    queryFn: async () => {
+      const res = await api.get<{ success: boolean; data: Array<{ amount: number; purchaseDate: string | null }> }>(
+        '/caixinha',
+        { params: { contractId } }
+      );
+      return res.data?.data ?? [];
+    },
+    enabled: !!contractId && canAccessCaixinhaModulo,
+  });
+
+  const {
+    data: contratoPeopleData,
+    isLoading: loadingContratoPeople,
+    isError: contratoPeopleError,
+  } = useQuery({
+    queryKey: ['contract-access-users', contractId],
+    queryFn: async () => {
+      const res = await api.get<{ success: boolean; data: ContratoResumoPessoa[] }>(
+        `/contracts/${contractId}/access-users`
+      );
+      if (!Array.isArray(res.data?.data)) {
+        throw new Error('Resposta inválida ao carregar pessoas do contrato');
+      }
+      return res.data.data;
+    },
+    enabled: !!contractId,
+    retry: 1,
+    staleTime: 30_000,
+  });
+  const contratoPeople = contratoPeopleError ? [] : contratoPeopleData ?? [];
+
+  const { data: combustivelListaData, isLoading: loadingCombustivelTotal } = useQuery({
+    queryKey: ['fuel-refuel-requests', 'contract-resumo', contractId],
+    queryFn: async () => {
+      const res = await api.get('/fuel-refuel-requests');
+      return (res.data?.data || []) as Array<{
+        contract?: { id: string } | null;
+        refuelDate?: string | null;
+        refuelReportedAt?: string | null;
+        litersRefueled?: string | number | null;
+        pricePerLiter?: string | number | null;
+      }>;
+    },
+    enabled: !!contractId && canAccessCombustivelModulo,
+    staleTime: 30_000,
+  });
+
   const orcamentosCount = Array.isArray(orcamentosListaData?.orcamentos)
     ? orcamentosListaData.orcamentos.length
     : 0;
+  const cronogramasCount = orcamentosCount;
   const relatoriosCount = Array.isArray(relatoriosListaData?.data)
     ? relatoriosListaData.data.length
     : 0;
@@ -1772,23 +1870,12 @@ export default function ContractDetailPage() {
   }, [contract]);
 
   useEffect(() => {
-    if (!contract || availableYears.length === 0) return;
-    setSelectedYear((prev) => {
-      if (prev === 0) return 0;
-      if (availableYears.includes(prev)) return prev;
-      if (availableYears.includes(currentYear)) return currentYear;
-      return availableYears[0];
-    });
-  }, [contract?.id, availableYears, currentYear]);
-
-  const headerYearSelectOptions = useMemo(
-    () =>
-      labeledToSelectOptions([
-        { value: '0', label: 'Todos' },
-        ...availableYears.map((year) => ({ value: String(year), label: String(year) })),
-      ]),
-    [availableYears]
-  );
+    if (mainTab === 'producao' && !canAccessProducaoSemanalModulo) {
+      setMainTab('resumo');
+    } else if ((mainTab === 'os' || mainTab === 'pleitos') && !canAccessOrdemServicoModulo) {
+      setMainTab('resumo');
+    }
+  }, [mainTab, canAccessProducaoSemanalModulo, canAccessOrdemServicoModulo]);
 
   const adjYearSelectOptions = useMemo(
     () =>
@@ -1826,6 +1913,23 @@ export default function ContractDetailPage() {
     : availableYears.includes(selectedYear)
       ? selectedYear
       : availableYears[0] ?? currentYear;
+
+  const controleYearIndex = useMemo(() => {
+    if (availableYears.length === 0) return -1;
+    const idx = availableYears.indexOf(safeSelectedYear);
+    return idx >= 0 ? idx : 0;
+  }, [availableYears, safeSelectedYear]);
+  const canGoPrevControleYear = controleYearIndex > 0;
+  const canGoNextControleYear =
+    controleYearIndex >= 0 && controleYearIndex < availableYears.length - 1;
+  const goControleYear = useCallback(
+    (delta: number) => {
+      const next = availableYears[controleYearIndex + delta];
+      if (next == null) return;
+      handlePeriodChange(`${next}-01-01`, `${next}-12-31`);
+    },
+    [availableYears, controleYearIndex, handlePeriodChange]
+  );
 
   const contractMonthsInSelectedYear = useMemo(() => {
     if (!contractVigenciaDates) return 0;
@@ -2063,18 +2167,6 @@ export default function ContractDetailPage() {
     return m;
   }, [billings]);
 
-  /** Produção semanal preenchida por mês da semana (preenchimento + 7 dias). */
-  const producaoPorYmKey = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const p of productions) {
-      const d = productionWeekFromFilling(p.fillingDate);
-      if (!d) continue;
-      const k = toYearMonthKey(d.getFullYear(), d.getMonth() + 1);
-      m.set(k, (m.get(k) || 0) + p.weeklyProductionValue);
-    }
-    return m;
-  }, [productions]);
-
   const vigenciaMonthList = useMemo(() => {
     if (!contractVigenciaDates) return [] as VigenciaMonth[];
     return listVigenciaMonthKeys(contractVigenciaDates.start, contractVigenciaDates.end);
@@ -2281,6 +2373,66 @@ export default function ContractDetailPage() {
     () => aggregateGastosNaturezaMonthlyTotals(contractGastosNaturezaRows, safeSelectedYear),
     [contractGastosNaturezaRows, safeSelectedYear]
   );
+
+  const producaoPorYmKey = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const p of productions) {
+      const d = productionWeekFromFilling(p.fillingDate);
+      if (!d) continue;
+      const k = toYearMonthKey(d.getFullYear(), d.getMonth() + 1);
+      m.set(k, (m.get(k) || 0) + p.weeklyProductionValue);
+    }
+    return m;
+  }, [productions]);
+
+  const controleGeralFluxoSeries = useMemo(() => {
+    const months: Array<{ y: number; m: number; key: string }> = isAllYears
+      ? vigenciaMonthList.length > 0
+        ? vigenciaMonthList
+        : availableYears.flatMap((y) =>
+            Array.from({ length: 12 }, (_, i) => ({
+              y,
+              m: i + 1,
+              key: toYearMonthKey(y, i + 1),
+            }))
+          )
+      : Array.from({ length: 12 }, (_, i) => ({
+          y: safeSelectedYear,
+          m: i + 1,
+          key: toYearMonthKey(safeSelectedYear, i + 1),
+        }));
+
+    const yearsInSeries = Array.from(new Set(months.map((item) => item.y)));
+    const gastosPorYm = new Map<string, number>();
+    for (const year of yearsInSeries) {
+      const porMes = aggregateGastosNaturezaMonthlyTotals(contractGastosNaturezaRows, year);
+      porMes.forEach((valor, idx) => {
+        gastosPorYm.set(toYearMonthKey(year, idx + 1), valor);
+      });
+    }
+
+    return months.map(({ y, m, key }) => {
+      const faturamento = faturamentoPorYmKey.get(key) || 0;
+      const gastos = Math.abs(gastosPorYm.get(key) || 0);
+      const producao = producaoPorYmKey.get(key) || 0;
+      return {
+        monthKey: key,
+        label: `${MESES[m - 1]}/${String(y).slice(-2)}`,
+        gastos,
+        faturamento,
+        producao,
+        diferenca: faturamento - gastos,
+      };
+    });
+  }, [
+    isAllYears,
+    vigenciaMonthList,
+    availableYears,
+    safeSelectedYear,
+    contractGastosNaturezaRows,
+    faturamentoPorYmKey,
+    producaoPorYmKey,
+  ]);
 
   const gastosOperacionaisPorAno = useMemo(
     () => aggregateGastosNaturezaYearlyTotals(contractGastosNaturezaRows, availableYears),
@@ -2536,59 +2688,472 @@ export default function ContractDetailPage() {
     return result;
   }, [availableYears, producaoPorAno, faturamentoPorAno]);
 
+  const caixinhaResumo = useMemo(() => {
+    const rows = Array.isArray(caixinhaListaData) ? caixinhaListaData : [];
+    const filtered = rows.filter((row) => {
+      const raw = row.purchaseDate;
+      if (!raw) return !periodFrom && !periodTo;
+      return isDateInContratoPeriod(parseDateSafe(raw), periodFrom, periodTo);
+    });
+    const total = filtered.reduce((acc, row) => acc + (Number(row.amount) || 0), 0);
+    return { total, count: filtered.length };
+  }, [caixinhaListaData, periodFrom, periodTo]);
+
+  const abastecimentoResumo = useMemo(() => {
+    const rows = Array.isArray(combustivelListaData) ? combustivelListaData : [];
+    const filtered = rows.filter((row) => {
+      if (row.contract?.id !== contractId) return false;
+      const raw = row.refuelReportedAt || row.refuelDate;
+      if (!raw) return !periodFrom && !periodTo;
+      return isDateInContratoPeriod(parseDateSafe(raw), periodFrom, periodTo);
+    });
+    let total = 0;
+    let count = 0;
+    for (const row of filtered) {
+      const liters = Number(row.litersRefueled);
+      const price = Number(row.pricePerLiter);
+      if (!Number.isFinite(liters) || !Number.isFinite(price)) continue;
+      total += liters * price;
+      count += 1;
+    }
+    return { total, count };
+  }, [combustivelListaData, contractId, periodFrom, periodTo]);
+
+  const resumoModulosKpis = useMemo((): ContratoResumoKpi[] => {
+    const reunioesCount = mensalCount + (canAccessReunioesAba ? semanalCount : 0);
+    const reunioesLoading = loadingMensalCount || (canAccessReunioesAba && loadingSemanalCount);
+
+    return [
+      {
+        title: 'Orçamentos',
+        value: canAccessOrcamento ? String(orcamentosCount) : '—',
+        subtitle: canAccessOrcamento ? undefined : 'Sem acesso',
+        loading: canAccessOrcamento && loadingOrcamentosCount,
+        href: canAccessOrcamento ? `/ponto/contratos/${contractId}/orcamento` : undefined,
+      },
+      {
+        title: 'Relatórios fotográficos',
+        value: canAccessRelatorios ? String(relatoriosCount) : '—',
+        subtitle: canAccessRelatorios ? undefined : 'Sem acesso',
+        loading: canAccessRelatorios && loadingRelatoriosCount,
+        href: canAccessRelatorios ? `/ponto/contratos/${contractId}/relatorios` : undefined,
+      },
+      {
+        title: 'Reuniões',
+        value: canAccessReunioesDeContrato ? String(reunioesCount) : '—',
+        subtitle: canAccessReunioesDeContrato ? undefined : 'Sem acesso',
+        loading: canAccessReunioesDeContrato && reunioesLoading,
+        href: canAccessReunioesDeContrato
+          ? canAccessReunioesAba
+            ? `/ponto/contratos/${contractId}/reunioes`
+            : `/ponto/contratos/${contractId}/reunioes?aba=relatorio-mensal`
+          : undefined,
+      },
+      {
+        title: 'Cronogramas',
+        value: canAccessCronogramasModulo ? String(cronogramasCount) : '—',
+        subtitle: canAccessCronogramasModulo ? undefined : 'Sem acesso',
+        loading: canAccessCronogramasModulo && loadingOrcamentosCount,
+        href: canAccessCronogramasModulo ? `/ponto/cronogramas?contrato=${contractId}` : undefined,
+      },
+    ];
+  }, [
+    contractId,
+    canAccessOrcamento,
+    canAccessRelatorios,
+    canAccessReunioesDeContrato,
+    canAccessReunioesAba,
+    canAccessCronogramasModulo,
+    orcamentosCount,
+    relatoriosCount,
+    mensalCount,
+    semanalCount,
+    cronogramasCount,
+    loadingOrcamentosCount,
+    loadingRelatoriosCount,
+    loadingMensalCount,
+    loadingSemanalCount,
+  ]);
+
   const faturamentoChartsYear = isAllYears
     ? availableYears.includes(currentYear)
       ? currentYear
       : availableYears[availableYears.length - 1] ?? currentYear
     : safeSelectedYear;
 
-  const faturamentoFluxoSeries = useMemo(() => {
-    const months: Array<{ y: number; m: number; key: string }> = isAllYears
-      ? vigenciaMonthList.length > 0
-        ? vigenciaMonthList
-        : availableYears.flatMap((y) =>
-            Array.from({ length: 12 }, (_, i) => ({
-              y,
-              m: i + 1,
-              key: toYearMonthKey(y, i + 1),
-            }))
-          )
-      : Array.from({ length: 12 }, (_, i) => ({
-          y: safeSelectedYear,
-          m: i + 1,
-          key: toYearMonthKey(safeSelectedYear, i + 1),
-        }));
+  const faturamentoInsight = useMemo((): ContratoFaturamentoInsight => {
+    const year = faturamentoChartsYear;
+    const prevYear = year - 1;
+    const monthMode = !isAllYears && selectedMonth > 0;
+    const mesIdx = selectedMonth - 1;
 
-    const yearsInSeries = Array.from(new Set(months.map((item) => item.y)));
-    const gastosPorYm = new Map<string, number>();
-    for (const year of yearsInSeries) {
-      const porMes = aggregateGastosNaturezaMonthlyTotals(contractGastosNaturezaRows, year);
-      porMes.forEach((valor, idx) => {
-        gastosPorYm.set(toYearMonthKey(year, idx + 1), valor);
-      });
+    const sumDays = (y: number, m: number) => {
+      const days = new Date(y, m, 0).getDate();
+      const byDay = new Array(days).fill(0);
+      for (const b of billings) {
+        const d = parseDateSafe(b.issueDate);
+        if (!d || d.getFullYear() !== y || d.getMonth() + 1 !== m) continue;
+        byDay[d.getDate() - 1] += b.grossValue;
+      }
+      return byDay as number[];
+    };
+
+    if (monthMode) {
+      const prevMonthDate = new Date(year, mesIdx, 1);
+      prevMonthDate.setMonth(prevMonthDate.getMonth() - 1);
+      const prevY = prevMonthDate.getFullYear();
+      const prevM = prevMonthDate.getMonth() + 1;
+      const atualDays = sumDays(year, selectedMonth);
+      const anteriorDays = sumDays(prevY, prevM);
+      const len = Math.max(atualDays.length, anteriorDays.length);
+      const series = Array.from({ length: len }, (_, i) => ({
+        label: String(i + 1),
+        atual: atualDays[i] || 0,
+        anterior: anteriorDays[i] || 0,
+      }));
+      const total = atualDays.reduce((a, v) => a + v, 0);
+      const previousTotal = anteriorDays.reduce((a, v) => a + v, 0);
+      const producao = producaoPorMes[mesIdx] || 0;
+      const pendente = Math.max(0, (valorOrcadoPorMes[mesIdx] || 0) - total);
+
+      return {
+        total,
+        previousTotal,
+        comparisonLabel: 'vs. mês anterior',
+        series,
+        breakdown: [
+          {
+            key: 'faturado',
+            label: 'Faturado',
+            value: total,
+            accentClass: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
+            barClass: 'bg-emerald-500',
+          },
+          {
+            key: 'pendente',
+            label: 'Pendente',
+            value: pendente,
+            accentClass: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300',
+            barClass: 'bg-amber-500',
+          },
+          {
+            key: 'producao',
+            label: 'Produção',
+            value: producao,
+            accentClass: 'bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300',
+            barClass: 'bg-sky-500',
+          },
+        ],
+      };
     }
 
-    return months.map(({ y, m, key }) => {
-      const faturamento = faturamentoPorYmKey.get(key) || 0;
-      const gastos = Math.abs(gastosPorYm.get(key) || 0);
-      const producao = producaoPorYmKey.get(key) || 0;
+    const series = Array.from({ length: 12 }, (_, i) => {
+      const m = i + 1;
       return {
-        monthKey: key,
-        label: `${MESES[m - 1]}/${String(y).slice(-2)}`,
-        gastos,
-        faturamento,
-        producao,
-        diferenca: faturamento - gastos,
+        label: MESES[i],
+        atual: faturamentoPorYmKey.get(toYearMonthKey(year, m)) || 0,
+        anterior: faturamentoPorYmKey.get(toYearMonthKey(prevYear, m)) || 0,
       };
     });
+    const total = isAllYears
+      ? faturamentoTotalTodosAnos
+      : series.reduce((acc, row) => acc + row.atual, 0);
+    const previousTotal = isAllYears
+      ? availableYears
+          .filter((y) => y < year)
+          .reduce((acc, y) => acc + (faturamentoPorAno[y] || 0), 0)
+      : series.reduce((acc, row) => acc + row.anterior, 0);
+    const producao = isAllYears
+      ? productions.reduce((acc, p) => acc + p.weeklyProductionValue, 0)
+      : producaoPorAno[year] || 0;
+    const pendente = isAllYears
+      ? Math.max(0, pendenteParaFaturarTodosAnos ?? 0)
+      : Math.max(0, saldoAnual ?? 0);
+
+    return {
+      total,
+      previousTotal,
+      comparisonLabel: isAllYears ? 'vs. anos anteriores' : `vs. ${prevYear}`,
+      series,
+      breakdown: [
+        {
+          key: 'faturado',
+          label: 'Faturado',
+          value: total,
+          accentClass: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
+          barClass: 'bg-emerald-500',
+        },
+        {
+          key: 'pendente',
+          label: 'Pendente',
+          value: pendente,
+          accentClass: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300',
+          barClass: 'bg-amber-500',
+        },
+        {
+          key: 'producao',
+          label: 'Produção',
+          value: producao,
+          accentClass: 'bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300',
+          barClass: 'bg-sky-500',
+        },
+      ],
+    };
+  }, [
+    faturamentoChartsYear,
+    isAllYears,
+    selectedMonth,
+    billings,
+    producaoPorMes,
+    valorOrcadoPorMes,
+    faturamentoPorYmKey,
+    faturamentoTotalTodosAnos,
+    availableYears,
+    faturamentoPorAno,
+    producaoPorAno,
+    productions,
+    pendenteParaFaturarTodosAnos,
+    saldoAnual,
+  ]);
+
+  const resumoPeriodLabel = useMemo(
+    () => formatContratoPeriodRangeLabel(periodFrom, periodTo),
+    [periodFrom, periodTo]
+  );
+
+  const resumoPeriodoFatPendente = useMemo((): ContratoResumoPeriodoFatPendente => {
+    if (!isAllYears && selectedMonth > 0) {
+      const idx = selectedMonth - 1;
+      return {
+        periodLabel: resumoPeriodLabel,
+        faturado: faturamentoPorMes[idx] || 0,
+        pendente: Math.max(0, pendenteFaturamentoPorMes[idx] || 0),
+      };
+    }
+    if (!isAllYears) {
+      return {
+        periodLabel: resumoPeriodLabel,
+        faturado: faturamentoAnual,
+        pendente: Math.max(0, pendenteFaturamentoPorAno[safeSelectedYear] || 0),
+      };
+    }
+    const pendente = availableYears.reduce(
+      (acc, y) => acc + Math.max(0, pendenteFaturamentoPorAno[y] || 0),
+      0
+    );
+    return {
+      periodLabel: resumoPeriodLabel,
+      faturado: faturamentoTotalTodosAnos,
+      pendente:
+        pendente > 0 ? pendente : Math.max(0, pendenteParaFaturarTodosAnos ?? 0),
+    };
   }, [
     isAllYears,
-    vigenciaMonthList,
-    availableYears,
+    selectedMonth,
+    resumoPeriodLabel,
+    faturamentoPorMes,
+    pendenteFaturamentoPorMes,
+    faturamentoAnual,
+    pendenteFaturamentoPorAno,
     safeSelectedYear,
-    contractGastosNaturezaRows,
-    faturamentoPorYmKey,
-    producaoPorYmKey,
+    availableYears,
+    faturamentoTotalTodosAnos,
+    pendenteParaFaturarTodosAnos,
+  ]);
+
+  const resumoMetaVsReal = useMemo((): ContratoResumoMetaVsReal => {
+    if (!isAllYears && selectedMonth > 0) {
+      const idx = selectedMonth - 1;
+      const key = toYearMonthKey(safeSelectedYear, selectedMonth);
+      const metaIdeal = metaSchedule.get(key) ?? 0;
+      const metaReal = metaRealPorMes[idx] ?? metaIdeal;
+      const faturado = faturamentoPorMes[idx] || 0;
+      const start = Math.max(0, idx - 5);
+      const series = Array.from({ length: idx - start + 1 }, (_, i) => {
+        const mi = start + i;
+        const k = toYearMonthKey(safeSelectedYear, mi + 1);
+        return {
+          label: MESES[mi],
+          metaIdeal: metaSchedule.get(k) ?? 0,
+          metaReal: metaRealPorMes[mi] ?? metaSchedule.get(k) ?? 0,
+          faturado: faturamentoPorMes[mi] || 0,
+        };
+      });
+      return {
+        periodLabel: resumoPeriodLabel,
+        metaIdeal,
+        metaReal,
+        faturado,
+        series,
+      };
+    }
+
+    if (!isAllYears) {
+      const series = MESES.map((label, i) => {
+        const k = toYearMonthKey(safeSelectedYear, i + 1);
+        return {
+          label,
+          metaIdeal: metaSchedule.get(k) ?? 0,
+          metaReal: metaRealPorMes[i] ?? metaSchedule.get(k) ?? 0,
+          faturado: faturamentoPorMes[i] || 0,
+        };
+      });
+      const metaIdeal = series.reduce((a, r) => a + r.metaIdeal, 0);
+      const metaReal = series.reduce((a, r) => a + r.metaReal, 0);
+      return {
+        periodLabel: resumoPeriodLabel,
+        metaIdeal,
+        metaReal,
+        faturado: faturamentoAnual,
+        series,
+      };
+    }
+
+    const series = availableYears.map((year) => {
+      let metaIdeal = 0;
+      let metaReal = 0;
+      for (let m = 1; m <= 12; m++) {
+        const k = toYearMonthKey(year, m);
+        const ideal = metaSchedule.get(k);
+        if (ideal != null) metaIdeal += ideal;
+        metaReal += metaRealByScheduleKey.get(k) ?? ideal ?? 0;
+      }
+      return {
+        label: String(year),
+        metaIdeal,
+        metaReal,
+        faturado: faturamentoPorAno[year] || 0,
+      };
+    });
+    return {
+      periodLabel: resumoPeriodLabel,
+      metaIdeal: series.reduce((a, r) => a + r.metaIdeal, 0),
+      metaReal: series.reduce((a, r) => a + r.metaReal, 0),
+      faturado: faturamentoTotalTodosAnos,
+      series,
+    };
+  }, [
+    isAllYears,
+    selectedMonth,
+    safeSelectedYear,
+    resumoPeriodLabel,
+    metaSchedule,
+    metaRealPorMes,
+    faturamentoPorMes,
+    faturamentoAnual,
+    availableYears,
+    metaRealByScheduleKey,
+    faturamentoPorAno,
+    faturamentoTotalTodosAnos,
+  ]);
+
+  const resumoProdFat = useMemo((): ContratoResumoProdFat => {
+    if (!isAllYears && selectedMonth > 0) {
+      const idx = selectedMonth - 1;
+      const start = Math.max(0, idx - 5);
+      const series = Array.from({ length: idx - start + 1 }, (_, i) => {
+        const mi = start + i;
+        return {
+          label: MESES[mi],
+          producao: producaoPorMes[mi] || 0,
+          faturamento: faturamentoPorMes[mi] || 0,
+        };
+      });
+      const producao = producaoPorMes[idx] || 0;
+      const faturamento = faturamentoPorMes[idx] || 0;
+      return {
+        periodLabel: resumoPeriodLabel,
+        producao,
+        faturamento,
+        delta: producao - faturamento,
+        series,
+      };
+    }
+    if (!isAllYears) {
+      const series = MESES.map((label, i) => ({
+        label,
+        producao: producaoPorMes[i] || 0,
+        faturamento: faturamentoPorMes[i] || 0,
+      }));
+      const producao = producaoPorAno[safeSelectedYear] || 0;
+      const faturamento = faturamentoAnual;
+      return {
+        periodLabel: resumoPeriodLabel,
+        producao,
+        faturamento,
+        delta: producao - faturamento,
+        series,
+      };
+    }
+    const series = availableYears.map((year) => ({
+      label: String(year),
+      producao: producaoPorAno[year] || 0,
+      faturamento: faturamentoPorAno[year] || 0,
+    }));
+    const producao = series.reduce((a, r) => a + r.producao, 0);
+    const faturamento = series.reduce((a, r) => a + r.faturamento, 0);
+    return {
+      periodLabel: resumoPeriodLabel,
+      producao,
+      faturamento,
+      delta: producao - faturamento,
+      series,
+    };
+  }, [
+    isAllYears,
+    selectedMonth,
+    resumoPeriodLabel,
+    producaoPorMes,
+    faturamentoPorMes,
+    producaoPorAno,
+    safeSelectedYear,
+    faturamentoAnual,
+    availableYears,
+    faturamentoPorAno,
+  ]);
+
+  const resumoGastoTeto = useMemo((): ContratoResumoGastoTeto => {
+    if (!isAllYears && selectedMonth > 0) {
+      const idx = selectedMonth - 1;
+      return {
+        periodLabel: resumoPeriodLabel,
+        gastos: gastosOperacionaisPorMes[idx] || 0,
+        teto: tetoOrcamentarioPorMes[idx] || 0,
+        loading: gastosOperacionaisCarregando || loadingTetoOrcamentario,
+      };
+    }
+    if (!isAllYears) {
+      const gastos = gastosOperacionaisPorMes.reduce((a, v) => a + (v || 0), 0);
+      const teto =
+        tetoOrcamentarioPorAno[safeSelectedYear] ??
+        tetoOrcamentarioPorMes.reduce((a, v) => a + (v || 0), 0);
+      return {
+        periodLabel: resumoPeriodLabel,
+        gastos,
+        teto: teto || 0,
+        loading: gastosOperacionaisCarregando || loadingTetoOrcamentario,
+      };
+    }
+    const gastos = availableYears.reduce((a, y) => a + (gastosOperacionaisPorAno[y] || 0), 0);
+    const teto = availableYears.reduce((a, y) => a + (tetoOrcamentarioPorAno[y] || 0), 0);
+    return {
+      periodLabel: resumoPeriodLabel,
+      gastos,
+      teto,
+      loading: gastosOperacionaisCarregando || loadingTetoOrcamentario,
+    };
+  }, [
+    isAllYears,
+    selectedMonth,
+    resumoPeriodLabel,
+    gastosOperacionaisPorMes,
+    tetoOrcamentarioPorMes,
+    gastosOperacionaisCarregando,
+    loadingTetoOrcamentario,
+    tetoOrcamentarioPorAno,
+    safeSelectedYear,
+    availableYears,
+    gastosOperacionaisPorAno,
   ]);
 
   // Faturamento filtrado por ano e mês (para exibição nas tabelas)
@@ -2690,6 +3255,23 @@ export default function ContractDetailPage() {
   );
 
   const osResumoTotals = useMemo(() => {
+    if (!isAllYears && selectedMonth > 0) {
+      const idx = selectedMonth - 1;
+      return {
+        totalOrcado: valorOrcadoPorMes[idx] || 0,
+        totalPleiteado: pleitosPorMes[idx] || 0,
+        totalFaturado: faturamentoPorMes[idx] || 0,
+      };
+    }
+
+    if (!isAllYears) {
+      return {
+        totalOrcado: valorOrcadoPorAno[safeSelectedYear] || 0,
+        totalPleiteado: pleitosPorAno[safeSelectedYear] || 0,
+        totalFaturado: faturamentoPorAno[safeSelectedYear] || faturamentoAnual,
+      };
+    }
+
     const osRows = allPleitos.filter((p) => !isPleitoHistorico(p));
     let totalOrcado = 0;
     let totalPleiteado = 0;
@@ -2706,7 +3288,155 @@ export default function ContractDetailPage() {
     }
 
     return { totalOrcado, totalPleiteado, totalFaturado };
-  }, [allPleitos, billingsForOs]);
+  }, [
+    isAllYears,
+    selectedMonth,
+    valorOrcadoPorMes,
+    pleitosPorMes,
+    faturamentoPorMes,
+    valorOrcadoPorAno,
+    pleitosPorAno,
+    faturamentoPorAno,
+    safeSelectedYear,
+    faturamentoAnual,
+    allPleitos,
+    billingsForOs,
+  ]);
+
+  const resumoProgresso = useMemo(() => {
+    if (!isAllYears && selectedMonth > 0) {
+      const idx = selectedMonth - 1;
+      const key = toYearMonthKey(safeSelectedYear, selectedMonth);
+      const metaIdeal = metaSchedule.get(key);
+      const metaReal = metaRealPorMes[idx];
+      const total =
+        metaReal != null && metaReal > 0
+          ? metaReal
+          : metaIdeal != null && metaIdeal > 0
+            ? metaIdeal
+            : valorOrcadoPorMes[idx] || 0;
+      return {
+        title: 'Progresso',
+        billed: faturamentoPorMes[idx] || 0,
+        total,
+      };
+    }
+
+    if (!isAllYears) {
+      return {
+        title: 'Progresso',
+        billed: faturamentoPorAno[faturamentoChartsYear] ?? faturamentoAnual,
+        total: valorAnualPorAno[faturamentoChartsYear] ?? valorAnualAjustado ?? 0,
+      };
+    }
+
+    return {
+      title: 'Progresso',
+      billed: faturamentoTotalTodosAnos,
+      total: valorMaisAditivosTotal,
+    };
+  }, [
+    isAllYears,
+    selectedMonth,
+    safeSelectedYear,
+    metaSchedule,
+    metaRealPorMes,
+    valorOrcadoPorMes,
+    faturamentoPorMes,
+    faturamentoChartsYear,
+    faturamentoAnual,
+    faturamentoPorAno,
+    valorAnualPorAno,
+    valorAnualAjustado,
+    faturamentoTotalTodosAnos,
+    valorMaisAditivosTotal,
+  ]);
+
+  const resumoAlertas = useMemo((): ContratoResumoAlerta[] => {
+    const list: ContratoResumoAlerta[] = [];
+    const { faturado, pendente } = resumoPeriodoFatPendente;
+    if (pendente > 0 && faturado === 0) {
+      list.push({
+        id: 'sem-fat',
+        tone: 'warn',
+        title: 'Sem faturamento no período',
+        detail: `Há ${formatCurrency(pendente)} pendente de faturamento (orçado − faturado).`,
+      });
+    } else if (pendente > faturado && pendente > 0) {
+      list.push({
+        id: 'pendente-alto',
+        tone: 'warn',
+        title: 'Pendente acima do faturado',
+        detail: `Pendente ${formatCurrency(pendente)} vs faturado ${formatCurrency(faturado)} no filtro.`,
+      });
+    }
+
+    if (resumoMetaVsReal.metaReal > 0 && resumoMetaVsReal.faturado < resumoMetaVsReal.metaReal * 0.85) {
+      list.push({
+        id: 'abaixo-meta',
+        tone: 'danger',
+        title: 'Abaixo da meta real',
+        detail: `Faturado ${formatCurrency(resumoMetaVsReal.faturado)} ante meta real ${formatCurrency(resumoMetaVsReal.metaReal)}.`,
+      });
+    }
+
+    if (resumoProdFat.delta > 0) {
+      list.push({
+        id: 'prod-fat',
+        tone: 'info',
+        title: 'Produção acima do faturamento',
+        detail: `Diferença de ${formatCurrency(resumoProdFat.delta)} (Prod. − Fat.) no período.`,
+      });
+    }
+
+    const teto = resumoGastoTeto.teto;
+    const gastos = Math.abs(resumoGastoTeto.gastos);
+    if (teto > 0) {
+      const pct = (gastos / teto) * 100;
+      if (pct >= 100) {
+        list.push({
+          id: 'teto-estouro',
+          tone: 'danger',
+          title: 'Gastos acima do teto',
+          detail: `${pct.toFixed(0)}% do teto utilizado (${formatCurrency(gastos)} / ${formatCurrency(teto)}).`,
+        });
+      } else if (pct >= 90) {
+        list.push({
+          id: 'teto-alerta',
+          tone: 'warn',
+          title: 'Gastos próximos do teto',
+          detail: `${pct.toFixed(0)}% do teto utilizado no período.`,
+        });
+      }
+    }
+
+    const osGapPleito = Math.max(0, osResumoTotals.totalOrcado - osResumoTotals.totalPleiteado);
+    if (osGapPleito > 0 && osResumoTotals.totalOrcado > 0) {
+      list.push({
+        id: 'os-pleito',
+        tone: 'info',
+        title: 'Há valor ainda não pleiteado',
+        detail: `${formatCurrency(osGapPleito)} entre orçado e pleiteado nas OS.`,
+      });
+    }
+
+    return list.slice(0, 5);
+  }, [
+    resumoPeriodoFatPendente,
+    resumoMetaVsReal,
+    resumoProdFat,
+    resumoGastoTeto,
+    osResumoTotals,
+  ]);
+
+  /** Alerta principal no header (prioriza perigo / aviso). */
+  const headerAlerta = useMemo(() => {
+    return (
+      resumoAlertas.find((a) => a.tone === 'danger') ??
+      resumoAlertas.find((a) => a.tone === 'warn') ??
+      null
+    );
+  }, [resumoAlertas]);
 
   const clearPleitosFilters = () => {
     setFilterOsStatus('');
@@ -3564,72 +4294,149 @@ export default function ContractDetailPage() {
         <div ref={containerRef} className="space-y-5">
           {/* Header */}
           <div className="space-y-4">
-            <div className="relative flex min-h-[3.25rem] items-center justify-center py-1">
-              <Link
-                href="/ponto/contratos"
-                aria-label="Voltar para contratos"
-                className="absolute left-0 top-1/2 z-10 inline-flex -translate-y-1/2 items-center gap-2 rounded-xl px-2 py-1.5 text-sm font-medium text-gray-500 transition-colors hover:bg-white/70 hover:text-gray-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-400 dark:text-gray-400 dark:hover:bg-white/10 dark:hover:text-gray-100"
-              >
-                <ArrowLeft className="h-4 w-4 shrink-0" />
-                Voltar
-              </Link>
-              <div className="absolute right-0 top-1/2 z-10 -translate-y-1/2">
-                {EXIBIR_GASTOS_CONTRATO_NA_UI ? (
-                  <div className="text-right">
-                    {paidDisplay.loading || totvsRmCarregando ? (
-                      <div className="inline-flex items-center gap-2 text-sm text-red-600 dark:text-red-400">
-                        <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
-                        <span className="hidden sm:inline">Carregando…</span>
-                      </div>
-                    ) : paidDisplay.totvsErrorMessage ? (
-                      <span className="text-xs text-amber-600 dark:text-amber-400" title={paidDisplay.totvsErrorMessage}>
-                        RM indisponível
-                      </span>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => openPaidNaturezaModal(null)}
-                        className="rounded-lg px-1 py-0.5 text-base font-bold text-red-600 transition-colors hover:bg-red-50 hover:text-red-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-500 dark:text-red-400 dark:hover:bg-red-950/40 dark:hover:text-red-300 sm:text-lg"
-                        title="Ver totais por natureza (RM)"
-                      >
-                        {paidHeaderTotal.toLocaleString('pt-BR', {
-                          style: 'currency',
-                          currency: 'BRL'
-                        })}
-                      </button>
-                    )}
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-1.5">
-                    <StringSingleSelectDropdown
-                      value={String(selectedMonth)}
-                      onChange={(v) => setSelectedMonth(Number(v))}
-                      options={MESES_FILTRO_SELECT_OPTIONS}
-                      allowEmpty={false}
-                      disableSearch
-                      menuAlign="end"
-                      matchTriggerWidth
-                      className="min-w-[9.5rem] max-w-[10.5rem]"
-                    />
-                    <StringSingleSelectDropdown
-                      value={String(selectedYear)}
-                      onChange={(v) => setSelectedYear(Number(v))}
-                      options={headerYearSelectOptions}
-                      allowEmpty={false}
-                      disableSearch
-                      menuAlign="end"
-                      matchTriggerWidth
-                      menuMinWidth={152}
-                      className="min-w-[5.25rem]"
-                    />
-                  </div>
-                )}
-              </div>
-              <div className="w-full max-w-3xl px-24 text-center sm:px-32">
-                <p className={CONTRACT_PAGE_SECTION_LABEL}>Contrato nº {contract.number}</p>
-                <h1 className="mt-1 break-words text-2xl font-semibold tracking-tight text-gray-900 dark:text-gray-50 sm:text-3xl">
+            <div className="flex flex-col gap-4 py-1 xl:flex-row xl:items-center xl:gap-6">
+              <div className="min-w-0 shrink-0 text-left">
+                <h1 className="break-words text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
                   {contract.name}
                 </h1>
+                <p className="mt-2 text-sm text-gray-600 dark:text-gray-400 sm:text-base">
+                  Contrato nº {contract.number}
+                </p>
+              </div>
+
+              <div className="flex min-w-0 flex-1 flex-col gap-3 lg:flex-row lg:items-center lg:justify-end lg:gap-4">
+                <div className="flex min-w-0 flex-wrap items-center gap-x-1 gap-y-2 sm:gap-x-2">
+                  <FilterStatCard
+                    variant="flat"
+                    size="sm"
+                    className="shrink-0"
+                    icon={Scale}
+                    label="Saldo pendente contratual"
+                    count={formatCurrency(Math.max(0, pendenteParaFaturarTodosAnos ?? 0))}
+                    iconBg="bg-gray-100 dark:bg-gray-700/60"
+                    iconColor="text-gray-600 dark:text-gray-300"
+                  />
+                  {canAccessCombustivelModulo ? (
+                    <>
+                      <span
+                        className="hidden h-8 w-px shrink-0 self-center bg-gray-200 dark:bg-gray-600 md:block"
+                        aria-hidden
+                      />
+                      <FilterStatCard
+                        variant="flat"
+                        size="sm"
+                        className="shrink-0"
+                        icon={Fuel}
+                        label="Abastecimento"
+                        count={formatCurrency(abastecimentoResumo.total)}
+                        loading={loadingCombustivelTotal}
+                        iconBg="bg-gray-100 dark:bg-gray-700/60"
+                        iconColor="text-gray-600 dark:text-gray-300"
+                        onClick={() =>
+                          router.push('/ponto/solicitacoes-combustivel/analises')
+                        }
+                      />
+                    </>
+                  ) : null}
+                  {canAccessCaixinhaModulo ? (
+                    <>
+                      <span
+                        className="hidden h-8 w-px shrink-0 self-center bg-gray-200 dark:bg-gray-600 md:block"
+                        aria-hidden
+                      />
+                      <FilterStatCard
+                        variant="flat"
+                        size="sm"
+                        className="shrink-0"
+                        icon={Wallet}
+                        label="Caixinha"
+                        count={formatCurrency(caixinhaResumo.total)}
+                        loading={loadingCaixinhaTotal}
+                        iconBg="bg-gray-100 dark:bg-gray-700/60"
+                        iconColor="text-gray-600 dark:text-gray-300"
+                        onClick={() =>
+                          router.push(`/ponto/caixinha?contrato=${contractId}`)
+                        }
+                      />
+                    </>
+                  ) : null}
+                  {headerAlerta ? (
+                    <>
+                      <span
+                        className="hidden h-8 w-px shrink-0 self-center bg-gray-200 dark:bg-gray-600 md:block"
+                        aria-hidden
+                      />
+                      <div
+                        className="flex min-w-0 max-w-full shrink-0 items-center gap-3 rounded-xl px-3 py-2.5 sm:max-w-[17rem]"
+                        title={headerAlerta.detail}
+                        role="status"
+                      >
+                        <div
+                          className={`flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full ${
+                            headerAlerta.tone === 'danger'
+                              ? 'bg-rose-100 text-rose-600 dark:bg-rose-900/40 dark:text-rose-300'
+                              : 'bg-amber-100 text-amber-600 dark:bg-amber-900/40 dark:text-amber-300'
+                          }`}
+                        >
+                          {headerAlerta.id === 'abaixo-meta' || headerAlerta.id === 'sem-fat' ? (
+                            <TrendingDown className="h-5 w-5" aria-hidden strokeWidth={2.25} />
+                          ) : (
+                            <AlertTriangle className="h-5 w-5" aria-hidden strokeWidth={2.25} />
+                          )}
+                        </div>
+                        <div className="min-w-0">
+                          <p
+                            className={`text-sm font-medium ${
+                              headerAlerta.tone === 'danger'
+                                ? 'text-rose-600 dark:text-rose-400'
+                                : 'text-amber-600 dark:text-amber-400'
+                            }`}
+                          >
+                            Atenção
+                          </p>
+                          <p
+                            className={`mt-0.5 truncate text-base font-bold leading-tight ${
+                              headerAlerta.tone === 'danger'
+                                ? 'text-rose-700 dark:text-rose-200'
+                                : 'text-amber-700 dark:text-amber-200'
+                            }`}
+                          >
+                            {headerAlerta.title}
+                          </p>
+                        </div>
+                      </div>
+                    </>
+                  ) : null}
+                </div>
+
+                {EXIBIR_GASTOS_CONTRATO_NA_UI ? (
+                  <div className="flex shrink-0 items-center self-start lg:self-center">
+                    <div className="shrink-0 text-right">
+                      {paidDisplay.loading || totvsRmCarregando ? (
+                        <div className="inline-flex items-center gap-2 text-sm text-red-600 dark:text-red-400">
+                          <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+                          <span className="hidden sm:inline">Carregando…</span>
+                        </div>
+                      ) : paidDisplay.totvsErrorMessage ? (
+                        <span className="text-xs text-amber-600 dark:text-amber-400" title={paidDisplay.totvsErrorMessage}>
+                          RM indisponível
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => openPaidNaturezaModal(null)}
+                          className="rounded-lg px-1 py-0.5 text-base font-bold text-red-600 transition-colors hover:bg-red-50 hover:text-red-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-500 dark:text-red-400 dark:hover:bg-red-950/40 dark:hover:text-red-300 sm:text-lg"
+                          title="Ver totais por natureza (RM)"
+                        >
+                          {paidHeaderTotal.toLocaleString('pt-BR', {
+                            style: 'currency',
+                            currency: 'BRL'
+                          })}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ) : null}
               </div>
             </div>
 
@@ -3655,359 +4462,138 @@ export default function ContractDetailPage() {
 
           </div>
 
+          <AppUnderlineTabList
+            aria-label="Seções do contrato"
+            centered={false}
+            className="mt-1"
+            trailing={
+              !EXIBIR_GASTOS_CONTRATO_NA_UI ? (
+                <ContratoPeriodoFilterControl
+                  variant="underline"
+                  from={periodFrom}
+                  to={periodTo}
+                  onPeriodChange={handlePeriodChange}
+                />
+              ) : null
+            }
+          >
+            <AppUnderlineTabButton
+              active={mainTab === 'resumo'}
+              onClick={() => setMainTab('resumo')}
+              className="whitespace-nowrap px-3 py-2.5 text-sm"
+            >
+              Resumo
+            </AppUnderlineTabButton>
+            <AppUnderlineTabButton
+              active={mainTab === 'controle'}
+              onClick={() => setMainTab('controle')}
+              className="whitespace-nowrap px-3 py-2.5 text-sm"
+            >
+              Controle Geral
+            </AppUnderlineTabButton>
+            {canAccessProducaoSemanalModulo ? (
+              <AppUnderlineTabButton
+                active={mainTab === 'producao'}
+                onClick={() => setMainTab('producao')}
+                className="whitespace-nowrap px-3 py-2.5 text-sm"
+              >
+                Produção
+              </AppUnderlineTabButton>
+            ) : null}
+            {canAccessOrdemServicoModulo ? (
+              <AppUnderlineTabButton
+                active={mainTab === 'os'}
+                onClick={() => setMainTab('os')}
+                className="whitespace-nowrap px-3 py-2.5 text-sm"
+              >
+                Ordens de Serviço
+              </AppUnderlineTabButton>
+            ) : null}
+            {canAccessOrdemServicoModulo ? (
+              <AppUnderlineTabButton
+                active={mainTab === 'pleitos'}
+                onClick={() => setMainTab('pleitos')}
+                className="whitespace-nowrap px-3 py-2.5 text-sm"
+              >
+                Pleitos
+              </AppUnderlineTabButton>
+            ) : null}
+            <AppUnderlineTabButton
+              active={mainTab === 'faturamento'}
+              onClick={() => setMainTab('faturamento')}
+              className="whitespace-nowrap px-3 py-2.5 text-sm"
+            >
+              Faturamento
+            </AppUnderlineTabButton>
+            <AppUnderlineTabButton
+              active={mainTab === 'dados'}
+              onClick={() => setMainTab('dados')}
+              className="whitespace-nowrap px-3 py-2.5 text-sm"
+            >
+              Dados
+            </AppUnderlineTabButton>
+          </AppUnderlineTabList>
+
+          {mainTab === 'resumo' ? (
           <div className="space-y-5">
+          <ContratoFaturamentoCharts
+            faturamentoInsight={faturamentoInsight}
+            progressoTitle={resumoProgresso.title}
+            progressoBilled={resumoProgresso.billed}
+            progressoTotal={resumoProgresso.total}
+            osTotais={osResumoTotals}
+            resumoKpis={resumoModulosKpis}
+            metaVsReal={resumoMetaVsReal}
+            people={contratoPeople}
+            peopleLoading={loadingContratoPeople}
+            peopleError={contratoPeopleError}
+          />
+          </div>
+          ) : null}
+
+          {mainTab === 'controle' ? (
           <div className="space-y-4">
-            <p className={CONTRACT_PAGE_SECTION_LABEL}>Contrato</p>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-5 xl:grid-cols-3">
-            <ContractSurfaceCard accent={CONTRACT_PAGE_ACCENTS.indigo}>
-              <CardContent className="p-4 sm:p-6">
-                <div className="flex items-center">
-                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-indigo-100 text-indigo-600 ring-1 ring-indigo-200/80 dark:bg-indigo-500/15 dark:text-indigo-300 dark:ring-indigo-400/20">
-                    <CalendarDays className="h-5 w-5 text-indigo-600 dark:text-indigo-400 sm:h-6 sm:w-6" />
-                  </div>
-                  <div className="ml-3 min-w-0 flex-1 sm:ml-4">
-                    <p className="whitespace-normal text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">
-                      Vigência
-                    </p>
-                    <div className="group relative mt-1 w-fit max-w-full">
-                      <p className="cursor-default text-xl font-semibold tracking-tight leading-snug text-gray-900 dark:text-gray-50 sm:text-2xl">
-                        {formatDate(contract.startDate)} até {formatDate(contract.endDate)}
-                      </p>
-                      <div
-                        role="tooltip"
-                        className="pointer-events-none absolute left-0 top-full z-50 mt-2 w-max max-w-[min(22rem,calc(100vw-2rem))] space-y-1 rounded-lg border border-gray-200 bg-white p-2.5 text-left text-xs leading-relaxed text-gray-600 opacity-0 shadow-lg transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300"
-                      >
-                        <p>Início: {formatDate(contract.startDate)}</p>
-                        <p>Término: {formatDate(contract.endDate)}</p>
-                        <p className="font-medium text-gray-900 dark:text-gray-100">
-                          Duração: {contractYearsCount > 0 ? contractYearsCount : '—'} ano(s) de vigência
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </ContractSurfaceCard>
-
-            <ContractSurfaceCard accent={CONTRACT_PAGE_ACCENTS.blue}>
-              <CardContent className="p-4 sm:p-6">
-                <div className="flex items-start justify-between gap-2 sm:items-center sm:gap-3">
-                  <div className="flex min-w-[120px] flex-1 items-center pr-2">
-                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-100 text-blue-600 ring-1 ring-blue-200/80 dark:bg-blue-500/15 dark:text-blue-300 dark:ring-blue-400/20">
-                      <Receipt className="h-5 w-5 text-blue-600 dark:text-blue-400 sm:h-6 sm:w-6" />
-                    </div>
-                    <div className="ml-3 min-w-0 flex-1 overflow-hidden sm:ml-4">
-                      <p className="break-normal text-xs font-medium leading-tight text-gray-600 dark:text-gray-400 sm:text-sm">
-                        Valor + Aditivos
-                      </p>
-                      <div className="group relative mt-1 w-fit max-w-full">
-                        <p className="cursor-default text-xl font-semibold tracking-tight text-gray-900 dark:text-gray-50 sm:text-2xl">
-                          {formatCurrency(valorMaisAditivosTotal)}
-                        </p>
-                        <div
-                          role="tooltip"
-                          className="pointer-events-none absolute left-0 top-full z-50 mt-2 w-max max-w-[min(22rem,calc(100vw-2rem))] space-y-1 rounded-lg border border-gray-200 bg-white p-2.5 text-left text-xs leading-relaxed text-gray-600 opacity-0 shadow-lg transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300"
-                        >
-                          <p>Valor contratual: {formatCurrency(contract.valuePlusAddenda)}</p>
-                          {totalAddenda !== 0 ? (
-                            <p>
-                              Aditivos: {totalAddenda >= 0 ? '+' : ''}
-                              {formatCurrency(totalAddenda)}
-                            </p>
-                          ) : (
-                            <p className="text-gray-500 dark:text-gray-400">Sem aditivos</p>
-                          )}
-                          <p className="font-medium text-gray-900 dark:text-gray-100">
-                            Total: {formatCurrency(valorMaisAditivosTotal)}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setShowAddendumModal(true)}
-                    className="mt-1 flex-shrink-0 rounded-lg p-2 text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-100 sm:mt-0 sm:p-2.5"
-                    title="Cadastrar aditivo"
-                    aria-label="Cadastrar aditivo"
-                  >
-                    <Plus className="h-4 w-4 sm:h-5 sm:w-5" />
-                  </button>
-                </div>
-              </CardContent>
-            </ContractSurfaceCard>
-
-            <ContractSurfaceCard accent={CONTRACT_PAGE_ACCENTS.sky}>
-              <CardContent className="p-4 sm:p-6">
-                <div className="flex items-start justify-between gap-2 sm:items-center sm:gap-3">
-                  <div className="flex min-w-[120px] flex-1 items-center pr-2">
-                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-sky-100 text-sky-600 ring-1 ring-sky-200/80 dark:bg-sky-500/15 dark:text-sky-300 dark:ring-sky-400/20">
-                      <FileText className="h-5 w-5 text-sky-600 dark:text-sky-400 sm:h-6 sm:w-6" />
-                    </div>
-                    <div className="ml-3 min-w-0 flex-1 overflow-hidden sm:ml-4">
-                      <p className="break-normal text-xs font-medium leading-tight text-gray-600 dark:text-gray-400 sm:text-sm">
-                        Valor anual
-                      </p>
-                      {isAllYears ? (
-                        <p className="mt-1 text-xl font-semibold tracking-tight text-gray-900 dark:text-gray-50 sm:text-2xl">—</p>
-                      ) : (
-                        <div className="group relative mt-1 w-fit max-w-full">
-                          <p className="cursor-default text-xl font-semibold tracking-tight text-gray-900 dark:text-gray-50 sm:text-2xl">
-                            {valorAnualAjustado !== null ? formatCurrency(valorAnualAjustado) : '-'}
-                          </p>
-                          <div
-                            role="tooltip"
-                            className="pointer-events-none absolute left-0 top-full z-50 mt-2 w-max max-w-[min(22rem,calc(100vw-2rem))] space-y-1 rounded-lg border border-gray-200 bg-white p-2.5 text-left text-xs leading-relaxed text-gray-600 opacity-0 shadow-lg transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300"
-                          >
-                            <p>Valor + aditivos: {formatCurrency(valorMaisAditivosTotal)}</p>
-                            <p>
-                              ÷ {contractVigenciaMonthCount > 0 ? contractVigenciaMonthCount : '—'} mês(es)
-                              {contractVigenciaMonthCount > 0
-                                ? ` = ${formatCurrency(valorMaisAditivosTotal / contractVigenciaMonthCount)}/mês`
-                                : ''}
-                            </p>
-                            <p>
-                              × {contractMonthsInSelectedYear} mês(es) em {safeSelectedYear}
-                              {valorAnualBase !== null ? ` = ${formatCurrency(valorAnualBase)}` : ''}
-                            </p>
-                            {valorAnualBase !== null &&
-                              valorAnualAjustado !== null &&
-                              Math.abs(valorAnualAjustado - valorAnualBase) > 0.009 && (
-                                <>
-                                  <p>
-                                    Ajuste orçamentário ({safeSelectedYear}):{' '}
-                                    {valorAnualAjustado >= valorAnualBase ? '+' : ''}
-                                    {formatCurrency(valorAnualAjustado - valorAnualBase)}
-                                  </p>
-                                  <p className="font-medium text-gray-900 dark:text-gray-100">
-                                    Valor anual: {formatCurrency(valorAnualAjustado)}
-                                  </p>
-                                </>
-                              )}
-                            {valorAnualBase !== null &&
-                              valorAnualAjustado !== null &&
-                              Math.abs(valorAnualAjustado - valorAnualBase) <= 0.009 && (
-                                <p className="font-medium text-gray-900 dark:text-gray-100">
-                                  Valor anual: {formatCurrency(valorAnualBase)}
-                                </p>
-                              )}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    disabled={isAllYears}
-                    onClick={() => {
-                      setAdjFormYear(safeSelectedYear);
-                      setShowValorAnualAdjustModal(true);
-                    }}
-                    className="mt-1 flex-shrink-0 rounded-lg p-2 text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 disabled:cursor-not-allowed disabled:opacity-40 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-100 sm:mt-0 sm:p-2.5"
-                    title="Ajustar valor anual"
-                    aria-label="Ajustar valor anual"
-                  >
-                    <Edit2 className="h-4 w-4 sm:h-5 sm:w-5" />
-                  </button>
-                </div>
-              </CardContent>
-            </ContractSurfaceCard>
-          </div>
-          </div>
-
-          <div className="space-y-4">
-            <p className={CONTRACT_PAGE_SECTION_LABEL}>Faturamento</p>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-5 xl:grid-cols-4">
-            <ContractSurfaceCard accent={CONTRACT_PAGE_ACCENTS.green}>
-              <CardContent className="p-4 sm:p-6">
-                <div className="flex items-center">
-                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-green-100 text-green-600 ring-1 ring-green-200/80 dark:bg-green-500/15 dark:text-green-300 dark:ring-green-400/20">
-                    <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400 sm:h-6 sm:w-6" />
-                  </div>
-                  <div className="ml-3 min-w-0 flex-1 sm:ml-4">
-                    <p className="whitespace-normal text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">
-                      Saldo anual faturado
-                    </p>
-                    <p className="mt-1 text-xl font-semibold tracking-tight text-gray-900 dark:text-gray-50 sm:text-2xl">
-                      {formatCurrency(isAllYears ? faturamentoTotalTodosAnos : faturamentoAnual)}
-                    </p>
-                  </div>
-                </div>
-              </CardContent>
-            </ContractSurfaceCard>
-            <ContractSurfaceCard>
-              <CardContent className="p-4 sm:p-6">
-                <div className="flex items-center">
-                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-amber-600 ring-1 ring-amber-200/80 dark:bg-amber-500/15 dark:text-amber-300 dark:ring-amber-400/20">
-                    <Clock className="h-5 w-5 text-amber-600 dark:text-amber-400 sm:h-6 sm:w-6" />
-                  </div>
-                  <div className="ml-3 min-w-0 flex-1 sm:ml-4">
-                    <p className="whitespace-normal text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">
-                      Saldo anual pendente
-                    </p>
-                    <p className="mt-1 text-xl font-semibold tracking-tight text-gray-900 dark:text-gray-50 sm:text-2xl">
-                      {isAllYears ? '—' : saldoAnual !== null ? formatCurrency(saldoAnual) : '-'}
-                    </p>
-                  </div>
-                </div>
-              </CardContent>
-            </ContractSurfaceCard>
-            <ContractSurfaceCard>
-              <CardContent className="p-4 sm:p-6">
-                <div className="flex items-center">
-                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-green-100 text-green-600 ring-1 ring-green-200/80 dark:bg-green-500/15 dark:text-green-300 dark:ring-green-400/20">
-                    <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400 sm:h-6 sm:w-6" />
-                  </div>
-                  <div className="ml-3 min-w-0 flex-1 sm:ml-4">
-                    <p className="whitespace-normal text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">
-                      Saldo contratual faturado
-                    </p>
-                    <p className="mt-1 text-xl font-semibold tracking-tight text-gray-900 dark:text-gray-50 sm:text-2xl">
-                      {formatCurrency(faturamentoTotalTodosAnos)}
-                    </p>
-                  </div>
-                </div>
-              </CardContent>
-            </ContractSurfaceCard>
-            <ContractSurfaceCard>
-              <CardContent className="p-4 sm:p-6">
-                <div className="flex items-center">
-                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-amber-600 ring-1 ring-amber-200/80 dark:bg-amber-500/15 dark:text-amber-300 dark:ring-amber-400/20">
-                    <Clock className="h-5 w-5 text-amber-600 dark:text-amber-400 sm:h-6 sm:w-6" />
-                  </div>
-                  <div className="ml-3 min-w-0 flex-1 sm:ml-4">
-                    <p className="whitespace-normal text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">
-                      Saldo contratual pendente
-                    </p>
-                    <p className="mt-1 text-xl font-semibold tracking-tight text-gray-900 dark:text-gray-50 sm:text-2xl">
-                      {pendenteParaFaturarTodosAnos !== null
-                        ? formatCurrency(pendenteParaFaturarTodosAnos)
-                        : '-'}
-                    </p>
-                  </div>
-                </div>
-              </CardContent>
-            </ContractSurfaceCard>
-          </div>
-          </div>
-
-          {(canAccessOrcamento || canAccessRelatorios || canAccessReunioesDeContrato) && (
-            <div className="space-y-4">
-              <p className={CONTRACT_PAGE_SECTION_LABEL}>Documentos</p>
-              <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-                {canAccessOrcamento ? (
-                  <Link
-                    href={`/ponto/contratos/${contractId}/orcamento`}
-                    aria-label="Abrir orçamentos"
-                    className="block rounded-2xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-500"
-                  >
-                    <ContractSurfaceCard
-                      accent={CONTRACT_PAGE_ACCENTS.green}
-                      className="h-full cursor-pointer transition-colors hover:border-gray-300/80 hover:bg-white/70 dark:hover:border-white/20 dark:hover:bg-gray-900/80"
-                    >
-                      <CardContent className="p-4 sm:p-6">
-                        <div className="flex min-w-[120px] items-center">
-                          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-emerald-100 text-emerald-600 ring-1 ring-emerald-200/80 dark:bg-emerald-500/15 dark:text-emerald-300 dark:ring-emerald-400/20">
-                            <Calculator className="h-5 w-5" />
-                          </div>
-                          <div className="ml-3 min-w-0 flex-1 overflow-hidden sm:ml-4">
-                            <p className="break-normal text-xs font-medium leading-tight text-gray-600 dark:text-gray-400 sm:text-sm">
-                              Orçamentos
-                            </p>
-                            <p className="mt-1 text-xl font-semibold tracking-tight text-gray-900 dark:text-gray-50 sm:text-2xl">
-                              {loadingOrcamentosCount ? '…' : orcamentosCount}
-                            </p>
-                          </div>
-                        </div>
-                      </CardContent>
-                    </ContractSurfaceCard>
-                  </Link>
-                ) : null}
-                {canAccessRelatorios ? (
-                  <Link
-                    href={`/ponto/contratos/${contractId}/relatorios`}
-                    aria-label="Abrir relatórios fotográficos"
-                    className="block rounded-2xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-500"
-                  >
-                    <ContractSurfaceCard
-                      accent={CONTRACT_PAGE_ACCENTS.rose}
-                      className="h-full cursor-pointer transition-colors hover:border-gray-300/80 hover:bg-white/70 dark:hover:border-white/20 dark:hover:bg-gray-900/80"
-                    >
-                      <CardContent className="p-4 sm:p-6">
-                        <div className="flex min-w-[120px] items-center">
-                          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-rose-100 text-rose-600 ring-1 ring-rose-200/80 dark:bg-rose-500/15 dark:text-rose-300 dark:ring-rose-400/20">
-                            <FileImage className="h-5 w-5" />
-                          </div>
-                          <div className="ml-3 min-w-0 flex-1 overflow-hidden sm:ml-4">
-                            <p className="break-normal text-xs font-medium leading-tight text-gray-600 dark:text-gray-400 sm:text-sm">
-                              Relatórios Fotográficos
-                            </p>
-                            <p className="mt-1 text-xl font-semibold tracking-tight text-gray-900 dark:text-gray-50 sm:text-2xl">
-                              {loadingRelatoriosCount ? '…' : relatoriosCount}
-                            </p>
-                          </div>
-                        </div>
-                      </CardContent>
-                    </ContractSurfaceCard>
-                  </Link>
-                ) : null}
-                {canAccessReunioesDeContrato ? (
-                  <Link
-                    href={
-                      canAccessReunioesAba
-                        ? `/ponto/contratos/${contractId}/reunioes`
-                        : `/ponto/contratos/${contractId}/reunioes?aba=relatorio-mensal`
-                    }
-                    aria-label="Abrir reuniões de contrato"
-                    className="block rounded-2xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-500"
-                  >
-                    <ContractSurfaceCard
-                      accent={CONTRACT_PAGE_ACCENTS.indigo}
-                      className="h-full cursor-pointer transition-colors hover:border-gray-300/80 hover:bg-white/70 dark:hover:border-white/20 dark:hover:bg-gray-900/80"
-                    >
-                      <CardContent className="p-4 sm:p-6">
-                        <div className="flex min-w-[120px] items-center">
-                          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-indigo-100 text-indigo-600 ring-1 ring-indigo-200/80 dark:bg-indigo-500/15 dark:text-indigo-300 dark:ring-indigo-400/20">
-                            <Video className="h-5 w-5" />
-                          </div>
-                          <div className="ml-3 min-w-0 flex-1 overflow-hidden sm:ml-4">
-                            <p className="break-normal text-xs font-medium leading-tight text-gray-600 dark:text-gray-400 sm:text-sm">
-                              Reuniões de Contrato
-                            </p>
-                            <p className="mt-1 text-xl font-semibold tracking-tight text-gray-900 dark:text-gray-50 sm:text-2xl">
-                              {loadingMensalCount || (canAccessReunioesAba && loadingSemanalCount)
-                                ? '…'
-                                : mensalCount + (canAccessReunioesAba ? semanalCount : 0)}
-                            </p>
-                          </div>
-                        </div>
-                      </CardContent>
-                    </ContractSurfaceCard>
-                  </Link>
-                ) : null}
-              </div>
-            </div>
-          )}
-
-          </div>
-
-          {/* Controle Geral - Metas Mensais ou Metas Anuais conforme filtro */}
           <ContractSurfaceCard accent={CONTRACT_PAGE_ACCENTS.indigo}>
             <CardHeader className="border-b-0 pb-1 !pt-5">
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex items-center space-x-3 min-w-0">
-                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-indigo-100 text-indigo-600 ring-1 ring-indigo-200/80 dark:bg-indigo-500/15 dark:text-indigo-300 dark:ring-indigo-400/20">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="flex min-w-0 items-center space-x-3">
+                  <div className="rounded-lg bg-indigo-100 p-2 dark:bg-indigo-900/30 sm:p-3">
                     <BarChart3 className="w-5 h-5 sm:w-6 sm:h-6 text-indigo-600 dark:text-indigo-400" />
                   </div>
                   <div className="min-w-0">
                     <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                      {isAllYears ? 'Acumulado Anual' : `Controle Geral - ${safeSelectedYear}`}
+                      {isAllYears ? 'Acumulado Anual' : 'Controle Geral'}
                     </h3>
                     <p className="text-sm text-gray-600 dark:text-gray-400">
                       {isAllYears ? 'Indicadores anuais por ano' : 'Indicadores mensais do contrato'}
                     </p>
                   </div>
                 </div>
+                {availableYears.length > 0 ? (
+                  <div className="flex shrink-0 items-center gap-0.5 self-end sm:self-start">
+                    <button
+                      type="button"
+                      onClick={() => goControleYear(-1)}
+                      disabled={!canGoPrevControleYear}
+                      className="inline-flex h-7 w-7 items-center justify-center rounded-md text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-800 disabled:pointer-events-none disabled:opacity-30 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100"
+                      aria-label="Ano anterior"
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                    </button>
+                    <span className="min-w-[3.5rem] text-center text-xs font-medium tabular-nums text-gray-600 dark:text-gray-300 sm:min-w-[4rem]">
+                      {safeSelectedYear}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => goControleYear(1)}
+                      disabled={!canGoNextControleYear}
+                      className="inline-flex h-7 w-7 items-center justify-center rounded-md text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-800 disabled:pointer-events-none disabled:opacity-30 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100"
+                      aria-label="Próximo ano"
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </button>
+                  </div>
+                ) : null}
               </div>
               {EXIBIR_GASTOS_CONTRATO_NA_UI &&
               !isAllYears &&
@@ -4146,14 +4732,14 @@ export default function ContractDetailPage() {
                           </td>
                         ))}
                       </tr>
-                      <tr className="bg-orange-50/50 dark:bg-orange-900/10">
-                        <td className="px-4 py-3 text-sm font-medium text-orange-700 dark:text-orange-400">
+                      <tr className="bg-green-50/50 dark:bg-green-900/10">
+                        <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">
                           Pendente Faturamento
                         </td>
                         {availableYears.map((year) => (
                           <td
                             key={year}
-                            className="px-4 py-3 text-center text-sm font-medium text-orange-700 dark:text-orange-400"
+                            className="px-4 py-3 text-center text-sm font-medium text-green-700 dark:text-green-400"
                           >
                             {pendenteFaturamentoPorAno[year] !== 0 ? formatCurrency(pendenteFaturamentoPorAno[year]) : '-'}
                           </td>
@@ -4489,14 +5075,14 @@ export default function ContractDetailPage() {
                           </td>
                         ))}
                       </tr>
-                      <tr className="bg-orange-50/50 dark:bg-orange-900/10">
-                        <td className="px-4 py-3 text-sm font-medium text-orange-700 dark:text-orange-400">
+                      <tr className="bg-green-50/50 dark:bg-green-900/10">
+                        <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">
                           Pendente Faturamento
                         </td>
                         {MESES.map((mes, i) => (
                           <td
                             key={mes}
-                            className="px-4 py-3 text-center text-sm font-medium text-orange-700 dark:text-orange-400"
+                            className="px-4 py-3 text-center text-sm font-medium text-green-700 dark:text-green-400"
                           >
                             {pendenteFaturamentoPorMes[i] !== 0 ? formatCurrency(pendenteFaturamentoPorMes[i]) : '-'}
                           </td>
@@ -4509,28 +5095,27 @@ export default function ContractDetailPage() {
             </CardContent>
           </ContractSurfaceCard>
 
-          <ContratoFaturamentoCharts
-            billings={billings}
-            year={faturamentoChartsYear}
-            monthlySeries={faturamentoFluxoSeries}
-            fluxoPeriodLabel={isAllYears ? 'Toda a vigência' : String(safeSelectedYear)}
-            loading={loadingBillings}
-            loadingFluxo={gastosOperacionaisCarregando}
+          <ContratoControleGeralFluxoChart
+            series={controleGeralFluxoSeries}
+            periodLabel={isAllYears ? 'Toda a vigência' : String(safeSelectedYear)}
+            loading={gastosOperacionaisCarregando}
           />
+          </div>
+          ) : null}
 
-          {canAccessProducaoSemanalModulo ? (
+          {mainTab === 'producao' && canAccessProducaoSemanalModulo ? (
           <>
           {/* Produção Semanal */}
           <ContractSurfaceCard accent={CONTRACT_PAGE_ACCENTS.amber}>
             <CardHeader className={`${cadastroListClasses.cardHeader} !pt-5`}>
               <div className={cadastroListClasses.cardHeaderRow}>
                 <div className={cadastroListClasses.cardHeaderIconRow}>
-                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-amber-600 ring-1 ring-amber-200/80 dark:bg-amber-500/15 dark:text-amber-300 dark:ring-amber-400/20">
+                  <div className="rounded-lg bg-amber-100 p-2 dark:bg-amber-900/30 sm:p-3">
                     <BarChart3 className="h-5 w-5 text-amber-600 dark:text-amber-400 sm:h-6 sm:w-6" />
                   </div>
                   <div className="min-w-0">
                     <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 sm:text-xl">
-                      Produção Semanal - Cadastrar às sextas-feiras
+                      Produção Semanal
                     </h3>
                     <p className="text-sm text-gray-500 dark:text-gray-400">
                       {loadingProductions
@@ -4549,7 +5134,7 @@ export default function ContractDetailPage() {
                       value={searchTermProduction}
                       onChange={(e) => setSearchTermProduction(e.target.value)}
                       placeholder="Buscar OS, responsável, valor..."
-                      className={`${LIST_SEARCH_INPUT_CLASS} focus:ring-amber-500`}
+                      className={LIST_SEARCH_INPUT_CLASS}
                     />
                     {searchTermProduction ? (
                       <button
@@ -4562,12 +5147,13 @@ export default function ContractDetailPage() {
                       </button>
                     ) : null}
                   </div>
+                  <div className={cadastroListClasses.filterIconButtonWrap}>
                   <button
                     type="button"
                     onClick={() => setShowProductionFilterModal(true)}
-                    className={`relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border transition-colors ${
+                    className={`${cadastroListClasses.filterIconButton} transition-colors ${
                       hasActiveProductionFilter
-                        ? 'border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100 dark:border-amber-800/60 dark:bg-amber-950/30 dark:text-amber-300 dark:hover:bg-amber-900/40'
+                        ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40'
                         : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
                     }`}
                     aria-label="Abrir filtro"
@@ -4575,9 +5161,10 @@ export default function ContractDetailPage() {
                   >
                     <Filter className="h-4 w-4" />
                     {hasActiveProductionFilter ? (
-                      <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-amber-500 ring-2 ring-white dark:ring-gray-900" />
+                      <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
                     ) : null}
                   </button>
+                  </div>
                   <button
                     type="button"
                     onClick={() => {
@@ -4590,7 +5177,7 @@ export default function ContractDetailPage() {
                       setShowProductionModal(true);
                     }}
                     disabled={!canCreateContrato}
-                    className="flex h-10 shrink-0 items-center gap-2 rounded-xl bg-red-600 px-4 text-sm font-semibold text-white shadow-sm shadow-red-600/25 transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+                    className={OS_TOOLBAR_BTN_PRIMARY}
                   >
                     <Plus className="h-4 w-4 shrink-0" />
                     <span>Nova Produção Semanal</span>
@@ -4637,8 +5224,8 @@ export default function ContractDetailPage() {
                     currentPage={productionListPage}
                     totalPages={productionListRange.totalPages}
                   />
-                <div className="table-scroll">
-                  <table className="w-full" data-cc-skip-column-customizer="1">
+                <div className={cadastroListClasses.tableScroll}>
+                  <table className={cadastroListClasses.table} data-cc-skip-column-customizer="1">
                     <thead className="border-b border-gray-200 dark:border-gray-700">
                       <tr>
                         <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Semana</th>
@@ -4658,7 +5245,7 @@ export default function ContractDetailPage() {
                           <td className="px-4 py-3 text-sm whitespace-nowrap text-gray-900 dark:text-gray-100">
                             {formatProductionWeekDate(p.fillingDate)}
                           </td>
-                          <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100">
+                          <td className={`${cadastroListClasses.td} whitespace-nowrap font-medium`}>
                             {formatOsSePastaOrDash(p.divSe, folderForDivSe(pleitos, p.divSe))}
                           </td>
                           <td className="px-4 py-3 text-sm text-right font-medium text-gray-900 dark:text-gray-100">{formatCurrency(p.weeklyProductionValue)}</td>
@@ -4722,72 +5309,15 @@ export default function ContractDetailPage() {
           </>
           ) : null}
 
-          {canAccessOrdemServicoModulo ? (
+          {mainTab === 'os' && canAccessOrdemServicoModulo ? (
           <>
-          <div className="space-y-4">
-            <p className={CONTRACT_PAGE_SECTION_LABEL}>Resumo</p>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 xl:grid-cols-3">
-              <ContractSurfaceCard>
-                <CardContent className="p-4 sm:p-6">
-                  <div className="flex items-center">
-                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-100 text-blue-600 ring-1 ring-blue-200/80 dark:bg-blue-500/15 dark:text-blue-300 dark:ring-blue-400/20">
-                      <Calculator className="h-5 w-5 text-blue-600 dark:text-blue-400 sm:h-6 sm:w-6" />
-                    </div>
-                    <div className="ml-3 min-w-0 flex-1 sm:ml-4">
-                      <p className="whitespace-normal text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">
-                        Total Orçado
-                      </p>
-                      <p className="mt-1 text-xl font-semibold tracking-tight text-gray-900 dark:text-gray-50 sm:text-2xl">
-                        {formatCurrency(osResumoTotals.totalOrcado)}
-                      </p>
-                    </div>
-                  </div>
-                </CardContent>
-              </ContractSurfaceCard>
-              <ContractSurfaceCard>
-                <CardContent className="p-4 sm:p-6">
-                  <div className="flex items-center">
-                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-indigo-100 text-indigo-600 ring-1 ring-indigo-200/80 dark:bg-indigo-500/15 dark:text-indigo-300 dark:ring-indigo-400/20">
-                      <FileText className="h-5 w-5 text-indigo-600 dark:text-indigo-400 sm:h-6 sm:w-6" />
-                    </div>
-                    <div className="ml-3 min-w-0 flex-1 sm:ml-4">
-                      <p className="whitespace-normal text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">
-                        Total Pleiteado
-                      </p>
-                      <p className="mt-1 text-xl font-semibold tracking-tight text-gray-900 dark:text-gray-50 sm:text-2xl">
-                        {formatCurrency(osResumoTotals.totalPleiteado)}
-                      </p>
-                    </div>
-                  </div>
-                </CardContent>
-              </ContractSurfaceCard>
-              <ContractSurfaceCard>
-                <CardContent className="p-4 sm:p-6">
-                  <div className="flex items-center">
-                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-green-100 text-green-600 ring-1 ring-green-200/80 dark:bg-green-500/15 dark:text-green-300 dark:ring-green-400/20">
-                      <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400 sm:h-6 sm:w-6" />
-                    </div>
-                    <div className="ml-3 min-w-0 flex-1 sm:ml-4">
-                      <p className="whitespace-normal text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">
-                        Total Faturado
-                      </p>
-                      <p className="mt-1 text-xl font-semibold tracking-tight text-gray-900 dark:text-gray-50 sm:text-2xl">
-                        {formatCurrency(osResumoTotals.totalFaturado)}
-                      </p>
-                    </div>
-                  </div>
-                </CardContent>
-              </ContractSurfaceCard>
-            </div>
-          </div>
-
           {/* Ordem de Serviço - Lista de pleitos do contrato */}
           <ContractSurfaceCard accent={CONTRACT_PAGE_ACCENTS.blue}>
             <CardHeader className={`${cadastroListClasses.cardHeader} !pt-5`}>
               <div className="flex flex-col gap-4">
                 <div className={cadastroListClasses.cardHeaderRow}>
                   <div className={cadastroListClasses.cardHeaderIconRow}>
-                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-100 text-blue-600 ring-1 ring-blue-200/80 dark:bg-blue-500/15 dark:text-blue-300 dark:ring-blue-400/20">
+                    <div className="rounded-lg bg-blue-100 p-2 dark:bg-blue-900/30 sm:p-3">
                       <ClipboardList className="h-5 w-5 text-blue-600 dark:text-blue-400 sm:h-6 sm:w-6" />
                     </div>
                     <div className="min-w-0">
@@ -4840,12 +5370,13 @@ export default function ContractDetailPage() {
                         </button>
                       ) : null}
                     </div>
+                    <div className={cadastroListClasses.filterIconButtonWrap}>
                     <button
                       type="button"
                       onClick={() => setShowPleitosFilterModal(true)}
-                      className={`relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border transition-colors ${
+                      className={`${cadastroListClasses.filterIconButton} transition-colors ${
                         hasActivePleitosFilter
-                          ? 'border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100 dark:border-blue-800/60 dark:bg-blue-950/30 dark:text-blue-300 dark:hover:bg-blue-900/40'
+                          ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40'
                           : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
                       }`}
                       aria-label="Abrir filtro"
@@ -4853,30 +5384,29 @@ export default function ContractDetailPage() {
                     >
                       <Filter className="h-4 w-4" />
                       {hasActivePleitosFilter ? (
-                        <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-blue-500 ring-2 ring-white dark:ring-gray-900" />
+                        <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
                       ) : null}
                     </button>
+                    </div>
                     <button
                       type="button"
                       onClick={() => setShowOsImportModal(true)}
                       disabled={!canCreateContrato}
-                      className={OS_TOOLBAR_BTN}
-                      title="Importar planilha"
-                      aria-label="Importar planilha"
+                      className={OS_TOOLBAR_BTN_ICON_ONLY}
+                      title="Importar"
+                      aria-label="Importar"
                     >
-                      <Upload className="h-4 w-4 shrink-0" />
-                      Importar
+                      <Upload className="h-4 w-4" />
                     </button>
                     <button
                       type="button"
                       onClick={() => setShowOsExportModal(true)}
                       disabled={filteredPleitos.length === 0 || exportingOsPdf}
-                      className={OS_TOOLBAR_BTN}
+                      className={OS_TOOLBAR_BTN_ICON_ONLY}
                       title="Exportar"
                       aria-label="Exportar"
                     >
-                      <Download className="h-4 w-4 shrink-0" />
-                      Exportar
+                      <Download className="h-4 w-4" />
                     </button>
                     <button
                       type="button"
@@ -4978,7 +5508,7 @@ export default function ContractDetailPage() {
                     currentPage={pleitosListPage}
                     totalPages={pleitosListRange.totalPages}
                   />
-                <div className="table-scroll">
+                <div className={cadastroListClasses.tableScroll}>
                   <table className="w-full text-sm" data-cc-skip-column-customizer="1">
                     <thead className="border-b border-gray-200 dark:border-gray-700">
                       <tr>
@@ -5199,17 +5729,19 @@ export default function ContractDetailPage() {
               )}
             </CardContent>
               </ContractSurfaceCard>
-
-          <ContractHistoricoPleitosPanel contractId={contractId} />
           </>
           ) : null}
 
-          {/* Faturamento - Lista de notas */}
+          {mainTab === 'pleitos' && canAccessOrdemServicoModulo ? (
+            <ContractHistoricoPleitosPanel contractId={contractId} />
+          ) : null}
+
+          {mainTab === 'faturamento' ? (
           <ContractSurfaceCard accent={CONTRACT_PAGE_ACCENTS.green}>
             <CardHeader className={`${cadastroListClasses.cardHeader} !pt-5`}>
               <div className={cadastroListClasses.cardHeaderRow}>
                 <div className={cadastroListClasses.cardHeaderIconRow}>
-                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-green-100 text-green-600 ring-1 ring-green-200/80 dark:bg-green-500/15 dark:text-green-300 dark:ring-green-400/20">
+                  <div className="rounded-lg bg-green-100 p-2 dark:bg-green-900/30 sm:p-3">
                     <Receipt className="h-5 w-5 text-green-600 dark:text-green-400 sm:h-6 sm:w-6" />
                   </div>
                   <div className="min-w-0">
@@ -5249,7 +5781,7 @@ export default function ContractDetailPage() {
                       value={searchTermBillings}
                       onChange={(e) => setSearchTermBillings(e.target.value)}
                       placeholder="Buscar nota, OS, valor..."
-                      className={`${LIST_SEARCH_INPUT_CLASS} focus:ring-green-500`}
+                      className={LIST_SEARCH_INPUT_CLASS}
                     />
                     {searchTermBillings ? (
                       <button
@@ -5262,12 +5794,13 @@ export default function ContractDetailPage() {
                       </button>
                     ) : null}
                   </div>
+                  <div className={cadastroListClasses.filterIconButtonWrap}>
                   <button
                     type="button"
                     onClick={() => setShowBillingFilterModal(true)}
-                    className={`relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border transition-colors ${
+                    className={`${cadastroListClasses.filterIconButton} transition-colors ${
                       hasActiveBillingFilter
-                        ? 'border-green-300 bg-green-50 text-green-700 hover:bg-green-100 dark:border-green-800/60 dark:bg-green-950/30 dark:text-green-300 dark:hover:bg-green-900/40'
+                        ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40'
                         : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'
                     }`}
                     aria-label="Abrir filtro"
@@ -5275,38 +5808,37 @@ export default function ContractDetailPage() {
                   >
                     <Filter className="h-4 w-4" />
                     {hasActiveBillingFilter ? (
-                      <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-green-500 ring-2 ring-white dark:ring-gray-900" />
+                      <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
                     ) : null}
                   </button>
+                  </div>
                   {contract?.allowBillingImportWithoutOsPleito ? (
                     <button
                       type="button"
                       onClick={() => setShowBillingOnlyImportModal(true)}
                       disabled={!canCreateContrato}
-                      className={OS_TOOLBAR_BTN}
-                      title="Importar planilha"
-                      aria-label="Importar faturamento"
+                      className={OS_TOOLBAR_BTN_ICON_ONLY}
+                      title="Importar"
+                      aria-label="Importar"
                     >
-                      <Upload className="h-4 w-4 shrink-0" />
-                      Importar
+                      <Upload className="h-4 w-4" />
                     </button>
                   ) : null}
                   <button
                     type="button"
                     onClick={handleExportFaturamentoExcel}
                     disabled={filteredBillings.length === 0}
-                    className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
-                    title="Exportar Excel"
-                    aria-label="Exportar faturamento em Excel"
+                    className={OS_TOOLBAR_BTN_ICON_ONLY}
+                    title="Exportar"
+                    aria-label="Exportar"
                   >
-                    <FileSpreadsheet className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
-                    <span className="hidden sm:inline">Exportar</span>
+                    <Download className="h-4 w-4" />
                   </button>
                   <button
                     type="button"
                     onClick={() => setShowBillingModal(true)}
                     disabled={!canCreateContrato}
-                    className="flex h-10 shrink-0 items-center gap-2 rounded-xl bg-red-600 px-4 text-sm font-semibold text-white shadow-sm shadow-red-600/25 transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+                    className={OS_TOOLBAR_BTN_PRIMARY}
                   >
                     <Plus className="h-4 w-4 shrink-0" />
                     <span>Novo Faturamento</span>
@@ -5345,16 +5877,16 @@ export default function ContractDetailPage() {
                       ? 'Nenhum faturamento cadastrado.'
                       : searchTermBillings.trim() || hasActiveBillingFilter
                         ? 'Nenhum faturamento encontrado com os filtros atuais.'
-                        : `Nenhum faturamento no período selecionado (${selectedMonth > 0 ? MESES_FILTRO.find((m) => m.value === selectedMonth)?.label + ' ' : ''}${isAllYears ? 'todos os anos' : selectedYear}).`}
+                        : `Nenhum faturamento no período selecionado (${formatContratoPeriodRangeLabel(periodFrom, periodTo)}).`}
                   </p>
                   {billings.length > 0 &&
                   !(searchTermBillings.trim() || hasActiveBillingFilter) ? (
                     <button
                       type="button"
-                      onClick={() => setSelectedMonth(0)}
+                      onClick={() => handlePeriodChange('', '')}
                       className="mt-3 text-green-600 dark:text-green-400 hover:underline text-sm font-medium"
                     >
-                      Ver {billings.length} faturamento{billings.length === 1 ? '' : 's'} em todos os meses
+                      Ver {billings.length} faturamento{billings.length === 1 ? '' : 's'} em todo o contrato
                     </button>
                   ) : (
                     <button
@@ -5377,7 +5909,7 @@ export default function ContractDetailPage() {
                     currentPage={billingsListPage}
                     totalPages={billingsListRange.totalPages}
                   />
-                <div className="table-scroll">
+                <div className={cadastroListClasses.tableScroll}>
                   <table className="w-full text-sm" data-cc-skip-column-customizer="1">
                     <thead className="border-b border-gray-200 dark:border-gray-700">
                       <tr>
@@ -5513,6 +6045,152 @@ export default function ContractDetailPage() {
               )}
             </CardContent>
               </ContractSurfaceCard>
+          ) : null}
+
+          {mainTab === 'dados' ? (
+            <ContractSurfaceCard>
+              <CardHeader className={`${cadastroListClasses.cardHeader} !pt-5`}>
+                <div className={cadastroListClasses.cardHeaderRow}>
+                  <div className={cadastroListClasses.cardHeaderIconRow}>
+                    <div className="rounded-lg bg-blue-100 p-2 dark:bg-blue-900/30 sm:p-3">
+                      <FileText className="h-5 w-5 text-blue-600 dark:text-blue-400 sm:h-6 sm:w-6" />
+                    </div>
+                    <div className="min-w-0">
+                      <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 sm:text-xl">
+                        Dados do contrato
+                      </h3>
+                      <p className="text-sm text-gray-500 dark:text-gray-400">
+                        Contrato nº {contract.number}
+                      </p>
+                    </div>
+                  </div>
+                  <div className={cadastroListClasses.cardToolbar}>
+                    <button
+                      type="button"
+                      onClick={() => setShowAddendumModal(true)}
+                      className={OS_TOOLBAR_BTN}
+                      title="Cadastrar aditivo"
+                    >
+                      <Plus className="h-4 w-4" />
+                      <span>Aditivo</span>
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isAllYears}
+                      onClick={() => {
+                        setAdjFormYear(safeSelectedYear);
+                        setShowValorAnualAdjustModal(true);
+                      }}
+                      className={OS_TOOLBAR_BTN}
+                      title="Ajustar valor anual"
+                    >
+                      <Edit2 className="h-4 w-4" />
+                      <span>Valor anual</span>
+                    </button>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className={cadastroListClasses.cardContent}>
+                <dl className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  <div className="min-w-0">
+                    <dt className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                      Nome
+                    </dt>
+                    <dd className="mt-1 text-sm text-gray-900 dark:text-gray-100">{contract.name || '—'}</dd>
+                  </div>
+                  <div className="min-w-0">
+                    <dt className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                      Número
+                    </dt>
+                    <dd className="mt-1 text-sm text-gray-900 dark:text-gray-100">{contract.number || '—'}</dd>
+                  </div>
+                  <div className="min-w-0">
+                    <dt className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                      Centro de custo
+                    </dt>
+                    <dd className="mt-1 text-sm text-gray-900 dark:text-gray-100">
+                      {contract.costCenter
+                        ? `${contract.costCenter.code}${contract.costCenter.name ? ` · ${contract.costCenter.name}` : ''}`
+                        : '—'}
+                    </dd>
+                  </div>
+                  <div className="min-w-0">
+                    <dt className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                      Início
+                    </dt>
+                    <dd className="mt-1 text-sm text-gray-900 dark:text-gray-100">{formatDate(contract.startDate)}</dd>
+                  </div>
+                  <div className="min-w-0">
+                    <dt className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                      Término
+                    </dt>
+                    <dd className="mt-1 text-sm text-gray-900 dark:text-gray-100">{formatDate(contract.endDate)}</dd>
+                  </div>
+                  <div className="min-w-0">
+                    <dt className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                      Duração
+                    </dt>
+                    <dd className="mt-1 text-sm text-gray-900 dark:text-gray-100">
+                      {contractYearsCount > 0 ? `${contractYearsCount} ano(s)` : '—'}
+                      {contractVigenciaMonthCount > 0 ? ` · ${contractVigenciaMonthCount} mês(es)` : ''}
+                    </dd>
+                  </div>
+                  <div className="min-w-0">
+                    <dt className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                      Valor contratual
+                    </dt>
+                    <dd className="mt-1 text-sm tabular-nums text-gray-900 dark:text-gray-100">
+                      {formatCurrency(contract.valuePlusAddenda)}
+                    </dd>
+                  </div>
+                  <div className="min-w-0">
+                    <dt className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                      Aditivos
+                    </dt>
+                    <dd className="mt-1 text-sm tabular-nums text-gray-900 dark:text-gray-100">
+                      {totalAddenda === 0
+                        ? 'Sem aditivos'
+                        : `${totalAddenda >= 0 ? '+' : ''}${formatCurrency(totalAddenda)}`}
+                    </dd>
+                  </div>
+                  <div className="min-w-0">
+                    <dt className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                      Total
+                    </dt>
+                    <dd className="mt-1 text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">
+                      {formatCurrency(valorMaisAditivosTotal)}
+                    </dd>
+                  </div>
+                  <div className="min-w-0">
+                    <dt className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                      Valor anual
+                    </dt>
+                    <dd className="mt-1 text-sm tabular-nums text-gray-900 dark:text-gray-100">
+                      {isAllYears
+                        ? 'Selecione um ano no filtro'
+                        : valorAnualAjustado !== null
+                          ? formatCurrency(valorAnualAjustado)
+                          : '—'}
+                    </dd>
+                    {!isAllYears ? (
+                      <p className="mt-1 text-[11px] text-gray-400 dark:text-gray-500">
+                        Referência {safeSelectedYear}
+                        {contractMonthsInSelectedYear > 0 ? ` · ${contractMonthsInSelectedYear} mês(es)` : ''}
+                      </p>
+                    ) : null}
+                  </div>
+                  <div className="min-w-0">
+                    <dt className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                      Importar faturamento sem OS
+                    </dt>
+                    <dd className="mt-1 text-sm text-gray-900 dark:text-gray-100">
+                      {contract.allowBillingImportWithoutOsPleito ? 'Sim' : 'Não'}
+                    </dd>
+                  </div>
+                </dl>
+              </CardContent>
+            </ContractSurfaceCard>
+          ) : null}
 
           <ContractGastosResumoModal
             isOpen={gastosResumoModal != null}
@@ -5612,7 +6290,7 @@ export default function ContractDetailPage() {
                             </td>
                           </tr>
                           {isExpanded ? (
-                            <tr className="bg-gray-50/80 dark:bg-gray-800/40">
+                            <tr>
                               <td colSpan={3} className="px-4 py-3">
                                 {linhas.length === 0 ? (
                                   <p className="py-2 text-center text-sm text-gray-500 dark:text-gray-400">
@@ -6676,7 +7354,7 @@ export default function ContractDetailPage() {
                   {contract && (
                     <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">{contract.name} - nº {contract.number}</p>
                   )}
-                  <div className="table-scroll">
+                  <div className={cadastroListClasses.tableScroll}>
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="border-b border-gray-200 dark:border-gray-700">
@@ -6701,7 +7379,7 @@ export default function ContractDetailPage() {
                         ))}
                       </tbody>
                       <tfoot>
-                        <tr className="bg-gray-50 dark:bg-gray-700/30 font-medium">
+                        <tr>
                           <td colSpan={3} className="px-3 py-2 text-gray-900 dark:text-gray-100">Total</td>
                           <td className="px-3 py-2 text-right text-gray-900 dark:text-gray-100">{formatCurrency(pleitoGeradoData.reduce((s, d) => s + d.valorPleiteado, 0))}</td>
                           <td className="px-3 py-2" />

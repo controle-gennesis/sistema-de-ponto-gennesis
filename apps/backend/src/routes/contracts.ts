@@ -93,6 +93,10 @@ router.get('/:contractId/totvs-total-pago', (req, res, next) =>
   contractController.getTotvsTotalPago(req, res, next)
 );
 
+router.get('/:contractId/access-users', (req, res, next) =>
+  contractController.getAccessUsers(req, res, next)
+);
+
 router.get('/:contractId/addenda', (req, res, next) =>
   addendumController.listByContract(req, res, next)
 );

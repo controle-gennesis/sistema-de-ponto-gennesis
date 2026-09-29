@@ -296,6 +296,7 @@ export class DemandSheetApprovalController {
 
       const search = String(req.query.search ?? '').trim();
       const status = String(req.query.status ?? '').trim();
+      const contratoId = String(req.query.contratoId ?? '').trim();
 
       const where: Prisma.DemandSheetApprovalWhereInput = {
         ...(await listWhereForUser(req.user.id, req.user.isAdmin)),
@@ -303,6 +304,9 @@ export class DemandSheetApprovalController {
 
       if (status && status !== 'ALL') {
         where.status = status as DemandSheetApprovalStatus;
+      }
+      if (contratoId) {
+        where.contratoId = contratoId;
       }
 
       if (search) {

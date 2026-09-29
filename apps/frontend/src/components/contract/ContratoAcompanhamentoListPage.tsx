@@ -231,9 +231,7 @@ function currentPeriodLabel(kind: AcompanhamentoKind) {
 function panelTone(kind: AcompanhamentoKind) {
   if (kind === 'mensal') {
     return {
-      bar: 'from-sky-500 via-cyan-400 to-teal-400',
-      iconWrap:
-        'bg-sky-100 text-sky-600 ring-1 ring-sky-200/80 dark:bg-sky-500/15 dark:text-sky-300 dark:ring-sky-400/20',
+      iconWrap: 'bg-sky-100 text-sky-600 dark:bg-sky-900/30 dark:text-sky-400',
       emptyWrap:
         'bg-sky-50 text-sky-600 dark:bg-sky-500/10 dark:text-sky-300',
       chip:
@@ -243,9 +241,7 @@ function panelTone(kind: AcompanhamentoKind) {
     };
   }
   return {
-    bar: 'from-indigo-500 via-violet-500 to-fuchsia-400',
-    iconWrap:
-      'bg-indigo-100 text-indigo-600 ring-1 ring-indigo-200/80 dark:bg-indigo-500/15 dark:text-indigo-300 dark:ring-indigo-400/20',
+    iconWrap: 'bg-indigo-100 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-400',
     emptyWrap:
       'bg-indigo-50 text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-300',
     chip:
@@ -674,11 +670,10 @@ function ContratoAcompanhamentoPanel({
     <>
       <Card
         padding={compact ? 'none' : 'md'}
-        className={`relative w-full !overflow-hidden !rounded-2xl border-gray-200/80 shadow-[0_18px_40px_-28px_rgba(15,23,42,0.55)] dark:border-white/10 dark:bg-gray-900/70 ${
+        className={`w-full ${
           compact ? 'flex h-full min-h-[28rem] flex-1 flex-col' : ''
         }`}
       >
-        <div className={`absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${tone.bar}`} />
         <CardHeader
           className={`!border-b !border-gray-100 dark:!border-white/10 ${
             compact ? 'shrink-0 !px-5 !pb-4 !pt-6 sm:!px-6' : '!pt-2'
@@ -686,10 +681,8 @@ function ContratoAcompanhamentoPanel({
         >
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div className="flex min-w-0 items-start gap-3">
-              <div
-                className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${tone.iconWrap}`}
-              >
-                <Icon className="h-5 w-5" strokeWidth={1.75} />
+              <div className={`rounded-lg p-2 sm:p-3 ${tone.iconWrap}`}>
+                <Icon className="h-5 w-5 sm:h-6 sm:w-6" strokeWidth={1.75} />
               </div>
               <div className="min-w-0">
                 <h3 className="text-base font-semibold tracking-tight text-gray-900 dark:text-gray-50 sm:text-lg">

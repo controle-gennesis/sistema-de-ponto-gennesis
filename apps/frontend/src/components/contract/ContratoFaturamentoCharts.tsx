@@ -1,94 +1,48 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
 import {
+  Area,
+  AreaChart,
+  Bar,
+  BarChart,
   CartesianGrid,
   Cell,
-  Legend,
+  ComposedChart,
+  LabelList,
   Line,
-  LineChart,
-  Pie,
-  PieChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from 'recharts';
-import { ClipboardList, Loader2, Receipt, TrendingUp, type LucideIcon } from 'lucide-react';
+import Link from 'next/link';
+import { ExternalLink, Loader2, TrendingDown, TrendingUp } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
-import { CadastroListEmpty } from '@/components/ui/CadastroListSummary';
 import { cadastroListClasses } from '@/components/ui/RowActionMenu';
-import { CONTRACT_PAGE_ACCENTS, CONTRACT_PAGE_SURFACE } from '@/lib/contractPageSurface';
-import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { useTheme } from '@/context/ThemeContext';
-import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
-import { compareOsSeNatural } from '@/lib/formatOsSePasta';
-import {
-  formatExtratoFluxoAxisValue,
-  formatExtratoFluxoCurrency,
-} from '@/app/ponto/financeiro/analise-extrato/extratoFluxoDiario';
+import { formatCpfInput } from '@/lib/cpf';
 
-export type ContratoFaturamentoChartBilling = {
-  issueDate: string;
-  serviceOrder?: string | null;
-  invoiceNumber?: string | null;
-  grossValue: number;
-};
-
-export type ContratoFaturamentoFluxoPoint = {
-  monthKey: string;
+export type ContratoFaturamentoInsightPoint = {
   label: string;
-  gastos: number;
-  faturamento: number;
-  producao: number;
-  diferenca: number;
+  atual: number;
+  anterior: number;
 };
 
-const CHART_PALETTE = [
-  '#15803d',
-  '#1d4ed8',
-  '#c2410c',
-  '#0f766e',
-  '#7c3aed',
-  '#b45309',
-  '#be185d',
-  '#0369a1',
-  '#4d7c0f',
-  '#334155',
-];
-
-const LINE_COLORS = {
-  gastos: '#dc2626',
-  faturamento: '#16a34a',
-  producao: '#d97706',
-  diferenca: '#2563eb',
-};
-
-const PIE_SLICE_LIMIT = 8;
-
-const MESES_LABEL = [
-  'Janeiro',
-  'Fevereiro',
-  'Março',
-  'Abril',
-  'Maio',
-  'Junho',
-  'Julho',
-  'Agosto',
-  'Setembro',
-  'Outubro',
-  'Novembro',
-  'Dezembro',
-];
-
-const MES_SELECT_OPTIONS = labeledToSelectOptions(
-  MESES_LABEL.map((label, index) => ({ value: String(index + 1), label }))
-);
-
-type ChartItem = {
+export type ContratoFaturamentoBreakdownItem = {
   key: string;
   label: string;
   value: number;
+  accentClass: string;
+  barClass: string;
+};
+
+export type ContratoFaturamentoInsight = {
+  total: number;
+  previousTotal: number;
+  comparisonLabel: string;
+  series: ContratoFaturamentoInsightPoint[];
+  breakdown: ContratoFaturamentoBreakdownItem[];
 };
 
 function formatCurrency(value: number) {
@@ -100,323 +54,822 @@ function formatCurrency(value: number) {
   }).format(value);
 }
 
-function billingYearMonth(issueDate: string): { y: number; m: number } | null {
-  const raw = String(issueDate || '').trim();
-  const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (iso) return { y: Number(iso[1]), m: Number(iso[2]) };
-  const parsed = new Date(raw);
-  if (Number.isNaN(parsed.getTime())) return null;
-  return { y: parsed.getFullYear(), m: parsed.getMonth() + 1 };
+function formatCurrencyCompact(value: number) {
+  const abs = Math.abs(value);
+  if (abs >= 1_000_000) {
+    return `${(value / 1_000_000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}M`;
+  }
+  if (abs >= 1_000) {
+    return `${(value / 1_000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}K`;
+  }
+  return value.toLocaleString('pt-BR', { maximumFractionDigits: 0 });
 }
 
 function useChartTheme() {
   const { isDark } = useTheme();
-  const tipColor = isDark ? '#f3f4f6' : '#111827';
   return {
-    pieStroke: isDark ? '#1f2937' : '#ffffff',
     chartTick: isDark ? '#9ca3af' : '#6b7280',
     chartGrid: isDark ? '#374151' : '#e5e7eb',
-    tipStyle: {
-      background: isDark ? 'rgba(31,41,55,0.96)' : 'rgba(255,255,255,0.96)',
-      border: `1px solid ${isDark ? '#4b5563' : '#e5e7eb'}`,
-      borderRadius: 10,
-      color: tipColor,
-      fontSize: 12,
-    } as React.CSSProperties,
-    tipLabelStyle: { color: tipColor, marginBottom: 4 } as React.CSSProperties,
-    tipItemStyle: { color: tipColor } as React.CSSProperties,
   };
 }
 
-function aggregateByKey(
-  billings: ContratoFaturamentoChartBilling[],
-  getKey: (row: ContratoFaturamentoChartBilling) => { key: string; label: string },
-  compareLabels?: (a: string, b: string) => number
-): ChartItem[] {
-  const map = new Map<string, ChartItem>();
-  for (const row of billings) {
-    const gross = Number(row.grossValue) || 0;
-    if (gross <= 0) continue;
-    const { key, label } = getKey(row);
-    const current = map.get(key);
-    if (current) {
-      current.value += gross;
-    } else {
-      map.set(key, { key, label, value: gross });
-    }
-  }
-  return Array.from(map.values()).sort((a, b) => {
-    if (b.value !== a.value) return b.value - a.value;
-    return compareLabels ? compareLabels(a.label, b.label) : a.label.localeCompare(b.label, 'pt-BR');
-  });
+/** Tooltip clara (fundo branco) — mesma aparência em Faturamento e Meta vs realidade. */
+function ChartLightTooltip({
+  active,
+  label,
+  rows,
+}: {
+  active?: boolean;
+  label?: React.ReactNode;
+  rows: Array<{ key: string; name: string; value: string; color: string }>;
+}) {
+  if (!active || rows.length === 0) return null;
+  return (
+    <div className="min-w-[168px] rounded-xl border border-gray-200 bg-white px-3.5 py-2.5 text-gray-900 shadow-lg">
+      <p className="mb-2 text-xs font-medium text-gray-500">{label}</p>
+      {rows.map((row) => (
+        <div key={row.key} className="flex items-center justify-between gap-4 py-0.5">
+          <span className="inline-flex items-center gap-2 text-xs text-gray-500">
+            <span
+              className="h-3 w-0.5 shrink-0 rounded-full"
+              style={{ backgroundColor: row.color }}
+              aria-hidden
+            />
+            {row.name}
+          </span>
+          <span className="text-xs font-semibold tabular-nums text-gray-900">{row.value}</span>
+        </div>
+      ))}
+    </div>
+  );
 }
 
-function toPieSlices(items: ChartItem[]): ChartItem[] {
-  if (items.length <= PIE_SLICE_LIMIT) return items;
-  const head = items.slice(0, PIE_SLICE_LIMIT - 1);
-  const rest = items.slice(PIE_SLICE_LIMIT - 1);
-  const outrosValue = rest.reduce((sum, item) => sum + item.value, 0);
-  if (outrosValue <= 0) return head;
-  return [...head, { key: '__outros__', label: `Outros (${rest.length})`, value: outrosValue }];
-}
-
-function osGroup(row: ContratoFaturamentoChartBilling): { key: string; label: string } {
-  const label = (row.serviceOrder || '').trim();
-  if (!label) return { key: '__sem-os__', label: 'Sem OS / SE' };
-  return { key: label.toLowerCase(), label };
-}
-
-function nfGroup(row: ContratoFaturamentoChartBilling): { key: string; label: string } {
-  const label = (row.invoiceNumber || '').trim();
-  if (!label) return { key: '__sem-nf__', label: 'Sem NF' };
-  return { key: label.toLowerCase(), label };
-}
-
-function fluxoSeriesLabel(key: string): string {
-  if (key === 'gastos') return 'Gastos';
-  if (key === 'faturamento') return 'Faturamento';
-  if (key === 'producao') return 'Produção';
-  return 'Faturamento − Gastos';
-}
-
-function FaturamentoDonutCard({
+function CardHeading({
   title,
   subtitle,
-  icon: Icon,
-  iconWrapClass,
-  iconClass,
-  items,
-  emptyHint,
+  extra,
+  compact = false,
+  tone = 'default',
 }: {
   title: string;
-  subtitle: string;
-  icon: LucideIcon;
-  iconWrapClass: string;
-  iconClass: string;
-  items: ChartItem[];
-  emptyHint: string;
+  subtitle?: React.ReactNode;
+  extra?: React.ReactNode;
+  compact?: boolean;
+  tone?: 'default' | 'brand';
 }) {
-  const theme = useChartTheme();
-  const total = items.reduce((sum, item) => sum + item.value, 0);
-  const pieItems = useMemo(() => toPieSlices(items), [items]);
-  const slices = pieItems.map((item, index) => ({
-    ...item,
-    color: CHART_PALETTE[index % CHART_PALETTE.length],
-  }));
-  const legendColorByKey = new Map(slices.map((slice) => [slice.key, slice.color]));
-  const outrosColor = slices.find((slice) => slice.key === '__outros__')?.color ?? '#64748b';
+  const isBrand = tone === 'brand';
+  return (
+    <CardHeader
+      className={`${cadastroListClasses.cardHeader} ${compact ? '!pb-1 !pt-4' : '!pt-5'} ${
+        subtitle ? '!pb-2' : ''
+      }`}
+    >
+      <div className={cadastroListClasses.cardHeaderRow}>
+        <div className="min-w-0">
+          <h3
+            className={`font-semibold ${
+              isBrand ? 'text-white' : 'text-gray-900 dark:text-gray-100'
+            } ${compact && !isBrand ? 'text-sm sm:text-base' : 'text-lg sm:text-xl'}`}
+          >
+            {title}
+          </h3>
+          {subtitle ? <div className="mt-1.5">{subtitle}</div> : null}
+        </div>
+        {extra ? <div className={`${cadastroListClasses.cardToolbar} self-start`}>{extra}</div> : null}
+      </div>
+    </CardHeader>
+  );
+}
+
+function ProgressoGaugeCard({
+  title,
+  billed,
+  total,
+}: {
+  title: string;
+  billed: number;
+  total: number;
+}) {
+  const { isDark } = useTheme();
+  const uid = React.useId().replace(/:/g, '');
+  const billedSafe = Math.max(0, Number(billed) || 0);
+  const totalSafe = Math.max(0, Number(total) || 0);
+  const pending = Math.max(0, totalSafe - billedSafe);
+  const pct = totalSafe > 0 ? Math.max(0, Math.min(100, (billedSafe / totalSafe) * 100)) : 0;
+  const pctRounded = Math.round(pct);
+  const track = isDark ? '#374151' : '#e5e7eb';
+  const hatch = isDark ? '#6b7280' : '#cbd5e1';
+  const billedColor = '#16a34a';
+  const labelFill = isDark ? '#f9fafb' : '#111827';
+  const hintFill = isDark ? '#9ca3af' : '#9ca3af';
+  const pendingLen = Math.max(0, 100 - pct);
 
   return (
-    <Card className={`${cadastroListClasses.card} ${CONTRACT_PAGE_SURFACE}`}>
-      <div className={`pointer-events-none absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${CONTRACT_PAGE_ACCENTS.sky}`} />
-      <CardHeader className={`${cadastroListClasses.cardHeader} !pt-5`}>
-        <div className={cadastroListClasses.cardHeaderIconRow}>
-          <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${iconWrapClass}`}>
-            <Icon className={`h-5 w-5 ${iconClass}`} aria-hidden />
-          </div>
-          <div className="min-w-0">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{title}</h3>
-            <p className="text-sm text-gray-500 dark:text-gray-400">{subtitle}</p>
+    <Card className={`${cadastroListClasses.card} flex min-h-0 flex-col`}>
+      <CardHeading title={title} />
+      <CardContent className={`${cadastroListClasses.cardContent} flex min-h-0 flex-1 flex-col`}>
+        <div className="flex flex-1 flex-col justify-center">
+          <div className="mx-auto w-full max-w-[220px]">
+            <svg viewBox="0 0 200 132" className="h-auto w-full" role="img" aria-label={`${title}: ${pctRounded}% faturado`}>
+              <defs>
+                <pattern
+                  id={`hatch-${uid}`}
+                  width="6"
+                  height="6"
+                  patternUnits="userSpaceOnUse"
+                  patternTransform="rotate(42)"
+                >
+                  <rect width="6" height="6" fill={track} />
+                  <line x1="0" y1="0" x2="0" y2="6" stroke={hatch} strokeWidth="2.4" />
+                </pattern>
+              </defs>
+              {/* Trilha sem caps — o padrão/hatch e o verde cobrem as pontas arredondadas */}
+              <path
+                d="M 28 108 A 72 72 0 0 1 172 108"
+                fill="none"
+                stroke={track}
+                strokeWidth="32"
+                strokeLinecap="butt"
+                pathLength={100}
+              />
+              {pendingLen > 0.4 ? (
+                <path
+                  d="M 28 108 A 72 72 0 0 1 172 108"
+                  fill="none"
+                  stroke={`url(#hatch-${uid})`}
+                  strokeWidth="32"
+                  strokeLinecap="round"
+                  pathLength={100}
+                  strokeDasharray={`${pendingLen} 100`}
+                  strokeDashoffset={-pct}
+                />
+              ) : null}
+              {pct > 0.4 ? (
+                <path
+                  d="M 28 108 A 72 72 0 0 1 172 108"
+                  fill="none"
+                  stroke={billedColor}
+                  strokeWidth="32"
+                  strokeLinecap="round"
+                  pathLength={100}
+                  strokeDasharray={`${pct} ${100 - pct}`}
+                />
+              ) : null}
+              {/* Caps hachurados nas pontas quando o pendente cobre as extremidades
+                  (alguns browsers não pintam pattern em strokeLinecap=round). */}
+              {pct < 0.4 && pendingLen > 0.4 ? (
+                <circle cx="28" cy="108" r="16" fill={`url(#hatch-${uid})`} />
+              ) : null}
+              {pct + pendingLen > 99.6 && pendingLen > 0.4 ? (
+                <circle cx="172" cy="108" r="16" fill={`url(#hatch-${uid})`} />
+              ) : null}
+              <text
+                x="100"
+                y="88"
+                textAnchor="middle"
+                fill={labelFill}
+                style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.03em' }}
+              >
+                {pctRounded}%
+              </text>
+              <text x="100" y="106" textAnchor="middle" fill={hintFill} style={{ fontSize: 10 }}>
+                faturado
+              </text>
+            </svg>
           </div>
         </div>
-      </CardHeader>
-      <CardContent className={cadastroListClasses.cardContent}>
-        {total <= 0 ? (
-          <CadastroListEmpty icon={Icon} title="Sem faturamento no período" hint={emptyHint} />
-        ) : (
-          <div className="flex flex-col items-stretch gap-5 sm:flex-row sm:items-center">
-            <div className="relative mx-auto h-[210px] w-[210px] shrink-0 sm:mx-0">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={slices}
-                    dataKey="value"
-                    nameKey="label"
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={44}
-                    outerRadius={96}
-                    paddingAngle={1.5}
-                    stroke={theme.pieStroke}
-                    strokeWidth={3}
-                    cornerRadius={3}
-                    animationDuration={650}
-                  >
-                    {slices.map((slice) => (
-                      <Cell key={slice.key} fill={slice.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    contentStyle={theme.tipStyle}
-                    labelStyle={theme.tipLabelStyle}
-                    itemStyle={theme.tipItemStyle}
-                    formatter={(value, name) => [formatCurrency(Number(value) || 0), name]}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-              <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-                <span className="px-4 text-center text-sm font-bold leading-tight tabular-nums text-gray-900 dark:text-gray-100">
-                  {formatCurrency(total)}
-                </span>
-                <span className="mt-1 text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                  Total
-                </span>
-              </div>
-            </div>
-            <ul className="max-h-64 min-w-0 flex-1 space-y-2.5 overflow-y-auto pr-1">
-              {items.map((item) => {
-                const pct = total > 0 ? Math.round((item.value / total) * 1000) / 10 : 0;
-                const color = legendColorByKey.get(item.key) ?? outrosColor;
-                return (
-                  <li key={item.key} className="space-y-1">
-                    <div className="flex items-center gap-2 text-xs">
-                      <span
-                        className="h-2.5 w-2.5 shrink-0 rounded-sm"
-                        style={{ backgroundColor: color }}
-                      />
-                      <span className="min-w-0 flex-1 truncate font-medium text-gray-800 dark:text-gray-100" title={item.label}>
-                        {item.label}
-                      </span>
-                      <span className="shrink-0 tabular-nums text-gray-500 dark:text-gray-400">
-                        {pct.toLocaleString('pt-BR')}%
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800">
-                        <div
-                          className="h-full rounded-full transition-all duration-500"
-                          style={{ width: `${Math.max(pct, 2)}%`, backgroundColor: color }}
-                        />
-                      </div>
-                      <span className="shrink-0 text-right text-xs font-semibold tabular-nums text-gray-800 dark:text-gray-100">
-                        {formatCurrency(item.value)}
-                      </span>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
+        <div className="mt-auto grid grid-cols-2 gap-2.5 pt-2">
+          <div className="rounded-xl bg-emerald-50/80 px-3 py-2.5 dark:bg-emerald-900/20">
+            <p className="text-[11px] font-medium text-emerald-700 dark:text-emerald-300">Faturado</p>
+            <p className="mt-0.5 truncate text-sm font-semibold tabular-nums text-emerald-900 dark:text-emerald-100">
+              {formatCurrency(billedSafe)}
+            </p>
           </div>
+          <div className="rounded-xl bg-gray-50 px-3 py-2.5 dark:bg-gray-800/60">
+            <p className="text-[11px] font-medium text-gray-500 dark:text-gray-400">Pendente</p>
+            <p className="mt-0.5 truncate text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">
+              {formatCurrency(pending)}
+            </p>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function FaturamentoProfitCard({ insight }: { insight: ContratoFaturamentoInsight }) {
+  const { isDark } = useTheme();
+  const uid = React.useId().replace(/:/g, '');
+  const deltaPct = useMemo(() => {
+    if (insight.previousTotal === 0) {
+      return insight.total > 0 ? 100 : 0;
+    }
+    return ((insight.total - insight.previousTotal) / Math.abs(insight.previousTotal)) * 100;
+  }, [insight.total, insight.previousTotal]);
+  const isUp = deltaPct >= 0;
+  const deltaLabel = `${Math.abs(deltaPct).toLocaleString('pt-BR', {
+    maximumFractionDigits: 1,
+    minimumFractionDigits: 0,
+  })}%`;
+  const atualStroke = '#60a5fa';
+  const anteriorStroke = '#fb923c';
+  const tickFill = isDark ? '#9ca3af' : '#94a3b8';
+
+  return (
+    <Card className={`${cadastroListClasses.card} flex min-h-0 flex-col`}>
+      <CardContent className={`${cadastroListClasses.cardContent} flex min-h-0 flex-1 flex-col !pt-5`}>
+        <div className="flex min-w-0 items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 sm:text-xl">
+              Faturamento
+            </h3>
+            <p className="mt-2 text-2xl font-semibold tracking-tight tabular-nums text-gray-900 dark:text-gray-50 sm:text-3xl">
+              {formatCurrency(insight.total)}
+            </p>
+          </div>
+          <div className="flex shrink-0 flex-col items-end gap-1 pt-0.5">
+            <span
+              className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold ${
+                isUp
+                  ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
+                  : 'bg-rose-50 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300'
+              }`}
+            >
+              {isUp ? (
+                <TrendingUp className="h-3.5 w-3.5" aria-hidden />
+              ) : (
+                <TrendingDown className="h-3.5 w-3.5" aria-hidden />
+              )}
+              {deltaLabel}
+            </span>
+            <span className="text-xs text-gray-500 dark:text-gray-400">{insight.comparisonLabel}</span>
+          </div>
+        </div>
+
+        <div className="mt-5 h-[180px] w-full min-w-0 flex-1">
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={insight.series} margin={{ top: 12, right: 10, left: 0, bottom: 4 }}>
+              <defs>
+                <linearGradient id={`fat-atual-${uid}`} x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor={atualStroke} stopOpacity={0.28} />
+                  <stop offset="75%" stopColor={atualStroke} stopOpacity={0.06} />
+                  <stop offset="100%" stopColor={atualStroke} stopOpacity={0} />
+                </linearGradient>
+                <linearGradient id={`fat-anterior-${uid}`} x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor={anteriorStroke} stopOpacity={0.22} />
+                  <stop offset="75%" stopColor={anteriorStroke} stopOpacity={0.05} />
+                  <stop offset="100%" stopColor={anteriorStroke} stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <XAxis
+                dataKey="label"
+                tick={{ fontSize: 11, fill: tickFill }}
+                interval="preserveStartEnd"
+                minTickGap={14}
+                axisLine={false}
+                tickLine={false}
+                tickMargin={8}
+              />
+              <YAxis
+                tick={{ fontSize: 11, fill: tickFill }}
+                axisLine={false}
+                tickLine={false}
+                width={40}
+                tickFormatter={(v) => formatCurrencyCompact(Number(v) || 0)}
+                domain={[0, (max: number) => Math.max(Number(max) || 0, 1)]}
+              />
+              <Tooltip
+                cursor={{ stroke: isDark ? '#6b7280' : '#cbd5e1', strokeDasharray: '4 4', strokeWidth: 1 }}
+                content={({ active, label, payload }) => (
+                  <ChartLightTooltip
+                    active={active}
+                    label={label}
+                    rows={(payload ?? []).map((entry) => {
+                      const key = String(entry.dataKey);
+                      const isAtual = key === 'atual';
+                      return {
+                        key,
+                        name: isAtual ? 'Este período' : 'Período anterior',
+                        value: formatCurrency(Number(entry.value) || 0),
+                        color: isAtual ? atualStroke : anteriorStroke,
+                      };
+                    })}
+                  />
+                )}
+              />
+              <Area
+                type="monotone"
+                dataKey="anterior"
+                stroke={anteriorStroke}
+                strokeWidth={2.5}
+                fill={`url(#fat-anterior-${uid})`}
+                dot={false}
+                activeDot={{
+                  r: 5,
+                  strokeWidth: 2,
+                  stroke: isDark ? '#1f2937' : '#fff',
+                  fill: anteriorStroke,
+                }}
+              />
+              <Area
+                type="monotone"
+                dataKey="atual"
+                stroke={atualStroke}
+                strokeWidth={2.75}
+                fill={`url(#fat-atual-${uid})`}
+                dot={false}
+                activeDot={{
+                  r: 5,
+                  strokeWidth: 2,
+                  stroke: isDark ? '#1f2937' : '#fff',
+                  fill: atualStroke,
+                }}
+              />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+export type ContratoOsTotais = {
+  totalOrcado: number;
+  totalPleiteado: number;
+  totalFaturado: number;
+};
+
+export type ContratoResumoPeriodoFatPendente = {
+  periodLabel: string;
+  faturado: number;
+  pendente: number;
+};
+
+export type ContratoResumoMetaPoint = {
+  label: string;
+  metaIdeal: number;
+  metaReal: number;
+  faturado: number;
+};
+
+export type ContratoResumoMetaVsReal = {
+  periodLabel: string;
+  metaIdeal: number;
+  metaReal: number;
+  faturado: number;
+  series: ContratoResumoMetaPoint[];
+};
+
+export type ContratoResumoProdFatPoint = {
+  label: string;
+  producao: number;
+  faturamento: number;
+};
+
+export type ContratoResumoProdFat = {
+  periodLabel: string;
+  producao: number;
+  faturamento: number;
+  delta: number;
+  series: ContratoResumoProdFatPoint[];
+};
+
+export type ContratoResumoGastoTeto = {
+  periodLabel: string;
+  gastos: number;
+  teto: number;
+  loading?: boolean;
+};
+
+export type ContratoResumoAlerta = {
+  id: string;
+  tone: 'info' | 'warn' | 'danger';
+  title: string;
+  detail: string;
+};
+
+const OS_TOTAIS_META = [
+  {
+    key: 'orcado' as const,
+    label: 'Orçado',
+    fill: '#2563eb',
+  },
+  {
+    key: 'pleiteado' as const,
+    label: 'Pleiteado',
+    fill: '#7c3aed',
+  },
+  {
+    key: 'faturado' as const,
+    label: 'Faturado',
+    fill: '#16a34a',
+  },
+];
+
+function OsTotaisDashboardCard({ totais }: { totais: ContratoOsTotais }) {
+  const theme = useChartTheme();
+  const { isDark } = useTheme();
+  const uid = React.useId().replace(/:/g, '');
+  const data = useMemo(
+    () =>
+      OS_TOTAIS_META.map((meta) => ({
+        ...meta,
+        value:
+          meta.key === 'orcado'
+            ? totais.totalOrcado
+            : meta.key === 'pleiteado'
+              ? totais.totalPleiteado
+              : totais.totalFaturado,
+      })),
+    [totais.totalOrcado, totais.totalPleiteado, totais.totalFaturado]
+  );
+  const maxValue = Math.max(...data.map((d) => d.value), 0);
+  const chartMax = maxValue > 0 ? maxValue * 1.18 : 1;
+  const labelFill = isDark ? '#e5e7eb' : '#374151';
+
+  return (
+    <Card className={`${cadastroListClasses.card} flex min-h-0 flex-col`}>
+      <CardHeading title="Ordem de serviço" />
+      <CardContent className={`${cadastroListClasses.cardContent} flex min-h-0 flex-1 flex-col`}>
+        <div className="min-h-[200px] flex-1 w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={data} margin={{ top: 28, right: 8, left: 0, bottom: 4 }} barCategoryGap="28%">
+              <defs>
+                {data.map((item) => (
+                  <linearGradient key={item.key} id={`os-bar-${uid}-${item.key}`} x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor={item.fill} stopOpacity={0.95} />
+                    <stop offset="100%" stopColor={item.fill} stopOpacity={0.55} />
+                  </linearGradient>
+                ))}
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke={theme.chartGrid} vertical={false} />
+              <XAxis
+                dataKey="label"
+                tick={{ fontSize: 12, fill: theme.chartTick, fontWeight: 500 }}
+                axisLine={false}
+                tickLine={false}
+                tickMargin={10}
+              />
+              <YAxis
+                tick={{ fontSize: 10, fill: theme.chartTick }}
+                axisLine={false}
+                tickLine={false}
+                width={44}
+                tickFormatter={(v) => formatCurrencyCompact(Number(v) || 0)}
+                domain={[0, chartMax]}
+              />
+              <Tooltip
+                cursor={{ fill: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(15,23,42,0.04)', radius: 8 }}
+                content={({ active, label, payload }) => (
+                  <ChartLightTooltip
+                    active={active}
+                    label={label}
+                    rows={(payload ?? []).map((entry) => ({
+                      key: String(entry.dataKey ?? entry.name ?? 'value'),
+                      name: 'Valor',
+                      value: formatCurrency(Number(entry.value) || 0),
+                      color: String(entry.payload?.fill || entry.color || '#64748b'),
+                    }))}
+                  />
+                )}
+              />
+              <Bar dataKey="value" radius={[10, 10, 4, 4]} maxBarSize={48} background={{ fill: 'transparent' }}>
+                {data.map((item) => (
+                  <Cell
+                    key={item.key}
+                    fill={`url(#os-bar-${uid}-${item.key})`}
+                    stroke={item.fill}
+                    strokeWidth={0}
+                  />
+                ))}
+                <LabelList
+                  dataKey="value"
+                  position="top"
+                  offset={8}
+                  fill={labelFill}
+                  fontSize={11}
+                  fontWeight={600}
+                  formatter={(value) => formatCurrencyCompact(Number(value) || 0)}
+                />
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+export type ContratoResumoKpi = {
+  title: string;
+  value: string;
+  subtitle?: string;
+  loading?: boolean;
+  href?: string;
+  /** Card compacto/quadrado (ex.: Caixinha). */
+  variant?: 'default' | 'square';
+  /** Destaque invertido (ex.: vermelho com texto branco). */
+  tone?: 'default' | 'brand';
+};
+
+function MetaVsRealidadeCard({ data }: { data: ContratoResumoMetaVsReal }) {
+  const theme = useChartTheme();
+  const uid = React.useId().replace(/:/g, '');
+  const chartData = data.series.length > 0
+    ? data.series
+    : [{ label: data.periodLabel, metaIdeal: data.metaIdeal, metaReal: data.metaReal, faturado: data.faturado }];
+  const desvio = data.metaReal > 0 ? ((data.faturado - data.metaReal) / data.metaReal) * 100 : data.faturado > 0 ? 100 : 0;
+  const onTrack = desvio >= -5;
+
+  return (
+    <Card className={`${cadastroListClasses.card} flex min-h-0 flex-col !rounded-2xl`}>
+      <CardHeading
+        title="Meta vs realidade"
+        extra={
+          <span
+            className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${
+              onTrack
+                ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
+                : 'bg-rose-50 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300'
+            }`}
+          >
+            {desvio >= 0 ? '+' : ''}
+            {desvio.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}% vs meta real
+          </span>
+        }
+      />
+      <CardContent className={`${cadastroListClasses.cardContent} flex min-h-0 flex-1 flex-col !pt-1`}>
+        <div className="h-[190px] w-full min-w-0 flex-1">
+          <ResponsiveContainer width="100%" height="100%">
+            <ComposedChart data={chartData} margin={{ top: 10, right: 8, left: 0, bottom: 0 }} barGap={4}>
+              <defs>
+                <linearGradient id={`meta-ideal-${uid}`} x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#94a3b8" stopOpacity={0.95} />
+                  <stop offset="100%" stopColor="#94a3b8" stopOpacity={0.45} />
+                </linearGradient>
+                <linearGradient id={`meta-real-${uid}`} x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#34d399" stopOpacity={1} />
+                  <stop offset="100%" stopColor="#10b981" stopOpacity={0.55} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="4 6" stroke={theme.chartGrid} vertical={false} />
+              <XAxis
+                dataKey="label"
+                tick={{ fontSize: 11, fill: theme.chartTick, fontWeight: 500 }}
+                axisLine={false}
+                tickLine={false}
+                tickMargin={8}
+              />
+              <YAxis
+                tick={{ fontSize: 10, fill: theme.chartTick }}
+                axisLine={false}
+                tickLine={false}
+                width={42}
+                tickFormatter={(v) => formatCurrencyCompact(Number(v) || 0)}
+              />
+              <Tooltip
+                cursor={{ fill: 'rgba(148,163,184,0.12)' }}
+                content={({ active, label, payload }) => {
+                  const nameByKey: Record<string, string> = {
+                    metaIdeal: 'Meta ideal',
+                    metaReal: 'Meta real',
+                    faturado: 'Faturado',
+                  };
+                  const colorByKey: Record<string, string> = {
+                    metaIdeal: '#94a3b8',
+                    metaReal: '#10b981',
+                    faturado: '#2563eb',
+                  };
+                  return (
+                    <ChartLightTooltip
+                      active={active}
+                      label={label}
+                      rows={(payload ?? []).map((entry) => {
+                        const key = String(entry.dataKey);
+                        return {
+                          key,
+                          name: nameByKey[key] || key,
+                          value: formatCurrency(Number(entry.value) || 0),
+                          color: colorByKey[key] || String(entry.color || '#64748b'),
+                        };
+                      })}
+                    />
+                  );
+                }}
+              />
+              <Bar
+                dataKey="metaIdeal"
+                fill={`url(#meta-ideal-${uid})`}
+                radius={[6, 6, 0, 0]}
+                maxBarSize={16}
+              />
+              <Bar
+                dataKey="metaReal"
+                fill={`url(#meta-real-${uid})`}
+                radius={[6, 6, 0, 0]}
+                maxBarSize={16}
+              />
+              <Line
+                type="monotone"
+                dataKey="faturado"
+                stroke="#2563eb"
+                strokeWidth={2.75}
+                dot={{ r: 3.5, fill: '#2563eb', strokeWidth: 2, stroke: '#fff' }}
+                activeDot={{ r: 5 }}
+              />
+            </ComposedChart>
+          </ResponsiveContainer>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+const PEOPLE_AVATAR_TONES = [
+  'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-200',
+  'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200',
+  'bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-200',
+  'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200',
+  'bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-200',
+  'bg-teal-100 text-teal-700 dark:bg-teal-900/40 dark:text-teal-200',
+] as const;
+
+function personInitials(name: string) {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return '?';
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return `${parts[0][0] || ''}${parts[parts.length - 1][0] || ''}`.toUpperCase();
+}
+
+function avatarToneForName(name: string) {
+  let hash = 0;
+  for (let i = 0; i < name.length; i += 1) hash = (hash + name.charCodeAt(i) * (i + 1)) % 997;
+  return PEOPLE_AVATAR_TONES[hash % PEOPLE_AVATAR_TONES.length];
+}
+
+export type ContratoResumoPessoa = {
+  id: string;
+  name: string;
+  email?: string | null;
+  cpf?: string | null;
+  position?: string | null;
+  department?: string | null;
+};
+
+function PessoasContratoCard({
+  people,
+  loading = false,
+  error = false,
+}: {
+  people: ContratoResumoPessoa[];
+  loading?: boolean;
+  error?: boolean;
+}) {
+  return (
+    <Card className={`${cadastroListClasses.card} flex h-full min-h-0 flex-col !rounded-2xl`}>
+      <CardHeading title="Colaboradores" />
+      <CardContent className={`${cadastroListClasses.cardContent} flex min-h-0 flex-1 flex-col !pt-2`}>
+        {loading ? (
+          <div className="flex h-[280px] items-center justify-center">
+            <Loader2 className="h-6 w-6 animate-spin text-gray-400" aria-label="Carregando" />
+          </div>
+        ) : error ? (
+          <p className="flex h-[280px] items-center justify-center text-center text-sm text-rose-600 dark:text-rose-400">
+            Não foi possível carregar as pessoas. Atualize a página.
+          </p>
+        ) : people.length === 0 ? (
+          <p className="flex h-[280px] items-center justify-center text-center text-sm text-gray-500 dark:text-gray-400">
+            Nenhuma pessoa com este contrato liberado.
+          </p>
+        ) : (
+          <ul className="h-[280px] space-y-1 overflow-y-auto overscroll-contain pr-1">
+            {people.map((person) => {
+              const cpfLabel = person.cpf ? formatCpfInput(person.cpf) : '—';
+              return (
+                <li
+                  key={person.id}
+                  className="flex items-center gap-3 rounded-xl px-1.5 py-2.5 transition-colors hover:bg-gray-50 dark:hover:bg-gray-800/50"
+                >
+                  <span
+                    className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${avatarToneForName(
+                      person.name
+                    )}`}
+                    aria-hidden
+                  >
+                    {personInitials(person.name)}
+                  </span>
+                  <div className="min-w-0 flex-[1.2]">
+                    <p className="truncate text-sm font-semibold text-gray-900 dark:text-gray-100">
+                      {person.name}
+                    </p>
+                    <p className="mt-0.5 truncate text-xs tabular-nums text-gray-500 dark:text-gray-400">
+                      {cpfLabel}
+                    </p>
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm text-gray-700 dark:text-gray-200">
+                      {person.email || '—'}
+                    </p>
+                  </div>
+                  <span className="shrink-0 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
+                    Liberado
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
         )}
       </CardContent>
     </Card>
   );
 }
 
-function FluxoLinhaCard({
-  series,
-  periodLabel,
+function KpiStatCard({
+  title,
+  value,
+  subtitle,
   loading,
-}: {
-  series: ContratoFaturamentoFluxoPoint[];
-  periodLabel: string;
-  loading?: boolean;
-}) {
-  const theme = useChartTheme();
-  const hasValue = series.some(
-    (point) =>
-      point.gastos !== 0 ||
-      point.faturamento !== 0 ||
-      point.producao !== 0 ||
-      point.diferenca !== 0
-  );
+  href,
+  variant = 'default',
+  tone = 'default',
+}: ContratoResumoKpi) {
+  const isSquare = variant === 'square';
+  const isBrand = tone === 'brand';
+  const openLink = href ? (
+    <Link
+      href={href}
+      aria-label={`Abrir ${title}`}
+      title={title}
+      className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors ${
+        isBrand
+          ? 'bg-white/20 text-white hover:bg-white/30'
+          : 'text-gray-500 hover:bg-gray-100 hover:text-red-600 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-red-400'
+      }`}
+    >
+      <ExternalLink className="h-4 w-4" aria-hidden />
+    </Link>
+  ) : null;
 
   return (
-    <Card className={`${cadastroListClasses.card} ${CONTRACT_PAGE_SURFACE}`}>
-      <div className={`pointer-events-none absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${CONTRACT_PAGE_ACCENTS.teal}`} />
-      <CardHeader className={`${cadastroListClasses.cardHeader} !pt-5`}>
-        <div className={cadastroListClasses.cardHeaderIconRow}>
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-teal-100 text-teal-700 ring-1 ring-teal-200/80 dark:bg-teal-500/15 dark:text-teal-300 dark:ring-teal-400/20">
-            <TrendingUp className="h-5 w-5" aria-hidden />
-          </div>
-          <div className="min-w-0">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-              Gasto, faturamento, produção e diferença
-            </h3>
-            <p className="text-sm text-gray-500 dark:text-gray-400">
-              Evolução mensal · {periodLabel} · valores do Controle Geral
-            </p>
-          </div>
+    <Card
+      title={title}
+      className={`${cadastroListClasses.card} flex min-h-0 flex-col !rounded-2xl ${
+        isSquare ? 'aspect-square w-[8.75rem] shrink-0 sm:w-[9.5rem]' : ''
+      } ${
+        isBrand
+          ? '!border-transparent !bg-gradient-to-br !from-red-600 !via-red-600 !to-red-700 shadow-[0_16px_32px_-18px_rgba(220,38,38,0.55)] dark:!from-red-600 dark:!via-red-700 dark:!to-red-800'
+          : ''
+      }`}
+    >
+      {/* Em viewport estreito o título some e fica só o ícone, para o card não quebrar. */}
+      <CardHeader
+        className={`${cadastroListClasses.cardHeader} ${isSquare ? '!pb-1 !pt-4' : '!pt-5'}`}
+      >
+        <div
+          className={`${cadastroListClasses.cardHeaderRow} max-xl:justify-end`}
+        >
+          <h3
+            className={`min-w-0 font-semibold max-xl:sr-only ${
+              isBrand ? 'text-white' : 'text-gray-900 dark:text-gray-100'
+            } ${isSquare && !isBrand ? 'text-sm sm:text-base' : 'text-lg sm:text-xl'}`}
+          >
+            {title}
+          </h3>
+          {openLink ? (
+            <div className={`${cadastroListClasses.cardToolbar} self-start`}>{openLink}</div>
+          ) : null}
         </div>
       </CardHeader>
-      <CardContent className={cadastroListClasses.cardContent}>
+      <CardContent
+        className={`${cadastroListClasses.cardContent} flex min-h-0 flex-1 flex-col ${
+          isSquare ? 'justify-end !pt-0' : ''
+        }`}
+      >
         {loading ? (
-          <div className="flex items-center justify-center py-16">
+          <div className={`flex items-center justify-center ${isSquare ? 'flex-1' : 'py-6'}`}>
             <Loader2
-              className="h-6 w-6 animate-spin text-teal-600 dark:text-teal-400"
-              aria-label="Carregando gráfico de evolução"
+              className={`h-6 w-6 animate-spin ${isBrand ? 'text-white/70' : 'text-gray-400'}`}
+              aria-label="Carregando"
             />
           </div>
-        ) : !hasValue ? (
-          <CadastroListEmpty
-            icon={TrendingUp}
-            title="Sem movimento no período"
-            hint="A linha usa o gasto, o faturamento e a produção mensais do Controle Geral."
-          />
         ) : (
-          <div className="h-[280px] w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={series} margin={{ top: 8, right: 16, left: 4, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke={theme.chartGrid} />
-                <XAxis
-                  dataKey="label"
-                  tick={{ fontSize: 10, fill: theme.chartTick }}
-                  interval="preserveStartEnd"
-                  minTickGap={16}
-                />
-                <YAxis
-                  tick={{ fontSize: 10, fill: theme.chartTick }}
-                  tickFormatter={formatExtratoFluxoAxisValue}
-                  width={52}
-                />
-                <Tooltip
-                  contentStyle={theme.tipStyle}
-                  labelStyle={theme.tipLabelStyle}
-                  itemStyle={theme.tipItemStyle}
-                  formatter={(value, name) => [
-                    formatExtratoFluxoCurrency(Number(value) || 0),
-                    fluxoSeriesLabel(String(name ?? '')),
-                  ]}
-                />
-                <Legend wrapperStyle={{ fontSize: 12 }} formatter={(value) => fluxoSeriesLabel(String(value))} />
-                <Line
-                  type="monotone"
-                  dataKey="gastos"
-                  name="gastos"
-                  stroke={LINE_COLORS.gastos}
-                  strokeWidth={2}
-                  dot={series.length <= 24}
-                  activeDot={{ r: 4 }}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="faturamento"
-                  name="faturamento"
-                  stroke={LINE_COLORS.faturamento}
-                  strokeWidth={2}
-                  dot={series.length <= 24}
-                  activeDot={{ r: 4 }}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="producao"
-                  name="producao"
-                  stroke={LINE_COLORS.producao}
-                  strokeWidth={2}
-                  dot={series.length <= 24}
-                  activeDot={{ r: 4 }}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="diferenca"
-                  name="diferenca"
-                  stroke={LINE_COLORS.diferenca}
-                  strokeWidth={2}
-                  dot={series.length <= 24}
-                  activeDot={{ r: 4 }}
-                />
-              </LineChart>
-            </ResponsiveContainer>
+          <div>
+            <p
+              className={`font-semibold tracking-tight tabular-nums ${
+                isBrand ? 'text-white' : 'text-gray-900 dark:text-gray-50'
+              } ${isSquare ? 'text-base leading-tight sm:text-lg' : 'text-xl sm:text-2xl'}`}
+            >
+              {value}
+            </p>
+            {subtitle ? (
+              <p
+                className={`mt-1 ${
+                  isBrand ? 'text-white/80' : 'text-gray-500 dark:text-gray-400'
+                } ${isSquare ? 'text-xs' : 'text-sm'}`}
+              >
+                {subtitle}
+              </p>
+            ) : null}
           </div>
         )}
       </CardContent>
@@ -425,102 +878,52 @@ function FluxoLinhaCard({
 }
 
 export function ContratoFaturamentoCharts({
-  billings,
-  year,
-  monthlySeries,
-  fluxoPeriodLabel,
-  loading = false,
-  loadingFluxo = false,
+  faturamentoInsight,
+  progressoTitle,
+  progressoBilled = 0,
+  progressoTotal = 0,
+  osTotais,
+  resumoKpis = [],
+  metaVsReal,
+  people = [],
+  peopleLoading = false,
+  peopleError = false,
 }: {
-  billings: ContratoFaturamentoChartBilling[];
-  year: number;
-  monthlySeries: ContratoFaturamentoFluxoPoint[];
-  fluxoPeriodLabel: string;
-  loading?: boolean;
-  loadingFluxo?: boolean;
+  faturamentoInsight: ContratoFaturamentoInsight;
+  progressoTitle: string;
+  progressoBilled?: number;
+  progressoTotal?: number;
+  osTotais: ContratoOsTotais;
+  resumoKpis?: ContratoResumoKpi[];
+  metaVsReal: ContratoResumoMetaVsReal;
+  people?: ContratoResumoPessoa[];
+  peopleLoading?: boolean;
+  peopleError?: boolean;
 }) {
-  const [selectedMonth, setSelectedMonth] = useState(() => new Date().getMonth() + 1);
-  const monthLabel = MESES_LABEL[selectedMonth - 1] ?? String(selectedMonth);
-
-  const monthBillings = useMemo(
-    () =>
-      billings.filter((row) => {
-        const ym = billingYearMonth(row.issueDate);
-        return ym != null && ym.y === year && ym.m === selectedMonth;
-      }),
-    [billings, year, selectedMonth]
-  );
-
-  const osItems = useMemo(
-    () => aggregateByKey(monthBillings, osGroup, compareOsSeNatural),
-    [monthBillings]
-  );
-  const nfItems = useMemo(() => aggregateByKey(monthBillings, nfGroup), [monthBillings]);
-  const lancamentos = monthBillings.length;
-  const subtitleBase =
-    lancamentos === 1
-      ? `1 lançamento · ${monthLabel}/${year}`
-      : `${lancamentos} lançamentos · ${monthLabel}/${year}`;
-
   return (
     <div className="space-y-4">
-      <FluxoLinhaCard series={monthlySeries} periodLabel={fluxoPeriodLabel} loading={loadingFluxo} />
-
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-gray-400 dark:text-gray-500">
-          Faturamento do mês
-        </p>
-        <StringSingleSelectDropdown
-          value={String(selectedMonth)}
-          onChange={(value) => {
-            const next = Number(value);
-            if (next >= 1 && next <= 12) setSelectedMonth(next);
-          }}
-          options={MES_SELECT_OPTIONS}
-          allowEmpty={false}
-          disableSearch
-          menuAlign="end"
-          matchTriggerWidth
-          menuMinWidth={168}
-          className="min-w-[10.5rem] sm:w-[12rem]"
-        />
-      </div>
-
-      {loading ? (
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-          {['os', 'nf'].map((key) => (
-            <Card key={key} className={`${cadastroListClasses.card} ${CONTRACT_PAGE_SURFACE}`}>
-              <CardContent className="flex items-center justify-center py-16">
-                <Loader2
-                  className="h-6 w-6 animate-spin text-green-600 dark:text-green-400"
-                  aria-label="Carregando gráficos de faturamento"
-                />
-              </CardContent>
-            </Card>
+      {resumoKpis.length > 0 ? (
+        <div className="grid grid-cols-2 items-stretch gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          {resumoKpis.map((kpi) => (
+            <KpiStatCard key={kpi.title} {...kpi} />
           ))}
         </div>
-      ) : (
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-          <FaturamentoDonutCard
-            title="Faturamento por OS"
-            subtitle={`${subtitleBase} · valor bruto`}
-            icon={ClipboardList}
-            iconWrapClass="bg-sky-100 text-sky-700 ring-1 ring-sky-200/80 dark:bg-sky-500/15 dark:text-sky-300 dark:ring-sky-400/20"
-            iconClass=""
-            items={osItems}
-            emptyHint="Os valores vêm dos lançamentos do quadrante de Faturamento no mês selecionado."
-          />
-          <FaturamentoDonutCard
-            title="Faturamento por nota fiscal"
-            subtitle={`${subtitleBase} · valor bruto`}
-            icon={Receipt}
-            iconWrapClass="bg-green-100 text-green-700 ring-1 ring-green-200/80 dark:bg-green-500/15 dark:text-green-300 dark:ring-green-400/20"
-            iconClass=""
-            items={nfItems}
-            emptyHint="Os valores vêm dos lançamentos do quadrante de Faturamento no mês selecionado."
-          />
-        </div>
-      )}
+      ) : null}
+
+      <div className="grid grid-cols-1 items-stretch gap-4 lg:grid-cols-[1.35fr_1fr_1fr]">
+        <FaturamentoProfitCard insight={faturamentoInsight} />
+        <ProgressoGaugeCard
+          title={progressoTitle}
+          billed={progressoBilled}
+          total={progressoTotal}
+        />
+        <OsTotaisDashboardCard totais={osTotais} />
+      </div>
+
+      <div className="grid grid-cols-1 items-stretch gap-4 lg:grid-cols-[1fr_2fr]">
+        <MetaVsRealidadeCard data={metaVsReal} />
+        <PessoasContratoCard people={people} loading={peopleLoading} error={peopleError} />
+      </div>
     </div>
   );
 }

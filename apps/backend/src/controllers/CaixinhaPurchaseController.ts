@@ -140,24 +140,29 @@ export class CaixinhaPurchaseController {
       if (!req.user) throw createError('Não autenticado', 401);
 
       const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+      const contractId =
+        typeof req.query.contractId === 'string' ? req.query.contractId.trim() : '';
       const scope = await listWhereForUser(req.user.id, req.user.isAdmin);
       const where: Prisma.CaixinhaPurchaseWhereInput = { ...scope };
+      const andParts: Prisma.CaixinhaPurchaseWhereInput[] = [];
       if (search) {
-        where.AND = [
-          {
-            OR: [
-              { personName: { contains: search, mode: 'insensitive' } },
-              { osNumber: { contains: search, mode: 'insensitive' } },
-              { contractName: { contains: search, mode: 'insensitive' } },
-              { obraName: { contains: search, mode: 'insensitive' } },
-              { caixinha: { contains: search, mode: 'insensitive' } },
-              { storeName: { contains: search, mode: 'insensitive' } },
-              { invoiceNumber: { contains: search, mode: 'insensitive' } },
-              { notes: { contains: search, mode: 'insensitive' } },
-            ],
-          },
-        ];
+        andParts.push({
+          OR: [
+            { personName: { contains: search, mode: 'insensitive' } },
+            { osNumber: { contains: search, mode: 'insensitive' } },
+            { contractName: { contains: search, mode: 'insensitive' } },
+            { obraName: { contains: search, mode: 'insensitive' } },
+            { caixinha: { contains: search, mode: 'insensitive' } },
+            { storeName: { contains: search, mode: 'insensitive' } },
+            { invoiceNumber: { contains: search, mode: 'insensitive' } },
+            { notes: { contains: search, mode: 'insensitive' } },
+          ],
+        });
       }
+      if (contractId) {
+        andParts.push({ contractId });
+      }
+      if (andParts.length) where.AND = andParts;
 
       const rows = await prisma.caixinhaPurchase.findMany({
         where,

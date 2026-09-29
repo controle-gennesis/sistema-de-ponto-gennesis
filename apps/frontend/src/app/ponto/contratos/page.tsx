@@ -780,10 +780,10 @@ export default function ContratosPage() {
           <>
           <div className="text-center">
             <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">
-              Cadastro de Contratos
+              Contratos
             </h1>
             <p className="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400">
-              Gerencie os contratos da engenharia
+              Consulte e gerencie os contratos.
             </p>
           </div>
 

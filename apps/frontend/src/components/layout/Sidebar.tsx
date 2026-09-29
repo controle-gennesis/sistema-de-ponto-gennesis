@@ -280,6 +280,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
     canApproveFuel,
     canApproveMaterialRequests,
     canAccessOsRoutePage,
+    canAccessOrcamentoRoutePage,
     canAccessRecebimentoEntregasRoutePage,
     canAccessRelatoriosContratoPage,
     fluigApproverNameKeys,
@@ -1122,6 +1123,14 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
             icon: FileText,
             description: 'Cadastro de contratos da engenharia',
             permission: isAdministrator || can(pk('/ponto/contratos')),
+            section: 'Obras'
+          },
+          {
+            name: 'Orçamentos',
+            href: '/ponto/orcamentos',
+            icon: Calculator,
+            description: 'Orçamentos dos contratos liberados',
+            permission: canAccessOrcamentoRoutePage,
             section: 'Obras'
           },
           {

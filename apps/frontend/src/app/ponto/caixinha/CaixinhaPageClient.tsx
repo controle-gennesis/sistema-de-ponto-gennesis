@@ -2,7 +2,7 @@
 
 import React, { useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Loader2, Minus, Paperclip, Plus, Search, Trash2, Wallet, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { MainLayout } from '@/components/layout/MainLayout';
@@ -218,6 +218,8 @@ function CurrencyStepperInput({
 
 export default function CaixinhaPageClient() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const contratoFiltro = (searchParams.get('contrato') || '').trim();
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -249,10 +251,13 @@ export default function CaixinhaPageClient() {
   const user = userData?.data || { name: 'Usuário', role: 'EMPLOYEE', id: '' };
 
   const { data: rows = [], isLoading: loadingRows } = useQuery({
-    queryKey: ['caixinha-purchases', search],
+    queryKey: ['caixinha-purchases', search, contratoFiltro],
     queryFn: async () => {
       const res = await api.get<{ success: boolean; data: CaixinhaPurchase[] }>('/caixinha', {
-        params: { search: search || undefined }
+        params: {
+          search: search || undefined,
+          contractId: contratoFiltro || undefined
+        }
       });
       return res.data?.data ?? [];
     }

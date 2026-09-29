@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { CalendarRange, Filter, Search, X } from 'lucide-react';
+import { Calculator, Filter, Search, X } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
@@ -27,30 +27,45 @@ type ContractRow = {
   costCenterId?: string | null;
 };
 
+type OrcamentoStatusAprovacao =
+  | 'rascunho'
+  | 'pronta'
+  | 'aguardando_aprovacao'
+  | 'aprovado'
+  | 'em_correcao'
+  | 'reprovado';
+
 type OrcamentoListaRow = {
   id: string;
   nome: string;
   updatedAt: string;
-  cronogramaProgressoFisico?: number;
-  cronogramaConcluido?: number;
-  cronogramaTotalEtapas?: number;
-  cronogramaAtrasado?: number;
+  statusAprovacao?: string;
+  bdiPercentual?: number;
+  totalComBdi?: number;
 };
 
-type CronogramaListItem = {
+type OrcamentoListItem = {
   contractId: string;
   contractName: string;
   orcamentoId: string;
   nome: string;
   codigo: string;
   updatedAt: string;
-  progressoFisico?: number;
-  concluido?: number;
-  totalEtapas?: number;
-  atrasado?: number;
+  status: OrcamentoStatusAprovacao;
+  bdiPercentual?: number;
+  totalComBdi?: number;
 };
 
 const ITEMS_PER_PAGE = 20;
+
+const ORCAMENTO_STATUS_LABELS: Record<OrcamentoStatusAprovacao, string> = {
+  rascunho: 'Rascunho',
+  pronta: 'FD pronta',
+  aguardando_aprovacao: 'Aguardando aprovação',
+  aprovado: 'Aprovado',
+  em_correcao: 'Em correção',
+  reprovado: 'Reprovado',
+};
 
 function codigoFromNomeOrcamento(nome: string): string {
   const m = String(nome || '').match(/\(([^)]+)\)\s*$/);
@@ -65,12 +80,56 @@ function nomeOrcamentoSemCodigo(nome: string): string {
   );
 }
 
-function formatPctLista(v: number | undefined): string {
-  const n = typeof v === 'number' && Number.isFinite(v) ? v : 0;
-  return `${n.toFixed(1).replace('.', ',')}%`;
+function normalizarStatusAprovacao(raw: unknown): OrcamentoStatusAprovacao {
+  const s = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+  if (
+    s === 'pronta' ||
+    s === 'aguardando_aprovacao' ||
+    s === 'aprovado' ||
+    s === 'em_correcao' ||
+    s === 'reprovado' ||
+    s === 'rascunho'
+  ) {
+    return s;
+  }
+  return 'rascunho';
 }
 
-export default function CronogramasPage() {
+function orcamentoStatusBadgeClass(status: OrcamentoStatusAprovacao): string {
+  const base =
+    'inline-flex items-center justify-center rounded-full px-2.5 py-1 text-xs font-medium whitespace-nowrap';
+  switch (status) {
+    case 'pronta':
+      return `${base} bg-sky-100 text-sky-900 dark:bg-sky-900/30 dark:text-sky-200`;
+    case 'aguardando_aprovacao':
+      return `${base} bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200`;
+    case 'aprovado':
+      return `${base} bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-200`;
+    case 'em_correcao':
+      return `${base} bg-orange-100 text-orange-900 dark:bg-orange-900/40 dark:text-orange-200`;
+    case 'reprovado':
+      return `${base} bg-red-200 text-red-900 dark:bg-red-900/40 dark:text-red-200`;
+    default:
+      return `${base} bg-slate-100 text-slate-800 dark:bg-slate-800/60 dark:text-slate-200`;
+  }
+}
+
+function formatCurrencyBrl(value: number | undefined): string {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '—';
+  return new Intl.NumberFormat('pt-BR', {
+    style: 'currency',
+    currency: 'BRL',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value);
+}
+
+function formatBdiPct(value: number | undefined): string {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '—';
+  return `${value.toFixed(2).replace('.', ',')}%`;
+}
+
+export default function OrcamentosPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const contratoFromUrl = (searchParams.get('contrato') || '').trim();
@@ -78,7 +137,12 @@ export default function CronogramasPage() {
   const [contratoFiltro, setContratoFiltro] = useState(contratoFromUrl);
   const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
-  const { canAccessContract, isAdministrator, isLoading: loadingPermissions } = usePermissions();
+  const {
+    canAccessContract,
+    canAccessContractOrcamentoTab,
+    isAdministrator,
+    isLoading: loadingPermissions,
+  } = usePermissions();
 
   useEffect(() => {
     setContratoFiltro(contratoFromUrl);
@@ -100,7 +164,7 @@ export default function CronogramasPage() {
   });
 
   const { data: contractsData, isLoading: loadingContracts } = useQuery({
-    queryKey: ['contracts', 'cronogramas-all'],
+    queryKey: ['contracts', 'orcamentos-all'],
     queryFn: async () => {
       const res = await api.get('/contracts', { params: { limit: 500 } });
       return res.data;
@@ -115,14 +179,14 @@ export default function CronogramasPage() {
       .filter((c) => {
         if (!c?.id || !c.costCenterId) return false;
         if (isAdministrator) return true;
-        return canAccessContract(c.id);
+        return canAccessContract(c.id) && canAccessContractOrcamentoTab(c.id);
       })
       .sort((a, b) =>
         (a.name || a.number || '').localeCompare(b.name || b.number || '', 'pt-BR', {
           sensitivity: 'base',
         })
       );
-  }, [contractsData, isAdministrator, canAccessContract]);
+  }, [contractsData, isAdministrator, canAccessContract, canAccessContractOrcamentoTab]);
 
   const contratoFilterOptions = useMemo(
     () =>
@@ -137,9 +201,9 @@ export default function CronogramasPage() {
 
   const hasActiveFilters = Boolean(contratoFiltro);
 
-  const { data: cronogramasData, isLoading: loadingOrcamentos } = useQuery({
+  const { data: orcamentosData, isLoading: loadingOrcamentos } = useQuery({
     queryKey: [
-      'cronogramas-todos',
+      'orcamentos-todos',
       contractsLiberados.map((c) => c.id).sort().join(','),
     ],
     queryFn: async () => {
@@ -150,34 +214,27 @@ export default function CronogramasPage() {
             ? res.data.orcamentos
             : []) as OrcamentoListaRow[];
           return orcs.map(
-            (o): CronogramaListItem => ({
+            (o): OrcamentoListItem => ({
               contractId: c.id,
               contractName: (c.name || c.number || c.id).trim(),
               orcamentoId: o.id,
               nome: nomeOrcamentoSemCodigo(o.nome) || o.nome,
               codigo: codigoFromNomeOrcamento(o.nome),
               updatedAt: o.updatedAt || '',
-              progressoFisico:
-                typeof o.cronogramaProgressoFisico === 'number' && Number.isFinite(o.cronogramaProgressoFisico)
-                  ? o.cronogramaProgressoFisico
+              status: normalizarStatusAprovacao(o.statusAprovacao),
+              bdiPercentual:
+                typeof o.bdiPercentual === 'number' && Number.isFinite(o.bdiPercentual)
+                  ? o.bdiPercentual
                   : undefined,
-              concluido:
-                typeof o.cronogramaConcluido === 'number' && Number.isFinite(o.cronogramaConcluido)
-                  ? o.cronogramaConcluido
-                  : undefined,
-              totalEtapas:
-                typeof o.cronogramaTotalEtapas === 'number' && Number.isFinite(o.cronogramaTotalEtapas)
-                  ? o.cronogramaTotalEtapas
-                  : undefined,
-              atrasado:
-                typeof o.cronogramaAtrasado === 'number' && Number.isFinite(o.cronogramaAtrasado)
-                  ? o.cronogramaAtrasado
+              totalComBdi:
+                typeof o.totalComBdi === 'number' && Number.isFinite(o.totalComBdi)
+                  ? o.totalComBdi
                   : undefined,
             })
           );
         })
       );
-      const items: CronogramaListItem[] = [];
+      const items: OrcamentoListItem[] = [];
       for (const r of settled) {
         if (r.status === 'fulfilled') items.push(...r.value);
       }
@@ -191,8 +248,8 @@ export default function CronogramasPage() {
     enabled: !loadingContracts && !loadingPermissions && contractsLiberados.length > 0,
   });
 
-  const cronogramas = useMemo(() => {
-    const list = Array.isArray(cronogramasData) ? cronogramasData : [];
+  const orcamentos = useMemo(() => {
+    const list = Array.isArray(orcamentosData) ? orcamentosData : [];
     const q = searchTerm.trim().toLowerCase();
     return list.filter((o) => {
       if (contratoFiltro && o.contractId !== contratoFiltro) return false;
@@ -200,14 +257,17 @@ export default function CronogramasPage() {
       const nome = (o.nome || '').toLowerCase();
       const codigo = (o.codigo || '').toLowerCase();
       const contrato = (o.contractName || '').toLowerCase();
-      return nome.includes(q) || codigo.includes(q) || contrato.includes(q);
+      const status = (ORCAMENTO_STATUS_LABELS[o.status] || '').toLowerCase();
+      return (
+        nome.includes(q) || codigo.includes(q) || contrato.includes(q) || status.includes(q)
+      );
     });
-  }, [cronogramasData, searchTerm, contratoFiltro]);
+  }, [orcamentosData, searchTerm, contratoFiltro]);
 
-  const totalFiltered = cronogramas.length;
+  const totalFiltered = orcamentos.length;
   const totalPages = Math.max(1, Math.ceil(totalFiltered / ITEMS_PER_PAGE));
   const page = Math.min(currentPage, totalPages);
-  const pageRows = cronogramas.slice((page - 1) * ITEMS_PER_PAGE, page * ITEMS_PER_PAGE);
+  const pageRows = orcamentos.slice((page - 1) * ITEMS_PER_PAGE, page * ITEMS_PER_PAGE);
 
   const isLoadingList =
     loadingContracts || loadingPermissions || (contractsLiberados.length > 0 && loadingOrcamentos);
@@ -216,7 +276,7 @@ export default function CronogramasPage() {
 
   if (loadingUser) {
     return (
-      <ProtectedRoute route="/ponto/cronogramas">
+      <ProtectedRoute route="/ponto/orcamentos">
         <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
           <Loading message="Carregando..." fullScreen size="lg" />
         </MainLayout>
@@ -225,15 +285,15 @@ export default function CronogramasPage() {
   }
 
   return (
-    <ProtectedRoute route="/ponto/cronogramas">
+    <ProtectedRoute route="/ponto/orcamentos">
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
         <div className="space-y-6">
           <div className="text-center">
             <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
-              Cronogramas
+              Orçamentos
             </h1>
             <p className="mx-auto mt-2 max-w-2xl text-sm text-gray-600 dark:text-gray-400 sm:text-base">
-              Cronogramas dos orçamentos dos contratos liberados para você.
+              Orçamentos dos contratos liberados para você.
             </p>
           </div>
 
@@ -242,14 +302,14 @@ export default function CronogramasPage() {
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center space-x-3">
                   <div className="rounded-lg bg-red-100 p-2 dark:bg-red-900/30 sm:p-3">
-                    <CalendarRange className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6" />
+                    <Calculator className="h-5 w-5 text-red-600 dark:text-red-400 sm:h-6 sm:w-6" />
                   </div>
                   <div>
                     <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                      Cronogramas
+                      Orçamentos
                     </h3>
                     <p className="text-sm text-gray-600 dark:text-gray-400">
-                      Todos os orçamentos com cronograma dos seus contratos
+                      Todos os orçamentos dos seus contratos
                     </p>
                   </div>
                 </div>
@@ -258,7 +318,7 @@ export default function CronogramasPage() {
                     <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
                     <input
                       type="text"
-                      placeholder="Buscar por orçamento ou código..."
+                      placeholder="Buscar por orçamento, código ou contrato..."
                       value={searchTerm}
                       onChange={(e) => {
                         setSearchTerm(e.target.value);
@@ -301,16 +361,16 @@ export default function CronogramasPage() {
             </CardHeader>
             <CardContent>
               {isLoadingList ? (
-                <CadastroListLoading message="Carregando cronogramas..." />
+                <CadastroListLoading message="Carregando orçamentos..." />
               ) : isListEmpty ? (
                 <div className="py-8 text-center">
-                  <CalendarRange className="mx-auto mb-4 h-12 w-12 text-gray-400 dark:text-gray-500" />
-                  <p className="text-gray-600 dark:text-gray-400">Nenhum cronograma encontrado</p>
+                  <Calculator className="mx-auto mb-4 h-12 w-12 text-gray-400 dark:text-gray-500" />
+                  <p className="text-gray-600 dark:text-gray-400">Nenhum orçamento encontrado</p>
                   <p className="mt-2 text-sm text-gray-500 dark:text-gray-500">
                     {searchTerm.trim() || hasActiveFilters
                       ? 'Tente ajustar os filtros'
                       : contractsLiberados.length === 0
-                        ? 'Você não tem contratos liberados'
+                        ? 'Você não tem contratos liberados com acesso a orçamento'
                         : 'Não há orçamentos nos contratos liberados'}
                   </p>
                 </div>
@@ -324,19 +384,19 @@ export default function CronogramasPage() {
                             Código
                           </th>
                           <th className="px-3 py-4 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
-                            Orçamento
+                            Descrição
                           </th>
-                          <th className="w-[16%] px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                          <th className="w-[14%] px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
                             Contrato
                           </th>
-                          <th className="w-[10%] px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-4">
-                            Progresso
+                          <th className="w-[14%] px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-4">
+                            Status
                           </th>
                           <th className="w-[10%] px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-4">
-                            Concluídos
+                            BDI
                           </th>
-                          <th className="w-[10%] px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-4">
-                            Atrasados
+                          <th className="w-[14%] px-3 py-4 text-right text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
+                            Total
                           </th>
                           <th className="w-[14%] px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
                             Atualizado
@@ -348,10 +408,12 @@ export default function CronogramasPage() {
                           <tr
                             key={`${o.contractId}-${o.orcamentoId}`}
                             onClick={() =>
-                              router.push(`/ponto/cronogramas/${o.contractId}/${o.orcamentoId}`)
+                              router.push(
+                                `/ponto/contratos/${o.contractId}/orcamento/${o.orcamentoId}`
+                              )
                             }
                             className={getListTableRowClassName(true)}
-                            aria-label={`Abrir cronograma de ${o.nome}`}
+                            aria-label={`Abrir orçamento ${o.nome}`}
                           >
                             <td className="whitespace-nowrap px-3 py-3 font-mono text-sm text-gray-900 dark:text-gray-100 sm:px-6">
                               {formatCadastroListId(o.codigo || null)}
@@ -366,20 +428,16 @@ export default function CronogramasPage() {
                                 {o.contractName}
                               </span>
                             </td>
-                            <td className="whitespace-nowrap px-3 py-3 text-center text-sm tabular-nums font-semibold text-gray-900 dark:text-gray-100 sm:px-4">
-                              {formatPctLista(o.progressoFisico)}
+                            <td className="whitespace-nowrap px-3 py-3 text-center sm:px-4">
+                              <span className={orcamentoStatusBadgeClass(o.status)}>
+                                {ORCAMENTO_STATUS_LABELS[o.status]}
+                              </span>
                             </td>
                             <td className="whitespace-nowrap px-3 py-3 text-center text-sm tabular-nums text-gray-700 dark:text-gray-300 sm:px-4">
-                              {`${o.concluido ?? 0}/${o.totalEtapas ?? 0}`}
+                              {formatBdiPct(o.bdiPercentual)}
                             </td>
-                            <td
-                              className={`whitespace-nowrap px-3 py-3 text-center text-sm tabular-nums font-semibold sm:px-4 ${
-                                (o.atrasado ?? 0) > 0
-                                  ? 'text-red-600 dark:text-red-400'
-                                  : 'text-gray-700 dark:text-gray-300'
-                              }`}
-                            >
-                              {o.atrasado ?? 0}
+                            <td className="whitespace-nowrap px-3 py-3 text-right text-sm tabular-nums font-medium text-gray-900 dark:text-gray-100 sm:px-6">
+                              {formatCurrencyBrl(o.totalComBdi)}
                             </td>
                             <td className="whitespace-nowrap px-3 py-3 text-center text-sm tabular-nums text-gray-700 dark:text-gray-300 sm:px-6">
                               {o.updatedAt

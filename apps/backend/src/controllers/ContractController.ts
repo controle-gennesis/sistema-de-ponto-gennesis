@@ -211,6 +211,55 @@ export class ContractController {
   }
 
   /**
+   * Pessoas com este contrato liberado (quem tem acesso na página de Contratos).
+   */
+  async getAccessUsers(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const contractId = String(req.params.contractId || req.params.id || '').trim();
+      if (!contractId) throw createError('Contrato não informado', 400);
+      await assertContractAccess(req, contractId);
+
+      const rows = await prisma.userContractPermission.findMany({
+        where: {
+          contractId,
+          user: { isActive: true },
+        },
+        select: {
+          user: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              cpf: true,
+              employee: {
+                select: {
+                  position: true,
+                  department: true,
+                },
+              },
+            },
+          },
+        },
+        orderBy: { user: { name: 'asc' } },
+      });
+
+      res.json({
+        success: true,
+        data: rows.map((r) => ({
+          id: r.user.id,
+          name: r.user.name,
+          email: r.user.email,
+          cpf: r.user.cpf || null,
+          position: r.user.employee?.position || null,
+          department: r.user.employee?.department || null,
+        })),
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
    * Criar novo contrato
    */
   async createContract(req: AuthRequest, res: Response, next: NextFunction) {

@@ -7,6 +7,7 @@ const EXTRA_PAGE_TITLES: Record<string, { title: string; category?: string; href
   '/ponto/home': { title: 'Início' },
   '/ponto/agenda': { title: 'Agenda', category: 'Principal' },
   '/ponto/cronogramas': { title: 'Cronogramas', category: 'Engenharia', href: '/ponto/cronogramas' },
+  '/ponto/orcamentos': { title: 'Orçamentos', category: 'Engenharia', href: '/ponto/orcamentos' },
   '/ponto/aprovacoes': { title: 'Aprovações', category: 'Principal' },
   '/ponto/solicitacoes-gerais': { title: 'Solicitações Internas', category: 'Principal' },
   '/ponto/gerenciar-solicitacoes-gerais': {
@@ -47,6 +48,7 @@ const SUB_PATH_TITLES: Record<string, string> = {
   andamento: 'Andamento',
   'cronograma-mensal': 'Cronograma Mensal',
   cronogramas: 'Cronogramas',
+  orcamentos: 'Orçamentos',
   'historico-os': 'Histórico OS',
   faturamento: 'Faturamento',
   relatorios: 'Relatórios Fotográficos',

@@ -120,26 +120,36 @@ export function AppUnderlineTabList({
   children,
   className = '',
   centered = true,
+  trailing,
   'aria-label': ariaLabel
 }: {
   children: React.ReactNode;
   className?: string;
   centered?: boolean;
+  /** Conteúdo à direita do trilho (ex.: filtro de período). */
+  trailing?: React.ReactNode;
   'aria-label'?: string;
 }) {
   return (
     <div
       className={`border-b border-gray-200 dark:border-gray-600 ${className}`.trim()}
     >
-      <nav
-        className={`-mb-px flex flex-wrap gap-x-1 gap-y-2 overflow-x-auto sm:gap-x-2 ${
-          centered ? 'justify-center' : ''
+      <div
+        className={`flex flex-wrap items-end gap-x-3 gap-y-2 ${
+          trailing ? 'justify-between' : centered ? 'justify-center' : ''
         }`}
-        role="tablist"
-        aria-label={ariaLabel}
       >
-        {children}
-      </nav>
+        <nav
+          className={`-mb-px flex min-w-0 flex-wrap gap-x-1 gap-y-2 overflow-x-auto sm:gap-x-2 ${
+            !trailing && centered ? 'justify-center' : ''
+          }`}
+          role="tablist"
+          aria-label={ariaLabel}
+        >
+          {children}
+        </nav>
+        {trailing ? <div className="-mb-px shrink-0 self-end">{trailing}</div> : null}
+      </div>
     </div>
   );
 }
