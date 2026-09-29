@@ -76,6 +76,7 @@ import {
 } from '@/lib/pleitoForm';
 import { useContractTableColumnCustomizer } from '@/components/useContractTableColumnCustomizer';
 import { usePermissions } from '@/hooks/usePermissions';
+import { useMensalReportPendingCount } from '@/hooks/useMensalReportPendingCount';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import {
   formatOsSePasta,
@@ -1017,6 +1018,8 @@ export default function ContractDetailPage() {
   const canAccessCombustivelModulo =
     isAdministrator || can(pathToModuleKey('/ponto/solicitacoes-combustivel'));
   const canAccessReunioesDeContrato = isElevatedUser || canAccessContract(contractId);
+  const { pendingByContractId } = useMensalReportPendingCount(Boolean(contractId));
+  const mensalReportPendingForContract = pendingByContractId.has(contractId) ? 1 : 0;
   const canAccessReunioesAba = canAccessContractReunioesTab(contractId);
   const canAccessOrdemServicoModulo = canAccessContractOrdemServicoTab(contractId);
   const canAccessProducaoSemanalModulo = canAccessContractProducaoSemanalTab(contractId);
@@ -2743,10 +2746,13 @@ export default function ContractDetailPage() {
         value: canAccessReunioesDeContrato ? String(reunioesCount) : '—',
         subtitle: canAccessReunioesDeContrato ? undefined : 'Sem acesso',
         loading: canAccessReunioesDeContrato && reunioesLoading,
+        badgeCount: canAccessReunioesDeContrato ? mensalReportPendingForContract : 0,
         href: canAccessReunioesDeContrato
-          ? canAccessReunioesAba
-            ? `/ponto/contratos/${contractId}/reunioes`
-            : `/ponto/contratos/${contractId}/reunioes?aba=relatorio-mensal`
+          ? mensalReportPendingForContract > 0
+            ? `/ponto/contratos/${contractId}/reunioes?aba=relatorio-mensal`
+            : canAccessReunioesAba
+              ? `/ponto/contratos/${contractId}/reunioes`
+              : `/ponto/contratos/${contractId}/reunioes?aba=relatorio-mensal`
           : undefined,
       },
       {
@@ -2773,6 +2779,7 @@ export default function ContractDetailPage() {
     loadingRelatoriosCount,
     loadingMensalCount,
     loadingSemanalCount,
+    mensalReportPendingForContract,
   ]);
 
   const faturamentoChartsYear = isAllYears

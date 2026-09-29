@@ -28,6 +28,8 @@ import {
   FormMultiFileField,
   isBlankFormFileValue,
 } from '@/components/forms/FormMultiFileField';
+import { MENSAL_REPORT_PENDING_QUERY_KEY } from '@/hooks/useMensalReportPendingCount';
+import { authService } from '@/lib/auth';
 import { downloadUploadFile } from '@/lib/downloadUploadFile';
 import { FormStepsStepper } from '@/components/forms/FormStepsStepper';
 import { FORM_FIELD_INPUT_CLS, FORM_FIELD_TEXTAREA_CLS } from '@/lib/formFieldUi';
@@ -221,15 +223,24 @@ function isAnswerEmpty(question: Question, answer: ReuniaoAnswer | undefined): b
   }
   if (question.type === 'valor') {
     const v = answer?.value;
-    if (typeof v === 'number') return !Number.isFinite(v);
+    if (typeof v === 'number') return !Number.isFinite(v) || v === 0;
     if (v === null || v === undefined || v === '') return true;
-    return parseCurrencyInputBr(String(v)) === null;
+    const parsed = parseCurrencyInputBr(String(v));
+    return parsed === null || parsed === 0;
   }
   if (question.type === 'percent') {
     const v = answer?.value;
-    if (typeof v === 'number') return !Number.isFinite(v);
+    if (typeof v === 'number') return !Number.isFinite(v) || v === 0;
     if (v === null || v === undefined || v === '') return true;
-    return parsePercentInput(String(v)) === null;
+    const parsed = parsePercentInput(String(v));
+    return parsed === null || parsed === 0;
+  }
+  if (question.type === 'number' || question.type === 'slider') {
+    const v = answer?.value;
+    if (typeof v === 'number') return !Number.isFinite(v) || v === 0;
+    if (v === null || v === undefined || v === '') return true;
+    const n = Number(String(v).replace(',', '.'));
+    return !Number.isFinite(n) || n === 0;
   }
   if (questionHasFormula(question)) {
     const v = answer?.value;
@@ -1066,6 +1077,7 @@ export function ReuniaoFormModal({
         });
         queryClient.invalidateQueries({ queryKey: ['reuniao', kind, contractId, reuniaoId] });
         queryClient.invalidateQueries({ queryKey: ['reunioes', kind, contractId] });
+        queryClient.invalidateQueries({ queryKey: MENSAL_REPORT_PENDING_QUERY_KEY });
         if (opts?.finalize) {
           queryClient.invalidateQueries({ queryKey: [`reunioes-${kind}-overview`] });
         }
@@ -1143,11 +1155,12 @@ export function ReuniaoFormModal({
 
   const validateSections = (
     sections: Section[],
-    answers: Record<string, ReuniaoAnswer>
+    answers: Record<string, ReuniaoAnswer>,
+    opts?: { requireAll?: boolean }
   ): string | null => {
     for (const section of sections) {
       for (const q of section.questions) {
-        if (!q.required) continue;
+        if (!opts?.requireAll && !q.required) continue;
         if (isAnswerEmpty(q, answers[q.id])) {
           return `Preencha: ${q.title}`;
         }
@@ -1159,13 +1172,15 @@ export function ReuniaoFormModal({
   const findFirstValidationError = (): { message: string; stepIndex: number } | null => {
     if (multiStep) {
       for (let i = 0; i < formSteps.length; i += 1) {
-        const err = validateSections((formSteps[i]?.sections as Section[]) ?? [], form.answers);
+        const err = validateSections((formSteps[i]?.sections as Section[]) ?? [], form.answers, {
+          requireAll: true,
+        });
         if (err) return { message: err, stepIndex: i };
       }
       return null;
     }
 
-    const err = validateSections(allSections, form.answers);
+    const err = validateSections(allSections, form.answers, { requireAll: true });
     return err ? { message: err, stepIndex: 0 } : null;
   };
 
@@ -1211,7 +1226,16 @@ export function ReuniaoFormModal({
       toast.error(validation.message);
       return;
     }
-    const ok = await persist(form, { finalize: true });
+    const userName = authService.getUser()?.name?.trim() || '';
+    const dataToSave: ReuniaoData = {
+      ...form,
+      identificacao: {
+        ...form.identificacao,
+        responsavelPreenchimento:
+          form.identificacao.responsavelPreenchimento?.trim() || userName,
+      },
+    };
+    const ok = await persist(dataToSave, { finalize: true });
     if (!ok) return;
     toast.success(kind === 'mensal' ? 'Relatório salvo!' : 'Reunião salva!');
     onClose();

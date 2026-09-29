@@ -8,14 +8,12 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
-  ExternalLink,
   FileText,
-  History,
-  PenLine,
   Settings2,
   AlertCircle,
   MinusCircle,
   Eye,
+  Plus,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { MainLayout } from '@/components/layout/MainLayout';
@@ -27,7 +25,7 @@ import { CadastroListEmpty, CadastroListLoading } from '@/components/ui/Cadastro
 import { cadastroListClasses, RowActionMenuCell, RowActionMenuPortal } from '@/components/ui/RowActionMenu';
 import { Modal } from '@/components/ui/Modal';
 import { ReuniaoFormModal } from '@/components/contract/ReuniaoFormModal';
-import { SegmentedControl } from '@/components/ui/SegmentedControl';
+import { AppUnderlineTabButton, AppUnderlineTabList } from '@/components/ui/AppTabButton';
 import { RelatoriosContratoMensalPanel } from './RelatoriosContratoMensalPanel';
 import { useRowActionMenu } from '@/hooks/useRowActionMenu';
 import { useCadastroCrudPermissions } from '@/hooks/useCadastroCrudPermissions';
@@ -39,7 +37,7 @@ import {
   isFortnightBefore,
   shiftFortnightKey,
 } from '@/lib/weekPeriod';
-import { getListTableRowClassName } from '@/components/ui/listTableUi';
+import { getListTableRowClassName, ListRowNavigableLabel } from '@/components/ui/listTableUi';
 
 type SemanalReportStatus = 'sem_formulario' | 'pendente' | 'preenchido';
 type StatusFilter = 'todos' | SemanalReportStatus;
@@ -345,18 +343,23 @@ export default function RelatoriosContratoPage() {
                   : 'Acompanhe as reuniões quinzenais de cada contrato.'
                 : 'Acompanhe os relatórios mensais preenchidos pelas equipes dos contratos.'}
             </p>
-            <div className="mt-4 flex justify-center">
-              <SegmentedControl
-                value={pageTab}
-                onChange={setPageTab}
-                aria-label="Tipo de relatório"
-                className="h-auto [&>button]:px-5 [&>button]:py-2 [&>button]:font-medium"
-                pillClassName="bg-white shadow-sm dark:bg-gray-900"
-                options={[
-                  { value: 'semanal', label: 'Reuniões quinzenais' },
-                  { value: 'mensal', label: 'Relatórios mensais' },
-                ]}
-              />
+            <div className="mt-4">
+              <AppUnderlineTabList aria-label="Tipo de relatório">
+                <AppUnderlineTabButton
+                  active={pageTab === 'semanal'}
+                  onClick={() => setPageTab('semanal')}
+                  className="whitespace-nowrap px-3 py-2.5 text-sm"
+                >
+                  Reuniões quinzenais
+                </AppUnderlineTabButton>
+                <AppUnderlineTabButton
+                  active={pageTab === 'mensal'}
+                  onClick={() => setPageTab('mensal')}
+                  className="whitespace-nowrap px-3 py-2.5 text-sm"
+                >
+                  Relatórios mensais
+                </AppUnderlineTabButton>
+              </AppUnderlineTabList>
             </div>
           </div>
 
@@ -402,18 +405,18 @@ export default function RelatoriosContratoPage() {
                   </div>
                 </div>
                 <div className={cadastroListClasses.cardToolbar}>
-                  <div className="box-border flex h-10 w-full shrink-0 items-center gap-0.5 rounded-lg border border-gray-300 bg-white px-1 dark:border-gray-600 dark:bg-gray-800 sm:w-auto sm:min-w-[300px]">
+                  <div className="flex shrink-0 items-center gap-0.5">
                     <button
                       type="button"
                       onClick={() => setWeekKey((current) => shiftFortnightKey(current, -1))}
-                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-gray-600 transition-colors hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
+                      className="inline-flex h-7 w-7 items-center justify-center rounded-md text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100"
                       aria-label="Quinzena anterior"
                     >
                       <ChevronLeft className="h-4 w-4" />
                     </button>
-                    <p className="flex-1 whitespace-nowrap px-1 text-center text-sm font-medium leading-none text-gray-900 dark:text-gray-100">
+                    <span className="min-w-[11rem] whitespace-nowrap px-1 text-center text-xs font-medium tabular-nums text-gray-600 dark:text-gray-300 sm:min-w-[13rem] sm:text-sm">
                       {formatWeekLabel(weekKey)}
-                    </p>
+                    </span>
                     <button
                       type="button"
                       disabled={!canGoNextWeek}
@@ -423,7 +426,7 @@ export default function RelatoriosContratoPage() {
                           return isFortnightAfter(next, currentWeekKey) ? currentWeekKey : next;
                         })
                       }
-                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-gray-600 transition-colors hover:bg-gray-100 disabled:pointer-events-none disabled:opacity-40 dark:text-gray-300 dark:hover:bg-gray-700"
+                      className="inline-flex h-7 w-7 items-center justify-center rounded-md text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-800 disabled:pointer-events-none disabled:opacity-30 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100"
                       aria-label="Próxima quinzena"
                     >
                       <ChevronRight className="h-4 w-4" />
@@ -448,7 +451,7 @@ export default function RelatoriosContratoPage() {
                         <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
                           Contrato
                         </th>
-                        <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                        <th className={`${cadastroListClasses.thCenter} px-3 py-2 font-semibold`}>
                           Formulário
                         </th>
                         <th className={`${cadastroListClasses.thCenter} px-3 py-2 font-semibold`}>
@@ -470,14 +473,19 @@ export default function RelatoriosContratoPage() {
                         return (
                           <tr
                             key={row.contractId}
-                            className={`border-b border-gray-100 dark:border-gray-800/80 ${getListTableRowClassName(false)}`}
+                            onClick={() =>
+                              router.push(
+                                `/ponto/metricas/relatorios-contrato/${row.contractId}`,
+                              )
+                            }
+                            className={`border-b border-gray-100 dark:border-gray-800/80 ${getListTableRowClassName(true)}`}
                           >
                             <td className="px-3 py-3">
-                              <div className="font-medium text-gray-900 dark:text-gray-100">
+                              <ListRowNavigableLabel className="font-medium">
                                 {row.contractName}
-                              </div>
+                              </ListRowNavigableLabel>
                             </td>
-                            <td className="px-3 py-3 text-gray-700 dark:text-gray-300">
+                            <td className="px-3 py-3 text-center text-gray-700 dark:text-gray-300">
                               {row.formularioName || (
                                 <span className="text-gray-400">Não configurado</span>
                               )}
@@ -499,7 +507,10 @@ export default function RelatoriosContratoPage() {
                             <RowActionMenuCell
                               align="center"
                               isOpen={isRowMenuOpen(row.contractId)}
-                              onToggle={(e) => toggleRowActionMenu(row.contractId, e.currentTarget)}
+                              onToggle={(e) => {
+                                e.stopPropagation();
+                                toggleRowActionMenu(row.contractId, e.currentTarget);
+                              }}
                             />
                           </tr>
                         );
@@ -512,6 +523,26 @@ export default function RelatoriosContratoPage() {
                       onClose={closeRowActionMenu}
                       hideDefaultActions
                       extraItems={[
+                        {
+                          label: canWrite
+                            ? rowForActionMenu.entryId
+                              ? 'Continuar reunião'
+                              : 'Registrar reunião'
+                            : 'Visualizar reunião',
+                          icon: canWrite ? (
+                            <Plus className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
+                          ) : (
+                            <Eye className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
+                          ),
+                          onClick: () => handleFill(rowForActionMenu),
+                          disabled: canWrite
+                            ? openPeriodMutation.isPending
+                            : !rowForActionMenu.entryId,
+                          disabledTitle: canWrite
+                            ? 'Abrindo período...'
+                            : 'Ainda não há reunião registrada',
+                          tone: canWrite ? 'danger' : 'default',
+                        },
                         ...(canWrite
                           ? [
                               {
@@ -523,43 +554,6 @@ export default function RelatoriosContratoPage() {
                               },
                             ]
                           : []),
-                        {
-                          label: canWrite
-                            ? rowForActionMenu.entryId
-                              ? 'Continuar reunião da quinzena'
-                              : 'Registrar reunião da quinzena'
-                            : 'Visualizar reunião',
-                          icon: canWrite ? (
-                            <PenLine className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
-                          ) : (
-                            <Eye className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
-                          ),
-                          onClick: () => handleFill(rowForActionMenu),
-                          disabled: canWrite
-                            ? openPeriodMutation.isPending
-                            : !rowForActionMenu.entryId,
-                          disabledTitle: canWrite
-                            ? 'Abrindo período...'
-                            : 'Ainda não há reunião registrada',
-                        },
-                        {
-                          label: 'Histórico',
-                          icon: (
-                            <History className="h-4 w-4 shrink-0 text-gray-600 dark:text-gray-400" />
-                          ),
-                          onClick: () =>
-                            router.push(
-                              `/ponto/metricas/relatorios-contrato/${rowForActionMenu.contractId}`,
-                            ),
-                        },
-                        {
-                          label: 'Abrir contrato',
-                          icon: (
-                            <ExternalLink className="h-4 w-4 shrink-0 text-gray-600 dark:text-gray-400" />
-                          ),
-                          onClick: () =>
-                            router.push(`/ponto/contratos/${rowForActionMenu.contractId}`),
-                        },
                       ]}
                     />
                   ) : null}

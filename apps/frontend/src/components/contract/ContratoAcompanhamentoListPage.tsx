@@ -6,7 +6,6 @@ import Link from 'next/link';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import type { LucideIcon } from 'lucide-react';
 import {
-  ArrowLeft,
   Trash2,
   Search,
   MoreVertical,
@@ -18,23 +17,28 @@ import {
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { AppUnderlineTabButton, AppUnderlineTabList } from '@/components/ui/AppTabButton';
+import { NotificationCountBadge } from '@/components/ui/NotificationCountBadge';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Loading } from '@/components/ui/Loading';
-import { CadastroListLoading } from '@/components/ui/CadastroListSummary';
+import { CadastroListEmpty, CadastroListLoading, CadastroListSummary, getCadastroListRange } from '@/components/ui/CadastroListSummary';
+import { ListPagination } from '@/components/ui/ListPagination';
 import { Modal } from '@/components/ui/Modal';
 import toast from 'react-hot-toast';
 import api from '@/lib/api';
 import { textMatchesSearch } from '@/lib/normalizeSearchText';
 import { ActionMenuOverlay } from '@/components/ui/ActionMenuOverlay';
 import { computeRowActionMenuPosition } from '@/lib/computeRowActionMenuPosition';
-import { getListTableRowClassName, ListRowNavigableLabel, rowActionMenuButtonClass } from '@/components/ui/listTableUi';
+import {
+  cadastroListClasses,
+  getListTableRowClassName,
+  ListRowNavigableLabel,
+  rowActionMenuButtonClass,
+} from '@/components/ui/RowActionMenu';
 import { ReuniaoFormModal, type ReuniaoListPatch } from '@/components/contract/ReuniaoFormModal';
 import { ContratoControleGeralMensalCard } from '@/components/contract/ContratoControleGeralMensalCard';
 import { ContratoReunioesLancamentosBar } from '@/components/contract/ContratoReunioesLancamentosBar';
 import { useCadastroCrudPermissions } from '@/hooks/useCadastroCrudPermissions';
-import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
-import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
 import { entryMonthLabel, formatMonthLabel, getIsoMonthKey } from '@/lib/monthPeriod';
 import {
   entryWeekLabel,
@@ -44,6 +48,21 @@ import {
   getFortnightKey,
 } from '@/lib/weekPeriod';
 import type { AcompanhamentoKind } from '@/lib/acompanhamentoTypes';
+
+const TOOLBAR_BTN =
+  'inline-flex h-10 shrink-0 items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3.5 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700';
+
+const TOOLBAR_BTN_PRIMARY =
+  'inline-flex h-10 shrink-0 items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40';
+
+const TOOLBAR_BTN_ICON =
+  'inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700';
+
+const TOOLBAR_BTN_PRIMARY_ICON =
+  'inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-red-200 bg-red-50 text-red-700 transition-colors hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40';
+
+const SEARCH_INPUT_CLASS =
+  'h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100';
 
 export type { AcompanhamentoKind };
 
@@ -56,6 +75,8 @@ interface ReuniaoEntry {
   weekKey?: string;
   formularioName?: string;
   formularioDescription?: string;
+  submittedAt?: string;
+  fillStatus?: 'nao_preenchido' | 'preenchendo' | 'preenchido';
   createdAt: string;
   updatedAt: string;
 }
@@ -110,48 +131,52 @@ export interface ContratoAcompanhamentoListConfig {
   backHref?: (contractId: string) => string;
   backLabel?: string;
   protectedRoute?: string;
+  /** Se false, oculta configurar formulário (definido em Relatórios de Contrato). */
+  allowConfigureForm?: boolean;
+  /** Se false, oculta o botão + da toolbar (registro fica no menu da linha / métricas). */
+  allowToolbarCreate?: boolean;
+  /** Se false, oculta Editar/Excluir no menu da linha. */
+  allowRowEditDelete?: boolean;
+  emptyTitle?: string;
+  emptyHint?: string;
 }
 
 export type ContratoAcompanhamentoTabs = {
-  items: Array<{ id: string; label: string }>;
+  items: Array<{ id: string; label: string; badgeCount?: number }>;
   activeId: string;
   onChange: (id: string) => void;
 };
 
-const REUNIAO_MENU_WIDTH_PX = 224;
-const COMPACT_PANEL_BODY_CLASS = 'min-h-[22rem] flex-1';
+const FILL_STATUS_META: Record<
+  NonNullable<ReuniaoEntry['fillStatus']>,
+  { label: string; className: string }
+> = {
+  nao_preenchido: {
+    label: 'Não preenchido',
+    className: 'bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300',
+  },
+  preenchendo: {
+    label: 'Em andamento',
+    className: 'bg-blue-100 text-blue-800 dark:bg-blue-950/50 dark:text-blue-300',
+  },
+  preenchido: {
+    label: 'Preenchido',
+    className: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300',
+  },
+};
 
-const MESES_FILTRO = [
-  { value: 0, label: 'Todos os meses' },
-  { value: 1, label: 'Janeiro' },
-  { value: 2, label: 'Fevereiro' },
-  { value: 3, label: 'Março' },
-  { value: 4, label: 'Abril' },
-  { value: 5, label: 'Maio' },
-  { value: 6, label: 'Junho' },
-  { value: 7, label: 'Julho' },
-  { value: 8, label: 'Agosto' },
-  { value: 9, label: 'Setembro' },
-  { value: 10, label: 'Outubro' },
-  { value: 11, label: 'Novembro' },
-  { value: 12, label: 'Dezembro' },
-];
-
-const MESES_FILTRO_SELECT_OPTIONS = labeledToSelectOptions(
-  MESES_FILTRO.map((m) => ({ value: String(m.value), label: m.label }))
-);
-
-function yearsFromContractRange(startDate?: string, endDate?: string): number[] {
-  const now = new Date().getFullYear();
-  const startY = startDate ? new Date(startDate).getFullYear() : now;
-  const endY = endDate ? new Date(endDate).getFullYear() : now;
-  if (Number.isNaN(startY) || Number.isNaN(endY)) return [now];
-  const from = Math.min(startY, endY, now);
-  const to = Math.max(startY, endY, now);
-  const years: number[] = [];
-  for (let y = from; y <= to; y++) years.push(y);
-  return years;
+function resolveFillStatus(entry: ReuniaoEntry): NonNullable<ReuniaoEntry['fillStatus']> {
+  if (entry.fillStatus) return entry.fillStatus;
+  if (entry.submittedAt) return 'preenchido';
+  if (entry.updatedAt && entry.createdAt && entry.updatedAt !== entry.createdAt) {
+    return 'preenchendo';
+  }
+  if (entry.responsavelPreenchimento?.trim()) return 'preenchendo';
+  return 'nao_preenchido';
 }
+
+const REUNIAO_MENU_WIDTH_PX = 224;
+const LIST_DISPLAY_LIMIT = 10;
 
 function parseMonthKeyParts(monthKey?: string): { y: number; m: number } | null {
   const match = /^(\d{4})-(\d{2})$/.exec(String(monthKey || '').trim());
@@ -224,30 +249,18 @@ function isCurrentPeriod(kind: AcompanhamentoKind, entry: ReuniaoEntry) {
   return entry.weekKey === getFortnightKey();
 }
 
-function currentPeriodLabel(kind: AcompanhamentoKind) {
-  return kind === 'mensal' ? formatMonthLabel(getIsoMonthKey()) : formatWeekLabel(getFortnightKey());
-}
-
 function panelTone(kind: AcompanhamentoKind) {
   if (kind === 'mensal') {
     return {
-      iconWrap: 'bg-sky-100 text-sky-600 dark:bg-sky-900/30 dark:text-sky-400',
-      emptyWrap:
-        'bg-sky-50 text-sky-600 dark:bg-sky-500/10 dark:text-sky-300',
-      chip:
-        'bg-sky-50 text-sky-700 ring-1 ring-sky-200/70 dark:bg-sky-950/50 dark:text-sky-300 dark:ring-sky-500/20',
+      iconWrap: 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400',
       emptyTitle: 'Nenhum relatório registrado',
-      emptyHint: 'Configure o formulário e preencha o mês atual para acompanhar o contrato.',
+      emptyHint: 'Preencha o mês atual para acompanhar o contrato.',
     };
   }
   return {
-    iconWrap: 'bg-indigo-100 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-400',
-    emptyWrap:
-      'bg-indigo-50 text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-300',
-    chip:
-      'bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200/70 dark:bg-indigo-950/50 dark:text-indigo-300 dark:ring-indigo-500/20',
+    iconWrap: 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400',
     emptyTitle: 'Nenhuma reunião registrada',
-    emptyHint: 'Configure o formulário e registre a reunião da quinzena com a equipe.',
+    emptyHint: 'Registre a reunião da quinzena com a equipe.',
   };
 }
 
@@ -280,18 +293,23 @@ function ContratoAcompanhamentoPanel({
     fillButtonLabel,
     fillButtonContinueLabel,
     fillButtonNewLabel,
-    currentPeriodSummaryLabel,
-    recordsCountLabel,
     saveSuccessToast,
     openSuccessToast,
     createSuccessToast,
     backHref,
+    allowConfigureForm = true,
+    allowToolbarCreate = true,
+    allowRowEditDelete = true,
+    emptyTitle,
+    emptyHint,
   } = config;
 
   const relatoriosCrud = useCadastroCrudPermissions('/ponto/metricas/relatorios-contrato');
   const fromMetricasPage = config.protectedRoute === '/ponto/metricas/relatorios-contrato';
   const canWrite = !fromMetricasPage || relatoriosCrud.canEdit || relatoriosCrud.canCreate;
-  const canRemove = relatoriosCrud.canDelete;
+  const canRemove = allowRowEditDelete && relatoriosCrud.canDelete;
+  const canConfigureForm = canWrite && allowConfigureForm;
+  const canEditEntry = canWrite && allowRowEditDelete;
 
   const router = useRouter();
   const pathname = usePathname();
@@ -299,6 +317,7 @@ function ContratoAcompanhamentoPanel({
   const queryClient = useQueryClient();
 
   const [searchTerm, setSearchTerm] = useState('');
+  const [listPage, setListPage] = useState(1);
   const [reuniaoActionMenu, setReuniaoActionMenu] = useState<ReuniaoActionMenuState | null>(null);
   const [modalReuniaoId, setModalReuniaoId] = useState<string | null>(null);
   const [formViewOnly, setFormViewOnly] = useState(false);
@@ -406,8 +425,14 @@ function ContratoAcompanhamentoPanel({
         (err as { response?: { data?: { message?: string } } })?.response?.data?.message ||
         'Erro ao abrir o período atual.';
       if (msg.includes('Configure o formulário')) {
-        toast.error(msg);
-        setConfigModalOpen(true);
+        if (canConfigureForm) {
+          toast.error(msg);
+          setConfigModalOpen(true);
+          return;
+        }
+        toast.error(
+          'O formulário deste contrato ainda não foi definido. Configure em Relatórios de Contrato.'
+        );
         return;
       }
       toast.error(msg);
@@ -536,102 +561,121 @@ function ContratoAcompanhamentoPanel({
     );
   });
 
+  const listRange = useMemo(
+    () => getCadastroListRange(listPage, LIST_DISPLAY_LIMIT, reunioesFiltradas.length),
+    [listPage, reunioesFiltradas.length],
+  );
+
+  useEffect(() => {
+    setListPage(1);
+  }, [searchTerm, filterYear, filterMonth, kind, contractId]);
+
+  useEffect(() => {
+    if (listPage > listRange.totalPages) {
+      setListPage(listRange.totalPages);
+    }
+  }, [listPage, listRange.totalPages]);
+
+  const reunioesPagina = useMemo(
+    () =>
+      reunioesFiltradas.slice(
+        (listPage - 1) * LIST_DISPLAY_LIMIT,
+        listPage * LIST_DISPLAY_LIMIT,
+      ),
+    [reunioesFiltradas, listPage],
+  );
+
+  const itemLabel = kind === 'mensal' ? 'mês' : 'registro';
+  const itemLabelPlural = kind === 'mensal' ? 'meses' : 'registros';
+
   const listMarkup = (
     <>
-      {!loadingReunioes && reunioes.length > 0 && (
-        <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <span
-            className={`inline-flex w-fit items-center rounded-full px-2.5 py-1 text-xs font-medium ${tone.chip}`}
-          >
-            {currentPeriodSummaryLabel}: {currentPeriodLabel(kind)}
-            {currentPeriodEntry ? ' · em andamento' : ' · pendente'}
-          </span>
-          <span className="text-xs font-medium text-gray-500 dark:text-gray-400">
-            {recordsCountLabel(reunioesFiltradas.length)}
-          </span>
-        </div>
-      )}
-
       {loadingReunioes ? (
         <div className="mt-2">
           <CadastroListLoading message="Carregando histórico..." />
         </div>
       ) : reunioesFiltradas.length === 0 ? (
-        <div
-          className={`flex flex-col items-center justify-center px-6 text-center ${
-            compact ? `${COMPACT_PANEL_BODY_CLASS} py-10` : 'py-14'
-          }`}
-        >
-          <div
-            className={`mb-4 flex h-14 w-14 items-center justify-center rounded-2xl ${tone.emptyWrap}`}
-          >
-            <Icon className="h-7 w-7" strokeWidth={1.6} />
-          </div>
-          <p className="text-[15px] font-semibold text-gray-900 dark:text-gray-100">
-            {reunioes.length === 0 ? tone.emptyTitle : 'Nenhum registro encontrado'}
-          </p>
-          <p className="mt-1.5 max-w-[18rem] text-sm leading-relaxed text-gray-500 dark:text-gray-400">
-            {reunioes.length === 0
-              ? tone.emptyHint
+        <CadastroListEmpty
+          icon={Icon}
+          title={
+            reunioes.length === 0
+              ? emptyTitle || tone.emptyTitle
+              : 'Nenhum registro encontrado'
+          }
+          hint={
+            reunioes.length === 0
+              ? emptyHint || tone.emptyHint
               : searchTerm.trim()
                 ? 'Tente outro termo na busca.'
-                : 'Nenhum registro neste mês e ano.'}
-          </p>
-        </div>
+                : 'Nenhum registro neste mês e ano.'
+          }
+        />
       ) : (
-        <div
-          className={`mt-1 overflow-hidden rounded-xl border border-gray-100 dark:border-white/10 ${
-            compact ? COMPACT_PANEL_BODY_CLASS : ''
-          }`}
-        >
-          <div className="table-scroll">
-            <table className={`w-full text-sm ${compact ? 'min-w-[520px]' : 'min-w-[720px]'}`}>
+        <>
+          <CadastroListSummary
+            startItem={listRange.startItem}
+            endItem={listRange.endItem}
+            total={reunioesFiltradas.length}
+            itemLabel={itemLabel}
+            itemLabelPlural={itemLabelPlural}
+            currentPage={listPage}
+            totalPages={listRange.totalPages}
+          />
+          <div className={`${cadastroListClasses.tableScroll}`}>
+            <table className={cadastroListClasses.table}>
               <thead>
-                <tr className="border-b border-gray-100 bg-gray-50/80 dark:border-white/10 dark:bg-white/5">
-                  <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-500 dark:text-gray-400">
-                    {periodColumnLabel}
-                  </th>
-                  <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-500 dark:text-gray-400">
-                    Responsável
-                  </th>
-                  {!compact ? (
-                    <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-500 dark:text-gray-400">
-                      Atualizado em
-                    </th>
+                <tr className="border-b border-gray-200 dark:border-gray-700">
+                  <th className={cadastroListClasses.th}>{periodColumnLabel}</th>
+                  {kind === 'mensal' ? (
+                    <th className={cadastroListClasses.thCenter}>Status</th>
                   ) : null}
-                  <th className="px-4 py-2.5 text-right text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-500 dark:text-gray-400">
-                    Ação
-                  </th>
+                  <th className={cadastroListClasses.thCenter}>Responsável</th>
+                  {!compact ? (
+                    <th className={cadastroListClasses.thCenter}>Atualizado em</th>
+                  ) : null}
+                  <th className={cadastroListClasses.thRight}>Ação</th>
                 </tr>
               </thead>
               <tbody>
-                {reunioesFiltradas.map((r) => (
+                {reunioesPagina.map((r) => {
+                  const fillStatus = resolveFillStatus(r);
+                  const statusMeta = FILL_STATUS_META[fillStatus];
+                  return (
                   <tr
                     key={r.id}
-                    onClick={() => openReuniao(r.id, 'view')}
-                    className={`border-b border-gray-100 last:border-0 dark:border-white/5 ${getListTableRowClassName(true)} ${
+                    onClick={() =>
+                      openReuniao(r.id, canWrite && !allowRowEditDelete ? 'edit' : 'view')
+                    }
+                    className={`${getListTableRowClassName(true)} ${
                       modalReuniaoId === r.id ? 'bg-red-50/50 dark:bg-red-950/20' : ''
-                    } ${isCurrentPeriod(kind, r) ? 'bg-indigo-50/40 dark:bg-indigo-950/20' : ''}`}
+                    }`}
                   >
-                    <td className="px-4 py-3">
+                    <td className={cadastroListClasses.td}>
                       <ListRowNavigableLabel className="truncate font-medium">
                         {entryPeriodLabel(kind, r)}
-                        {isCurrentPeriod(kind, r) ? (
-                          <span className="ml-2 rounded-full bg-indigo-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-300">
-                            atual
-                          </span>
-                        ) : null}
                       </ListRowNavigableLabel>
                     </td>
-                    <td className="px-4 py-3 text-gray-600 dark:text-gray-300">
+                    {kind === 'mensal' ? (
+                      <td className={`${cadastroListClasses.td} text-center`}>
+                        <span
+                          className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${statusMeta.className}`}
+                        >
+                          {statusMeta.label}
+                        </span>
+                      </td>
+                    ) : null}
+                    <td className={cadastroListClasses.tdCenter}>
                       {r.responsavelPreenchimento?.trim() || '—'}
                     </td>
                     {!compact ? (
-                      <td className="whitespace-nowrap px-4 py-3 text-gray-600 dark:text-gray-300">
+                      <td className={cadastroListClasses.tdCenter}>
                         {formatDateTime(r.updatedAt || r.createdAt)}
                       </td>
                     ) : null}
-                    <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                    <td
+                      className={`${cadastroListClasses.td} text-right`}
+                      onClick={(e) => e.stopPropagation()}
+                    >
                       <div className="flex items-center justify-end">
                         <button
                           type="button"
@@ -657,128 +701,124 @@ function ContratoAcompanhamentoPanel({
                       </div>
                     </td>
                   </tr>
-                ))}
+                );
+                })}
               </tbody>
             </table>
           </div>
-        </div>
+          <ListPagination
+            currentPage={listPage}
+            totalPages={listRange.totalPages}
+            onPageChange={setListPage}
+          />
+        </>
       )}
     </>
   );
 
   return (
     <>
-      <Card
-        padding={compact ? 'none' : 'md'}
-        className={`w-full ${
-          compact ? 'flex h-full min-h-[28rem] flex-1 flex-col' : ''
-        }`}
-      >
-        <CardHeader
-          className={`!border-b !border-gray-100 dark:!border-white/10 ${
-            compact ? 'shrink-0 !px-5 !pb-4 !pt-6 sm:!px-6' : '!pt-2'
-          }`}
-        >
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-            <div className="flex min-w-0 items-start gap-3">
+      <Card className={cadastroListClasses.card}>
+        <CardHeader className={cadastroListClasses.cardHeader}>
+          <div className={cadastroListClasses.cardHeaderRow}>
+            <div className={cadastroListClasses.cardHeaderIconRow}>
               <div className={`rounded-lg p-2 sm:p-3 ${tone.iconWrap}`}>
-                <Icon className="h-5 w-5 sm:h-6 sm:w-6" strokeWidth={1.75} />
+                <Icon className="h-5 w-5 sm:h-6 sm:w-6" />
               </div>
               <div className="min-w-0">
-                <h3 className="text-base font-semibold tracking-tight text-gray-900 dark:text-gray-50 sm:text-lg">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
                   {sectionTitle}
                 </h3>
-                <p className="mt-1 text-sm leading-snug text-gray-500 dark:text-gray-400">
-                  {loadingConfig
-                    ? 'Carregando configuração…'
-                    : contractConfig?.formularioName
-                      ? `Formulário: ${contractConfig.formularioName}`
-                      : sectionDescription}
+                <p className="text-sm text-gray-600 dark:text-gray-400">
+                  {sectionDescription}
                 </p>
               </div>
             </div>
-            <div className="flex w-full flex-shrink-0 flex-wrap items-center gap-2 lg:w-auto lg:justify-end">
-              {!showInlineForm && !loadingReunioes && reunioes.length > 0 && (
-                <div className="relative min-w-0 w-full flex-1 basis-full sm:basis-auto sm:min-w-[200px] sm:w-[240px] sm:flex-none">
+            <div className={cadastroListClasses.cardToolbar}>
+              {!showInlineForm ? (
+                <div className={cadastroListClasses.searchField}>
                   <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
                   <input
                     type="text"
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
                     placeholder={searchPlaceholder}
-                    className="h-10 w-full rounded-xl border border-gray-200 bg-white/80 py-2 pl-9 pr-3 text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-white/10 dark:bg-gray-950/40 dark:text-gray-100"
+                    className={SEARCH_INPUT_CLASS}
                   />
                 </div>
-              )}
-              {canWrite ? (
-              <button
-                type="button"
-                onClick={() => setConfigModalOpen(true)}
-                className="inline-flex h-10 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-xl border border-gray-200 bg-white/80 px-3.5 text-sm font-semibold text-gray-700 shadow-sm transition-colors hover:border-gray-300 hover:bg-white focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 dark:border-white/10 dark:bg-gray-950/40 dark:text-gray-200 dark:hover:border-white/20 dark:hover:bg-gray-900"
-              >
-                <Settings2 className="h-4 w-4 shrink-0" />
-                {compact ? 'Formulário' : 'Configurar formulário'}
-              </button>
               ) : null}
-              {canWrite || currentPeriodEntry ? (
-              <>
-              <button
-                type="button"
-                onClick={() => {
-                  if (currentPeriodEntry) {
-                    openReuniao(currentPeriodEntry.id, canWrite ? 'edit' : 'view');
-                    return;
-                  }
-                  if (!canWrite) return;
-                  periodoAtualMutation.mutate(false);
-                }}
-                disabled={periodoAtualMutation.isPending || loadingConfig}
-                className="inline-flex h-10 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-red-600 px-4 text-sm font-semibold text-white shadow-sm shadow-red-600/25 transition-colors hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 disabled:opacity-70"
-              >
-                <PenLine className="h-4 w-4 shrink-0" />
-                {currentPeriodEntry
-                  ? canWrite
-                    ? fillButtonContinueLabel
-                    : 'Visualizar quinzena'
-                  : fillButtonLabel}
-              </button>
-              {canWrite && (currentPeriodEntry || showInlineForm) ? (
+              {canConfigureForm ? (
                 <button
                   type="button"
-                  onClick={() => periodoAtualMutation.mutate(true)}
-                  disabled={periodoAtualMutation.isPending || loadingConfig}
-                  className="inline-flex h-10 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-xl border border-gray-200 bg-white/80 px-3.5 text-sm font-semibold text-gray-700 shadow-sm transition-colors hover:border-gray-300 hover:bg-white focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 disabled:opacity-70 dark:border-white/10 dark:bg-gray-950/40 dark:text-gray-200 dark:hover:border-white/20 dark:hover:bg-gray-900"
+                  onClick={() => setConfigModalOpen(true)}
+                  className={TOOLBAR_BTN_ICON}
+                  title="Configurar formulário"
+                  aria-label="Configurar formulário"
                 >
-                  <Plus className="h-4 w-4 shrink-0" />
-                  {newRecordLabel}
+                  <Settings2 className="h-4 w-4 shrink-0 text-gray-500 dark:text-gray-400" />
                 </button>
               ) : null}
-              </>
+              {allowToolbarCreate && (canWrite || currentPeriodEntry) ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (currentPeriodEntry) {
+                        openReuniao(currentPeriodEntry.id, canWrite ? 'edit' : 'view');
+                        return;
+                      }
+                      if (!canWrite) return;
+                      periodoAtualMutation.mutate(false);
+                    }}
+                    disabled={periodoAtualMutation.isPending || loadingConfig}
+                    className={TOOLBAR_BTN_PRIMARY_ICON}
+                    title={
+                      currentPeriodEntry
+                        ? canWrite
+                          ? fillButtonContinueLabel
+                          : 'Visualizar quinzena'
+                        : fillButtonLabel
+                    }
+                    aria-label={
+                      currentPeriodEntry
+                        ? canWrite
+                          ? fillButtonContinueLabel
+                          : 'Visualizar quinzena'
+                        : fillButtonLabel
+                    }
+                  >
+                    <Plus className="h-4 w-4 shrink-0" />
+                  </button>
+                  {canWrite && (currentPeriodEntry || showInlineForm) ? (
+                    <button
+                      type="button"
+                      onClick={() => periodoAtualMutation.mutate(true)}
+                      disabled={periodoAtualMutation.isPending || loadingConfig}
+                      className={TOOLBAR_BTN_ICON}
+                      title={newRecordLabel}
+                      aria-label={newRecordLabel}
+                    >
+                      <Plus className="h-4 w-4 shrink-0 text-gray-500 dark:text-gray-400" />
+                    </button>
+                  ) : null}
+                </>
               ) : null}
             </div>
           </div>
         </CardHeader>
-        <CardContent
-          className={
-            compact
-              ? `app-thin-scroll flex ${COMPACT_PANEL_BODY_CLASS} flex-col overflow-y-auto !px-5 !pb-5 !pt-4 sm:!px-6 sm:!pb-6`
-              : undefined
-          }
-        >
+        <CardContent className={cadastroListClasses.cardContent}>
           {showInlineForm ? (
-            <div className={COMPACT_PANEL_BODY_CLASS}>
-              <ReuniaoFormModal
-                key={modalReuniaoId}
-                isOpen={formOpen}
-                onClose={closeForm}
-                contractId={contractId}
-                kind={kind}
-                reuniaoId={modalReuniaoId}
-                onListPatch={handleListPatch}
-                variant="inline"
-                readOnly={formReadOnly}
-              />
-            </div>
+            <ReuniaoFormModal
+              key={modalReuniaoId}
+              isOpen={formOpen}
+              onClose={closeForm}
+              contractId={contractId}
+              kind={kind}
+              reuniaoId={modalReuniaoId}
+              onListPatch={handleListPatch}
+              variant="inline"
+              readOnly={formReadOnly}
+            />
           ) : (
             listMarkup
           )}
@@ -795,50 +835,76 @@ function ContratoAcompanhamentoPanel({
           maxHeight={reuniaoActionMenu.maxHeight}
           placement={reuniaoActionMenu.placement}
         >
-          <button
-            type="button"
-            role="menuitem"
-            onClick={(e) => {
-              e.stopPropagation();
-              openReuniao(reuniaoActionMenu.reuniaoId, 'view');
-            }}
-            className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700"
-          >
-            <Eye className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
-            <span>Visualizar</span>
-          </button>
-          {canWrite ? (
-            <button
-              type="button"
-              role="menuitem"
-              onClick={(e) => {
-                e.stopPropagation();
-                openReuniao(reuniaoActionMenu.reuniaoId, 'edit');
-              }}
-              className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700"
-            >
-              <PenLine className="h-4 w-4 shrink-0 text-indigo-600 dark:text-indigo-400" />
-              <span>Editar formulário</span>
-            </button>
-          ) : null}
-          {canRemove ? (
-            <button
-              type="button"
-              role="menuitem"
-              onClick={(e) => {
-                e.stopPropagation();
-                const { reuniaoId } = reuniaoActionMenu;
-                setReuniaoActionMenu(null);
-                if (confirm('Excluir este registro? Esta ação não pode ser desfeita.')) {
-                  deleteMutation.mutate(reuniaoId);
-                }
-              }}
-              className="flex w-full items-center gap-2 border-t border-gray-200 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-700"
-            >
-              <Trash2 className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
-              <span>Excluir</span>
-            </button>
-          ) : null}
+          {(() => {
+            const menuEntry = reunioes.find((r) => r.id === reuniaoActionMenu.reuniaoId);
+            const fillStatus = menuEntry ? resolveFillStatus(menuEntry) : 'nao_preenchido';
+            const contractFillMode = !allowRowEditDelete && canWrite;
+            const openMode: 'view' | 'edit' = contractFillMode || canEditEntry ? 'edit' : 'view';
+            const primaryLabel = contractFillMode
+              ? fillStatus === 'preenchido'
+                ? 'Abrir formulário'
+                : fillStatus === 'preenchendo'
+                  ? 'Continuar preenchimento'
+                  : 'Preencher'
+              : 'Visualizar';
+            const PrimaryIcon = contractFillMode ? PenLine : Eye;
+            const primaryIconClass = contractFillMode
+              ? 'h-4 w-4 shrink-0 text-red-600 dark:text-red-400'
+              : 'h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400';
+
+            return (
+              <>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openReuniao(reuniaoActionMenu.reuniaoId, openMode);
+                  }}
+                  className={`flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-700 ${
+                    contractFillMode
+                      ? 'font-medium text-red-600 dark:text-red-400'
+                      : 'text-gray-700 dark:text-gray-300'
+                  }`}
+                >
+                  <PrimaryIcon className={primaryIconClass} />
+                  <span>{primaryLabel}</span>
+                </button>
+                {canEditEntry ? (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openReuniao(reuniaoActionMenu.reuniaoId, 'edit');
+                    }}
+                    className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700"
+                  >
+                    <PenLine className="h-4 w-4 shrink-0 text-indigo-600 dark:text-indigo-400" />
+                    <span>Editar formulário</span>
+                  </button>
+                ) : null}
+                {canRemove ? (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const { reuniaoId } = reuniaoActionMenu;
+                      setReuniaoActionMenu(null);
+                      if (confirm('Excluir este registro? Esta ação não pode ser desfeita.')) {
+                        deleteMutation.mutate(reuniaoId);
+                      }
+                    }}
+                    className="flex w-full items-center gap-2 border-t border-gray-200 px-3 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-700"
+                  >
+                    <Trash2 className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
+                    <span>Excluir</span>
+                  </button>
+                ) : null}
+              </>
+            );
+          })()}
         </ActionMenuOverlay>
       ) : null}
 
@@ -902,7 +968,7 @@ function ContratoAcompanhamentoPanel({
               type="button"
               onClick={() => setConfigModalOpen(false)}
               disabled={configMutation.isPending}
-              className="rounded-lg px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700"
+              className={TOOLBAR_BTN}
             >
               Cancelar
             </button>
@@ -910,7 +976,7 @@ function ContratoAcompanhamentoPanel({
               type="button"
               disabled={!selectedFormularioId || configMutation.isPending || formularios.length === 0}
               onClick={() => configMutation.mutate(selectedFormularioId)}
-              className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+              className={TOOLBAR_BTN_PRIMARY}
             >
               {configMutation.isPending ? 'Salvando...' : 'Salvar formulário'}
             </button>
@@ -950,7 +1016,6 @@ export function ContratoAcompanhamentoListPage({
   const {
     pageTitle,
     backHref,
-    backLabel = 'Voltar',
     protectedRoute = '/ponto/contratos',
   } = config;
 
@@ -962,10 +1027,8 @@ export function ContratoAcompanhamentoListPage({
   const isSplit = !!splitWith;
   const openKind: AcompanhamentoKind =
     searchParams?.get('aba') === 'relatorio-mensal' ? 'mensal' : 'semanal';
-  const currentYear = new Date().getFullYear();
-  const currentMonth = new Date().getMonth() + 1;
-  const [filterYear, setFilterYear] = useState(currentYear);
-  const [filterMonth, setFilterMonth] = useState(currentMonth);
+  const filterYear = 0;
+  const filterMonth = 0;
 
   const { data: userData, isLoading: loadingUser } = useQuery({
     queryKey: ['user'],
@@ -986,18 +1049,6 @@ export function ContratoAcompanhamentoListPage({
 
   const user = userData?.data || { name: 'Usuário', role: 'EMPLOYEE' };
   const contract = contractData?.data as Contract | undefined;
-  const availableYears = useMemo(
-    () => yearsFromContractRange(contract?.startDate, contract?.endDate),
-    [contract?.startDate, contract?.endDate]
-  );
-  const yearSelectOptions = useMemo(
-    () =>
-      labeledToSelectOptions([
-        { value: '0', label: 'Todos os anos' },
-        ...availableYears.map((year) => ({ value: String(year), label: String(year) })),
-      ]),
-    [availableYears]
-  );
 
   if (!contractId || loadingUser) {
     return <Loading message="Carregando..." fullScreen size="lg" />;
@@ -1021,30 +1072,14 @@ export function ContratoAcompanhamentoListPage({
   return (
     <ProtectedRoute route={protectedRoute} contractId={contractId}>
       <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
-        <div
-          className={
-            isSplit
-              ? `flex min-h-0 flex-col gap-5 ${showMonthlyControleGeral ? '' : 'xl:h-[calc(100dvh-9.5rem)]'}`
-              : 'space-y-6'
-          }
-        >
-          <div className="relative flex min-h-[3.25rem] shrink-0 items-center justify-center py-1">
-            <Link
-              href={backHref?.(contractId) || `/ponto/contratos/${contractId}`}
-              aria-label={backLabel}
-              className="absolute left-0 top-1/2 z-10 inline-flex -translate-y-1/2 items-center gap-2 rounded-xl px-2 py-1.5 text-sm font-medium text-gray-500 transition-colors hover:bg-white/70 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/10 dark:hover:text-gray-100"
-            >
-              <ArrowLeft className="h-4 w-4 shrink-0" />
-              {backLabel}
-            </Link>
-            <div className="w-full max-w-3xl px-14 text-center sm:px-20">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-gray-400 dark:text-gray-500">
-                {pageTitle}
-              </p>
-              <h1 className="mt-1 break-words text-2xl font-semibold tracking-tight text-gray-900 dark:text-gray-50 sm:text-3xl">
-                {loadingContract ? 'Carregando contrato…' : contract?.name || pageTitle}
-              </h1>
-            </div>
+        <div className="space-y-6">
+          <div className="text-center">
+            <h1 className="break-words text-2xl font-bold text-gray-900 dark:text-gray-100 sm:text-3xl">
+              {loadingContract ? 'Carregando contrato…' : contract?.name || pageTitle}
+            </h1>
+            <p className="mt-2 text-sm text-gray-600 dark:text-gray-400 sm:text-base">
+              {pageTitle}
+            </p>
           </div>
 
           {tabs && !isSplit ? (
@@ -1054,65 +1089,36 @@ export function ContratoAcompanhamentoListPage({
                   key={item.id}
                   active={tabs.activeId === item.id}
                   onClick={() => tabs.onChange(item.id)}
-                  className="px-3 py-2 text-sm"
+                  className="inline-flex items-center justify-center gap-2 whitespace-nowrap px-3 py-2.5 text-sm"
                 >
                   {item.label}
+                  {(item.badgeCount ?? 0) > 0 ? (
+                    <NotificationCountBadge count={item.badgeCount!} inline />
+                  ) : null}
                 </AppUnderlineTabButton>
               ))}
             </AppUnderlineTabList>
           ) : null}
 
           {showMonthlyControleGeral ? (
-            <div className="flex shrink-0 flex-col gap-3">
+            <div className="flex flex-col gap-3">
               <ContratoReunioesLancamentosBar contractId={contractId} />
               <ContratoControleGeralMensalCard contractId={contractId} />
             </div>
           ) : null}
 
-          <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
-            <StringSingleSelectDropdown
-              value={String(filterMonth)}
-              onChange={(v) => setFilterMonth(Number(v))}
-              options={MESES_FILTRO_SELECT_OPTIONS}
-              allowEmpty={false}
-              disableSearch
-              menuAlign="end"
-              matchTriggerWidth
-              className="min-w-[9.5rem] max-w-[10.5rem]"
-            />
-            <StringSingleSelectDropdown
-              value={String(filterYear)}
-              onChange={(v) => setFilterYear(Number(v))}
-              options={yearSelectOptions}
-              allowEmpty={false}
-              disableSearch
-              menuAlign="end"
-              matchTriggerWidth
-              menuMinWidth={152}
-              className="min-w-[5.25rem]"
-            />
-          </div>
-
           {isSplit && splitWith ? (
-            <div
-              className={`grid min-h-0 flex-1 grid-cols-1 gap-5 xl:grid-cols-2 xl:items-stretch ${
-                showMonthlyControleGeral ? 'xl:min-h-[min(44rem,calc(100dvh-20rem))]' : ''
-              }`}
-            >
-              <div className="flex h-full min-h-[28rem] min-w-0 flex-col">
-                {renderPanel(config, {
-                  compact: true,
-                  formVariant: 'inline',
-                  consumeOpenQuery: openKind === config.kind,
-                })}
-              </div>
-              <div className="flex h-full min-h-[28rem] min-w-0 flex-col">
-                {renderPanel(splitWith, {
-                  compact: true,
-                  formVariant: 'inline',
-                  consumeOpenQuery: openKind === splitWith.kind,
-                })}
-              </div>
+            <div className="space-y-6">
+              {renderPanel(config, {
+                compact: false,
+                formVariant: 'modal',
+                consumeOpenQuery: openKind === config.kind,
+              })}
+              {renderPanel(splitWith, {
+                compact: false,
+                formVariant: 'modal',
+                consumeOpenQuery: openKind === splitWith.kind,
+              })}
             </div>
           ) : (
             renderPanel(config, { compact: false, formVariant: 'modal', consumeOpenQuery: true })

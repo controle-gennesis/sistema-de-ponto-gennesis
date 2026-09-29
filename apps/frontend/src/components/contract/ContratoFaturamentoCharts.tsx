@@ -20,6 +20,7 @@ import Link from 'next/link';
 import { ExternalLink, Loader2, TrendingDown, TrendingUp } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { cadastroListClasses } from '@/components/ui/RowActionMenu';
+import { NotificationCountBadge } from '@/components/ui/NotificationCountBadge';
 import { useTheme } from '@/context/ThemeContext';
 import { formatCpfInput } from '@/lib/cpf';
 
@@ -566,6 +567,8 @@ export type ContratoResumoKpi = {
   subtitle?: string;
   loading?: boolean;
   href?: string;
+  /** Aviso numérico (ex.: relatório mensal pendente). */
+  badgeCount?: number;
   /** Card compacto/quadrado (ex.: Caixinha). */
   variant?: 'default' | 'square';
   /** Destaque invertido (ex.: vermelho com texto branco). */
@@ -582,7 +585,7 @@ function MetaVsRealidadeCard({ data }: { data: ContratoResumoMetaVsReal }) {
   const onTrack = desvio >= -5;
 
   return (
-    <Card className={`${cadastroListClasses.card} flex min-h-0 flex-col !rounded-2xl`}>
+    <Card className={`${cadastroListClasses.card} flex min-h-0 flex-col`}>
       <CardHeading
         title="Meta vs realidade"
         extra={
@@ -726,7 +729,7 @@ function PessoasContratoCard({
   error?: boolean;
 }) {
   return (
-    <Card className={`${cadastroListClasses.card} flex h-full min-h-0 flex-col !rounded-2xl`}>
+    <Card className={`${cadastroListClasses.card} flex h-full min-h-0 flex-col`}>
       <CardHeading title="Colaboradores" />
       <CardContent className={`${cadastroListClasses.cardContent} flex min-h-0 flex-1 flex-col !pt-2`}>
         {loading ? (
@@ -790,6 +793,7 @@ function KpiStatCard({
   subtitle,
   loading,
   href,
+  badgeCount = 0,
   variant = 'default',
   tone = 'default',
 }: ContratoResumoKpi) {
@@ -800,20 +804,21 @@ function KpiStatCard({
       href={href}
       aria-label={`Abrir ${title}`}
       title={title}
-      className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors ${
+      className={`relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors ${
         isBrand
           ? 'bg-white/20 text-white hover:bg-white/30'
           : 'text-gray-500 hover:bg-gray-100 hover:text-red-600 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-red-400'
       }`}
     >
       <ExternalLink className="h-4 w-4" aria-hidden />
+      {badgeCount > 0 ? <NotificationCountBadge count={badgeCount} rail /> : null}
     </Link>
   ) : null;
 
   return (
     <Card
       title={title}
-      className={`${cadastroListClasses.card} flex min-h-0 flex-col !rounded-2xl ${
+      className={`${cadastroListClasses.card} flex min-h-0 flex-col ${
         isSquare ? 'aspect-square w-[8.75rem] shrink-0 sm:w-[9.5rem]' : ''
       } ${
         isBrand

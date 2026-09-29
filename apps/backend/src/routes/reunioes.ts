@@ -65,6 +65,9 @@ router.get('/template', (req, res, next) => controller.getTemplate(req as any, r
 router.put('/template', (req, res, next) => controller.saveTemplate(req as any, res, next));
 router.post('/template/reset', (req, res, next) => controller.resetTemplate(req as any, res, next));
 router.get('/mensal/overview', (req, res, next) => controller.getMensalOverview(req as any, res, next));
+router.get('/mensal/pending-count', (req, res, next) =>
+  controller.getMensalPendingCount(req as any, res, next)
+);
 router.get('/semanal/overview', (req, res, next) => controller.getSemanalOverview(req as any, res, next));
 
 router.use('/:contractId/:kind', parseReuniaoKindParam, async (req, res, next) => {

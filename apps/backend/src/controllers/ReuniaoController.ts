@@ -103,6 +103,29 @@ export class ReuniaoController {
     }
   }
 
+  async getMensalPendingCount(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.user) {
+        return res.status(401).json({ success: false, message: 'Não autenticado.' });
+      }
+
+      const access = await getContractAccessForUser(req.user.id, req.user.isAdmin);
+      if (access.filter === 'none') {
+        return res.json({ success: true, data: { count: 0, contractIds: [] } });
+      }
+
+      const where = access.filter === 'ids' ? { id: { in: access.ids } } : {};
+      const contracts = await prisma.contract.findMany({
+        where,
+        select: { id: true },
+      });
+      const summary = await service.getMensalPendingSummary(contracts.map((c) => c.id));
+      return res.json({ success: true, data: summary });
+    } catch (err) {
+      return next(err);
+    }
+  }
+
   async getSemanalOverview(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       if (!req.user) {

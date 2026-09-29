@@ -23,6 +23,8 @@ import {
   listTableRowClasses,
   rowActionMenuButtonClass,
 } from '@/components/ui/RowActionMenu';
+import { NotificationCountBadge } from '@/components/ui/NotificationCountBadge';
+import { useMensalReportPendingCount } from '@/hooks/useMensalReportPendingCount';
 import { ActionMenuOverlay } from '@/components/ui/ActionMenuOverlay';
 import { DatePickerField } from '@/components/ui/DatePickerField';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
@@ -232,6 +234,7 @@ export default function ContratosPage() {
     allowedContractIds,
   } = usePermissions();
   const queryClient = useQueryClient();
+  const { pendingByContractId } = useMensalReportPendingCount(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [editingContract, setEditingContract] = useState<Contract | null>(null);
@@ -896,9 +899,14 @@ export default function ContratosPage() {
                           aria-label={`Abrir detalhes do contrato ${c.name}`}
                         >
                           <td className="min-w-0 overflow-hidden px-3 py-3 align-middle text-left sm:px-6">
-                            <ListRowNavigableLabel className="font-medium break-words whitespace-normal">
-                              {c.name}
-                            </ListRowNavigableLabel>
+                            <div className="flex min-w-0 items-center gap-2">
+                              <ListRowNavigableLabel className="font-medium break-words whitespace-normal">
+                                {c.name}
+                              </ListRowNavigableLabel>
+                              {pendingByContractId.has(c.id) ? (
+                                <NotificationCountBadge count={1} inline />
+                              ) : null}
+                            </div>
                           </td>
                           <td
                             className="min-w-0 overflow-hidden px-3 py-3 align-middle text-left text-sm text-gray-700 dark:text-gray-300 sm:px-6"

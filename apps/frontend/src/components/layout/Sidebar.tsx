@@ -85,6 +85,7 @@ import { usePermissions } from '@/hooks/usePermissions';
 import { visibleTabRefetchInterval } from '@/hooks/useVisibleTabRefetchInterval';
 import { useFdNotificationCounts } from '@/hooks/useFdNotificationCounts';
 import { useApprovalNotificationCounts } from '@/hooks/useApprovalNotificationCounts';
+import { useMensalReportPendingCount } from '@/hooks/useMensalReportPendingCount';
 import { NotificationCountBadge } from '@/components/ui/NotificationCountBadge';
 import {
   readSelectedModuleId,
@@ -578,6 +579,9 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
 
   const { counts: fdNotificationCounts } = useFdNotificationCounts();
   const { counts: approvalCounts } = useApprovalNotificationCounts();
+  const { count: mensalReportPendingCount } = useMensalReportPendingCount(
+    !isLoading && (isAdministrator || can(pk('/ponto/contratos')))
+  );
 
   const navBadgeCountForHref = (href: string): number => {
     if (href === '/ponto/aprovacoes') return approvalCounts.total;
@@ -601,6 +605,7 @@ export function Sidebar({ userRole, onMenuToggle }: SidebarProps) {
     if (href === '/ponto/solicitacoes-ferramentas') return toolRentalSuppliesPendingCount;
     if (href === '/ponto/entrega-logistica') return entregaLogisticaPendingCount;
     if (href === '/ponto/conversas-whatsapp') return centralAtendimentosPendingCount;
+    if (href === '/ponto/contratos') return mensalReportPendingCount;
     return 0;
   };
 

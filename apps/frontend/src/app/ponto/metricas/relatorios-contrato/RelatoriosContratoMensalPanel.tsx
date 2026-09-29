@@ -8,11 +8,9 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
-  ExternalLink,
   Eye,
   FileText,
   Filter,
-  History,
   Search,
   Settings2,
   AlertCircle,
@@ -31,7 +29,7 @@ import { useRowActionMenu } from '@/hooks/useRowActionMenu';
 import api from '@/lib/api';
 import { textMatchesSearch } from '@/lib/normalizeSearchText';
 import { formatMonthLabel, getIsoMonthKey, shiftIsoMonthKey } from '@/lib/monthPeriod';
-import { getListTableRowClassName } from '@/components/ui/listTableUi';
+import { getListTableRowClassName, ListRowNavigableLabel } from '@/components/ui/listTableUi';
 import { useCadastroCrudPermissions } from '@/hooks/useCadastroCrudPermissions';
 
 type MensalReportStatus = 'sem_formulario' | 'pendente' | 'preenchido';
@@ -378,7 +376,7 @@ export function RelatoriosContratoMensalPanel() {
                     <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
                       Contrato
                     </th>
-                    <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                    <th className={`${cadastroListClasses.thCenter} px-3 py-2 font-semibold`}>
                       Formulário
                     </th>
                     <th className={`${cadastroListClasses.thCenter} px-3 py-2 font-semibold`}>
@@ -400,14 +398,19 @@ export function RelatoriosContratoMensalPanel() {
                     return (
                       <tr
                         key={row.contractId}
-                        className={`border-b border-gray-100 dark:border-gray-800/80 ${getListTableRowClassName(false)}`}
+                        onClick={() =>
+                          router.push(
+                            `/ponto/contratos/${row.contractId}/acompanhamento-mensal`,
+                          )
+                        }
+                        className={`border-b border-gray-100 dark:border-gray-800/80 ${getListTableRowClassName(true)}`}
                       >
                         <td className="px-3 py-3">
-                          <div className="font-medium text-gray-900 dark:text-gray-100">
+                          <ListRowNavigableLabel className="font-medium">
                             {row.contractName}
-                          </div>
+                          </ListRowNavigableLabel>
                         </td>
-                        <td className="px-3 py-3 text-gray-700 dark:text-gray-300">
+                        <td className="px-3 py-3 text-center text-gray-700 dark:text-gray-300">
                           {row.formularioName || (
                             <span className="text-gray-400">Não configurado</span>
                           )}
@@ -429,7 +432,10 @@ export function RelatoriosContratoMensalPanel() {
                         <RowActionMenuCell
                           align="center"
                           isOpen={isRowMenuOpen(row.contractId)}
-                          onToggle={(e) => toggleRowActionMenu(row.contractId, e.currentTarget)}
+                          onToggle={(e) => {
+                            e.stopPropagation();
+                            toggleRowActionMenu(row.contractId, e.currentTarget);
+                          }}
                         />
                       </tr>
                     );
@@ -442,6 +448,15 @@ export function RelatoriosContratoMensalPanel() {
                   onClose={closeRowActionMenu}
                   hideDefaultActions
                   extraItems={[
+                    {
+                      label: 'Ver relatório do mês',
+                      icon: (
+                        <Eye className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
+                      ),
+                      onClick: () => openViewReport(rowForActionMenu),
+                      disabled: !rowForActionMenu.entryId,
+                      disabledTitle: 'Relatório ainda não preenchido',
+                    },
                     ...(canWrite
                       ? [
                           {
@@ -453,33 +468,6 @@ export function RelatoriosContratoMensalPanel() {
                           },
                         ]
                       : []),
-                    {
-                      label: 'Ver relatório do mês',
-                      icon: (
-                        <Eye className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
-                      ),
-                      onClick: () => openViewReport(rowForActionMenu),
-                      disabled: !rowForActionMenu.entryId,
-                      disabledTitle: 'Relatório ainda não preenchido',
-                    },
-                    {
-                      label: 'Histórico mensal',
-                      icon: (
-                        <History className="h-4 w-4 shrink-0 text-gray-600 dark:text-gray-400" />
-                      ),
-                      onClick: () =>
-                        router.push(
-                          `/ponto/contratos/${rowForActionMenu.contractId}/acompanhamento-mensal`,
-                        ),
-                    },
-                    {
-                      label: 'Abrir contrato',
-                      icon: (
-                        <ExternalLink className="h-4 w-4 shrink-0 text-gray-600 dark:text-gray-400" />
-                      ),
-                      onClick: () =>
-                        router.push(`/ponto/contratos/${rowForActionMenu.contractId}`),
-                    },
                   ]}
                 />
               ) : null}

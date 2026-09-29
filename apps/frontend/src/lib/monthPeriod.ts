@@ -1,8 +1,18 @@
+/** Dia do mês em que o relatório mensal passa a aparecer para preenchimento. */
+export const MENSAL_REPORT_RELEASE_DAY = 20;
+/** Dia do mês limite para a equipe preencher o relatório mensal. */
+export const MENSAL_REPORT_DUE_DAY = 25;
+
 /** Chave do mês (ex.: 2026-08). */
 export function getIsoMonthKey(date = new Date()): string {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
   return `${year}-${month}`;
+}
+
+/** True a partir do dia 20 do mês corrente (janela de abertura do relatório mensal). */
+export function isMensalReportVisible(date = new Date()): boolean {
+  return date.getDate() >= MENSAL_REPORT_RELEASE_DAY;
 }
 
 const MONTH_NAMES = [

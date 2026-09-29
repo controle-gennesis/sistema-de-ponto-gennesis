@@ -3,7 +3,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import fs from 'fs';
 import path from 'path';
 import { randomUUID } from 'crypto';
-import { formatMonthLabel, getIsoMonthKey } from '../lib/monthPeriod';
+import { formatMonthLabel, getIsoMonthKey, isMensalReportVisible } from '../lib/monthPeriod';
 import { formatWeekLabel, getFortnightKey } from '../lib/weekPeriod';
 import { backendUploadsRoot } from '../lib/uploads';
 import { isS3NoSuchKey, s3BodyToString } from '../lib/awsS3Compat';
@@ -122,7 +122,11 @@ export interface ReuniaoIndexEntry {
   updatedAt: string;
   /** Preenchido somente ao salvar/finalizar o formulário (não em rascunho). */
   submittedAt?: string;
+  /** Status de preenchimento (só na resposta da API; não persistido). */
+  fillStatus?: ReuniaoFillStatus;
 }
+
+export type ReuniaoFillStatus = 'nao_preenchido' | 'preenchendo' | 'preenchido';
 
 export type ReuniaoKind = 'mensal' | 'semanal';
 
@@ -671,8 +675,18 @@ export class ReuniaoService {
     };
   }
 
-  /** Lista com enriquecimento do nome/descrição do formulário quando faltar no índice. */
+  /** Lista com enriquecimento do nome/descrição do formulário quando faltar no índice.
+   *  No mensal, a partir do dia 20 abre automaticamente o período do mês corrente
+   *  (prazo de preenchimento: dia 25), se o formulário estiver configurado. */
   async listReunioes(contractId: string, kind: ReuniaoKind): Promise<ReuniaoIndexEntry[]> {
+    if (kind === 'mensal' && isMensalReportVisible()) {
+      try {
+        await this.ensurePeriodoAtual(contractId, 'mensal');
+      } catch {
+        /* Sem formulário configurado ou falha ao abrir — lista o que já existir. */
+      }
+    }
+
     const idx = await this.getIndex(contractId, kind);
     let dirty = false;
     for (const entry of idx.reunioes) {
@@ -691,21 +705,193 @@ export class ReuniaoService {
     if (dirty) {
       await this.writeJson(this.getIndexKey(contractId, kind), idx);
     }
-    return idx.reunioes;
+
+    const withStatus = await Promise.all(
+      idx.reunioes.map(async (entry) => ({
+        ...entry,
+        fillStatus: await this.resolveFillStatus(contractId, kind, entry),
+      })),
+    );
+    return withStatus;
   }
 
-  private reuniaoDataLooksSubmitted(data: ReuniaoData): boolean {
+  /**
+   * Contratos com relatório mensal do mês corrente ainda não finalizado
+   * (a partir do dia 20). Usado nos avisos da sidebar / listas / abas.
+   */
+  async getMensalPendingSummary(contractIds: string[]): Promise<{
+    count: number;
+    contractIds: string[];
+  }> {
+    if (!isMensalReportVisible() || contractIds.length === 0) {
+      return { count: 0, contractIds: [] };
+    }
+
+    const monthKey = getIsoMonthKey();
+    const pending: string[] = [];
+
+    await Promise.all(
+      contractIds.map(async (contractId) => {
+        const config = await this.getContractConfig(contractId, 'mensal');
+        if (!config?.formularioId) return;
+
+        const idx = await this.getIndex(contractId, 'mensal');
+        const entry = idx.reunioes.find((row) => row.monthKey === monthKey);
+        if (!entry) {
+          pending.push(contractId);
+          return;
+        }
+        const status = await this.resolveFillStatus(contractId, 'mensal', entry);
+        if (status !== 'preenchido') {
+          pending.push(contractId);
+        }
+      }),
+    );
+
+    return { count: pending.length, contractIds: pending };
+  }
+
+  private isNumericLikeEmpty(value: unknown): boolean {
+    if (value === null || value === undefined || value === '') return true;
+    if (typeof value === 'number') {
+      return !Number.isFinite(value) || value === 0;
+    }
+    const raw = String(value)
+      .trim()
+      .replace(/\s/g, '')
+      .replace(/^R\$\s?/i, '')
+      .replace(/%$/, '')
+      .replace(/\./g, '')
+      .replace(',', '.');
+    if (!raw || raw === '-') return true;
+    const n = Number(raw);
+    return Number.isFinite(n) && n === 0;
+  }
+
+  private isTableAnswerFilled(value: unknown): boolean {
+    const parseRows = (raw: unknown): Array<{ cells?: Record<string, unknown> }> => {
+      if (Array.isArray(raw)) return raw as Array<{ cells?: Record<string, unknown> }>;
+      if (raw && typeof raw === 'object' && Array.isArray((raw as { rows?: unknown }).rows)) {
+        return (raw as { rows: Array<{ cells?: Record<string, unknown> }> }).rows;
+      }
+      if (typeof raw === 'string' && raw.trim()) {
+        try {
+          return parseRows(JSON.parse(raw) as unknown);
+        } catch {
+          return [];
+        }
+      }
+      return [];
+    };
+
+    const rows = parseRows(value);
+    return rows.some((row) => {
+      const cells = row?.cells || {};
+      return Object.values(cells).some((cell) => {
+        if (cell === null || cell === undefined) return false;
+        if (typeof cell === 'number') return Number.isFinite(cell) && cell !== 0;
+        return String(cell).trim() !== '';
+      });
+    });
+  }
+
+  private isAnswerFilled(
+    question: { type?: string },
+    answer: { value?: unknown; followUp?: string } | undefined,
+  ): boolean {
+    if (!answer) return false;
+    const value = answer.value;
+    if (question.type === 'signature') {
+      return typeof value === 'string' && value.trim().length > 40;
+    }
+    if (question.type === 'attachment' || question.type === 'image') {
+      if (Array.isArray(value)) return value.length > 0;
+      if (value && typeof value === 'object') return true;
+      return typeof value === 'string' && value.trim() !== '';
+    }
+    if (question.type === 'rating') {
+      return typeof value === 'number' && value >= 1 && value <= 5;
+    }
+    if (question.type === 'checkbox') {
+      return value === 'true' || value === 'SIM' || value === 1;
+    }
+    if (question.type === 'checklist') {
+      return (
+        String(value ?? '')
+          .split(',')
+          .map((item) => item.trim())
+          .filter(Boolean).length > 0
+      );
+    }
+    if (question.type === 'table') {
+      return this.isTableAnswerFilled(value);
+    }
+    if (
+      question.type === 'valor' ||
+      question.type === 'percent' ||
+      question.type === 'number' ||
+      question.type === 'slider'
+    ) {
+      return !this.isNumericLikeEmpty(value);
+    }
+    if (value === null || value === undefined || value === '') return false;
+    if (typeof value === 'number') return Number.isFinite(value) && value !== 0;
+    return String(value).trim() !== '';
+  }
+
+  private collectTemplateQuestions(data: ReuniaoData): Array<{ id: string; type?: string }> {
+    const fromSteps =
+      data.formTemplate?.steps?.flatMap((step) =>
+        (step.sections || []).flatMap((section) => section.questions || []),
+      ) || [];
+    if (fromSteps.length > 0) return fromSteps;
+    return (data.formTemplate?.sections || []).flatMap((section) => section.questions || []);
+  }
+
+  /** Qualquer progresso no formulário (campo, anexo, responsável…). */
+  private reuniaoDataHasAnyProgress(data: ReuniaoData): boolean {
     if (data.identificacao?.responsavelPreenchimento?.trim()) return true;
     if (data.ata?.key || data.video?.key) return true;
     const answers = data.answers || {};
-    for (const key of Object.keys(answers)) {
-      const answer = answers[key];
-      if (!answer) continue;
-      const value = answer.value;
-      if (value !== null && value !== undefined && value !== '') return true;
-      if (answer.followUp?.trim()) return true;
+    const questions = this.collectTemplateQuestions(data);
+    for (const [questionId, answer] of Object.entries(answers)) {
+      const question = questions.find((q) => q.id === questionId) || { type: 'text' };
+      if (this.isAnswerFilled(question, answer)) return true;
     }
     return false;
+  }
+
+  /** Completo só quando todos os campos do formulário estão preenchidos. */
+  private reuniaoDataIsComplete(data: ReuniaoData): boolean {
+    const questions = this.collectTemplateQuestions(data);
+    if (questions.length === 0) {
+      return Boolean(data.identificacao?.responsavelPreenchimento?.trim());
+    }
+    for (const question of questions) {
+      if (!this.isAnswerFilled(question, data.answers?.[question.id])) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private async resolveFillStatus(
+    contractId: string,
+    kind: ReuniaoKind,
+    entry: ReuniaoIndexEntry,
+  ): Promise<ReuniaoFillStatus> {
+    const data = await this.getReuniao(contractId, kind, entry.id);
+    if (data) {
+      // submittedAt sozinho não basta: só "Preenchido" com todos os campos.
+      if (this.reuniaoDataIsComplete(data)) return 'preenchido';
+      if (this.reuniaoDataHasAnyProgress(data)) return 'preenchendo';
+    }
+
+    if (entry.submittedAt) return 'preenchendo';
+    if (entry.updatedAt && entry.createdAt && entry.updatedAt !== entry.createdAt) {
+      return 'preenchendo';
+    }
+    return 'nao_preenchido';
   }
 
   private async isEntrySubmitted(
@@ -713,10 +899,8 @@ export class ReuniaoService {
     kind: ReuniaoKind,
     entry: ReuniaoIndexEntry,
   ): Promise<boolean> {
-    if (entry.submittedAt) return true;
-    if (entry.responsavelPreenchimento?.trim()) return true;
     const data = await this.getReuniao(contractId, kind, entry.id);
-    return data ? this.reuniaoDataLooksSubmitted(data) : false;
+    return data ? this.reuniaoDataIsComplete(data) : false;
   }
 
   private async buildOverviewEntryFields(
