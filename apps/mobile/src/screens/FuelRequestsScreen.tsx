@@ -285,12 +285,13 @@ function formatRefuelDeadline(
   unit?: FuelRefuelDeadlineUnit | null,
   deadlineAt?: string | null,
 ): string | null {
+  if (deadlineAt) {
+    return `Até 22:00 do dia (${formatDateTimeLabel(deadlineAt)})`;
+  }
   if (!amount || !unit) return null;
   const unitLabel =
     unit === 'HOURS' ? (amount === 1 ? 'hora' : 'horas') : amount === 1 ? 'dia' : 'dias';
-  const base = `${amount} ${unitLabel}`;
-  if (!deadlineAt) return base;
-  return `${base} (até ${formatDateTimeLabel(deadlineAt)})`;
+  return `${amount} ${unitLabel}`;
 }
 
 function mapFrotaParticToFuelType(frotaPartic?: 'FROTA' | 'PARTICULAR' | null): FuelVehicleType {
@@ -1584,28 +1585,20 @@ export default function FuelRequestsScreen() {
                   </View>
                 ) : null}
 
-                {detailTarget.refuelDeadlineAmount && detailTarget.refuelDeadlineUnit ? (
+                {detailTarget.refuelDeadlineAt ||
+                (detailTarget.refuelDeadlineAmount && detailTarget.refuelDeadlineUnit) ? (
                   <View style={[styles.infoBlock, { marginTop: 10 }]}>
                     <View style={styles.releaseRow}>
                       <Clock size={16} color="#059669" strokeWidth={2.2} />
                       <View style={styles.releaseTextCol}>
                         <Text style={styles.releaseLabel}>Prazo para abastecer</Text>
                         <Text style={[styles.releaseValue, { color: colors.text }]}>
-                          {`${detailTarget.refuelDeadlineAmount} ${
-                            detailTarget.refuelDeadlineUnit === 'HOURS'
-                              ? detailTarget.refuelDeadlineAmount === 1
-                                ? 'hora'
-                                : 'horas'
-                              : detailTarget.refuelDeadlineAmount === 1
-                                ? 'dia'
-                                : 'dias'
-                          }`}
+                          {formatRefuelDeadline(
+                            detailTarget.refuelDeadlineAmount,
+                            detailTarget.refuelDeadlineUnit,
+                            detailTarget.refuelDeadlineAt,
+                          )}
                         </Text>
-                        {detailTarget.refuelDeadlineAt ? (
-                          <Text style={[styles.releaseComment, { color: colors.textSecondary }]}>
-                            {formatDateTimeLabel(detailTarget.refuelDeadlineAt)}
-                          </Text>
-                        ) : null}
                       </View>
                     </View>
                   </View>
@@ -1735,7 +1728,7 @@ export default function FuelRequestsScreen() {
                       </View>
                     </View>
                   ) : null}
-                  {reportTarget.refuelDeadlineAmount ? (
+                  {reportTarget.refuelDeadlineAt || reportTarget.refuelDeadlineAmount ? (
                     <View style={styles.releaseRow}>
                       <Clock size={15} color="#059669" strokeWidth={2.2} />
                       <View style={styles.releaseTextCol}>

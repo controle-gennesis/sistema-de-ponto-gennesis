@@ -1,5 +1,4 @@
 import {
-  FuelRefuelDeadlineUnit,
   FuelRefuelRequestStatus,
   FuelTankLevelAfter,
   FuelVehicleType,
@@ -9,7 +8,7 @@ import { resolveFuelPhotoViewUrl } from '../lib/fuelPhotoStorage';
 import { getFuelSatelliteCityByCode } from '../constants/fuelSatelliteCities';
 import { getFuelGasStationForContract } from '../lib/fuelAdministrativeRegions';
 import {
-  computeRefuelDeadlineAt,
+  computeRefuelDeadlineAtForDate,
   formatRefuelDeadlineLabel,
 } from '../lib/fuelSuppliesSla';
 import { prisma } from '../lib/prisma';
@@ -61,8 +60,6 @@ export type CreateFuelRefuelRequestInput = {
 
 export type SuppliesApproveFuelRefuelInput = {
   gasStationId: string;
-  refuelDeadlineAmount: number;
-  refuelDeadlineUnit: FuelRefuelDeadlineUnit;
   releasedAmountReais: number;
   comment?: string | null;
 };
@@ -522,14 +519,6 @@ export class FuelRefuelRequestService {
       throw createError('Solicitação sem contrato definido', 400);
     }
 
-    const amount = Math.trunc(input.refuelDeadlineAmount);
-    if (!Number.isFinite(amount) || amount < 1) {
-      throw createError('Informe o prazo para abastecer (mínimo 1)', 400);
-    }
-    if (amount > 365) {
-      throw createError('Prazo para abastecer inválido', 400);
-    }
-
     const gasStation = await getFuelGasStationForContract(input.gasStationId, contractId);
     if (!gasStation) {
       throw createError('Selecione um posto vinculado ao contrato da solicitação', 400);
@@ -540,7 +529,7 @@ export class FuelRefuelRequestService {
       throw createError('Informe o valor que será liberado', 400);
     }
 
-    const refuelDeadlineAt = computeRefuelDeadlineAt(amount, input.refuelDeadlineUnit);
+    const refuelDeadlineAt = computeRefuelDeadlineAtForDate(row.refuelDate);
 
     const updated = await prisma.fuelRefuelRequest.update({
       where: { id, status: row.status },
@@ -548,8 +537,8 @@ export class FuelRefuelRequestService {
         status: FuelRefuelRequestStatus.AWAITING_REFUEL,
         gasStationId: gasStation.id,
         refuelDeadlineAt,
-        refuelDeadlineAmount: amount,
-        refuelDeadlineUnit: input.refuelDeadlineUnit,
+        refuelDeadlineAmount: null,
+        refuelDeadlineUnit: null,
         suppliesApprovedBy: suppliesUserId,
         suppliesApprovedAt: new Date(),
         suppliesApprovalComment: input.comment?.trim() || null,
@@ -574,7 +563,7 @@ export class FuelRefuelRequestService {
       {
         gasStationName: gasStation.name,
         gasStationAddress: gasStation.address,
-        refuelDeadlineLabel: formatRefuelDeadlineLabel(amount, input.refuelDeadlineUnit),
+        refuelDeadlineLabel: formatRefuelDeadlineLabel(),
         refuelDeadlineAt,
         comment: updated.suppliesApprovalComment,
       },

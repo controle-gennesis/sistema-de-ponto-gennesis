@@ -363,12 +363,14 @@ function formatRefuelDeadline(
   unit?: FuelRefuelDeadlineUnit | null,
   deadlineAt?: string | null,
 ): string {
+  if (deadlineAt) {
+    const when = format(new Date(deadlineAt), 'dd/MM/yyyy HH:mm', { locale: ptBR });
+    return `Até 22:00 do dia (${when})`;
+  }
   if (!amount || !unit) return '—';
   const unitLabel =
     unit === 'HOURS' ? (amount === 1 ? 'hora' : 'horas') : amount === 1 ? 'dia' : 'dias';
-  const base = `${amount} ${unitLabel}`;
-  if (!deadlineAt) return base;
-  return `${base} (até ${format(new Date(deadlineAt), 'dd/MM/yyyy HH:mm', { locale: ptBR })})`;
+  return `${amount} ${unitLabel}`;
 }
 
 function formatRefuelDeadlineLines(
@@ -376,6 +378,14 @@ function formatRefuelDeadlineLines(
   unit?: FuelRefuelDeadlineUnit | null,
   deadlineAt?: string | null,
 ): { amountLabel: string; dateLabel: string | null; timeLabel: string | null } | null {
+  if (deadlineAt) {
+    const parts = formatDateTimeParts(deadlineAt);
+    return {
+      amountLabel: 'Até 22:00 do dia',
+      dateLabel: parts?.date ?? null,
+      timeLabel: parts?.time ?? null,
+    };
+  }
   if (!amount || !unit) return null;
   const unitLabel =
     unit === 'HOURS' ? (amount === 1 ? 'hora' : 'horas') : amount === 1 ? 'dia' : 'dias';
@@ -1251,7 +1261,7 @@ export default function SolicitarCombustivelPage() {
                     </p>
                   </div>
                 ) : null}
-                {detailRequest.refuelDeadlineAmount ? (
+                {detailRequest.refuelDeadlineAt || detailRequest.refuelDeadlineAmount ? (
                   <div className="sm:col-span-2">
                     <span className="font-medium text-gray-500 dark:text-gray-400">
                       Prazo para abastecer
@@ -1606,7 +1616,7 @@ export default function SolicitarCombustivelPage() {
                       : ''}
                   </p>
                 ) : null}
-                {reportTarget.refuelDeadlineAmount ? (
+                {reportTarget.refuelDeadlineAt || reportTarget.refuelDeadlineAmount ? (
                   <p className="text-gray-900 dark:text-gray-100">
                     <span className="font-medium text-gray-700 dark:text-gray-300">Prazo:</span>{' '}
                     {formatRefuelDeadline(

@@ -69,8 +69,6 @@ const approveSchema = z.object({
 const suppliesApproveSchema = z.object({
   comment: z.string().optional(),
   gasStationId: z.string().min(1, 'Selecione o posto para abastecimento'),
-  refuelDeadlineAmount: z.coerce.number().int().min(1).max(365),
-  refuelDeadlineUnit: z.enum(['HOURS', 'DAYS']),
   releasedAmountReais: z.number().positive('Informe o valor que será liberado'),
 });
 
@@ -760,8 +758,6 @@ export class FuelRefuelRequestController {
       const body = suppliesApproveSchema.parse(req.body);
       const row = await fuelRefuelRequestService.suppliesApprove(req.params.id, user.id, {
         gasStationId: body.gasStationId,
-        refuelDeadlineAmount: body.refuelDeadlineAmount,
-        refuelDeadlineUnit: body.refuelDeadlineUnit,
         releasedAmountReais: body.releasedAmountReais,
         comment: body.comment,
       });

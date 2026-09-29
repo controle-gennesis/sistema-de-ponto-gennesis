@@ -443,21 +443,18 @@ function fuelRefuelTotalValue(
   return litersNum * priceNum;
 }
 
-const DEADLINE_UNIT_OPTIONS = labeledToSelectOptions([
-  { value: 'HOURS', label: 'Horas' },
-  { value: 'DAYS', label: 'Dias' },
-]);
-
 function formatRefuelDeadline(
   amount?: number | null,
   unit?: FuelRefuelDeadlineUnit | null,
   deadlineAt?: string | null,
 ): string {
+  if (deadlineAt) {
+    const when = format(new Date(deadlineAt), 'dd/MM/yyyy HH:mm', { locale: ptBR });
+    return `Até 22:00 do dia (${when})`;
+  }
   if (!amount || !unit) return '—';
   const unitLabel = unit === 'HOURS' ? (amount === 1 ? 'hora' : 'horas') : amount === 1 ? 'dia' : 'dias';
-  const base = `${amount} ${unitLabel}`;
-  if (!deadlineAt) return base;
-  return `${base} (até ${format(new Date(deadlineAt), 'dd/MM/yyyy HH:mm', { locale: ptBR })})`;
+  return `${amount} ${unitLabel}`;
 }
 
 export default function SolicitacoesCombustivelPage() {
@@ -477,8 +474,6 @@ export default function SolicitacoesCombustivelPage() {
   const [approveGasStationId, setApproveGasStationId] = useState('');
   const [adminEditing, setAdminEditing] = useState(false);
   const [editContractId, setEditContractId] = useState('');
-  const [refuelDeadlineAmount, setRefuelDeadlineAmount] = useState('24');
-  const [refuelDeadlineUnit, setRefuelDeadlineUnit] = useState<FuelRefuelDeadlineUnit>('HOURS');
   const [releasedAmountInput, setReleasedAmountInput] = useState('');
   const [rejectReason, setRejectReason] = useState('');
   const [showRejectForm, setShowRejectForm] = useState(false);
@@ -553,21 +548,15 @@ export default function SolicitacoesCombustivelPage() {
     mutationFn: async ({
       id,
       gasStationId,
-      amount,
-      unit,
       releasedAmountReais,
     }: {
       id: string;
       gasStationId: string;
-      amount: number;
-      unit: FuelRefuelDeadlineUnit;
       releasedAmountReais: number;
     }) => {
       const res = await api.put(`/fuel-refuel-requests/${id}/supplies-approve`, {
         comment: suppliesComment.trim() || undefined,
         gasStationId,
-        refuelDeadlineAmount: amount,
-        refuelDeadlineUnit: unit,
         releasedAmountReais,
       });
       return res.data;
@@ -577,8 +566,6 @@ export default function SolicitacoesCombustivelPage() {
       setSelected(null);
       setSuppliesComment('');
       setApproveGasStationId('');
-      setRefuelDeadlineAmount('24');
-      setRefuelDeadlineUnit('HOURS');
       setReleasedAmountInput('');
       setShowRejectForm(false);
       void queryClient.invalidateQueries({ queryKey: ['fuel-refuel-requests'] });
@@ -895,8 +882,6 @@ export default function SolicitacoesCombustivelPage() {
     if (selected?.status === 'PENDING_SUPPLIES') {
       setApproveGasStationId('');
       setSuppliesComment('');
-      setRefuelDeadlineAmount('24');
-      setRefuelDeadlineUnit('HOURS');
       setReleasedAmountInput('');
     }
   }, [selected?.id, selected?.status]);
@@ -1414,7 +1399,7 @@ export default function SolicitacoesCombustivelPage() {
                     </p>
                   </div>
                 ) : null}
-                {selected.refuelDeadlineAmount ? (
+                {selected.refuelDeadlineAt || selected.refuelDeadlineAmount ? (
                   <div className="sm:col-span-2">
                     <span className="font-medium text-gray-500 dark:text-gray-400">
                       Prazo para abastecer
@@ -1908,31 +1893,9 @@ export default function SolicitacoesCombustivelPage() {
                           noFocusRing
                         />
                       </div>
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        <Input
-                          label="Prazo para abastecer *"
-                          type="number"
-                          min={1}
-                          max={365}
-                          value={refuelDeadlineAmount}
-                          onChange={(e) => setRefuelDeadlineAmount(e.target.value)}
-                          placeholder="Ex.: 24"
-                          className="[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                        />
-                        <div>
-                          <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                            Unidade do prazo *
-                          </label>
-                          <StringSingleSelectDropdown
-                            value={refuelDeadlineUnit}
-                            onChange={(value) =>
-                              setRefuelDeadlineUnit(value as FuelRefuelDeadlineUnit)
-                            }
-                            options={DEADLINE_UNIT_OPTIONS}
-                            allowEmpty={false}
-                            className="w-full"
-                          />
-                        </div>
+                      <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700 dark:border-gray-600 dark:bg-gray-900/40 dark:text-gray-200">
+                        <span className="font-medium">Prazo para abastecer:</span> até 22:00 do dia
+                        da data de abastecimento
                       </div>
                       <Input
                         label="Observação (opcional)"
@@ -1952,7 +1915,6 @@ export default function SolicitacoesCombustivelPage() {
                         <Button
                           type="button"
                           onClick={() => {
-                            const amount = Number(refuelDeadlineAmount);
                             const releasedAmountReais = parseCurrencyInputBr(releasedAmountInput);
                             if (!releasedAmountReais || releasedAmountReais <= 0) {
                               return toast.error('Informe o valor que será liberado');
@@ -1960,21 +1922,15 @@ export default function SolicitacoesCombustivelPage() {
                             if (!approveGasStationId) {
                               return toast.error('Selecione o posto para abastecimento');
                             }
-                            if (!Number.isFinite(amount) || amount < 1) {
-                              return toast.error('Informe o prazo para abastecer');
-                            }
                             approveMutation.mutate({
                               id: selected.id,
                               gasStationId: approveGasStationId,
-                              amount,
-                              unit: refuelDeadlineUnit,
                               releasedAmountReais,
                             });
                           }}
                           disabled={
                             approveMutation.isPending ||
                             !approveGasStationId ||
-                            !refuelDeadlineAmount.trim() ||
                             !releasedAmountInput.trim()
                           }
                         >
@@ -2049,7 +2005,7 @@ export default function SolicitacoesCombustivelPage() {
                       : ''}
                   </p>
                 ) : null}
-                {reportTarget.refuelDeadlineAmount ? (
+                {reportTarget.refuelDeadlineAt || reportTarget.refuelDeadlineAmount ? (
                   <p className="text-gray-900 dark:text-gray-100">
                     <span className="font-medium text-gray-700 dark:text-gray-300">Prazo:</span>{' '}
                     {formatRefuelDeadline(
