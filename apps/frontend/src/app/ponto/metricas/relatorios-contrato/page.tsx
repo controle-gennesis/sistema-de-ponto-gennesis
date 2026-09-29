@@ -2,7 +2,7 @@
 
 import React, { useMemo, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   CheckCircle2,
@@ -180,10 +180,13 @@ type PageTab = 'semanal' | 'mensal';
 
 export default function RelatoriosContratoPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const queryClient = useQueryClient();
   const { canCreate, canEdit } = useCadastroCrudPermissions('/ponto/metricas/relatorios-contrato');
   const canWrite = canCreate || canEdit;
-  const [pageTab, setPageTab] = useState<PageTab>('semanal');
+  const initialTab: PageTab =
+    searchParams?.get('aba') === 'relatorio-mensal' ? 'mensal' : 'semanal';
+  const [pageTab, setPageTab] = useState<PageTab>(initialTab);
   const [weekKey, setWeekKey] = useState(getFortnightKey());
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('todos');
   const [configTargetIds, setConfigTargetIds] = useState<string[]>([]);
@@ -347,14 +350,23 @@ export default function RelatoriosContratoPage() {
               <AppUnderlineTabList aria-label="Tipo de relatório">
                 <AppUnderlineTabButton
                   active={pageTab === 'semanal'}
-                  onClick={() => setPageTab('semanal')}
+                  onClick={() => {
+                    setPageTab('semanal');
+                    router.replace('/ponto/metricas/relatorios-contrato', { scroll: false });
+                  }}
                   className="whitespace-nowrap px-3 py-2.5 text-sm"
                 >
                   Reuniões quinzenais
                 </AppUnderlineTabButton>
                 <AppUnderlineTabButton
                   active={pageTab === 'mensal'}
-                  onClick={() => setPageTab('mensal')}
+                  onClick={() => {
+                    setPageTab('mensal');
+                    router.replace(
+                      '/ponto/metricas/relatorios-contrato?aba=relatorio-mensal',
+                      { scroll: false },
+                    );
+                  }}
                   className="whitespace-nowrap px-3 py-2.5 text-sm"
                 >
                   Relatórios mensais
@@ -469,7 +481,6 @@ export default function RelatoriosContratoPage() {
                     <tbody>
                       {filteredRows.map((row) => {
                         const meta = STATUS_META[row.status];
-                        const StatusIcon = meta.Icon;
                         return (
                           <tr
                             key={row.contractId}
@@ -492,9 +503,8 @@ export default function RelatoriosContratoPage() {
                             </td>
                             <td className="px-3 py-3 text-center">
                               <span
-                                className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold ${meta.className}`}
+                                className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${meta.className}`}
                               >
-                                <StatusIcon className="h-3.5 w-3.5" />
                                 {meta.label}
                               </span>
                             </td>

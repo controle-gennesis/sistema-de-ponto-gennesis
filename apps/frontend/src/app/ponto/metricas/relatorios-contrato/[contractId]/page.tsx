@@ -9,7 +9,7 @@ import {
 const CONFIG: ContratoAcompanhamentoListConfig = {
   kind: 'semanal',
   pageTitle: 'Reuniões Quinzenais',
-  sectionTitle: 'Histórico quinzenal',
+  sectionTitle: 'Histórico',
   sectionDescription: 'Reuniões quinzenais registradas para este contrato.',
   Icon: Video,
   periodColumnLabel: 'Quinzena',
@@ -28,6 +28,7 @@ const CONFIG: ContratoAcompanhamentoListConfig = {
   saveSuccessToast: 'Formulário de reunião quinzenal configurado!',
   openSuccessToast: 'Reunião da quinzena aberta para registro.',
   createSuccessToast: 'Nova reunião criada.',
+  allowToolbarCreate: false,
   backHref: () => '/ponto/metricas/relatorios-contrato',
   backLabel: 'Voltar ao painel',
   protectedRoute: '/ponto/metricas/relatorios-contrato',

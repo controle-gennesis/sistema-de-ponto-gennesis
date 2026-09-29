@@ -8,7 +8,6 @@ import type { LucideIcon } from 'lucide-react';
 import {
   Trash2,
   Search,
-  MoreVertical,
   Eye,
   ClipboardList,
   Settings2,
@@ -33,7 +32,7 @@ import {
   cadastroListClasses,
   getListTableRowClassName,
   ListRowNavigableLabel,
-  rowActionMenuButtonClass,
+  RowActionMenuCell,
 } from '@/components/ui/RowActionMenu';
 import { ReuniaoFormModal, type ReuniaoListPatch } from '@/components/contract/ReuniaoFormModal';
 import { ContratoControleGeralMensalCard } from '@/components/contract/ContratoControleGeralMensalCard';
@@ -137,6 +136,11 @@ export interface ContratoAcompanhamentoListConfig {
   allowToolbarCreate?: boolean;
   /** Se false, oculta Editar/Excluir no menu da linha. */
   allowRowEditDelete?: boolean;
+  /**
+   * Quando `allowRowEditDelete` é false: se true (padrão), permite preencher/continuar;
+   * se false, abre só em visualização (ex.: quinzenais no contrato).
+   */
+  allowFill?: boolean;
   emptyTitle?: string;
   emptyHint?: string;
 }
@@ -300,6 +304,7 @@ function ContratoAcompanhamentoPanel({
     allowConfigureForm = true,
     allowToolbarCreate = true,
     allowRowEditDelete = true,
+    allowFill = true,
     emptyTitle,
     emptyHint,
   } = config;
@@ -310,6 +315,9 @@ function ContratoAcompanhamentoPanel({
   const canRemove = allowRowEditDelete && relatoriosCrud.canDelete;
   const canConfigureForm = canWrite && allowConfigureForm;
   const canEditEntry = canWrite && allowRowEditDelete;
+  const contractFillMode = !allowRowEditDelete && canWrite && allowFill;
+  /** Métricas: editar pelo histórico; contrato mensal: preencher; contrato quinzenal: só ver. */
+  const canOpenForEdit = contractFillMode || canEditEntry;
 
   const router = useRouter();
   const pathname = usePathname();
@@ -633,7 +641,7 @@ function ContratoAcompanhamentoPanel({
                   {!compact ? (
                     <th className={cadastroListClasses.thCenter}>Atualizado em</th>
                   ) : null}
-                  <th className={cadastroListClasses.thRight}>Ação</th>
+                  <th className={`${cadastroListClasses.thCenter} w-14`}>Ação</th>
                 </tr>
               </thead>
               <tbody>
@@ -644,7 +652,7 @@ function ContratoAcompanhamentoPanel({
                   <tr
                     key={r.id}
                     onClick={() =>
-                      openReuniao(r.id, canWrite && !allowRowEditDelete ? 'edit' : 'view')
+                      openReuniao(r.id, canOpenForEdit ? 'edit' : 'view')
                     }
                     className={`${getListTableRowClassName(true)} ${
                       modalReuniaoId === r.id ? 'bg-red-50/50 dark:bg-red-950/20' : ''
@@ -672,34 +680,22 @@ function ContratoAcompanhamentoPanel({
                         {formatDateTime(r.updatedAt || r.createdAt)}
                       </td>
                     ) : null}
-                    <td
-                      className={`${cadastroListClasses.td} text-right`}
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <div className="flex items-center justify-end">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            const bounds = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
-                            setReuniaoActionMenu((prev) => {
-                              if (prev?.reuniaoId === r.id) return null;
-                              const coords = computeRowActionMenuPosition(
-                                bounds,
-                                REUNIAO_MENU_WIDTH_PX
-                              );
-                              return { reuniaoId: r.id, ...coords };
-                            });
-                          }}
-                          className={rowActionMenuButtonClass(reuniaoActionMenu?.reuniaoId === r.id)}
-                          aria-label="Menu de ações"
-                          aria-expanded={reuniaoActionMenu?.reuniaoId === r.id}
-                          aria-haspopup="menu"
-                        >
-                          <MoreVertical className="h-4 w-4" />
-                        </button>
-                      </div>
-                    </td>
+                    <RowActionMenuCell
+                      align="center"
+                      isOpen={reuniaoActionMenu?.reuniaoId === r.id}
+                      onToggle={(e) => {
+                        e.stopPropagation();
+                        const bounds = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
+                        setReuniaoActionMenu((prev) => {
+                          if (prev?.reuniaoId === r.id) return null;
+                          const coords = computeRowActionMenuPosition(
+                            bounds,
+                            REUNIAO_MENU_WIDTH_PX
+                          );
+                          return { reuniaoId: r.id, ...coords };
+                        });
+                      }}
+                    />
                   </tr>
                 );
                 })}
@@ -789,7 +785,7 @@ function ContratoAcompanhamentoPanel({
                   >
                     <Plus className="h-4 w-4 shrink-0" />
                   </button>
-                  {canWrite && (currentPeriodEntry || showInlineForm) ? (
+                  {canWrite && !fromMetricasPage && (currentPeriodEntry || showInlineForm) ? (
                     <button
                       type="button"
                       onClick={() => periodoAtualMutation.mutate(true)}
@@ -838,8 +834,7 @@ function ContratoAcompanhamentoPanel({
           {(() => {
             const menuEntry = reunioes.find((r) => r.id === reuniaoActionMenu.reuniaoId);
             const fillStatus = menuEntry ? resolveFillStatus(menuEntry) : 'nao_preenchido';
-            const contractFillMode = !allowRowEditDelete && canWrite;
-            const openMode: 'view' | 'edit' = contractFillMode || canEditEntry ? 'edit' : 'view';
+            const openMode: 'view' | 'edit' = canOpenForEdit ? 'edit' : 'view';
             const primaryLabel = contractFillMode
               ? fillStatus === 'preenchido'
                 ? 'Abrir formulário'

@@ -1,6 +1,6 @@
 'use client';
 
-import { useParams } from 'next/navigation';
+import { useParams, usePathname } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import api from '@/lib/api';
 import { useBreadcrumbEntity } from '@/hooks/useBreadcrumbEntity';
@@ -12,6 +12,7 @@ export default function RelatorioContratoDetalheLayout({
   children: React.ReactNode;
 }) {
   const params = useParams();
+  const pathname = usePathname();
   const contractId =
     typeof params?.contractId === 'string'
       ? params.contractId
@@ -33,7 +34,12 @@ export default function RelatorioContratoDetalheLayout({
 
   useBreadcrumbEntity(
     name && contractId
-      ? { label: name, href: `/ponto/metricas/relatorios-contrato/${contractId}` }
+      ? {
+          label: name,
+          href: pathname?.includes('/mensal')
+            ? `/ponto/metricas/relatorios-contrato/${contractId}/mensal`
+            : `/ponto/metricas/relatorios-contrato/${contractId}`,
+        }
       : null,
     { priority: 0 },
   );

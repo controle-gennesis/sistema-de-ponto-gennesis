@@ -112,16 +112,21 @@ export function formatWeekRangeCompactLabel(weekKey: string): string {
   return `${fmt(monday)} – ${fmt(sunday)}`;
 }
 
-/** Rótulo amigável: "Quinzena 25/08 – 07/09/2026". */
+/** Rótulo amigável: "Quinzena 25/08/2026 – 07/09/2026". */
 export function formatWeekLabel(weekKey: string): string {
   const monday = mondayFromIsoWeekKey(weekKey);
   const sunday = sundayFromFortnightKey(weekKey);
   if (!monday || !sunday) return weekKey;
 
   const fmt = (value: Date) =>
-    value.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', timeZone: 'UTC' });
+    value.toLocaleDateString('pt-BR', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      timeZone: 'UTC',
+    });
 
-  return `Quinzena ${fmt(monday)} – ${fmt(sunday)}/${sunday.getUTCFullYear()}`;
+  return `Quinzena ${fmt(monday)} – ${fmt(sunday)}`;
 }
 
 export function entryWeekLabel(entry: {

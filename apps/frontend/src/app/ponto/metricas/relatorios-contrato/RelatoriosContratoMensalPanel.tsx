@@ -394,13 +394,12 @@ export function RelatoriosContratoMensalPanel() {
                 <tbody>
                   {filteredRows.map((row) => {
                     const meta = STATUS_META[row.status];
-                    const StatusIcon = meta.Icon;
                     return (
                       <tr
                         key={row.contractId}
                         onClick={() =>
                           router.push(
-                            `/ponto/contratos/${row.contractId}/acompanhamento-mensal`,
+                            `/ponto/metricas/relatorios-contrato/${row.contractId}/mensal`,
                           )
                         }
                         className={`border-b border-gray-100 dark:border-gray-800/80 ${getListTableRowClassName(true)}`}
@@ -417,9 +416,8 @@ export function RelatoriosContratoMensalPanel() {
                         </td>
                         <td className="px-3 py-3 text-center">
                           <span
-                            className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold ${meta.className}`}
+                            className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${meta.className}`}
                           >
-                            <StatusIcon className="h-3.5 w-3.5" />
                             {meta.label}
                           </span>
                         </td>

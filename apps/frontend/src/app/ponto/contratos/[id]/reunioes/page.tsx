@@ -37,6 +37,7 @@ const REUNIOES_CONFIG: ContratoAcompanhamentoListConfig = {
   allowConfigureForm: false,
   allowToolbarCreate: false,
   allowRowEditDelete: false,
+  allowFill: false,
 };
 
 const RELATORIO_MENSAL_CONFIG: ContratoAcompanhamentoListConfig = {
