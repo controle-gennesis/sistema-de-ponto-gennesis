@@ -2980,7 +2980,7 @@ export default function ContractDetailPage() {
       const series = Array.from({ length: idx - start + 1 }, (_, i) => {
         const mi = start + i;
         const k = toYearMonthKey(safeSelectedYear, mi + 1);
-        return {
+      return {
           label: MESES[mi],
           metaIdeal: metaSchedule.get(k) ?? 0,
           metaReal: metaRealPorMes[mi] ?? metaSchedule.get(k) ?? 0,
@@ -4419,29 +4419,29 @@ export default function ContractDetailPage() {
                 {EXIBIR_GASTOS_CONTRATO_NA_UI ? (
                   <div className="flex shrink-0 items-center self-start lg:self-center">
                     <div className="shrink-0 text-right">
-                      {paidDisplay.loading || totvsRmCarregando ? (
-                        <div className="inline-flex items-center gap-2 text-sm text-red-600 dark:text-red-400">
-                          <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
-                          <span className="hidden sm:inline">Carregando…</span>
-                        </div>
-                      ) : paidDisplay.totvsErrorMessage ? (
-                        <span className="text-xs text-amber-600 dark:text-amber-400" title={paidDisplay.totvsErrorMessage}>
-                          RM indisponível
-                        </span>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => openPaidNaturezaModal(null)}
-                          className="rounded-lg px-1 py-0.5 text-base font-bold text-red-600 transition-colors hover:bg-red-50 hover:text-red-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-500 dark:text-red-400 dark:hover:bg-red-950/40 dark:hover:text-red-300 sm:text-lg"
-                          title="Ver totais por natureza (RM)"
-                        >
-                          {paidHeaderTotal.toLocaleString('pt-BR', {
-                            style: 'currency',
-                            currency: 'BRL'
-                          })}
-                        </button>
-                      )}
-                    </div>
+                    {paidDisplay.loading || totvsRmCarregando ? (
+                      <div className="inline-flex items-center gap-2 text-sm text-red-600 dark:text-red-400">
+                        <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+                        <span className="hidden sm:inline">Carregando…</span>
+                      </div>
+                    ) : paidDisplay.totvsErrorMessage ? (
+                      <span className="text-xs text-amber-600 dark:text-amber-400" title={paidDisplay.totvsErrorMessage}>
+                        RM indisponível
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => openPaidNaturezaModal(null)}
+                        className="rounded-lg px-1 py-0.5 text-base font-bold text-red-600 transition-colors hover:bg-red-50 hover:text-red-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-500 dark:text-red-400 dark:hover:bg-red-950/40 dark:hover:text-red-300 sm:text-lg"
+                        title="Ver totais por natureza (RM)"
+                      >
+                        {paidHeaderTotal.toLocaleString('pt-BR', {
+                          style: 'currency',
+                          currency: 'BRL'
+                        })}
+                      </button>
+                    )}
+                  </div>
                   </div>
                 ) : null}
               </div>
@@ -4515,7 +4515,7 @@ export default function ContractDetailPage() {
               >
                 Ordens de Serviço
               </AppUnderlineTabButton>
-            ) : null}
+                ) : null}
             {canAccessOrdemServicoModulo ? (
               <AppUnderlineTabButton
                 active={mainTab === 'pleitos'}
@@ -4524,7 +4524,7 @@ export default function ContractDetailPage() {
               >
                 Pleitos
               </AppUnderlineTabButton>
-            ) : null}
+                ) : null}
             <AppUnderlineTabButton
               active={mainTab === 'faturamento'}
               onClick={() => setMainTab('faturamento')}
@@ -4555,8 +4555,8 @@ export default function ContractDetailPage() {
             peopleLoading={loadingContratoPeople}
             peopleError={contratoPeopleError}
           />
-          </div>
-          ) : null}
+                          </div>
+                ) : null}
 
           {mainTab === 'controle' ? (
           <div className="space-y-4">
@@ -5740,7 +5740,7 @@ export default function ContractDetailPage() {
           ) : null}
 
           {mainTab === 'pleitos' && canAccessOrdemServicoModulo ? (
-            <ContractHistoricoPleitosPanel contractId={contractId} />
+          <ContractHistoricoPleitosPanel contractId={contractId} />
           ) : null}
 
           {mainTab === 'faturamento' ? (

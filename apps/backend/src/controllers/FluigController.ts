@@ -124,12 +124,12 @@ function sanitizeDownloadFilename(raw: string, fallbackId: string): string {
 /** Metadados de anexos (nome real no GED) — corrige lista nomes/ids desalinhada do dataset. */
 export async function getDocumentsMeta(req: Request, res: Response) {
   try {
-    const raw = Array.isArray(req.body?.ids) ? req.body.ids : [];
-    const ids = Array.from(
+    const raw = Array.isArray(req.body?.ids) ? (req.body.ids as unknown[]) : [];
+    const ids: string[] = Array.from(
       new Set(
         raw
-          .map((v: unknown) => String(v ?? '').trim())
-          .filter((v: string) => /^\d+$/.test(v))
+          .map((v) => String(v ?? '').trim())
+          .filter((v): v is string => /^\d+$/.test(v))
       )
     ).slice(0, 40);
     if (ids.length === 0) {

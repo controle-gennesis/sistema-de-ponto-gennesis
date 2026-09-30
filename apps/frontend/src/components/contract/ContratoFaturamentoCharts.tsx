@@ -493,7 +493,7 @@ function OsTotaisDashboardCard({ totais }: { totais: ContratoOsTotais }) {
       <CardHeading title="Ordem de serviço" />
       <CardContent className={`${cadastroListClasses.cardContent} flex min-h-0 flex-1 flex-col`}>
         <div className="min-h-[200px] flex-1 w-full">
-          <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height="100%">
             <BarChart data={data} margin={{ top: 28, right: 8, left: 0, bottom: 4 }} barCategoryGap="28%">
               <defs>
                 {data.map((item) => (
@@ -519,7 +519,7 @@ function OsTotaisDashboardCard({ totais }: { totais: ContratoOsTotais }) {
                 tickFormatter={(v) => formatCurrencyCompact(Number(v) || 0)}
                 domain={[0, chartMax]}
               />
-              <Tooltip
+                  <Tooltip
                 cursor={{ fill: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(15,23,42,0.04)', radius: 8 }}
                 content={({ active, label, payload }) => (
                   <ChartLightTooltip
@@ -554,7 +554,7 @@ function OsTotaisDashboardCard({ totais }: { totais: ContratoOsTotais }) {
                 />
               </Bar>
             </BarChart>
-          </ResponsiveContainer>
+              </ResponsiveContainer>
         </div>
       </CardContent>
     </Card>
@@ -598,7 +598,7 @@ function MetaVsRealidadeCard({ data }: { data: ContratoResumoMetaVsReal }) {
           >
             {desvio >= 0 ? '+' : ''}
             {desvio.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}% vs meta real
-          </span>
+                </span>
         }
       />
       <CardContent className={`${cadastroListClasses.cardContent} flex min-h-0 flex-1 flex-col !pt-1`}>
@@ -682,7 +682,7 @@ function MetaVsRealidadeCard({ data }: { data: ContratoResumoMetaVsReal }) {
               />
             </ComposedChart>
           </ResponsiveContainer>
-        </div>
+              </div>
       </CardContent>
     </Card>
   );
@@ -735,7 +735,7 @@ function PessoasContratoCard({
         {loading ? (
           <div className="flex h-[280px] items-center justify-center">
             <Loader2 className="h-6 w-6 animate-spin text-gray-400" aria-label="Carregando" />
-          </div>
+            </div>
         ) : error ? (
           <p className="flex h-[280px] items-center justify-center text-center text-sm text-rose-600 dark:text-rose-400">
             Não foi possível carregar as pessoas. Atualize a página.
@@ -748,19 +748,19 @@ function PessoasContratoCard({
           <ul className="h-[280px] space-y-1 overflow-y-auto overscroll-contain pr-1">
             {people.map((person) => {
               const cpfLabel = person.cpf ? formatCpfInput(person.cpf) : '—';
-              return (
+                return (
                 <li
                   key={person.id}
                   className="flex items-center gap-3 rounded-xl px-1.5 py-2.5 transition-colors hover:bg-gray-50 dark:hover:bg-gray-800/50"
                 >
-                  <span
+                      <span
                     className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${avatarToneForName(
                       person.name
                     )}`}
                     aria-hidden
                   >
                     {personInitials(person.name)}
-                  </span>
+                      </span>
                   <div className="min-w-0 flex-[1.2]">
                     <p className="truncate text-sm font-semibold text-gray-900 dark:text-gray-100">
                       {person.name}
@@ -768,19 +768,19 @@ function PessoasContratoCard({
                     <p className="mt-0.5 truncate text-xs tabular-nums text-gray-500 dark:text-gray-400">
                       {cpfLabel}
                     </p>
-                  </div>
+                    </div>
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm text-gray-700 dark:text-gray-200">
                       {person.email || '—'}
                     </p>
-                  </div>
+                      </div>
                   <span className="shrink-0 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
                     Liberado
-                  </span>
-                </li>
-              );
-            })}
-          </ul>
+                      </span>
+                  </li>
+                );
+              })}
+            </ul>
         )}
       </CardContent>
     </Card>
@@ -839,7 +839,7 @@ function KpiStatCard({
             } ${isSquare && !isBrand ? 'text-sm sm:text-base' : 'text-lg sm:text-xl'}`}
           >
             {title}
-          </h3>
+            </h3>
           {openLink ? (
             <div className={`${cadastroListClasses.cardToolbar} self-start`}>{openLink}</div>
           ) : null}
@@ -928,7 +928,7 @@ export function ContratoFaturamentoCharts({
       <div className="grid grid-cols-1 items-stretch gap-4 lg:grid-cols-[1fr_2fr]">
         <MetaVsRealidadeCard data={metaVsReal} />
         <PessoasContratoCard people={people} loading={peopleLoading} error={peopleError} />
-      </div>
+        </div>
     </div>
   );
 }
