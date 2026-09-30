@@ -2,8 +2,9 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useQuery } from '@tanstack/react-query';
-import { Calculator, Filter, Search, X } from 'lucide-react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Calculator, Filter, Plus, Search, X } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
@@ -13,6 +14,12 @@ import { ListPagination } from '@/components/ui/ListPagination';
 import { Modal } from '@/components/ui/Modal';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
+import {
+  RowActionMenuCell,
+  RowActionMenuPortal,
+  cadastroListClasses,
+} from '@/components/ui/RowActionMenu';
+import { useRowActionMenu } from '@/hooks/useRowActionMenu';
 import api from '@/lib/api';
 import { usePermissions } from '@/hooks/usePermissions';
 import {
@@ -45,7 +52,9 @@ type OrcamentoListaRow = {
 };
 
 type OrcamentoListItem = {
+  id: string;
   contractId: string;
+  costCenterId: string;
   contractName: string;
   orcamentoId: string;
   nome: string;
@@ -131,12 +140,17 @@ function formatBdiPct(value: number | undefined): string {
 
 export default function OrcamentosPage() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const searchParams = useSearchParams();
   const contratoFromUrl = (searchParams.get('contrato') || '').trim();
   const [searchTerm, setSearchTerm] = useState('');
   const [contratoFiltro, setContratoFiltro] = useState(contratoFromUrl);
   const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
+  const [isNovoModalOpen, setIsNovoModalOpen] = useState(false);
+  const [novoContratoId, setNovoContratoId] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
+  const [deleteTarget, setDeleteTarget] = useState<OrcamentoListItem | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   const {
     canAccessContractOrcamentoTab,
     isAdministrator,
@@ -171,7 +185,7 @@ export default function OrcamentosPage() {
     enabled: !loadingUser,
   });
 
-  const contractsLiberados = useMemo(() => {
+  const contractsComOrcamento = useMemo(() => {
     const raw = contractsData?.data ?? contractsData;
     const list = Array.isArray(raw) ? (raw as ContractRow[]) : [];
     return list
@@ -190,31 +204,32 @@ export default function OrcamentosPage() {
   const contratoFilterOptions = useMemo(
     () =>
       labeledToSelectOptions(
-        contractsLiberados.map((c) => ({
+        contractsComOrcamento.map((c) => ({
           value: c.id,
           label: (c.name || c.number || c.id).trim(),
         }))
       ),
-    [contractsLiberados]
+    [contractsComOrcamento]
   );
 
   const hasActiveFilters = Boolean(contratoFiltro);
 
+  const contractsKey = contractsComOrcamento.map((c) => c.id).sort().join(',');
+
   const { data: orcamentosData, isLoading: loadingOrcamentos } = useQuery({
-    queryKey: [
-      'orcamentos-todos',
-      contractsLiberados.map((c) => c.id).sort().join(','),
-    ],
+    queryKey: ['orcamentos-todos', contractsKey],
     queryFn: async () => {
       const settled = await Promise.allSettled(
-        contractsLiberados.map(async (c) => {
+        contractsComOrcamento.map(async (c) => {
           const res = await api.get(`/orcamento/${c.costCenterId}`, { timeout: 60000 });
           const orcs = (Array.isArray(res.data?.orcamentos)
             ? res.data.orcamentos
             : []) as OrcamentoListaRow[];
           return orcs.map(
             (o): OrcamentoListItem => ({
+              id: `${c.id}-${o.id}`,
               contractId: c.id,
+              costCenterId: String(c.costCenterId),
               contractName: (c.name || c.number || c.id).trim(),
               orcamentoId: o.id,
               nome: nomeOrcamentoSemCodigo(o.nome) || o.nome,
@@ -244,7 +259,7 @@ export default function OrcamentosPage() {
       });
       return items;
     },
-    enabled: !loadingContracts && !loadingPermissions && contractsLiberados.length > 0,
+    enabled: !loadingContracts && !loadingPermissions && contractsComOrcamento.length > 0,
   });
 
   const orcamentos = useMemo(() => {
@@ -268,10 +283,70 @@ export default function OrcamentosPage() {
   const page = Math.min(currentPage, totalPages);
   const pageRows = orcamentos.slice((page - 1) * ITEMS_PER_PAGE, page * ITEMS_PER_PAGE);
 
+  const {
+    rowActionMenu,
+    rowForActionMenu,
+    toggleRowActionMenu,
+    closeRowActionMenu,
+    isRowMenuOpen,
+  } = useRowActionMenu(orcamentos);
+
   const isLoadingList =
-    loadingContracts || loadingPermissions || (contractsLiberados.length > 0 && loadingOrcamentos);
+    loadingContracts || loadingPermissions || (contractsComOrcamento.length > 0 && loadingOrcamentos);
   const isListEmpty = !isLoadingList && totalFiltered === 0;
   const user = userData?.data || { name: 'Usuário', role: 'EMPLOYEE' };
+
+  const abrirOrcamento = (o: OrcamentoListItem) => {
+    router.push(`/ponto/contratos/${o.contractId}/orcamento/${o.orcamentoId}`);
+  };
+
+  const irParaCriarNoContrato = (contractId: string) => {
+    router.push(`/ponto/contratos/${contractId}/orcamento?novo=1`);
+  };
+
+  const abrirFluxoNovoOrcamento = () => {
+    if (contractsComOrcamento.length === 0) {
+      toast.error('Nenhum contrato com permissão de orçamento.');
+      return;
+    }
+    if (contratoFiltro && contractsComOrcamento.some((c) => c.id === contratoFiltro)) {
+      irParaCriarNoContrato(contratoFiltro);
+      return;
+    }
+    if (contractsComOrcamento.length === 1) {
+      irParaCriarNoContrato(contractsComOrcamento[0].id);
+      return;
+    }
+    setNovoContratoId('');
+    setIsNovoModalOpen(true);
+  };
+
+  const confirmarNovoOrcamento = () => {
+    const id = novoContratoId.trim();
+    if (!id) {
+      toast.error('Selecione o contrato.');
+      return;
+    }
+    setIsNovoModalOpen(false);
+    irParaCriarNoContrato(id);
+  };
+
+  const confirmarExclusao = async () => {
+    if (!deleteTarget || isDeleting) return;
+    setIsDeleting(true);
+    try {
+      await api.delete(
+        `/orcamento/${deleteTarget.costCenterId}/orcamentos/${deleteTarget.orcamentoId}`
+      );
+      toast.success('Orçamento excluído.');
+      setDeleteTarget(null);
+      await queryClient.invalidateQueries({ queryKey: ['orcamentos-todos'] });
+    } catch {
+      toast.error('Não foi possível excluir o orçamento.');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   if (loadingUser) {
     return (
@@ -308,7 +383,7 @@ export default function OrcamentosPage() {
                       Orçamentos
                     </h3>
                     <p className="text-sm text-gray-600 dark:text-gray-400">
-                      Todos os orçamentos dos seus contratos
+                      Crie, edite e exclua os orçamentos dos seus contratos
                     </p>
                   </div>
                 </div>
@@ -355,6 +430,15 @@ export default function OrcamentosPage() {
                       <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
                     ) : null}
                   </button>
+                  <button
+                    type="button"
+                    onClick={abrirFluxoNovoOrcamento}
+                    disabled={isLoadingList || contractsComOrcamento.length === 0}
+                    className="inline-flex h-10 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-red-200 bg-red-50 px-4 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 active:bg-red-200/80 disabled:pointer-events-none disabled:opacity-50 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40 dark:active:bg-red-900/55"
+                  >
+                    <Plus className="h-4 w-4 shrink-0" aria-hidden />
+                    Novo orçamento
+                  </button>
                 </div>
               </div>
             </CardHeader>
@@ -368,10 +452,20 @@ export default function OrcamentosPage() {
                   <p className="mt-2 text-sm text-gray-500 dark:text-gray-500">
                     {searchTerm.trim() || hasActiveFilters
                       ? 'Tente ajustar os filtros'
-                      : contractsLiberados.length === 0
-                        ? 'Você não tem contratos liberados com acesso a orçamento'
-                        : 'Não há orçamentos nos contratos liberados'}
+                      : contractsComOrcamento.length === 0
+                        ? 'Você não tem contratos com acesso a orçamento'
+                        : 'Não há orçamentos nos contratos disponíveis'}
                   </p>
+                  {contractsComOrcamento.length > 0 && !searchTerm.trim() && !hasActiveFilters ? (
+                    <button
+                      type="button"
+                      onClick={abrirFluxoNovoOrcamento}
+                      className="mt-4 inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+                    >
+                      <Plus className="h-4 w-4" aria-hidden />
+                      Criar orçamento
+                    </button>
+                  ) : null}
                 </div>
               ) : (
                 <>
@@ -400,17 +494,14 @@ export default function OrcamentosPage() {
                           <th className="w-[14%] px-3 py-4 text-center text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 sm:px-6">
                             Atualizado
                           </th>
+                          <th className={cadastroListClasses.thRight}>Ações</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
                         {pageRows.map((o) => (
                           <tr
-                            key={`${o.contractId}-${o.orcamentoId}`}
-                            onClick={() =>
-                              router.push(
-                                `/ponto/contratos/${o.contractId}/orcamento/${o.orcamentoId}`
-                              )
-                            }
+                            key={o.id}
+                            onClick={() => abrirOrcamento(o)}
                             className={getListTableRowClassName(true)}
                             aria-label={`Abrir orçamento ${o.nome}`}
                           >
@@ -443,6 +534,10 @@ export default function OrcamentosPage() {
                                 ? new Date(o.updatedAt).toLocaleString('pt-BR')
                                 : '—'}
                             </td>
+                            <RowActionMenuCell
+                              isOpen={isRowMenuOpen(o.id)}
+                              onToggle={(e) => toggleRowActionMenu(o.id, e.currentTarget)}
+                            />
                           </tr>
                         ))}
                       </tbody>
@@ -456,6 +551,20 @@ export default function OrcamentosPage() {
                         onPageChange={setCurrentPage}
                       />
                     </div>
+                  ) : null}
+                  {rowActionMenu && rowForActionMenu ? (
+                    <RowActionMenuPortal
+                      menu={rowActionMenu}
+                      onClose={closeRowActionMenu}
+                      onEdit={() => {
+                        closeRowActionMenu();
+                        abrirOrcamento(rowForActionMenu);
+                      }}
+                      onDelete={() => {
+                        closeRowActionMenu();
+                        setDeleteTarget(rowForActionMenu);
+                      }}
+                    />
                   ) : null}
                 </>
               )}
@@ -505,6 +614,88 @@ export default function OrcamentosPage() {
                   className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
                 >
                   Aplicar
+                </button>
+              </div>
+            </div>
+          </Modal>
+
+          <Modal
+            isOpen={isNovoModalOpen}
+            onClose={() => setIsNovoModalOpen(false)}
+            title="Novo orçamento"
+            size="md"
+          >
+            <div className="space-y-4">
+              <p className="text-sm text-gray-600 dark:text-gray-400">
+                Selecione o contrato em que o orçamento será criado.
+              </p>
+              <div>
+                <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Contrato
+                </label>
+                <StringSingleSelectDropdown
+                  value={novoContratoId}
+                  onChange={setNovoContratoId}
+                  options={contratoFilterOptions}
+                  allowEmpty
+                  emptyOptionLabel="Selecione…"
+                  placeholder="Selecione o contrato"
+                  searchPlaceholder="Pesquisar contrato..."
+                  emptyOptionsMessage="Nenhum contrato disponível."
+                  className="w-full"
+                />
+              </div>
+              <div className="flex items-center justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
+                <button
+                  type="button"
+                  onClick={() => setIsNovoModalOpen(false)}
+                  className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmarNovoOrcamento}
+                  className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+                >
+                  Continuar
+                </button>
+              </div>
+            </div>
+          </Modal>
+
+          <Modal
+            isOpen={Boolean(deleteTarget)}
+            onClose={() => {
+              if (!isDeleting) setDeleteTarget(null);
+            }}
+            title="Excluir orçamento?"
+            size="md"
+          >
+            <div className="space-y-4">
+              <p className="text-sm text-gray-600 dark:text-gray-400">
+                Tem certeza que deseja excluir o orçamento{' '}
+                <span className="font-semibold text-gray-900 dark:text-gray-100">
+                  {deleteTarget?.nome}
+                </span>
+                ? Esta ação não pode ser desfeita.
+              </p>
+              <div className="flex items-center justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
+                <button
+                  type="button"
+                  disabled={isDeleting}
+                  onClick={() => setDeleteTarget(null)}
+                  className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  disabled={isDeleting}
+                  onClick={() => void confirmarExclusao()}
+                  className="inline-flex items-center gap-2 rounded-lg border border-red-300 bg-red-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-700 disabled:opacity-50"
+                >
+                  {isDeleting ? 'Excluindo…' : 'Excluir'}
                 </button>
               </div>
             </div>

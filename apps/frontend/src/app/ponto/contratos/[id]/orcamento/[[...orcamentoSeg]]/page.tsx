@@ -31,6 +31,32 @@ function LegacyOrcamentoQueryRedirect({ contractId }: { contractId: string }) {
   return null;
 }
 
+function OrcamentoEmbeddedWithQueryFlags({
+  lockedCostCenterId,
+  embeddedContractId,
+  embeddedContractName,
+  embeddedOrcamentoIdFromRoute,
+}: {
+  lockedCostCenterId: string;
+  embeddedContractId: string;
+  embeddedContractName: string;
+  embeddedOrcamentoIdFromRoute: string | null;
+}) {
+  const searchParams = useSearchParams();
+  const novoFlag = (searchParams?.get('novo') || '').trim().toLowerCase();
+  const autoOpenNovoOrcamento =
+    (novoFlag === '1' || novoFlag === 'true') && !embeddedOrcamentoIdFromRoute;
+  return (
+    <OrcamentoPageView
+      lockedCostCenterId={lockedCostCenterId}
+      embeddedContractId={embeddedContractId}
+      embeddedContractName={embeddedContractName}
+      embeddedOrcamentoIdFromRoute={embeddedOrcamentoIdFromRoute}
+      autoOpenNovoOrcamento={autoOpenNovoOrcamento}
+    />
+  );
+}
+
 export default function ContratoOrcamentoPage() {
   const params = useParams();
   const router = useRouter();
@@ -169,7 +195,7 @@ export default function ContratoOrcamentoPage() {
   return (
     <Suspense fallback={<Loading message="Carregando orçamento..." size="lg" />}>
       <LegacyOrcamentoQueryRedirect contractId={contractId} />
-      <OrcamentoPageView
+      <OrcamentoEmbeddedWithQueryFlags
         lockedCostCenterId={contract.costCenterId}
         embeddedContractId={contractId}
         embeddedContractName={typeof contract.name === 'string' ? contract.name.trim() : ''}
