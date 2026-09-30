@@ -151,6 +151,8 @@ export type OrcamentoPageProps = {
   embeddedOrcamentoIdFromRoute?: string | null;
   /** Abre o modal «Novo orçamento» ao carregar a lista (ex.: `?novo=1` na lista global). */
   autoOpenNovoOrcamento?: boolean;
+  /** Abre o modal de importar orçamento ao carregar a lista (ex.: `?importar=1` na lista global). */
+  autoOpenImportOrcamento?: boolean;
   /** Só a aba Cronograma (página dedicada `/ponto/cronogramas/...`). */
   cronogramaOnly?: boolean;
   /** Só a Ficha de demanda, com colunas de compra (página `/ponto/fds-aprovadas/[id]`). */
@@ -5304,6 +5306,7 @@ export function OrcamentoPageView({
   embeddedContractName = null,
   embeddedOrcamentoIdFromRoute = null,
   autoOpenNovoOrcamento = false,
+  autoOpenImportOrcamento = false,
   cronogramaOnly = false,
   fichaDemandaOnly = false,
   fichaDemandaRecord = null,
@@ -5312,6 +5315,7 @@ export function OrcamentoPageView({
   const { costCenters, isLoading: loadingCentros } = useCostCenters();
   const [centroCustoId, setCentroCustoId] = useState<string | null>(() => lockedCostCenterId ?? null);
   const autoNovoOrcamentoHandledRef = useRef(false);
+  const autoImportOrcamentoHandledRef = useRef(false);
   const [composicoes, setComposicoes] = useState<ComposicaoItem[]>([]);
   const [servicos, setServicos] = useState<ServicoPadrao[]>([]);
   /** Evita falha em lote no Strict Mode: o updater de setServicos pode rodar 2× com o mesmo prev e marcar duplicata. */
@@ -6318,6 +6322,30 @@ export function OrcamentoPageView({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- dispara uma vez ao listar com autoOpen
   }, [
     autoOpenNovoOrcamento,
+    centroCustoId,
+    carregandoListaOrcamentos,
+    orcamentoAtivoId,
+    fichaDemandaOnly,
+    cronogramaOnly,
+    embeddedContractId,
+    router,
+  ]);
+
+  /** Entrada pela lista global `/ponto/orcamentos` com `?importar=1`. */
+  useEffect(() => {
+    if (!autoOpenImportOrcamento) return;
+    if (autoImportOrcamentoHandledRef.current) return;
+    if (fichaDemandaOnly || cronogramaOnly) return;
+    if (orcamentoAtivoId) return;
+    if (!centroCustoId || carregandoListaOrcamentos) return;
+    autoImportOrcamentoHandledRef.current = true;
+    if (embeddedContractId) {
+      router.replace(`/ponto/contratos/${embeddedContractId}/orcamento`, { scroll: false });
+    }
+    abrirModalEscolherOrigemImport();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- dispara uma vez ao listar com autoOpen import
+  }, [
+    autoOpenImportOrcamento,
     centroCustoId,
     carregandoListaOrcamentos,
     orcamentoAtivoId,

@@ -44,8 +44,12 @@ function OrcamentoEmbeddedWithQueryFlags({
 }) {
   const searchParams = useSearchParams();
   const novoFlag = (searchParams?.get('novo') || '').trim().toLowerCase();
+  const importarFlag = (searchParams?.get('importar') || '').trim().toLowerCase();
+  const onList = !embeddedOrcamentoIdFromRoute;
   const autoOpenNovoOrcamento =
-    (novoFlag === '1' || novoFlag === 'true') && !embeddedOrcamentoIdFromRoute;
+    onList && (novoFlag === '1' || novoFlag === 'true');
+  const autoOpenImportOrcamento =
+    onList && (importarFlag === '1' || importarFlag === 'true');
   return (
     <OrcamentoPageView
       lockedCostCenterId={lockedCostCenterId}
@@ -53,6 +57,7 @@ function OrcamentoEmbeddedWithQueryFlags({
       embeddedContractName={embeddedContractName}
       embeddedOrcamentoIdFromRoute={embeddedOrcamentoIdFromRoute}
       autoOpenNovoOrcamento={autoOpenNovoOrcamento}
+      autoOpenImportOrcamento={autoOpenImportOrcamento}
     />
   );
 }

@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Calculator, Filter, Plus, Search, X } from 'lucide-react';
+import { Calculator, Filter, Plus, Search, Upload, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { MainLayout } from '@/components/layout/MainLayout';
@@ -146,8 +146,8 @@ export default function OrcamentosPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [contratoFiltro, setContratoFiltro] = useState(contratoFromUrl);
   const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
-  const [isNovoModalOpen, setIsNovoModalOpen] = useState(false);
-  const [novoContratoId, setNovoContratoId] = useState('');
+  const [contratoActionModal, setContratoActionModal] = useState<'novo' | 'importar' | null>(null);
+  const [actionContratoId, setActionContratoId] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [deleteTarget, setDeleteTarget] = useState<OrcamentoListItem | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -300,35 +300,37 @@ export default function OrcamentosPage() {
     router.push(`/ponto/contratos/${o.contractId}/orcamento/${o.orcamentoId}`);
   };
 
-  const irParaCriarNoContrato = (contractId: string) => {
-    router.push(`/ponto/contratos/${contractId}/orcamento?novo=1`);
+  const irParaAcaoNoContrato = (contractId: string, acao: 'novo' | 'importar') => {
+    const qs = acao === 'importar' ? 'importar=1' : 'novo=1';
+    router.push(`/ponto/contratos/${contractId}/orcamento?${qs}`);
   };
 
-  const abrirFluxoNovoOrcamento = () => {
+  const abrirFluxoComContrato = (acao: 'novo' | 'importar') => {
     if (contractsComOrcamento.length === 0) {
       toast.error('Nenhum contrato com permissão de orçamento.');
       return;
     }
     if (contratoFiltro && contractsComOrcamento.some((c) => c.id === contratoFiltro)) {
-      irParaCriarNoContrato(contratoFiltro);
+      irParaAcaoNoContrato(contratoFiltro, acao);
       return;
     }
     if (contractsComOrcamento.length === 1) {
-      irParaCriarNoContrato(contractsComOrcamento[0].id);
+      irParaAcaoNoContrato(contractsComOrcamento[0].id, acao);
       return;
     }
-    setNovoContratoId('');
-    setIsNovoModalOpen(true);
+    setActionContratoId('');
+    setContratoActionModal(acao);
   };
 
-  const confirmarNovoOrcamento = () => {
-    const id = novoContratoId.trim();
-    if (!id) {
+  const confirmarAcaoComContrato = () => {
+    const id = actionContratoId.trim();
+    if (!id || !contratoActionModal) {
       toast.error('Selecione o contrato.');
       return;
     }
-    setIsNovoModalOpen(false);
-    irParaCriarNoContrato(id);
+    const acao = contratoActionModal;
+    setContratoActionModal(null);
+    irParaAcaoNoContrato(id, acao);
   };
 
   const confirmarExclusao = async () => {
@@ -432,7 +434,17 @@ export default function OrcamentosPage() {
                   </button>
                   <button
                     type="button"
-                    onClick={abrirFluxoNovoOrcamento}
+                    onClick={() => abrirFluxoComContrato('importar')}
+                    disabled={isLoadingList || contractsComOrcamento.length === 0}
+                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-700 transition-colors hover:bg-gray-50 active:bg-gray-100 disabled:pointer-events-none disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700 dark:active:bg-gray-600"
+                    title="Importar orçamento"
+                    aria-label="Importar orçamento"
+                  >
+                    <Upload className="h-4 w-4" aria-hidden />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => abrirFluxoComContrato('novo')}
                     disabled={isLoadingList || contractsComOrcamento.length === 0}
                     className="inline-flex h-10 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-red-200 bg-red-50 px-4 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 active:bg-red-200/80 disabled:pointer-events-none disabled:opacity-50 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40 dark:active:bg-red-900/55"
                   >
@@ -457,14 +469,24 @@ export default function OrcamentosPage() {
                         : 'Não há orçamentos nos contratos disponíveis'}
                   </p>
                   {contractsComOrcamento.length > 0 && !searchTerm.trim() && !hasActiveFilters ? (
-                    <button
-                      type="button"
-                      onClick={abrirFluxoNovoOrcamento}
-                      className="mt-4 inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
-                    >
-                      <Plus className="h-4 w-4" aria-hidden />
-                      Criar orçamento
-                    </button>
+                    <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => abrirFluxoComContrato('importar')}
+                        className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                      >
+                        <Upload className="h-4 w-4" aria-hidden />
+                        Importar orçamento
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => abrirFluxoComContrato('novo')}
+                        className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
+                      >
+                        <Plus className="h-4 w-4" aria-hidden />
+                        Criar orçamento
+                      </button>
+                    </div>
                   ) : null}
                 </div>
               ) : (
@@ -620,22 +642,24 @@ export default function OrcamentosPage() {
           </Modal>
 
           <Modal
-            isOpen={isNovoModalOpen}
-            onClose={() => setIsNovoModalOpen(false)}
-            title="Novo orçamento"
+            isOpen={contratoActionModal != null}
+            onClose={() => setContratoActionModal(null)}
+            title={contratoActionModal === 'importar' ? 'Importar orçamento' : 'Novo orçamento'}
             size="md"
           >
             <div className="space-y-4">
               <p className="text-sm text-gray-600 dark:text-gray-400">
-                Selecione o contrato em que o orçamento será criado.
+                {contratoActionModal === 'importar'
+                  ? 'Selecione o contrato em que o orçamento será importado.'
+                  : 'Selecione o contrato em que o orçamento será criado.'}
               </p>
               <div>
                 <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                   Contrato
                 </label>
                 <StringSingleSelectDropdown
-                  value={novoContratoId}
-                  onChange={setNovoContratoId}
+                  value={actionContratoId}
+                  onChange={setActionContratoId}
                   options={contratoFilterOptions}
                   allowEmpty
                   emptyOptionLabel="Selecione…"
@@ -648,14 +672,14 @@ export default function OrcamentosPage() {
               <div className="flex items-center justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
                 <button
                   type="button"
-                  onClick={() => setIsNovoModalOpen(false)}
+                  onClick={() => setContratoActionModal(null)}
                   className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
                 >
                   Cancelar
                 </button>
                 <button
                   type="button"
-                  onClick={confirmarNovoOrcamento}
+                  onClick={confirmarAcaoComContrato}
                   className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-100 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-900/40"
                 >
                   Continuar
