@@ -307,25 +307,14 @@ export function usePermissions() {
     ? canAction(employeesKey, 'excluir')
     : hasEmployeeAcesso;
 
-  const hasContractAcesso = can(contractsKey);
   /**
-   * Com matriz granular (Ver/Criar/Editar/Excluir), `acesso` sozinho não libera mutações.
-   * Só `ver` → pode ver, não criar/editar/excluir (mesmo padrão de Funcionários).
-   * Cadastro legado: só `acesso`, sem linhas CRUD → mantém módulo inteiro.
+   * Contratos: mutações só com ação explícita (criar/editar/excluir).
+   * A coluna «Ver» da matriz grava `acesso` (e/ou `ver`) — isso libera a tela,
+   * mas NÃO pode liberar editar/excluir (bug antigo: só `acesso` = módulo inteiro).
    */
-  const CONTRACT_MODULE_CRUD = ['ver', 'criar', 'editar', 'excluir'] as const;
-  const hasContractGranular =
-    !isElevatedUser &&
-    CONTRACT_MODULE_CRUD.some((a) => allowedActionSet.has(`${contractsKey}:${a}`));
-  const canCreateContracts = hasContractGranular
-    ? canAction(contractsKey, 'criar')
-    : hasContractAcesso;
-  const canEditContracts = hasContractGranular
-    ? canAction(contractsKey, 'editar')
-    : hasContractAcesso;
-  const canDeleteContracts = hasContractGranular
-    ? canAction(contractsKey, 'excluir')
-    : hasContractAcesso;
+  const canCreateContracts = canAction(contractsKey, 'criar');
+  const canEditContracts = canAction(contractsKey, 'editar');
+  const canDeleteContracts = canAction(contractsKey, 'excluir');
 
   /** Rescisão / alteração função-salário: admin, equipe DP (gerenciar), Controle «criar solicitações restritas» ou Gestor DP no contrato/CC. */
   const canCreateSensitiveDpRequestType = (

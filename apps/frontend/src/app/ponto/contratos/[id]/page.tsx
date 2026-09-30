@@ -1023,13 +1023,14 @@ export default function ContractDetailPage() {
   const canAccessReunioesAba = canAccessContractReunioesTab(contractId);
   const canAccessOrdemServicoModulo = canAccessContractOrdemServicoTab(contractId);
   const canAccessProducaoSemanalModulo = canAccessContractProducaoSemanalTab(contractId);
-  // Liberado na aba Contratos = pode cadastrar/editar neste contrato (sem exigir coluna Criar da aba Acesso)
+  // Liberado na aba Contratos = operar no contrato (OS, produção, etc.).
+  // Editar/excluir o cadastro do contrato na listagem exige Editar/Excluir na matriz Acesso.
   const hasThisContractAccess = isElevatedUser || canAccessContract(contractId);
   const canCreateContrato =
     isElevatedUser || permissions.canCreateContracts || hasThisContractAccess;
   const canEditContrato =
     isElevatedUser || permissions.canEditContracts || hasThisContractAccess;
-  /** Excluir o contrato na listagem — só matriz Contratos → Excluir (ou admin). */
+  /** Excluir o cadastro do contrato — só matriz Contratos → Excluir (ou admin). */
   const canDeleteContrato = isElevatedUser || permissions.canDeleteContracts;
   /** Excluir OS na aba do contrato — quem pode criar OS também pode excluir. */
   const canDeleteOs = canCreateContrato;

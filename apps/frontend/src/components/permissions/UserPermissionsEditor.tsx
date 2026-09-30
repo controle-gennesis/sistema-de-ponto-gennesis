@@ -295,7 +295,13 @@ function buildPermissionsSnapshotForCache(
     if (DEPRECATED_CONTROLE_KEYS.has(module)) continue;
     out.push({ module, action: PERMISSION_ACCESS_ACTION });
   }
-  for (const action of Array.from(contractActions)) {
+  // Coluna «Ver» grava acesso ao módulo; persistir também `ver` para a matriz
+  // granular não cair no legado «só acesso = editar/excluir».
+  const contractActionsToSave = new Set(contractActions);
+  if (hasAnyContractsData && contractActionsToSave.size === 0) {
+    contractActionsToSave.add('ver');
+  }
+  for (const action of Array.from(contractActionsToSave)) {
     out.push({ module: CONTRACTS_MODULE_KEY, action });
   }
   for (const action of Array.from(employeeActions)) {
@@ -1937,6 +1943,7 @@ export function UserPermissionsEditor({
       next.add(CONTRACTS_MODULE_KEY);
       return next;
     });
+    setContractActionsSet(new Set(['ver']));
   };
 
   const toggleEmployeeVerCell = () => {

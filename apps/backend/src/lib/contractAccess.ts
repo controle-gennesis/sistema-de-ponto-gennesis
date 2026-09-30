@@ -204,36 +204,17 @@ async function assertUserHasContractMutation(
 ): Promise<void> {
   if (isAdmin) return;
 
-  const crudActions = ['ver', 'criar', 'editar', 'excluir'] as const;
-  const granularRows = await prisma.userPermission.findMany({
+  // Só a ação explícita libera mutação. «Ver»/`acesso` não basta.
+  const row = await prisma.userPermission.findFirst({
     where: {
       userId,
       module: CONTRACTS_MODULE_KEY,
-      action: { in: [...crudActions] },
-      allowed: true,
-    },
-    select: { action: true },
-  });
-
-  // Matriz nova: exige a ação explícita.
-  if (granularRows.length > 0) {
-    if (!granularRows.some((r) => r.action === action)) {
-      throw createError(message, 403);
-    }
-    return;
-  }
-
-  // Legado: só `acesso` no módulo (sem Ver/Criar/Editar/Excluir) → libera mutação.
-  const hasAcesso = await prisma.userPermission.findFirst({
-    where: {
-      userId,
-      module: CONTRACTS_MODULE_KEY,
-      action: PERMISSION_ACCESS_ACTION,
+      action,
       allowed: true,
     },
     select: { id: true },
   });
-  if (!hasAcesso) {
+  if (!row) {
     throw createError(message, 403);
   }
 }
