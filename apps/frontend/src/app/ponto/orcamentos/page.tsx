@@ -299,11 +299,12 @@ export default function OrcamentosPage() {
   const user = userData?.data || { name: 'Usuário', role: 'EMPLOYEE' };
 
   const abrirOrcamento = (o: OrcamentoListItem) => {
-    router.push(`/ponto/contratos/${o.contractId}/orcamento/${o.orcamentoId}`);
+    router.push(`/ponto/orcamentos/${o.contractId}/${o.orcamentoId}`);
   };
 
   const irParaNovoNoContrato = (contractId: string) => {
-    router.push(`/ponto/contratos/${contractId}/orcamento?novo=1`);
+    // Cria no contrato, mas com origem na lista global para o breadcrumb/URL finais.
+    router.push(`/ponto/contratos/${contractId}/orcamento?novo=1&origem=lista`);
   };
 
   const abrirFluxoImportar = () => {

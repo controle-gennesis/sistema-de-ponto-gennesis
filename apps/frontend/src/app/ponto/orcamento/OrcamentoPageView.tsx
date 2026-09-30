@@ -168,6 +168,11 @@ export type OrcamentoPageProps = {
   onImportShellDismiss?: () => void;
   /** Só a aba Cronograma (página dedicada `/ponto/cronogramas/...`). */
   cronogramaOnly?: boolean;
+  /**
+   * Entrada pela lista global `/ponto/orcamentos/:contrato/:orcamento`.
+   * URLs e breadcrumb ficam em Orçamentos (sem passar por Contratos).
+   */
+  listaGlobalEntry?: boolean;
   /** Só a Ficha de demanda, com colunas de compra (página `/ponto/fds-aprovadas/[id]`). */
   fichaDemandaOnly?: boolean;
   fichaDemandaRecord?: FichaDemandaApprovalRecord | null;
@@ -5326,6 +5331,7 @@ export function OrcamentoPageView({
   importShellOnly = false,
   onImportShellDismiss,
   cronogramaOnly = false,
+  listaGlobalEntry = false,
   fichaDemandaOnly = false,
   fichaDemandaRecord = null,
 }: OrcamentoPageProps = {}) {
@@ -5542,13 +5548,22 @@ export function OrcamentoPageView({
   const autosaveProtecaoAvisadaRef = useRef<string | null>(null);
 
   const embeddedOrcamentoBasePath = embeddedContractId
-    ? `/ponto/contratos/${embeddedContractId}/orcamento`
+    ? listaGlobalEntry
+      ? `/ponto/orcamentos/${embeddedContractId}`
+      : `/ponto/contratos/${embeddedContractId}/orcamento`
     : null;
 
   const navigateEmbeddedOrcamentoPath = useCallback(
     (orcamentoId: string | null) => {
       if (fichaDemandaOnly || !embeddedOrcamentoBasePath) return;
-      const target = orcamentoId ? `${embeddedOrcamentoBasePath}/${orcamentoId}` : embeddedOrcamentoBasePath;
+      // Lista global: ao fechar/excluir volta para `/ponto/orcamentos`, não para uma lista por contrato.
+      if (listaGlobalEntry && !orcamentoId) {
+        router.replace('/ponto/orcamentos', { scroll: false });
+        return;
+      }
+      const target = orcamentoId
+        ? `${embeddedOrcamentoBasePath}/${orcamentoId}`
+        : embeddedOrcamentoBasePath;
       // Abrir: push para a seta do navegador voltar à lista de orçamentos.
       // Fechar/excluir: replace para não deixar o detalhe excluído no histórico.
       if (orcamentoId) {
@@ -5557,7 +5572,7 @@ export function OrcamentoPageView({
         router.replace(target, { scroll: false });
       }
     },
-    [embeddedOrcamentoBasePath, router, fichaDemandaOnly]
+    [embeddedOrcamentoBasePath, router, fichaDemandaOnly, listaGlobalEntry]
   );
 
   // useLayoutEffect: evita 1 frame com URL na lista e UI/breadcrumb ainda no orçamento aberto.
@@ -5635,7 +5650,7 @@ export function OrcamentoPageView({
   const abrirAposImportarOrcamento = (contractId: string, orcamentoId: string) => {
     if (deferContractOnImport || importShellOnly) {
       if (contractId) {
-        router.push(`/ponto/contratos/${contractId}/orcamento/${orcamentoId}`, { scroll: false });
+        router.push(`/ponto/orcamentos/${contractId}/${orcamentoId}`, { scroll: false });
       }
       onImportShellDismiss?.();
       return;
@@ -6380,7 +6395,10 @@ export function OrcamentoPageView({
     if (!centroCustoId || carregandoListaOrcamentos) return;
     autoNovoOrcamentoHandledRef.current = true;
     if (embeddedContractId) {
-      router.replace(`/ponto/contratos/${embeddedContractId}/orcamento`, { scroll: false });
+      const origemQs = listaGlobalEntry ? '?origem=lista' : '';
+      router.replace(`/ponto/contratos/${embeddedContractId}/orcamento${origemQs}`, {
+        scroll: false,
+      });
     }
     void criarNovoOrcamento();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- dispara uma vez ao listar com autoOpen
@@ -6391,6 +6409,7 @@ export function OrcamentoPageView({
     orcamentoAtivoId,
     fichaDemandaOnly,
     cronogramaOnly,
+    listaGlobalEntry,
     embeddedContractId,
     router,
   ]);
@@ -6409,7 +6428,10 @@ export function OrcamentoPageView({
     if (!centroCustoId || carregandoListaOrcamentos) return;
     autoImportOrcamentoHandledRef.current = true;
     if (embeddedContractId) {
-      router.replace(`/ponto/contratos/${embeddedContractId}/orcamento`, { scroll: false });
+      const origemQs = listaGlobalEntry ? '?origem=lista' : '';
+      router.replace(`/ponto/contratos/${embeddedContractId}/orcamento${origemQs}`, {
+        scroll: false,
+      });
     }
     abrirModalEscolherOrigemImport();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- dispara uma vez ao listar com autoOpen import
@@ -6422,6 +6444,7 @@ export function OrcamentoPageView({
     orcamentoAtivoId,
     fichaDemandaOnly,
     cronogramaOnly,
+    listaGlobalEntry,
     embeddedContractId,
     router,
   ]);
@@ -9184,8 +9207,9 @@ export function OrcamentoPageView({
     const listHref = cronogramaOnly ? '/ponto/cronogramas' : '/ponto/orcamentos';
     const crumbs: { label: string; href?: string }[] = [];
 
-    if (cronogramaOnly) {
-      // Não usar fallback «Cronograma» — colide com o crumb da rota e some do breadcrumb.
+    // Lista global / Cronogramas: a rota já traz «Orçamentos»/«Cronograma» — só o nome do item.
+    if (cronogramaOnly || listaGlobalEntry) {
+      // Não usar fallback genérico — colide com o crumb da rota e some do breadcrumb.
       if (orcamentoIdNaRota && nomeOrcamentoSemCodigo) {
         crumbs.push({ label: nomeOrcamentoSemCodigo });
       }
@@ -9208,6 +9232,7 @@ export function OrcamentoPageView({
     nomeContratoBreadcrumb,
     nomeOrcamentoSemCodigo,
     cronogramaOnly,
+    listaGlobalEntry,
     fichaDemandaOnly,
     fichaDemandaRecord?.codFichaDemanda,
   ]);

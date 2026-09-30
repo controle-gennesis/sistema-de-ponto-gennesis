@@ -45,11 +45,14 @@ function OrcamentoEmbeddedWithQueryFlags({
   const searchParams = useSearchParams();
   const novoFlag = (searchParams?.get('novo') || '').trim().toLowerCase();
   const importarFlag = (searchParams?.get('importar') || '').trim().toLowerCase();
+  const origemFlag = (searchParams?.get('origem') || '').trim().toLowerCase();
   const onList = !embeddedOrcamentoIdFromRoute;
   const autoOpenNovoOrcamento =
     onList && (novoFlag === '1' || novoFlag === 'true');
   const autoOpenImportOrcamento =
     onList && (importarFlag === '1' || importarFlag === 'true');
+  /** Veio da lista global `/ponto/orcamentos` — após criar, abre na rota sem Contratos. */
+  const listaGlobalEntry = origemFlag === 'lista' || origemFlag === 'orcamentos';
   return (
     <OrcamentoPageView
       lockedCostCenterId={lockedCostCenterId}
@@ -58,6 +61,7 @@ function OrcamentoEmbeddedWithQueryFlags({
       embeddedOrcamentoIdFromRoute={embeddedOrcamentoIdFromRoute}
       autoOpenNovoOrcamento={autoOpenNovoOrcamento}
       autoOpenImportOrcamento={autoOpenImportOrcamento}
+      listaGlobalEntry={listaGlobalEntry}
     />
   );
 }
