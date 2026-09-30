@@ -153,6 +153,19 @@ export type OrcamentoPageProps = {
   autoOpenNovoOrcamento?: boolean;
   /** Abre o modal de importar orçamento ao carregar a lista (ex.: `?importar=1` na lista global). */
   autoOpenImportOrcamento?: boolean;
+  /**
+   * Importação iniciada na lista global `/ponto/orcamentos`: não exige contrato no início;
+   * o contrato é escolhido nos modais de importação.
+   */
+  deferContractOnImport?: boolean;
+  /** Contratos disponíveis para escolher durante a importação (modo lista global). */
+  importContractOptions?: Array<{ id: string; costCenterId: string; label: string }>;
+  /** Pré-seleciona o contrato no modal de importação (ex.: filtro ativo na lista). */
+  initialImportContractId?: string | null;
+  /** Só renderiza os modais de importação (overlay na lista global). */
+  importShellOnly?: boolean;
+  /** Chamado ao cancelar/fechar o fluxo de importação no modo shell. */
+  onImportShellDismiss?: () => void;
   /** Só a aba Cronograma (página dedicada `/ponto/cronogramas/...`). */
   cronogramaOnly?: boolean;
   /** Só a Ficha de demanda, com colunas de compra (página `/ponto/fds-aprovadas/[id]`). */
@@ -5307,6 +5320,11 @@ export function OrcamentoPageView({
   embeddedOrcamentoIdFromRoute = null,
   autoOpenNovoOrcamento = false,
   autoOpenImportOrcamento = false,
+  deferContractOnImport = false,
+  importContractOptions = [],
+  initialImportContractId = null,
+  importShellOnly = false,
+  onImportShellDismiss,
   cronogramaOnly = false,
   fichaDemandaOnly = false,
   fichaDemandaRecord = null,
@@ -5314,6 +5332,9 @@ export function OrcamentoPageView({
   const router = useRouter();
   const { costCenters, isLoading: loadingCentros } = useCostCenters();
   const [centroCustoId, setCentroCustoId] = useState<string | null>(() => lockedCostCenterId ?? null);
+  const [importContratoSelecionadoId, setImportContratoSelecionadoId] = useState(
+    () => (initialImportContractId || '').trim()
+  );
   const autoNovoOrcamentoHandledRef = useRef(false);
   const autoImportOrcamentoHandledRef = useRef(false);
   const [composicoes, setComposicoes] = useState<ComposicaoItem[]>([]);
@@ -5583,8 +5604,51 @@ export function OrcamentoPageView({
     return name || null;
   }, [centroCustoId, costCenters]);
 
-  const abrirModalImportarOrcamentoExcel = () => {
+  const importContractSelectOptions = useMemo(
+    () =>
+      (importContractOptions ?? []).map((c) => ({
+        value: c.id,
+        label: c.label,
+      })),
+    [importContractOptions]
+  );
+
+  const resolveImportTarget = (): { contractId: string; costCenterId: string } | null => {
+    if (deferContractOnImport) {
+      const opt = (importContractOptions ?? []).find((c) => c.id === importContratoSelecionadoId);
+      if (!opt?.costCenterId) {
+        toast.error('Selecione o contrato.');
+        return null;
+      }
+      return { contractId: opt.id, costCenterId: String(opt.costCenterId) };
+    }
     if (!centroCustoId) {
+      toast.error('Selecione um contrato antes de importar.');
+      return null;
+    }
+    return {
+      contractId: embeddedContractId || '',
+      costCenterId: centroCustoId,
+    };
+  };
+
+  const abrirAposImportarOrcamento = (contractId: string, orcamentoId: string) => {
+    if (deferContractOnImport || importShellOnly) {
+      if (contractId) {
+        router.push(`/ponto/contratos/${contractId}/orcamento/${orcamentoId}`, { scroll: false });
+      }
+      onImportShellDismiss?.();
+      return;
+    }
+    navigateEmbeddedOrcamentoPath(orcamentoId);
+  };
+
+  const dismissImportShellIfNeeded = () => {
+    if (importShellOnly) onImportShellDismiss?.();
+  };
+
+  const abrirModalImportarOrcamentoExcel = () => {
+    if (!deferContractOnImport && !centroCustoId) {
       toast.error('Selecione um contrato antes de importar.');
       return;
     }
@@ -5593,7 +5657,7 @@ export function OrcamentoPageView({
   };
 
   const abrirModalEscolherOrigemImport = () => {
-    if (!centroCustoId) {
+    if (!deferContractOnImport && !centroCustoId) {
       toast.error('Selecione um contrato antes de importar.');
       return;
     }
@@ -6331,12 +6395,17 @@ export function OrcamentoPageView({
     router,
   ]);
 
-  /** Entrada pela lista global `/ponto/orcamentos` com `?importar=1`. */
+  /** Entrada pela lista global `/ponto/orcamentos` com `?importar=1` ou shell de importação. */
   useEffect(() => {
     if (!autoOpenImportOrcamento) return;
     if (autoImportOrcamentoHandledRef.current) return;
     if (fichaDemandaOnly || cronogramaOnly) return;
     if (orcamentoAtivoId) return;
+    if (deferContractOnImport || importShellOnly) {
+      autoImportOrcamentoHandledRef.current = true;
+      abrirModalEscolherOrigemImport();
+      return;
+    }
     if (!centroCustoId || carregandoListaOrcamentos) return;
     autoImportOrcamentoHandledRef.current = true;
     if (embeddedContractId) {
@@ -6346,6 +6415,8 @@ export function OrcamentoPageView({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- dispara uma vez ao listar com autoOpen import
   }, [
     autoOpenImportOrcamento,
+    deferContractOnImport,
+    importShellOnly,
     centroCustoId,
     carregandoListaOrcamentos,
     orcamentoAtivoId,
@@ -6354,6 +6425,12 @@ export function OrcamentoPageView({
     embeddedContractId,
     router,
   ]);
+
+  useEffect(() => {
+    if (!deferContractOnImport) return;
+    const next = (initialImportContractId || '').trim();
+    if (next) setImportContratoSelecionadoId(next);
+  }, [deferContractOnImport, initialImportContractId]);
 
   const confirmarCriacaoNovoOrcamento = async () => {
     if (!centroCustoId || isCreatingOrcamento) return;
@@ -6831,7 +6908,7 @@ export function OrcamentoPageView({
   }, []);
 
   const abrirModalImportarOrcafascioOrcamentos = () => {
-    if (!centroCustoId) {
+    if (!deferContractOnImport && !centroCustoId) {
       toast.error('Selecione um contrato antes de importar.');
       return;
     }
@@ -7254,10 +7331,10 @@ export function OrcamentoPageView({
    * sem alterar a base do contrato; abre direto na aba Orçamento (montagem).
    */
   const importarPlanilhaComoNovoOrcamento = async (file: File): Promise<boolean> => {
-    if (!centroCustoId) {
-      toast.error('Selecione um contrato (centro de custo) antes de importar.');
-      return false;
-    }
+    const target = resolveImportTarget();
+    if (!target) return false;
+    const { contractId: importContractId, costCenterId: ccId } = target;
+    setCentroCustoId(ccId);
     setIsImportandoOrcamento(true);
     try {
       const parsed = await parsePlanilhaOrcamentoPerfeito(file);
@@ -7314,7 +7391,7 @@ export function OrcamentoPageView({
           : parsed.metaPlanilha.descricao || parsed.metaPlanilha.osNumeroPasta || `Importado — ${nomeBase}`
       ).slice(0, 120);
 
-      const entry = await criarOrcamentoApi(centroCustoId);
+      const entry = await criarOrcamentoApi(ccId);
       const subtitulosNoOrcamento: string[] = [];
       const quantidadesPorItem: Record<string, number> = {};
       const dimensoesPorItemImport: Record<string, DimensoesItem> = {};
@@ -7359,10 +7436,10 @@ export function OrcamentoPageView({
       };
 
       const servicosParaApi = servicosSemQuantidadePlanilha(servicosImportados);
-      const padraoContrato = await fetchServicosPadraoFromApi(centroCustoId);
+      const padraoContrato = await fetchServicosPadraoFromApi(ccId);
       const importsMesclados: ImportRecord[] = Array.isArray(padraoContrato?.imports) ? padraoContrato.imports : [];
 
-      await saveOrcamentoToApi(centroCustoId, entry.id, {
+      await saveOrcamentoToApi(ccId, entry.id, {
         imports: importsMesclados,
         servicos: servicosParaApi,
         sessaoOrcamento: {
@@ -7376,7 +7453,7 @@ export function OrcamentoPageView({
         }
       });
 
-      await renomearOrcamentoApi(centroCustoId, entry.id, nomeLista);
+      await renomearOrcamentoApi(ccId, entry.id, nomeLista);
       const entryAtualizado = { ...entry, nome: nomeLista };
       setListaOrcamentos(prev => [entryAtualizado, ...prev.filter(o => o.id !== entry.id)]);
       setNomeOrcamentoRascunho(nomeLista);
@@ -7399,7 +7476,7 @@ export function OrcamentoPageView({
       };
       servicosRef.current = servicosParaApi;
       setOrcamentoAtivoId(entry.id);
-      navigateEmbeddedOrcamentoPath(entry.id);
+      abrirAposImportarOrcamento(importContractId, entry.id);
       setOrcamentoViewTab('montagem');
       toast.success(
         `Novo orçamento criado com ${servicosImportados.length} serviço(s).${
@@ -7444,10 +7521,10 @@ export function OrcamentoPageView({
    * com serviços/composições/quantidades, e abre na montagem.
    */
   const importarOrcamentoOrcafascioComoNovo = async (): Promise<boolean> => {
-    if (!centroCustoId) {
-      toast.error('Selecione um contrato antes de importar.');
-      return false;
-    }
+    const target = resolveImportTarget();
+    if (!target) return false;
+    const { contractId: importContractId, costCenterId: ccId } = target;
+    setCentroCustoId(ccId);
     if (!orcafascioOrcamentoDetalhe) {
       toast.error('Selecione um orçamento do Orçafascio.');
       return false;
@@ -7536,7 +7613,7 @@ export function OrcamentoPageView({
         codigoOrigem ? `${nomeOrigem} (${codigoOrigem})` : `Orçafascio — ${nomeOrigem}`
       ).slice(0, 120);
 
-      const entry = await criarOrcamentoApi(centroCustoId, nomeLista);
+      const entry = await criarOrcamentoApi(ccId, nomeLista);
       const usarMemoriaCalculo = orcafascioImportUsarMemoria;
       const modoArredondamento = orcafascioImportModoArredondamento;
       const subtitulosNoOrcamento: string[] = [];
@@ -7585,12 +7662,12 @@ export function OrcamentoPageView({
       };
 
       const servicosParaApi = servicosSemQuantidadePlanilha(servicosImportados);
-      const padraoContrato = await fetchServicosPadraoFromApi(centroCustoId);
+      const padraoContrato = await fetchServicosPadraoFromApi(ccId);
       const importsMesclados: ImportRecord[] = Array.isArray(padraoContrato?.imports)
         ? padraoContrato.imports
         : [];
 
-      await saveOrcamentoToApi(centroCustoId, entry.id, {
+      await saveOrcamentoToApi(ccId, entry.id, {
         imports: importsMesclados,
         servicos: servicosParaApi,
         sessaoOrcamento: {
@@ -7603,7 +7680,7 @@ export function OrcamentoPageView({
       });
 
       // Já deixamos o detalhe no cache — abrir o orçamento não espera o S3 de novo.
-      seedOrcamentoDetailCache(centroCustoId, entry.id, {
+      seedOrcamentoDetailCache(ccId, entry.id, {
         servicos: servicosParaApi,
         imports: importsMesclados,
         sessaoOrcamento: {
@@ -7615,7 +7692,7 @@ export function OrcamentoPageView({
         },
       });
 
-      await renomearOrcamentoApi(centroCustoId, entry.id, nomeLista);
+      await renomearOrcamentoApi(ccId, entry.id, nomeLista);
       const bdiPtsImport = parsePercentualMeta(finApi.bdiPercentual) * 100;
       const entryAtualizado: OrcamentoListaEntry = {
         ...entry,
@@ -7625,7 +7702,7 @@ export function OrcamentoPageView({
       setListaOrcamentos((prev) => [entryAtualizado, ...prev.filter((o) => o.id !== entry.id)]);
       setNomeOrcamentoRascunho(nomeLista);
       setOrcamentoAtivoId(entry.id);
-      navigateEmbeddedOrcamentoPath(entry.id);
+      abrirAposImportarOrcamento(importContractId, entry.id);
       setOrcamentoViewTab(usarMemoriaCalculo ? 'memorial' : 'montagem');
 
       setOrcafascioImportUsarMemoria(false);
@@ -11373,8 +11450,13 @@ export function OrcamentoPageView({
       })
     : ({ route: '/ponto/orcamentos' as const, contractId: undefined as string | undefined });
 
+  const protectedRouteForShell = importShellOnly
+    ? ({ route: '/ponto/orcamentos' as const, contractId: undefined as string | undefined })
+    : protectedRoute;
+
   return (
-    <ProtectedRoute route={protectedRoute.route} contractId={protectedRoute.contractId}>
+    <ProtectedRoute route={protectedRouteForShell.route} contractId={protectedRouteForShell.contractId}>
+      {!importShellOnly ? (
       <MainLayout userRole="EMPLOYEE" userName="" onLogout={handleLogout}>
         <div className="space-y-6">
           <div className="text-center">
@@ -12518,7 +12600,11 @@ export function OrcamentoPageView({
                     ) : (
                         <>
                         <div className="table-scroll rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
-                          <table className={`min-w-full border-collapse ${gradeTableCls}`}>
+                          <table
+                            className={`w-full border-collapse table-fixed ${gradeTableCls} ${
+                              mostrarColunasCompraFichaDemanda ? 'min-w-[2200px]' : 'min-w-full'
+                            }`}
+                          >
                             <thead className="bg-gray-50 dark:bg-gray-800 sticky top-0 z-10 border-b border-gray-200 dark:border-gray-700">
                               <tr className={gradeTableRowTrCls}>
                                 <th
@@ -12529,19 +12615,19 @@ export function OrcamentoPageView({
                                 </th>
                                 <th
                                   title={PLANILHA_ANALITICA_TOOLTIP.codigo}
-                                  className="min-w-[5.5rem] px-2 py-2.5 text-center text-[11px] font-semibold leading-tight text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600"
+                                  className="w-[5.5rem] px-2 py-2.5 text-center text-[11px] font-semibold leading-tight text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600"
                                 >
                                   Código
                                 </th>
                                 <th
                                   title={PLANILHA_ANALITICA_TOOLTIP.banco}
-                                  className="min-w-[5.5rem] px-2 py-2.5 text-center text-[11px] font-semibold leading-tight text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600"
+                                  className="w-[5.5rem] px-2 py-2.5 text-center text-[11px] font-semibold leading-tight text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600"
                                 >
                                   Banco
                                 </th>
                                 <th
                                   title={PLANILHA_ANALITICA_TOOLTIP.servico}
-                                  className="min-w-[220px] max-w-[min(520px,55vw)] px-3 py-2.5 text-left text-[11px] font-semibold leading-tight text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600"
+                                  className="min-w-0 px-3 py-2.5 text-left text-[11px] font-semibold leading-tight text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600"
                                 >
                                   Descrição
                                 </th>
@@ -12553,37 +12639,37 @@ export function OrcamentoPageView({
                                 </th>
                                 <th
                                   title={PLANILHA_ANALITICA_TOOLTIP.un}
-                                  className="min-w-[5.5rem] px-2 py-2.5 text-center text-[11px] font-semibold leading-tight text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600"
+                                  className="w-[5.5rem] px-2 py-2.5 text-center text-[11px] font-semibold leading-tight text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600"
                                 >
                                   Unidade
                                 </th>
                                 <th
                                   title={PLANILHA_ANALITICA_TOOLTIP.theadQuantidade}
-                                  className="min-w-[6.5rem] px-2 py-2.5 text-center text-[11px] font-semibold leading-tight text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600"
+                                  className="w-[6.5rem] px-2 py-2.5 text-center text-[11px] font-semibold leading-tight text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600"
                                 >
                                   Quantidade
                                 </th>
                                 <th
                                   title={PLANILHA_ANALITICA_TOOLTIP.theadValorUnitOrc}
-                                  className="min-w-[7.5rem] max-w-[9rem] px-2 py-2.5 text-center text-[11px] font-semibold leading-tight text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600"
+                                  className="w-[7.5rem] px-2 py-2.5 text-center text-[11px] font-semibold leading-tight text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600"
                                 >
                                   Valor unitário orçamento
                                 </th>
                                 <th
                                   title={PLANILHA_ANALITICA_TOOLTIP.theadTotalOrc}
-                                  className="min-w-[7.5rem] max-w-[9rem] px-2 py-2.5 text-center text-[11px] font-semibold leading-tight text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600"
+                                  className="w-[7.5rem] px-2 py-2.5 text-center text-[11px] font-semibold leading-tight text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600"
                                 >
                                   Custo orçamento
                                 </th>
                                 <th
                                   title={PLANILHA_ANALITICA_TOOLTIP.theadValorUnitEst}
-                                  className="min-w-[7.5rem] max-w-[9rem] px-2 py-2.5 text-center text-[11px] font-semibold leading-tight text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600"
+                                  className="w-[7.5rem] px-2 py-2.5 text-center text-[11px] font-semibold leading-tight text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600"
                                 >
                                   Valor unitário estimado (40%)
                                 </th>
                                 <th
                                   title={PLANILHA_ANALITICA_TOOLTIP.theadCustoEst}
-                                  className="min-w-[7.5rem] max-w-[9rem] px-2 py-2.5 text-center text-[11px] font-semibold leading-tight text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600"
+                                  className="w-[7.5rem] px-2 py-2.5 text-center text-[11px] font-semibold leading-tight text-gray-600 dark:text-gray-300 uppercase tracking-wide border-l border-gray-300 dark:border-gray-600"
                                 >
                                   Custo estimado (40%)
                                 </th>
@@ -12811,9 +12897,9 @@ export function OrcamentoPageView({
                                       </td>
                                       <td
                                         title={PLANILHA_ANALITICA_TOOLTIP.servico}
-                                        className="min-w-[220px] px-3 py-2.5 text-sm font-semibold text-gray-900 dark:text-gray-50 border-l border-gray-200 dark:border-gray-700"
+                                        className="min-w-0 px-3 py-2.5 text-sm font-semibold text-gray-900 dark:text-gray-50 border-l border-gray-200 dark:border-gray-700"
                                       >
-                                        <div className="max-w-[min(520px,55vw)] whitespace-normal break-words">
+                                        <div className="min-w-0 whitespace-normal break-words">
                                           {l.descricao}
                                         </div>
                                       </td>
@@ -12975,9 +13061,9 @@ export function OrcamentoPageView({
                                     </td>
                                     <td
                                       title={PLANILHA_ANALITICA_TOOLTIP.servico}
-                                      className="min-w-[220px] px-3 py-2.5 text-sm text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700"
+                                      className="min-w-0 px-3 py-2.5 text-sm text-gray-700 dark:text-gray-300 border-l border-gray-200 dark:border-gray-700"
                                     >
-                                      <div className="max-w-[min(520px,55vw)] whitespace-normal break-words">
+                                      <div className="min-w-0 whitespace-normal break-words">
                                         {l.descricao}
                                       </div>
                                     </td>
@@ -14046,6 +14132,7 @@ export function OrcamentoPageView({
           </>
         )}
       </MainLayout>
+      ) : null}
 
       <FichaDemandaApprovalFormModal
         isOpen={fdAprovacaoModalOpen}
@@ -14277,6 +14364,7 @@ export function OrcamentoPageView({
       <Modal
         isOpen={orcafascioModalOpen && orcafascioModalSoloOrcamentos}
         onClose={() => {
+          if (isImportandoOrcamento) return;
           setOrcafascioModalOpen(false);
           setOrcafascioModalSoloOrcamentos(false);
           setOrcafascioImportSelectValue('');
@@ -14286,6 +14374,7 @@ export function OrcamentoPageView({
           setOrcafascioOrcamentoAnalitico(null);
           setOrcafascioOrcamentoLinhaCatalogo(null);
           setOrcafascioOrcamentoLinhaChave(null);
+          dismissImportShellIfNeeded();
         }}
         title="Importar orçamento"
         size="md"
@@ -14380,6 +14469,24 @@ export function OrcamentoPageView({
 
         {orcafascioOrcamentoDetalhe && !orcafascioOrcamentoComposicoesLoading ? (
           <div className="mt-4 space-y-4">
+            {deferContractOnImport ? (
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Contrato
+                </label>
+                <StringSingleSelectDropdown
+                  value={importContratoSelecionadoId}
+                  onChange={setImportContratoSelecionadoId}
+                  options={importContractSelectOptions}
+                  allowEmpty
+                  emptyOptionLabel="Selecione o contrato"
+                  placeholder="Selecione o contrato"
+                  searchPlaceholder="Pesquisar contrato..."
+                  emptyOptionsMessage="Nenhum contrato disponível."
+                  className="w-full"
+                />
+              </div>
+            ) : null}
             <Checkbox
               checked={orcafascioImportUsarMemoria}
               onChange={setOrcafascioImportUsarMemoria}
@@ -14424,6 +14531,7 @@ export function OrcamentoPageView({
               setOrcafascioOrcamentoLinhaChave(null);
               setOrcafascioImportUsarMemoria(false);
               setOrcafascioImportModoArredondamento('truncar');
+              dismissImportShellIfNeeded();
             }}
             disabled={isImportandoOrcamento}
             className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-800 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800"
@@ -14437,7 +14545,8 @@ export function OrcamentoPageView({
               isImportandoOrcamento ||
               !orcafascioImportSelectValue ||
               !orcafascioOrcamentoDetalhe ||
-              orcafascioOrcamentoComposicoesLoading
+              orcafascioOrcamentoComposicoesLoading ||
+              (deferContractOnImport && !importContratoSelecionadoId.trim())
             }
             className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-red-700 dark:hover:bg-red-800"
           >
@@ -14640,7 +14749,10 @@ export function OrcamentoPageView({
 
       <Modal
         isOpen={importOrigemModalOpen}
-        onClose={() => setImportOrigemModalOpen(false)}
+        onClose={() => {
+          setImportOrigemModalOpen(false);
+          dismissImportShellIfNeeded();
+        }}
         title="Importar orçamento"
         size="md"
       >
@@ -14691,6 +14803,7 @@ export function OrcamentoPageView({
               if (!isImportandoOrcamento) {
                 setImportOrcamentoModalOpen(false);
                 setImportOrcamentoModalFile(null);
+                dismissImportShellIfNeeded();
               }
             }}
             aria-hidden
@@ -14704,6 +14817,7 @@ export function OrcamentoPageView({
                   if (!isImportandoOrcamento) {
                     setImportOrcamentoModalOpen(false);
                     setImportOrcamentoModalFile(null);
+                    dismissImportShellIfNeeded();
                   }
                 }}
                 disabled={isImportandoOrcamento}
@@ -14718,7 +14832,7 @@ export function OrcamentoPageView({
               <div className="flex items-center justify-between gap-4 border-b border-gray-200 pb-4 dark:border-gray-700">
                 <div className="min-w-0 flex-1">
                   <p className="text-sm text-gray-600 dark:text-gray-400">
-                    Envie um Excel no padrão Gênnesis (sintético com ITEM, CÓDIGO, BANCO e DESCRIÇÃO). Se houver aba de memória, ela entra no orçamento; se não houver analítico, essa aba não aparece. Isso cria um orçamento novo neste contrato.
+                    Envie um Excel no padrão Gênnesis (sintético com ITEM, CÓDIGO, BANCO e DESCRIÇÃO). Se houver aba de memória, ela entra no orçamento; se não houver analítico, essa aba não aparece. Isso cria um orçamento novo no contrato escolhido.
                   </p>
                 </div>
                 <button
@@ -14840,6 +14954,25 @@ export function OrcamentoPageView({
                 </div>
               </div>
 
+              {deferContractOnImport ? (
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Contrato
+                  </label>
+                  <StringSingleSelectDropdown
+                    value={importContratoSelecionadoId}
+                    onChange={setImportContratoSelecionadoId}
+                    options={importContractSelectOptions}
+                    allowEmpty
+                    emptyOptionLabel="Selecione o contrato"
+                    placeholder="Selecione o contrato"
+                    searchPlaceholder="Pesquisar contrato..."
+                    emptyOptionsMessage="Nenhum contrato disponível."
+                    className="w-full"
+                  />
+                </div>
+              ) : null}
+
               <div className="flex space-x-3 border-t border-gray-200 pt-4 dark:border-gray-700">
                 <button
                   type="button"
@@ -14847,6 +14980,7 @@ export function OrcamentoPageView({
                     if (!isImportandoOrcamento) {
                       setImportOrcamentoModalOpen(false);
                       setImportOrcamentoModalFile(null);
+                      dismissImportShellIfNeeded();
                     }
                   }}
                   disabled={isImportandoOrcamento}
@@ -14857,7 +14991,11 @@ export function OrcamentoPageView({
                 <button
                   type="button"
                   onClick={() => void confirmarImportOrcamentoModal()}
-                  disabled={isImportandoOrcamento || !importOrcamentoModalFile}
+                  disabled={
+                    isImportandoOrcamento ||
+                    !importOrcamentoModalFile ||
+                    (deferContractOnImport && !importContratoSelecionadoId.trim())
+                  }
                   className="flex flex-1 items-center justify-center space-x-2 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-green-700 dark:hover:bg-green-800"
                 >
                   {isImportandoOrcamento ? (

@@ -15,6 +15,8 @@ import {
   getDatasetStructure,
   getDatasetData,
   searchDataset,
+  getDocumentsMeta,
+  downloadDocument,
 } from '../controllers/FluigController';
 
 const router = express.Router();
@@ -36,6 +38,8 @@ router.get('/datasets', getAvailableDatasets);
 router.get('/datasets/:datasetId/structure', getDatasetStructure);
 router.post('/datasets/:datasetId/data', getDatasetData);
 router.post('/datasets/:datasetId/search', searchDataset);
+router.post('/documents/meta', getDocumentsMeta);
+router.get('/documents/:documentId/file', downloadDocument);
 
 router.get('/aprovadores/viewers', requireFluigApproverViewerManager, async (_req, res, next) => {
   try {

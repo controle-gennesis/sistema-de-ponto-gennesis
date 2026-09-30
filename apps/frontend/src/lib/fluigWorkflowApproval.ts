@@ -14,6 +14,12 @@ export function buildFluigWorkflowProcessViewUrl(processInstanceId: string): str
   return `${FLUIG_PORTAL_BASE_URL}/portal/p/1/pageworkflowview?app_ecm_workflowview_detailsProcessInstanceID=${encodeURIComponent(id)}`;
 }
 
+/** Abre o documento/anexo no GED do Fluig pelo NR_DOCUMENTO. */
+export function buildFluigDocumentViewUrl(documentId: string): string {
+  const id = documentId.trim();
+  return `${FLUIG_PORTAL_BASE_URL}/portal/p/1/ecmnavigation?app_ecm_navigation_doc=${encodeURIComponent(id)}`;
+}
+
 export const FLUIG_WORKFLOW_APPROVAL_DATASETS = [
   FLUIG_WORKFLOW_APPROVAL_DATASET_G3,
   FLUIG_WORKFLOW_APPROVAL_DATASET_G5,

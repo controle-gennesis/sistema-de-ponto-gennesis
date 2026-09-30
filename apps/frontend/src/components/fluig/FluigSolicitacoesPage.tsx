@@ -20,8 +20,10 @@ import {
   Landmark,
   FileText,
   ExternalLink,
+  Paperclip,
   X,
 } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Modal } from '@/components/ui/Modal';
 import { MainLayout } from '@/components/layout/MainLayout';
@@ -688,6 +690,155 @@ function getFluigProcessInstanceId(
   return v && v !== '—' ? v : '';
 }
 
+/** Colunas agregadas de anexos do dataset (nomes/ids separados por ` | `). */
+function isFluigAnexosDatasetColumn(colRaw: string): boolean {
+  const n = colRaw
+    .trim()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[_\s-]+/g, '')
+    .toLowerCase();
+  return (
+    n === 'anexosnomes' ||
+    n === 'anexosids' ||
+    n === 'listaanexos' ||
+    n === 'listaids' ||
+    n === 'anexos' ||
+    n === 'anexonomes' ||
+    n === 'anexoids'
+  );
+}
+
+function splitFluigAnexoList(raw: unknown): string[] {
+  const text = formatValue(raw);
+  if (!text || text === '—') return [];
+  return text
+    .split(/\s*\|\s*/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+type FluigAnexoItem = { id: string; nome: string };
+
+function fluigAnexoIsPreviewable(nome: string): boolean {
+  const lower = nome.toLowerCase();
+  return (
+    lower.endsWith('.pdf') ||
+    lower.endsWith('.png') ||
+    lower.endsWith('.jpg') ||
+    lower.endsWith('.jpeg') ||
+    lower.endsWith('.gif') ||
+    lower.endsWith('.webp') ||
+    lower.endsWith('.txt')
+  );
+}
+
+function sniffBlobKind(buf: ArrayBuffer): { mime: string; ext: string } | null {
+  const u8 = new Uint8Array(buf.slice(0, 8));
+  if (u8.length >= 4 && u8[0] === 0x25 && u8[1] === 0x50 && u8[2] === 0x44 && u8[3] === 0x46) {
+    return { mime: 'application/pdf', ext: '.pdf' };
+  }
+  if (u8.length >= 2 && u8[0] === 0x50 && u8[1] === 0x4b) {
+    return {
+      mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      ext: '.xlsx',
+    };
+  }
+  if (u8.length >= 3 && u8[0] === 0xff && u8[1] === 0xd8 && u8[2] === 0xff) {
+    return { mime: 'image/jpeg', ext: '.jpg' };
+  }
+  if (
+    u8.length >= 8 &&
+    u8[0] === 0x89 &&
+    u8[1] === 0x50 &&
+    u8[2] === 0x4e &&
+    u8[3] === 0x47
+  ) {
+    return { mime: 'image/png', ext: '.png' };
+  }
+  return null;
+}
+
+function ensureFilenameExtension(filename: string, ext: string): string {
+  const base = filename.replace(/\.[^/.]+$/, '').trim() || 'anexo';
+  return `${base}${ext}`;
+}
+
+async function fetchFluigAnexoBlob(
+  documentId: string,
+  filename: string,
+  disposition: 'inline' | 'attachment'
+): Promise<Blob> {
+  const res = await api.get(`/fluig/documents/${encodeURIComponent(documentId)}/file`, {
+    params: { filename, disposition },
+    responseType: 'blob',
+    timeout: 120000,
+  });
+  const blob = res.data as Blob;
+  const type = (blob.type || '').toLowerCase();
+  // Backend às vezes devolve JSON de erro com responseType blob.
+  if (type.includes('json') || type.includes('text') || type.includes('html') || !type) {
+    const ab = await blob.arrayBuffer();
+    const sniffed = sniffBlobKind(ab);
+    if (sniffed) {
+      return new Blob([ab], { type: sniffed.mime });
+    }
+    const text = new TextDecoder().decode(ab).trim();
+    if (
+      text.startsWith('{') ||
+      /not allowed|permiss|recusou|forbidden|access denied|não tem arquivo|nao tem arquivo/i.test(
+        text
+      )
+    ) {
+      try {
+        const parsed = JSON.parse(text) as { message?: string };
+        throw Object.assign(new Error(parsed.message || text.slice(0, 200)), {
+          response: { data: parsed },
+        });
+      } catch (err) {
+        if (err instanceof Error && !(err as { response?: unknown }).response) {
+          throw Object.assign(new Error(text.slice(0, 200) || 'Falha ao obter anexo'), {
+            response: { data: { message: text.slice(0, 200) } },
+          });
+        }
+        throw err;
+      }
+    }
+    // Reconstitui blob se o texto era conteúdo legítimo (ex.: .txt).
+    return new Blob([text], { type: type || 'text/plain' });
+  }
+  return blob;
+}
+
+/** Lê `anexos_nomes` + `anexos_ids` (ou aliases) e monta a lista de anexos. */
+function parseFluigAnexosFromRow(
+  row: Record<string, unknown>,
+  columns: string[]
+): FluigAnexoItem[] {
+  const nomesCol =
+    columns.find((c) => /^anexos_nomes$/i.test(c.trim())) ??
+    columns.find((c) => /^lista_anexos$/i.test(c.trim())) ??
+    columns.find((c) => /anexo.*nome|lista.*anexo/i.test(c));
+  const idsCol =
+    columns.find((c) => /^anexos_ids$/i.test(c.trim())) ??
+    columns.find((c) => /^lista_ids$/i.test(c.trim())) ??
+    columns.find((c) => /anexo.*id|lista.*id/i.test(c) && !/nome/i.test(c));
+
+  const nomes = nomesCol ? splitFluigAnexoList(row[nomesCol]) : [];
+  const ids = idsCol ? splitFluigAnexoList(row[idsCol]) : [];
+  const count = Math.max(nomes.length, ids.length);
+  if (count === 0) return [];
+
+  const items: FluigAnexoItem[] = [];
+  for (let i = 0; i < count; i++) {
+    const id = ids[i] || '';
+    const nome = nomes[i] || (id ? `Documento ${id}` : `Anexo ${i + 1}`);
+    if (!id && !nome) continue;
+    items.push({ id, nome });
+  }
+  return items;
+}
+
 /** Texto normalizado para classificar colunas do modal de detalhe (nome técnico + rótulo). */
 function fluigDetailModalHint(colRaw: string): string {
   const r = colRaw.trim();
@@ -851,6 +1002,19 @@ const NO_TOUCHED_FILTERS: Record<FluigFilterCategory, boolean> = {
   naturezaOrcamentaria: false,
 };
 
+const EMPTY_FLUIG_VALUES: Record<string, unknown>[] = [];
+const EMPTY_FLUIG_COLUMNS: string[] = [];
+const EMPTY_STRING_OPTIONS: string[] = [];
+
+function sameStringArray(a: readonly string[], b: readonly string[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
 export function FluigSolicitacoesPage({
   config,
 }: {
@@ -883,6 +1047,130 @@ export function FluigSolicitacoesPage({
     columns: string[];
     datasetId: string;
   } | null>(null);
+  const [resolvedAnexos, setResolvedAnexos] = useState<FluigAnexoItem[] | null>(null);
+  const [resolvingAnexos, setResolvingAnexos] = useState(false);
+  const [anexoBusyKey, setAnexoBusyKey] = useState<string | null>(null);
+  const anexoBusyRef = useRef(false);
+
+  useEffect(() => {
+    if (!detail) {
+      setResolvedAnexos(null);
+      setResolvingAnexos(false);
+      return;
+    }
+    const parsed = parseFluigAnexosFromRow(detail.row, detail.columns);
+    const ids = parsed.map((a) => a.id).filter((id) => /^\d+$/.test(id));
+    if (ids.length === 0) {
+      setResolvedAnexos(parsed);
+      setResolvingAnexos(false);
+      return;
+    }
+    let cancelled = false;
+    setResolvingAnexos(true);
+    setResolvedAnexos(null);
+    void (async () => {
+      try {
+        const res = await api.post(
+          '/fluig/documents/meta',
+          { ids },
+          { timeout: 90000 }
+        );
+        const metas = (res.data?.data || []) as Array<{
+          documentId?: string;
+          filename?: string | null;
+          empty?: boolean;
+        }>;
+        if (cancelled) return;
+        const next: FluigAnexoItem[] = [];
+        for (const id of ids) {
+          const meta = metas.find((m) => String(m.documentId || '') === id);
+          if (meta?.empty) continue;
+          const nome =
+            (meta?.filename && String(meta.filename).trim()) ||
+            parsed.find((p) => p.id === id)?.nome ||
+            `Documento ${id}`;
+          next.push({ id, nome });
+        }
+        setResolvedAnexos(next.length > 0 ? next : parsed.filter((p) => p.id));
+      } catch {
+        if (!cancelled) setResolvedAnexos(parsed);
+      } finally {
+        if (!cancelled) setResolvingAnexos(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [detail]);
+
+  const openFluigAnexo = useCallback(async (anexo: FluigAnexoItem, mode: 'view' | 'download') => {
+    if (!anexo.id || anexoBusyRef.current) return;
+    const busyKey = `${anexo.id}:${mode}`;
+    anexoBusyRef.current = true;
+    setAnexoBusyKey(busyKey);
+    let filename = anexo.nome || `anexo-fluig-${anexo.id}`;
+    const preferInline = mode === 'view';
+    try {
+      let blob = await fetchFluigAnexoBlob(
+        anexo.id,
+        filename,
+        preferInline ? 'inline' : 'attachment'
+      );
+      const ab = await blob.arrayBuffer();
+      const sniffed = sniffBlobKind(ab);
+      if (sniffed) {
+        filename = ensureFilenameExtension(filename, sniffed.ext);
+        blob = new Blob([ab], { type: sniffed.mime });
+      }
+      const type = (blob.type || '').toLowerCase();
+      const canPreview =
+        type.includes('pdf') ||
+        type.startsWith('image/') ||
+        type.startsWith('text/') ||
+        fluigAnexoIsPreviewable(filename);
+      const objectUrl = URL.createObjectURL(blob);
+      if (mode === 'view' && canPreview) {
+        const opened = window.open(objectUrl, '_blank', 'noopener,noreferrer');
+        if (!opened) {
+          toast.error('Permita pop-ups para visualizar o anexo.');
+          URL.revokeObjectURL(objectUrl);
+          return;
+        }
+        window.setTimeout(() => URL.revokeObjectURL(objectUrl), 120_000);
+        return;
+      }
+      const a = document.createElement('a');
+      a.href = objectUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 30_000);
+      if (mode === 'view' && !canPreview) {
+        toast.success('Arquivo baixado — abra no computador para visualizar.');
+      }
+    } catch (err: unknown) {
+      const axiosErr = err as { response?: { data?: Blob | { message?: string } }; message?: string };
+      let message =
+        (err instanceof Error && err.message) || 'Não foi possível obter o anexo.';
+      const data = axiosErr.response?.data;
+      if (data instanceof Blob) {
+        try {
+          const text = await data.text();
+          const parsed = JSON.parse(text) as { message?: string };
+          if (parsed?.message) message = parsed.message;
+        } catch {
+          /* ignore */
+        }
+      } else if (data && typeof data === 'object' && 'message' in data && data.message) {
+        message = String(data.message);
+      }
+      toast.error(message);
+    } finally {
+      anexoBusyRef.current = false;
+      setAnexoBusyKey(null);
+    }
+  }, []);
 
   const [{ data: userData, isLoading: loadingUser }] = useQueries({
     queries: [
@@ -1213,8 +1501,18 @@ export function FluigSolicitacoesPage({
 
   const currentQuery = datasetQueries[activeTab];
   const currentContent = currentQuery?.data?.data?.content;
-  const currentValues = (currentContent?.values || []) as Record<string, unknown>[];
-  const currentColumns = (currentContent?.columns || (currentValues[0] ? Object.keys(currentValues[0]) : [])) as string[];
+  const currentValues = useMemo(() => {
+    const values = currentContent?.values;
+    return Array.isArray(values) && values.length > 0
+      ? (values as Record<string, unknown>[])
+      : EMPTY_FLUIG_VALUES;
+  }, [currentContent?.values]);
+  const currentColumns = useMemo(() => {
+    const cols = currentContent?.columns;
+    if (Array.isArray(cols) && cols.length > 0) return cols as string[];
+    if (currentValues[0]) return Object.keys(currentValues[0]);
+    return EMPTY_FLUIG_COLUMNS;
+  }, [currentContent?.columns, currentValues]);
 
   const filialCol = useMemo(
     () =>
@@ -1426,10 +1724,10 @@ export function FluigSolicitacoesPage({
     return buildPersonNameGroups(raw);
   }, [currentValuesFilteredByFilial, responsavelCol]);
 
-  const responsaveis = useMemo(
-    () => responsavelGroups.map((g) => g.label),
-    [responsavelGroups],
-  );
+  const responsaveis = useMemo(() => {
+    const next = responsavelGroups.map((g) => g.label);
+    return next.length > 0 ? next : EMPTY_STRING_OPTIONS;
+  }, [responsavelGroups]);
 
   const responsavelMemberToLabel = useMemo(() => {
     const map = new Map<string, string>();
@@ -1476,13 +1774,14 @@ export function FluigSolicitacoesPage({
   }, [ccColFromColumns, ccColumnsCandidates]);
 
   const filiais = useMemo(() => {
-    if (!filialCol) return [];
+    if (!filialCol) return EMPTY_STRING_OPTIONS;
     const set = new Set<string>();
     currentValuesFilteredByFilial.forEach((row: Record<string, unknown>) => {
       const v = getFilialValue(row);
       if (v) set.add(v);
     });
-    return Array.from(set).sort();
+    const next = Array.from(set).sort();
+    return next.length > 0 ? next : EMPTY_STRING_OPTIONS;
   }, [currentValuesFilteredByFilial, filialCol]);
 
   const readFluigCellString = (row: Record<string, unknown>, col: string): string => {
@@ -1514,23 +1813,25 @@ export function FluigSolicitacoesPage({
   };
 
   const centrosCusto = useMemo(() => {
-    if (!ccColResolved) return [];
+    if (!ccColResolved) return EMPTY_STRING_OPTIONS;
     const set = new Set<string>();
     currentValuesFilteredByFilial.forEach((row) => {
       const v = getCCValue(row);
       if (v) set.add(v);
     });
-    return Array.from(set).sort();
+    const next = Array.from(set).sort();
+    return next.length > 0 ? next : EMPTY_STRING_OPTIONS;
   }, [currentValuesFilteredByFilial, ccColResolved]);
 
   const fornecedores = useMemo(() => {
-    if (!fornecedorCol) return [];
+    if (!fornecedorCol) return EMPTY_STRING_OPTIONS;
     const set = new Set<string>();
     currentValuesFilteredByFilial.forEach((row: Record<string, unknown>) => {
       const v = String(row[fornecedorCol] ?? '').trim();
       if (v) set.add(v);
     });
-    return Array.from(set).sort();
+    const next = Array.from(set).sort();
+    return next.length > 0 ? next : EMPTY_STRING_OPTIONS;
   }, [currentValuesFilteredByFilial, fornecedorCol]);
 
   const getSetorSolicitanteValue = (row: Record<string, unknown>): string => {
@@ -1544,13 +1845,14 @@ export function FluigSolicitacoesPage({
   };
 
   const setoresSolicitantes = useMemo(() => {
-    if (!setorSolicitanteCol) return [];
+    if (!setorSolicitanteCol) return EMPTY_STRING_OPTIONS;
     const set = new Set<string>();
     currentValuesFilteredByFilial.forEach((row: Record<string, unknown>) => {
       const v = getSetorSolicitanteValue(row);
       if (v) set.add(v);
     });
-    return Array.from(set).sort();
+    const next = Array.from(set).sort();
+    return next.length > 0 ? next : EMPTY_STRING_OPTIONS;
   }, [currentValuesFilteredByFilial, setorSolicitanteCol]);
 
   const getUrgenciaValue = (row: Record<string, unknown>): string => {
@@ -1564,13 +1866,14 @@ export function FluigSolicitacoesPage({
   };
 
   const urgencias = useMemo(() => {
-    if (!urgenciaCol) return [];
+    if (!urgenciaCol) return EMPTY_STRING_OPTIONS;
     const set = new Set<string>();
     currentValuesFilteredByFilial.forEach((row: Record<string, unknown>) => {
       const v = getUrgenciaValue(row);
       if (v) set.add(v);
     });
-    return Array.from(set).sort();
+    const next = Array.from(set).sort();
+    return next.length > 0 ? next : EMPTY_STRING_OPTIONS;
   }, [currentValuesFilteredByFilial, urgenciaCol]);
 
   const getNaturezaOrcamentariaValue = (row: Record<string, unknown>): string => {
@@ -1589,13 +1892,14 @@ export function FluigSolicitacoesPage({
   };
 
   const naturezasOrcamentarias = useMemo(() => {
-    if (!naturezaOrcamentariaCol) return [];
+    if (!naturezaOrcamentariaCol) return EMPTY_STRING_OPTIONS;
     const set = new Set<string>();
     currentValuesFilteredByFilial.forEach((row: Record<string, unknown>) => {
       const v = getNaturezaOrcamentariaValue(row);
       if (v) set.add(v);
     });
-    return Array.from(set).sort();
+    const next = Array.from(set).sort();
+    return next.length > 0 ? next : EMPTY_STRING_OPTIONS;
   }, [currentValuesFilteredByFilial, naturezaOrcamentariaCol]);
 
   const naturezaOrcamentariaFilterOptions = useMemo(
@@ -1619,41 +1923,53 @@ export function FluigSolicitacoesPage({
 
   // Categorias ainda não tocadas acompanham a lista completa de opções, para que
   // "todas selecionadas" continue equivalente a "sem filtro" quando os dados chegam.
+  // Só atualiza estado quando o conteúdo muda (evita loop por nova referência de array).
   useEffect(() => {
-    if (!touchedFilters.filial) setSelectedFiliais(filiais);
+    if (touchedFilters.filial) return;
+    setSelectedFiliais((prev) => (sameStringArray(prev, filiais) ? prev : filiais));
   }, [filiais, touchedFilters.filial]);
 
   useEffect(() => {
-    if (!touchedFilters.cc) setSelectedCCs(centrosCusto);
+    if (touchedFilters.cc) return;
+    setSelectedCCs((prev) => (sameStringArray(prev, centrosCusto) ? prev : centrosCusto));
   }, [centrosCusto, touchedFilters.cc]);
 
   useEffect(() => {
-    if (!touchedFilters.setorSolicitante) setSelectedSetoresSolicitantes(setoresSolicitantes);
+    if (touchedFilters.setorSolicitante) return;
+    setSelectedSetoresSolicitantes((prev) =>
+      sameStringArray(prev, setoresSolicitantes) ? prev : setoresSolicitantes
+    );
   }, [setoresSolicitantes, touchedFilters.setorSolicitante]);
 
   useEffect(() => {
     if (!touchedFilters.responsavel) {
-      setSelectedResponsaveis(responsaveis);
+      setSelectedResponsaveis((prev) => (sameStringArray(prev, responsaveis) ? prev : responsaveis));
       return;
     }
     setSelectedResponsaveis((prev) => {
       const mapped = prev
         .map((v) => responsavelMemberToLabel.get(v) || responsavelMemberToLabel.get(normalizePersonNameKey(v)) || v)
         .filter((v) => responsaveis.includes(v));
-      return Array.from(new Set(mapped));
+      const next = Array.from(new Set(mapped));
+      return sameStringArray(prev, next) ? prev : next;
     });
   }, [responsaveis, responsavelMemberToLabel, touchedFilters.responsavel]);
 
   useEffect(() => {
-    if (!touchedFilters.urgencia) setSelectedUrgencias(urgencias);
+    if (touchedFilters.urgencia) return;
+    setSelectedUrgencias((prev) => (sameStringArray(prev, urgencias) ? prev : urgencias));
   }, [urgencias, touchedFilters.urgencia]);
 
   useEffect(() => {
-    if (!touchedFilters.fornecedor) setSelectedFornecedores(fornecedores);
+    if (touchedFilters.fornecedor) return;
+    setSelectedFornecedores((prev) => (sameStringArray(prev, fornecedores) ? prev : fornecedores));
   }, [fornecedores, touchedFilters.fornecedor]);
 
   useEffect(() => {
-    if (!touchedFilters.naturezaOrcamentaria) setSelectedNaturezasOrcamentarias(naturezasOrcamentarias);
+    if (touchedFilters.naturezaOrcamentaria) return;
+    setSelectedNaturezasOrcamentarias((prev) =>
+      sameStringArray(prev, naturezasOrcamentarias) ? prev : naturezasOrcamentarias
+    );
   }, [naturezasOrcamentarias, touchedFilters.naturezaOrcamentaria]);
 
   const hasPeriodFilter = Boolean(periodFrom || periodTo);
@@ -2785,6 +3101,12 @@ export function FluigSolicitacoesPage({
               })();
             const skipCols = new Set<string>();
             if (idColSkip && numInTitle) skipCols.add(idColSkip);
+            for (const col of detail.columns) {
+              if (isFluigAnexosDatasetColumn(col)) skipCols.add(col);
+            }
+
+            const anexos =
+              resolvedAnexos ?? parseFluigAnexosFromRow(detail.row, detail.columns);
 
             const buckets: string[][] = [
               ...FLUIG_DETAIL_MODAL_SECTIONS.map(() => [] as string[]),
@@ -2815,6 +3137,81 @@ export function FluigSolicitacoesPage({
 
             return (
               <div className="max-h-[60vh] overflow-y-auto pr-1 space-y-4">
+                <div className="rounded-xl border border-gray-200 dark:border-gray-600/80 bg-white dark:bg-gray-900/40 shadow-sm overflow-hidden">
+                  <div className="px-4 py-2.5 border-b border-gray-200 dark:border-gray-600/80 bg-gray-50/90 dark:bg-gray-800/50">
+                    <h3 className="inline-flex items-center gap-2 text-sm font-semibold text-gray-800 dark:text-gray-100">
+                      <Paperclip className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" aria-hidden />
+                      Anexos
+                      {anexos.length > 0 ? (
+                        <span className="rounded-full bg-gray-200/80 px-2 py-0.5 text-xs font-medium text-gray-700 dark:bg-gray-700 dark:text-gray-200">
+                          {anexos.length}
+                        </span>
+                      ) : null}
+                    </h3>
+                  </div>
+                  <div className="p-4">
+                    {resolvingAnexos && !resolvedAnexos ? (
+                      <p className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+                        <Loader2 className="h-4 w-4 animate-spin text-red-600" aria-hidden />
+                        Confirmando anexos no Fluig…
+                      </p>
+                    ) : anexos.length === 0 ? (
+                      <p className="text-sm text-gray-500 dark:text-gray-400">
+                        Nenhum anexo encontrado nesta solicitação.
+                      </p>
+                    ) : (
+                      <ul className="space-y-2">
+                        {anexos.map((anexo, idx) => {
+                          const key = `${anexo.id || 'sem-id'}-${idx}`;
+                          const label = anexo.nome || (anexo.id ? `Documento ${anexo.id}` : `Anexo ${idx + 1}`);
+                          const downloadBusy = anexoBusyKey === `${anexo.id}:download`;
+                          const anyBusy = Boolean(anexoBusyKey);
+                          if (!anexo.id) {
+                            return (
+                              <li
+                                key={key}
+                                className="flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-800 dark:border-gray-600 dark:bg-gray-800/60 dark:text-gray-100"
+                              >
+                                <FileText className="h-4 w-4 shrink-0 text-gray-400" aria-hidden />
+                                <span className="min-w-0 break-words">{label}</span>
+                              </li>
+                            );
+                          }
+                          return (
+                            <li
+                              key={key}
+                              className="flex flex-col gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2.5 sm:flex-row sm:items-center dark:border-gray-600 dark:bg-gray-800/40"
+                            >
+                              <div className="flex min-w-0 flex-1 items-center gap-2">
+                                <FileText className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" aria-hidden />
+                                <span className="min-w-0 break-words text-sm font-medium text-gray-900 dark:text-gray-100">
+                                  {label}
+                                </span>
+                              </div>
+                              <div className="flex shrink-0 items-center self-end sm:self-auto">
+                                <button
+                                  type="button"
+                                  disabled={anyBusy}
+                                  onClick={() => void openFluigAnexo(anexo, 'download')}
+                                  className="inline-flex h-8 w-8 items-center justify-center rounded-md text-gray-600 transition-colors hover:text-gray-900 disabled:pointer-events-none disabled:opacity-50 dark:text-gray-300 dark:hover:text-gray-100"
+                                  title="Baixar anexo"
+                                  aria-label="Baixar anexo"
+                                >
+                                  {downloadBusy ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                                  ) : (
+                                    <Download className="h-4 w-4" aria-hidden />
+                                  )}
+                                </button>
+                              </div>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                  </div>
+                </div>
+
                 {FLUIG_DETAIL_MODAL_SECTIONS.map((sectionTitle, i) => {
                   const cols = sortCols(buckets[i]);
                   if (cols.length === 0) return null;
