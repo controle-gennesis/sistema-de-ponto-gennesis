@@ -603,7 +603,7 @@ export function UserPermissionsTabBar({
 }) {
   const items = [
     { id: 'gerais' as const, label: 'Acesso', disabled: false as const },
-    { id: 'contratos' as const, label: 'Contratos', disabled: !showContracts },
+    { id: 'contratos' as const, label: 'Contratos', disabled: false as const },
     { id: 'controle' as const, label: 'Controle', disabled: false as const },
   ];
 
@@ -621,7 +621,6 @@ export function UserPermissionsTabBar({
               }}
               disabled={t.disabled}
               aria-disabled={t.disabled}
-              title={t.disabled ? 'Ative o módulo Contratos na aba Acesso' : undefined}
               className="px-3 py-2 text-sm"
             >
               {t.label}
@@ -909,7 +908,8 @@ export function UserPermissionsEditor({
     const nextViewCc = new Set(userPermissionData.dpRequestViewCostCenterIds ?? []);
     const rawFlags = userPermissionData.contractModuleFlags ?? {};
     const nextFlags: Record<string, ContractModuleFlags> = {};
-    for (const id of Array.from(nextContractIds)) {
+    // Liberados + contratos só com flag (ex.: Orçamento sem Liberado).
+    for (const id of new Set([...Array.from(nextContractIds), ...Object.keys(rawFlags)])) {
       nextFlags[id] = rawFlags[id] ?? emptyContractModuleFlags();
     }
     const nextCadastroCrud = parseCadastroCrudFromPerms(perms);
@@ -1527,13 +1527,15 @@ export function UserPermissionsEditor({
           delete next[contractId];
           return next;
         });
-        setContractModuleFlags((f) => {
-          const next = { ...f };
-          delete next[contractId];
-          return next;
-        });
+        // Desmarcar Liberado não apaga flags (ex.: Orçamento sozinho).
       } else {
         n.add(contractId);
+        // Liberado exige módulo Contratos na aba Acesso.
+        setSelectedSet((mods) => {
+          const next = new Set(mods);
+          next.add(CONTRACTS_MODULE_KEY);
+          return next;
+        });
         setContractModuleFlags((f) => ({
           ...f,
           [contractId]: f[contractId] ?? emptyContractModuleFlags(),
@@ -1544,12 +1546,26 @@ export function UserPermissionsEditor({
   };
 
   const setContractModuleFlag = (contractId: string, key: keyof ContractModuleFlags, value: boolean) => {
-    if (value) {
+    // Orçamento sozinho não marca Liberado — libera só a página Orçamentos.
+    if (value && key !== 'orcamento') {
       setSelectedContractIds((prev) => new Set(prev).add(contractId));
     }
     setContractModuleFlags((prev) => {
       const current = prev[contractId] ?? emptyContractModuleFlags();
-      return { ...prev, [contractId]: { ...current, [key]: value } };
+      const nextFlags = { ...current, [key]: value };
+      if (
+        !value &&
+        !nextFlags.orcamento &&
+        !nextFlags.relatorios &&
+        !nextFlags.ordemServico &&
+        !nextFlags.producaoSemanal &&
+        !nextFlags.reunioes
+      ) {
+        const next = { ...prev };
+        delete next[contractId];
+        return next;
+      }
+      return { ...prev, [contractId]: nextFlags };
     });
   };
 
@@ -1630,7 +1646,7 @@ export function UserPermissionsEditor({
     const nextViewCc = new Set(source.dpRequestViewCostCenterIds ?? []);
     const rawFlags = source.contractModuleFlags ?? {};
     const nextFlags: Record<string, ContractModuleFlags> = {};
-    for (const id of Array.from(nextContractIds)) {
+    for (const id of new Set([...Array.from(nextContractIds), ...Object.keys(rawFlags)])) {
       nextFlags[id] = rawFlags[id] ?? emptyContractModuleFlags();
     }
     setSelectedSet(next);
@@ -1731,7 +1747,7 @@ export function UserPermissionsEditor({
     const srcFlags = source.contractModuleFlags ?? {};
     const defaultFlags: ContractModuleFlags = emptyContractModuleFlags();
     const nextFlags: Record<string, ContractModuleFlags> = {};
-    for (const id of Array.from(nextContractIds)) {
+    for (const id of new Set([...Array.from(nextContractIds), ...Object.keys(srcFlags)])) {
       nextFlags[id] = srcFlags[id] ?? { ...defaultFlags };
     }
     setContractActionsSet(nextContract);
@@ -1853,8 +1869,8 @@ export function UserPermissionsEditor({
     }
   };
 
-  const contractsTabAvailable =
-    selectedSet.has(CONTRACTS_MODULE_KEY) || contractActionsSet.size > 0 || selectedContractIds.size > 0;
+  /** Aba Contratos sempre disponível — Orçamento pode ser marcado sem módulo Contratos. */
+  const contractsTabAvailable = true;
 
   useEffect(() => {
     onContractsTabAvailabilityChange?.(contractsTabAvailable);
@@ -2344,19 +2360,22 @@ export function UserPermissionsEditor({
               <PermissionPageHeader
                 icon={FileText}
                 title="Contratos"
-                subtitle="Libere contratos e recursos específicos para este usuário."
+                subtitle="Libere a ficha do contrato ou só o Orçamento, sem abrir os dados do contrato."
                 actions={permissionActionsButton}
               />
             </CardHeader>
             <CardContent>
             {!selectedSet.has(CONTRACTS_MODULE_KEY) ? (
-              <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-800 dark:bg-amber-900/20">
+              <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-800 dark:bg-amber-900/20">
                 <p className="text-sm text-amber-800 dark:text-amber-200">
-                  Ative o módulo <strong>Contratos</strong> na aba <strong>Acesso</strong> (linha
-                  Contratos, coluna Ver) para escolher contratos específicos.
+                  Sem o módulo <strong>Contratos</strong> em Acesso, use só a coluna{' '}
+                  <strong>Orçamento</strong> (sem Liberado). A pessoa entra em Orçamentos e vê
+                  esses contratos. Para abrir a ficha do contrato, marque Liberado — isso ativa
+                  Contratos em Acesso automaticamente.
                 </p>
               </div>
-            ) : contractsList.length === 0 ? (
+            ) : null}
+            {contractsList.length === 0 ? (
               <div className="py-14 text-center text-sm text-gray-500 dark:text-gray-400">
                 Nenhum contrato cadastrado ainda.
               </div>

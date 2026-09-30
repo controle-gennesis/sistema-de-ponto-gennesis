@@ -61,6 +61,71 @@ function prismaModelHasField(modelName: string, fieldName: string): boolean {
   );
 }
 
+type ContractPermRow = {
+  contractId: string;
+  accessLiberado: boolean;
+  accessOrcamento: boolean;
+  accessRelatorios: boolean;
+  accessOrdemServico: boolean;
+  accessProducaoSemanal: boolean;
+  accessReunioes: boolean;
+};
+
+async function loadUserContractPermissionRows(userId: string): Promise<ContractPermRow[]> {
+  const canLiberado = prismaModelHasField('UserContractPermission', 'accessLiberado');
+  const canReunioes = prismaModelHasField('UserContractPermission', 'accessReunioes');
+  const rows = await safePermissionRows('userContractPermission', () =>
+    prisma.userContractPermission.findMany({
+      where: { userId },
+      select: {
+        contractId: true,
+        ...(canLiberado ? { accessLiberado: true } : {}),
+        accessOrcamento: true,
+        accessRelatorios: true,
+        accessOrdemServico: true,
+        accessProducaoSemanal: true,
+        ...(canReunioes ? { accessReunioes: true } : {}),
+      },
+    })
+  );
+  return rows.map((r) => ({
+    contractId: r.contractId,
+    accessLiberado: canLiberado
+      ? Boolean((r as { accessLiberado?: boolean }).accessLiberado !== false)
+      : true,
+    accessOrcamento: r.accessOrcamento,
+    accessRelatorios: r.accessRelatorios,
+    accessOrdemServico: r.accessOrdemServico,
+    accessProducaoSemanal: r.accessProducaoSemanal,
+    accessReunioes: canReunioes
+      ? Boolean((r as { accessReunioes?: boolean }).accessReunioes)
+      : false,
+  }));
+}
+
+function contractFlagsFromRows(rows: ContractPermRow[]) {
+  const contractModuleFlags: Record<
+    string,
+    {
+      orcamento: boolean;
+      relatorios: boolean;
+      ordemServico: boolean;
+      producaoSemanal: boolean;
+      reunioes: boolean;
+    }
+  > = {};
+  for (const r of rows) {
+    contractModuleFlags[r.contractId] = {
+      orcamento: r.accessOrcamento,
+      relatorios: r.accessRelatorios,
+      ordemServico: r.accessOrdemServico,
+      producaoSemanal: r.accessProducaoSemanal,
+      reunioes: r.accessReunioes,
+    };
+  }
+  return contractModuleFlags;
+}
+
 function toDpApprovalSectorsMap(
   rows: Array<{ contractId: string; allowedSectors?: unknown }>
 ): Record<string, string[]> {
@@ -243,35 +308,7 @@ router.get('/me', async (req: AuthRequest, res, next) => {
       },
     });
 
-    const allowedContractIds = await (async () => {
-      const withReunioes = await safePermissionRows('me/userContractPermission+reunioes', () =>
-        prisma.userContractPermission.findMany({
-          where: { userId: meUserId },
-          select: {
-            contractId: true,
-            accessOrcamento: true,
-            accessRelatorios: true,
-            accessOrdemServico: true,
-            accessProducaoSemanal: true,
-            accessReunioes: true,
-          },
-        })
-      );
-      if (withReunioes.length > 0) return withReunioes;
-      const withoutReunioes = await safePermissionRows('me/userContractPermission', () =>
-        prisma.userContractPermission.findMany({
-          where: { userId: meUserId },
-          select: {
-            contractId: true,
-            accessOrcamento: true,
-            accessRelatorios: true,
-            accessOrdemServico: true,
-            accessProducaoSemanal: true,
-          },
-        })
-      );
-      return withoutReunioes.map((r) => ({ ...r, accessReunioes: false }));
-    })();
+    const contractPermRows = await loadUserContractPermissionRows(meUserId);
 
     const canReadDpSectors = prismaModelHasField('UserDpApprovalContract', 'allowedSectors');
     const dpApprovalRows = await safePermissionRows<{ contractId: string; allowedSectors?: unknown }>(
@@ -347,32 +384,17 @@ router.get('/me', async (req: AuthRequest, res, next) => {
     const fluigApproverAccess = await getFluigApproverAccessForUser(meUserId, false);
     const canManageFluigApproverViewers = await userCanManageFluigApproverViewers(meUserId, false);
 
-    const contractModuleFlags: Record<
-      string,
-      {
-        orcamento: boolean;
-        relatorios: boolean;
-        ordemServico: boolean;
-        producaoSemanal: boolean;
-        reunioes: boolean;
-      }
-    > = {};
-    for (const r of allowedContractIds) {
-      contractModuleFlags[r.contractId] = {
-        orcamento: r.accessOrcamento,
-        relatorios: r.accessRelatorios,
-        ordemServico: r.accessOrdemServico,
-        producaoSemanal: r.accessProducaoSemanal,
-        reunioes: Boolean((r as { accessReunioes?: boolean }).accessReunioes),
-      };
-    }
+    const contractModuleFlags = contractFlagsFromRows(contractPermRows);
+    const allowedContractIds = contractPermRows
+      .filter((r) => r.accessLiberado)
+      .map((r) => r.contractId);
 
     return res.json({
       success: true,
       data: {
         isAdmin: false,
         permissions,
-        allowedContractIds: allowedContractIds.map((r) => r.contractId),
+        allowedContractIds,
         dpApprovalContractIds: dpApprovalRows.map((r) => r.contractId),
         dpApprovalContractSectors: toDpApprovalSectorsMap(dpApprovalRows),
         restrictedDpApprovalCostCenterIds: restrictedDpApprovalRows.map((r) => r.costCenterId),
@@ -530,37 +552,7 @@ router.get('/users/:userId', requirePermissionManagerOrAdministrator, async (req
           select: { module: true, action: true },
         });
 
-    const contractPermRows = isAdmin
-      ? []
-      : await (async () => {
-          const withReunioes = await safePermissionRows('userContractPermission+reunioes', () =>
-            prisma.userContractPermission.findMany({
-              where: { userId },
-              select: {
-                contractId: true,
-                accessOrcamento: true,
-                accessRelatorios: true,
-                accessOrdemServico: true,
-                accessProducaoSemanal: true,
-                accessReunioes: true,
-              },
-            })
-          );
-          if (withReunioes.length > 0) return withReunioes;
-          const withoutReunioes = await safePermissionRows('userContractPermission', () =>
-            prisma.userContractPermission.findMany({
-              where: { userId },
-              select: {
-                contractId: true,
-                accessOrcamento: true,
-                accessRelatorios: true,
-                accessOrdemServico: true,
-                accessProducaoSemanal: true,
-              },
-            })
-          );
-          return withoutReunioes.map((r) => ({ ...r, accessReunioes: false }));
-        })();
+    const contractPermRows = isAdmin ? [] : await loadUserContractPermissionRows(userId);
 
     const canReadDpSectorsUser = prismaModelHasField('UserDpApprovalContract', 'allowedSectors');
     const dpApprovalRows = isAdmin
@@ -631,18 +623,10 @@ router.get('/users/:userId', requirePermissionManagerOrAdministrator, async (req
           });
         });
 
-    const contractModuleFlags: Record<string, {
-      orcamento: boolean; relatorios: boolean; ordemServico: boolean; producaoSemanal: boolean; reunioes: boolean;
-    }> = {};
-    for (const r of contractPermRows) {
-      contractModuleFlags[r.contractId] = {
-        orcamento: r.accessOrcamento,
-        relatorios: r.accessRelatorios,
-        ordemServico: r.accessOrdemServico,
-        producaoSemanal: r.accessProducaoSemanal,
-        reunioes: Boolean((r as { accessReunioes?: boolean }).accessReunioes),
-      };
-    }
+    const contractModuleFlags = contractFlagsFromRows(contractPermRows);
+    const allowedContractIds = contractPermRows
+      .filter((r) => r.accessLiberado)
+      .map((r) => r.contractId);
 
     return res.json({
       success: true,
@@ -650,7 +634,7 @@ router.get('/users/:userId', requirePermissionManagerOrAdministrator, async (req
         user: targetUser,
         isAdmin,
         permissions,
-        allowedContractIds: contractPermRows.map((r) => r.contractId),
+        allowedContractIds,
         dpApprovalContractIds: dpApprovalRows.map((r) => r.contractId),
         dpApprovalContractSectors: toDpApprovalSectorsMap(dpApprovalRows),
         restrictedDpApprovalCostCenterIds: restrictedDpApprovalRows.map((r) => r.costCenterId),
@@ -742,12 +726,27 @@ router.put('/users/:userId', requirePermissionManagerOrAdministrator, async (req
     }
 
     let contractIdsToSave: string[] = [];
+    let liberadoContractIds = new Set<string>();
     if (shouldSyncContracts) {
-      contractIdsToSave = rawContractIds.filter((id: unknown) => typeof id === 'string' && id.length > 0);
+      liberadoContractIds = new Set(
+        rawContractIds.filter((id: unknown): id is string => typeof id === 'string' && id.length > 0)
+      );
+      const flaggedIds = Object.entries(rawModuleFlags)
+        .filter(([, flags]) =>
+          Boolean(
+            flags?.orcamento ||
+              flags?.relatorios ||
+              flags?.ordemServico ||
+              flags?.producaoSemanal ||
+              flags?.reunioes
+          )
+        )
+        .map(([id]) => id);
+      contractIdsToSave = [...new Set([...liberadoContractIds, ...flaggedIds])];
       const hasContractsModule = normalized.some((p) => p.module === CONTRACTS_MODULE_KEY);
-      if (contractIdsToSave.length > 0 && !hasContractsModule) {
+      if (liberadoContractIds.size > 0 && !hasContractsModule) {
         throw createError(
-          'Marque a permissão do módulo Contratos antes de autorizar contratos específicos',
+          'Marque a permissão do módulo Contratos antes de liberar a ficha do contrato',
           400
         );
       }
@@ -758,6 +757,7 @@ router.put('/users/:userId', requirePermissionManagerOrAdministrator, async (req
         });
         const ok = new Set(existing.map((c) => c.id));
         contractIdsToSave = contractIdsToSave.filter((id) => ok.has(id));
+        liberadoContractIds = new Set([...liberadoContractIds].filter((id) => ok.has(id)));
       }
     }
 
@@ -855,6 +855,7 @@ router.put('/users/:userId', requirePermissionManagerOrAdministrator, async (req
     }
 
     const canWriteReunioes = prismaModelHasField('UserContractPermission', 'accessReunioes');
+    const canWriteLiberado = prismaModelHasField('UserContractPermission', 'accessLiberado');
     const canSyncRestrictedCcTable =
       shouldSyncRestrictedCc &&
       hasPrismaDelegate('userRestrictedDpApprovalCostCenter') &&
@@ -898,14 +899,16 @@ router.put('/users/:userId', requirePermissionManagerOrAdministrator, async (req
           await tx.userContractPermission.createMany({
             data: contractIdsToSave.map((contractId) => {
               const flags = rawModuleFlags[contractId] ?? {};
+              const liberado = liberadoContractIds.has(contractId);
               return {
                 userId,
                 contractId,
                 updatedBy: req.user!.id,
-                accessOrcamento: flags.orcamento !== false,
-                accessRelatorios: flags.relatorios !== false,
-                accessOrdemServico: flags.ordemServico !== false,
-                accessProducaoSemanal: flags.producaoSemanal !== false,
+                ...(canWriteLiberado ? { accessLiberado: liberado } : {}),
+                accessOrcamento: flags.orcamento === true,
+                accessRelatorios: flags.relatorios === true,
+                accessOrdemServico: flags.ordemServico === true,
+                accessProducaoSemanal: flags.producaoSemanal === true,
                 ...(canWriteReunioes ? { accessReunioes: flags.reunioes === true } : {}),
               };
             }),

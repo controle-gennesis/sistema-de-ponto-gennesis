@@ -2739,6 +2739,9 @@ model UserContractPermission {
   id                        String   @id @default(cuid())
   userId                    String
   contractId                String
+  /// Checkbox «Liberado»: abre a ficha/página do contrato (exige módulo Contratos).
+  /// Pode ser false com accessOrcamento true (só página Orçamentos).
+  accessLiberado            Boolean  @default(true)
   /// Recursos por contrato (aba PermissÃµes). Se false, o usuÃ¡rio nÃ£o acessa esse bloco dentro do contrato.
   accessOrcamento           Boolean  @default(true)
   accessRelatorios          Boolean  @default(true)

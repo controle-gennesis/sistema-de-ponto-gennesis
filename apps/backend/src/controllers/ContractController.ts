@@ -6,10 +6,12 @@ import { prisma } from '../lib/prisma';
 import { parseDateInput } from '../utils/dateInput';
 import {
   assertContractAccess,
+  assertContractSummaryAccess,
   assertUserCanCreateContract,
   assertUserCanDeleteContract,
   assertUserCanEditContract,
   getContractAccessForUser,
+  getOrcamentoContractIdsForUser,
   userCanAccessGastosOperacionais
 } from '../lib/contractAccess';
 import { getTotvsRmRelatorioFinService } from '../services/TotvsRmRelatorioFinService';
@@ -109,7 +111,8 @@ export class ContractController {
     try {
       if (!req.user) throw createError('Não autenticado', 401);
       const access = await getContractAccessForUser(req.user.id, req.user.isAdmin);
-      if (access.filter === 'none') {
+      const orcamentoIds = await getOrcamentoContractIdsForUser(req.user.id, req.user.isAdmin);
+      if (access.filter === 'none' && (!orcamentoIds || orcamentoIds.length === 0)) {
         throw createError('Sem permissão para acessar contratos', 403);
       }
 
@@ -117,8 +120,12 @@ export class ContractController {
 
       const where: any = {};
 
-      if (access.filter === 'ids') {
-        where.id = { in: access.ids };
+      if (access.filter === 'ids' || (access.filter === 'none' && orcamentoIds)) {
+        const ids = new Set<string>([
+          ...(access.filter === 'ids' ? access.ids : []),
+          ...(Array.isArray(orcamentoIds) ? orcamentoIds : []),
+        ]);
+        where.id = { in: [...ids] };
       }
 
       if (search) {
@@ -183,7 +190,7 @@ export class ContractController {
     try {
       const { id } = req.params;
 
-      await assertContractAccess(req, id);
+      await assertContractSummaryAccess(req, id);
 
       const contract = await prisma.contract.findUnique({
         where: { id },
@@ -348,6 +355,7 @@ export class ContractController {
             create: {
               userId: creatorId,
               contractId: created.id,
+              accessLiberado: true,
               accessOrcamento: true,
               accessRelatorios: true,
               accessOrdemServico: true,

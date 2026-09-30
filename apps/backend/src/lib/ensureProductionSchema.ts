@@ -2090,6 +2090,13 @@ async function ensureUserContractReunioesColumn(prisma: PrismaClient): Promise<v
   );
 }
 
+async function ensureUserContractLiberadoColumn(prisma: PrismaClient): Promise<void> {
+  if (!(await tableExists(prisma, 'user_contract_permissions'))) return;
+  await prisma.$executeRawUnsafe(
+    `ALTER TABLE "user_contract_permissions" ADD COLUMN IF NOT EXISTS "accessLiberado" BOOLEAN NOT NULL DEFAULT true;`
+  );
+}
+
 async function addFkIfMissing(
   prisma: PrismaClient,
   table: string,
@@ -2410,6 +2417,7 @@ export async function ensureProductionSchema(prisma: PrismaClient): Promise<void
     await ensureDriveStarTrashColumns(prisma);
     await ensureUserActivityTracking(prisma);
     await ensureUserContractReunioesColumn(prisma);
+    await ensureUserContractLiberadoColumn(prisma);
     await ensurePermissionAccessTables(prisma);
     await ensureAuditLogTracking(prisma);
     await ensureQuoteMapUnitPricePrecision(prisma);

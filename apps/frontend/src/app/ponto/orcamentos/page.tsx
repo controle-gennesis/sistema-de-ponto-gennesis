@@ -138,7 +138,6 @@ export default function OrcamentosPage() {
   const [isFiltersModalOpen, setIsFiltersModalOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const {
-    canAccessContract,
     canAccessContractOrcamentoTab,
     isAdministrator,
     isLoading: loadingPermissions,
@@ -179,14 +178,14 @@ export default function OrcamentosPage() {
       .filter((c) => {
         if (!c?.id || !c.costCenterId) return false;
         if (isAdministrator) return true;
-        return canAccessContract(c.id) && canAccessContractOrcamentoTab(c.id);
+        return canAccessContractOrcamentoTab(c.id);
       })
       .sort((a, b) =>
         (a.name || a.number || '').localeCompare(b.name || b.number || '', 'pt-BR', {
           sensitivity: 'base',
         })
       );
-  }, [contractsData, isAdministrator, canAccessContract, canAccessContractOrcamentoTab]);
+  }, [contractsData, isAdministrator, canAccessContractOrcamentoTab]);
 
   const contratoFilterOptions = useMemo(
     () =>

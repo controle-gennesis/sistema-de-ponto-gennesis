@@ -9048,10 +9048,7 @@ export function OrcamentoPageView({
       return codigo ? [{ label: codigo }] : null;
     }
     if (!embeddedContractId) return null;
-    const listHref = cronogramaOnly
-      ? '/ponto/cronogramas'
-      : `/ponto/contratos/${embeddedContractId}/orcamento`;
-    const contractHref = `/ponto/contratos/${embeddedContractId}`;
+    const listHref = cronogramaOnly ? '/ponto/cronogramas' : '/ponto/orcamentos';
     const crumbs: { label: string; href?: string }[] = [];
 
     if (cronogramaOnly) {
@@ -9062,10 +9059,9 @@ export function OrcamentoPageView({
       return crumbs;
     }
 
-    // Só inclui o contrato quando o nome real já existe (evita crumb genérico «Contrato»).
-    // O layout também publica o nome (priority 0); labels iguais são mesclados.
+    // Nome do contrato sem link para a ficha (pode ter só Orçamento, sem Liberado).
     if (nomeContratoBreadcrumb) {
-      crumbs.push({ label: nomeContratoBreadcrumb, href: contractHref });
+      crumbs.push({ label: nomeContratoBreadcrumb });
     }
     crumbs.push({ label: 'Orçamentos', href: listHref });
     if (orcamentoIdNaRota) {
@@ -11319,9 +11315,7 @@ export function OrcamentoPageView({
         route: '/ponto/cronogramas' as const,
         contractId: embeddedContractId || undefined,
       })
-    : embeddedContractId
-      ? ({ route: '/ponto/orcamento' as const, contractId: embeddedContractId })
-      : ({ route: '/ponto/orcamento' as const, contractId: undefined as string | undefined });
+    : ({ route: '/ponto/orcamentos' as const, contractId: undefined as string | undefined });
 
   return (
     <ProtectedRoute route={protectedRoute.route} contractId={protectedRoute.contractId}>

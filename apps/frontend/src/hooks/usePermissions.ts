@@ -463,10 +463,8 @@ export function usePermissions() {
     can(pk('/ponto/controle/ver-valores-kanban'));
 
 
-  /** Lista de orçamentos: módulo Contratos + permissão checklist «Orçamento» em pelo menos um contrato. */
-  const canAccessOrcamentoRoutePage =
-    isElevatedUser ||
-    (can(pk('/ponto/contratos')) && hasOrcamentoViaAnyAllowedContract);
+  /** Lista de orçamentos: flag «Orçamento» em pelo menos um contrato (não exige Liberado nem módulo Contratos). */
+  const canAccessOrcamentoRoutePage = isElevatedUser || hasOrcamentoViaAnyAllowedContract;
 
   /**
    * Tela global «Ordem de Serviço»:
@@ -525,9 +523,7 @@ export function usePermissions() {
   const canAccessContractOrcamentoTab = (contractId: string) => {
     if (hideContractOrcamento) return false;
     if (isElevatedUser) return true;
-    return (
-      canAccessContract(contractId) && contractModuleFlags[contractId]?.orcamento === true
-    );
+    return contractModuleFlags[contractId]?.orcamento === true;
   };
 
   const canAccessContractRelatoriosTab = (contractId: string) => {

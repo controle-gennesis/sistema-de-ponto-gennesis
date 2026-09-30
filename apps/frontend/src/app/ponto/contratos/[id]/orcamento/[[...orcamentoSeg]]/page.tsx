@@ -83,7 +83,7 @@ export default function ContratoOrcamentoPage() {
 
   if (loadingContract) {
     return (
-      <ProtectedRoute route="/ponto/contratos" contractId={contractId}>
+      <ProtectedRoute route="/ponto/orcamentos">
         <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
           <Loading message="Carregando contrato..." size="lg" />
         </MainLayout>
@@ -93,16 +93,16 @@ export default function ContratoOrcamentoPage() {
 
   if (!contract) {
     return (
-      <ProtectedRoute route="/ponto/contratos" contractId={contractId}>
+      <ProtectedRoute route="/ponto/orcamentos">
         <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
           <div className="text-center py-12">
             <p className="text-gray-600 dark:text-gray-400">Contrato não encontrado.</p>
             <Link
-              href="/ponto/contratos"
+              href="/ponto/orcamentos"
               className="mt-4 inline-flex items-center gap-2 text-red-600 dark:text-red-400 hover:underline"
             >
               <ArrowLeft className="w-4 h-4" />
-              Voltar para contratos
+              Voltar para orçamentos
             </Link>
           </div>
         </MainLayout>
@@ -112,7 +112,7 @@ export default function ContratoOrcamentoPage() {
 
   if (!canAccessContractOrcamentoTab(contractId)) {
     return (
-      <ProtectedRoute route="/ponto/contratos" contractId={contractId}>
+      <ProtectedRoute route="/ponto/orcamentos">
         <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
           <Card>
             <CardContent className="p-8 text-center">
@@ -120,11 +120,11 @@ export default function ContratoOrcamentoPage() {
                 Orçamentos não estão disponíveis para o seu centro de custo.
               </p>
               <Link
-                href={`/ponto/contratos/${contractId}`}
+                href="/ponto/orcamentos"
                 className="mt-4 inline-flex items-center gap-2 text-red-600 dark:text-red-400 hover:underline"
               >
                 <ArrowLeft className="w-4 h-4" />
-                Voltar ao contrato
+                Voltar para orçamentos
               </Link>
             </CardContent>
           </Card>
@@ -135,7 +135,7 @@ export default function ContratoOrcamentoPage() {
 
   if (!contract.costCenterId) {
     return (
-      <ProtectedRoute route="/ponto/contratos" contractId={contractId}>
+      <ProtectedRoute route="/ponto/orcamentos">
         <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
           <Card>
             <CardContent className="p-8 text-center">
@@ -143,11 +143,11 @@ export default function ContratoOrcamentoPage() {
                 Este contrato não tem centro de custo vinculado. O orçamento depende de um centro de custo.
               </p>
               <Link
-                href={`/ponto/contratos/${contractId}`}
+                href="/ponto/orcamentos"
                 className="mt-4 inline-flex items-center gap-2 text-red-600 dark:text-red-400 hover:underline"
               >
                 <ArrowLeft className="w-4 h-4" />
-                Voltar ao contrato
+                Voltar para orçamentos
               </Link>
             </CardContent>
           </Card>
@@ -158,7 +158,7 @@ export default function ContratoOrcamentoPage() {
 
   if (orcamentoSeg.length > 1) {
     return (
-      <ProtectedRoute route="/ponto/contratos" contractId={contractId}>
+      <ProtectedRoute route="/ponto/orcamentos">
         <MainLayout userRole={user.role} userName={user.name} onLogout={handleLogout}>
           <Loading message="Redirecionando…" size="lg" />
         </MainLayout>

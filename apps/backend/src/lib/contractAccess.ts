@@ -33,11 +33,24 @@ export async function getContractAccessForUser(
   if (!hasModule) return { filter: 'none' };
 
   const rows = await prisma.userContractPermission.findMany({
-    where: { userId },
+    where: { userId, accessLiberado: true },
     select: { contractId: true },
   });
 
   return { filter: 'ids', ids: rows.map((r) => r.contractId) };
+}
+
+/** Contratos com flag Orçamento (com ou sem «Liberado» / módulo Contratos). */
+export async function getOrcamentoContractIdsForUser(
+  userId: string,
+  isAdmin: boolean
+): Promise<string[] | null> {
+  if (isAdmin) return null;
+  const rows = await prisma.userContractPermission.findMany({
+    where: { userId, accessOrcamento: true },
+    select: { contractId: true },
+  });
+  return rows.map((r) => r.contractId);
 }
 
 /** Centros de custo dos contratos liberados. `null` = sem restrição (admin). `[]` = nenhum. */
@@ -66,7 +79,7 @@ export async function getAssignedContractIds(
 ): Promise<string[] | null> {
   if (isAdmin) return null;
   const rows = await prisma.userContractPermission.findMany({
-    where: { userId },
+    where: { userId, accessLiberado: true },
     select: { contractId: true },
   });
   if (rows.length > 0) return rows.map((r) => r.contractId);
@@ -128,6 +141,31 @@ export async function assertContractAccess(req: AuthRequest, contractId: string)
   }
 }
 
+/** Leitura básica do contrato (nome/CC): Liberado ou flag Orçamento. */
+export async function assertContractSummaryAccess(
+  req: AuthRequest,
+  contractId: string
+): Promise<void> {
+  if (!req.user) throw createError('Usuário não autenticado', 401);
+  if (req.user.isAdmin) return;
+
+  try {
+    await assertContractAccess(req, contractId);
+    return;
+  } catch {
+    /* tenta orçamento */
+  }
+
+  const row = await prisma.userContractPermission.findUnique({
+    where: {
+      userId_contractId: { userId: req.user.id, contractId },
+    },
+    select: { accessOrcamento: true },
+  });
+  if (row?.accessOrcamento === true) return;
+  throw createError('Sem permissão para este contrato', 403);
+}
+
 /** Flags da aba «Contratos» em permissões (orçamento, relatórios, OS, produção semanal, reuniões). */
 export type ContractScopedModuleFlag =
   | 'orcamento'
@@ -153,9 +191,13 @@ export async function assertContractModulePermission(
   contractId: string,
   module: ContractScopedModuleFlag
 ): Promise<void> {
-  await assertContractAccess(req, contractId);
   if (!req.user) throw createError('Usuário não autenticado', 401);
   if (req.user.isAdmin) return;
+
+  // Orçamento pode existir sem «Liberado» e sem módulo Contratos.
+  if (module !== 'orcamento') {
+    await assertContractAccess(req, contractId);
+  }
 
   const row = await prisma.userContractPermission.findUnique({
     where: {
