@@ -422,10 +422,20 @@ export function DpRequestDetailsPreview({ requestType, details, employeeNameById
           employeeNameById={employeeNameById}
           personItemCls={personItemCls}
           formatSubtitle={(row) => {
+            const tipoRaw = toTrimmedString(
+              row.tipoAlteracao ?? row.tipoAlteracaoFuncaoOuSalario
+            );
+            const tipoLabel =
+              tipoRaw === 'SALARIO' ? 'Salário' : tipoRaw === 'FUNCAO' ? 'Função' : '';
             const oldV = toTrimmedString(row.funcaoSalarioAntigo);
             const newV = toTrimmedString(row.funcaoSalarioNovo);
             const just = toTrimmedString(row.justificativa);
-            return `${oldV || '—'} → ${newV || '—'}${just ? ` — ${just}` : ''}`;
+            const parts = [
+              tipoLabel,
+              `${oldV || '—'} → ${newV || '—'}`,
+              just ? `Justificativa: ${just}` : '',
+            ].filter(Boolean);
+            return parts.join(' — ') || '—';
           }}
         />
       </div>
@@ -583,10 +593,28 @@ export function DpRequestDetailsPreview({ requestType, details, employeeNameById
           employeeNameById={employeeNameById}
           personItemCls={personItemCls}
           formatSubtitle={(row) => {
+            const rawDatas = toTrimmedString(row.datas);
+            const inicio = toTrimmedString(row.dataInicial);
+            const fim = toTrimmedString(row.dataFinal);
+            let periodo = '';
+            if (inicio || fim) {
+              periodo = `${formatYmdToBr(inicio || null)} à ${formatYmdToBr(fim || null)}`;
+            } else if (rawDatas) {
+              const [inicioRaw, fimRaw] = parseRangeRaw(rawDatas);
+              periodo =
+                inicioRaw && fimRaw
+                  ? `${formatYmdToBr(inicioRaw)} à ${formatYmdToBr(fimRaw)}`
+                  : rawDatas;
+            }
+            const valores = toTrimmedString(row.valores);
+            const observacoes = toTrimmedString(row.observacoes);
             const parts = [
               toTrimmedString(row.tipoSolicitacao),
               toTrimmedString(row.situacao),
               toTrimmedString(row.justificativa),
+              periodo ? `Período: ${periodo}` : '',
+              valores ? `Valores: ${valores}` : '',
+              observacoes ? `Obs.: ${observacoes}` : '',
             ].filter(Boolean);
             return parts.join(' — ') || '—';
           }}

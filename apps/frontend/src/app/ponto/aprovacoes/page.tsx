@@ -17,7 +17,11 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'react-hot-toast';
 import { formatDateTimeBr } from '@/lib/dateTimeBr';
 import { formatIsoDateRangeToBr } from '@/lib/dpSolicitacoesUi';
-import { parseDpAttachment } from '@/lib/dpRequestDetailsPreview';
+import { DpRequestDetailsPreview } from '@/lib/dpRequestDetailsPreview';
+import {
+  DpRequestHistoryMetaCard,
+  type DpRequestHistoryMetaField,
+} from '@/lib/dpRequestHistoryModal';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { usePermissions } from '@/hooks/usePermissions';
 import { Check, Download, Eye, FileText, Filter, MoreVertical, Wrench, Search, X, CheckCircle, Clock, LayoutList, XCircle } from 'lucide-react';
@@ -56,8 +60,6 @@ import {
 import { useApprovalNotificationCounts } from '@/hooks/useApprovalNotificationCounts';
 import { StringSingleSelectDropdown } from '@/components/ui/StringSingleSelectDropdown';
 import { labeledToSelectOptions } from '@/lib/selectOptionBuilders';
-import { AppModalOverlay } from '@/components/ui/AppModalOverlay';
-
 const DP_PHASES = ['PENDING', 'APPROVED', 'REJECTED', 'ALL'] as const;
 type DpPhaseFilter = (typeof DP_PHASES)[number];
 
@@ -205,257 +207,8 @@ type DpRequest = {
   employee?: { costCenter?: string | null } | null;
 };
 
-const STATUS_LABELS: Record<DpRequestStatus, string> = {
-  WAITING_MANAGER: 'Aguardando aprovação do gestor',
-  IN_REVIEW_DP: 'Em análise (DP)',
-  IN_FINANCEIRO: 'No financeiro',
-  WAITING_RETURN: 'Pendência colaborador',
-  WAITING_RETURN_ACCOUNTING: 'Pendência contábil',
-  WAITING_RETURN_ADM_TST: 'Pendência ADM/TST',
-  WAITING_RETURN_ENGINEERING: 'Pendência engenharia',
-  CONCLUDED: 'Finalizada',
-  CANCELLED: 'Cancelada',
-};
-
-/** Rótulos legíveis para chaves comuns em `details` (formulário por tipo). */
-const DETAIL_KEY_LABELS: Record<string, string> = {
-  employeeId: 'Colaborador',
-  employeeIds: 'Colaboradores',
-  costCenter: 'Centro de custo',
-  punicao: 'Punição',
-  motivo: 'Motivo',
-  observacao: 'Observação',
-  observacoes: 'Observações',
-  setor: 'Setor',
-  dataInicial: 'Data inicial',
-  dataFinal: 'Data final',
-  quantidadeNomeFuncaoContato: 'Qtd. / nome / função / contato',
-  funcaoNomeQuantidadeContato: 'Função / nome / qtd. / contato',
-  quantidade: 'Quantidade',
-  candidatos: 'Candidatos',
-  medidas: 'Medidas disciplinares',
-  ferias: 'Férias',
-  rescisoes: 'Rescisões',
-  alteracoes: 'Alterações',
-  atestados: 'Atestados',
-  retificacoes: 'Retificações',
-  horasExtras: 'Horas extras',
-  viagensBeneficio: 'Viagens (benefício)',
-  viagens: 'Viagens',
-  itens: 'Itens',
-  motivoContratacao: 'Motivo da contratação',
-  funcaoSalarioAntigo: 'Função/salário (anterior)',
-  funcaoSalarioNovo: 'Função/salário (novo)',
-  justificativa: 'Justificativa',
-  tipoAviso: 'Tipo de aviso',
-  tipoRescisao: 'Tipo de rescisão',
-  destinoViagem: 'Destino (viagem)',
-  periodo: 'Período',
-  horas: 'Horas',
-  valor: 'Valor',
-  descricao: 'Descrição',
-};
-
 function formatDateTime(iso?: string | null) {
   return formatDateTimeBr(iso, '—');
-}
-
-function humanizeDetailKey(key: string): string {
-  if (DETAIL_KEY_LABELS[key]) return DETAIL_KEY_LABELS[key];
-  return key.replace(/([A-Z])/g, ' $1').replace(/^./, (s) => s.toUpperCase()).trim();
-}
-
-function formatDetailValue(val: unknown): string {
-  if (val == null) return '';
-  if (Array.isArray(val)) {
-    if (val.length === 0) return '';
-    return val.map((x) => (typeof x === 'object' ? JSON.stringify(x) : String(x))).join(', ');
-  }
-  if (typeof val === 'object') return JSON.stringify(val);
-  return String(val);
-}
-
-function formatDetailEntryValue(
-  key: string,
-  v: unknown,
-  employeeNameById?: Map<string, string>,
-  parentDetails?: Record<string, unknown>
-): string {
-  if (employeeNameById && key === 'employeeId' && typeof v === 'string') {
-    const id = v.trim();
-    if (!id) return '';
-    const name = employeeNameById.get(id);
-    return (name ?? id).trim();
-  }
-  if (employeeNameById && key === 'employeeIds' && Array.isArray(v)) {
-    const parts = v
-      .map((x) => {
-        const id = String(x).trim();
-        if (!id) return '';
-        return employeeNameById.get(id) ?? id;
-      })
-      .filter(Boolean);
-    return parts.join(', ');
-  }
-  if (key === 'candidatos' && Array.isArray(v)) {
-    const legacyMotivo = String(parentDetails?.motivoContratacao ?? '').trim();
-    const legacySetor = String(parentDetails?.setor ?? '').trim();
-    const legacyObservacao = String(parentDetails?.observacao ?? '').trim();
-    return v
-      .map((item, index) => {
-        if (!item || typeof item !== 'object') return '';
-        const row = item as Record<string, unknown>;
-        const nome = String(row.nome ?? '—').trim() || '—';
-        const funcao = String(row.funcao ?? '—').trim() || '—';
-        const contato = String(row.contato ?? '—').trim() || '—';
-        const motivo = String(row.motivoContratacao ?? legacyMotivo).trim() || '—';
-        const setor = String(row.setor ?? legacySetor).trim() || '—';
-        const observacao = String(row.observacao ?? legacyObservacao).trim();
-        const obsPart = observacao ? ` — Obs.: ${observacao}` : '';
-        const docRaw = row.anexoDocumento;
-        const docName =
-          docRaw && typeof docRaw === 'object'
-            ? String((docRaw as Record<string, unknown>).fileName ?? '').trim()
-            : '';
-        const docPart = docName ? ` — Anexo: ${docName}` : '';
-        return `${index + 1}. ${nome} — ${funcao} — ${contato} — Motivo: ${motivo} — Setor: ${setor}${obsPart}${docPart}`;
-      })
-      .filter(Boolean)
-      .join('\n');
-  }
-  if (key === 'medidas' && Array.isArray(v)) {
-    return v
-      .map((item, index) => {
-        if (!item || typeof item !== 'object') return '';
-        const row = item as Record<string, unknown>;
-        const employeeId = String(row.employeeId ?? '').trim();
-        const nome = employeeId
-          ? employeeNameById?.get(employeeId) ?? employeeId
-          : '—';
-        const punicaoRaw = String(row.punicao ?? '').trim();
-        const punicao =
-          punicaoRaw === 'ADVERTENCIA'
-            ? 'Advertência'
-            : punicaoRaw === 'SUSPENSAO'
-              ? 'Suspensão'
-              : punicaoRaw || '—';
-        const motivo = String(row.motivo ?? '—').trim() || '—';
-        return `${index + 1}. ${nome} — ${punicao} — ${motivo}`;
-      })
-      .filter(Boolean)
-      .join('\n');
-  }
-  if (key === 'rescisoes' && Array.isArray(v)) {
-    return v
-      .map((item, index) => {
-        if (!item || typeof item !== 'object') return '';
-        const row = item as Record<string, unknown>;
-        const employeeId = String(row.employeeId ?? '').trim();
-        const nome = employeeId
-          ? employeeNameById?.get(employeeId) ?? employeeId
-          : '—';
-        const tipoAviso = String(row.tipoAviso ?? '').trim();
-        const tipoRescisao = String(row.tipoRescisao ?? '').trim();
-        const motivo = String(row.motivo ?? '').trim();
-        const observacoes = String(row.observacoes ?? '').trim();
-        const parts = [tipoAviso, tipoRescisao, motivo].filter(Boolean);
-        const docRaw = row.anexoDocumento;
-        const docName =
-          docRaw && typeof docRaw === 'object'
-            ? String((docRaw as Record<string, unknown>).fileName ?? '').trim()
-            : '';
-        let text = `${index + 1}. ${nome}`;
-        if (parts.length) text += ` — ${parts.join(' — ')}`;
-        if (observacoes) text += ` — ${observacoes}`;
-        if (docName) text += ` — Anexo: ${docName}`;
-        return text;
-      })
-      .filter(Boolean)
-      .join('\n');
-  }
-  const employeeArrayKeys = [
-    'ferias',
-    'alteracoes',
-    'atestados',
-    'retificacoes',
-    'horasExtras',
-    'viagensBeneficio',
-    'viagens',
-    'itens',
-  ];
-  if (employeeArrayKeys.includes(key) && Array.isArray(v)) {
-    return v
-      .map((item, index) => {
-        if (!item || typeof item !== 'object') return '';
-        const row = item as Record<string, unknown>;
-        const employeeIds = Array.isArray(row.employeeIds)
-          ? row.employeeIds.map((id) => String(id ?? '').trim()).filter(Boolean)
-          : [];
-        const nome = employeeIds.length
-          ? employeeIds.map((id) => employeeNameById?.get(id) ?? id).join(', ')
-          : (() => {
-              const employeeId = String(row.employeeId ?? '').trim();
-              return employeeId ? employeeNameById?.get(employeeId) ?? employeeId : '—';
-            })();
-        return `${index + 1}. ${nome}`;
-      })
-      .filter(Boolean)
-      .join('\n');
-  }
-  return formatDetailValue(v);
-}
-
-function buildDetailRows(
-  details: Record<string, unknown> | null | undefined,
-  employeeNameById?: Map<string, string>
-): { key: string; label: string; value: string }[] {
-  if (!details || typeof details !== 'object') return [];
-  const rows: { key: string; label: string; value: string }[] = [];
-  for (const [k, v] of Object.entries(details)) {
-    if (k === 'anexoAtestado') continue;
-    if (
-      (k === 'motivoContratacao' || k === 'setor' || k === 'observacao') &&
-      Array.isArray(details.candidatos) &&
-      details.candidatos.length > 0
-    ) {
-      continue;
-    }
-    const value = formatDetailEntryValue(k, v, employeeNameById, details).trim();
-    if (!value) continue;
-    rows.push({ key: k, label: humanizeDetailKey(k), value });
-  }
-  return rows.sort((a, b) => a.label.localeCompare(b.label, 'pt-BR'));
-}
-
-function extractAtestadoAttachment(
-  details: Record<string, unknown> | null | undefined
-): { fileName: string; mimeType: string; previewUrl: string } | null {
-  if (!details || typeof details !== 'object') return null;
-  const fromTop = parseDpAttachment((details as { anexoAtestado?: unknown }).anexoAtestado);
-  if (fromTop) return fromTop;
-  const atestados = Array.isArray((details as { atestados?: unknown }).atestados)
-    ? ((details as { atestados: unknown[] }).atestados)
-    : [];
-  for (const row of atestados) {
-    if (!row || typeof row !== 'object') continue;
-    const att = parseDpAttachment((row as { anexoAtestado?: unknown }).anexoAtestado);
-    if (att) return att;
-  }
-  return null;
-}
-
-function getDetailString(details: Record<string, unknown> | null | undefined, key: string): string | null {
-  if (!details || typeof details !== 'object') return null;
-  const v = (details as any)[key];
-  if (v == null) return null;
-  const s = String(v).trim();
-  return s || null;
-}
-
-function formatYmd(iso: string) {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '—';
-  return d.toISOString().slice(0, 10);
 }
 
 const URGENCY_LABELS: Record<DpUrgency, string> = {
@@ -537,31 +290,6 @@ function AprovacoesPage() {
     top: number;
     left: number;
   } | null>(null);
-  const [attachmentPreview, setAttachmentPreview] = useState<{
-    fileName: string;
-    mimeType: string;
-    previewUrl: string;
-  } | null>(null);
-
-  const downloadAttachment = async (att: { fileName: string; previewUrl: string }) => {
-    try {
-      const res = await fetch(att.previewUrl, { mode: 'cors', credentials: 'omit' });
-      if (!res.ok) throw new Error('download failed');
-      const blob = await res.blob();
-      const objectUrl = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = objectUrl;
-      a.download = att.fileName || 'atestado';
-      a.style.display = 'none';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
-    } catch {
-      toast.error('Não foi possível baixar o anexo agora.');
-    }
-  };
-
   const {
     canAccessDpApproverPages,
     canApproveFd,
@@ -709,15 +437,6 @@ function AprovacoesPage() {
     return new Map(list.map((e) => [e.id, e.name]));
   }, [payrollEmpForDetail]);
 
-  const detailModalRows = React.useMemo(
-    () => (detailRequest ? buildDetailRows(detailRequest.details, employeeNameByIdForDetail) : []),
-    [detailRequest, employeeNameByIdForDetail]
-  );
-  const detailAttachment = React.useMemo(
-    () => (detailRequest ? extractAtestadoAttachment(detailRequest.details) : null),
-    [detailRequest]
-  );
-
   const getCostCenterLabel = (r: DpRequest): string | null => {
     const fromLinked = r.costCenter?.name?.trim() || r.costCenter?.code?.trim() || '';
     if (fromLinked) return fromLinked;
@@ -732,61 +451,69 @@ function AprovacoesPage() {
     return getCostCenterLabel(r) || r.contract?.name || '—';
   };
 
-  const detailInfoRows = React.useMemo(() => {
-    if (!detailRequest) return [] as Array<{ key: string; label: string; value: string }>;
-    const rows: Array<{ key: string; label: string; value: string }> = [];
-    const seen = new Set<string>();
-    const push = (key: string, label: string, value?: string | null) => {
-      const v = String(value ?? '').trim();
-      if (!v || seen.has(key)) return;
-      seen.add(key);
-      rows.push({ key, label, value: v });
-    };
-
-    push('status', 'Status', STATUS_LABELS[detailRequest.status] ?? detailRequest.status);
-    push('aprovadoPor', 'Aprovado por', detailRequest.managerApprovedByName);
-    push(
-      'aprovadoEm',
-      'Aprovado em',
-      detailRequest.managerApprovedAt ? formatDateTime(detailRequest.managerApprovedAt) : null
-    );
-    push('urgency', 'Urgência', URGENCY_LABELS[detailRequest.urgency]);
-    push('tipo', 'Tipo', TYPE_LABELS[detailRequest.requestType] ?? detailRequest.requestType);
-    push('criadaEm', 'Criada em', formatDateTime(detailRequest.createdAt));
-    push('prazoInicio', 'Prazo (início)', formatYmd(detailRequest.prazoInicio));
-    push('prazoFim', 'Prazo (fim)', formatYmd(detailRequest.prazoFim));
-    push('centroCusto', 'Centro de custo', getCostCenterLabel(detailRequest));
-    push('empresa', 'Empresa', detailRequest.company ?? null);
-    push('polo', 'Polo', detailRequest.polo ?? null);
-    if (!getCostCenterLabel(detailRequest)) {
-      const contrato = `${detailRequest.contract?.name ?? ''}${
-        detailRequest.contract?.number ? ` (${detailRequest.contract.number})` : ''
-      }`.trim();
-      push('contrato', 'Contrato', contrato || '—');
+  const detailMetaFields = React.useMemo((): DpRequestHistoryMetaField[] => {
+    if (!detailRequest) return [];
+    const centroCusto = getCostCenterLabel(detailRequest);
+    const contrato = `${detailRequest.contract?.name ?? ''}${
+      detailRequest.contract?.number ? ` (${detailRequest.contract.number})` : ''
+    }`.trim();
+    const fields: DpRequestHistoryMetaField[] = [
+      {
+        label: 'Nº da solicitação',
+        value: detailRequest.displayNumber != null ? String(detailRequest.displayNumber) : '—',
+      },
+      {
+        label: APPROVAL_STATUS_COLUMN_TITLE,
+        value: <ApprovalStatusBadge kind={dpToApprovalStatus(detailRequest.status)} />,
+      },
+      {
+        label: 'Urgência',
+        value: (
+          <span className={`text-sm font-medium ${URGENCY_ROW_BADGE[detailRequest.urgency]}`}>
+            {URGENCY_LABELS[detailRequest.urgency]}
+          </span>
+        ),
+      },
+      {
+        label: 'Tipo',
+        value: TYPE_LABELS[detailRequest.requestType] ?? detailRequest.requestType,
+      },
+      {
+        label: 'Período de atendimento',
+        value: formatIsoDateRangeToBr(detailRequest.prazoInicio, detailRequest.prazoFim),
+      },
+      { label: 'Criada em', value: formatDateTime(detailRequest.createdAt) },
+      { label: 'Centro de custo', value: centroCusto || '—' },
+      { label: 'Contrato', value: contrato || '—' },
+      { label: 'Empresa', value: detailRequest.company?.trim() || '—' },
+      { label: 'Polo', value: detailRequest.polo?.trim() || '—' },
+      { label: 'Solicitante', value: detailRequest.solicitanteNome || '—' },
+      { label: 'Setor', value: detailRequest.sectorSolicitante || '—' },
+      { label: 'Login', value: detailRequest.solicitanteEmail || '—' },
+    ];
+    if (detailRequest.managerApprovedByName?.trim()) {
+      fields.push({ label: 'Aprovado por', value: detailRequest.managerApprovedByName });
     }
-    push('solicitante', 'Solicitante', detailRequest.solicitanteNome);
-    push('setor', 'Setor', detailRequest.sectorSolicitante || '—');
-    push('login', 'Login', detailRequest.solicitanteEmail || '—');
-
-    // Ordem pedida: data inicial acima de data final.
-    push('dataInicial', 'Data inicial', getDetailString(detailRequest.details, 'dataInicial'));
-    push('dataFinal', 'Data final', getDetailString(detailRequest.details, 'dataFinal'));
-    push('numeroDias', 'Número de dias', getDetailString(detailRequest.details, 'numeroDias'));
-    push(
-      'colaborador',
-      'Colaborador',
-      getDetailString(detailRequest.details, 'employeeId')
-        ? formatDetailEntryValue('employeeId', getDetailString(detailRequest.details, 'employeeId')!, employeeNameByIdForDetail)
-        : null
-    );
-
-    detailModalRows.forEach((row) => {
-      if (['costCenter', 'dataInicial', 'dataFinal', 'numeroDias', 'employeeId'].includes(row.key)) return;
-      push(`details_${row.key}`, row.label, row.value);
-    });
-
-    return rows;
-  }, [detailRequest, detailModalRows, employeeNameByIdForDetail]);
+    if (detailRequest.managerApprovedAt) {
+      fields.push({
+        label: 'Aprovado em',
+        value: formatDateTime(detailRequest.managerApprovedAt),
+      });
+    }
+    if (detailRequest.managerApprovalComment?.trim()) {
+      fields.push({
+        label: 'Comentário da aprovação',
+        value: detailRequest.managerApprovalComment,
+      });
+    }
+    if (detailRequest.managerRejectionReason?.trim()) {
+      fields.push({
+        label: 'Motivo do cancelamento',
+        value: detailRequest.managerRejectionReason,
+      });
+    }
+    return fields;
+  }, [detailRequest]);
 
   const dpFiltered = useMemo(() => {
     const q = searchDp.trim();
@@ -1589,59 +1316,13 @@ function AprovacoesPage() {
           >
             {detailRequest && (
               <div className="space-y-6">
-                {detailInfoRows.length > 0 ? (
-                  <div className="space-y-2">
-                    <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-                      Informações
-                    </h3>
-                    <div className="max-h-[240px] overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-700">
-                      <dl className="divide-y divide-gray-100 dark:divide-gray-700 text-sm">
-                        {detailInfoRows.map((row) => (
-                          <div key={row.key} className="grid gap-1 px-3 py-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] sm:gap-4">
-                            <dt className="font-medium text-gray-700 dark:text-gray-300">{row.label}</dt>
-                            <dd className="whitespace-pre-wrap break-words text-gray-600 dark:text-gray-400">
-                              {row.value}
-                            </dd>
-                          </div>
-                        ))}
-                      </dl>
-                    </div>
-                  </div>
-                ) : null}
+                <DpRequestHistoryMetaCard title="Informações" fields={detailMetaFields} />
 
-                {detailAttachment ? (
-                  <div className="space-y-2">
-                    <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Anexo do atestado</h3>
-                    <div className="rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-2 flex items-center justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium text-gray-800 dark:text-gray-200 truncate">
-                          {detailAttachment.fileName}
-                        </p>
-                        <p className="text-xs text-gray-500 dark:text-gray-400">{detailAttachment.mimeType}</p>
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <button
-                          type="button"
-                          onClick={() => setAttachmentPreview(detailAttachment)}
-                          className="inline-flex items-center justify-center w-9 h-9 rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                          title="Ver anexo"
-                          aria-label="Ver anexo"
-                        >
-                          <Eye className="h-4 w-4" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => void downloadAttachment(detailAttachment)}
-                          className="inline-flex items-center justify-center w-9 h-9 rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                          title="Baixar anexo"
-                          aria-label="Baixar anexo"
-                        >
-                          <Download className="h-4 w-4" />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ) : null}
+                <DpRequestDetailsPreview
+                  requestType={detailRequest.requestType}
+                  details={detailRequest.details}
+                  employeeNameById={employeeNameByIdForDetail}
+                />
 
                 <div className="border-t border-gray-200 pt-4 dark:border-gray-700">
                   <h3 className="mb-3 text-sm font-semibold text-gray-900 dark:text-gray-100">Decisão</h3>
@@ -1710,41 +1391,6 @@ function AprovacoesPage() {
               </div>
             )}
           </Modal>
-
-          {attachmentPreview && (
-            <AppModalOverlay
-              className="app-modal-overlay fixed inset-0 z-[2200] flex items-center justify-center bg-black/85 p-4"
-              role="dialog"
-              aria-modal="true"
-              aria-label="Visualizar anexo do atestado"
-              onClick={() => setAttachmentPreview(null)}
-            >
-              <button
-                type="button"
-                onClick={() => setAttachmentPreview(null)}
-                className="absolute top-4 right-4 p-2 rounded-full bg-black/50 text-white hover:bg-black/70 transition-colors z-10"
-                aria-label="Fechar"
-              >
-                <X className="w-5 h-5" />
-              </button>
-              <div className="max-w-[92vw] max-h-[88vh] flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
-                {attachmentPreview.mimeType.toLowerCase().includes('pdf') ? (
-                  <iframe
-                    title={attachmentPreview.fileName}
-                    src={attachmentPreview.previewUrl}
-                    className="w-[min(92vw,980px)] h-[85vh] rounded-xl bg-white"
-                  />
-                ) : (
-                  <img
-                    src={attachmentPreview.previewUrl}
-                    alt={attachmentPreview.fileName}
-                    className="max-w-full max-h-[85vh] object-contain rounded-xl"
-                    referrerPolicy="no-referrer"
-                  />
-                )}
-              </div>
-            </AppModalOverlay>
-          )}
 
           {/* Modal de Filtros — bloco «Solicitações» */}
           <Modal
