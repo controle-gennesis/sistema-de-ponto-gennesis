@@ -74,6 +74,8 @@ export interface ModalProps {
   scrollContent?: boolean;
   /** Classes extras no wrapper interno do conteúdo (ex.: ajustar padding). */
   contentClassName?: string;
+  /** Classes extras no cabeçalho (ex.: tirar borda quando o modal tem abas embaixo). */
+  headerClassName?: string;
   /** Classes extras no painel do modal (ex.: altura fixa na aba de comentários). */
   panelClassName?: string;
 }
@@ -94,6 +96,7 @@ export const Modal: React.FC<ModalProps> = ({
   elevated = false,
   scrollContent = true,
   contentClassName,
+  headerClassName,
   panelClassName,
 }) => {
   const rootRef = useRef<HTMLDivElement>(null);
@@ -198,11 +201,16 @@ export const Modal: React.FC<ModalProps> = ({
         >
           {/* Header */}
           {(title || showCloseButton || headerActions) && (
-            <div className="flex items-center gap-3 p-4 sm:p-6 border-b border-gray-200 dark:border-gray-700 shrink-0 w-full">
+            <div
+              className={clsx(
+                'flex w-full shrink-0 items-center gap-3 border-b border-gray-200 p-4 dark:border-gray-700 sm:p-6',
+                headerClassName,
+              )}
+            >
               {title ? (
-                <div className="flex-1 min-w-0 pr-2">
+                <div className="min-w-0 flex-1 pr-2">
                   {typeof title === 'string' ? (
-                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 truncate">
+                    <h3 className="truncate text-lg font-semibold text-gray-900 dark:text-gray-100">
                       {title}
                     </h3>
                   ) : (
@@ -210,18 +218,18 @@ export const Modal: React.FC<ModalProps> = ({
                   )}
                 </div>
               ) : (
-                <div className="flex-1 min-w-0" aria-hidden />
+                <div className="min-w-0 flex-1" aria-hidden />
               )}
-              <div className="flex items-center gap-2 shrink-0 ml-auto">
+              <div className="ml-auto flex shrink-0 items-center gap-2">
                 {headerActions}
                 {showCloseButton && (
                   <button
                     type="button"
                     onClick={requestClose}
-                    className="p-1 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                    className="p-1 text-gray-400 transition-colors hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
                     aria-label="Fechar"
                   >
-                    <X className="w-6 h-6" />
+                    <X className="h-6 w-6" />
                   </button>
                 )}
               </div>

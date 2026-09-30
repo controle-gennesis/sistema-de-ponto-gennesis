@@ -1,14 +1,16 @@
 'use client';
 
 import React from 'react';
+import {
+  DetailInfoActions,
+  DetailInfoSection,
+  type DetailInfoField,
+} from '@/components/ui/DetailInfoLayout';
 import type { DpTimelineStep } from '@/lib/dpRequestTimeline';
 
 export type DpRequestHistoryModalTab = 'detalhes' | 'timeline';
 
-export type DpRequestHistoryMetaField = {
-  label: string;
-  value: React.ReactNode;
-};
+export type DpRequestHistoryMetaField = DetailInfoField;
 
 const tabBtnCls = (active: boolean) =>
   `min-w-[7.5rem] rounded-md px-5 py-2 text-sm font-medium transition-all ${
@@ -61,19 +63,7 @@ export function DpRequestHistoryMetaCard({
   title?: string;
   fields: DpRequestHistoryMetaField[];
 }) {
-  return (
-    <section className="rounded-lg border border-gray-200 px-4 py-3 dark:border-gray-700">
-      <h3 className="mb-3 text-sm font-semibold text-gray-900 dark:text-gray-100">{title}</h3>
-      <dl className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
-        {fields.map((field) => (
-          <div key={field.label} className="min-w-0 space-y-0.5">
-            <dt className="text-xs font-medium text-gray-500 dark:text-gray-400">{field.label}</dt>
-            <dd className="text-sm text-gray-900 dark:text-gray-100">{field.value}</dd>
-          </div>
-        ))}
-      </dl>
-    </section>
-  );
+  return <DetailInfoSection title={title} fields={fields} columns={3} />;
 }
 
 export function DpRequestHistorySectionCard({
@@ -83,20 +73,11 @@ export function DpRequestHistorySectionCard({
   title: string;
   children: React.ReactNode;
 }) {
-  return (
-    <section className="rounded-lg border border-gray-200 px-4 py-3 dark:border-gray-700">
-      <h3 className="mb-3 text-sm font-semibold text-gray-900 dark:text-gray-100">{title}</h3>
-      {children}
-    </section>
-  );
+  return <DetailInfoSection title={title}>{children}</DetailInfoSection>;
 }
 
 export function DpRequestHistoryModalFooter({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="flex flex-wrap justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
-      {children}
-    </div>
-  );
+  return <DetailInfoActions>{children}</DetailInfoActions>;
 }
 
 function stripResponsibleFromNote(note: string) {

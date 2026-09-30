@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Download, ImageIcon, Minus, Plus, RotateCcw, X, ZoomIn } from 'lucide-react';
+import { Download, Minus, Plus, RotateCcw, X, ZoomIn } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 export type FuelRequestPhotoProps = {
@@ -12,6 +12,8 @@ export type FuelRequestPhotoProps = {
   fileName?: string | null;
   /** Miniatura mais compacta (ex.: dentro do bloco verde de abastecimento). */
   compact?: boolean;
+  /** Ação opcional ao lado do rótulo (ex.: ícone de editar). */
+  labelAction?: React.ReactNode;
 };
 
 const MIN_ZOOM = 1;
@@ -26,7 +28,14 @@ function clampZoom(value: number) {
   return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value));
 }
 
-export function FuelRequestPhoto({ src, alt, label, fileName, compact = false }: FuelRequestPhotoProps) {
+export function FuelRequestPhoto({
+  src,
+  alt,
+  label,
+  fileName,
+  compact = false,
+  labelAction,
+}: FuelRequestPhotoProps) {
   const [open, setOpen] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [zoom, setZoom] = useState(1);
@@ -161,15 +170,15 @@ export function FuelRequestPhoto({ src, alt, label, fileName, compact = false }:
 
   const thumbClass = compact
     ? 'group relative flex h-36 w-full max-w-[200px] items-center justify-center overflow-hidden rounded-xl border border-green-200/80 bg-gray-900/40 dark:border-green-800/60'
-    : 'group relative flex h-40 w-full max-w-[280px] items-center justify-center overflow-hidden rounded-xl border border-gray-200 bg-gray-100 shadow-sm dark:border-gray-600 dark:bg-gray-800';
+    : 'group relative flex h-40 w-full items-center justify-center overflow-hidden rounded-xl border border-gray-200 bg-gray-100 shadow-sm dark:border-gray-600 dark:bg-gray-800';
 
   return (
     <>
       <div className={compact ? 'mt-3' : undefined}>
-        <span className="mb-2 flex items-center gap-1.5 text-sm font-medium text-gray-500 dark:text-gray-400">
-          <ImageIcon className="h-4 w-4 shrink-0" />
-          {label}
-        </span>
+        <div className="mb-2 flex items-center gap-1.5">
+          <span className="text-sm font-medium text-gray-500 dark:text-gray-400">{label}</span>
+          {labelAction}
+        </div>
         <button
           type="button"
           onClick={() => setOpen(true)}
