@@ -211,6 +211,12 @@ function formatDateTime(iso?: string | null) {
   return formatDateTimeBr(iso, '—');
 }
 
+function formatYmd(iso: string) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toISOString().slice(0, 10);
+}
+
 const URGENCY_LABELS: Record<DpUrgency, string> = {
   LOW: 'Baixa',
   MEDIUM: 'Normal',
